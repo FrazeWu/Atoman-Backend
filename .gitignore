@@ -1,0 +1,13 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.gocache/
+/bin/
+/dist/
+/build/
+/coverage/
+/tmp/
+output.txt
+nvim.log
+.claude/

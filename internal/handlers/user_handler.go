@@ -1,0 +1,740 @@
+package handlers
+
+import (
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+
+	"atoman/internal/middleware"
+	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
+)
+
+// SetupUserRoutes configures user-related routes
+func SetupUserRoutes(router *gin.Engine, db *gorm.DB) {
+	// Blog explore route
+	router.GET("/api/blog/explore", ExplorePosts(db))
+
+	users := router.Group("/api/users")
+	{
+		// Public routes — lookup by username (must come before /:id routes)
+		users.GET("/search", middleware.OptionalAuthMiddleware(), SearchUsers(db))
+		users.GET("/by-username/:username", GetUserByUsername(db))
+		users.GET("/:id/profile", GetUserProfile(db))
+		users.GET("/:id/followers", GetUserFollowers(db))
+		users.GET("/:id/following", GetUserFollowing(db))
+
+		// Protected routes
+		protected := users.Group("")
+		protected.Use(middleware.AuthMiddleware())
+		{
+			protected.GET("/me", GetCurrentUser(db))
+			protected.PUT("/me", UpdateUserProfile(db))
+			protected.GET("/me/settings", GetUserSettings(db))
+			protected.PUT("/me/settings", UpdateUserSettings(db))
+
+			protected.POST("/:id/follow", FollowUser(db))
+			protected.DELETE("/:id/follow", UnfollowUser(db))
+		}
+
+		owner := users.Group("")
+		owner.Use(middleware.AuthMiddleware())
+		owner.Use(RequireOwner())
+		{
+			owner.GET("/roles", ListUsersForRoleManagement(db))
+			owner.PUT("/:id/role", UpdateUserRole(db))
+		}
+	}
+}
+
+func RequireOwner() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !authctx.RoleAtLeast(c.GetString("role"), authctx.RoleOwner) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Owner access required"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// UserProfileInput represents the request body for updating user profile
+type UserProfileInput struct {
+	DisplayName string `json:"display_name"`
+	AvatarURL   string `json:"avatar_url"`
+	Bio         string `json:"bio"`
+	Website     string `json:"website"`
+	Location    string `json:"location"`
+}
+
+// UserSettingsInput represents the request body for updating user settings
+type UserSettingsInput struct {
+	PrivateProfile *bool   `json:"private_profile"`
+	DMPermission   *string `json:"dm_permission"`
+}
+
+// ExplorePostResponse represents a post in the explore feed
+type ExplorePostResponse struct {
+	model.Post
+	LikesCount    int64 `json:"likes_count"`
+	CommentsCount int64 `json:"comments_count"`
+}
+
+// ExplorePosts returns a paginated list of published posts with interaction counts
+// ExplorePosts godoc
+// @Summary 获取博客探索流
+// @Description 返回已发布文章的分页列表，并附带点赞数和评论数。
+// @Tags users
+// @Produce json
+// @Param page query int false "页码" default(1)
+// @Param limit query int false "每页数量" default(20)
+// @Success 200 {object} ExplorePostListResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/blog/explore [get]
+func ExplorePosts(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+		offset := (page - 1) * limit
+
+		var posts []model.Post
+		if err := db.Preload("User").
+			Where("status = ?", "published").
+			Order("created_at DESC").
+			Limit(limit).
+			Offset(offset).
+			Find(&posts).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch explore posts"})
+			return
+		}
+
+		// Get counts for each post
+		var response []ExplorePostResponse
+		for _, post := range posts {
+			var likesCount int64
+			var commentsCount int64
+
+			db.Model(&model.Like{}).Where("target_type = ? AND target_id = ?", "post", post.ID).Count(&likesCount)
+			db.Model(&model.Comment{}).Where("post_id = ? AND status = ?", post.ID, "visible").Count(&commentsCount)
+
+			response = append(response, ExplorePostResponse{
+				Post:          post,
+				LikesCount:    likesCount,
+				CommentsCount: commentsCount,
+			})
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": response, "message": "ok"})
+	}
+}
+
+// GetCurrentUser returns the authenticated user's own full profile
+// GetCurrentUser godoc
+// @Summary 获取当前用户
+// @Description 返回当前登录用户的完整资料。
+// @Tags users
+// @Produce json
+// @Success 200 {object} UserResponse
+// @Failure 404 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/users/me [get]
+func GetCurrentUser(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+
+		var user model.User
+		if err := db.Where("uuid = ?", userID).First(&user).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": user, "message": "ok"})
+	}
+}
+
+// GetUserByUsername looks up a user by their username (public)
+// GetUserByUsername godoc
+// @Summary 按用户名获取用户摘要
+// @Description 返回公开的用户摘要信息和关注统计。
+// @Tags users
+// @Produce json
+// @Param username path string true "用户名"
+// @Success 200 {object} UserLookupResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/users/by-username/{username} [get]
+func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		username := c.Param("username")
+		var user model.User
+
+		if err := db.Where("username = ?", username).First(&user).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+
+		var followersCount, followingCount, postsCount int64
+		db.Model(&model.Follow{}).Where("following_id = ?", user.UUID).Count(&followersCount)
+		db.Model(&model.Follow{}).Where("follower_id = ?", user.UUID).Count(&followingCount)
+		db.Model(&model.Post{}).Where("user_id = ? AND status = ?", user.UUID, "published").Count(&postsCount)
+
+		c.JSON(http.StatusOK, gin.H{
+			"data": gin.H{
+				"id":              user.ID,
+				"uuid":            user.UUID,
+				"username":        user.Username,
+				"display_name":    user.DisplayName,
+				"avatar_url":      user.AvatarURL,
+				"bio":             user.Bio,
+				"website":         user.Website,
+				"role":            user.Role,
+				"created_at":      user.CreatedAt,
+				"followers_count": followersCount,
+				"following_count": followingCount,
+				"posts_count":     postsCount,
+			},
+			"message": "ok",
+		})
+	}
+}
+
+// GetUserProfile returns public profile information for a user
+// GetUserProfile godoc
+// @Summary 获取用户公开资料
+// @Description 通过 UUID 或用户名获取公开资料、统计信息和频道列表。
+// @Tags users
+// @Produce json
+// @Param id path string true "用户 UUID 或用户名"
+// @Success 200 {object} UserProfileResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/users/{id}/profile [get]
+func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		var user model.User
+
+		if err := db.Where("uuid = ? OR username = ?", id, id).First(&user).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+
+		// Get counts
+		var followersCount int64
+		var followingCount int64
+		var postsCount int64
+
+		db.Model(&model.Follow{}).Where("following_id = ?", user.UUID).Count(&followersCount)
+		db.Model(&model.Follow{}).Where("follower_id = ?", user.UUID).Count(&followingCount)
+		db.Model(&model.Post{}).Where("user_id = ? AND status = ?", user.UUID, "published").Count(&postsCount)
+
+		// Get user's channels
+		var channels []model.Channel
+		db.Where("user_id = ?", user.UUID).Find(&channels)
+
+		c.JSON(http.StatusOK, gin.H{
+			"data": gin.H{
+				"user": gin.H{
+					"id":           user.ID,
+					"uuid":         user.UUID,
+					"username":     user.Username,
+					"display_name": user.DisplayName,
+					"avatar_url":   user.AvatarURL,
+					"bio":          user.Bio,
+					"website":      user.Website,
+					"location":     user.Location,
+					"created_at":   user.CreatedAt,
+				},
+				"stats": gin.H{
+					"followers_count": followersCount,
+					"following_count": followingCount,
+					"posts_count":     postsCount,
+				},
+				"channels": channels,
+			},
+			"message": "ok",
+		})
+	}
+}
+
+// UpdateUserProfile updates the authenticated user's profile
+// UpdateUserProfile godoc
+// @Summary 更新当前用户资料
+// @Description 更新显示名、头像、简介、网站和所在地。
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param input body UserProfileInput true "用户资料"
+// @Success 200 {object} UserResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/users/me [put]
+func UpdateUserProfile(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input UserProfileInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+
+		var user model.User
+		if err := db.Where("uuid = ?", userID).First(&user).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+
+		if err := db.Model(&user).Updates(model.User{
+			DisplayName: input.DisplayName,
+			AvatarURL:   input.AvatarURL,
+			Bio:         input.Bio,
+			Website:     input.Website,
+			Location:    input.Location,
+		}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": user, "message": "ok"})
+	}
+}
+
+// GetUserSettings returns the authenticated user's settings
+// GetUserSettings godoc
+// @Summary 获取当前用户设置
+// @Description 返回当前登录用户的隐私与私信设置。
+// @Tags users
+// @Produce json
+// @Success 200 {object} UserSettingsResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/users/me/settings [get]
+func GetUserSettings(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+
+		var settings model.UserSettings
+		if err := db.Where("user_id = ?", userID).First(&settings).Error; err != nil {
+			// If settings don't exist, create default
+			settings = model.UserSettings{UserID: userID}
+			db.Create(&settings)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": settings, "message": "ok"})
+	}
+}
+
+// UpdateUserSettings updates the authenticated user's settings
+// UpdateUserSettings godoc
+// @Summary 更新当前用户设置
+// @Description 更新私密资料开关和私信权限设置。
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param input body UserSettingsInput true "用户设置"
+// @Success 200 {object} UserSettingsResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/users/me/settings [put]
+func UpdateUserSettings(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input UserSettingsInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+
+		var settings model.UserSettings
+		if err := db.Where("user_id = ?", userID).First(&settings).Error; err != nil {
+			settings = model.UserSettings{UserID: userID}
+			db.Create(&settings)
+		}
+
+		updates := map[string]interface{}{}
+		if input.PrivateProfile != nil {
+			updates["private_profile"] = *input.PrivateProfile
+		}
+		if input.DMPermission != nil {
+			permission := strings.TrimSpace(*input.DMPermission)
+			switch permission {
+			case "anyone", "following_only", "one_before_reply":
+				updates["dm_permission"] = permission
+			default:
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid dm_permission"})
+				return
+			}
+		}
+
+		if len(updates) > 0 {
+			if err := db.Model(&settings).Updates(updates).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update settings"})
+				return
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": settings, "message": "ok"})
+	}
+}
+
+// FollowUser creates a follow relationship
+// FollowUser godoc
+// @Summary 关注用户
+// @Description 当前用户关注指定 UUID 用户。
+// @Tags users
+// @Produce json
+// @Param id path string true "目标用户 UUID"
+// @Success 200 {object} MessageResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/users/{id}/follow [post]
+func FollowUser(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		targetIDStr := c.Param("id")
+		targetID, err := uuid.Parse(targetIDStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user UUID"})
+			return
+		}
+
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+
+		if userID == targetID {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "You cannot follow yourself"})
+			return
+		}
+
+		// Check if target user exists
+		var targetUser model.User
+		if err := db.Where("uuid = ?", targetID).First(&targetUser).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+
+		follow := model.Follow{
+			FollowerID:  userID,
+			FollowingID: targetID,
+		}
+
+		if err := db.Where(model.Follow{FollowerID: userID, FollowingID: targetID}).FirstOrCreate(&follow).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to follow user"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	}
+}
+
+// UnfollowUser removes a follow relationship
+// UnfollowUser godoc
+// @Summary 取消关注用户
+// @Description 当前用户取消关注指定 UUID 用户。
+// @Tags users
+// @Produce json
+// @Param id path string true "目标用户 UUID"
+// @Success 200 {object} MessageResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/users/{id}/follow [delete]
+func UnfollowUser(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		targetID := c.Param("id")
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+
+		if err := db.Where("follower_id = ? AND following_id = ?", userID, targetID).Delete(&model.Follow{}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to unfollow user"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	}
+}
+
+// GetUserFollowers returns a list of users following the specified user
+// GetUserFollowers godoc
+// @Summary 获取用户粉丝列表
+// @Description 返回关注该用户的用户列表。
+// @Tags users
+// @Produce json
+// @Param id path string true "用户 UUID"
+// @Success 200 {object} UserListResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/users/{id}/followers [get]
+func GetUserFollowers(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		var follows []model.Follow
+
+		if err := db.Where("following_id = ?", id).Find(&follows).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch followers"})
+			return
+		}
+
+		// Get user details for followers
+		var followerIDs []uuid.UUID
+		for _, f := range follows {
+			followerIDs = append(followerIDs, f.FollowerID)
+		}
+
+		var users []model.User
+		if len(followerIDs) > 0 {
+			db.Where("uuid IN ?", followerIDs).Find(&users)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": users, "message": "ok"})
+	}
+}
+
+// GetUserFollowing returns a list of users the specified user is following
+// GetUserFollowing godoc
+// @Summary 获取用户关注列表
+// @Description 返回该用户正在关注的用户列表。
+// @Tags users
+// @Produce json
+// @Param id path string true "用户 UUID"
+// @Success 200 {object} UserListResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/users/{id}/following [get]
+func GetUserFollowing(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id := c.Param("id")
+		var follows []model.Follow
+
+		if err := db.Where("follower_id = ?", id).Find(&follows).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch following"})
+			return
+		}
+
+		// Get user details for following
+		var followingIDs []uuid.UUID
+		for _, f := range follows {
+			followingIDs = append(followingIDs, f.FollowingID)
+		}
+
+		var users []model.User
+		if len(followingIDs) > 0 {
+			db.Where("uuid IN ?", followingIDs).Find(&users)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": users, "message": "ok"})
+	}
+}
+
+// SearchUsers returns users matching the query string.
+// GET /api/users/search?q=<query>&limit=<n>&scope=mention
+// SearchUsers godoc
+// @Summary 搜索用户
+// @Description 按用户名或显示名搜索用户；scope=mention 时仅返回当前用户关注的人。
+// @Tags users
+// @Produce json
+// @Param q query string false "搜索关键字"
+// @Param limit query int false "结果数量上限，1-20" default(5)
+// @Param scope query string false "搜索范围，例如 mention"
+// @Success 200 {object} SearchUsersResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/users/search [get]
+func SearchUsers(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		q := strings.TrimSpace(c.Query("q"))
+		scope := strings.TrimSpace(c.Query("scope"))
+		limit := 5
+		if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 20 {
+			limit = l
+		}
+
+		type UserResult struct {
+			UUID        string `json:"uuid"`
+			Username    string `json:"username"`
+			DisplayName string `json:"display_name"`
+			AvatarURL   string `json:"avatar_url"`
+			Role        string `json:"role"`
+		}
+
+		query := db.Model(&model.User{}).
+			Select("Users.uuid, Users.username, Users.display_name, Users.avatar_url, Users.role").
+			Where("Users.is_active = ?", true)
+
+		if scope == "mention" {
+			userIDVal, ok := c.Get("user_id")
+			if !ok {
+				c.JSON(http.StatusOK, gin.H{"data": []UserResult{}})
+				return
+			}
+			userID, ok := userIDVal.(uuid.UUID)
+			if !ok {
+				c.JSON(http.StatusOK, gin.H{"data": []UserResult{}})
+				return
+			}
+			query = query.Joins(`JOIN follows ON follows.follower_id = "Users".uuid AND follows.following_id = ?`, userID)
+		}
+
+		if q != "" {
+			like := "%" + q + "%"
+			query = query.Where("LOWER(Users.username) LIKE LOWER(?) OR LOWER(Users.display_name) LIKE LOWER(?)", like, like)
+		}
+
+		var results []UserResult
+		if err := query.Limit(limit).Scan(&results).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "search failed"})
+			return
+		}
+		if results == nil {
+			results = []UserResult{}
+		}
+		c.JSON(http.StatusOK, gin.H{"data": results})
+	}
+}
+
+// ListUsersForRoleManagement godoc
+// @Summary 获取用户角色列表
+// @Description 仅站长可用，按用户名、邮箱、显示名搜索用户并返回当前角色。
+// @Tags users
+// @Produce json
+// @Param q query string false "搜索关键字"
+// @Param limit query int false "结果数量上限，1-100" default(20)
+// @Success 200 {object} UserRoleListResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/users/roles [get]
+func ListUsersForRoleManagement(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		q := strings.TrimSpace(c.Query("q"))
+		limit := 20
+		if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 100 {
+			limit = l
+		}
+
+		query := db.Model(&model.User{}).
+			Select("uuid, username, email, display_name, avatar_url, role, created_at").
+			Where("is_active = ?", true).
+			Order("created_at DESC").
+			Limit(limit)
+
+		if q != "" {
+			like := "%" + q + "%"
+			query = query.Where("LOWER(username) LIKE LOWER(?) OR LOWER(email) LIKE LOWER(?) OR LOWER(display_name) LIKE LOWER(?)", like, like, like)
+		}
+
+		var users []struct {
+			UUID        uuid.UUID `json:"uuid"`
+			Username    string    `json:"username"`
+			Email       string    `json:"email"`
+			DisplayName string    `json:"display_name"`
+			AvatarURL   string    `json:"avatar_url"`
+			Role        string    `json:"role"`
+			CreatedAt   string    `json:"created_at"`
+		}
+		if err := query.Scan(&users).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to search users"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": users})
+	}
+}
+
+// UpdateUserRole godoc
+// @Summary 更新用户角色
+// @Description 仅站长可用，可将指定用户设置为 user 或 admin，站长账号本身不可降级。
+// @Tags users
+// @Accept json
+// @Produce json
+// @Param id path string true "用户 UUID"
+// @Param input body UpdateUserRoleInput true "角色更新请求"
+// @Success 200 {object} UserRoleResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/users/{id}/role [put]
+func UpdateUserRole(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		targetID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user UUID"})
+			return
+		}
+
+		var input struct {
+			Role string `json:"role"`
+		}
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid role payload"})
+			return
+		}
+		input.Role = strings.TrimSpace(input.Role)
+		if input.Role != authctx.RoleUser && input.Role != authctx.RoleAdmin {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Role must be user or admin"})
+			return
+		}
+
+		currentUserID, _ := c.Get("user_id")
+		ownerID, ok := currentUserID.(uuid.UUID)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+
+		var user model.User
+		if err := db.Where("uuid = ?", targetID).First(&user).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load user"})
+			return
+		}
+		if user.Role == authctx.RoleOwner {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Owner role cannot be changed here"})
+			return
+		}
+		if user.UUID == ownerID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Owner role cannot be changed here"})
+			return
+		}
+
+		if err := db.Model(&user).Update("role", input.Role).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user role"})
+			return
+		}
+		user.Role = input.Role
+
+		c.JSON(http.StatusOK, gin.H{
+			"data": gin.H{
+				"uuid":         user.UUID,
+				"username":     user.Username,
+				"email":        user.Email,
+				"display_name": user.DisplayName,
+				"avatar_url":   user.AvatarURL,
+				"role":         user.Role,
+				"created_at":   user.CreatedAt,
+			},
+		})
+	}
+}

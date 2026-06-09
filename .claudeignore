@@ -1,0 +1,15 @@
+# 后端依赖和构建产物
+.gocache/
+coverage/
+.cache/
+
+# 日志和临时文件
+*.log
+*.tmp
+nvim.log
+output.txt
+
+# 编辑器和版本控制
+.git/
+.idea/
+.vscode/

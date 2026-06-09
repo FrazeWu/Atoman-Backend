@@ -1,0 +1,413 @@
+package handlers
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
+
+	"atoman/internal/model"
+	"atoman/internal/service"
+)
+
+const (
+	authTokenCookieName = "atoman_token"
+	authTokenTTL        = 30 * 24 * time.Hour
+)
+
+func HashPassword(password string) (string, error) {
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return string(hashedPassword), nil
+}
+
+func generateAuthToken(user model.User) (string, error) {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		return "", fmt.Errorf("JWT_SECRET is not configured")
+	}
+
+	role := user.Role
+	if role == "" {
+		role = "user"
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id":  user.UUID.String(),
+		"username": user.Username,
+		"role":     role,
+		"exp":      time.Now().Add(authTokenTTL).Unix(),
+	})
+
+	return token.SignedString([]byte(secret))
+}
+
+func setAuthTokenCookie(c *gin.Context, tokenString string) {
+	domain := os.Getenv("AUTH_COOKIE_DOMAIN")
+	secure := os.Getenv("ENV") == "production" || domain != ""
+	cookie := http.Cookie{
+		Name:     authTokenCookieName,
+		Value:    tokenString,
+		Path:     "/",
+		Domain:   domain,
+		MaxAge:   int(authTokenTTL.Seconds()),
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(c.Writer, &cookie)
+}
+
+func clearAuthTokenCookie(c *gin.Context) {
+	domain := os.Getenv("AUTH_COOKIE_DOMAIN")
+	secure := os.Getenv("ENV") == "production" || domain != ""
+	cookie := http.Cookie{
+		Name:     authTokenCookieName,
+		Value:    "",
+		Path:     "/",
+		Domain:   domain,
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	}
+	http.SetCookie(c.Writer, &cookie)
+}
+
+func userAuthResponse(user model.User, tokenString string) gin.H {
+	return gin.H{
+		"token": tokenString,
+		"user": gin.H{
+			"uuid":                    user.UUID,
+			"id":                      user.ID,
+			"username":                user.Username,
+			"email":                   user.Email,
+			"role":                    user.Role,
+			"display_name":            user.DisplayName,
+			"avatar_url":              user.AvatarURL,
+			"is_active":               user.IsActive,
+			"onboarding_completed_at": user.OnboardingCompletedAt,
+		},
+	}
+}
+
+// RegisterInput represents user registration request
+type RegisterInput struct {
+	Username         string `json:"username" binding:"required"`
+	Email            string `json:"email" binding:"required,email"`
+	Password         string `json:"password" binding:"required,min=6"`
+	PasswordConfirm  string `json:"password_confirm" binding:"required,eqfield=Password"`
+	VerificationCode string `json:"verification_code" binding:"required,len=6"`
+	TurnstileToken   string `json:"turnstile_token"`
+}
+
+// LoginInput represents user login request
+type LoginInput struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+// SendVerificationInput represents email verification code request
+type SendVerificationInput struct {
+	Email          string `json:"email" binding:"required,email"`
+	TurnstileToken string `json:"turnstile_token"`
+}
+
+// VerifyEmailInput represents email verification request
+type VerifyEmailInput struct {
+	Email string `json:"email" binding:"required,email"`
+	Code  string `json:"code" binding:"required,len=6"`
+}
+
+// SetupAuthRoutes configures authentication routes
+func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.EmailService) {
+	auth := router.Group("/api/auth")
+	{
+		auth.POST("/register", RegisterHandler(db, emailService))
+		auth.POST("/login", LoginHandler(db))
+		auth.POST("/logout", LogoutHandler())
+		auth.GET("/session", SessionHandler(db))
+		auth.POST("/send-verification", SendVerificationHandler(emailService))
+		auth.POST("/verify-email", VerifyEmailHandler(emailService))
+	}
+}
+
+// RegisterHandler godoc
+// @Summary 注册新用户
+// @Description 验证邮箱验证码后创建账号并返回登录态。
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param input body RegisterInput true "注册请求"
+// @Success 201 {object} AuthSuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/auth/register [post]
+func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input RegisterInput
+
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := verifyTurnstileToken(input.TurnstileToken, c.ClientIP()); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Verify email verification code first
+		valid, err := emailService.VerifyCode(input.Email, input.VerificationCode)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify email code"})
+			return
+		}
+		if !valid {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired verification code"})
+			return
+		}
+
+		// Check if user exists
+		var existingUser model.User
+		if err := db.Where("username = ? OR email = ?", input.Username, input.Email).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "User already exists"})
+			return
+		}
+
+		// Hash password
+		hashedPassword, err := bcrypt.GenerateFromPassword([]byte(input.Password), bcrypt.DefaultCost)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+			return
+		}
+
+		user := model.User{
+			Username: input.Username,
+			Email:    input.Email,
+			Password: string(hashedPassword),
+			Role:     "user",
+		}
+
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&user).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(&model.UserSettings{UserID: user.UUID}).Error; err != nil {
+				return err
+			}
+			if err := service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.Username); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create default channel"})
+			return
+		}
+
+		tokenString, err := generateAuthToken(user)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+			return
+		}
+
+		setAuthTokenCookie(c, tokenString)
+
+		c.JSON(http.StatusCreated, userAuthResponse(user, tokenString))
+	}
+}
+
+// LogoutHandler godoc
+// @Summary 退出登录
+// @Description 清除认证 Cookie。
+// @Tags auth
+// @Produce json
+// @Success 204
+// @Router /api/auth/logout [post]
+func LogoutHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		clearAuthTokenCookie(c)
+		c.Status(http.StatusNoContent)
+	}
+}
+
+// SessionHandler godoc
+// @Summary 获取当前会话
+// @Description 读取当前登录用户信息。
+// @Tags auth
+// @Produce json
+// @Success 200 {object} AuthSuccessResponse
+// @Failure 401 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/auth/session [get]
+func SessionHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		cookie, err := c.Cookie(authTokenCookieName)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+			return
+		}
+
+		token, err := jwt.Parse(cookie, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			}
+			return []byte(os.Getenv("JWT_SECRET")), nil
+		})
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			return
+		}
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			return
+		}
+		userID, ok := claims["user_id"].(string)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			return
+		}
+		var user model.User
+		if err := db.Where("uuid = ?", userID).First(&user).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+			return
+		}
+		if user.Role == "" {
+			user.Role = "user"
+		}
+		c.JSON(http.StatusOK, userAuthResponse(user, cookie))
+	}
+}
+
+// LoginHandler godoc
+// @Summary 用户登录
+// @Description 使用用户名或邮箱登录并返回登录态。
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param input body LoginInput true "登录请求"
+// @Success 200 {object} AuthSuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/auth/login [post]
+func LoginHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input LoginInput
+
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		var user model.User
+		if err := db.Where("username = ? OR email = ?", input.Username, input.Username).First(&user).Error; err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或邮箱不存在"})
+			return
+		}
+		if user.Role == "" {
+			user.Role = "user"
+		}
+
+		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名和密码不匹配"})
+			return
+		}
+
+		tokenString, err := generateAuthToken(user)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+			return
+		}
+
+		setAuthTokenCookie(c, tokenString)
+
+		c.JSON(http.StatusOK, userAuthResponse(user, tokenString))
+	}
+}
+
+// SendVerificationHandler godoc
+// @Summary 发送邮箱验证码
+// @Description 向指定邮箱发送 6 位验证码。
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param input body SendVerificationInput true "验证码请求"
+// @Success 200 {object} MessageResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/auth/send-verification [post]
+func SendVerificationHandler(emailService *service.EmailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input SendVerificationInput
+
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := verifyTurnstileToken(input.TurnstileToken, c.ClientIP()); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Send verification code
+		code, err := emailService.SendVerificationCode(input.Email)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification code", "details": err.Error()})
+			return
+		}
+
+		// Log the code in development mode for debugging
+		if os.Getenv("GIN_MODE") != "release" {
+			println("[DEBUG] Verification code for", input.Email, ":", code)
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Verification code sent"})
+	}
+}
+
+// VerifyEmailHandler godoc
+// @Summary 校验邮箱验证码
+// @Description 校验邮箱与验证码是否匹配。
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param input body VerifyEmailInput true "邮箱验证请求"
+// @Success 200 {object} MessageResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/auth/verify-email [post]
+func VerifyEmailHandler(emailService *service.EmailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input VerifyEmailInput
+
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Verify the code
+		valid, err := emailService.VerifyCode(input.Email, input.Code)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify code"})
+			return
+		}
+
+		if !valid {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired verification code"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "Email verified successfully"})
+	}
+}
