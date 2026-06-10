@@ -128,7 +128,7 @@ type VerifyEmailInput struct {
 
 // SetupAuthRoutes configures authentication routes
 func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.EmailService) {
-	auth := router.Group("/api/auth")
+	auth := router.Group("/api/v1/auth")
 	{
 		auth.POST("/register", RegisterHandler(db, emailService))
 		auth.POST("/login", LoginHandler(db))
@@ -149,7 +149,7 @@ func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.Emai
 // @Success 201 {object} AuthSuccessResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/auth/register [post]
+// @Router /api/v1/auth/register [post]
 func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input RegisterInput
@@ -230,7 +230,7 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 // @Tags auth
 // @Produce json
 // @Success 204
-// @Router /api/auth/logout [post]
+// @Router /api/v1/auth/logout [post]
 func LogoutHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		clearAuthTokenCookie(c)
@@ -247,7 +247,7 @@ func LogoutHandler() gin.HandlerFunc {
 // @Failure 401 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/auth/session [get]
+// @Router /api/v1/auth/session [get]
 func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cookie, err := c.Cookie(authTokenCookieName)
@@ -299,7 +299,7 @@ func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/auth/login [post]
+// @Router /api/v1/auth/login [post]
 func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input LoginInput
@@ -345,7 +345,7 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} MessageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/auth/send-verification [post]
+// @Router /api/v1/auth/send-verification [post]
 func SendVerificationHandler(emailService *service.EmailService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input SendVerificationInput
@@ -386,7 +386,7 @@ func SendVerificationHandler(emailService *service.EmailService) gin.HandlerFunc
 // @Success 200 {object} MessageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/auth/verify-email [post]
+// @Router /api/v1/auth/verify-email [post]
 func VerifyEmailHandler(emailService *service.EmailService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input VerifyEmailInput

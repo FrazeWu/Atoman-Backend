@@ -23,10 +23,10 @@ func TestCreateAdminFeedSource(t *testing.T) {
 	db := newAdminFeedFullTextTestDB(t)
 
 	r := gin.New()
-	r.POST("/api/admin/feed/fulltext/sources", CreateAdminFeedSource(db))
+	r.POST("/api/v1/admin/feed/fulltext/sources", CreateAdminFeedSource(db))
 
 	body := bytes.NewBufferString(`{"rss_url":"https://example.com/feed.xml","title":"Example Feed"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/feed/fulltext/sources", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/feed/fulltext/sources", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -61,10 +61,10 @@ func TestCreateAdminFeedSourceRejectsInternalRSSURL(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.POST("/api/admin/feed/fulltext/sources", CreateAdminFeedSource(db))
+	r.POST("/api/v1/admin/feed/fulltext/sources", CreateAdminFeedSource(db))
 
 	body := bytes.NewBufferString(`{"rss_url":"https://example.com/api/feed/rss/alice","title":"Internal Feed"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/feed/fulltext/sources", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/feed/fulltext/sources", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -98,10 +98,10 @@ func TestUpdateAdminFeedSource(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.PUT("/api/admin/feed/fulltext/sources/:source_id", UpdateAdminFeedSource(db))
+	r.PUT("/api/v1/admin/feed/fulltext/sources/:source_id", UpdateAdminFeedSource(db))
 
 	body := bytes.NewBufferString(`{"rss_url":"https://example.com/updated.xml","title":"Updated Feed"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/admin/feed/fulltext/sources/"+source.ID.String(), body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/feed/fulltext/sources/"+source.ID.String(), body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -137,10 +137,10 @@ func TestUpdateAdminFeedSourceRejectsBlankTitle(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.PATCH("/api/admin/feed/sources/:id", AdminUpdateFeedSourceRow(db))
+	r.PATCH("/api/v1/admin/feed/sources/:id", AdminUpdateFeedSourceRow(db))
 
 	body := bytes.NewBufferString(`{"title":"   \t\n  "}`)
-	req := httptest.NewRequest(http.MethodPatch, "/api/admin/feed/sources/"+source.ID.String(), body)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/admin/feed/sources/"+source.ID.String(), body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -210,9 +210,9 @@ func TestAdminDeleteFeedSourceCleansDependentFeedItemTables(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.DELETE("/api/admin/feed/sources/:id", AdminDeleteFeedSourceRow(db))
+	r.DELETE("/api/v1/admin/feed/sources/:id", AdminDeleteFeedSourceRow(db))
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/admin/feed/sources/"+source.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/feed/sources/"+source.ID.String(), nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -253,10 +253,10 @@ func TestUpdateAdminFeedSourceRejectsInternalSource(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.PUT("/api/admin/feed/fulltext/sources/:source_id", UpdateAdminFeedSource(db))
+	r.PUT("/api/v1/admin/feed/fulltext/sources/:source_id", UpdateAdminFeedSource(db))
 
 	body := bytes.NewBufferString(`{"rss_url":"https://example.com/updated.xml","title":"Updated Feed"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/admin/feed/fulltext/sources/"+source.ID.String(), body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/feed/fulltext/sources/"+source.ID.String(), body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -280,9 +280,9 @@ func TestSyncAdminFeedSourceRejectsInternalSource(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.POST("/api/admin/feed/fulltext/sources/:source_id/sync", SyncAdminFeedSource(db))
+	r.POST("/api/v1/admin/feed/fulltext/sources/:source_id/sync", SyncAdminFeedSource(db))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/feed/fulltext/sources/"+source.ID.String()+"/sync", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/feed/fulltext/sources/"+source.ID.String()+"/sync", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -349,9 +349,9 @@ func TestGetAdminFeedFullTextHealth(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.GET("/api/admin/feed/fulltext/health", GetAdminFeedFullTextHealth(db))
+	r.GET("/api/v1/admin/feed/fulltext/health", GetAdminFeedFullTextHealth(db))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/feed/fulltext/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/fulltext/health", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -414,7 +414,7 @@ func TestRetryAdminFeedFullTextItem(t *testing.T) {
 		FeedSourceID:          source.ID,
 		GUID:                  "retry-item",
 		Title:                 "Retry Item",
-		Link:                  "https://example.com/post",
+		Link:                  "https://93.184.216.34/post",
 		PublishedAt:           now,
 		FetchedAt:             now,
 		FullTextStatus:        service.FullTextStatusFailed,
@@ -428,9 +428,9 @@ func TestRetryAdminFeedFullTextItem(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.POST("/api/admin/feed/fulltext/items/:item_id/retry", RetryAdminFeedFullTextItem(db))
+	r.POST("/api/v1/admin/feed/fulltext/items/:item_id/retry", RetryAdminFeedFullTextItem(db))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/feed/fulltext/items/"+item.ID.String()+"/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/feed/fulltext/items/"+item.ID.String()+"/retry", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -479,9 +479,9 @@ func TestRetryAdminFeedFullTextItemRejectsDisabledSource(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.POST("/api/admin/feed/fulltext/items/:item_id/retry", RetryAdminFeedFullTextItem(db))
+	r.POST("/api/v1/admin/feed/fulltext/items/:item_id/retry", RetryAdminFeedFullTextItem(db))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/feed/fulltext/items/"+item.ID.String()+"/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/feed/fulltext/items/"+item.ID.String()+"/retry", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -519,9 +519,9 @@ func TestRetryAdminFeedFullTextItemRejectsNonFailedStatus(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.POST("/api/admin/feed/fulltext/items/:item_id/retry", RetryAdminFeedFullTextItem(db))
+	r.POST("/api/v1/admin/feed/fulltext/items/:item_id/retry", RetryAdminFeedFullTextItem(db))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/admin/feed/fulltext/items/"+item.ID.String()+"/retry", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/feed/fulltext/items/"+item.ID.String()+"/retry", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -571,9 +571,9 @@ func TestUpdateAdminFeedFullTextSourceSettings(t *testing.T) {
 
 	body := bytes.NewBufferString(`{"full_text_enabled":false}`)
 	r := gin.New()
-	r.PUT("/api/admin/feed/fulltext/sources/:source_id/settings", UpdateAdminFeedFullTextSourceSettings(db))
+	r.PUT("/api/v1/admin/feed/fulltext/sources/:source_id/settings", UpdateAdminFeedFullTextSourceSettings(db))
 
-	req := httptest.NewRequest(http.MethodPut, "/api/admin/feed/fulltext/sources/"+source.ID.String()+"/settings", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/feed/fulltext/sources/"+source.ID.String()+"/settings", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -629,9 +629,9 @@ func TestUpdateAdminFeedFullTextSourceSettingsReenablesDisabledItems(t *testing.
 
 	body := bytes.NewBufferString(`{"full_text_enabled":true}`)
 	r := gin.New()
-	r.PUT("/api/admin/feed/fulltext/sources/:source_id/settings", UpdateAdminFeedFullTextSourceSettings(db))
+	r.PUT("/api/v1/admin/feed/fulltext/sources/:source_id/settings", UpdateAdminFeedFullTextSourceSettings(db))
 
-	req := httptest.NewRequest(http.MethodPut, "/api/admin/feed/fulltext/sources/"+source.ID.String()+"/settings", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/feed/fulltext/sources/"+source.ID.String()+"/settings", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -728,9 +728,9 @@ func TestGetAdminFeedFullTextHealthCountsOnlyExternalRSS(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.GET("/api/admin/feed/fulltext/health", GetAdminFeedFullTextHealth(db))
+	r.GET("/api/v1/admin/feed/fulltext/health", GetAdminFeedFullTextHealth(db))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/feed/fulltext/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/fulltext/health", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -802,9 +802,9 @@ func TestGetAdminFeedFullTextHealthExcludesPodcastFeeds(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.GET("/api/admin/feed/fulltext/health", GetAdminFeedFullTextHealth(db))
+	r.GET("/api/v1/admin/feed/fulltext/health", GetAdminFeedFullTextHealth(db))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/feed/fulltext/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/fulltext/health", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -840,7 +840,7 @@ func TestUpdateAdminFeedFullTextSourceSettingsRequiresField(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.PUT("/api/admin/feed/fulltext/sources/:source_id/settings", UpdateAdminFeedFullTextSourceSettings(db))
+	r.PUT("/api/v1/admin/feed/fulltext/sources/:source_id/settings", UpdateAdminFeedFullTextSourceSettings(db))
 
 	for _, tc := range []struct {
 		name string
@@ -850,7 +850,7 @@ func TestUpdateAdminFeedFullTextSourceSettingsRequiresField(t *testing.T) {
 		{name: "missing field", body: `{"unexpected":true}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPut, "/api/admin/feed/fulltext/sources/"+source.ID.String()+"/settings", bytes.NewBufferString(tc.body))
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/feed/fulltext/sources/"+source.ID.String()+"/settings", bytes.NewBufferString(tc.body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
@@ -895,9 +895,9 @@ func TestGetAdminFeedFullTextItemsFilters(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.GET("/api/admin/feed/fulltext/items", GetAdminFeedFullTextItems(db))
+	r.GET("/api/v1/admin/feed/fulltext/items", GetAdminFeedFullTextItems(db))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/feed/fulltext/items?status=failed&error_code="+service.FullTextErrorRequestTimeout, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/fulltext/items?status=failed&error_code="+service.FullTextErrorRequestTimeout, nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -963,7 +963,7 @@ func TestGetAdminFeedFullTextSourcesEnabledFilter(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.GET("/api/admin/feed/fulltext/sources", GetAdminFeedFullTextSources(db))
+	r.GET("/api/v1/admin/feed/fulltext/sources", GetAdminFeedFullTextSources(db))
 
 	for _, tc := range []struct {
 		name       string
@@ -974,7 +974,7 @@ func TestGetAdminFeedFullTextSourcesEnabledFilter(t *testing.T) {
 		{name: "enabled false", query: "enabled=false", expectedID: disabledSource.ID},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "/api/admin/feed/fulltext/sources?"+tc.query, nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/fulltext/sources?"+tc.query, nil)
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 
@@ -1047,9 +1047,9 @@ func TestGetAdminFeedFullTextSourcesStatusFilter(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.GET("/api/admin/feed/fulltext/sources", GetAdminFeedFullTextSources(db))
+	r.GET("/api/v1/admin/feed/fulltext/sources", GetAdminFeedFullTextSources(db))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/feed/fulltext/sources?status=degraded", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/fulltext/sources?status=degraded", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -1077,7 +1077,7 @@ func TestGetAdminFeedFullTextSourcesStatusFilter(t *testing.T) {
 		t.Fatalf("unexpected source row: %+v", payload.Data[0])
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/api/admin/feed/fulltext/sources?status=disabled", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/fulltext/sources?status=disabled", nil)
 	w = httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -1140,9 +1140,9 @@ func TestGetAdminFeedFullTextSourcesSortByPendingCount(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.GET("/api/admin/feed/fulltext/sources", GetAdminFeedFullTextSources(db))
+	r.GET("/api/v1/admin/feed/fulltext/sources", GetAdminFeedFullTextSources(db))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/feed/fulltext/sources?sort=pending_count", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/fulltext/sources?sort=pending_count", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

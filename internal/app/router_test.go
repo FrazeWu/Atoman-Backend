@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"atoman/internal/collab"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
@@ -38,7 +39,7 @@ func TestRegisterV1RoutesMountsMusicSubmitEdit(t *testing.T) {
 		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser})
 		c.Next()
 	})
-	RegisterV1Routes(r, db)
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
 
 	body := map[string]any{
 		"type":        "create_artist",
@@ -91,7 +92,7 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser})
 		c.Next()
 	})
-	RegisterV1Routes(r, db)
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
 
 	body := map[string]any{
 		"title":          "Router Post",
@@ -151,7 +152,7 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleModerator})
 		c.Next()
 	})
-	RegisterV1Routes(r, db)
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/subscriptions", nil)
@@ -225,7 +226,7 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser})
 		c.Next()
 	})
-	RegisterV1Routes(r, db)
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
 
 	body := map[string]any{
 		"title":       "Router Debate",

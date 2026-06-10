@@ -12,7 +12,7 @@ import (
 )
 
 func SetupLyricAnnotationRoutes(router *gin.Engine, db *gorm.DB) {
-	songs := router.Group("/api/songs/:id")
+	songs := router.Group("/api/v1/songs/:id")
 	{
 		songs.GET("/annotations", GetSongAnnotationsHandler(db))
 		songs.POST("/annotations", middleware.AuthMiddleware(), CreateSongAnnotationHandler(db))
@@ -35,7 +35,7 @@ type AnnotationGroup struct {
 // @Success 200 {object} SongAnnotationGroupListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/songs/{id}/annotations [get]
+// @Router /api/v1/songs/{id}/annotations [get]
 func GetSongAnnotationsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		songID, err := uuid.Parse(c.Param("id"))
@@ -84,7 +84,7 @@ func GetSongAnnotationsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id}/annotations [post]
+// @Router /api/v1/songs/{id}/annotations [post]
 func CreateSongAnnotationHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		songID, err := uuid.Parse(c.Param("id"))
@@ -137,7 +137,7 @@ func CreateSongAnnotationHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id}/annotations/{annotationId} [put]
+// @Router /api/v1/songs/{id}/annotations/{annotationId} [put]
 func UpdateSongAnnotationHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		songID, err := uuid.Parse(c.Param("id"))
@@ -196,7 +196,7 @@ func UpdateSongAnnotationHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id}/annotations/{annotationId} [delete]
+// @Router /api/v1/songs/{id}/annotations/{annotationId} [delete]
 func DeleteSongAnnotationHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		songID, err := uuid.Parse(c.Param("id"))

@@ -17,7 +17,7 @@ import (
 func SetupArtistWikiRoutes(router *gin.Engine, db *gorm.DB) {
 	revisionService := service.NewRevisionService(db)
 
-	artists := router.Group("/api/artists")
+	artists := router.Group("/api/v1/artists")
 	{
 		artists.GET("/:id", GetArtistByIDHandler(db))
 		artists.PUT("/:id", middleware.AuthMiddleware(), UpdateArtistHandler(db, revisionService))
@@ -30,7 +30,7 @@ func SetupArtistWikiRoutes(router *gin.Engine, db *gorm.DB) {
 		artists.DELETE("/:id/aliases/:aliasId", middleware.AuthMiddleware(), DeleteArtistAliasHandler(db))
 	}
 
-	admin := router.Group("/api/admin/artists")
+	admin := router.Group("/api/v1/admin/artists")
 	admin.Use(middleware.AuthMiddleware(), middleware.AdminMiddleware(db))
 	{
 		admin.POST("/:id/merge", MergeArtistsHandler(db))
@@ -46,7 +46,7 @@ func SetupArtistWikiRoutes(router *gin.Engine, db *gorm.DB) {
 // @Success 200 {object} ArtistWikiResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/artists/{id} [get]
+// @Router /api/v1/artists/{id} [get]
 func GetArtistByIDHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -89,7 +89,7 @@ func GetArtistByIDHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id} [put]
+// @Router /api/v1/artists/{id} [put]
 func UpdateArtistHandler(db *gorm.DB, revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -204,7 +204,7 @@ func UpdateArtistHandler(db *gorm.DB, revisionService *service.RevisionService) 
 // @Success 200 {object} RevisionListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/artists/{id}/revisions [get]
+// @Router /api/v1/artists/{id}/revisions [get]
 func GetArtistRevisionsHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -235,7 +235,7 @@ func GetArtistRevisionsHandler(revisionService *service.RevisionService) gin.Han
 // @Success 200 {object} RevisionResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/artists/{id}/revisions/{version} [get]
+// @Router /api/v1/artists/{id}/revisions/{version} [get]
 func GetArtistRevisionHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -278,7 +278,7 @@ func GetArtistRevisionHandler(revisionService *service.RevisionService) gin.Hand
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id}/edit [post]
+// @Router /api/v1/artists/{id}/edit [post]
 func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -340,7 +340,7 @@ func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionS
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id}/revert/{version} [post]
+// @Router /api/v1/artists/{id}/revert/{version} [post]
 func RevertArtistHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -376,7 +376,7 @@ func RevertArtistHandler(revisionService *service.RevisionService) gin.HandlerFu
 // @Success 200 {object} ArtistAliasListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/artists/{id}/aliases [get]
+// @Router /api/v1/artists/{id}/aliases [get]
 func GetArtistAliasesHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -408,7 +408,7 @@ func GetArtistAliasesHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id}/aliases [post]
+// @Router /api/v1/artists/{id}/aliases [post]
 func AddArtistAliasHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -452,7 +452,7 @@ func AddArtistAliasHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id}/aliases/{aliasId} [delete]
+// @Router /api/v1/artists/{id}/aliases/{aliasId} [delete]
 func DeleteArtistAliasHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -490,7 +490,7 @@ func DeleteArtistAliasHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/artists/{id}/merge [post]
+// @Router /api/v1/admin/artists/{id}/merge [post]
 func MergeArtistsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		targetID, err := uuid.Parse(c.Param("id"))

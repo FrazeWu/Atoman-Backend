@@ -87,10 +87,10 @@ func TestCreatePostDefaultsVisibilityToPublic(t *testing.T) {
 	user := seedBlogPostUser(t, db)
 
 	router := gin.New()
-	router.POST("/api/blog/posts", withBlogPostAuth(user.UUID, CreatePost(db)))
+	router.POST("/api/v1/blog/posts", withBlogPostAuth(user.UUID, CreatePost(db)))
 
 	body := strings.NewReader(`{"title":"Visibility Default","content":"Post body"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/blog/posts", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -112,10 +112,10 @@ func TestPutBlogDraftPersistsFollowersVisibility(t *testing.T) {
 	contextKey := "editor:new"
 
 	router := gin.New()
-	router.PUT("/api/blog/drafts", withBlogPostAuth(user.UUID, PutBlogDraft(db)))
+	router.PUT("/api/v1/blog/drafts", withBlogPostAuth(user.UUID, PutBlogDraft(db)))
 
 	body := strings.NewReader(`{"context_key":"editor:new","title":"Draft title","content":"Draft body","visibility":"followers"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/blog/drafts", body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/blog/drafts", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -140,9 +140,9 @@ func TestGetPostRejectsPrivatePostForNonOwner(t *testing.T) {
 	require.NoError(t, db.Create(&post).Error)
 
 	router := gin.New()
-	router.GET("/api/blog/posts/:id", withBlogPostAuth(viewer.UUID, GetPost(db)))
+	router.GET("/api/v1/blog/posts/:id", withBlogPostAuth(viewer.UUID, GetPost(db)))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/blog/posts/"+post.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -160,15 +160,15 @@ func TestGetPostAllowsFollowersVisibilityForChannelSubscriber(t *testing.T) {
 	seedBlogPostChannelSubscription(t, db, follower.UUID, channel)
 
 	router := gin.New()
-	router.GET("/api/blog/posts/:id", withBlogPostAuth(follower.UUID, GetPost(db)))
-	req := httptest.NewRequest(http.MethodGet, "/api/blog/posts/"+post.ID.String(), nil)
+	router.GET("/api/v1/blog/posts/:id", withBlogPostAuth(follower.UUID, GetPost(db)))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
 	strangerRouter := gin.New()
-	strangerRouter.GET("/api/blog/posts/:id", withBlogPostAuth(stranger.UUID, GetPost(db)))
-	strangerReq := httptest.NewRequest(http.MethodGet, "/api/blog/posts/"+post.ID.String(), nil)
+	strangerRouter.GET("/api/v1/blog/posts/:id", withBlogPostAuth(stranger.UUID, GetPost(db)))
+	strangerReq := httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil)
 	strangerW := httptest.NewRecorder()
 	strangerRouter.ServeHTTP(strangerW, strangerReq)
 	require.Equal(t, http.StatusForbidden, strangerW.Code, strangerW.Body.String())
@@ -200,10 +200,10 @@ func TestUpdatePostWithoutChannelFieldsPreservesExistingChannelAndCollections(t 
 	require.NoError(t, db.Model(&post).Association("Collections").Append(defaultCollection, &extraCollection))
 
 	router := gin.New()
-	router.PUT("/api/blog/posts/:id", withBlogPostAuth(user.UUID, UpdatePost(db)))
+	router.PUT("/api/v1/blog/posts/:id", withBlogPostAuth(user.UUID, UpdatePost(db)))
 
 	body := strings.NewReader(`{"title":"After","content":"After body","summary":"Summary","status":"published"}`)
-	req := httptest.NewRequest(http.MethodPut, "/api/blog/posts/"+post.ID.String(), body)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/blog/posts/"+post.ID.String(), body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -237,12 +237,12 @@ func TestRequireBlogPostEditAccessRejectsNonOwner(t *testing.T) {
 
 	called := false
 	router := gin.New()
-	router.GET("/api/collab/ws/:roomID", withBlogPostAuth(viewer.UUID, RequireBlogPostEditAccess(db, func(c *gin.Context) {
+	router.GET("/api/v1/collab/ws/:roomID", withBlogPostAuth(viewer.UUID, RequireBlogPostEditAccess(db, func(c *gin.Context) {
 		called = true
 		c.Status(http.StatusNoContent)
 	})))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/collab/ws/"+post.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collab/ws/"+post.ID.String(), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -267,12 +267,12 @@ func TestRequireBlogPostEditAccessAllowsOwner(t *testing.T) {
 
 	called := false
 	router := gin.New()
-	router.GET("/api/collab/ws/:roomID", withBlogPostAuth(owner.UUID, RequireBlogPostEditAccess(db, func(c *gin.Context) {
+	router.GET("/api/v1/collab/ws/:roomID", withBlogPostAuth(owner.UUID, RequireBlogPostEditAccess(db, func(c *gin.Context) {
 		called = true
 		c.Status(http.StatusNoContent)
 	})))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/collab/ws/"+post.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/collab/ws/"+post.ID.String(), nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 

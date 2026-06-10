@@ -13,7 +13,7 @@ import (
 	// @Param year_end query int false "结束年份"
 	// @Success 200 {object} TimelineEventListResponse
 	// @Failure 500 {object} ErrorResponse
-	// @Router /api/timeline/events [get]
+	// @Router /api/v1/timeline/events [get]
 	"fmt"
 	"net/http"
 	"strconv"
@@ -74,7 +74,7 @@ func parseDateTime(s string) (time.Time, error) {
 }
 
 func SetupTimelineRoutes(router *gin.Engine, db *gorm.DB) {
-	tl := router.Group("/api/timeline")
+	tl := router.Group("/api/v1/timeline")
 	{
 		// Public routes
 		tl.GET("/events", GetTimelineEvents(db))
@@ -164,7 +164,7 @@ func GetTimelineEvents(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "事件 UUID"
 // @Success 200 {object} TimelineEventResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/timeline/events/{id} [get]
+// @Router /api/v1/timeline/events/{id} [get]
 func GetTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -204,7 +204,7 @@ type CreateEventInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/events [post]
+// @Router /api/v1/timeline/events [post]
 func CreateTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input CreateEventInput
@@ -273,7 +273,7 @@ func CreateTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/events/{id} [put]
+// @Router /api/v1/timeline/events/{id} [put]
 func UpdateTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -351,7 +351,7 @@ func UpdateTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/events/{id} [delete]
+// @Router /api/v1/timeline/events/{id} [delete]
 func DeleteTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -386,7 +386,7 @@ func DeleteTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 // @Param search query string false "名称搜索"
 // @Success 200 {object} TimelinePersonListResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/timeline/persons [get]
+// @Router /api/v1/timeline/persons [get]
 func GetTimelinePersons(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -432,7 +432,7 @@ func GetTimelinePersons(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "人物 UUID"
 // @Success 200 {object} TimelinePersonResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/timeline/persons/{id} [get]
+// @Router /api/v1/timeline/persons/{id} [get]
 func GetTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -460,7 +460,7 @@ func GetTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} PersonLocationListResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/timeline/persons/{id}/locations [get]
+// @Router /api/v1/timeline/persons/{id}/locations [get]
 func GetPersonLocations(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -502,7 +502,7 @@ type CreatePersonInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/persons [post]
+// @Router /api/v1/timeline/persons [post]
 func CreateTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input CreatePersonInput
@@ -561,7 +561,7 @@ func CreateTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/persons/{id} [put]
+// @Router /api/v1/timeline/persons/{id} [put]
 func UpdateTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -632,7 +632,7 @@ func UpdateTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/persons/{id} [delete]
+// @Router /api/v1/timeline/persons/{id} [delete]
 func DeleteTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -683,7 +683,7 @@ type CreateLocationInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/persons/{id}/locations [post]
+// @Router /api/v1/timeline/persons/{id}/locations [post]
 func AddPersonLocation(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		personID := c.Param("id")
@@ -754,7 +754,7 @@ func AddPersonLocation(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/locations/{id} [put]
+// @Router /api/v1/timeline/locations/{id} [put]
 func UpdatePersonLocation(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -824,7 +824,7 @@ func UpdatePersonLocation(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/locations/{id} [delete]
+// @Router /api/v1/timeline/locations/{id} [delete]
 func DeletePersonLocation(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -884,7 +884,7 @@ func saveEventRevision(db *gorm.DB, event model.TimelineEvent, editorID uuid.UUI
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/events/{id}/history [get]
+// @Router /api/v1/timeline/events/{id}/history [get]
 func GetTimelineEventHistory(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -912,7 +912,7 @@ func GetTimelineEventHistory(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/timeline/events/{id}/revert/{revision_id} [post]
+// @Router /api/v1/timeline/events/{id}/revert/{revision_id} [post]
 func RevertTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, _ := c.Get("role")

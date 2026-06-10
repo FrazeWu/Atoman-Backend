@@ -73,7 +73,7 @@ func normalizeMusicStatus(status string) string {
 
 // SetupSongRoutes configures song-related routes
 func SetupSongRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
-	songs := router.Group("/api/songs")
+	songs := router.Group("/api/v1/songs")
 	{
 		songs.GET("", GetSongsHandler(db))
 		songs.GET("/:id", GetSongHandler(db))
@@ -91,7 +91,7 @@ func SetupSongRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // @Produce json
 // @Success 200 {array} SongPublicItem
 // @Failure 500 {object} ErrorResponse
-// @Router /api/songs [get]
+// @Router /api/v1/songs [get]
 func GetSongsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var songs []model.Song
@@ -163,7 +163,7 @@ func GetSongsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "歌曲 UUID"
 // @Success 200 {object} SongPublicItem
 // @Failure 404 {object} ErrorResponse
-// @Router /api/songs/{id} [get]
+// @Router /api/v1/songs/{id} [get]
 func GetSongHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -240,7 +240,7 @@ func GetSongHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs [post]
+// @Router /api/v1/songs [post]
 func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input SongInput
@@ -498,7 +498,7 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id} [put]
+// @Router /api/v1/songs/{id} [put]
 func UpdateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -681,7 +681,7 @@ func UpdateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id} [delete]
+// @Router /api/v1/songs/{id} [delete]
 func DeleteSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")

@@ -19,7 +19,7 @@ import (
 
 // SetupBlogUploadRoutes configures blog media upload routes
 func SetupBlogUploadRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
-	blog := router.Group("/api/blog")
+	blog := router.Group("/api/v1/blog")
 	protected := blog.Group("")
 	protected.Use(middleware.AuthMiddleware())
 	{
@@ -41,7 +41,7 @@ func SetupBlogUploadRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/upload-image [post]
+// @Router /api/v1/blog/upload-image [post]
 func UploadBlogImage(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Get authenticated user ID

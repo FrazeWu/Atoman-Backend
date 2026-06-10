@@ -18,7 +18,7 @@ import (
 
 // SetupBlogPostRoutes configures blog post routes
 func SetupBlogPostRoutes(router *gin.Engine, db *gorm.DB) {
-	blog := router.Group("/api/blog")
+	blog := router.Group("/api/v1/blog")
 	{
 		blog.GET("/posts", GetPosts(db))
 		blog.GET("/posts/:id", middleware.OptionalAuthMiddleware(), GetPost(db))
@@ -108,7 +108,7 @@ type BlogDraftResponse struct {
 // @Param limit query int false "返回数量上限"
 // @Success 200 {object} PostListResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/blog/posts [get]
+// @Router /api/v1/blog/posts [get]
 func GetPosts(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var posts []model.Post
@@ -165,7 +165,7 @@ func GetPosts(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} PostResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/blog/posts/{id} [get]
+// @Router /api/v1/blog/posts/{id} [get]
 func GetPost(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -213,7 +213,7 @@ func GetPost(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/posts [post]
+// @Router /api/v1/blog/posts [post]
 func CreatePost(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input PostInput
@@ -351,7 +351,7 @@ func CreatePost(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/posts/{id} [put]
+// @Router /api/v1/blog/posts/{id} [put]
 func UpdatePost(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -503,7 +503,7 @@ func UpdatePost(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/posts/{id} [delete]
+// @Router /api/v1/blog/posts/{id} [delete]
 func DeletePost(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -544,7 +544,7 @@ func DeletePost(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/posts/{id}/publish [post]
+// @Router /api/v1/blog/posts/{id}/publish [post]
 func PublishPost(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		updatePostStatus(c, db, "published")
@@ -564,7 +564,7 @@ func PublishPost(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/posts/{id}/unpublish [post]
+// @Router /api/v1/blog/posts/{id}/unpublish [post]
 func UnpublishPost(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		updatePostStatus(c, db, "draft")
@@ -584,7 +584,7 @@ func UnpublishPost(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/posts/{id}/pin [post]
+// @Router /api/v1/blog/posts/{id}/pin [post]
 func PinPost(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		updatePostPin(c, db, true)
@@ -604,7 +604,7 @@ func PinPost(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/posts/{id}/unpin [post]
+// @Router /api/v1/blog/posts/{id}/unpin [post]
 func UnpinPost(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		updatePostPin(c, db, false)
@@ -621,7 +621,7 @@ func UnpinPost(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/posts/drafts [get]
+// @Router /api/v1/blog/posts/drafts [get]
 func GetDrafts(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -648,7 +648,7 @@ func GetDrafts(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/drafts [get]
+// @Router /api/v1/blog/drafts [get]
 func GetBlogDraft(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		contextKey := strings.TrimSpace(c.Query("context_key"))
@@ -682,7 +682,7 @@ func GetBlogDraft(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/drafts [put]
+// @Router /api/v1/blog/drafts [put]
 func PutBlogDraft(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input BlogDraftInput
@@ -756,7 +756,7 @@ func PutBlogDraft(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/drafts [delete]
+// @Router /api/v1/blog/drafts [delete]
 func DeleteBlogDraft(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		contextKey := strings.TrimSpace(c.Query("context_key"))
@@ -793,7 +793,7 @@ func DeleteBlogDraft(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/posts/{id}/collections [post]
+// @Router /api/v1/blog/posts/{id}/collections [post]
 func AddPostToCollection(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		postID := c.Param("id")
@@ -864,7 +864,7 @@ func AddPostToCollection(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/posts/{id}/collections/{collection_id} [delete]
+// @Router /api/v1/blog/posts/{id}/collections/{collection_id} [delete]
 func RemovePostFromCollection(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		postID := c.Param("id")

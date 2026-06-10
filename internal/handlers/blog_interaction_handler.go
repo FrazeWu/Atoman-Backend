@@ -15,7 +15,7 @@ import (
 
 // SetupBlogInteractionRoutes configures comment, like, and bookmark routes
 func SetupBlogInteractionRoutes(router *gin.Engine, db *gorm.DB) {
-	blog := router.Group("/api/blog")
+	blog := router.Group("/api/v1/blog")
 	{
 		// Public routes
 		blog.GET("/posts/:id/comments", GetPostComments(db))
@@ -114,7 +114,7 @@ func ensureBlogPostInteractive(db *gorm.DB, viewerID *uuid.UUID, post model.Post
 // @Success 200 {object} CommentListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/blog/posts/{id}/comments [get]
+// @Router /api/v1/blog/posts/{id}/comments [get]
 func GetPostComments(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		postID, err := uuid.Parse(c.Param("id"))
@@ -158,7 +158,7 @@ func GetPostComments(db *gorm.DB) gin.HandlerFunc {
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/blog/posts/{id}/comments [post]
+// @Router /api/v1/blog/posts/{id}/comments [post]
 func CreateComment(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		postID, err := uuid.Parse(c.Param("id"))
@@ -250,7 +250,7 @@ func CreateComment(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/comments/{id} [delete]
+// @Router /api/v1/blog/comments/{id} [delete]
 func DeleteComment(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))
@@ -310,8 +310,8 @@ func DeleteComment(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/likes [post]
-// @Router /api/blog/likes [delete]
+// @Router /api/v1/blog/likes [post]
+// @Router /api/v1/blog/likes [delete]
 func ToggleLike(db *gorm.DB, isLike bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input LikeInput
@@ -375,7 +375,7 @@ func ToggleLike(db *gorm.DB, isLike bool) gin.HandlerFunc {
 // @Success 200 {object} LikeCountResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/blog/posts/{id}/likes/count [get]
+// @Router /api/v1/blog/posts/{id}/likes/count [get]
 func GetPostLikesCount(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		postID, err := uuid.Parse(c.Param("id"))
@@ -405,7 +405,7 @@ func GetPostLikesCount(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/bookmarks [get]
+// @Router /api/v1/blog/bookmarks [get]
 func GetBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -441,7 +441,7 @@ func GetBookmarks(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/bookmarks [post]
+// @Router /api/v1/blog/bookmarks [post]
 func CreateBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input BookmarkInput
@@ -498,7 +498,7 @@ func CreateBookmark(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/bookmarks/{id} [delete]
+// @Router /api/v1/blog/bookmarks/{id} [delete]
 func DeleteBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))
@@ -529,7 +529,7 @@ func DeleteBookmark(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/bookmark-folders [get]
+// @Router /api/v1/blog/bookmark-folders [get]
 func GetBookmarkFolders(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -558,7 +558,7 @@ func GetBookmarkFolders(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/bookmark-folders [post]
+// @Router /api/v1/blog/bookmark-folders [post]
 func CreateBookmarkFolder(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input BookmarkFolderInput
@@ -596,7 +596,7 @@ func CreateBookmarkFolder(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/bookmark-folders/{id} [delete]
+// @Router /api/v1/blog/bookmark-folders/{id} [delete]
 func DeleteBookmarkFolder(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))

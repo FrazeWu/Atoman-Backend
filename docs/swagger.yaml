@@ -1,4 +1,4 @@
-basePath: /
+basePath: /api/v1
 definitions:
   atoman_internal_model.Album:
     properties:
@@ -3635,7 +3635,7 @@ info:
   title: Atoman API
   version: "1.0"
 paths:
-  /api/admin/artists/{id}/merge:
+  /api/v1/admin/artists/{id}/merge:
     post:
       consumes:
       - application/json
@@ -3673,7 +3673,7 @@ paths:
       summary: 合并艺人
       tags:
       - music-artists
-  /api/admin/discussions/{id}:
+  /api/v1/admin/discussions/{id}:
     delete:
       description: 管理员可软删除任意讨论。
       parameters:
@@ -3707,7 +3707,7 @@ paths:
       summary: 管理员删除讨论
       tags:
       - music-discussions
-  /api/admin/music/entries:
+  /api/v1/admin/music/entries:
     get:
       description: 管理员按类型和状态筛选音乐 wiki 条目。
       parameters:
@@ -3749,7 +3749,7 @@ paths:
       summary: 获取音乐条目后台列表
       tags:
       - music-entry-status
-  /api/admin/reviews/album-corrections:
+  /api/v1/admin/reviews/album-corrections:
     get:
       description: 返回所有待审核专辑纠错及其关联专辑信息。
       produces:
@@ -3771,7 +3771,7 @@ paths:
       summary: 获取待审核专辑纠错列表
       tags:
       - admin
-  /api/admin/reviews/album-corrections/{id}/approve:
+  /api/v1/admin/reviews/album-corrections/{id}/approve:
     post:
       description: 将专辑纠错标记为 approved，并把改动应用到专辑实体。
       parameters:
@@ -3801,7 +3801,7 @@ paths:
       summary: 审核通过专辑纠错
       tags:
       - admin
-  /api/admin/reviews/album-corrections/{id}/reject:
+  /api/v1/admin/reviews/album-corrections/{id}/reject:
     post:
       description: 将专辑纠错标记为 rejected。
       parameters:
@@ -3831,7 +3831,7 @@ paths:
       summary: 驳回专辑纠错
       tags:
       - admin
-  /api/admin/reviews/albums:
+  /api/v1/admin/reviews/albums:
     get:
       description: 返回所有待审核专辑及其关联艺人、用户和歌曲信息。
       produces:
@@ -3853,7 +3853,7 @@ paths:
       summary: 获取待审核专辑列表
       tags:
       - admin
-  /api/admin/reviews/albums/{id}/approve:
+  /api/v1/admin/reviews/albums/{id}/approve:
     post:
       description: 将待审核专辑及其附属歌曲标记为 approved，并在可用时迁移本地文件到 S3。
       parameters:
@@ -3883,7 +3883,7 @@ paths:
       summary: 审核通过专辑
       tags:
       - admin
-  /api/admin/reviews/albums/{id}/reject:
+  /api/v1/admin/reviews/albums/{id}/reject:
     post:
       description: 删除待审核专辑及其关联存储对象。
       parameters:
@@ -3913,7 +3913,7 @@ paths:
       summary: 驳回专辑
       tags:
       - admin
-  /api/admin/reviews/artist-corrections:
+  /api/v1/admin/reviews/artist-corrections:
     get:
       description: 返回所有待审核艺人纠错及其关联艺人、提交用户信息。
       produces:
@@ -3935,7 +3935,7 @@ paths:
       summary: 获取待审核艺人纠错列表
       tags:
       - admin
-  /api/admin/reviews/artist-corrections/{id}/approve:
+  /api/v1/admin/reviews/artist-corrections/{id}/approve:
     post:
       description: 将艺人纠错标记为 approved。
       parameters:
@@ -3965,7 +3965,7 @@ paths:
       summary: 审核通过艺人纠错
       tags:
       - admin
-  /api/admin/reviews/artist-corrections/{id}/reject:
+  /api/v1/admin/reviews/artist-corrections/{id}/reject:
     post:
       description: 将艺人纠错标记为 rejected。
       parameters:
@@ -3995,7 +3995,7 @@ paths:
       summary: 驳回艺人纠错
       tags:
       - admin
-  /api/admin/reviews/revisions/{id}/approve:
+  /api/v1/admin/reviews/revisions/{id}/approve:
     post:
       consumes:
       - application/json
@@ -4032,7 +4032,7 @@ paths:
       summary: 审核通过修订
       tags:
       - music-revisions
-  /api/admin/reviews/revisions/{id}/reject:
+  /api/v1/admin/reviews/revisions/{id}/reject:
     post:
       consumes:
       - application/json
@@ -4070,7 +4070,7 @@ paths:
       summary: 驳回修订
       tags:
       - music-revisions
-  /api/admin/reviews/song-corrections:
+  /api/v1/admin/reviews/song-corrections:
     get:
       description: 返回所有待审核歌曲纠错及其关联歌曲、提交用户信息。
       produces:
@@ -4092,7 +4092,7 @@ paths:
       summary: 获取待审核歌曲纠错列表
       tags:
       - admin
-  /api/admin/reviews/song-corrections/{id}/approve:
+  /api/v1/admin/reviews/song-corrections/{id}/approve:
     post:
       description: 将歌曲纠错标记为 approved，并把支持的字段改动应用到歌曲实体。
       parameters:
@@ -4122,7 +4122,7 @@ paths:
       summary: 审核通过歌曲纠错
       tags:
       - admin
-  /api/admin/reviews/song-corrections/{id}/reject:
+  /api/v1/admin/reviews/song-corrections/{id}/reject:
     post:
       description: 将歌曲纠错标记为 rejected。
       parameters:
@@ -4148,7 +4148,7 @@ paths:
       summary: 驳回歌曲纠错
       tags:
       - admin
-  /api/admin/reviews/songs:
+  /api/v1/admin/reviews/songs:
     get:
       description: 返回所有待审核歌曲及其关联用户、专辑和艺人信息。
       produces:
@@ -4170,7 +4170,7 @@ paths:
       summary: 获取待审核歌曲列表
       tags:
       - admin
-  /api/admin/reviews/songs/{id}/approve:
+  /api/v1/admin/reviews/songs/{id}/approve:
     post:
       description: 将待审核歌曲标记为 approved，并在可用时把本地文件迁移到 S3。
       parameters:
@@ -4200,7 +4200,7 @@ paths:
       summary: 审核通过歌曲
       tags:
       - admin
-  /api/admin/reviews/songs/{id}/reject:
+  /api/v1/admin/reviews/songs/{id}/reject:
     post:
       description: 删除待审核歌曲及其关联本地或对象存储文件。
       parameters:
@@ -4230,7 +4230,7 @@ paths:
       summary: 驳回歌曲
       tags:
       - admin
-  /api/albums:
+  /api/v1/albums:
     get:
       description: 返回所有未关闭的专辑列表。
       produces:
@@ -4309,7 +4309,7 @@ paths:
       summary: 创建专辑
       tags:
       - music-albums
-  /api/albums/{id}:
+  /api/v1/albums/{id}:
     delete:
       description: 删除指定专辑，仅管理员可执行。
       parameters:
@@ -4440,7 +4440,7 @@ paths:
       summary: 更新专辑
       tags:
       - music-albums
-  /api/albums/{id}/discussions:
+  /api/v1/albums/{id}/discussions:
     get:
       description: 分页返回专辑的顶层讨论及其已预加载的回复。
       parameters:
@@ -4512,7 +4512,7 @@ paths:
       summary: 创建专辑讨论
       tags:
       - music-discussions
-  /api/albums/{id}/discussions/{discussion_id}:
+  /api/v1/albums/{id}/discussions/{discussion_id}:
     delete:
       description: 讨论所有者或管理员可将专辑讨论软删除。
       parameters:
@@ -4605,7 +4605,7 @@ paths:
       summary: 更新专辑讨论
       tags:
       - music-discussions
-  /api/albums/{id}/discussions/{discussion_id}/reply:
+  /api/v1/albums/{id}/discussions/{discussion_id}/reply:
     post:
       consumes:
       - application/json
@@ -4652,7 +4652,7 @@ paths:
       summary: 回复专辑或歌曲讨论
       tags:
       - music-discussions
-  /api/albums/{id}/discussions/unread-count:
+  /api/v1/albums/{id}/discussions/unread-count:
     get:
       description: 返回专辑下未读且未删除的讨论数量。
       parameters:
@@ -4679,7 +4679,7 @@ paths:
       summary: 获取专辑未读讨论数
       tags:
       - music-discussions
-  /api/albums/{id}/entry-status:
+  /api/v1/albums/{id}/entry-status:
     put:
       consumes:
       - application/json
@@ -4717,7 +4717,7 @@ paths:
       summary: 修改专辑条目状态
       tags:
       - music-entry-status
-  /api/albums/{id}/protection:
+  /api/v1/albums/{id}/protection:
     delete:
       description: 管理员移除专辑的保护设置。
       parameters:
@@ -4814,7 +4814,7 @@ paths:
       summary: 设置专辑保护级别
       tags:
       - music-protection
-  /api/albums/{id}/revisions:
+  /api/v1/albums/{id}/revisions:
     get:
       description: 分页返回专辑条目的 revision 历史。
       parameters:
@@ -4894,7 +4894,7 @@ paths:
       summary: 提交专辑修订
       tags:
       - music-revisions
-  /api/albums/{id}/revisions/{version}:
+  /api/v1/albums/{id}/revisions/{version}:
     get:
       description: 返回专辑某个版本号对应的 revision 详情。
       parameters:
@@ -4926,7 +4926,7 @@ paths:
       summary: 获取专辑指定修订
       tags:
       - music-revisions
-  /api/albums/{id}/revisions/{version}/revert:
+  /api/v1/albums/{id}/revisions/{version}/revert:
     post:
       consumes:
       - application/json
@@ -4968,7 +4968,7 @@ paths:
       summary: 回滚专辑到指定版本
       tags:
       - music-revisions
-  /api/albums/{id}/revisions/diff:
+  /api/v1/albums/{id}/revisions/diff:
     get:
       description: 比较专辑两个版本之间的字段差异。
       parameters:
@@ -5005,7 +5005,7 @@ paths:
       summary: 比较专辑修订差异
       tags:
       - music-revisions
-  /api/artists:
+  /api/v1/artists:
     get:
       description: 返回艺人列表，可按名称或别名搜索。
       parameters:
@@ -5065,7 +5065,7 @@ paths:
       summary: 创建艺人
       tags:
       - music-artists
-  /api/artists/{id}:
+  /api/v1/artists/{id}:
     get:
       description: 返回艺人详情、别名与专辑信息；若该艺人已合并则附带 redirect_to。
       parameters:
@@ -5137,7 +5137,7 @@ paths:
       summary: 更新艺人信息
       tags:
       - music-artists
-  /api/artists/{id}/aliases:
+  /api/v1/artists/{id}/aliases:
     get:
       description: 返回指定艺人的所有别名。
       parameters:
@@ -5201,7 +5201,7 @@ paths:
       summary: 添加艺人别名
       tags:
       - music-artists
-  /api/artists/{id}/aliases/{aliasId}:
+  /api/v1/artists/{id}/aliases/{aliasId}:
     delete:
       description: 删除指定艺人上的某个别名。
       parameters:
@@ -5236,7 +5236,7 @@ paths:
       summary: 删除艺人别名
       tags:
       - music-artists
-  /api/artists/{id}/discussions:
+  /api/v1/artists/{id}/discussions:
     get:
       description: 分页返回艺人条目的顶层讨论及其回复。
       parameters:
@@ -5308,7 +5308,7 @@ paths:
       summary: 创建艺人讨论
       tags:
       - music-discussions
-  /api/artists/{id}/discussions/{discussion_id}:
+  /api/v1/artists/{id}/discussions/{discussion_id}:
     delete:
       description: 讨论所有者或管理员可将艺人讨论软删除。
       parameters:
@@ -5347,7 +5347,7 @@ paths:
       summary: 删除艺人讨论
       tags:
       - music-discussions
-  /api/artists/{id}/discussions/{discussion_id}/reply:
+  /api/v1/artists/{id}/discussions/{discussion_id}/reply:
     post:
       consumes:
       - application/json
@@ -5390,7 +5390,7 @@ paths:
       summary: 回复艺人讨论
       tags:
       - music-discussions
-  /api/artists/{id}/edit:
+  /api/v1/artists/{id}/edit:
     post:
       consumes:
       - application/json
@@ -5436,7 +5436,7 @@ paths:
       summary: 创建艺人修订
       tags:
       - music-artists
-  /api/artists/{id}/entry-status:
+  /api/v1/artists/{id}/entry-status:
     put:
       consumes:
       - application/json
@@ -5474,7 +5474,7 @@ paths:
       summary: 修改艺人条目状态
       tags:
       - music-entry-status
-  /api/artists/{id}/protection:
+  /api/v1/artists/{id}/protection:
     delete:
       description: 管理员移除艺人的保护设置。
       parameters:
@@ -5571,7 +5571,7 @@ paths:
       summary: 设置艺人保护级别
       tags:
       - music-protection
-  /api/artists/{id}/revert/{version}:
+  /api/v1/artists/{id}/revert/{version}:
     post:
       consumes:
       - application/json
@@ -5613,7 +5613,7 @@ paths:
       summary: 回滚艺人到指定版本
       tags:
       - music-artists
-  /api/artists/{id}/revisions:
+  /api/v1/artists/{id}/revisions:
     get:
       description: 分页返回艺人条目的 revision 历史。
       parameters:
@@ -5648,7 +5648,7 @@ paths:
       summary: 获取艺人修订历史
       tags:
       - music-artists
-  /api/artists/{id}/revisions/{version}:
+  /api/v1/artists/{id}/revisions/{version}:
     get:
       description: 按版本号返回艺人 revision 详情。
       parameters:
@@ -5680,7 +5680,7 @@ paths:
       summary: 获取单个艺人修订版本
       tags:
       - music-artists
-  /api/auth/login:
+  /api/v1/auth/login:
     post:
       consumes:
       - application/json
@@ -5714,7 +5714,7 @@ paths:
       summary: 用户登录
       tags:
       - auth
-  /api/auth/logout:
+  /api/v1/auth/logout:
     post:
       description: 清除认证 Cookie。
       produces:
@@ -5725,7 +5725,7 @@ paths:
       summary: 退出登录
       tags:
       - auth
-  /api/auth/onboarding/complete:
+  /api/v1/auth/onboarding/complete:
     post:
       description: 将当前登录用户的 onboarding_completed_at 设置为当前 UTC 时间。
       produces:
@@ -5749,7 +5749,7 @@ paths:
       summary: 完成首次登录引导
       tags:
       - auth
-  /api/auth/register:
+  /api/v1/auth/register:
     post:
       consumes:
       - application/json
@@ -5779,7 +5779,7 @@ paths:
       summary: 注册新用户
       tags:
       - auth
-  /api/auth/send-verification:
+  /api/v1/auth/send-verification:
     post:
       consumes:
       - application/json
@@ -5809,7 +5809,7 @@ paths:
       summary: 发送邮箱验证码
       tags:
       - auth
-  /api/auth/session:
+  /api/v1/auth/session:
     get:
       description: 读取当前登录用户信息。
       produces:
@@ -5829,7 +5829,7 @@ paths:
       summary: 获取当前会话
       tags:
       - auth
-  /api/auth/verify-email:
+  /api/v1/auth/verify-email:
     post:
       consumes:
       - application/json
@@ -5859,7 +5859,7 @@ paths:
       summary: 校验邮箱验证码
       tags:
       - auth
-  /api/blog/bookmark-folders:
+  /api/v1/blog/bookmark-folders:
     get:
       description: 返回当前用户的书签文件夹列表。
       produces:
@@ -5911,7 +5911,7 @@ paths:
       summary: 创建书签文件夹
       tags:
       - blog-interactions
-  /api/blog/bookmark-folders/{id}:
+  /api/v1/blog/bookmark-folders/{id}:
     delete:
       description: 删除当前用户的书签文件夹，并把其中书签移到未分组状态。
       parameters:
@@ -5941,7 +5941,7 @@ paths:
       summary: 删除书签文件夹
       tags:
       - blog-interactions
-  /api/blog/bookmarks:
+  /api/v1/blog/bookmarks:
     get:
       description: 返回当前用户的书签列表，可按书签文件夹过滤。
       parameters:
@@ -6002,7 +6002,7 @@ paths:
       summary: 创建书签
       tags:
       - blog-interactions
-  /api/blog/bookmarks/{id}:
+  /api/v1/blog/bookmarks/{id}:
     delete:
       description: 删除当前用户的指定书签。
       parameters:
@@ -6032,7 +6032,7 @@ paths:
       summary: 删除书签
       tags:
       - blog-interactions
-  /api/blog/channels:
+  /api/v1/blog/channels:
     get:
       description: 返回频道列表，可按用户 UUID 过滤。
       parameters:
@@ -6094,7 +6094,7 @@ paths:
       summary: 创建频道
       tags:
       - blog-channels
-  /api/blog/channels/{id}:
+  /api/v1/blog/channels/{id}:
     delete:
       consumes:
       - application/json
@@ -6215,7 +6215,7 @@ paths:
       summary: 更新频道
       tags:
       - blog-channels
-  /api/blog/channels/{id}/collections:
+  /api/v1/blog/channels/{id}/collections:
     get:
       description: 返回指定频道 UUID 下的所有合集。
       parameters:
@@ -6287,7 +6287,7 @@ paths:
       summary: 创建合集
       tags:
       - blog-collections
-  /api/blog/channels/ensure-default:
+  /api/v1/blog/channels/ensure-default:
     post:
       description: 为当前用户创建默认频道；若已存在则直接返回。
       produces:
@@ -6311,7 +6311,7 @@ paths:
       summary: 确保默认频道存在
       tags:
       - blog-channels
-  /api/blog/channels/slug/{slug}:
+  /api/v1/blog/channels/slug/{slug}:
     get:
       description: 按频道 slug 返回频道详情。
       parameters:
@@ -6334,7 +6334,7 @@ paths:
       summary: 按 slug 获取频道详情
       tags:
       - blog-channels
-  /api/blog/channels/slug/{slug}/collections:
+  /api/v1/blog/channels/slug/{slug}/collections:
     get:
       description: 返回指定频道 slug 下的所有合集。
       parameters:
@@ -6361,7 +6361,7 @@ paths:
       summary: 按频道 slug 获取合集列表
       tags:
       - blog-collections
-  /api/blog/channels/slug/{slug}/rss/article:
+  /api/v1/blog/channels/slug/{slug}/rss/article:
     get:
       description: 输出指定频道已发布文章的 RSS 2.0 XML。
       parameters:
@@ -6384,7 +6384,7 @@ paths:
       summary: 获取频道文章 RSS
       tags:
       - blog-channels
-  /api/blog/collections:
+  /api/v1/blog/collections:
     get:
       description: 返回当前登录用户名下所有频道的合集，并附带频道名称。
       produces:
@@ -6408,7 +6408,7 @@ paths:
       summary: 获取我的合集列表
       tags:
       - blog-collections
-  /api/blog/collections/{id}:
+  /api/v1/blog/collections/{id}:
     delete:
       description: 删除当前用户可管理的合集。
       parameters:
@@ -6513,7 +6513,7 @@ paths:
       summary: 更新合集
       tags:
       - blog-collections
-  /api/blog/comments/{id}:
+  /api/v1/blog/comments/{id}:
     delete:
       description: 删除当前用户拥有的评论，或删除自己文章下的评论。
       parameters:
@@ -6551,7 +6551,7 @@ paths:
       summary: 删除评论
       tags:
       - blog-interactions
-  /api/blog/drafts:
+  /api/v1/blog/drafts:
     delete:
       description: 按 context_key 删除当前用户保存的编辑器草稿。
       parameters:
@@ -6642,7 +6642,7 @@ paths:
       summary: 保存编辑器草稿
       tags:
       - blog-posts
-  /api/blog/explore:
+  /api/v1/blog/explore:
     get:
       description: 返回已发布文章的分页列表，并附带点赞数和评论数。
       parameters:
@@ -6670,7 +6670,7 @@ paths:
       summary: 获取博客探索流
       tags:
       - users
-  /api/blog/likes:
+  /api/v1/blog/likes:
     delete:
       consumes:
       - application/json
@@ -6743,7 +6743,7 @@ paths:
       summary: 点赞或取消点赞
       tags:
       - blog-interactions
-  /api/blog/posts:
+  /api/v1/blog/posts:
     get:
       description: 返回已发布文章，可按用户、频道或合集筛选。
       parameters:
@@ -6817,7 +6817,7 @@ paths:
       summary: 创建文章
       tags:
       - blog-posts
-  /api/blog/posts/{id}:
+  /api/v1/blog/posts/{id}:
     delete:
       description: 删除当前用户拥有的文章。
       parameters:
@@ -6922,7 +6922,7 @@ paths:
       summary: 更新文章
       tags:
       - blog-posts
-  /api/blog/posts/{id}/collections:
+  /api/v1/blog/posts/{id}/collections:
     post:
       consumes:
       - application/json
@@ -6968,7 +6968,7 @@ paths:
       summary: 将文章加入合集
       tags:
       - blog-posts
-  /api/blog/posts/{id}/collections/{collection_id}:
+  /api/v1/blog/posts/{id}/collections/{collection_id}:
     delete:
       description: 移除当前用户拥有文章与指定合集之间的关联。
       parameters:
@@ -7011,7 +7011,7 @@ paths:
       summary: 将文章移出合集
       tags:
       - blog-posts
-  /api/blog/posts/{id}/comments:
+  /api/v1/blog/posts/{id}/comments:
     get:
       description: 返回指定文章的可见评论列表。
       parameters:
@@ -7080,7 +7080,7 @@ paths:
       summary: 创建文章评论
       tags:
       - blog-interactions
-  /api/blog/posts/{id}/likes/count:
+  /api/v1/blog/posts/{id}/likes/count:
     get:
       description: 返回指定文章的点赞总数。
       parameters:
@@ -7107,7 +7107,7 @@ paths:
       summary: 获取文章点赞数
       tags:
       - blog-interactions
-  /api/blog/posts/{id}/pin:
+  /api/v1/blog/posts/{id}/pin:
     post:
       description: 将当前用户拥有的文章标记为置顶。
       parameters:
@@ -7141,7 +7141,7 @@ paths:
       summary: 置顶文章
       tags:
       - blog-posts
-  /api/blog/posts/{id}/publish:
+  /api/v1/blog/posts/{id}/publish:
     post:
       description: 将当前用户拥有的文章状态切换为 published。
       parameters:
@@ -7175,7 +7175,7 @@ paths:
       summary: 发布文章
       tags:
       - blog-posts
-  /api/blog/posts/{id}/unpin:
+  /api/v1/blog/posts/{id}/unpin:
     post:
       description: 取消当前用户拥有文章的置顶状态。
       parameters:
@@ -7209,7 +7209,7 @@ paths:
       summary: 取消置顶文章
       tags:
       - blog-posts
-  /api/blog/posts/{id}/unpublish:
+  /api/v1/blog/posts/{id}/unpublish:
     post:
       description: 将当前用户拥有的文章状态切换为 draft。
       parameters:
@@ -7243,7 +7243,7 @@ paths:
       summary: 取消发布文章
       tags:
       - blog-posts
-  /api/blog/posts/drafts:
+  /api/v1/blog/posts/drafts:
     get:
       description: 返回当前登录用户的文章草稿列表。
       produces:
@@ -7263,7 +7263,7 @@ paths:
       summary: 获取我的草稿文章
       tags:
       - blog-posts
-  /api/blog/upload-image:
+  /api/v1/blog/upload-image:
     post:
       consumes:
       - multipart/form-data
@@ -7299,7 +7299,7 @@ paths:
       summary: 上传博客图片
       tags:
       - blog-upload
-  /api/channels/{slug}/rss/podcast:
+  /api/v1/channels/{slug}/rss/podcast:
     get:
       description: 输出指定频道的播客 RSS。
       parameters:
@@ -7322,7 +7322,7 @@ paths:
       summary: 获取播客 RSS
       tags:
       - podcast
-  /api/channels/slug/{slug}/rss/video:
+  /api/v1/channels/slug/{slug}/rss/video:
     get:
       description: 输出指定频道的公开视频 RSS。
       parameters:
@@ -7345,7 +7345,7 @@ paths:
       summary: 获取频道视频 RSS
       tags:
       - videos
-  /api/corrections/album:
+  /api/v1/corrections/album:
     post:
       consumes:
       - multipart/form-data
@@ -7397,7 +7397,7 @@ paths:
       summary: 提交专辑纠错
       tags:
       - music-corrections
-  /api/corrections/artist:
+  /api/v1/corrections/artist:
     post:
       consumes:
       - application/json
@@ -7438,7 +7438,7 @@ paths:
       summary: 提交艺人纠错
       tags:
       - music-corrections
-  /api/corrections/song:
+  /api/v1/corrections/song:
     post:
       consumes:
       - application/json
@@ -7471,7 +7471,7 @@ paths:
       summary: 提交歌曲纠错
       tags:
       - music-corrections
-  /api/debate/arguments/{id}:
+  /api/v1/debate/arguments/{id}:
     delete:
       description: 论点作者或管理员可以删除论点，并清理关联投票与引用关系。
       parameters:
@@ -7546,7 +7546,7 @@ paths:
       summary: 更新论点
       tags:
       - debate
-  /api/debate/arguments/{id}/debate-reference:
+  /api/v1/debate/arguments/{id}/debate-reference:
     post:
       consumes:
       - application/json
@@ -7588,7 +7588,7 @@ paths:
       summary: 添加辩题引用
       tags:
       - debate
-  /api/debate/arguments/{id}/debate-reference/{debate_id}:
+  /api/v1/debate/arguments/{id}/debate-reference/{debate_id}:
     delete:
       description: 删除论点与被引用辩题之间的关联。
       parameters:
@@ -7623,7 +7623,7 @@ paths:
       summary: 移除辩题引用
       tags:
       - debate
-  /api/debate/arguments/{id}/fold:
+  /api/v1/debate/arguments/{id}/fold:
     delete:
       description: 管理员恢复一条已折叠论点的显示状态。
       parameters:
@@ -7689,7 +7689,7 @@ paths:
       summary: 折叠论点
       tags:
       - debate
-  /api/debate/arguments/{id}/reference:
+  /api/v1/debate/arguments/{id}/reference:
     post:
       consumes:
       - application/json
@@ -7731,7 +7731,7 @@ paths:
       summary: 添加论点引用
       tags:
       - debate
-  /api/debate/arguments/{id}/reference/{ref_id}:
+  /api/v1/debate/arguments/{id}/reference/{ref_id}:
     delete:
       description: 删除论点与被引用论点之间的关联。
       parameters:
@@ -7766,7 +7766,7 @@ paths:
       summary: 移除论点引用
       tags:
       - debate
-  /api/debate/arguments/{id}/vote:
+  /api/v1/debate/arguments/{id}/vote:
     delete:
       description: 删除当前用户对某条论点的投票。
       parameters:
@@ -7829,7 +7829,7 @@ paths:
       summary: 为论点投票
       tags:
       - debate
-  /api/debate/arguments/{id}/votes:
+  /api/v1/debate/arguments/{id}/votes:
     get:
       description: 管理员查看某条论点的实名投票明细。
       parameters:
@@ -7859,7 +7859,7 @@ paths:
       summary: 获取论点投票明细
       tags:
       - debate
-  /api/debate/topics:
+  /api/v1/debate/topics:
     get:
       description: 分页返回辩题列表，支持按状态和标签筛选。
       parameters:
@@ -7925,7 +7925,7 @@ paths:
       summary: 创建辩题
       tags:
       - debate
-  /api/debate/topics/{id}:
+  /api/v1/debate/topics/{id}:
     delete:
       description: 辩题作者或管理员可以删除辩题及其论点。
       parameters:
@@ -8022,7 +8022,7 @@ paths:
       summary: 更新辩题
       tags:
       - debate
-  /api/debate/topics/{id}/arguments:
+  /api/v1/debate/topics/{id}/arguments:
     get:
       description: 返回辩题下的论点列表，并在已登录时附带当前用户投票映射。
       parameters:
@@ -8086,7 +8086,7 @@ paths:
       summary: 创建论点
       tags:
       - debate
-  /api/debate/topics/{id}/conclude:
+  /api/v1/debate/topics/{id}/conclude:
     post:
       consumes:
       - application/json
@@ -8132,7 +8132,7 @@ paths:
       summary: 结束辩题
       tags:
       - debate
-  /api/debate/topics/{id}/conclude-vote:
+  /api/v1/debate/topics/{id}/conclude-vote:
     post:
       description: 对开放中的辩题投票要求结束，达到阈值时自动结束。
       parameters:
@@ -8170,7 +8170,7 @@ paths:
       summary: 投票结束辩题
       tags:
       - debate
-  /api/debate/topics/{id}/reopen:
+  /api/v1/debate/topics/{id}/reopen:
     post:
       description: 管理员重新开启已结束的辩题。
       parameters:
@@ -8204,7 +8204,7 @@ paths:
       summary: 重新开启辩题
       tags:
       - debate
-  /api/debate/topics/search:
+  /api/v1/debate/topics/search:
     get:
       description: 按标题或描述搜索辩题。
       parameters:
@@ -8230,7 +8230,7 @@ paths:
       summary: 搜索辩题
       tags:
       - debate
-  /api/dm/conversations:
+  /api/v1/dm/conversations:
     get:
       description: 返回当前用户的私信会话列表和未读计数。
       produces:
@@ -8250,7 +8250,7 @@ paths:
       summary: 获取私信会话列表
       tags:
       - dm
-  /api/dm/conversations/{username}:
+  /api/v1/dm/conversations/{username}:
     get:
       description: 按对方用户名获取私信会话消息，支持分页。
       parameters:
@@ -8334,7 +8334,7 @@ paths:
       summary: 发送私信
       tags:
       - dm
-  /api/dm/conversations/{username}/read:
+  /api/v1/dm/conversations/{username}/read:
     put:
       description: 将与指定用户名的会话中对方发来的未读消息全部标记为已读。
       parameters:
@@ -8364,7 +8364,7 @@ paths:
       summary: 标记会话已读
       tags:
       - dm
-  /api/dm/unread-count:
+  /api/v1/dm/unread-count:
     get:
       description: 返回当前用户的未读私信数量。
       produces:
@@ -8384,7 +8384,7 @@ paths:
       summary: 获取未读私信数
       tags:
       - dm
-  /api/dm/upload:
+  /api/v1/dm/upload:
     post:
       consumes:
       - multipart/form-data
@@ -8416,7 +8416,7 @@ paths:
       summary: 上传私信图片
       tags:
       - dm
-  /api/feed/explore:
+  /api/v1/feed/explore:
     get:
       description: 分页返回推荐条目，支持按随机 (random) 或热门 (popular) 排序。
       parameters:
@@ -8452,7 +8452,7 @@ paths:
       summary: 探索订阅条目
       tags:
       - feed
-  /api/feed/groups:
+  /api/v1/feed/groups:
     get:
       description: 返回当前用户的订阅分组。
       produces:
@@ -8504,7 +8504,7 @@ paths:
       summary: 创建订阅分组
       tags:
       - feed
-  /api/feed/groups/{id}:
+  /api/v1/feed/groups/{id}:
     delete:
       description: 删除分组并将其中订阅迁回默认分组。
       parameters:
@@ -8579,7 +8579,7 @@ paths:
       summary: 更新订阅分组
       tags:
       - feed
-  /api/feed/items/{id}:
+  /api/v1/feed/items/{id}:
     get:
       description: 返回单个 feed item 详情。
       parameters:
@@ -8613,7 +8613,7 @@ paths:
       summary: 获取单个 feed 条目
       tags:
       - feed
-  /api/feed/opml/export:
+  /api/v1/feed/opml/export:
     get:
       description: 导出当前用户的订阅为 OPML 文件。
       produces:
@@ -8633,7 +8633,7 @@ paths:
       summary: 导出 OPML
       tags:
       - feed
-  /api/feed/opml/import:
+  /api/v1/feed/opml/import:
     post:
       consumes:
       - multipart/form-data
@@ -8665,7 +8665,7 @@ paths:
       summary: 导入 OPML
       tags:
       - feed
-  /api/feed/reading-list:
+  /api/v1/feed/reading-list:
     get:
       description: 分页返回当前用户的稍后读条目。
       parameters:
@@ -8730,7 +8730,7 @@ paths:
       summary: 切换稍后读条目
       tags:
       - feed
-  /api/feed/reading-list/{id}:
+  /api/v1/feed/reading-list/{id}:
     delete:
       description: 从稍后读列表中删除指定 feed item。
       parameters:
@@ -8760,7 +8760,7 @@ paths:
       summary: 移除稍后读条目
       tags:
       - feed
-  /api/feed/rss/{username}:
+  /api/v1/feed/rss/{username}:
     get:
       description: 输出指定用户的博客 RSS。
       parameters:
@@ -8787,7 +8787,7 @@ paths:
       summary: 获取用户博客 RSS
       tags:
       - feed
-  /api/feed/stars:
+  /api/v1/feed/stars:
     get:
       description: 分页返回当前用户已星标的 feed item。
       parameters:
@@ -8816,7 +8816,7 @@ paths:
       summary: 获取星标条目
       tags:
       - feed
-  /api/feed/stats:
+  /api/v1/feed/stats:
     get:
       description: 返回阅读统计数据和来源分布。
       parameters:
@@ -8849,7 +8849,7 @@ paths:
       summary: 获取订阅统计
       tags:
       - feed
-  /api/feed/subscribe/channel/{channel_id}:
+  /api/v1/feed/subscribe/channel/{channel_id}:
     delete:
       description: 将当前用户从指定频道取消订阅。
       parameters:
@@ -8920,7 +8920,7 @@ paths:
       summary: 订阅频道
       tags:
       - feed
-  /api/feed/subscribe/channel/{channel_id}/status:
+  /api/v1/feed/subscribe/channel/{channel_id}/status:
     get:
       description: 返回当前用户是否已订阅指定频道。
       parameters:
@@ -8946,7 +8946,7 @@ paths:
       summary: 查询频道订阅状态
       tags:
       - feed
-  /api/feed/subscribe/collection/{collection_id}:
+  /api/v1/feed/subscribe/collection/{collection_id}:
     delete:
       description: 将当前用户从指定合集取消订阅。
       parameters:
@@ -9017,7 +9017,7 @@ paths:
       summary: 订阅合集
       tags:
       - feed
-  /api/feed/subscribe/collection/{collection_id}/status:
+  /api/v1/feed/subscribe/collection/{collection_id}/status:
     get:
       description: 返回当前用户是否已订阅指定合集。
       parameters:
@@ -9043,7 +9043,7 @@ paths:
       summary: 查询合集订阅状态
       tags:
       - feed
-  /api/feed/subscriptions:
+  /api/v1/feed/subscriptions:
     get:
       description: 返回当前用户的订阅列表。
       produces:
@@ -9095,7 +9095,7 @@ paths:
       summary: 创建订阅
       tags:
       - feed
-  /api/feed/subscriptions/{id}:
+  /api/v1/feed/subscriptions/{id}:
     delete:
       description: 删除当前用户的一个订阅。
       parameters:
@@ -9162,7 +9162,7 @@ paths:
       summary: 更新订阅
       tags:
       - feed
-  /api/feed/subscriptions/{id}/group:
+  /api/v1/feed/subscriptions/{id}/group:
     put:
       consumes:
       - application/json
@@ -9200,7 +9200,7 @@ paths:
       summary: 设置订阅分组
       tags:
       - feed
-  /api/feed/subscriptions/{id}/health:
+  /api/v1/feed/subscriptions/{id}/health:
     post:
       description: 检测订阅源可访问性并更新健康状态。
       parameters:
@@ -9234,7 +9234,7 @@ paths:
       summary: 检查单个订阅健康状态
       tags:
       - feed
-  /api/feed/subscriptions/health/check-all:
+  /api/v1/feed/subscriptions/health/check-all:
     post:
       description: 批量检测当前用户所有订阅的健康状态。
       produces:
@@ -9254,7 +9254,7 @@ paths:
       summary: 检查全部订阅健康状态
       tags:
       - feed
-  /api/feed/subscriptions/search:
+  /api/v1/feed/subscriptions/search:
     get:
       description: 按标题搜索当前用户的订阅。
       parameters:
@@ -9288,7 +9288,7 @@ paths:
       summary: 搜索订阅
       tags:
       - feed
-  /api/feed/timeline:
+  /api/v1/feed/timeline:
     get:
       description: 聚合博客文章与外部 RSS 条目时间线，支持分页和筛选。
       parameters:
@@ -9340,7 +9340,7 @@ paths:
       summary: 获取订阅时间线
       tags:
       - feed
-  /api/feed/timeline/mark-all-read:
+  /api/v1/feed/timeline/mark-all-read:
     post:
       description: 将当前用户外部 RSS 条目全部标记为已读。
       produces:
@@ -9356,7 +9356,7 @@ paths:
       summary: 全部标记已读
       tags:
       - feed
-  /api/feed/timeline/mark-all-unread:
+  /api/v1/feed/timeline/mark-all-unread:
     post:
       description: 将当前用户外部 RSS 条目全部标记为未读。
       produces:
@@ -9372,7 +9372,7 @@ paths:
       summary: 全部标记未读
       tags:
       - feed
-  /api/feed/timeline/mark-read:
+  /api/v1/feed/timeline/mark-read:
     post:
       consumes:
       - application/json
@@ -9401,7 +9401,7 @@ paths:
       summary: 标记条目已读
       tags:
       - feed
-  /api/feed/timeline/star:
+  /api/v1/feed/timeline/star:
     post:
       consumes:
       - application/json
@@ -9438,7 +9438,7 @@ paths:
       summary: 切换条目星标
       tags:
       - feed
-  /api/forum/categories:
+  /api/v1/forum/categories:
     get:
       description: 返回全部论坛分类以及每个分类的话题数量。
       produces:
@@ -9491,7 +9491,7 @@ paths:
       summary: 创建论坛分类
       tags:
       - forum
-  /api/forum/category-requests:
+  /api/v1/forum/category-requests:
     get:
       description: 仅管理员可查看待审的论坛分类申请列表。
       produces:
@@ -9543,7 +9543,7 @@ paths:
       summary: 提交分类申请
       tags:
       - forum
-  /api/forum/category-requests/{id}/review:
+  /api/v1/forum/category-requests/{id}/review:
     post:
       consumes:
       - application/json
@@ -9589,7 +9589,7 @@ paths:
       summary: 审核分类申请
       tags:
       - forum
-  /api/forum/drafts:
+  /api/v1/forum/drafts:
     delete:
       description: 按 context_key 删除当前用户的论坛草稿。
       parameters:
@@ -9672,7 +9672,7 @@ paths:
       summary: 保存论坛草稿
       tags:
       - forum
-  /api/forum/replies/{id}:
+  /api/v1/forum/replies/{id}:
     delete:
       description: 删除当前用户拥有的回复，管理员也可删除。
       parameters:
@@ -9747,7 +9747,7 @@ paths:
       summary: 更新论坛回复
       tags:
       - forum
-  /api/forum/replies/{id}/like:
+  /api/v1/forum/replies/{id}/like:
     post:
       description: 再次调用会在点赞与取消点赞之间切换。
       parameters:
@@ -9773,7 +9773,7 @@ paths:
       summary: 点赞或取消点赞回复
       tags:
       - forum
-  /api/forum/replies/{id}/solve:
+  /api/v1/forum/replies/{id}/solve:
     delete:
       description: 取消指定回复的话题解决方案状态。
       parameters:
@@ -9844,7 +9844,7 @@ paths:
       summary: 标记解决方案
       tags:
       - forum
-  /api/forum/report:
+  /api/v1/forum/report:
     post:
       consumes:
       - application/json
@@ -9881,7 +9881,7 @@ paths:
       summary: 举报论坛内容
       tags:
       - forum
-  /api/forum/search:
+  /api/v1/forum/search:
     get:
       description: 按标题或正文搜索论坛话题。
       parameters:
@@ -9913,7 +9913,7 @@ paths:
       summary: 搜索论坛话题
       tags:
       - forum
-  /api/forum/topics:
+  /api/v1/forum/topics:
     get:
       description: 返回论坛话题分页列表，支持分类、标签、搜索和排序筛选。
       parameters:
@@ -9990,7 +9990,7 @@ paths:
       summary: 创建论坛话题
       tags:
       - forum
-  /api/forum/topics/{id}:
+  /api/v1/forum/topics/{id}:
     delete:
       description: 删除当前用户拥有的话题，管理员也可删除。
       parameters:
@@ -10091,7 +10091,7 @@ paths:
       summary: 更新论坛话题
       tags:
       - forum
-  /api/forum/topics/{id}/bookmark:
+  /api/v1/forum/topics/{id}/bookmark:
     post:
       description: 再次调用会在收藏与取消收藏之间切换。
       parameters:
@@ -10117,7 +10117,7 @@ paths:
       summary: 收藏或取消收藏论坛话题
       tags:
       - forum
-  /api/forum/topics/{id}/close:
+  /api/v1/forum/topics/{id}/close:
     post:
       description: 仅管理员可切换论坛话题的关闭状态。
       parameters:
@@ -10151,7 +10151,7 @@ paths:
       summary: 切换话题关闭状态
       tags:
       - forum
-  /api/forum/topics/{id}/feature:
+  /api/v1/forum/topics/{id}/feature:
     delete:
       description: 仅管理员可取消话题的精选状态。
       parameters:
@@ -10210,7 +10210,7 @@ paths:
       summary: 设为精选话题
       tags:
       - forum
-  /api/forum/topics/{id}/like:
+  /api/v1/forum/topics/{id}/like:
     post:
       description: 再次调用会在点赞与取消点赞之间切换。
       parameters:
@@ -10240,7 +10240,7 @@ paths:
       summary: 点赞或取消点赞论坛话题
       tags:
       - forum
-  /api/forum/topics/{id}/pin:
+  /api/v1/forum/topics/{id}/pin:
     post:
       description: 仅管理员可切换论坛话题的置顶状态。
       parameters:
@@ -10274,7 +10274,7 @@ paths:
       summary: 切换话题置顶状态
       tags:
       - forum
-  /api/forum/topics/{id}/replies:
+  /api/v1/forum/topics/{id}/replies:
     get:
       description: 返回指定话题下的回复列表，支持按 oldest 或 best 排序。
       parameters:
@@ -10351,7 +10351,7 @@ paths:
       summary: 创建论坛回复
       tags:
       - forum
-  /api/notifications:
+  /api/v1/notifications:
     get:
       description: 返回当前用户的通知列表，可按类型筛选。
       parameters:
@@ -10385,7 +10385,7 @@ paths:
       summary: 获取通知列表
       tags:
       - notifications
-  /api/notifications/{id}/read:
+  /api/v1/notifications/{id}/read:
     put:
       description: 将指定通知标记为已读。
       parameters:
@@ -10419,7 +10419,7 @@ paths:
       summary: 标记单条通知已读
       tags:
       - notifications
-  /api/notifications/read-all:
+  /api/v1/notifications/read-all:
     put:
       description: 将当前用户的通知全部标记为已读，可按类型过滤。
       parameters:
@@ -10448,7 +10448,7 @@ paths:
       summary: 标记所有通知已读
       tags:
       - notifications
-  /api/notifications/unread-count:
+  /api/v1/notifications/unread-count:
     get:
       description: 返回当前用户的未读通知数量。
       produces:
@@ -10472,7 +10472,7 @@ paths:
       summary: 获取未读通知数
       tags:
       - notifications
-  /api/podcast/episodes:
+  /api/v1/podcast/episodes:
     get:
       description: 返回所有已发布的播客单集。
       parameters:
@@ -10539,7 +10539,7 @@ paths:
       summary: 创建播客单集
       tags:
       - podcast
-  /api/podcast/episodes/{id}:
+  /api/v1/podcast/episodes/{id}:
     delete:
       description: 软删除单集及其关联 Post。
       parameters:
@@ -10640,7 +10640,7 @@ paths:
       summary: 更新播客单集
       tags:
       - podcast
-  /api/podcast/shows/{channelSlug}/episodes:
+  /api/v1/podcast/shows/{channelSlug}/episodes:
     get:
       description: 返回某个频道下已发布的播客单集。
       parameters:
@@ -10663,7 +10663,7 @@ paths:
       summary: 获取节目单集列表
       tags:
       - podcast
-  /api/podcast/upload-audio:
+  /api/v1/podcast/upload-audio:
     post:
       consumes:
       - multipart/form-data
@@ -10695,7 +10695,7 @@ paths:
       summary: 上传播客音频
       tags:
       - podcast
-  /api/podcast/upload-cover:
+  /api/v1/podcast/upload-cover:
     post:
       consumes:
       - multipart/form-data
@@ -10727,7 +10727,7 @@ paths:
       summary: 上传播客封面
       tags:
       - podcast
-  /api/songs:
+  /api/v1/songs:
     get:
       description: 返回所有未关闭的歌曲公开列表。
       produces:
@@ -10818,7 +10818,7 @@ paths:
       summary: 创建歌曲
       tags:
       - music-songs
-  /api/songs/{id}:
+  /api/v1/songs/{id}:
     delete:
       description: 删除指定歌曲。
       parameters:
@@ -10941,7 +10941,7 @@ paths:
       summary: 更新歌曲
       tags:
       - music-songs
-  /api/songs/{id}/annotations:
+  /api/v1/songs/{id}/annotations:
     get:
       description: 按行号分组返回某首歌曲的歌词注释。
       parameters:
@@ -11005,7 +11005,7 @@ paths:
       summary: 创建歌词注释
       tags:
       - music-annotations
-  /api/songs/{id}/annotations/{annotationId}:
+  /api/v1/songs/{id}/annotations/{annotationId}:
     delete:
       description: 删除当前用户自己的注释，管理员也可删除任意注释。
       parameters:
@@ -11098,7 +11098,7 @@ paths:
       summary: 更新歌词注释
       tags:
       - music-annotations
-  /api/songs/{id}/discussions:
+  /api/v1/songs/{id}/discussions:
     get:
       description: 分页返回歌曲的顶层讨论及其已预加载的回复。
       parameters:
@@ -11170,7 +11170,7 @@ paths:
       summary: 创建歌曲讨论
       tags:
       - music-discussions
-  /api/songs/{id}/discussions/{discussion_id}:
+  /api/v1/songs/{id}/discussions/{discussion_id}:
     delete:
       description: 讨论所有者或管理员可将歌曲讨论软删除。
       parameters:
@@ -11263,7 +11263,7 @@ paths:
       summary: 更新歌曲讨论
       tags:
       - music-discussions
-  /api/songs/{id}/discussions/{discussion_id}/reply:
+  /api/v1/songs/{id}/discussions/{discussion_id}/reply:
     post:
       consumes:
       - application/json
@@ -11310,7 +11310,7 @@ paths:
       summary: 回复专辑或歌曲讨论
       tags:
       - music-discussions
-  /api/songs/{id}/discussions/unread-count:
+  /api/v1/songs/{id}/discussions/unread-count:
     get:
       description: 返回歌曲下未读且未删除的讨论数量。
       parameters:
@@ -11337,7 +11337,7 @@ paths:
       summary: 获取歌曲未读讨论数
       tags:
       - music-discussions
-  /api/songs/{id}/protection:
+  /api/v1/songs/{id}/protection:
     delete:
       description: 管理员移除歌曲的保护设置。
       parameters:
@@ -11434,7 +11434,7 @@ paths:
       summary: 设置歌曲保护级别
       tags:
       - music-protection
-  /api/songs/{id}/revisions:
+  /api/v1/songs/{id}/revisions:
     get:
       description: 分页返回歌曲条目的 revision 历史。
       parameters:
@@ -11514,7 +11514,7 @@ paths:
       summary: 提交歌曲修订
       tags:
       - music-revisions
-  /api/songs/{id}/revisions/{version}:
+  /api/v1/songs/{id}/revisions/{version}:
     get:
       description: 返回歌曲某个版本号对应的 revision 详情。
       parameters:
@@ -11546,7 +11546,7 @@ paths:
       summary: 获取歌曲指定修订
       tags:
       - music-revisions
-  /api/songs/{id}/revisions/{version}/revert:
+  /api/v1/songs/{id}/revisions/{version}/revert:
     post:
       consumes:
       - application/json
@@ -11588,7 +11588,7 @@ paths:
       summary: 回滚歌曲到指定版本
       tags:
       - music-revisions
-  /api/songs/{id}/revisions/diff:
+  /api/v1/songs/{id}/revisions/diff:
     get:
       description: 比较歌曲两个版本之间的字段差异。
       parameters:
@@ -11625,7 +11625,7 @@ paths:
       summary: 比较歌曲修订差异
       tags:
       - music-revisions
-  /api/timeline/events:
+  /api/v1/timeline/events:
     post:
       consumes:
       - application/json
@@ -11658,7 +11658,7 @@ paths:
       summary: 创建时间线事件
       tags:
       - timeline
-  /api/timeline/events/{id}:
+  /api/v1/timeline/events/{id}:
     delete:
       description: 事件作者或管理员可以删除时间线事件。
       parameters:
@@ -11755,7 +11755,7 @@ paths:
       summary: 更新时间线事件
       tags:
       - timeline
-  /api/timeline/events/{id}/history:
+  /api/v1/timeline/events/{id}/history:
     get:
       description: 返回时间线事件的修订快照列表。
       parameters:
@@ -11781,7 +11781,7 @@ paths:
       summary: 获取事件修订历史
       tags:
       - timeline
-  /api/timeline/events/{id}/revert/{revision_id}:
+  /api/v1/timeline/events/{id}/revert/{revision_id}:
     post:
       description: 管理员将时间线事件回滚到指定修订版本。
       parameters:
@@ -11820,7 +11820,7 @@ paths:
       summary: 回滚时间线事件
       tags:
       - timeline
-  /api/timeline/locations/{id}:
+  /api/v1/timeline/locations/{id}:
     delete:
       description: 人物作者或管理员可以删除地点轨迹记录。
       parameters:
@@ -11895,7 +11895,7 @@ paths:
       summary: 更新人物地点轨迹
       tags:
       - timeline
-  /api/timeline/persons:
+  /api/v1/timeline/persons:
     get:
       description: 分页返回公开人物，支持按名称搜索。
       parameters:
@@ -11957,7 +11957,7 @@ paths:
       summary: 创建时间线人物
       tags:
       - timeline
-  /api/timeline/persons/{id}:
+  /api/v1/timeline/persons/{id}:
     delete:
       description: 人物作者或管理员可以删除人物及其地点轨迹。
       parameters:
@@ -12054,7 +12054,7 @@ paths:
       summary: 更新时间线人物
       tags:
       - timeline
-  /api/timeline/persons/{id}/locations:
+  /api/v1/timeline/persons/{id}/locations:
     get:
       description: 返回某个人物的地点轨迹列表。
       parameters:
@@ -12126,7 +12126,7 @@ paths:
       summary: 新增人物地点轨迹
       tags:
       - timeline
-  /api/users/{id}/follow:
+  /api/v1/users/{id}/follow:
     delete:
       description: 当前用户取消关注指定 UUID 用户。
       parameters:
@@ -12185,7 +12185,7 @@ paths:
       summary: 关注用户
       tags:
       - users
-  /api/users/{id}/followers:
+  /api/v1/users/{id}/followers:
     get:
       description: 返回关注该用户的用户列表。
       parameters:
@@ -12208,7 +12208,7 @@ paths:
       summary: 获取用户粉丝列表
       tags:
       - users
-  /api/users/{id}/following:
+  /api/v1/users/{id}/following:
     get:
       description: 返回该用户正在关注的用户列表。
       parameters:
@@ -12231,7 +12231,7 @@ paths:
       summary: 获取用户关注列表
       tags:
       - users
-  /api/users/{id}/profile:
+  /api/v1/users/{id}/profile:
     get:
       description: 通过 UUID 或用户名获取公开资料、统计信息和频道列表。
       parameters:
@@ -12254,7 +12254,7 @@ paths:
       summary: 获取用户公开资料
       tags:
       - users
-  /api/users/{id}/role:
+  /api/v1/users/{id}/role:
     put:
       consumes:
       - application/json
@@ -12300,7 +12300,7 @@ paths:
       summary: 更新用户角色
       tags:
       - users
-  /api/users/by-username/{username}:
+  /api/v1/users/by-username/{username}:
     get:
       description: 返回公开的用户摘要信息和关注统计。
       parameters:
@@ -12323,7 +12323,7 @@ paths:
       summary: 按用户名获取用户摘要
       tags:
       - users
-  /api/users/me:
+  /api/v1/users/me:
     get:
       description: 返回当前登录用户的完整资料。
       produces:
@@ -12379,7 +12379,7 @@ paths:
       summary: 更新当前用户资料
       tags:
       - users
-  /api/users/me/settings:
+  /api/v1/users/me/settings:
     get:
       description: 返回当前登录用户的隐私与私信设置。
       produces:
@@ -12427,7 +12427,7 @@ paths:
       summary: 更新当前用户设置
       tags:
       - users
-  /api/users/roles:
+  /api/v1/users/roles:
     get:
       description: 仅站长可用，按用户名、邮箱、显示名搜索用户并返回当前角色。
       parameters:
@@ -12461,7 +12461,7 @@ paths:
       summary: 获取用户角色列表
       tags:
       - users
-  /api/users/search:
+  /api/v1/users/search:
     get:
       description: 按用户名或显示名搜索用户；scope=mention 时仅返回当前用户关注的人。
       parameters:
@@ -12495,7 +12495,7 @@ paths:
       summary: 搜索用户
       tags:
       - users
-  /api/videos:
+  /api/v1/videos:
     get:
       description: 返回公开已发布的视频列表，可按频道、标签和排序方式筛选。
       parameters:
@@ -12566,7 +12566,7 @@ paths:
       summary: 创建视频
       tags:
       - videos
-  /api/videos/{id}:
+  /api/v1/videos/{id}:
     delete:
       description: 软删除当前用户拥有的视频。
       parameters:
@@ -12663,7 +12663,7 @@ paths:
       summary: 更新视频
       tags:
       - videos
-  /api/videos/{id}/comments:
+  /api/v1/videos/{id}/comments:
     get:
       description: 返回视频下所有可见评论。
       parameters:
@@ -12731,7 +12731,7 @@ paths:
       summary: 创建视频评论
       tags:
       - videos
-  /api/videos/{id}/recommended:
+  /api/v1/videos/{id}/recommended:
     get:
       description: 基于同频道和同标签返回推荐视频。
       parameters:
@@ -12756,7 +12756,7 @@ paths:
       summary: 获取推荐视频
       tags:
       - videos
-  /api/videos/{id}/view:
+  /api/v1/videos/{id}/view:
     post:
       description: 为指定视频增加一次播放计数。
       parameters:
@@ -12775,7 +12775,7 @@ paths:
       summary: 增加视频播放量
       tags:
       - videos
-  /api/videos/comments/{commentID}:
+  /api/v1/videos/comments/{commentID}:
     delete:
       description: 评论作者或视频作者可删除评论。
       parameters:
@@ -12813,7 +12813,7 @@ paths:
       summary: 删除视频评论
       tags:
       - videos
-  /api/videos/upload-cover:
+  /api/v1/videos/upload-cover:
     post:
       consumes:
       - multipart/form-data
@@ -12845,7 +12845,7 @@ paths:
       summary: 上传视频封面
       tags:
       - videos
-  /api/videos/upload-video:
+  /api/v1/videos/upload-video:
     post:
       consumes:
       - multipart/form-data

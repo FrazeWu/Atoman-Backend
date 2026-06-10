@@ -13,19 +13,19 @@ import (
 )
 
 func SetupEntryStatusRoutes(router *gin.Engine, db *gorm.DB) {
-	albums := router.Group("/api/albums/:id")
+	albums := router.Group("/api/v1/albums/:id")
 	albums.Use(middleware.AuthMiddleware(), middleware.AdminMiddleware(db))
 	{
 		albums.PUT("/entry-status", ChangeAlbumStatusHandler(db))
 	}
 
-	artists := router.Group("/api/artists/:id")
+	artists := router.Group("/api/v1/artists/:id")
 	artists.Use(middleware.AuthMiddleware(), middleware.AdminMiddleware(db))
 	{
 		artists.PUT("/entry-status", ChangeArtistStatusHandler(db))
 	}
 
-	admin := router.Group("/api/admin/music")
+	admin := router.Group("/api/v1/admin/music")
 	admin.Use(middleware.AuthMiddleware(), middleware.AdminMiddleware(db))
 	{
 		admin.GET("/entries", ListMusicEntriesHandler(db))
@@ -45,7 +45,7 @@ func SetupEntryStatusRoutes(router *gin.Engine, db *gorm.DB) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id}/entry-status [put]
+// @Router /api/v1/albums/{id}/entry-status [put]
 func ChangeAlbumStatusHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		albumID, err := uuid.Parse(c.Param("id"))
@@ -88,7 +88,7 @@ func ChangeAlbumStatusHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id}/entry-status [put]
+// @Router /api/v1/artists/{id}/entry-status [put]
 func ChangeArtistStatusHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -141,7 +141,7 @@ type MusicEntryItem struct {
 // @Success 200 {object} MusicEntryListResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/music/entries [get]
+// @Router /api/v1/admin/music/entries [get]
 func ListMusicEntriesHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		entryType := c.DefaultQuery("type", "all")

@@ -49,7 +49,7 @@ type dmPushPayload struct {
 func SetupDMRoutes(r *gin.Engine, db *gorm.DB, userHub *collab.UserHub, s3Client *s3.S3) {
 	h := &dmHandler{db: db, userHub: userHub, s3: s3Client}
 
-	auth := r.Group("/api/dm")
+	auth := r.Group("/api/v1/dm")
 	auth.Use(middleware.AuthMiddleware())
 	{
 		auth.GET("/conversations", h.listConversations)
@@ -70,7 +70,7 @@ func SetupDMRoutes(r *gin.Engine, db *gorm.DB, userHub *collab.UserHub, s3Client
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/dm/conversations [get]
+// @Router /api/v1/dm/conversations [get]
 func (h *dmHandler) listConversations(c *gin.Context) {
 	userID := mustGetUserUUID(c)
 	if userID == uuid.Nil {
@@ -125,7 +125,7 @@ func (h *dmHandler) listConversations(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/dm/conversations/{username} [get]
+// @Router /api/v1/dm/conversations/{username} [get]
 func (h *dmHandler) getMessages(c *gin.Context) {
 	userID := mustGetUserUUID(c)
 	if userID == uuid.Nil {
@@ -176,7 +176,7 @@ func (h *dmHandler) getMessages(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/dm/conversations/{username} [post]
+// @Router /api/v1/dm/conversations/{username} [post]
 func (h *dmHandler) sendMessage(c *gin.Context) {
 	senderID := mustGetUserUUID(c)
 	if senderID == uuid.Nil {
@@ -270,7 +270,7 @@ func (h *dmHandler) sendMessage(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/dm/conversations/{username}/read [put]
+// @Router /api/v1/dm/conversations/{username}/read [put]
 func (h *dmHandler) markRead(c *gin.Context) {
 	userID := mustGetUserUUID(c)
 	if userID == uuid.Nil {
@@ -312,7 +312,7 @@ func (h *dmHandler) markRead(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/dm/unread-count [get]
+// @Router /api/v1/dm/unread-count [get]
 func (h *dmHandler) unreadCount(c *gin.Context) {
 	userID := mustGetUserUUID(c)
 	if userID == uuid.Nil {
@@ -344,7 +344,7 @@ func (h *dmHandler) unreadCount(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/dm/upload [post]
+// @Router /api/v1/dm/upload [post]
 func (h *dmHandler) uploadImage(c *gin.Context) {
 	userID := mustGetUserUUID(c)
 	if userID == uuid.Nil {

@@ -31,7 +31,7 @@ type AlbumInput struct {
 
 func SetupAlbumRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	revisionService := service.NewRevisionService(db)
-	albums := router.Group("/api/albums")
+	albums := router.Group("/api/v1/albums")
 	{
 		albums.GET("", GetAlbumsHandler(db))
 		albums.GET("/:id", GetAlbumHandler(db))
@@ -48,7 +48,7 @@ func SetupAlbumRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // @Produce json
 // @Success 200 {array} model.Album
 // @Failure 500 {object} ErrorResponse
-// @Router /api/albums [get]
+// @Router /api/v1/albums [get]
 func GetAlbumsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var albums []model.Album
@@ -72,7 +72,7 @@ func GetAlbumsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} model.Album
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/albums/{id} [get]
+// @Router /api/v1/albums/{id} [get]
 func GetAlbumHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -109,7 +109,7 @@ func GetAlbumHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums [post]
+// @Router /api/v1/albums [post]
 func CreateAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input AlbumInput
@@ -293,7 +293,7 @@ func splitArtistNames(value string) []string {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id} [put]
+// @Router /api/v1/albums/{id} [put]
 func UpdateAlbumHandler(db *gorm.DB, s3Client *s3.S3, revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -460,7 +460,7 @@ func UpdateAlbumHandler(db *gorm.DB, s3Client *s3.S3, revisionService *service.R
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id} [delete]
+// @Router /api/v1/albums/{id} [delete]
 func DeleteAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")

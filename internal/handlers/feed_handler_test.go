@@ -167,9 +167,9 @@ func TestGetFeedItemSummaryFallbackWhenFullTextStatusNotSuccess(t *testing.T) {
 	}
 
 	r := gin.New()
-	r.GET("/api/feed/items/:id", GetFeedItem(db))
+	r.GET("/api/v1/feed/items/:id", GetFeedItem(db))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/feed/items/"+item.ID.String(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/items/"+item.ID.String(), nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -304,11 +304,11 @@ func TestDiscoverFeedCandidatesRejectsInvalidJSON(t *testing.T) {
 	user := seedFeedTestUser(t, db)
 
 	router := gin.New()
-	feed := router.Group("/api/feed")
+	feed := router.Group("/api/v1/feed")
 	feed.POST("/discover", withFeedAuth(user.UUID, DiscoverFeedCandidates()))
 
 	body := strings.NewReader(`{"url":`)
-	req := httptest.NewRequest(http.MethodPost, "/api/feed/discover", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/discover", body)
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -328,11 +328,11 @@ func TestDiscoverFeedCandidatesRejectsInvalidURL(t *testing.T) {
 	user := seedFeedTestUser(t, db)
 
 	router := gin.New()
-	feed := router.Group("/api/feed")
+	feed := router.Group("/api/v1/feed")
 	feed.POST("/discover", withFeedAuth(user.UUID, DiscoverFeedCandidates()))
 
 	body := strings.NewReader(`{"url":"not-a-url"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/feed/discover", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/discover", body)
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -372,10 +372,10 @@ func TestCreateSubscriptionReusesExistingFeedSourceForSameCanonicalURL(t *testin
 	user := seedFeedTestUser(t, db)
 
 	router := gin.New()
-	feed := router.Group("/api/feed")
+	feed := router.Group("/api/v1/feed")
 	feed.POST("/subscriptions", withFeedAuth(user.UUID, CreateSubscription(db)))
 
-	first := httptest.NewRequest(http.MethodPost, "/api/feed/subscriptions", strings.NewReader(`{"target_type":"external_rss","rss_url":"https://example.com/feed.xml"}`))
+	first := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions", strings.NewReader(`{"target_type":"external_rss","rss_url":"https://example.com/feed.xml"}`))
 	first.Header.Set("Content-Type", "application/json")
 	firstRR := httptest.NewRecorder()
 	router.ServeHTTP(firstRR, first)
@@ -383,7 +383,7 @@ func TestCreateSubscriptionReusesExistingFeedSourceForSameCanonicalURL(t *testin
 		t.Fatalf("expected first subscription status %d, got %d with body %s", http.StatusCreated, firstRR.Code, firstRR.Body.String())
 	}
 
-	second := httptest.NewRequest(http.MethodPost, "/api/feed/subscriptions", strings.NewReader(`{"target_type":"external_rss","rss_url":"https://example.com/feed.xml/"}`))
+	second := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions", strings.NewReader(`{"target_type":"external_rss","rss_url":"https://example.com/feed.xml/"}`))
 	second.Header.Set("Content-Type", "application/json")
 	secondRR := httptest.NewRecorder()
 	router.ServeHTTP(secondRR, second)
@@ -468,10 +468,10 @@ func TestGetTimelineUnreadOnlyFiltersReadItems(t *testing.T) {
 	}
 
 	router := gin.New()
-	feed := router.Group("/api/feed")
+	feed := router.Group("/api/v1/feed")
 	feed.GET("/timeline", withFeedAuth(user.UUID, GetTimeline(db)))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/feed/timeline?unread_only=true", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?unread_only=true", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -505,11 +505,11 @@ func TestCreateSubscriptionFromProviderCreatesRSSHubSource(t *testing.T) {
 	user := seedFeedTestUser(t, db)
 
 	router := gin.New()
-	feed := router.Group("/api/feed")
+	feed := router.Group("/api/v1/feed")
 	feed.POST("/sources/create-from-provider", withFeedAuth(user.UUID, CreateSubscriptionFromProvider(db)))
 
 	body := strings.NewReader(`{"provider":"rsshub","template_key":"github/repo","params":{"owner":"DIYgod","repo":"RSSHub"},"title":"RSSHub Repo"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/feed/sources/create-from-provider", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/sources/create-from-provider", body)
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 
@@ -540,13 +540,13 @@ func TestAdminListFeedSourcesRequiresAdmin(t *testing.T) {
 	user := seedFeedTestUser(t, db)
 
 	router := gin.New()
-	admin := router.Group("/api/admin")
+	admin := router.Group("/api/v1/admin")
 	admin.Use(withFeedAuth(user.UUID, middleware.AdminMiddleware(db)))
 	admin.GET("/feed/sources", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/feed/sources", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/sources", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -562,11 +562,11 @@ func TestAdminListFeedSourcesReturnsSourceRows(t *testing.T) {
 	seedAdminFeedSource(t, db, "RSSHub Source", false)
 
 	router := gin.New()
-	admin := router.Group("/api/admin")
+	admin := router.Group("/api/v1/admin")
 	admin.Use(withFeedAuthRole(adminUser.UUID, "admin", middleware.AdminMiddleware(db)))
 	admin.GET("/feed/sources", AdminListFeedSources(db))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin/feed/sources", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/sources", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -644,10 +644,10 @@ func TestGetTimelineExcludesHiddenFeedSources(t *testing.T) {
 	}
 
 	router := gin.New()
-	feed := router.Group("/api/feed")
+	feed := router.Group("/api/v1/feed")
 	feed.GET("/timeline", withFeedAuth(user.UUID, GetTimeline(db)))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/feed/timeline", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline", nil)
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 

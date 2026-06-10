@@ -24,7 +24,7 @@ import (
 )
 
 func SetupAdminRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
-	router.GET("/api/site/access", GetPublicSiteAccessHandler(db))
+	router.GET("/api/v1/site/access", GetPublicSiteAccessHandler(db))
 	router.GET("/api/v1/settings/public/site-access", GetPublicSiteAccessHandler(db))
 
 	settings := router.Group("/api/v1/settings")
@@ -35,7 +35,7 @@ func SetupAdminRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		settings.PUT("/site-access", UpdateSiteAccessHandler(db))
 	}
 
-	admin := router.Group("/api/admin")
+	admin := router.Group("/api/v1/admin")
 	admin.Use(middleware.AuthMiddleware())
 	admin.Use(middleware.AdminMiddleware(db))
 	{
@@ -714,7 +714,7 @@ func SyncAdminFeedSource(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load source"})
 			return
 		}
-		if source.SourceType != "external_rss" || strings.Contains(source.RssURL, "/api/feed/rss/") {
+		if source.SourceType != "external_rss" || strings.Contains(source.RssURL, "/api/v1/feed/rss/") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Only external blog RSS sources can be synced manually"})
 			return
 		}
@@ -750,7 +750,7 @@ func UpdateAdminFeedFullTextSourceSettings(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load source"})
 			return
 		}
-		if source.SourceType != "external_rss" || strings.Contains(source.RssURL, "/api/feed/rss/") {
+		if source.SourceType != "external_rss" || strings.Contains(source.RssURL, "/api/v1/feed/rss/") {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Only external blog RSS sources support full text settings"})
 			return
 		}
@@ -903,7 +903,7 @@ func canUploadToS3(s3Client *s3.S3) bool {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/songs [get]
+// @Router /api/v1/admin/reviews/songs [get]
 func GetPendingSongsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var songs []model.Song
@@ -932,7 +932,7 @@ func GetPendingSongsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/songs/{id}/approve [post]
+// @Router /api/v1/admin/reviews/songs/{id}/approve [post]
 func ApproveSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -993,7 +993,7 @@ func ApproveSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/songs/{id}/reject [post]
+// @Router /api/v1/admin/reviews/songs/{id}/reject [post]
 func RejectSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -1032,7 +1032,7 @@ func RejectSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/song-corrections [get]
+// @Router /api/v1/admin/reviews/song-corrections [get]
 func GetPendingSongCorrectionsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var corrections []model.SongCorrection
@@ -1059,7 +1059,7 @@ func GetPendingSongCorrectionsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/song-corrections/{id}/approve [post]
+// @Router /api/v1/admin/reviews/song-corrections/{id}/approve [post]
 func ApproveSongCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -1120,7 +1120,7 @@ func ApproveSongCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/song-corrections/{id}/reject [post]
+// @Router /api/v1/admin/reviews/song-corrections/{id}/reject [post]
 func RejectSongCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -1149,7 +1149,7 @@ func RejectSongCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/albums [get]
+// @Router /api/v1/admin/reviews/albums [get]
 func GetPendingAlbumsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var albums []model.Album
@@ -1177,7 +1177,7 @@ func GetPendingAlbumsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/albums/{id}/approve [post]
+// @Router /api/v1/admin/reviews/albums/{id}/approve [post]
 func ApproveAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -1258,7 +1258,7 @@ func ApproveAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/albums/{id}/reject [post]
+// @Router /api/v1/admin/reviews/albums/{id}/reject [post]
 func RejectAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -1292,7 +1292,7 @@ func RejectAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/album-corrections [get]
+// @Router /api/v1/admin/reviews/album-corrections [get]
 func GetPendingAlbumCorrectionsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var corrections []model.AlbumCorrection
@@ -1320,7 +1320,7 @@ func GetPendingAlbumCorrectionsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/album-corrections/{id}/approve [post]
+// @Router /api/v1/admin/reviews/album-corrections/{id}/approve [post]
 func ApproveAlbumCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -1386,7 +1386,7 @@ func ApproveAlbumCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/album-corrections/{id}/reject [post]
+// @Router /api/v1/admin/reviews/album-corrections/{id}/reject [post]
 func RejectAlbumCorrectionHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -1426,7 +1426,7 @@ func RejectAlbumCorrectionHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc 
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/artist-corrections [get]
+// @Router /api/v1/admin/reviews/artist-corrections [get]
 func GetPendingArtistCorrectionsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var corrections []model.ArtistCorrection
@@ -1453,7 +1453,7 @@ func GetPendingArtistCorrectionsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/artist-corrections/{id}/approve [post]
+// @Router /api/v1/admin/reviews/artist-corrections/{id}/approve [post]
 func ApproveArtistCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -1490,7 +1490,7 @@ func ApproveArtistCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/artist-corrections/{id}/reject [post]
+// @Router /api/v1/admin/reviews/artist-corrections/{id}/reject [post]
 func RejectArtistCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")

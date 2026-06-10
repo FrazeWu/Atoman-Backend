@@ -25,7 +25,7 @@ func SetupNotificationRoutes(r *gin.Engine, db *gorm.DB, userHub *collab.UserHub
 		userHub: userHub,
 	}
 
-	auth := r.Group("/api/notifications")
+	auth := r.Group("/api/v1/notifications")
 	auth.Use(middleware.AuthMiddleware())
 	{
 		auth.GET("", h.list)
@@ -47,7 +47,7 @@ func SetupNotificationRoutes(r *gin.Engine, db *gorm.DB, userHub *collab.UserHub
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/notifications [get]
+// @Router /api/v1/notifications [get]
 func (h *notificationHandler) list(c *gin.Context) {
 	userID, ok := c.Get("user_id")
 	if !ok {
@@ -85,7 +85,7 @@ func (h *notificationHandler) list(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/notifications/unread-count [get]
+// @Router /api/v1/notifications/unread-count [get]
 func (h *notificationHandler) unreadCount(c *gin.Context) {
 	userID, ok := c.Get("user_id")
 	if !ok {
@@ -115,7 +115,7 @@ func (h *notificationHandler) unreadCount(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/notifications/{id}/read [put]
+// @Router /api/v1/notifications/{id}/read [put]
 func (h *notificationHandler) markRead(c *gin.Context) {
 	userID, ok := c.Get("user_id")
 	if !ok {
@@ -149,7 +149,7 @@ func (h *notificationHandler) markRead(c *gin.Context) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/notifications/read-all [put]
+// @Router /api/v1/notifications/read-all [put]
 func (h *notificationHandler) markAllRead(c *gin.Context) {
 	userID, ok := c.Get("user_id")
 	if !ok {

@@ -1,8 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 
 	docs "atoman/docs"
@@ -20,7 +24,6 @@ import (
 
 	"atoman/internal/app"
 	"atoman/internal/collab"
-	"atoman/internal/handlers"
 	"atoman/internal/middleware"
 	"atoman/internal/migrations"
 	"atoman/internal/model"
@@ -33,7 +36,7 @@ import (
 // @title Atoman API
 // @version 1.0
 // @description Atoman 后端 API 文档。
-// @BasePath /
+// @BasePath /api/v1
 // @schemes http https
 // @securityDefinitions.apikey BearerAuth
 // @in header
@@ -164,6 +167,81 @@ func backfillExternalRSSFullTextEnabled(db *gorm.DB) {
 		Where("source_type = ? AND full_text_enabled = ?", "external_rss", false).
 		Update("full_text_enabled", true).Error; err != nil {
 		log.Printf("WARN: failed to backfill external RSS full_text_enabled: %v", err)
+	}
+}
+
+var internalRSSBackfillPattern = regexp.MustCompile(`(?:^|/)api/feed/rss/([^/?#]+)$`)
+
+func resolveInternalRSSUserIDForBackfill(db *gorm.DB, rawURL string) (uuid.UUID, error) {
+	m := internalRSSBackfillPattern.FindStringSubmatch(strings.TrimSpace(rawURL))
+	if len(m) < 2 {
+		return uuid.UUID{}, fmt.Errorf("not an internal RSS URL")
+	}
+
+	var user model.User
+	if err := db.Where("username = ?", m[1]).First(&user).Error; err != nil {
+		return uuid.UUID{}, err
+	}
+	return user.UUID, nil
+}
+
+func buildInternalFeedSourceHash(targetType string, targetID uuid.UUID) string {
+	raw := fmt.Sprintf("%s:%s", targetType, targetID.String())
+	h := sha256.New()
+	h.Write([]byte(raw))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func mergeInternalRSSFeedSourceIntoCanonical(tx *gorm.DB, legacy model.FeedSource, canonical model.FeedSource) error {
+	if err := tx.Model(&model.Subscription{}).
+		Where("feed_source_id = ?", legacy.ID).
+		Update("feed_source_id", canonical.ID).Error; err != nil {
+		return err
+	}
+
+	return tx.Delete(&model.FeedSource{}, "id = ?", legacy.ID).Error
+}
+
+func backfillInternalRSSFeedSources(db *gorm.DB) {
+	var sources []model.FeedSource
+	if err := db.Where("source_type = ? AND rss_url LIKE ?", "external_rss", "/api/feed/rss/%").Find(&sources).Error; err != nil {
+		log.Printf("WARN: failed to load internal RSS feed source backfill candidates: %v", err)
+		return
+	}
+
+	for _, source := range sources {
+		userID, err := resolveInternalRSSUserIDForBackfill(db, source.RssURL)
+		if err != nil {
+			log.Printf("WARN: failed to resolve internal RSS feed source %s (%s): %v", source.ID, source.RssURL, err)
+			continue
+		}
+
+		targetHash := buildInternalFeedSourceHash("internal_user", userID)
+		var canonical model.FeedSource
+		if err := db.Where("hash = ?", targetHash).First(&canonical).Error; err == nil {
+			if canonical.ID == source.ID {
+				continue
+			}
+			if err := db.Transaction(func(tx *gorm.DB) error {
+				return mergeInternalRSSFeedSourceIntoCanonical(tx, source, canonical)
+			}); err != nil {
+				log.Printf("WARN: failed to merge internal RSS feed source %s into canonical %s: %v", source.ID, canonical.ID, err)
+			}
+			continue
+		}
+
+		updates := map[string]interface{}{
+			"source_type":   "internal_user",
+			"source_id":     userID,
+			"rss_url":       "",
+			"provider":      "internal",
+			"canonical_url": "",
+			"site_url":      "",
+			"hash":          targetHash,
+		}
+		if err := db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(updates).Error; err != nil {
+			log.Printf("WARN: failed to backfill internal RSS feed source %s: %v", source.ID, err)
+		}
 	}
 }
 
@@ -392,7 +470,7 @@ ON CONFLICT (key) DO NOTHING`)
 	}
 
 	r := gin.Default()
-	docs.SwaggerInfo.BasePath = "/"
+	docs.SwaggerInfo.BasePath = "/api/v1"
 
 	// Configure allowed origins based on environment
 	allowedOrigins := []string{
@@ -448,48 +526,9 @@ ON CONFLICT (key) DO NOTHING`)
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	log.Println("Static files served from ./uploads directory")
 
-	handlers.SetupAuthRoutes(r, db, emailService)
-	handlers.SetupOnboardingRoutes(r, db)
-	handlers.SetupUserRoutes(r, db)
-	handlers.SetupBlogChannelRoutes(r, db)
-	handlers.SetupBlogPostRoutes(r, db)
-	handlers.SetupBlogInteractionRoutes(r, db)
-	handlers.SetupBlogUploadRoutes(r, db, s3Client)
-	handlers.SetupFeedRoutes(r, db)
-	handlers.SetupSongRoutes(r, db, s3Client)
-	handlers.SetupAlbumRoutes(r, db, s3Client)
-	handlers.SetupArtistRoutes(r, db)
-	handlers.SetupArtistWikiRoutes(r, db)
-	handlers.SetupCorrectionRoutes(r, db, s3Client)
-	handlers.SetupEntryStatusRoutes(r, db)
-	handlers.SetupLyricAnnotationRoutes(r, db)
-	notifSvc := service.NewNotificationService(db)
 	userHub := collab.NewUserHub()
-	handlers.SetupForumRoutes(r, db, notifSvc, userHub)
-	handlers.SetupNotificationRoutes(r, db, userHub)
-	handlers.SetupDMRoutes(r, db, userHub, s3Client)
-	handlers.SetupDebateRoutes(r, db)
-	handlers.SetupTimelineRoutes(r, db)
-	handlers.SetupVideoRoutes(r, db, s3Client)
-	r.GET("/ws/user", func(c *gin.Context) {
-		userHub.ServeWS(c, os.Getenv("JWT_SECRET"))
-	})
-
-	// Revision system routes (wiki-style collaboration)
-	handlers.SetupRevisionRoutes(r, db)
-	handlers.SetupDiscussionRoutes(r, db)
-	handlers.SetupProtectionRoutes(r, db)
-
-	// Real-time collaborative editing (Yjs WebSocket relay)
 	collabHub := collab.NewHub()
-	collabGroup := r.Group("/api/collab")
-	collabGroup.Use(middleware.AuthMiddleware())
-	collabGroup.GET("/ws/:roomID", handlers.RequireBlogPostEditAccess(db, collabHub.ServeWS))
-
-	// Admin routes
-	handlers.SetupPodcastRoutes(r, db, s3Client)
-	handlers.SetupAdminRoutes(r, db, s3Client)
-	app.RegisterV1Routes(r, db)
+	app.RegisterV1Routes(r, db, emailService, s3Client, userHub, collabHub)
 
 	// 404 handler - must be last
 	r.NoRoute(func(c *gin.Context) {
