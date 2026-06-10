@@ -65,9 +65,9 @@ func TestGetVideoCommentsReturnsMixedComments(t *testing.T) {
 	require.NoError(t, db.Create(&c2).Error)
 
 	r := gin.New()
-	r.GET("/api/videos/:id/comments", GetVideoComments(db))
+	r.GET("/api/v1/videos/:id/comments", GetVideoComments(db))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/videos/"+video.ID.String()+"/comments", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/videos/"+video.ID.String()+"/comments", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -83,10 +83,10 @@ func TestCreateVideoCommentWithTimestamp(t *testing.T) {
 	video := seedVideo(t, db, user.UUID)
 
 	r := gin.New()
-	r.POST("/api/videos/:id/comments", withVideoAuth(user.UUID, CreateVideoComment(db)))
+	r.POST("/api/v1/videos/:id/comments", withVideoAuth(user.UUID, CreateVideoComment(db)))
 
 	body := strings.NewReader(`{"content":"这一段很强","timestamp_sec":92}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/videos/"+video.ID.String()+"/comments", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/comments", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -108,10 +108,10 @@ func TestCreateVideoCommentRejectsNegativeTimestamp(t *testing.T) {
 	video := seedVideo(t, db, user.UUID)
 
 	r := gin.New()
-	r.POST("/api/videos/:id/comments", withVideoAuth(user.UUID, CreateVideoComment(db)))
+	r.POST("/api/v1/videos/:id/comments", withVideoAuth(user.UUID, CreateVideoComment(db)))
 
 	body := strings.NewReader(`{"content":"bad timestamp","timestamp_sec":-1}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/videos/"+video.ID.String()+"/comments", body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/comments", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)

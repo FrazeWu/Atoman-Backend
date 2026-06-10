@@ -20,7 +20,7 @@ import (
 )
 
 func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
-	p := router.Group("/api/podcast")
+	p := router.Group("/api/v1/podcast")
 	{
 		p.GET("/episodes", GetPodcastEpisodes(db))
 		p.GET("/shows/:channelSlug/episodes", GetShowEpisodes(db))
@@ -32,7 +32,7 @@ func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		p.POST("/upload-audio", middleware.AuthMiddleware(), UploadPodcastAudio(s3Client))
 		p.POST("/upload-cover", middleware.AuthMiddleware(), UploadPodcastCover(s3Client))
 	}
-	router.GET("/api/channels/:slug/rss/podcast", GetPodcastRSS(db))
+	router.GET("/api/v1/channels/:slug/rss/podcast", GetPodcastRSS(db))
 }
 
 // GetPodcastEpisodes lists all published episodes across all shows.
@@ -45,7 +45,7 @@ func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // @Param sort query string false "排序方式" Enums(latest,random)
 // @Param limit query int false "返回数量上限"
 // @Success 200 {array} model.PodcastEpisode
-// @Router /api/podcast/episodes [get]
+// @Router /api/v1/podcast/episodes [get]
 func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		channelID := c.Query("channel_id")
@@ -77,7 +77,7 @@ func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 // @Param channelSlug path string true "频道 slug"
 // @Success 200 {object} ShowEpisodesResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/podcast/shows/{channelSlug}/episodes [get]
+// @Router /api/v1/podcast/shows/{channelSlug}/episodes [get]
 func GetShowEpisodes(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		slug := c.Param("channelSlug")
@@ -105,7 +105,7 @@ func GetShowEpisodes(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "单集 UUID"
 // @Success 200 {object} model.PodcastEpisode
 // @Failure 404 {object} ErrorResponse
-// @Router /api/podcast/episodes/{id} [get]
+// @Router /api/v1/podcast/episodes/{id} [get]
 func GetPodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -133,7 +133,7 @@ func GetPodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/podcast/episodes [post]
+// @Router /api/v1/podcast/episodes [post]
 func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idVal, exists := c.Get("user_id")
@@ -229,7 +229,7 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/podcast/episodes/{id} [put]
+// @Router /api/v1/podcast/episodes/{id} [put]
 func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idVal, exists := c.Get("user_id")
@@ -329,7 +329,7 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/podcast/episodes/{id} [delete]
+// @Router /api/v1/podcast/episodes/{id} [delete]
 func DeletePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		idVal, exists := c.Get("user_id")
@@ -377,7 +377,7 @@ func assignPodcastPostCollections(db *gorm.DB, post *model.Post, channelID uuid.
 // @Param slug path string true "频道 slug"
 // @Success 200 {string} string "Podcast RSS XML"
 // @Failure 404 {object} ErrorResponse
-// @Router /api/channels/{slug}/rss/podcast [get]
+// @Router /api/v1/channels/{slug}/rss/podcast [get]
 func GetPodcastRSS(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		slug := c.Param("slug")
@@ -471,7 +471,7 @@ func buildPodcastRSS(ch model.Channel, episodes []model.PodcastEpisode, siteURL 
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/podcast/upload-audio [post]
+// @Router /api/v1/podcast/upload-audio [post]
 func UploadPodcastAudio(s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
@@ -582,7 +582,7 @@ func UploadPodcastAudio(s3Client *s3.S3) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/podcast/upload-cover [post]
+// @Router /api/v1/podcast/upload-cover [post]
 func UploadPodcastCover(s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")

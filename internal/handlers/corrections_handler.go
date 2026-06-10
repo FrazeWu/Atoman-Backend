@@ -35,7 +35,7 @@ type AlbumCorrectionFormInput struct {
 }
 
 func SetupCorrectionRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
-	corrections := router.Group("/api/corrections")
+	corrections := router.Group("/api/v1/corrections")
 	{
 		corrections.POST("/song", middleware.AuthMiddleware(), CreateSongCorrectionHandler(db))
 		corrections.POST("/album", middleware.AuthMiddleware(), CreateAlbumCorrectionHandler(db, s3Client))
@@ -55,7 +55,7 @@ func SetupCorrectionRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/corrections/song [post]
+// @Router /api/v1/corrections/song [post]
 func CreateSongCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var uid uuid.UUID
@@ -130,7 +130,7 @@ func CreateSongCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/corrections/album [post]
+// @Router /api/v1/corrections/album [post]
 func CreateAlbumCorrectionHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var uid uuid.UUID
@@ -265,7 +265,7 @@ func CreateAlbumCorrectionHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc 
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/corrections/artist [post]
+// @Router /api/v1/corrections/artist [post]
 func CreateArtistCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		uid, exists := c.Get("userID")

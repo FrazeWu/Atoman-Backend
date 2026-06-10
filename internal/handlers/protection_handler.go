@@ -58,7 +58,7 @@ type SetProtectionInput struct {
 // @Success 200 {object} ProtectionResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/albums/{id}/protection [get]
+// @Router /api/v1/albums/{id}/protection [get]
 // GetAlbumProtectionHandler returns protection status for an album
 func GetAlbumProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -112,7 +112,7 @@ func GetAlbumProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} ProtectionResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/songs/{id}/protection [get]
+// @Router /api/v1/songs/{id}/protection [get]
 // GetSongProtectionHandler returns protection status for a song
 func GetSongProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -154,7 +154,7 @@ func GetSongProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} ProtectionResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/artists/{id}/protection [get]
+// @Router /api/v1/artists/{id}/protection [get]
 // GetArtistProtectionHandler returns protection status for an artist
 func GetArtistProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -200,7 +200,7 @@ func GetArtistProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id}/protection [put]
+// @Router /api/v1/albums/{id}/protection [put]
 func SetAlbumProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return setProtectionHandler(db, "album")
 }
@@ -219,7 +219,7 @@ func SetAlbumProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id}/protection [put]
+// @Router /api/v1/songs/{id}/protection [put]
 func SetSongProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return setProtectionHandler(db, "song")
 }
@@ -238,7 +238,7 @@ func SetSongProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id}/protection [put]
+// @Router /api/v1/artists/{id}/protection [put]
 func SetArtistProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return setProtectionHandler(db, "artist")
 }
@@ -329,7 +329,7 @@ func setProtectionHandler(db *gorm.DB, contentType string) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id}/protection [delete]
+// @Router /api/v1/albums/{id}/protection [delete]
 func RemoveAlbumProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return removeProtectionHandler(db, "album")
 }
@@ -347,7 +347,7 @@ func RemoveAlbumProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id}/protection [delete]
+// @Router /api/v1/songs/{id}/protection [delete]
 func RemoveSongProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return removeProtectionHandler(db, "song")
 }
@@ -365,7 +365,7 @@ func RemoveSongProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id}/protection [delete]
+// @Router /api/v1/artists/{id}/protection [delete]
 func RemoveArtistProtectionHandler(db *gorm.DB) gin.HandlerFunc {
 	return removeProtectionHandler(db, "artist")
 }

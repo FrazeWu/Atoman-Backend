@@ -22,7 +22,7 @@ import (
 )
 
 func SetupVideoRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
-	v := router.Group("/api/videos")
+	v := router.Group("/api/v1/videos")
 	{
 		v.GET("", GetVideos(db))
 		v.GET("/:id", GetVideo(db))
@@ -40,7 +40,7 @@ func SetupVideoRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		v.DELETE("/comments/:commentID", middleware.AuthMiddleware(), DeleteVideoComment(db))
 	}
 	// Per-channel Video RSS feed
-	router.GET("/api/channels/slug/:slug/rss/video", GetVideoRSS(db))
+	router.GET("/api/v1/channels/slug/:slug/rss/video", GetVideoRSS(db))
 }
 
 func boundedListLimit(raw string, fallback int, max int) int {
@@ -71,7 +71,7 @@ func boundedListLimit(raw string, fallback int, max int) int {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/videos/upload-video [post]
+// @Router /api/v1/videos/upload-video [post]
 func UploadVideoFile(s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := fmt.Sprintf("%v", c.MustGet("userID"))
@@ -165,7 +165,7 @@ func UploadVideoFile(s3Client *s3.S3) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/videos/upload-cover [post]
+// @Router /api/v1/videos/upload-cover [post]
 func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := fmt.Sprintf("%v", c.MustGet("userID"))
@@ -243,7 +243,7 @@ func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 // @Param limit query int false "返回数量上限"
 // @Success 200 {array} model.Video
 // @Failure 500 {object} ErrorResponse
-// @Router /api/videos [get]
+// @Router /api/v1/videos [get]
 func GetVideos(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		channelID := c.Query("channel_id")
@@ -323,7 +323,7 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "视频 UUID"
 // @Success 200 {object} model.Video
 // @Failure 404 {object} ErrorResponse
-// @Router /api/videos/{id} [get]
+// @Router /api/v1/videos/{id} [get]
 func GetVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -345,7 +345,7 @@ func GetVideo(db *gorm.DB) gin.HandlerFunc {
 // @Produce json
 // @Param id path string true "视频 UUID"
 // @Success 200 {object} BoolStatusResponse
-// @Router /api/videos/{id}/view [post]
+// @Router /api/v1/videos/{id}/view [post]
 func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -368,7 +368,7 @@ func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/videos [post]
+// @Router /api/v1/videos [post]
 func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
@@ -461,7 +461,7 @@ func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/videos/{id} [put]
+// @Router /api/v1/videos/{id} [put]
 func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
@@ -563,7 +563,7 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/videos/{id} [delete]
+// @Router /api/v1/videos/{id} [delete]
 func DeleteVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
@@ -624,7 +624,7 @@ func assignVideoCollections(db *gorm.DB, video *model.Video, ids []uuid.UUID) er
 // @Param id path string true "视频 UUID"
 // @Success 200 {array} model.Video
 // @Failure 404 {object} ErrorResponse
-// @Router /api/videos/{id}/recommended [get]
+// @Router /api/v1/videos/{id}/recommended [get]
 func GetRecommendedVideos(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -708,7 +708,7 @@ func GetRecommendedVideos(db *gorm.DB) gin.HandlerFunc {
 // @Param slug path string true "频道 slug"
 // @Success 200 {string} string "RSS XML"
 // @Failure 404 {object} ErrorResponse
-// @Router /api/channels/slug/{slug}/rss/video [get]
+// @Router /api/v1/channels/slug/{slug}/rss/video [get]
 func GetVideoRSS(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		slug := c.Param("slug")
@@ -774,7 +774,7 @@ func buildVideoRSS(ch model.Channel, videos []model.Video, siteURL string) strin
 // @Success 200 {object} CommentListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/videos/{id}/comments [get]
+// @Router /api/v1/videos/{id}/comments [get]
 func GetVideoComments(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		videoID, err := uuid.Parse(c.Param("id"))
@@ -811,7 +811,7 @@ func GetVideoComments(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/videos/{id}/comments [post]
+// @Router /api/v1/videos/{id}/comments [post]
 func CreateVideoComment(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		videoID, err := uuid.Parse(c.Param("id"))
@@ -875,7 +875,7 @@ func CreateVideoComment(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/videos/comments/{commentID} [delete]
+// @Router /api/v1/videos/comments/{commentID} [delete]
 func DeleteVideoComment(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		commentID, err := uuid.Parse(c.Param("commentID"))

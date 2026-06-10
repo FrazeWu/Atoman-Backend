@@ -18,7 +18,7 @@ func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB) {
 	revisionService := service.NewRevisionService(db)
 
 	// Album revisions
-	albums := router.Group("/api/albums/:id")
+	albums := router.Group("/api/v1/albums/:id")
 	{
 		albums.GET("/revisions", GetAlbumRevisionsHandler(revisionService))
 		albums.GET("/revisions/:version", GetAlbumRevisionHandler(revisionService))
@@ -28,7 +28,7 @@ func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB) {
 	}
 
 	// Song revisions
-	songs := router.Group("/api/songs/:id")
+	songs := router.Group("/api/v1/songs/:id")
 	{
 		songs.GET("/revisions", GetSongRevisionsHandler(revisionService))
 		songs.GET("/revisions/:version", GetSongRevisionHandler(revisionService))
@@ -38,7 +38,7 @@ func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB) {
 	}
 
 	// Admin approval endpoints
-	admin := router.Group("/api/admin/reviews/revisions")
+	admin := router.Group("/api/v1/admin/reviews/revisions")
 	admin.Use(middleware.AuthMiddleware(), middleware.AdminMiddleware(db))
 	{
 		admin.POST("/:id/approve", ApproveRevisionHandler(revisionService))
@@ -63,7 +63,7 @@ type CreateRevisionInput struct {
 // @Success 200 {object} RevisionListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/albums/{id}/revisions [get]
+// @Router /api/v1/albums/{id}/revisions [get]
 // GetAlbumRevisionsHandler returns revision history for an album
 func GetAlbumRevisionsHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -101,7 +101,7 @@ func GetAlbumRevisionsHandler(revisionService *service.RevisionService) gin.Hand
 // @Success 200 {object} RevisionResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/albums/{id}/revisions/{version} [get]
+// @Router /api/v1/albums/{id}/revisions/{version} [get]
 // GetAlbumRevisionHandler returns a specific revision
 func GetAlbumRevisionHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -142,7 +142,7 @@ func GetAlbumRevisionHandler(revisionService *service.RevisionService) gin.Handl
 // @Success 200 {object} RevisionDiffResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/albums/{id}/revisions/diff [get]
+// @Router /api/v1/albums/{id}/revisions/diff [get]
 // GetAlbumRevisionDiffHandler compares two versions
 func GetAlbumRevisionDiffHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -189,7 +189,7 @@ func GetAlbumRevisionDiffHandler(revisionService *service.RevisionService) gin.H
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id}/revisions [post]
+// @Router /api/v1/albums/{id}/revisions [post]
 // CreateAlbumRevisionHandler creates a new album revision
 func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -277,7 +277,7 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id}/revisions/{version}/revert [post]
+// @Router /api/v1/albums/{id}/revisions/{version}/revert [post]
 // RevertAlbumHandler reverts album to a previous version
 func RevertAlbumHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -333,7 +333,7 @@ func RevertAlbumHandler(revisionService *service.RevisionService) gin.HandlerFun
 // @Success 200 {object} RevisionListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/songs/{id}/revisions [get]
+// @Router /api/v1/songs/{id}/revisions [get]
 func GetSongRevisionsHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		songID, err := uuid.Parse(c.Param("id"))
@@ -368,7 +368,7 @@ func GetSongRevisionsHandler(revisionService *service.RevisionService) gin.Handl
 // @Success 200 {object} RevisionResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/songs/{id}/revisions/{version} [get]
+// @Router /api/v1/songs/{id}/revisions/{version} [get]
 func GetSongRevisionHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		songID, err := uuid.Parse(c.Param("id"))
@@ -408,7 +408,7 @@ func GetSongRevisionHandler(revisionService *service.RevisionService) gin.Handle
 // @Success 200 {object} RevisionDiffResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/songs/{id}/revisions/diff [get]
+// @Router /api/v1/songs/{id}/revisions/diff [get]
 func GetSongRevisionDiffHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		songID, err := uuid.Parse(c.Param("id"))
@@ -445,7 +445,7 @@ func GetSongRevisionDiffHandler(revisionService *service.RevisionService) gin.Ha
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id}/revisions [post]
+// @Router /api/v1/songs/{id}/revisions [post]
 func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		songID, err := uuid.Parse(c.Param("id"))
@@ -521,7 +521,7 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id}/revisions/{version}/revert [post]
+// @Router /api/v1/songs/{id}/revisions/{version}/revert [post]
 func RevertSongHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		songID, err := uuid.Parse(c.Param("id"))
@@ -574,7 +574,7 @@ func RevertSongHandler(revisionService *service.RevisionService) gin.HandlerFunc
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/revisions/{id}/approve [post]
+// @Router /api/v1/admin/reviews/revisions/{id}/approve [post]
 func ApproveRevisionHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		revisionID, err := uuid.Parse(c.Param("id"))
@@ -614,7 +614,7 @@ func ApproveRevisionHandler(revisionService *service.RevisionService) gin.Handle
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/reviews/revisions/{id}/reject [post]
+// @Router /api/v1/admin/reviews/revisions/{id}/reject [post]
 func RejectRevisionHandler(revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		revisionID, err := uuid.Parse(c.Param("id"))

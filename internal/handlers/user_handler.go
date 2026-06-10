@@ -17,9 +17,9 @@ import (
 // SetupUserRoutes configures user-related routes
 func SetupUserRoutes(router *gin.Engine, db *gorm.DB) {
 	// Blog explore route
-	router.GET("/api/blog/explore", ExplorePosts(db))
+	router.GET("/api/v1/blog/explore", ExplorePosts(db))
 
-	users := router.Group("/api/users")
+	users := router.Group("/api/v1/users")
 	{
 		// Public routes — lookup by username (must come before /:id routes)
 		users.GET("/search", middleware.OptionalAuthMiddleware(), SearchUsers(db))
@@ -94,7 +94,7 @@ type ExplorePostResponse struct {
 // @Param limit query int false "每页数量" default(20)
 // @Success 200 {object} ExplorePostListResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/blog/explore [get]
+// @Router /api/v1/blog/explore [get]
 func ExplorePosts(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -142,7 +142,7 @@ func ExplorePosts(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/users/me [get]
+// @Router /api/v1/users/me [get]
 func GetCurrentUser(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -167,7 +167,7 @@ func GetCurrentUser(db *gorm.DB) gin.HandlerFunc {
 // @Param username path string true "用户名"
 // @Success 200 {object} UserLookupResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/users/by-username/{username} [get]
+// @Router /api/v1/users/by-username/{username} [get]
 func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.Param("username")
@@ -212,7 +212,7 @@ func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "用户 UUID 或用户名"
 // @Success 200 {object} UserProfileResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/users/{id}/profile [get]
+// @Router /api/v1/users/{id}/profile [get]
 func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -275,7 +275,7 @@ func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/users/me [put]
+// @Router /api/v1/users/me [put]
 func UpdateUserProfile(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input UserProfileInput
@@ -317,7 +317,7 @@ func UpdateUserProfile(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} UserSettingsResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/users/me/settings [get]
+// @Router /api/v1/users/me/settings [get]
 func GetUserSettings(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -347,7 +347,7 @@ func GetUserSettings(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/users/me/settings [put]
+// @Router /api/v1/users/me/settings [put]
 func UpdateUserSettings(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input UserSettingsInput
@@ -404,7 +404,7 @@ func UpdateUserSettings(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/users/{id}/follow [post]
+// @Router /api/v1/users/{id}/follow [post]
 func FollowUser(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		targetIDStr := c.Param("id")
@@ -454,7 +454,7 @@ func FollowUser(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/users/{id}/follow [delete]
+// @Router /api/v1/users/{id}/follow [delete]
 func UnfollowUser(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		targetID := c.Param("id")
@@ -479,7 +479,7 @@ func UnfollowUser(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "用户 UUID"
 // @Success 200 {object} UserListResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/users/{id}/followers [get]
+// @Router /api/v1/users/{id}/followers [get]
 func GetUserFollowers(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -514,7 +514,7 @@ func GetUserFollowers(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "用户 UUID"
 // @Success 200 {object} UserListResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/users/{id}/following [get]
+// @Router /api/v1/users/{id}/following [get]
 func GetUserFollowing(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -554,7 +554,7 @@ func GetUserFollowing(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/users/search [get]
+// @Router /api/v1/users/search [get]
 func SearchUsers(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		q := strings.TrimSpace(c.Query("q"))
@@ -619,7 +619,7 @@ func SearchUsers(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/users/roles [get]
+// @Router /api/v1/users/roles [get]
 func ListUsersForRoleManagement(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		q := strings.TrimSpace(c.Query("q"))
@@ -672,7 +672,7 @@ func ListUsersForRoleManagement(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/users/{id}/role [put]
+// @Router /api/v1/users/{id}/role [put]
 func UpdateUserRole(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		targetID, err := uuid.Parse(c.Param("id"))

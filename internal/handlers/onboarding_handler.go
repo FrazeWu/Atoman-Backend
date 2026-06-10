@@ -13,7 +13,7 @@ import (
 )
 
 func SetupOnboardingRoutes(router *gin.Engine, db *gorm.DB) {
-	group := router.Group("/api/auth/onboarding")
+	group := router.Group("/api/v1/auth/onboarding")
 	group.Use(middleware.AuthMiddleware())
 	group.POST("/complete", CompleteOnboardingHandler(db))
 }
@@ -28,7 +28,7 @@ func SetupOnboardingRoutes(router *gin.Engine, db *gorm.DB) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/auth/onboarding/complete [post]
+// @Router /api/v1/auth/onboarding/complete [post]
 func CompleteOnboardingHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		currentUser, ok := authctx.Current(c)

@@ -14,7 +14,7 @@ import (
 )
 
 func SetupDebateRoutes(router *gin.Engine, db *gorm.DB) {
-	debate := router.Group("/api/debate")
+	debate := router.Group("/api/v1/debate")
 	{
 		debate.GET("/topics", GetDebateTopics(db))
 		debate.GET("/topics/:id", GetDebateTopic(db))
@@ -70,7 +70,7 @@ func SetupDebateRoutes(router *gin.Engine, db *gorm.DB) {
 // @Param tag query string false "标签"
 // @Success 200 {object} DebateListResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/debate/topics [get]
+// @Router /api/v1/debate/topics [get]
 func GetDebateTopics(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -121,7 +121,7 @@ func GetDebateTopics(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "辩题 UUID"
 // @Success 200 {object} DebateResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/debate/topics/{id} [get]
+// @Router /api/v1/debate/topics/{id} [get]
 func GetDebateTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -158,7 +158,7 @@ type CreateDebateInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/topics [post]
+// @Router /api/v1/debate/topics [post]
 func CreateDebateTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input CreateDebateInput
@@ -204,7 +204,7 @@ func CreateDebateTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/topics/{id} [put]
+// @Router /api/v1/debate/topics/{id} [put]
 func UpdateDebateTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -257,7 +257,7 @@ func UpdateDebateTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/topics/{id} [delete]
+// @Router /api/v1/debate/topics/{id} [delete]
 func DeleteDebateTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -299,7 +299,7 @@ func DeleteDebateTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/topics/{id}/conclude [post]
+// @Router /api/v1/debate/topics/{id}/conclude [post]
 func ConcludeDebateTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -356,7 +356,7 @@ func ConcludeDebateTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/topics/{id}/reopen [post]
+// @Router /api/v1/debate/topics/{id}/reopen [post]
 func ReopenDebateTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -402,7 +402,7 @@ func ReopenDebateTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/topics/{id}/conclude-vote [post]
+// @Router /api/v1/debate/topics/{id}/conclude-vote [post]
 func VoteToConclude(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -468,7 +468,7 @@ func VoteToConclude(db *gorm.DB) gin.HandlerFunc {
 // @Param limit query int false "返回数量"
 // @Success 200 {object} DebateSearchResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/debate/topics/search [get]
+// @Router /api/v1/debate/topics/search [get]
 func SearchDebateTopics(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		q := c.Query("q")
@@ -501,7 +501,7 @@ func SearchDebateTopics(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "辩题 UUID"
 // @Success 200 {object} DebateArgumentListResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/debate/topics/{id}/arguments [get]
+// @Router /api/v1/debate/topics/{id}/arguments [get]
 func GetDebateArguments(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		debateID := c.Param("id")
@@ -557,7 +557,7 @@ type CreateArgumentInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/topics/{id}/arguments [post]
+// @Router /api/v1/debate/topics/{id}/arguments [post]
 func CreateArgument(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		debateID := c.Param("id")
@@ -626,7 +626,7 @@ func CreateArgument(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id} [put]
+// @Router /api/v1/debate/arguments/{id} [put]
 func UpdateArgument(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -679,7 +679,7 @@ func UpdateArgument(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id} [delete]
+// @Router /api/v1/debate/arguments/{id} [delete]
 func DeleteArgument(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -730,7 +730,7 @@ type ReferenceInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id}/reference [post]
+// @Router /api/v1/debate/arguments/{id}/reference [post]
 func AddArgumentReference(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		argumentID := c.Param("id")
@@ -773,7 +773,7 @@ func AddArgumentReference(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id}/reference/{ref_id} [delete]
+// @Router /api/v1/debate/arguments/{id}/reference/{ref_id} [delete]
 func RemoveArgumentReference(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		argumentID := c.Param("id")
@@ -820,7 +820,7 @@ type DebateReferenceInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id}/debate-reference [post]
+// @Router /api/v1/debate/arguments/{id}/debate-reference [post]
 func AddDebateReference(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		argumentID := c.Param("id")
@@ -863,7 +863,7 @@ func AddDebateReference(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id}/debate-reference/{debate_id} [delete]
+// @Router /api/v1/debate/arguments/{id}/debate-reference/{debate_id} [delete]
 func RemoveDebateReference(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		argumentID := c.Param("id")
@@ -909,7 +909,7 @@ type VoteInput struct {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id}/vote [post]
+// @Router /api/v1/debate/arguments/{id}/vote [post]
 func VoteArgument(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		argumentID := c.Param("id")
@@ -979,7 +979,7 @@ func VoteArgument(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id}/vote [delete]
+// @Router /api/v1/debate/arguments/{id}/vote [delete]
 func RemoveVote(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		argumentID := c.Param("id")
@@ -1013,7 +1013,7 @@ func RemoveVote(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id}/votes [get]
+// @Router /api/v1/debate/arguments/{id}/votes [get]
 func GetArgumentVotes(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		// Admin only
@@ -1052,7 +1052,7 @@ func GetArgumentVotes(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id}/fold [post]
+// @Router /api/v1/debate/arguments/{id}/fold [post]
 func FoldArgument(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, _ := c.Get("role")
@@ -1089,7 +1089,7 @@ func FoldArgument(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/debate/arguments/{id}/fold [delete]
+// @Router /api/v1/debate/arguments/{id}/fold [delete]
 func UnfoldArgument(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, _ := c.Get("role")

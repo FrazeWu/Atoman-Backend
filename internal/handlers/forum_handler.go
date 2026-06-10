@@ -23,49 +23,23 @@ type forumHandler struct {
 }
 
 func SetupForumRoutes(router *gin.Engine, db *gorm.DB, notifSvc *service.NotificationService, userHub *collab.UserHub) {
-	h := &forumHandler{db: db, notifSvc: notifSvc, userHub: userHub}
-	forum := router.Group("/api/forum")
+	forum := router.Group("/api/v1/forum")
 	{
-		// Public / optional-auth routes
-		forum.GET("/categories", GetForumCategories(db))
-		forum.GET("/topics", GetForumTopics(db))
-		forum.GET("/topics/:id", GetForumTopic(db))
-		forum.GET("/topics/:id/replies", GetForumReplies(db))
 		forum.GET("/search", SearchForumTopics(db))
 
 		protected := forum.Group("")
 		protected.Use(middleware.AuthMiddleware())
 		{
-			// Topics
-			protected.POST("/topics", CreateForumTopic(db))
-			protected.PUT("/topics/:id", UpdateForumTopic(db))
-			protected.DELETE("/topics/:id", DeleteForumTopic(db))
-			protected.POST("/topics/:id/like", h.ToggleForumTopicLike())
-			protected.POST("/topics/:id/bookmark", ToggleForumTopicBookmark(db))
-			protected.POST("/topics/:id/pin", PinForumTopic(db))
-			protected.POST("/topics/:id/close", CloseForumTopic(db))
-
-			// Replies
-			protected.POST("/topics/:id/replies", h.CreateForumReply())
-			protected.PUT("/replies/:id", UpdateForumReply(db))
-			protected.DELETE("/replies/:id", DeleteForumReply(db))
-			protected.POST("/replies/:id/like", h.ToggleForumReplyLike())
-			protected.POST("/replies/:id/solve", h.SolveForumReply())
-			protected.DELETE("/replies/:id/solve", UnsolveForumReply(db))
-
-			// Drafts
-			protected.GET("/drafts", GetForumDraft(db))
-			protected.PUT("/drafts", PutForumDraft(db))
-			protected.DELETE("/drafts", DeleteForumDraft(db))
-
-			// Admin
-			protected.POST("/categories", CreateForumCategory(db))
-			protected.POST("/topics/:id/feature", FeatureForumTopic(db))
-			protected.DELETE("/topics/:id/feature", UnfeatureForumTopic(db))
+			protected.POST("/topics/:topicID/close", CloseForumTopic(db))
+			protected.POST("/replies/:replyID/like", (&forumHandler{db: db, notifSvc: notifSvc, userHub: userHub}).ToggleForumReplyLike())
+			protected.POST("/replies/:replyID/solve", (&forumHandler{db: db, notifSvc: notifSvc, userHub: userHub}).SolveForumReply())
+			protected.DELETE("/replies/:replyID/solve", UnsolveForumReply(db))
+			protected.POST("/topics/:topicID/feature", FeatureForumTopic(db))
+			protected.DELETE("/topics/:topicID/feature", UnfeatureForumTopic(db))
 			protected.POST("/report", ReportForumContent(db))
 			protected.POST("/category-requests", CreateCategoryRequest(db))
 			protected.GET("/category-requests", GetCategoryRequests(db))
-			protected.POST("/category-requests/:id/review", ReviewCategoryRequest(db))
+			protected.POST("/category-requests/:requestID/review", ReviewCategoryRequest(db))
 		}
 	}
 }
@@ -79,7 +53,7 @@ func SetupForumRoutes(router *gin.Engine, db *gorm.DB, notifSvc *service.Notific
 // @Produce json
 // @Success 200 {object} ForumCategoryListResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/forum/categories [get]
+// @Router /api/v1/forum/categories [get]
 func GetForumCategories(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var categories []model.ForumCategory
@@ -109,7 +83,7 @@ func GetForumCategories(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/categories [post]
+// @Router /api/v1/forum/categories [post]
 func CreateForumCategory(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, _ := c.Get("role")
@@ -153,7 +127,7 @@ func CreateForumCategory(db *gorm.DB) gin.HandlerFunc {
 // @Param search query string false "搜索关键字"
 // @Success 200 {object} ForumTopicListResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/forum/topics [get]
+// @Router /api/v1/forum/topics [get]
 func GetForumTopics(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
@@ -227,7 +201,7 @@ func GetForumTopics(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} ForumTopicResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/forum/topics/{id} [get]
+// @Router /api/v1/forum/topics/{id} [get]
 func GetForumTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))
@@ -286,7 +260,7 @@ func GetForumTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/topics [post]
+// @Router /api/v1/forum/topics [post]
 func CreateForumTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input struct {
@@ -351,7 +325,7 @@ func CreateForumTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/topics/{id} [put]
+// @Router /api/v1/forum/topics/{id} [put]
 func UpdateForumTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))
@@ -406,7 +380,7 @@ func UpdateForumTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/topics/{id} [delete]
+// @Router /api/v1/forum/topics/{id} [delete]
 func DeleteForumTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))
@@ -442,7 +416,7 @@ func DeleteForumTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/topics/{id}/like [post]
+// @Router /api/v1/forum/topics/{id}/like [post]
 func (h *forumHandler) ToggleForumTopicLike() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := h.db
@@ -489,7 +463,7 @@ func (h *forumHandler) ToggleForumTopicLike() gin.HandlerFunc {
 // @Failure 400 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/topics/{id}/bookmark [post]
+// @Router /api/v1/forum/topics/{id}/bookmark [post]
 func ToggleForumTopicBookmark(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))
@@ -523,7 +497,7 @@ func ToggleForumTopicBookmark(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/topics/{id}/pin [post]
+// @Router /api/v1/forum/topics/{id}/pin [post]
 func PinForumTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, _ := c.Get("role")
@@ -559,7 +533,7 @@ func PinForumTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/topics/{id}/close [post]
+// @Router /api/v1/forum/topics/{id}/close [post]
 func CloseForumTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		role, _ := c.Get("role")
@@ -595,7 +569,7 @@ func CloseForumTopic(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} ForumReplyListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/forum/topics/{id}/replies [get]
+// @Router /api/v1/forum/topics/{id}/replies [get]
 func GetForumReplies(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		topicID, err := uuid.Parse(c.Param("id"))
@@ -656,7 +630,7 @@ func GetForumReplies(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/topics/{id}/replies [post]
+// @Router /api/v1/forum/topics/{id}/replies [post]
 func (h *forumHandler) CreateForumReply() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := h.db
@@ -764,7 +738,7 @@ func (h *forumHandler) CreateForumReply() gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/replies/{id} [put]
+// @Router /api/v1/forum/replies/{id} [put]
 func UpdateForumReply(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))
@@ -809,7 +783,7 @@ func UpdateForumReply(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/replies/{id} [delete]
+// @Router /api/v1/forum/replies/{id} [delete]
 func DeleteForumReply(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id, err := uuid.Parse(c.Param("id"))
@@ -847,7 +821,7 @@ func DeleteForumReply(db *gorm.DB) gin.HandlerFunc {
 // @Failure 400 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/replies/{id}/like [post]
+// @Router /api/v1/forum/replies/{id}/like [post]
 func (h *forumHandler) ToggleForumReplyLike() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := h.db
@@ -921,7 +895,7 @@ func (h *forumHandler) ToggleForumReplyLike() gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/replies/{id}/solve [post]
+// @Router /api/v1/forum/replies/{id}/solve [post]
 func (h *forumHandler) SolveForumReply() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		db := h.db
@@ -979,7 +953,7 @@ func (h *forumHandler) SolveForumReply() gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/replies/{id}/solve [delete]
+// @Router /api/v1/forum/replies/{id}/solve [delete]
 func UnsolveForumReply(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		replyID, err := uuid.Parse(c.Param("id"))
@@ -1028,7 +1002,7 @@ func UnsolveForumReply(db *gorm.DB) gin.HandlerFunc {
 // @Param limit query int false "每页数量" default(20)
 // @Success 200 {object} ForumSearchResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/forum/search [get]
+// @Router /api/v1/forum/search [get]
 func SearchForumTopics(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		q := strings.TrimSpace(c.Query("q"))
@@ -1074,7 +1048,7 @@ func SearchForumTopics(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/drafts [get]
+// @Router /api/v1/forum/drafts [get]
 func GetForumDraft(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		contextKey := c.Query("context_key")
@@ -1105,7 +1079,7 @@ func GetForumDraft(db *gorm.DB) gin.HandlerFunc {
 // @Failure 400 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/drafts [put]
+// @Router /api/v1/forum/drafts [put]
 func PutForumDraft(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input struct {
@@ -1154,7 +1128,7 @@ func PutForumDraft(db *gorm.DB) gin.HandlerFunc {
 // @Failure 400 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/drafts [delete]
+// @Router /api/v1/forum/drafts [delete]
 func DeleteForumDraft(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		contextKey := c.Query("context_key")
@@ -1245,7 +1219,7 @@ func isAdmin(c *gin.Context) bool {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/topics/{id}/feature [post]
+// @Router /api/v1/forum/topics/{id}/feature [post]
 func FeatureForumTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !isAdmin(c) {
@@ -1274,7 +1248,7 @@ func FeatureForumTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/topics/{id}/feature [delete]
+// @Router /api/v1/forum/topics/{id}/feature [delete]
 func UnfeatureForumTopic(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !isAdmin(c) {
@@ -1306,7 +1280,7 @@ func UnfeatureForumTopic(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/report [post]
+// @Router /api/v1/forum/report [post]
 func ReportForumContent(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
@@ -1375,7 +1349,7 @@ func ReportForumContent(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/category-requests [post]
+// @Router /api/v1/forum/category-requests [post]
 func CreateCategoryRequest(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
@@ -1414,7 +1388,7 @@ func CreateCategoryRequest(db *gorm.DB) gin.HandlerFunc {
 // @Failure 403 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/category-requests [get]
+// @Router /api/v1/forum/category-requests [get]
 func GetCategoryRequests(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !isAdmin(c) {
@@ -1444,7 +1418,7 @@ func GetCategoryRequests(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/forum/category-requests/{id}/review [post]
+// @Router /api/v1/forum/category-requests/{id}/review [post]
 func ReviewCategoryRequest(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if !isAdmin(c) {

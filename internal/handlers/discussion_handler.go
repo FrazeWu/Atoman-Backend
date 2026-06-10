@@ -65,7 +65,7 @@ func SetupDiscussionRoutes(router *gin.Engine, db *gorm.DB) {
 // @Success 200 {object} DiscussionUnreadCountResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/albums/{id}/discussions/unread-count [get]
+// @Router /api/v1/albums/{id}/discussions/unread-count [get]
 // GetAlbumDiscussionUnreadCountHandler returns the count of unread discussions for an album
 func GetAlbumDiscussionUnreadCountHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -101,7 +101,7 @@ func GetAlbumDiscussionUnreadCountHandler(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} DiscussionUnreadCountResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/songs/{id}/discussions/unread-count [get]
+// @Router /api/v1/songs/{id}/discussions/unread-count [get]
 // GetSongDiscussionUnreadCountHandler returns the count of unread discussions for a song
 func GetSongDiscussionUnreadCountHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -139,7 +139,7 @@ func GetSongDiscussionUnreadCountHandler(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} DiscussionListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/albums/{id}/discussions [get]
+// @Router /api/v1/albums/{id}/discussions [get]
 // GetAlbumDiscussionsHandler returns discussions for an album
 func GetAlbumDiscussionsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -193,7 +193,7 @@ func GetAlbumDiscussionsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} DiscussionListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/songs/{id}/discussions [get]
+// @Router /api/v1/songs/{id}/discussions [get]
 // GetSongDiscussionsHandler returns discussions for a song
 func GetSongDiscussionsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -250,7 +250,7 @@ type CreateDiscussionInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id}/discussions [post]
+// @Router /api/v1/albums/{id}/discussions [post]
 // CreateAlbumDiscussionHandler creates a new discussion for an album
 func CreateAlbumDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -303,7 +303,7 @@ func CreateAlbumDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id}/discussions [post]
+// @Router /api/v1/songs/{id}/discussions [post]
 // CreateSongDiscussionHandler creates a new discussion for a song
 func CreateSongDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -357,8 +357,8 @@ func CreateSongDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id}/discussions/{discussion_id}/reply [post]
-// @Router /api/songs/{id}/discussions/{discussion_id}/reply [post]
+// @Router /api/v1/albums/{id}/discussions/{discussion_id}/reply [post]
+// @Router /api/v1/songs/{id}/discussions/{discussion_id}/reply [post]
 // ReplyToDiscussionHandler adds a reply to an existing discussion
 func ReplyToDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -422,7 +422,7 @@ func ReplyToDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id}/discussions/{discussion_id} [put]
+// @Router /api/v1/albums/{id}/discussions/{discussion_id} [put]
 // UpdateAlbumDiscussionHandler updates a discussion (only by owner)
 func UpdateAlbumDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -482,7 +482,7 @@ func UpdateAlbumDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id}/discussions/{discussion_id} [put]
+// @Router /api/v1/songs/{id}/discussions/{discussion_id} [put]
 func UpdateSongDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 	return UpdateAlbumDiscussionHandler(db) // Same logic
 }
@@ -501,7 +501,7 @@ func UpdateSongDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/albums/{id}/discussions/{discussion_id} [delete]
+// @Router /api/v1/albums/{id}/discussions/{discussion_id} [delete]
 // DeleteAlbumDiscussionHandler soft deletes a discussion (only by owner or admin)
 func DeleteAlbumDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -547,7 +547,7 @@ func DeleteAlbumDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/songs/{id}/discussions/{discussion_id} [delete]
+// @Router /api/v1/songs/{id}/discussions/{discussion_id} [delete]
 // DeleteSongDiscussionHandler soft deletes a discussion for song
 func DeleteSongDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 	return DeleteAlbumDiscussionHandler(db) // Same logic
@@ -566,7 +566,7 @@ func DeleteSongDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/admin/discussions/{id} [delete]
+// @Router /api/v1/admin/discussions/{id} [delete]
 func AdminDeleteDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		discussionID, err := uuid.Parse(c.Param("id"))
@@ -601,7 +601,7 @@ func AdminDeleteDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} DiscussionListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/artists/{id}/discussions [get]
+// @Router /api/v1/artists/{id}/discussions [get]
 // GetEntityDiscussionsHandler returns discussions for any content type (artist, album, etc.)
 func GetEntityDiscussionsHandler(db *gorm.DB, contentType string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -646,7 +646,7 @@ func GetEntityDiscussionsHandler(db *gorm.DB, contentType string) gin.HandlerFun
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id}/discussions [post]
+// @Router /api/v1/artists/{id}/discussions [post]
 // CreateEntityDiscussionHandler creates a discussion for any content type
 func CreateEntityDiscussionHandler(db *gorm.DB, contentType string) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -694,7 +694,7 @@ func CreateEntityDiscussionHandler(db *gorm.DB, contentType string) gin.HandlerF
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id}/discussions/{discussion_id} [delete]
+// @Router /api/v1/artists/{id}/discussions/{discussion_id} [delete]
 func DeleteEntityDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		discussionID, err := uuid.Parse(c.Param("discussion_id"))
@@ -734,7 +734,7 @@ func DeleteEntityDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists/{id}/discussions/{discussion_id}/reply [post]
+// @Router /api/v1/artists/{id}/discussions/{discussion_id}/reply [post]
 func ReplyToEntityDiscussionHandler(db *gorm.DB, contentType string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		entityID, err := uuid.Parse(c.Param("id"))

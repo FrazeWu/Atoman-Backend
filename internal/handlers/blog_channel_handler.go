@@ -17,7 +17,7 @@ import (
 
 // SetupBlogChannelRoutes configures blog channel and collection routes
 func SetupBlogChannelRoutes(router *gin.Engine, db *gorm.DB) {
-	blog := router.Group("/api/blog")
+	blog := router.Group("/api/v1/blog")
 	{
 		// Public routes
 		blog.GET("/channels", middleware.OptionalAuthMiddleware(), GetChannels(db))
@@ -77,7 +77,7 @@ type DeleteChannelInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/channels/ensure-default [post]
+// @Router /api/v1/blog/channels/ensure-default [post]
 func EnsureDefaultChannel(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -109,7 +109,7 @@ func EnsureDefaultChannel(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} ChannelListResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/blog/channels [get]
+// @Router /api/v1/blog/channels [get]
 func GetChannels(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var channels []model.Channel
@@ -141,7 +141,7 @@ func GetChannels(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "频道 UUID"
 // @Success 200 {object} ChannelResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/blog/channels/{id} [get]
+// @Router /api/v1/blog/channels/{id} [get]
 func GetChannel(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -165,7 +165,7 @@ func GetChannel(db *gorm.DB) gin.HandlerFunc {
 // @Param slug path string true "频道 slug"
 // @Success 200 {object} ChannelResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/blog/channels/slug/{slug} [get]
+// @Router /api/v1/blog/channels/slug/{slug} [get]
 func GetChannelBySlug(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		slug := strings.TrimSpace(c.Param("slug"))
@@ -194,7 +194,7 @@ func GetChannelBySlug(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/channels [post]
+// @Router /api/v1/blog/channels [post]
 func CreateChannel(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input ChannelInput
@@ -272,7 +272,7 @@ func CreateChannel(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/channels/{id} [put]
+// @Router /api/v1/blog/channels/{id} [put]
 func UpdateChannel(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -355,7 +355,7 @@ func UpdateChannel(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/channels/{id} [delete]
+// @Router /api/v1/blog/channels/{id} [delete]
 func DeleteChannel(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -520,7 +520,7 @@ func DeleteChannel(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "合集 UUID"
 // @Success 200 {object} CollectionResponse
 // @Failure 404 {object} ErrorResponse
-// @Router /api/blog/collections/{id} [get]
+// @Router /api/v1/blog/collections/{id} [get]
 func GetCollection(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -544,7 +544,7 @@ func GetCollection(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "频道 UUID"
 // @Success 200 {object} CollectionListResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/blog/channels/{id}/collections [get]
+// @Router /api/v1/blog/channels/{id}/collections [get]
 func GetChannelCollections(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		channelID := c.Param("id")
@@ -569,7 +569,7 @@ func GetChannelCollections(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} CollectionListResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/blog/channels/slug/{slug}/collections [get]
+// @Router /api/v1/blog/channels/slug/{slug}/collections [get]
 func GetChannelCollectionsBySlug(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		slug := strings.TrimSpace(c.Param("slug"))
@@ -600,7 +600,7 @@ func GetChannelCollectionsBySlug(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/collections [get]
+// @Router /api/v1/blog/collections [get]
 func GetUserCollections(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, exists := c.Get("user_id")
@@ -668,7 +668,7 @@ func GetUserCollections(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/channels/{id}/collections [post]
+// @Router /api/v1/blog/channels/{id}/collections [post]
 func CreateCollection(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		channelIDStr := c.Param("id")
@@ -749,7 +749,7 @@ func CreateCollection(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/collections/{id} [put]
+// @Router /api/v1/blog/collections/{id} [put]
 func UpdateCollection(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -823,7 +823,7 @@ func UpdateCollection(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/blog/collections/{id} [delete]
+// @Router /api/v1/blog/collections/{id} [delete]
 func DeleteCollection(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -861,7 +861,7 @@ func DeleteCollection(db *gorm.DB) gin.HandlerFunc {
 // @Param slug path string true "频道 slug"
 // @Success 200 {string} string "RSS XML"
 // @Failure 404 {object} ErrorResponse
-// @Router /api/blog/channels/slug/{slug}/rss/article [get]
+// @Router /api/v1/blog/channels/slug/{slug}/rss/article [get]
 func GetChannelArticleRSS(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		slug := c.Param("slug")

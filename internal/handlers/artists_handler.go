@@ -17,7 +17,7 @@ type ArtistInput struct {
 }
 
 func SetupArtistRoutes(router *gin.Engine, db *gorm.DB) {
-	artists := router.Group("/api/artists")
+	artists := router.Group("/api/v1/artists")
 	{
 		artists.GET("", GetArtistsHandler(db))
 		artists.POST("", middleware.AuthMiddleware(), CreateArtistHandler(db))
@@ -32,7 +32,7 @@ func SetupArtistRoutes(router *gin.Engine, db *gorm.DB) {
 // @Param q query string false "搜索关键字"
 // @Success 200 {array} model.Artist
 // @Failure 500 {object} ErrorResponse
-// @Router /api/artists [get]
+// @Router /api/v1/artists [get]
 func GetArtistsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		q := c.Query("q")
@@ -69,7 +69,7 @@ func GetArtistsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/artists [post]
+// @Router /api/v1/artists [post]
 func CreateArtistHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input ArtistInput

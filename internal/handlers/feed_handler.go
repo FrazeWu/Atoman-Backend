@@ -26,55 +26,35 @@ import (
 )
 
 func SetupFeedRoutes(router *gin.Engine, db *gorm.DB) {
-	feed := router.Group("/api/feed")
+	feed := router.Group("/api/v1/feed")
 	{
 		feed.GET("/rss/:username", GetUserRSS(db))
 
 		protected := feed.Group("")
 		protected.Use(middleware.AuthMiddleware())
 		{
-			protected.POST("/subscriptions", CreateSubscription(db))
 			protected.POST("/discover", DiscoverFeedCandidates())
 			protected.POST("/sources/create-from-provider", CreateSubscriptionFromProvider(db))
 			protected.DELETE("/subscriptions/:id", DeleteSubscription(db))
 			protected.PUT("/subscriptions/:id", UpdateSubscription(db))
-			protected.GET("/subscriptions", GetSubscriptions(db))
-			protected.GET("/timeline", GetTimeline(db))
 			protected.GET("/stats", GetFeedStats(db))
 			protected.GET("/items/:id", GetFeedItem(db))
-
-			protected.POST("/timeline/mark-read", MarkItemsRead(db))
-			protected.POST("/timeline/mark-all-read", MarkAllRead(db))
-			protected.POST("/timeline/mark-all-unread", MarkAllUnread(db))
-
 			protected.GET("/groups", GetSubscriptionGroups(db))
 			protected.POST("/groups", CreateSubscriptionGroup(db))
 			protected.PUT("/groups/:id", UpdateSubscriptionGroup(db))
 			protected.DELETE("/groups/:id", DeleteSubscriptionGroup(db))
 			protected.PUT("/subscriptions/:id/group", SetSubscriptionGroup(db))
-
 			protected.POST("/opml/import", ImportOPML(db))
 			protected.GET("/opml/export", ExportOPML(db))
-
-			protected.POST("/timeline/star", ToggleStar(db))
 			protected.GET("/stars", GetStarredItems(db))
 			protected.GET("/star-groups", GetFeedStarGroups(db))
 			protected.POST("/star-groups", CreateFeedStarGroup(db))
 			protected.PUT("/star-groups/:id", UpdateFeedStarGroup(db))
 			protected.DELETE("/star-groups/:id", DeleteFeedStarGroup(db))
 			protected.PUT("/stars/:feedItemId/group", SetFeedStarGroup(db))
-			protected.POST("/reading-list", ToggleReadingListItem(db))
-			protected.GET("/reading-list", GetReadingListItems(db))
-			protected.DELETE("/reading-list/:id", RemoveReadingListItem(db))
-
-			// Search subscriptions
 			protected.GET("/subscriptions/search", SearchSubscriptions(db))
-
-			// Health check endpoints
 			protected.POST("/subscriptions/:id/health", CheckSubscriptionHealth(db))
 			protected.POST("/subscriptions/health/check-all", CheckAllSubscriptionsHealth(db))
-
-			// Subscribe to channels and collections
 			protected.POST("/subscribe/channel/:channel_id", SubscribeChannel(db))
 			protected.DELETE("/subscribe/channel/:channel_id", UnsubscribeChannel(db))
 			protected.GET("/subscribe/channel/:channel_id/status", CheckChannelSubscription(db))
@@ -376,7 +356,7 @@ func resolveInternalRSSURL(db *gorm.DB, rawURL string) (uuid.UUID, error) {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscriptions [post]
+// @Router /api/v1/feed/subscriptions [post]
 func CreateSubscription(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input SubscriptionInput
@@ -523,7 +503,7 @@ func CreateSubscriptionFromProvider(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscriptions/{id} [delete]
+// @Router /api/v1/feed/subscriptions/{id} [delete]
 func DeleteSubscription(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -553,7 +533,7 @@ func DeleteSubscription(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} object
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscriptions/{id} [put]
+// @Router /api/v1/feed/subscriptions/{id} [put]
 func UpdateSubscription(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -615,7 +595,7 @@ func UpdateSubscription(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscriptions [get]
+// @Router /api/v1/feed/subscriptions [get]
 func GetSubscriptions(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -710,7 +690,7 @@ type feedReadEvent struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/timeline [get]
+// @Router /api/v1/feed/timeline [get]
 func GetTimeline(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -933,7 +913,7 @@ func GetTimeline(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/stats [get]
+// @Router /api/v1/feed/stats [get]
 func GetFeedStats(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -1110,7 +1090,7 @@ type MarkReadInput struct {
 // @Failure 400 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/timeline/mark-read [post]
+// @Router /api/v1/feed/timeline/mark-read [post]
 func MarkItemsRead(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input MarkReadInput
@@ -1145,7 +1125,7 @@ func MarkItemsRead(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} MessageResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/timeline/mark-all-read [post]
+// @Router /api/v1/feed/timeline/mark-all-read [post]
 func MarkAllRead(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -1192,7 +1172,7 @@ func MarkAllRead(db *gorm.DB) gin.HandlerFunc {
 // @Success 200 {object} MessageResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/timeline/mark-all-unread [post]
+// @Router /api/v1/feed/timeline/mark-all-unread [post]
 func MarkAllUnread(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -1238,7 +1218,7 @@ func MarkAllUnread(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/groups [get]
+// @Router /api/v1/feed/groups [get]
 func GetSubscriptionGroups(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -1275,7 +1255,7 @@ type GroupInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/groups [post]
+// @Router /api/v1/feed/groups [post]
 func CreateSubscriptionGroup(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var input GroupInput
@@ -1335,7 +1315,7 @@ func CreateSubscriptionGroup(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/groups/{id} [put]
+// @Router /api/v1/feed/groups/{id} [put]
 func UpdateSubscriptionGroup(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -1400,7 +1380,7 @@ func UpdateSubscriptionGroup(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/groups/{id} [delete]
+// @Router /api/v1/feed/groups/{id} [delete]
 func DeleteSubscriptionGroup(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
@@ -1454,7 +1434,7 @@ type SetGroupInput struct {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscriptions/{id}/group [put]
+// @Router /api/v1/feed/subscriptions/{id}/group [put]
 func SetSubscriptionGroup(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		subID := c.Param("id")
@@ -1525,7 +1505,7 @@ type RSSItem struct {
 // @Success 200 {string} string "RSS XML"
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Router /api/feed/rss/{username} [get]
+// @Router /api/v1/feed/rss/{username} [get]
 func GetUserRSS(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		username := c.Param("username")
@@ -1639,7 +1619,7 @@ func importFeedFromURL(db *gorm.DB, userID uuid.UUID, title, xmlURL string) erro
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/opml/import [post]
+// @Router /api/v1/feed/opml/import [post]
 func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -1709,7 +1689,7 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/opml/export [get]
+// @Router /api/v1/feed/opml/export [get]
 func ExportOPML(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -1802,7 +1782,7 @@ func ExportOPML(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/timeline/star [post]
+// @Router /api/v1/feed/timeline/star [post]
 func ToggleStar(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2021,7 +2001,7 @@ func SetFeedStarGroup(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/stars [get]
+// @Router /api/v1/feed/stars [get]
 func GetStarredItems(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2116,7 +2096,7 @@ func GetStarredItems(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/reading-list [post]
+// @Router /api/v1/feed/reading-list [post]
 func ToggleReadingListItem(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2179,7 +2159,7 @@ func ToggleReadingListItem(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/reading-list [get]
+// @Router /api/v1/feed/reading-list [get]
 func GetReadingListItems(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2228,7 +2208,7 @@ func GetReadingListItems(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/reading-list/{id} [delete]
+// @Router /api/v1/feed/reading-list/{id} [delete]
 func RemoveReadingListItem(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2262,7 +2242,7 @@ func RemoveReadingListItem(db *gorm.DB) gin.HandlerFunc {
 // @Failure 404 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscriptions/{id}/health [post]
+// @Router /api/v1/feed/subscriptions/{id}/health [post]
 func CheckSubscriptionHealth(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2354,7 +2334,7 @@ func CheckSubscriptionHealth(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscriptions/health/check-all [post]
+// @Router /api/v1/feed/subscriptions/health/check-all [post]
 func CheckAllSubscriptionsHealth(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2439,7 +2419,7 @@ func CheckAllSubscriptionsHealth(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscriptions/search [get]
+// @Router /api/v1/feed/subscriptions/search [get]
 func SearchSubscriptions(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2490,7 +2470,7 @@ func SearchSubscriptions(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/items/{id} [get]
+// @Router /api/v1/feed/items/{id} [get]
 func GetFeedItem(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		itemID := c.Param("id")
@@ -2554,7 +2534,7 @@ func GetFeedItem(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscribe/channel/{channel_id} [post]
+// @Router /api/v1/feed/subscribe/channel/{channel_id} [post]
 func SubscribeChannel(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2628,7 +2608,7 @@ func SubscribeChannel(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscribe/channel/{channel_id} [delete]
+// @Router /api/v1/feed/subscribe/channel/{channel_id} [delete]
 func UnsubscribeChannel(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2675,7 +2655,7 @@ func UnsubscribeChannel(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscribe/collection/{collection_id} [post]
+// @Router /api/v1/feed/subscribe/collection/{collection_id} [post]
 func SubscribeCollection(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2749,7 +2729,7 @@ func SubscribeCollection(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscribe/collection/{collection_id} [delete]
+// @Router /api/v1/feed/subscribe/collection/{collection_id} [delete]
 func UnsubscribeCollection(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2793,7 +2773,7 @@ func UnsubscribeCollection(db *gorm.DB) gin.HandlerFunc {
 // @Failure 400 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscribe/channel/{channel_id}/status [get]
+// @Router /api/v1/feed/subscribe/channel/{channel_id}/status [get]
 func CheckChannelSubscription(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2839,7 +2819,7 @@ func CheckChannelSubscription(db *gorm.DB) gin.HandlerFunc {
 // @Failure 400 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/subscribe/collection/{collection_id}/status [get]
+// @Router /api/v1/feed/subscribe/collection/{collection_id}/status [get]
 func CheckCollectionSubscription(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2886,7 +2866,7 @@ func CheckCollectionSubscription(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/feed/explore [get]
+// @Router /api/v1/feed/explore [get]
 func GetExploreFeed(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sort := c.DefaultQuery("sort", "random")

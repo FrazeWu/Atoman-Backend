@@ -15,7 +15,7 @@ const docTemplate = `{
     "host": "{{.Host}}",
     "basePath": "{{.BasePath}}",
     "paths": {
-        "/api/admin/artists/{id}/merge": {
+        "/api/v1/admin/artists/{id}/merge": {
             "post": {
                 "security": [
                     {
@@ -76,7 +76,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/discussions/{id}": {
+        "/api/v1/admin/discussions/{id}": {
             "delete": {
                 "security": [
                     {
@@ -131,7 +131,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/music/entries": {
+        "/api/v1/admin/music/entries": {
             "get": {
                 "security": [
                     {
@@ -196,7 +196,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/album-corrections": {
+        "/api/v1/admin/reviews/album-corrections": {
             "get": {
                 "security": [
                     {
@@ -233,7 +233,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/album-corrections/{id}/approve": {
+        "/api/v1/admin/reviews/album-corrections/{id}/approve": {
             "post": {
                 "security": [
                     {
@@ -282,7 +282,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/album-corrections/{id}/reject": {
+        "/api/v1/admin/reviews/album-corrections/{id}/reject": {
             "post": {
                 "security": [
                     {
@@ -331,7 +331,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/albums": {
+        "/api/v1/admin/reviews/albums": {
             "get": {
                 "security": [
                     {
@@ -368,7 +368,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/albums/{id}/approve": {
+        "/api/v1/admin/reviews/albums/{id}/approve": {
             "post": {
                 "security": [
                     {
@@ -417,7 +417,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/albums/{id}/reject": {
+        "/api/v1/admin/reviews/albums/{id}/reject": {
             "post": {
                 "security": [
                     {
@@ -466,7 +466,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/artist-corrections": {
+        "/api/v1/admin/reviews/artist-corrections": {
             "get": {
                 "security": [
                     {
@@ -503,7 +503,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/artist-corrections/{id}/approve": {
+        "/api/v1/admin/reviews/artist-corrections/{id}/approve": {
             "post": {
                 "security": [
                     {
@@ -552,7 +552,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/artist-corrections/{id}/reject": {
+        "/api/v1/admin/reviews/artist-corrections/{id}/reject": {
             "post": {
                 "security": [
                     {
@@ -601,7 +601,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/revisions/{id}/approve": {
+        "/api/v1/admin/reviews/revisions/{id}/approve": {
             "post": {
                 "security": [
                     {
@@ -661,7 +661,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/revisions/{id}/reject": {
+        "/api/v1/admin/reviews/revisions/{id}/reject": {
             "post": {
                 "security": [
                     {
@@ -722,7 +722,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/song-corrections": {
+        "/api/v1/admin/reviews/song-corrections": {
             "get": {
                 "security": [
                     {
@@ -759,7 +759,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/song-corrections/{id}/approve": {
+        "/api/v1/admin/reviews/song-corrections/{id}/approve": {
             "post": {
                 "security": [
                     {
@@ -808,7 +808,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/song-corrections/{id}/reject": {
+        "/api/v1/admin/reviews/song-corrections/{id}/reject": {
             "post": {
                 "security": [
                     {
@@ -851,7 +851,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/songs": {
+        "/api/v1/admin/reviews/songs": {
             "get": {
                 "security": [
                     {
@@ -888,7 +888,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/songs/{id}/approve": {
+        "/api/v1/admin/reviews/songs/{id}/approve": {
             "post": {
                 "security": [
                     {
@@ -937,7 +937,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/admin/reviews/songs/{id}/reject": {
+        "/api/v1/admin/reviews/songs/{id}/reject": {
             "post": {
                 "security": [
                     {
@@ -986,7 +986,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums": {
+        "/api/v1/albums": {
             "get": {
                 "description": "返回所有未关闭的专辑列表。",
                 "produces": [
@@ -1108,7 +1108,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}": {
+        "/api/v1/albums/{id}": {
             "get": {
                 "description": "按 UUID 返回专辑详情。",
                 "produces": [
@@ -1312,7 +1312,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}/discussions": {
+        "/api/v1/albums/{id}/discussions": {
             "get": {
                 "description": "分页返回专辑的顶层讨论及其已预加载的回复。",
                 "produces": [
@@ -1424,7 +1424,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}/discussions/unread-count": {
+        "/api/v1/albums/{id}/discussions/unread-count": {
             "get": {
                 "description": "返回专辑下未读且未删除的讨论数量。",
                 "produces": [
@@ -1465,7 +1465,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}/discussions/{discussion_id}": {
+        "/api/v1/albums/{id}/discussions/{discussion_id}": {
             "put": {
                 "security": [
                     {
@@ -1611,7 +1611,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}/discussions/{discussion_id}/reply": {
+        "/api/v1/albums/{id}/discussions/{discussion_id}/reply": {
             "post": {
                 "security": [
                     {
@@ -1685,7 +1685,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}/entry-status": {
+        "/api/v1/albums/{id}/entry-status": {
             "put": {
                 "security": [
                     {
@@ -1746,7 +1746,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}/protection": {
+        "/api/v1/albums/{id}/protection": {
             "get": {
                 "description": "返回专辑当前的保护级别与保护元数据；未设置时返回 none。",
                 "produces": [
@@ -1899,7 +1899,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}/revisions": {
+        "/api/v1/albums/{id}/revisions": {
             "get": {
                 "description": "分页返回专辑条目的 revision 历史。",
                 "produces": [
@@ -2023,7 +2023,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}/revisions/diff": {
+        "/api/v1/albums/{id}/revisions/diff": {
             "get": {
                 "description": "比较专辑两个版本之间的字段差异。",
                 "produces": [
@@ -2078,7 +2078,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}/revisions/{version}": {
+        "/api/v1/albums/{id}/revisions/{version}": {
             "get": {
                 "description": "返回专辑某个版本号对应的 revision 详情。",
                 "produces": [
@@ -2126,7 +2126,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/albums/{id}/revisions/{version}/revert": {
+        "/api/v1/albums/{id}/revisions/{version}/revert": {
             "post": {
                 "security": [
                     {
@@ -2193,7 +2193,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists": {
+        "/api/v1/artists": {
             "get": {
                 "description": "返回艺人列表，可按名称或别名搜索。",
                 "produces": [
@@ -2288,7 +2288,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}": {
+        "/api/v1/artists/{id}": {
             "get": {
                 "description": "返回艺人详情、别名与专辑信息；若该艺人已合并则附带 redirect_to。",
                 "produces": [
@@ -2400,7 +2400,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/aliases": {
+        "/api/v1/artists/{id}/aliases": {
             "get": {
                 "description": "返回指定艺人的所有别名。",
                 "produces": [
@@ -2500,7 +2500,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/aliases/{aliasId}": {
+        "/api/v1/artists/{id}/aliases/{aliasId}": {
             "delete": {
                 "security": [
                     {
@@ -2556,7 +2556,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/discussions": {
+        "/api/v1/artists/{id}/discussions": {
             "get": {
                 "description": "分页返回艺人条目的顶层讨论及其回复。",
                 "produces": [
@@ -2668,7 +2668,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/discussions/{discussion_id}": {
+        "/api/v1/artists/{id}/discussions/{discussion_id}": {
             "delete": {
                 "security": [
                     {
@@ -2730,7 +2730,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/discussions/{discussion_id}/reply": {
+        "/api/v1/artists/{id}/discussions/{discussion_id}/reply": {
             "post": {
                 "security": [
                     {
@@ -2798,7 +2798,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/edit": {
+        "/api/v1/artists/{id}/edit": {
             "post": {
                 "security": [
                     {
@@ -2871,7 +2871,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/entry-status": {
+        "/api/v1/artists/{id}/entry-status": {
             "put": {
                 "security": [
                     {
@@ -2932,7 +2932,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/protection": {
+        "/api/v1/artists/{id}/protection": {
             "get": {
                 "description": "返回艺人当前的保护级别与保护元数据；未设置时返回 none。",
                 "produces": [
@@ -3085,7 +3085,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/revert/{version}": {
+        "/api/v1/artists/{id}/revert/{version}": {
             "post": {
                 "security": [
                     {
@@ -3152,7 +3152,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/revisions": {
+        "/api/v1/artists/{id}/revisions": {
             "get": {
                 "description": "分页返回艺人条目的 revision 历史。",
                 "produces": [
@@ -3205,7 +3205,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/artists/{id}/revisions/{version}": {
+        "/api/v1/artists/{id}/revisions/{version}": {
             "get": {
                 "description": "按版本号返回艺人 revision 详情。",
                 "produces": [
@@ -3253,7 +3253,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/auth/login": {
+        "/api/v1/auth/login": {
             "post": {
                 "description": "使用用户名或邮箱登录并返回登录态。",
                 "consumes": [
@@ -3305,7 +3305,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/auth/logout": {
+        "/api/v1/auth/logout": {
             "post": {
                 "description": "清除认证 Cookie。",
                 "produces": [
@@ -3322,7 +3322,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/auth/onboarding/complete": {
+        "/api/v1/auth/onboarding/complete": {
             "post": {
                 "security": [
                     {
@@ -3362,7 +3362,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/auth/register": {
+        "/api/v1/auth/register": {
             "post": {
                 "description": "验证邮箱验证码后创建账号并返回登录态。",
                 "consumes": [
@@ -3408,7 +3408,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/auth/send-verification": {
+        "/api/v1/auth/send-verification": {
             "post": {
                 "description": "向指定邮箱发送 6 位验证码。",
                 "consumes": [
@@ -3454,7 +3454,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/auth/session": {
+        "/api/v1/auth/session": {
             "get": {
                 "security": [
                     {
@@ -3488,7 +3488,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/auth/verify-email": {
+        "/api/v1/auth/verify-email": {
             "post": {
                 "description": "校验邮箱与验证码是否匹配。",
                 "consumes": [
@@ -3534,7 +3534,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/bookmark-folders": {
+        "/api/v1/blog/bookmark-folders": {
             "get": {
                 "security": [
                     {
@@ -3620,7 +3620,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/bookmark-folders/{id}": {
+        "/api/v1/blog/bookmark-folders/{id}": {
             "delete": {
                 "security": [
                     {
@@ -3669,7 +3669,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/bookmarks": {
+        "/api/v1/blog/bookmarks": {
             "get": {
                 "security": [
                     {
@@ -3769,7 +3769,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/bookmarks/{id}": {
+        "/api/v1/blog/bookmarks/{id}": {
             "delete": {
                 "security": [
                     {
@@ -3818,7 +3818,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/channels": {
+        "/api/v1/blog/channels": {
             "get": {
                 "description": "返回频道列表，可按用户 UUID 过滤。",
                 "produces": [
@@ -3916,7 +3916,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/channels/ensure-default": {
+        "/api/v1/blog/channels/ensure-default": {
             "post": {
                 "security": [
                     {
@@ -3956,7 +3956,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/channels/slug/{slug}": {
+        "/api/v1/blog/channels/slug/{slug}": {
             "get": {
                 "description": "按频道 slug 返回频道详情。",
                 "produces": [
@@ -3991,7 +3991,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/channels/slug/{slug}/collections": {
+        "/api/v1/blog/channels/slug/{slug}/collections": {
             "get": {
                 "description": "返回指定频道 slug 下的所有合集。",
                 "produces": [
@@ -4032,7 +4032,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/channels/slug/{slug}/rss/article": {
+        "/api/v1/blog/channels/slug/{slug}/rss/article": {
             "get": {
                 "description": "输出指定频道已发布文章的 RSS 2.0 XML。",
                 "produces": [
@@ -4067,7 +4067,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/channels/{id}": {
+        "/api/v1/blog/channels/{id}": {
             "get": {
                 "description": "按频道 UUID 返回频道详情。",
                 "produces": [
@@ -4256,7 +4256,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/channels/{id}/collections": {
+        "/api/v1/blog/channels/{id}/collections": {
             "get": {
                 "description": "返回指定频道 UUID 下的所有合集。",
                 "produces": [
@@ -4368,7 +4368,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/collections": {
+        "/api/v1/blog/collections": {
             "get": {
                 "security": [
                     {
@@ -4408,7 +4408,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/collections/{id}": {
+        "/api/v1/blog/collections/{id}": {
             "get": {
                 "description": "按合集 UUID 返回合集详情。",
                 "produces": [
@@ -4573,7 +4573,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/comments/{id}": {
+        "/api/v1/blog/comments/{id}": {
             "delete": {
                 "security": [
                     {
@@ -4634,7 +4634,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/drafts": {
+        "/api/v1/blog/drafts": {
             "get": {
                 "security": [
                     {
@@ -4782,7 +4782,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/explore": {
+        "/api/v1/blog/explore": {
             "get": {
                 "description": "返回已发布文章的分页列表，并附带点赞数和评论数。",
                 "produces": [
@@ -4824,7 +4824,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/likes": {
+        "/api/v1/blog/likes": {
             "post": {
                 "security": [
                     {
@@ -4942,7 +4942,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts": {
+        "/api/v1/blog/posts": {
             "get": {
                 "description": "返回已发布文章，可按用户、频道或合集筛选。",
                 "produces": [
@@ -5058,7 +5058,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts/drafts": {
+        "/api/v1/blog/posts/drafts": {
             "get": {
                 "security": [
                     {
@@ -5092,7 +5092,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts/{id}": {
+        "/api/v1/blog/posts/{id}": {
             "get": {
                 "description": "返回指定文章；若文章为草稿，则仅作者本人可查看。",
                 "produces": [
@@ -5257,7 +5257,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts/{id}/collections": {
+        "/api/v1/blog/posts/{id}/collections": {
             "post": {
                 "security": [
                     {
@@ -5330,7 +5330,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts/{id}/collections/{collection_id}": {
+        "/api/v1/blog/posts/{id}/collections/{collection_id}": {
             "delete": {
                 "security": [
                     {
@@ -5398,7 +5398,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts/{id}/comments": {
+        "/api/v1/blog/posts/{id}/comments": {
             "get": {
                 "description": "返回指定文章的可见评论列表。",
                 "produces": [
@@ -5502,7 +5502,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts/{id}/likes/count": {
+        "/api/v1/blog/posts/{id}/likes/count": {
             "get": {
                 "description": "返回指定文章的点赞总数。",
                 "produces": [
@@ -5543,7 +5543,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts/{id}/pin": {
+        "/api/v1/blog/posts/{id}/pin": {
             "post": {
                 "security": [
                     {
@@ -5598,7 +5598,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts/{id}/publish": {
+        "/api/v1/blog/posts/{id}/publish": {
             "post": {
                 "security": [
                     {
@@ -5653,7 +5653,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts/{id}/unpin": {
+        "/api/v1/blog/posts/{id}/unpin": {
             "post": {
                 "security": [
                     {
@@ -5708,7 +5708,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/posts/{id}/unpublish": {
+        "/api/v1/blog/posts/{id}/unpublish": {
             "post": {
                 "security": [
                     {
@@ -5763,7 +5763,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/blog/upload-image": {
+        "/api/v1/blog/upload-image": {
             "post": {
                 "security": [
                     {
@@ -5821,7 +5821,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/channels/slug/{slug}/rss/video": {
+        "/api/v1/channels/slug/{slug}/rss/video": {
             "get": {
                 "description": "输出指定频道的公开视频 RSS。",
                 "produces": [
@@ -5856,7 +5856,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/channels/{slug}/rss/podcast": {
+        "/api/v1/channels/{slug}/rss/podcast": {
             "get": {
                 "description": "输出指定频道的播客 RSS。",
                 "produces": [
@@ -5891,7 +5891,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/corrections/album": {
+        "/api/v1/corrections/album": {
             "post": {
                 "security": [
                     {
@@ -5973,7 +5973,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/corrections/artist": {
+        "/api/v1/corrections/artist": {
             "post": {
                 "security": [
                     {
@@ -6039,7 +6039,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/corrections/song": {
+        "/api/v1/corrections/song": {
             "post": {
                 "security": [
                     {
@@ -6093,7 +6093,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/arguments/{id}": {
+        "/api/v1/debate/arguments/{id}": {
             "put": {
                 "security": [
                     {
@@ -6213,7 +6213,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/arguments/{id}/debate-reference": {
+        "/api/v1/debate/arguments/{id}/debate-reference": {
             "post": {
                 "security": [
                     {
@@ -6280,7 +6280,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/arguments/{id}/debate-reference/{debate_id}": {
+        "/api/v1/debate/arguments/{id}/debate-reference/{debate_id}": {
             "delete": {
                 "security": [
                     {
@@ -6336,7 +6336,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/arguments/{id}/fold": {
+        "/api/v1/debate/arguments/{id}/fold": {
             "post": {
                 "security": [
                     {
@@ -6443,7 +6443,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/arguments/{id}/reference": {
+        "/api/v1/debate/arguments/{id}/reference": {
             "post": {
                 "security": [
                     {
@@ -6510,7 +6510,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/arguments/{id}/reference/{ref_id}": {
+        "/api/v1/debate/arguments/{id}/reference/{ref_id}": {
             "delete": {
                 "security": [
                     {
@@ -6566,7 +6566,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/arguments/{id}/vote": {
+        "/api/v1/debate/arguments/{id}/vote": {
             "post": {
                 "security": [
                     {
@@ -6668,7 +6668,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/arguments/{id}/votes": {
+        "/api/v1/debate/arguments/{id}/votes": {
             "get": {
                 "security": [
                     {
@@ -6717,7 +6717,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/topics": {
+        "/api/v1/debate/topics": {
             "get": {
                 "description": "分页返回辩题列表，支持按状态和标签筛选。",
                 "produces": [
@@ -6821,7 +6821,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/topics/search": {
+        "/api/v1/debate/topics/search": {
             "get": {
                 "description": "按标题或描述搜索辩题。",
                 "produces": [
@@ -6861,7 +6861,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/topics/{id}": {
+        "/api/v1/debate/topics/{id}": {
             "get": {
                 "description": "返回单个辩题详情，并增加一次浏览计数。",
                 "produces": [
@@ -7014,7 +7014,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/topics/{id}/arguments": {
+        "/api/v1/debate/topics/{id}/arguments": {
             "get": {
                 "description": "返回辩题下的论点列表，并在已登录时附带当前用户投票映射。",
                 "produces": [
@@ -7114,7 +7114,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/topics/{id}/conclude": {
+        "/api/v1/debate/topics/{id}/conclude": {
             "post": {
                 "security": [
                     {
@@ -7187,7 +7187,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/topics/{id}/conclude-vote": {
+        "/api/v1/debate/topics/{id}/conclude-vote": {
             "post": {
                 "security": [
                     {
@@ -7248,7 +7248,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/debate/topics/{id}/reopen": {
+        "/api/v1/debate/topics/{id}/reopen": {
             "post": {
                 "security": [
                     {
@@ -7303,7 +7303,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/dm/conversations": {
+        "/api/v1/dm/conversations": {
             "get": {
                 "security": [
                     {
@@ -7337,7 +7337,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/dm/conversations/{username}": {
+        "/api/v1/dm/conversations/{username}": {
             "get": {
                 "security": [
                     {
@@ -7470,7 +7470,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/dm/conversations/{username}/read": {
+        "/api/v1/dm/conversations/{username}/read": {
             "put": {
                 "security": [
                     {
@@ -7519,7 +7519,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/dm/unread-count": {
+        "/api/v1/dm/unread-count": {
             "get": {
                 "security": [
                     {
@@ -7553,7 +7553,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/dm/upload": {
+        "/api/v1/dm/upload": {
             "post": {
                 "security": [
                     {
@@ -7605,7 +7605,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/explore": {
+        "/api/v1/feed/explore": {
             "get": {
                 "security": [
                     {
@@ -7663,7 +7663,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/groups": {
+        "/api/v1/feed/groups": {
             "get": {
                 "security": [
                     {
@@ -7749,7 +7749,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/groups/{id}": {
+        "/api/v1/feed/groups/{id}": {
             "put": {
                 "security": [
                     {
@@ -7869,7 +7869,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/items/{id}": {
+        "/api/v1/feed/items/{id}": {
             "get": {
                 "security": [
                     {
@@ -7924,7 +7924,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/opml/export": {
+        "/api/v1/feed/opml/export": {
             "get": {
                 "security": [
                     {
@@ -7958,7 +7958,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/opml/import": {
+        "/api/v1/feed/opml/import": {
             "post": {
                 "security": [
                     {
@@ -8010,7 +8010,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/reading-list": {
+        "/api/v1/feed/reading-list": {
             "get": {
                 "security": [
                     {
@@ -8116,7 +8116,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/reading-list/{id}": {
+        "/api/v1/feed/reading-list/{id}": {
             "delete": {
                 "security": [
                     {
@@ -8165,7 +8165,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/rss/{username}": {
+        "/api/v1/feed/rss/{username}": {
             "get": {
                 "description": "输出指定用户的博客 RSS。",
                 "produces": [
@@ -8206,7 +8206,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/stars": {
+        "/api/v1/feed/stars": {
             "get": {
                 "security": [
                     {
@@ -8254,7 +8254,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/stats": {
+        "/api/v1/feed/stats": {
             "get": {
                 "security": [
                     {
@@ -8307,7 +8307,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/subscribe/channel/{channel_id}": {
+        "/api/v1/feed/subscribe/channel/{channel_id}": {
             "post": {
                 "security": [
                     {
@@ -8421,7 +8421,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/subscribe/channel/{channel_id}/status": {
+        "/api/v1/feed/subscribe/channel/{channel_id}/status": {
             "get": {
                 "security": [
                     {
@@ -8464,7 +8464,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/subscribe/collection/{collection_id}": {
+        "/api/v1/feed/subscribe/collection/{collection_id}": {
             "post": {
                 "security": [
                     {
@@ -8578,7 +8578,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/subscribe/collection/{collection_id}/status": {
+        "/api/v1/feed/subscribe/collection/{collection_id}/status": {
             "get": {
                 "security": [
                     {
@@ -8621,7 +8621,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/subscriptions": {
+        "/api/v1/feed/subscriptions": {
             "get": {
                 "security": [
                     {
@@ -8707,7 +8707,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/subscriptions/health/check-all": {
+        "/api/v1/feed/subscriptions/health/check-all": {
             "post": {
                 "security": [
                     {
@@ -8741,7 +8741,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/subscriptions/search": {
+        "/api/v1/feed/subscriptions/search": {
             "get": {
                 "security": [
                     {
@@ -8796,7 +8796,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/subscriptions/{id}": {
+        "/api/v1/feed/subscriptions/{id}": {
             "put": {
                 "security": [
                     {
@@ -8904,7 +8904,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/subscriptions/{id}/group": {
+        "/api/v1/feed/subscriptions/{id}/group": {
             "put": {
                 "security": [
                     {
@@ -8965,7 +8965,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/subscriptions/{id}/health": {
+        "/api/v1/feed/subscriptions/{id}/health": {
             "post": {
                 "security": [
                     {
@@ -9020,7 +9020,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/timeline": {
+        "/api/v1/feed/timeline": {
             "get": {
                 "security": [
                     {
@@ -9102,7 +9102,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/timeline/mark-all-read": {
+        "/api/v1/feed/timeline/mark-all-read": {
             "post": {
                 "security": [
                     {
@@ -9130,7 +9130,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/timeline/mark-all-unread": {
+        "/api/v1/feed/timeline/mark-all-unread": {
             "post": {
                 "security": [
                     {
@@ -9158,7 +9158,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/timeline/mark-read": {
+        "/api/v1/feed/timeline/mark-read": {
             "post": {
                 "security": [
                     {
@@ -9206,7 +9206,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/feed/timeline/star": {
+        "/api/v1/feed/timeline/star": {
             "post": {
                 "security": [
                     {
@@ -9266,7 +9266,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/categories": {
+        "/api/v1/forum/categories": {
             "get": {
                 "description": "返回全部论坛分类以及每个分类的话题数量。",
                 "produces": [
@@ -9350,7 +9350,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/category-requests": {
+        "/api/v1/forum/category-requests": {
             "get": {
                 "security": [
                     {
@@ -9436,7 +9436,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/category-requests/{id}/review": {
+        "/api/v1/forum/category-requests/{id}/review": {
             "post": {
                 "security": [
                     {
@@ -9509,7 +9509,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/drafts": {
+        "/api/v1/forum/drafts": {
             "get": {
                 "security": [
                     {
@@ -9645,7 +9645,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/replies/{id}": {
+        "/api/v1/forum/replies/{id}": {
             "put": {
                 "security": [
                     {
@@ -9765,7 +9765,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/replies/{id}/like": {
+        "/api/v1/forum/replies/{id}/like": {
             "post": {
                 "security": [
                     {
@@ -9808,7 +9808,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/replies/{id}/solve": {
+        "/api/v1/forum/replies/{id}/solve": {
             "post": {
                 "security": [
                     {
@@ -9922,7 +9922,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/report": {
+        "/api/v1/forum/report": {
             "post": {
                 "security": [
                     {
@@ -9982,7 +9982,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/search": {
+        "/api/v1/forum/search": {
             "get": {
                 "description": "按标题或正文搜索论坛话题。",
                 "produces": [
@@ -10030,7 +10030,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/topics": {
+        "/api/v1/forum/topics": {
             "get": {
                 "description": "返回论坛话题分页列表，支持分类、标签、搜索和排序筛选。",
                 "produces": [
@@ -10149,7 +10149,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/topics/{id}": {
+        "/api/v1/forum/topics/{id}": {
             "get": {
                 "description": "返回指定话题详情，并在允许时更新浏览量与当前用户状态。",
                 "produces": [
@@ -10308,7 +10308,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/topics/{id}/bookmark": {
+        "/api/v1/forum/topics/{id}/bookmark": {
             "post": {
                 "security": [
                     {
@@ -10351,7 +10351,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/topics/{id}/close": {
+        "/api/v1/forum/topics/{id}/close": {
             "post": {
                 "security": [
                     {
@@ -10406,7 +10406,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/topics/{id}/feature": {
+        "/api/v1/forum/topics/{id}/feature": {
             "post": {
                 "security": [
                     {
@@ -10502,7 +10502,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/topics/{id}/like": {
+        "/api/v1/forum/topics/{id}/like": {
             "post": {
                 "security": [
                     {
@@ -10551,7 +10551,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/topics/{id}/pin": {
+        "/api/v1/forum/topics/{id}/pin": {
             "post": {
                 "security": [
                     {
@@ -10606,7 +10606,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/forum/topics/{id}/replies": {
+        "/api/v1/forum/topics/{id}/replies": {
             "get": {
                 "description": "返回指定话题下的回复列表，支持按 oldest 或 best 排序。",
                 "produces": [
@@ -10725,7 +10725,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/notifications": {
+        "/api/v1/notifications": {
             "get": {
                 "security": [
                     {
@@ -10780,7 +10780,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/notifications/read-all": {
+        "/api/v1/notifications/read-all": {
             "put": {
                 "security": [
                     {
@@ -10828,7 +10828,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/notifications/unread-count": {
+        "/api/v1/notifications/unread-count": {
             "get": {
                 "security": [
                     {
@@ -10868,7 +10868,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/notifications/{id}/read": {
+        "/api/v1/notifications/{id}/read": {
             "put": {
                 "security": [
                     {
@@ -10923,7 +10923,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/podcast/episodes": {
+        "/api/v1/podcast/episodes": {
             "get": {
                 "description": "返回所有已发布的播客单集。",
                 "produces": [
@@ -11028,7 +11028,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/podcast/episodes/{id}": {
+        "/api/v1/podcast/episodes/{id}": {
             "get": {
                 "description": "按 UUID 返回单个播客单集。",
                 "produces": [
@@ -11187,7 +11187,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/podcast/shows/{channelSlug}/episodes": {
+        "/api/v1/podcast/shows/{channelSlug}/episodes": {
             "get": {
                 "description": "返回某个频道下已发布的播客单集。",
                 "produces": [
@@ -11222,7 +11222,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/podcast/upload-audio": {
+        "/api/v1/podcast/upload-audio": {
             "post": {
                 "security": [
                     {
@@ -11274,7 +11274,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/podcast/upload-cover": {
+        "/api/v1/podcast/upload-cover": {
             "post": {
                 "security": [
                     {
@@ -11326,7 +11326,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs": {
+        "/api/v1/songs": {
             "get": {
                 "description": "返回所有未关闭的歌曲公开列表。",
                 "produces": [
@@ -11466,7 +11466,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}": {
+        "/api/v1/songs/{id}": {
             "get": {
                 "description": "按 UUID 返回单首歌曲的公开信息。",
                 "produces": [
@@ -11658,7 +11658,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/annotations": {
+        "/api/v1/songs/{id}/annotations": {
             "get": {
                 "description": "按行号分组返回某首歌曲的歌词注释。",
                 "produces": [
@@ -11758,7 +11758,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/annotations/{annotationId}": {
+        "/api/v1/songs/{id}/annotations/{annotationId}": {
             "put": {
                 "security": [
                     {
@@ -11904,7 +11904,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/discussions": {
+        "/api/v1/songs/{id}/discussions": {
             "get": {
                 "description": "分页返回歌曲的顶层讨论及其已预加载的回复。",
                 "produces": [
@@ -12016,7 +12016,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/discussions/unread-count": {
+        "/api/v1/songs/{id}/discussions/unread-count": {
             "get": {
                 "description": "返回歌曲下未读且未删除的讨论数量。",
                 "produces": [
@@ -12057,7 +12057,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/discussions/{discussion_id}": {
+        "/api/v1/songs/{id}/discussions/{discussion_id}": {
             "put": {
                 "security": [
                     {
@@ -12203,7 +12203,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/discussions/{discussion_id}/reply": {
+        "/api/v1/songs/{id}/discussions/{discussion_id}/reply": {
             "post": {
                 "security": [
                     {
@@ -12277,7 +12277,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/protection": {
+        "/api/v1/songs/{id}/protection": {
             "get": {
                 "description": "返回歌曲当前的保护级别与保护元数据；未设置时返回 none。",
                 "produces": [
@@ -12430,7 +12430,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/revisions": {
+        "/api/v1/songs/{id}/revisions": {
             "get": {
                 "description": "分页返回歌曲条目的 revision 历史。",
                 "produces": [
@@ -12554,7 +12554,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/revisions/diff": {
+        "/api/v1/songs/{id}/revisions/diff": {
             "get": {
                 "description": "比较歌曲两个版本之间的字段差异。",
                 "produces": [
@@ -12609,7 +12609,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/revisions/{version}": {
+        "/api/v1/songs/{id}/revisions/{version}": {
             "get": {
                 "description": "返回歌曲某个版本号对应的 revision 详情。",
                 "produces": [
@@ -12657,7 +12657,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/songs/{id}/revisions/{version}/revert": {
+        "/api/v1/songs/{id}/revisions/{version}/revert": {
             "post": {
                 "security": [
                     {
@@ -12724,7 +12724,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/timeline/events": {
+        "/api/v1/timeline/events": {
             "post": {
                 "security": [
                     {
@@ -12778,7 +12778,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/timeline/events/{id}": {
+        "/api/v1/timeline/events/{id}": {
             "get": {
                 "description": "返回单个时间线事件详情。",
                 "produces": [
@@ -12931,7 +12931,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/timeline/events/{id}/history": {
+        "/api/v1/timeline/events/{id}/history": {
             "get": {
                 "security": [
                     {
@@ -12974,7 +12974,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/timeline/events/{id}/revert/{revision_id}": {
+        "/api/v1/timeline/events/{id}/revert/{revision_id}": {
             "post": {
                 "security": [
                     {
@@ -13036,7 +13036,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/timeline/locations/{id}": {
+        "/api/v1/timeline/locations/{id}": {
             "put": {
                 "security": [
                     {
@@ -13156,7 +13156,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/timeline/persons": {
+        "/api/v1/timeline/persons": {
             "get": {
                 "description": "分页返回公开人物，支持按名称搜索。",
                 "produces": [
@@ -13254,7 +13254,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/timeline/persons/{id}": {
+        "/api/v1/timeline/persons/{id}": {
             "get": {
                 "description": "返回人物详情及其地点轨迹。",
                 "produces": [
@@ -13407,7 +13407,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/timeline/persons/{id}/locations": {
+        "/api/v1/timeline/persons/{id}/locations": {
             "get": {
                 "description": "返回某个人物的地点轨迹列表。",
                 "produces": [
@@ -13519,7 +13519,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/users/by-username/{username}": {
+        "/api/v1/users/by-username/{username}": {
             "get": {
                 "description": "返回公开的用户摘要信息和关注统计。",
                 "produces": [
@@ -13554,7 +13554,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/users/me": {
+        "/api/v1/users/me": {
             "get": {
                 "security": [
                     {
@@ -13646,7 +13646,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/users/me/settings": {
+        "/api/v1/users/me/settings": {
             "get": {
                 "security": [
                     {
@@ -13726,7 +13726,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/users/roles": {
+        "/api/v1/users/roles": {
             "get": {
                 "security": [
                     {
@@ -13781,7 +13781,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/users/search": {
+        "/api/v1/users/search": {
             "get": {
                 "security": [
                     {
@@ -13836,7 +13836,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/users/{id}/follow": {
+        "/api/v1/users/{id}/follow": {
             "post": {
                 "security": [
                     {
@@ -13932,7 +13932,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/users/{id}/followers": {
+        "/api/v1/users/{id}/followers": {
             "get": {
                 "description": "返回关注该用户的用户列表。",
                 "produces": [
@@ -13967,7 +13967,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/users/{id}/following": {
+        "/api/v1/users/{id}/following": {
             "get": {
                 "description": "返回该用户正在关注的用户列表。",
                 "produces": [
@@ -14002,7 +14002,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/users/{id}/profile": {
+        "/api/v1/users/{id}/profile": {
             "get": {
                 "description": "通过 UUID 或用户名获取公开资料、统计信息和频道列表。",
                 "produces": [
@@ -14037,7 +14037,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/users/{id}/role": {
+        "/api/v1/users/{id}/role": {
             "put": {
                 "security": [
                     {
@@ -14110,7 +14110,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/videos": {
+        "/api/v1/videos": {
             "get": {
                 "description": "返回公开已发布的视频列表，可按频道、标签和排序方式筛选。",
                 "produces": [
@@ -14221,7 +14221,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/videos/comments/{commentID}": {
+        "/api/v1/videos/comments/{commentID}": {
             "delete": {
                 "security": [
                     {
@@ -14282,7 +14282,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/videos/upload-cover": {
+        "/api/v1/videos/upload-cover": {
             "post": {
                 "security": [
                     {
@@ -14334,7 +14334,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/videos/upload-video": {
+        "/api/v1/videos/upload-video": {
             "post": {
                 "security": [
                     {
@@ -14386,7 +14386,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/videos/{id}": {
+        "/api/v1/videos/{id}": {
             "get": {
                 "description": "按 UUID 返回单个视频详情。",
                 "produces": [
@@ -14539,7 +14539,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/videos/{id}/comments": {
+        "/api/v1/videos/{id}/comments": {
             "get": {
                 "description": "返回视频下所有可见评论。",
                 "produces": [
@@ -14645,7 +14645,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/videos/{id}/recommended": {
+        "/api/v1/videos/{id}/recommended": {
             "get": {
                 "description": "基于同频道和同标签返回推荐视频。",
                 "produces": [
@@ -14683,7 +14683,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/videos/{id}/view": {
+        "/api/v1/videos/{id}/view": {
             "post": {
                 "description": "为指定视频增加一次播放计数。",
                 "produces": [

@@ -24,7 +24,6 @@ import (
 
 	"atoman/internal/app"
 	"atoman/internal/collab"
-	"atoman/internal/handlers"
 	"atoman/internal/middleware"
 	"atoman/internal/migrations"
 	"atoman/internal/model"
@@ -37,7 +36,7 @@ import (
 // @title Atoman API
 // @version 1.0
 // @description Atoman 后端 API 文档。
-// @BasePath /
+// @BasePath /api/v1
 // @schemes http https
 // @securityDefinitions.apikey BearerAuth
 // @in header
@@ -473,7 +472,7 @@ ON CONFLICT (key) DO NOTHING`)
 	}
 
 	r := gin.Default()
-	docs.SwaggerInfo.BasePath = "/"
+	docs.SwaggerInfo.BasePath = "/api/v1"
 
 	// Configure allowed origins based on environment
 	allowedOrigins := []string{
@@ -529,48 +528,9 @@ ON CONFLICT (key) DO NOTHING`)
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
 	log.Println("Static files served from ./uploads directory")
 
-	handlers.SetupAuthRoutes(r, db, emailService)
-	handlers.SetupOnboardingRoutes(r, db)
-	handlers.SetupUserRoutes(r, db)
-	handlers.SetupBlogChannelRoutes(r, db)
-	handlers.SetupBlogPostRoutes(r, db)
-	handlers.SetupBlogInteractionRoutes(r, db)
-	handlers.SetupBlogUploadRoutes(r, db, s3Client)
-	handlers.SetupFeedRoutes(r, db)
-	handlers.SetupSongRoutes(r, db, s3Client)
-	handlers.SetupAlbumRoutes(r, db, s3Client)
-	handlers.SetupArtistRoutes(r, db)
-	handlers.SetupArtistWikiRoutes(r, db)
-	handlers.SetupCorrectionRoutes(r, db, s3Client)
-	handlers.SetupEntryStatusRoutes(r, db)
-	handlers.SetupLyricAnnotationRoutes(r, db)
-	notifSvc := service.NewNotificationService(db)
 	userHub := collab.NewUserHub()
-	handlers.SetupForumRoutes(r, db, notifSvc, userHub)
-	handlers.SetupNotificationRoutes(r, db, userHub)
-	handlers.SetupDMRoutes(r, db, userHub, s3Client)
-	handlers.SetupDebateRoutes(r, db)
-	handlers.SetupTimelineRoutes(r, db)
-	handlers.SetupVideoRoutes(r, db, s3Client)
-	r.GET("/ws/user", func(c *gin.Context) {
-		userHub.ServeWS(c, os.Getenv("JWT_SECRET"))
-	})
-
-	// Revision system routes (wiki-style collaboration)
-	handlers.SetupRevisionRoutes(r, db)
-	handlers.SetupDiscussionRoutes(r, db)
-	handlers.SetupProtectionRoutes(r, db)
-
-	// Real-time collaborative editing (Yjs WebSocket relay)
 	collabHub := collab.NewHub()
-	collabGroup := r.Group("/api/collab")
-	collabGroup.Use(middleware.AuthMiddleware())
-	collabGroup.GET("/ws/:roomID", handlers.RequireBlogPostEditAccess(db, collabHub.ServeWS))
-
-	// Admin routes
-	handlers.SetupPodcastRoutes(r, db, s3Client)
-	handlers.SetupAdminRoutes(r, db, s3Client)
-	app.RegisterV1Routes(r, db)
+	app.RegisterV1Routes(r, db, emailService, s3Client, userHub, collabHub)
 
 	// 404 handler - must be last
 	r.NoRoute(func(c *gin.Context) {
