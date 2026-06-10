@@ -1,8 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 
 	docs "atoman/docs"
@@ -164,6 +168,81 @@ func backfillExternalRSSFullTextEnabled(db *gorm.DB) {
 		Where("source_type = ? AND full_text_enabled = ?", "external_rss", false).
 		Update("full_text_enabled", true).Error; err != nil {
 		log.Printf("WARN: failed to backfill external RSS full_text_enabled: %v", err)
+	}
+}
+
+var internalRSSBackfillPattern = regexp.MustCompile(`(?:^|/)api/feed/rss/([^/?#]+)$`)
+
+func resolveInternalRSSUserIDForBackfill(db *gorm.DB, rawURL string) (uuid.UUID, error) {
+	m := internalRSSBackfillPattern.FindStringSubmatch(strings.TrimSpace(rawURL))
+	if len(m) < 2 {
+		return uuid.UUID{}, fmt.Errorf("not an internal RSS URL")
+	}
+
+	var user model.User
+	if err := db.Where("username = ?", m[1]).First(&user).Error; err != nil {
+		return uuid.UUID{}, err
+	}
+	return user.UUID, nil
+}
+
+func buildInternalFeedSourceHash(targetType string, targetID uuid.UUID) string {
+	raw := fmt.Sprintf("%s:%s", targetType, targetID.String())
+	h := sha256.New()
+	h.Write([]byte(raw))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+func mergeInternalRSSFeedSourceIntoCanonical(tx *gorm.DB, legacy model.FeedSource, canonical model.FeedSource) error {
+	if err := tx.Model(&model.Subscription{}).
+		Where("feed_source_id = ?", legacy.ID).
+		Update("feed_source_id", canonical.ID).Error; err != nil {
+		return err
+	}
+
+	return tx.Delete(&model.FeedSource{}, "id = ?", legacy.ID).Error
+}
+
+func backfillInternalRSSFeedSources(db *gorm.DB) {
+	var sources []model.FeedSource
+	if err := db.Where("source_type = ? AND rss_url LIKE ?", "external_rss", "/api/feed/rss/%").Find(&sources).Error; err != nil {
+		log.Printf("WARN: failed to load internal RSS feed source backfill candidates: %v", err)
+		return
+	}
+
+	for _, source := range sources {
+		userID, err := resolveInternalRSSUserIDForBackfill(db, source.RssURL)
+		if err != nil {
+			log.Printf("WARN: failed to resolve internal RSS feed source %s (%s): %v", source.ID, source.RssURL, err)
+			continue
+		}
+
+		targetHash := buildInternalFeedSourceHash("internal_user", userID)
+		var canonical model.FeedSource
+		if err := db.Where("hash = ?", targetHash).First(&canonical).Error; err == nil {
+			if canonical.ID == source.ID {
+				continue
+			}
+			if err := db.Transaction(func(tx *gorm.DB) error {
+				return mergeInternalRSSFeedSourceIntoCanonical(tx, source, canonical)
+			}); err != nil {
+				log.Printf("WARN: failed to merge internal RSS feed source %s into canonical %s: %v", source.ID, canonical.ID, err)
+			}
+			continue
+		}
+
+		updates := map[string]interface{}{
+			"source_type":   "internal_user",
+			"source_id":     userID,
+			"rss_url":       "",
+			"provider":      "internal",
+			"canonical_url": "",
+			"site_url":      "",
+			"hash":          targetHash,
+		}
+		if err := db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(updates).Error; err != nil {
+			log.Printf("WARN: failed to backfill internal RSS feed source %s: %v", source.ID, err)
+		}
 	}
 }
 
@@ -349,6 +428,8 @@ ON CONFLICT (key) DO NOTHING`)
 		backfillBlogChannelFields(db)
 		log.Println("Running external RSS full text enablement backfill...")
 		backfillExternalRSSFullTextEnabled(db)
+		log.Println("Running internal RSS feed source backfill...")
+		backfillInternalRSSFeedSources(db)
 
 		ensureSoftDeleteColumns(db)
 
