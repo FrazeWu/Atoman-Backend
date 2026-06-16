@@ -94,20 +94,6 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.PUT("/posts/:id/rating", h.setRating)
 }
 
-// createPost godoc
-// @Summary 创建文章
-// @Description 使用模块化博客服务创建文章。
-// @Tags blog
-// @Accept json
-// @Produce json
-// @Param input body CreatePostRequest true "文章输入"
-// @Success 201 {object} model.Post
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 500 {object} handlers.ErrorResponse
-// @Security BearerAuth
-// @Security CookieAuth
-// @Router /api/v1/blog/posts [post]
 // listPosts godoc
 // @Summary 获取已发布文章列表
 // @Description 返回已发布文章，可按用户、频道或合集筛选。
@@ -267,6 +253,20 @@ func boundedListLimit(raw string, fallback int, max int) int {
 	return value
 }
 
+// createPost godoc
+// @Summary 创建文章
+// @Description 使用模块化博客服务创建文章。
+// @Tags blog
+// @Accept json
+// @Produce json
+// @Param input body CreatePostRequest true "文章输入"
+// @Success 201 {object} model.Post
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/posts [post]
 func (h *Handler) createPost(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {

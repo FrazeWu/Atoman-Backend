@@ -6563,18 +6563,8 @@ paths:
       - blog-interactions
   /api/v1/blog/posts:
     get:
-      consumes:
-      - application/json
-      description: |-
-        使用模块化博客服务创建文章。
-        返回已发布文章，可按用户、频道或合集筛选。
+      description: 返回已发布文章，可按用户、频道或合集筛选。
       parameters:
-      - description: 文章输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/blog.CreatePostRequest'
       - description: 用户 UUID
         in: query
         name: user_id
@@ -6593,7 +6583,6 @@ paths:
         type: integer
       produces:
       - application/json
-      - application/json
       responses:
         "200":
           description: OK
@@ -6601,35 +6590,17 @@ paths:
             items:
               $ref: '#/definitions/model.Post'
             type: array
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/model.Post'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
       summary: 获取已发布文章列表
       tags:
-      - blog
       - blog
     post:
       consumes:
       - application/json
-      description: |-
-        使用模块化博客服务创建文章。
-        返回已发布文章，可按用户、频道或合集筛选。
+      description: 使用模块化博客服务创建文章。
       parameters:
       - description: 文章输入
         in: body
@@ -6637,32 +6608,9 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/blog.CreatePostRequest'
-      - description: 用户 UUID
-        in: query
-        name: user_id
-        type: string
-      - description: 频道 UUID
-        in: query
-        name: channel_id
-        type: string
-      - description: 合集 UUID
-        in: query
-        name: collection_id
-        type: string
-      - description: 返回数量上限
-        in: query
-        name: limit
-        type: integer
       produces:
       - application/json
-      - application/json
       responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.Post'
-            type: array
         "201":
           description: Created
           schema:
@@ -6682,9 +6630,8 @@ paths:
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 获取已发布文章列表
+      summary: 创建文章
       tags:
-      - blog
       - blog
   /api/v1/blog/posts/{id}:
     get:

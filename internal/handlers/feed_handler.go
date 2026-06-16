@@ -2378,18 +2378,6 @@ func GetReadingListItems(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
-// RemoveReadingListItem godoc
-// @Summary 移除稍后读条目
-// @Description 从稍后读列表中删除指定 feed item。
-// @Tags feed
-// @Produce json
-// @Param id path string true "Feed item UUID"
-// @Success 200 {object} RemoveStatusResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Security BearerAuth
-// @Security CookieAuth
-// @Router /api/v1/feed/reading-list/{id} [delete]
 func RemoveReadingListItem(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")

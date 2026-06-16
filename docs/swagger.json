@@ -4790,37 +4790,15 @@
         },
         "/api/v1/blog/posts": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "使用模块化博客服务创建文章。\n返回已发布文章，可按用户、频道或合集筛选。",
-                "consumes": [
-                    "application/json"
-                ],
+                "description": "返回已发布文章，可按用户、频道或合集筛选。",
                 "produces": [
-                    "application/json",
                     "application/json"
                 ],
                 "tags": [
-                    "blog",
                     "blog"
                 ],
                 "summary": "获取已发布文章列表",
                 "parameters": [
-                    {
-                        "description": "文章输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/blog.CreatePostRequest"
-                        }
-                    },
                     {
                         "type": "string",
                         "description": "用户 UUID",
@@ -4854,24 +4832,6 @@
                             "items": {
                                 "$ref": "#/definitions/model.Post"
                             }
-                        }
-                    },
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/model.Post"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "500": {
@@ -4891,19 +4851,17 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "使用模块化博客服务创建文章。\n返回已发布文章，可按用户、频道或合集筛选。",
+                "description": "使用模块化博客服务创建文章。",
                 "consumes": [
                     "application/json"
                 ],
                 "produces": [
-                    "application/json",
                     "application/json"
                 ],
                 "tags": [
-                    "blog",
                     "blog"
                 ],
-                "summary": "获取已发布文章列表",
+                "summary": "创建文章",
                 "parameters": [
                     {
                         "description": "文章输入",
@@ -4913,42 +4871,9 @@
                         "schema": {
                             "$ref": "#/definitions/blog.CreatePostRequest"
                         }
-                    },
-                    {
-                        "type": "string",
-                        "description": "用户 UUID",
-                        "name": "user_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "频道 UUID",
-                        "name": "channel_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "合集 UUID",
-                        "name": "collection_id",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "返回数量上限",
-                        "name": "limit",
-                        "in": "query"
                     }
                 ],
                 "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.Post"
-                            }
-                        }
-                    },
                     "201": {
                         "description": "Created",
                         "schema": {
