@@ -1,10 +1,14 @@
 package handlers
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,8 +17,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 
 	"atoman/internal/middleware"
 	"atoman/internal/migrations"
@@ -31,6 +37,20 @@ func newFeedHandlerTestDB(t *testing.T) *gorm.DB {
 	}
 	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionGroup{}, &model.Subscription{}, &model.FeedSource{}, &model.FeedItem{}, &model.FeedItemRead{}); err != nil {
 		t.Fatalf("migrate: %v", err)
+	}
+	return db
+}
+
+func newFeedHandlerTestDBWithLogBuffer(t *testing.T, sink io.Writer) *gorm.DB {
+	t.Helper()
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())
+	logger := gormlogger.New(log.New(sink, "", 0), gormlogger.Config{LogLevel: gormlogger.Info, Colorful: false})
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger})
+	if err != nil {
+		t.Fatalf("open sqlite with logger: %v", err)
+	}
+	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionGroup{}, &model.Subscription{}, &model.FeedSource{}, &model.FeedItem{}, &model.FeedItemRead{}); err != nil {
+		t.Fatalf("migrate with logger: %v", err)
 	}
 	return db
 }
@@ -132,6 +152,418 @@ func withFeedAuthRole(userID uuid.UUID, role string, h gin.HandlerFunc) gin.Hand
 		c.Set("user_id", userID)
 		c.Set("role", role)
 		h(c)
+	}
+}
+
+func newOPMLUploadRequest(t *testing.T, path string, opml string) *http.Request {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", path)
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := io.Copy(part, strings.NewReader(opml)); err != nil {
+		t.Fatalf("write opml body: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, path, &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
+}
+
+func countSubscriptionsForUser(t *testing.T, db *gorm.DB, userID uuid.UUID) int64 {
+	t.Helper()
+	var count int64
+	if err := db.Model(&model.Subscription{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+		t.Fatalf("count subscriptions: %v", err)
+	}
+	return count
+}
+
+func disableFeedSourceSync(t *testing.T) {
+	t.Helper()
+	original := syncFeedSource
+	syncFeedSource = func(db *gorm.DB, source model.FeedSource) {}
+	t.Cleanup(func() {
+		syncFeedSource = original
+	})
+}
+
+func signedFeedTokenForTest(t *testing.T, user model.User) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id":  user.UUID.String(),
+		"username": user.Username,
+		"role":     user.Role,
+		"exp":      time.Now().Add(time.Hour).Unix(),
+	})
+	signed, err := token.SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return signed
+}
+
+func TestImportGlobalOPMLCreatesFeedSourcesWithoutSubscriptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	admin := seedFeedAdminUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/sources/opml/import", withFeedAuth(admin.UUID, ImportGlobalOPML(db)))
+
+	opml := `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head><title>Feeds</title></head>
+  <body>
+    <outline text="Tech">
+      <outline text="Example Feed" type="rss" xmlUrl="https://example.com/feed.xml" />
+      <outline text="Example Two" type="rss" xmlUrl="https://example.com/two.xml" />
+    </outline>
+  </body>
+</opml>`
+
+	beforeSubscriptions := countSubscriptionsForUser(t, db, admin.UUID)
+	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var payload struct {
+		Message  string `json:"message"`
+		Imported int    `json:"imported"`
+		Reused   int    `json:"reused"`
+		Failed   int    `json:"failed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Imported != 2 || payload.Reused != 0 || payload.Failed != 0 {
+		t.Fatalf("unexpected import counts: %#v", payload)
+	}
+
+	var sources []model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").Order("created_at ASC").Find(&sources).Error; err != nil {
+		t.Fatalf("load feed sources: %v", err)
+	}
+	if len(sources) != 2 {
+		t.Fatalf("expected 2 external feed sources, got %d", len(sources))
+	}
+	if sources[0].RssURL != "https://example.com/feed.xml" || sources[0].Title != "Example Feed" {
+		t.Fatalf("unexpected first feed source: %#v", sources[0])
+	}
+	if afterSubscriptions := countSubscriptionsForUser(t, db, admin.UUID); afterSubscriptions != beforeSubscriptions {
+		t.Fatalf("expected subscriptions to remain %d, got %d", beforeSubscriptions, afterSubscriptions)
+	}
+}
+
+func TestImportGlobalOPMLReusesExistingFeedSources(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	admin := seedFeedAdminUser(t, db)
+
+	existing := model.FeedSource{
+		SourceType:   "external_rss",
+		Provider:     "rss",
+		RssURL:       "https://example.com/feed.xml",
+		CanonicalURL: "https://example.com/feed.xml",
+		Hash:         buildFeedSourceHash("external_rss", nil, "https://example.com/feed.xml"),
+		Title:        "Existing Feed",
+	}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create existing feed source: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/sources/opml/import", withFeedAuth(admin.UUID, ImportGlobalOPML(db)))
+
+	opml := `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <body>
+    <outline text="Existing Feed" type="rss" xmlUrl="https://example.com/feed.xml" />
+    <outline text="Brand New" type="rss" xmlUrl="https://example.com/new.xml" />
+  </body>
+</opml>`
+
+	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var payload struct {
+		Imported int `json:"imported"`
+		Reused   int `json:"reused"`
+		Failed   int `json:"failed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Imported != 1 || payload.Reused != 1 || payload.Failed != 0 {
+		t.Fatalf("unexpected import counts: %#v", payload)
+	}
+
+	var count int64
+	if err := db.Model(&model.FeedSource{}).Where("source_type = ?", "external_rss").Count(&count).Error; err != nil {
+		t.Fatalf("count feed sources: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected 2 external feed sources after reuse, got %d", count)
+	}
+}
+
+func TestImportGlobalOPMLCanonicalURLMatchCountsAsReused(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	admin := seedFeedAdminUser(t, db)
+
+	existing := model.FeedSource{
+		SourceType:   "external_rss",
+		Provider:     "rss",
+		RssURL:       "https://legacy.example.com/feed.xml/",
+		CanonicalURL: "https://example.com/feed.xml",
+		Hash:         "legacy-canonical-match-without-normalized-hash",
+		Title:        "Legacy Feed",
+	}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create canonical-match source: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/sources/opml/import", withFeedAuth(admin.UUID, ImportGlobalOPML(db)))
+
+	opml := `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <body>
+    <outline text="Legacy Feed" type="rss" xmlUrl="https://example.com/feed.xml" />
+  </body>
+</opml>`
+
+	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var payload struct {
+		Imported int `json:"imported"`
+		Reused   int `json:"reused"`
+		Failed   int `json:"failed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Imported != 0 || payload.Reused != 1 || payload.Failed != 0 {
+		t.Fatalf("unexpected import counts: %#v", payload)
+	}
+
+	var count int64
+	if err := db.Model(&model.FeedSource{}).Where("source_type = ?", "external_rss").Count(&count).Error; err != nil {
+		t.Fatalf("count feed sources: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected canonical_url match to reuse source, got %d sources", count)
+	}
+
+	var persisted model.FeedSource
+	if err := db.First(&persisted, existing.ID).Error; err != nil {
+		t.Fatalf("reload source: %v", err)
+	}
+	if persisted.ID != existing.ID {
+		t.Fatalf("expected canonical_url hit to keep existing source %s, got %s", existing.ID, persisted.ID)
+	}
+	if persisted.CanonicalURL != "https://example.com/feed.xml" {
+		t.Fatalf("expected canonical_url preserved, got %q", persisted.CanonicalURL)
+	}
+}
+
+func TestImportGlobalOPMLRequiresAuthenticatedUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.Use(middleware.AuthMiddleware())
+	feed.POST("/sources/opml/import", ImportGlobalOPML(db))
+
+	opml := `<?xml version="1.0"?><opml version="2.0"><body></body></opml>`
+	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestImportGlobalOPMLRejectsNonAdminUsers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	SetupFeedRoutes(router, db)
+
+	opml := `<?xml version="1.0"?><opml version="2.0"><body><outline text="User Feed" type="rss" xmlUrl="https://example.com/user.xml" /></body></opml>`
+	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
+	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, user))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestImportGlobalOPMLAllowsAdminThroughRealRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	admin := seedFeedAdminUser(t, db)
+
+	router := gin.New()
+	SetupFeedRoutes(router, db)
+
+	opml := `<?xml version="1.0"?><opml version="2.0"><body><outline text="Admin Feed" type="rss" xmlUrl="https://example.com/admin.xml" /></body></opml>`
+	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
+	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, admin))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestImportGlobalOPMLRejectsInvalidFeedURLs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	admin := seedFeedAdminUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/sources/opml/import", withFeedAuth(admin.UUID, ImportGlobalOPML(db)))
+
+	opml := `<?xml version="1.0"?><opml version="2.0"><body>
+		<outline text="Relative" type="rss" xmlUrl="/api/feed/rss/alice" />
+		<outline text="File" type="rss" xmlUrl="file:///etc/passwd" />
+		<outline text="Script" type="rss" xmlUrl="javascript:alert(1)" />
+	</body></opml>`
+	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		Imported int `json:"imported"`
+		Reused   int `json:"reused"`
+		Failed   int `json:"failed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Imported != 0 || payload.Reused != 0 || payload.Failed != 3 {
+		t.Fatalf("unexpected import counts: %#v", payload)
+	}
+	var count int64
+	if err := db.Model(&model.FeedSource{}).Count(&count).Error; err != nil {
+		t.Fatalf("count feed sources: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected invalid urls not to create sources, got %d", count)
+	}
+}
+
+func TestImportGlobalOPMLReusesDuplicateURLsInSameUpload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	admin := seedFeedAdminUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/sources/opml/import", withFeedAuth(admin.UUID, ImportGlobalOPML(db)))
+
+	opml := `<?xml version="1.0"?><opml version="2.0"><body>
+		<outline text="First" type="rss" xmlUrl="https://example.com/feed.xml" />
+		<outline text="Duplicate" type="rss" xmlUrl="https://example.com/feed.xml/" />
+	</body></opml>`
+	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		Imported int `json:"imported"`
+		Reused   int `json:"reused"`
+		Failed   int `json:"failed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Imported != 1 || payload.Reused != 1 || payload.Failed != 0 {
+		t.Fatalf("unexpected import counts: %#v", payload)
+	}
+	var count int64
+	if err := db.Model(&model.FeedSource{}).Where("source_type = ?", "external_rss").Count(&count).Error; err != nil {
+		t.Fatalf("count feed sources: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one source for duplicate urls, got %d", count)
+	}
+}
+
+func TestImportOPMLStillCreatesUserSubscriptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/opml/import", withFeedAuth(user.UUID, ImportOPML(db)))
+
+	opml := `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <body>
+    <outline text="User Feed" type="rss" xmlUrl="https://example.com/user.xml" />
+  </body>
+</opml>`
+
+	req := newOPMLUploadRequest(t, "/api/v1/feed/opml/import", opml)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if count := countSubscriptionsForUser(t, db, user.UUID); count != 1 {
+		t.Fatalf("expected 1 subscription after legacy OPML import, got %d", count)
 	}
 }
 
@@ -366,6 +798,24 @@ func TestFeedSourceMVPMigrationSupportsNewColumns(t *testing.T) {
 	}
 }
 
+func TestFindOrCreateFeedSourceDoesNotLogRecordNotFoundOnExpectedMiss(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var logs bytes.Buffer
+	db := newFeedHandlerTestDBWithLogBuffer(t, &logs)
+	logs.Reset()
+
+	source, err := findOrCreateFeedSource(db, "external_rss", nil, "https://example.com/feed.xml", "Example Feed", "")
+	if err != nil {
+		t.Fatalf("findOrCreateFeedSource returned error: %v", err)
+	}
+	if source == nil {
+		t.Fatal("expected created feed source, got nil")
+	}
+	if strings.Contains(strings.ToLower(logs.String()), "record not found") {
+		t.Fatalf("expected no record not found log on expected miss, got logs: %s", logs.String())
+	}
+}
+
 func TestCreateSubscriptionReusesExistingFeedSourceForSameCanonicalURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newFeedHandlerTestDB(t)
@@ -403,6 +853,40 @@ func TestCreateSubscriptionReusesExistingFeedSourceForSameCanonicalURL(t *testin
 	}
 	if sources[0].CanonicalURL != "https://example.com/feed.xml" {
 		t.Fatalf("expected canonical url normalized, got %q", sources[0].CanonicalURL)
+	}
+}
+
+func TestCreateSubscriptionTreatsAPIV1FeedRSSAsInternalUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+	author := seedFeedTestUser(t, db)
+	author.Username = "alice"
+	if err := db.Model(&author).Update("username", "alice").Error; err != nil {
+		t.Fatalf("rename author: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions", withFeedAuth(user.UUID, CreateSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions", strings.NewReader(`{"target_type":"external_rss","rss_url":"https://example.com/api/v1/feed/rss/alice"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var source model.FeedSource
+	if err := db.First(&source).Error; err != nil {
+		t.Fatalf("load source: %v", err)
+	}
+	if source.SourceType != "internal_user" {
+		t.Fatalf("expected internal_user source type, got %q", source.SourceType)
+	}
+	if source.SourceID == nil || *source.SourceID != author.UUID {
+		t.Fatalf("expected source_id %s, got %#v", author.UUID, source.SourceID)
 	}
 }
 

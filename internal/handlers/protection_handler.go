@@ -15,7 +15,7 @@ import (
 
 // SetupProtectionRoutes registers content protection routes
 func SetupProtectionRoutes(router *gin.Engine, db *gorm.DB) {
-	protected := router.Group("/api")
+	protected := router.Group("/api/v1")
 	{
 		// Album protection
 		albums := protected.Group("/albums/:id")
@@ -447,7 +447,7 @@ func GetPendingDiscussionsCount(db *gorm.DB) gin.HandlerFunc {
 
 // SetupStatusRoutes registers status management routes
 func SetupStatusRoutes(router *gin.Engine, db *gorm.DB) {
-	status := router.Group("/api")
+	status := router.Group("/api/v1")
 	{
 		// Album status
 		albums := status.Group("/albums/:id")

@@ -2,6 +2,7 @@ package feed
 
 import (
 	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -162,6 +163,30 @@ func (r *Repo) CreateReadingListItem(item *model.ReadingListItem) error {
 	return r.db.Create(item).Error
 }
 
+func (r *Repo) ListReadingListItems(userID uuid.UUID, limit int, offset int) ([]model.ReadingListItem, error) {
+	var items []model.ReadingListItem
+	err := r.db.Preload("FeedItem").Preload("FeedItem.FeedSource").
+		Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&items).Error
+	return items, err
+}
+
+func (r *Repo) CountReadingListItems(userID uuid.UUID) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.ReadingListItem{}).Where("user_id = ?", userID).Count(&count).Error
+	return count, err
+}
+
 func (r *Repo) DeleteReadingListItem(userID uuid.UUID, feedItemID uuid.UUID) error {
-	return r.db.Where("user_id = ? AND feed_item_id = ?", userID, feedItemID).Delete(&model.ReadingListItem{}).Error
+	result := r.db.Where("user_id = ? AND feed_item_id = ?", userID, feedItemID).Delete(&model.ReadingListItem{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return apperr.NotFound("feed.reading_list_item_not_found", "Reading list item not found")
+	}
+	return nil
 }

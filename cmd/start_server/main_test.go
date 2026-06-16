@@ -9,6 +9,117 @@ import (
 	"atoman/internal/testdb"
 )
 
+func TestBootstrapOwnerFromEnvCreatesOwnerWhenConfigured(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, ownerBootstrapModels()...)
+	t.Setenv("OWNER_USERNAME", "owner")
+	t.Setenv("OWNER_EMAIL", "owner@example.com")
+	t.Setenv("OWNER_PASSWORD", "change-me")
+
+	if err := bootstrapOwnerFromEnv(db); err != nil {
+		t.Fatalf("bootstrap owner: %v", err)
+	}
+
+	var user model.User
+	if err := db.First(&user, "username = ?", "owner").Error; err != nil {
+		t.Fatalf("reload owner: %v", err)
+	}
+	if user.Role != "owner" {
+		t.Fatalf("expected role owner, got %s", user.Role)
+	}
+	if !user.IsActive {
+		t.Fatal("expected owner to be active")
+	}
+}
+
+func TestBootstrapOwnerFromEnvSkipsWhenNotConfigured(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, ownerBootstrapModels()...)
+	t.Setenv("OWNER_USERNAME", "")
+	t.Setenv("OWNER_EMAIL", "")
+	t.Setenv("OWNER_PASSWORD", "")
+
+	if err := bootstrapOwnerFromEnv(db); err != nil {
+		t.Fatalf("bootstrap owner: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.User{}).Count(&count).Error; err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no users, got %d", count)
+	}
+}
+
+func TestBootstrapOwnerFromEnvSkipsPartialConfig(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, ownerBootstrapModels()...)
+	t.Setenv("OWNER_USERNAME", "owner")
+	t.Setenv("OWNER_EMAIL", "")
+	t.Setenv("OWNER_PASSWORD", "")
+
+	if err := bootstrapOwnerFromEnv(db); err != nil {
+		t.Fatalf("expected partial owner config to be skipped, got %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.User{}).Count(&count).Error; err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no users, got %d", count)
+	}
+}
+
+func TestBootstrapOwnerFromEnvDoesNotUpdateExistingOwnerByDefault(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, ownerBootstrapModels()...)
+	existing := model.User{Username: "owner", Email: "owner@example.com", Password: "manual-hash", Role: "owner", IsActive: true}
+	otherOwner := model.User{Username: "other", Email: "other@example.com", Password: "other-hash", Role: "owner", IsActive: true}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create existing owner: %v", err)
+	}
+	if err := db.Create(&otherOwner).Error; err != nil {
+		t.Fatalf("create other owner: %v", err)
+	}
+	t.Setenv("OWNER_USERNAME", "owner")
+	t.Setenv("OWNER_EMAIL", "owner@example.com")
+	t.Setenv("OWNER_PASSWORD", "change-me")
+
+	if err := bootstrapOwnerFromEnv(db); err != nil {
+		t.Fatalf("bootstrap owner: %v", err)
+	}
+
+	var reloaded model.User
+	if err := db.First(&reloaded, "uuid = ?", existing.UUID).Error; err != nil {
+		t.Fatalf("reload existing owner: %v", err)
+	}
+	if reloaded.Password != "manual-hash" {
+		t.Fatalf("expected existing password to remain manual-hash, got %q", reloaded.Password)
+	}
+	var reloadedOther model.User
+	if err := db.First(&reloadedOther, "uuid = ?", otherOwner.UUID).Error; err != nil {
+		t.Fatalf("reload other owner: %v", err)
+	}
+	if reloadedOther.Role != "owner" {
+		t.Fatalf("expected other owner role to remain owner, got %q", reloadedOther.Role)
+	}
+}
+
+func ownerBootstrapModels() []interface{} {
+	return []interface{}{
+		&model.User{},
+		&model.UserSettings{},
+		&model.Channel{},
+		&model.Collection{},
+		&model.FeedSource{},
+		&model.SubscriptionGroup{},
+		&model.Subscription{},
+		&model.BookmarkFolder{},
+	}
+}
+
 func TestBackfillInternalRSSFeedSourcesConvertsRelativeURLs(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.User{}, &model.FeedSource{})
@@ -103,6 +214,90 @@ func TestBackfillInternalRSSFeedSourcesMergesIntoExistingCanonicalSource(t *test
 	}
 	if updatedSubscription.FeedSourceID != canonical.ID {
 		t.Fatalf("expected subscription feed_source_id %s, got %s", canonical.ID, updatedSubscription.FeedSourceID)
+	}
+
+	var legacyCount int64
+	if err := db.Model(&model.FeedSource{}).Where("id = ?", legacy.ID).Count(&legacyCount).Error; err != nil {
+		t.Fatalf("count legacy source: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("expected legacy source to be removed, count=%d", legacyCount)
+	}
+}
+
+func TestBackfillInternalRSSFeedSourcesMergesDuplicateSubscriptions(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.FeedSource{}, &model.Subscription{})
+
+	viewer := model.User{
+		Username: "viewer",
+		Email:    "viewer@example.com",
+		Password: "hashed",
+	}
+	if err := db.Create(&viewer).Error; err != nil {
+		t.Fatalf("create viewer: %v", err)
+	}
+
+	author := model.User{
+		Username: "fazong",
+		Email:    "fazong@example.com",
+		Password: "hashed",
+	}
+	if err := db.Create(&author).Error; err != nil {
+		t.Fatalf("create author: %v", err)
+	}
+
+	canonical := model.FeedSource{
+		SourceType: "internal_user",
+		SourceID:   &author.UUID,
+		Hash:       buildInternalFeedSourceHash("internal_user", author.UUID),
+		Provider:   "internal",
+		Title:      "canonical",
+	}
+	if err := db.Create(&canonical).Error; err != nil {
+		t.Fatalf("create canonical source: %v", err)
+	}
+
+	legacy := model.FeedSource{
+		SourceType: "external_rss",
+		RssURL:     "/api/feed/rss/fazong",
+		Hash:       uuid.NewString(),
+		Title:      "legacy rss",
+		Provider:   "rss",
+	}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("create legacy source: %v", err)
+	}
+
+	canonicalSubscription := model.Subscription{
+		UserID:       viewer.UUID,
+		FeedSourceID: canonical.ID,
+		Title:        "canonical sub",
+	}
+	if err := db.Create(&canonicalSubscription).Error; err != nil {
+		t.Fatalf("create canonical subscription: %v", err)
+	}
+
+	legacySubscription := model.Subscription{
+		UserID:       viewer.UUID,
+		FeedSourceID: legacy.ID,
+		Title:        "legacy sub",
+	}
+	if err := db.Create(&legacySubscription).Error; err != nil {
+		t.Fatalf("create legacy subscription: %v", err)
+	}
+
+	backfillInternalRSSFeedSources(db)
+
+	var activeSubscriptions []model.Subscription
+	if err := db.Where("user_id = ?", viewer.UUID).Find(&activeSubscriptions).Error; err != nil {
+		t.Fatalf("load active subscriptions: %v", err)
+	}
+	if len(activeSubscriptions) != 1 {
+		t.Fatalf("expected one active subscription after merge, got %d", len(activeSubscriptions))
+	}
+	if activeSubscriptions[0].FeedSourceID != canonical.ID {
+		t.Fatalf("expected remaining subscription feed_source_id %s, got %s", canonical.ID, activeSubscriptions[0].FeedSourceID)
 	}
 
 	var legacyCount int64

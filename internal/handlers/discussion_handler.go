@@ -14,7 +14,7 @@ import (
 
 // SetupDiscussionRoutes registers discussion-related routes
 func SetupDiscussionRoutes(router *gin.Engine, db *gorm.DB) {
-	discussions := router.Group("/api")
+	discussions := router.Group("/api/v1")
 	{
 		// Album discussions
 		albums := discussions.Group("/albums/:id")

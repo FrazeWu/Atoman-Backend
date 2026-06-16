@@ -244,6 +244,33 @@ func (s *Service) ToggleReadingList(user authctx.CurrentUser, feedItemID uuid.UU
 	return true, nil
 }
 
+func (s *Service) ListReadingList(user authctx.CurrentUser, query FeedQuery) ([]model.ReadingListItem, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	page := normalizedPage(query.Page)
+	limit := normalizedPageSize(query.PageSize)
+	items, err := s.repo.ListReadingListItems(user.ID, limit, (page-1)*limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := s.repo.CountReadingListItems(user.ID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+func (s *Service) RemoveReadingListItem(user authctx.CurrentUser, feedItemID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	if feedItemID == uuid.Nil {
+		return apperr.BadRequest("validation.invalid_request", "feed item id must be a valid uuid")
+	}
+	return s.repo.DeleteReadingListItem(user.ID, feedItemID)
+}
+
 func (s *Service) readMap(userID uuid.UUID, items []model.FeedItem) (map[uuid.UUID]bool, error) {
 	ids := make([]uuid.UUID, 0, len(items))
 	for _, item := range items {

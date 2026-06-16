@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
@@ -185,6 +186,70 @@ func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 	}
 	if feedItemCount != 1 {
 		t.Fatalf("expected duplicate filter to leave 1 feed item, got %d", feedItemCount)
+	}
+}
+
+func TestListReadingListReturnsPagedItems(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var feedItem model.FeedItem
+	if err := db.First(&feedItem).Error; err != nil {
+		t.Fatalf("find feed item: %v", err)
+	}
+	if err := db.Create(&model.ReadingListItem{UserID: user.ID, FeedItemID: feedItem.ID, CreatedAt: time.Now().UTC()}).Error; err != nil {
+		t.Fatalf("create reading list item: %v", err)
+	}
+
+	items, total, err := service.ListReadingList(user, FeedQuery{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("list reading list: %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("expected one reading list item, got total=%d len=%d", total, len(items))
+	}
+	if items[0].FeedItemID != feedItem.ID {
+		t.Fatalf("expected feed item id %s, got %s", feedItem.ID, items[0].FeedItemID)
+	}
+	if items[0].FeedItem == nil || items[0].FeedItem.Title != feedItem.Title {
+		t.Fatalf("expected preloaded feed item, got %#v", items[0].FeedItem)
+	}
+}
+
+func TestRemoveReadingListItemDeletesUserItem(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var feedItem model.FeedItem
+	if err := db.First(&feedItem).Error; err != nil {
+		t.Fatalf("find feed item: %v", err)
+	}
+	if err := db.Create(&model.ReadingListItem{UserID: user.ID, FeedItemID: feedItem.ID, CreatedAt: time.Now().UTC()}).Error; err != nil {
+		t.Fatalf("create reading list item: %v", err)
+	}
+
+	if err := service.RemoveReadingListItem(user, feedItem.ID); err != nil {
+		t.Fatalf("remove reading list item: %v", err)
+	}
+	var count int64
+	if err := db.Model(&model.ReadingListItem{}).Where("user_id = ? AND feed_item_id = ?", user.ID, feedItem.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count reading list item: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected reading list item to be deleted, got %d", count)
+	}
+}
+
+func TestRemoveReadingListItemReturnsNotFoundWhenItemMissing(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var feedItem model.FeedItem
+	if err := db.First(&feedItem).Error; err != nil {
+		t.Fatalf("find feed item: %v", err)
+	}
+
+	err := service.RemoveReadingListItem(user, feedItem.ID)
+	if err == nil {
+		t.Fatal("expected missing reading list item to return an error")
+	}
+	appErr := apperr.FromError(err)
+	if appErr == nil || appErr.Code != "feed.reading_list_item_not_found" {
+		t.Fatalf("expected reading list not found error, got %#v", err)
 	}
 }
 

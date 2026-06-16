@@ -66,7 +66,7 @@ func initDefaultPolicies() {
 	groupingAdded := false
 
 	// Anonymous policies
-	if ok, _ := Enforcer.AddPolicy("anonymous", "/api/auth/*", "POST"); ok {
+	if ok, _ := Enforcer.AddPolicy("anonymous", "/api/v1/auth/*", "POST"); ok {
 		policyAdded = true
 	}
 	if ok, _ := Enforcer.AddPolicy("anonymous", "/api/*", "GET"); ok {
@@ -147,7 +147,7 @@ func CasbinMiddleware() gin.HandlerFunc {
 		}
 
 		if !allowed {
-			if role == "anonymous" && method != "GET" && !strings.HasPrefix(path, "/api/auth") {
+			if role == "anonymous" && method != "GET" && !strings.HasPrefix(path, "/api/v1/auth") {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required to perform this action"})
 				return
 			}

@@ -23,7 +23,7 @@ type Video struct {
 	DurationSec       int             `json:"duration_sec" gorm:"default:0"`
 	ProcessingStatus  string          `json:"processing_status" gorm:"not null;default:'none'"`
 	ProcessingError   string          `json:"processing_error" gorm:"type:text"`
-	PreviewThumbnails json.RawMessage `json:"preview_thumbnails" gorm:"type:jsonb"`
+	PreviewThumbnails json.RawMessage `json:"preview_thumbnails" gorm:"type:jsonb" swaggertype:"array,object"`
 	// Visibility: public | followers | private
 	Visibility  string       `json:"visibility" gorm:"not null;default:'public'"`
 	Status      string       `json:"status" gorm:"not null;default:'draft'"` // draft | published

@@ -18,14 +18,15 @@ type Handler struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
-	group.GET("/subscriptions", h.getSubscribedFeed)
 	group.GET("/timeline", h.getSubscribedFeed)
 	group.GET("/explore", h.getExploreFeed)
 	group.POST("/timeline/mark-read", h.markRead)
 	group.POST("/timeline/mark-all-read", h.markAllRead)
 	group.POST("/timeline/mark-all-unread", h.markAllUnread)
 	group.POST("/timeline/star", h.toggleStar)
+	group.GET("/reading-list", h.listReadingList)
 	group.POST("/reading-list", h.toggleReadingList)
+	group.DELETE("/reading-list/:id", h.removeReadingListItem)
 }
 
 func (h *Handler) getSubscribedFeed(c *gin.Context) {
@@ -123,6 +124,20 @@ func (h *Handler) toggleStar(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"starred": starred})
 }
 
+func (h *Handler) listReadingList(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	items, total, err := h.service.ListReadingList(user, queryFromContext(c))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, items, normalizedPageFromQuery(c), normalizedPageSizeFromQuery(c), total)
+}
+
 func (h *Handler) toggleReadingList(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -142,6 +157,37 @@ func (h *Handler) toggleReadingList(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"saved": saved})
+}
+
+// removeReadingListItem godoc
+// @Summary 从待读列表移除条目
+// @Description 删除当前用户待读列表中的指定 feed item。
+// @Tags feed
+// @Produce json
+// @Param id path string true "Feed item UUID"
+// @Success 200 {object} handlers.RemoveStatusResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/reading-list/{id} [delete]
+func (h *Handler) removeReadingListItem(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	feedItemID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "feed item id must be a valid uuid"))
+		return
+	}
+	if err := h.service.RemoveReadingListItem(user, feedItemID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"removed": true})
 }
 
 func queryFromContext(c *gin.Context) FeedQuery {

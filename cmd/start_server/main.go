@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -193,6 +194,21 @@ func buildInternalFeedSourceHash(targetType string, targetID uuid.UUID) string {
 }
 
 func mergeInternalRSSFeedSourceIntoCanonical(tx *gorm.DB, legacy model.FeedSource, canonical model.FeedSource) error {
+	if err := tx.Exec(`
+		DELETE FROM subscriptions AS legacy_sub
+		WHERE legacy_sub.feed_source_id = ?
+		  AND legacy_sub.deleted_at IS NULL
+		  AND EXISTS (
+			SELECT 1
+			FROM subscriptions AS canonical_sub
+			WHERE canonical_sub.user_id = legacy_sub.user_id
+			  AND canonical_sub.feed_source_id = ?
+			  AND canonical_sub.deleted_at IS NULL
+		  )
+	`, legacy.ID, canonical.ID).Error; err != nil {
+		return err
+	}
+
 	if err := tx.Model(&model.Subscription{}).
 		Where("feed_source_id = ?", legacy.ID).
 		Update("feed_source_id", canonical.ID).Error; err != nil {
@@ -200,6 +216,40 @@ func mergeInternalRSSFeedSourceIntoCanonical(tx *gorm.DB, legacy model.FeedSourc
 	}
 
 	return tx.Delete(&model.FeedSource{}, "id = ?", legacy.ID).Error
+}
+
+func bootstrapOwnerFromEnv(db *gorm.DB) error {
+	username := strings.TrimSpace(os.Getenv("OWNER_USERNAME"))
+	email := strings.TrimSpace(os.Getenv("OWNER_EMAIL"))
+	password := os.Getenv("OWNER_PASSWORD")
+	if username == "" && email == "" && password == "" {
+		return nil
+	}
+	if username == "" || email == "" || password == "" {
+		log.Printf("WARN: skipping owner bootstrap because OWNER_USERNAME, OWNER_EMAIL, and OWNER_PASSWORD must all be set")
+		return nil
+	}
+
+	var existing model.User
+	if err := db.Where("username = ? OR email = ?", username, email).First(&existing).Error; err == nil {
+		log.Printf("owner user %q already exists; startup bootstrap left it unchanged", existing.Username)
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	user, created, err := service.NewOwnerBootstrapService(db).EnsureOwner(service.OwnerBootstrapInput{
+		Username: username,
+		Email:    email,
+		Password: password,
+	})
+	if err != nil {
+		return err
+	}
+	if created {
+		log.Printf("owner user %q created", user.Username)
+	}
+	return nil
 }
 
 func backfillInternalRSSFeedSources(db *gorm.DB) {
@@ -431,6 +481,10 @@ ON CONFLICT (key) DO NOTHING`)
 		backfillInternalRSSFeedSources(db)
 
 		ensureSoftDeleteColumns(db)
+
+		if err := bootstrapOwnerFromEnv(db); err != nil {
+			log.Fatal("Failed to bootstrap owner user: ", err)
+		}
 
 		// Run forum-specific migrations (ltree extension, new columns, backfill)
 		if err := service.RunForumMigrations(db); err != nil {

@@ -35,6 +35,8 @@ func SetupFeedRoutes(router *gin.Engine, db *gorm.DB) {
 		{
 			protected.POST("/discover", DiscoverFeedCandidates())
 			protected.POST("/sources/create-from-provider", CreateSubscriptionFromProvider(db))
+			protected.GET("/subscriptions", GetSubscriptions(db))
+			protected.POST("/subscriptions", CreateSubscription(db))
 			protected.DELETE("/subscriptions/:id", DeleteSubscription(db))
 			protected.PUT("/subscriptions/:id", UpdateSubscription(db))
 			protected.GET("/stats", GetFeedStats(db))
@@ -46,6 +48,7 @@ func SetupFeedRoutes(router *gin.Engine, db *gorm.DB) {
 			protected.PUT("/subscriptions/:id/group", SetSubscriptionGroup(db))
 			protected.POST("/opml/import", ImportOPML(db))
 			protected.GET("/opml/export", ExportOPML(db))
+			protected.POST("/sources/opml/import", middleware.AdminMiddleware(db), ImportGlobalOPML(db))
 			protected.GET("/stars", GetStarredItems(db))
 			protected.GET("/star-groups", GetFeedStarGroups(db))
 			protected.POST("/star-groups", CreateFeedStarGroup(db))
@@ -66,6 +69,10 @@ func SetupFeedRoutes(router *gin.Engine, db *gorm.DB) {
 }
 
 const defaultSubscriptionGroupName = "默认分组"
+
+var syncFeedSource = func(db *gorm.DB, source model.FeedSource) {
+	go service.SyncSingleRSS(db, source)
+}
 
 func getOrCreateDefaultSubscriptionGroup(db *gorm.DB, userID uuid.UUID) (*model.SubscriptionGroup, error) {
 	var canonical model.SubscriptionGroup
@@ -199,7 +206,11 @@ func findOrCreateFeedSource(db *gorm.DB, targetType string, targetID *uuid.UUID,
 		}
 		if canonicalURL != "" {
 			var existing model.FeedSource
-			if err := db.Where("canonical_url = ?", canonicalURL).First(&existing).Error; err == nil {
+			canonicalLookup := db.Where("canonical_url = ?", canonicalURL).Limit(1).Find(&existing)
+			if canonicalLookup.Error != nil {
+				return nil, canonicalLookup.Error
+			}
+			if canonicalLookup.RowsAffected > 0 {
 				updates := map[string]any{}
 				if strings.TrimSpace(existing.Provider) == "" || (provider == "rsshub" && strings.TrimSpace(existing.Provider) == "rss") {
 					updates["provider"] = provider
@@ -238,9 +249,14 @@ func findOrCreateFeedSource(db *gorm.DB, targetType string, targetID *uuid.UUID,
 			if canonicalURL+"/" != "" {
 				legacyURLs = append(legacyURLs, canonicalURL+"/")
 			}
-			if err := db.Where("source_type = ? AND (canonical_url = '' OR canonical_url IS NULL) AND rss_url IN ?", targetType, legacyURLs).
+			legacyLookup := db.Where("source_type = ? AND (canonical_url = '' OR canonical_url IS NULL) AND rss_url IN ?", targetType, legacyURLs).
 				Order("created_at ASC").
-				First(&existing).Error; err == nil {
+				Limit(1).
+				Find(&existing)
+			if legacyLookup.Error != nil {
+				return nil, legacyLookup.Error
+			}
+			if legacyLookup.RowsAffected > 0 {
 				updates := map[string]any{
 					"provider":      provider,
 					"canonical_url": canonicalURL,
@@ -271,7 +287,11 @@ func findOrCreateFeedSource(db *gorm.DB, targetType string, targetID *uuid.UUID,
 	}
 
 	var source model.FeedSource
-	if err := db.Where("hash = ?", sourceHash).First(&source).Error; err == nil {
+	hashLookup := db.Where("hash = ?", sourceHash).Limit(1).Find(&source)
+	if hashLookup.Error != nil {
+		return nil, hashLookup.Error
+	}
+	if hashLookup.RowsAffected > 0 {
 		updates := map[string]any{}
 		if strings.TrimSpace(source.SourceType) == "" {
 			updates["source_type"] = targetType
@@ -322,13 +342,22 @@ func findOrCreateFeedSource(db *gorm.DB, targetType string, targetID *uuid.UUID,
 	}
 	populateFeedSourceTitle(db, &source, fallbackTitle)
 	if err := db.Create(&source).Error; err != nil {
+		var existing model.FeedSource
+		if loadErr := db.Where("hash = ?", sourceHash).First(&existing).Error; loadErr == nil {
+			return &existing, nil
+		}
+		if canonicalURL != "" {
+			if loadErr := db.Where("canonical_url = ?", canonicalURL).First(&existing).Error; loadErr == nil {
+				return &existing, nil
+			}
+		}
 		return nil, err
 	}
 	return &source, nil
 }
 
-// internalRSSPattern 匹配 /api/feed/rss/:username 或 http(s)://host/api/feed/rss/:username
-var internalRSSPattern = regexp.MustCompile(`(?:^|/)api/feed/rss/([^/?#]+)$`)
+// internalRSSPattern 匹配 /api/feed/rss/:username、/api/v1/feed/rss/:username 及对应绝对 URL
+var internalRSSPattern = regexp.MustCompile(`(?:^|/)api(?:/v1)?/feed/rss/([^/?#]+)$`)
 
 // resolveInternalRSSURL 检测 URL 是否为站内 RSS 地址，如果是则返回对应用户的 UUID。
 func resolveInternalRSSURL(db *gorm.DB, rawURL string) (uuid.UUID, error) {
@@ -436,7 +465,7 @@ func CreateSubscription(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if input.TargetType == "external_rss" {
-			go service.SyncSingleRSS(db, *source)
+			syncFeedSource(db, *source)
 		}
 
 		c.JSON(http.StatusCreated, gin.H{"data": subscription, "message": "ok"})
@@ -1576,16 +1605,88 @@ type OPMLOutline struct {
 	Outlines []OPMLOutline `xml:"outline,omitempty"`
 }
 
+type importedFeedSourceResult struct {
+	Source   *model.FeedSource
+	Imported bool
+}
+
+func importFeedSourceFromURL(db *gorm.DB, title, xmlURL string) (importedFeedSourceResult, error) {
+	trimmedURL := strings.TrimSpace(xmlURL)
+	u, err := url.ParseRequestURI(trimmedURL)
+	if err != nil || u == nil || !u.IsAbs() || (u.Scheme != "http" && u.Scheme != "https") {
+		return importedFeedSourceResult{}, fmt.Errorf("feed url must be an absolute http/https URL")
+	}
+	sourceHash := buildFeedSourceHash("external_rss", nil, trimmedURL)
+	canonicalURL := normalizeCanonicalFeedURL(trimmedURL)
+
+	var existing model.FeedSource
+	if err := db.Where("hash = ?", sourceHash).First(&existing).Error; err == nil {
+		return importedFeedSourceResult{Source: &existing, Imported: false}, nil
+	} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return importedFeedSourceResult{}, err
+	}
+
+	if canonicalURL != "" {
+		if err := db.Where("canonical_url = ?", canonicalURL).First(&existing).Error; err == nil {
+			feedSource, err := findOrCreateFeedSource(db, "external_rss", nil, trimmedURL, title, "")
+			if err != nil {
+				return importedFeedSourceResult{}, err
+			}
+			return importedFeedSourceResult{Source: feedSource, Imported: false}, nil
+		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return importedFeedSourceResult{}, err
+		}
+	}
+
+	legacyURLs := []string{}
+	for _, candidate := range []string{trimmedURL, canonicalURL, canonicalURL + "/"} {
+		if candidate == "" {
+			continue
+		}
+		duplicate := false
+		for _, existingURL := range legacyURLs {
+			if existingURL == candidate {
+				duplicate = true
+				break
+			}
+		}
+		if !duplicate {
+			legacyURLs = append(legacyURLs, candidate)
+		}
+	}
+	if len(legacyURLs) > 0 {
+		if err := db.Where("source_type = ? AND (canonical_url = '' OR canonical_url IS NULL) AND rss_url IN ?", "external_rss", legacyURLs).
+			Order("created_at ASC").
+			First(&existing).Error; err == nil {
+			feedSource, err := findOrCreateFeedSource(db, "external_rss", nil, trimmedURL, title, "")
+			if err != nil {
+				return importedFeedSourceResult{}, err
+			}
+			return importedFeedSourceResult{Source: feedSource, Imported: false}, nil
+		} else if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return importedFeedSourceResult{}, err
+		}
+	}
+
+	feedSource, err := findOrCreateFeedSource(db, "external_rss", nil, trimmedURL, title, "")
+	if err != nil {
+		return importedFeedSourceResult{}, err
+	}
+
+	return importedFeedSourceResult{Source: feedSource, Imported: true}, nil
+}
+
 func importFeedFromURL(db *gorm.DB, userID uuid.UUID, title, xmlURL string) error {
 	defaultGroup, err := getOrCreateDefaultSubscriptionGroup(db, userID)
 	if err != nil {
 		return err
 	}
 
-	feedSource, err := findOrCreateFeedSource(db, "external_rss", nil, xmlURL, title, "")
+	result, err := importFeedSourceFromURL(db, title, xmlURL)
 	if err != nil {
 		return err
 	}
+	feedSource := result.Source
 
 	var existingSub model.Subscription
 	if err := db.Where("user_id = ? AND feed_source_id = ?", userID, feedSource.ID).First(&existingSub).Error; err == nil {
@@ -1675,6 +1776,86 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"message":  "OPML import completed",
 			"imported": imported,
+			"failed":   failed,
+		})
+	}
+}
+
+// ImportGlobalOPML godoc
+// @Summary 导入全局 OPML 订阅源
+// @Description 管理员上传 OPML 文件，批量创建或复用全局 RSS 源，不创建用户订阅。
+// @Tags feed
+// @Accept mpfd
+// @Produce json
+// @Param file formData file true "OPML 文件"
+// @Success 200 {object} OPMLImportResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/sources/opml/import [post]
+func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		file, header, err := c.Request.FormFile("file")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to get uploaded file"})
+			return
+		}
+		defer file.Close()
+
+		if header.Size > 10<<20 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "File size exceeds 10MB limit"})
+			return
+		}
+
+		data, err := io.ReadAll(file)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read file"})
+			return
+		}
+
+		var opml OPML
+		if err := xml.Unmarshal(data, &opml); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid OPML format"})
+			return
+		}
+
+		imported := 0
+		reused := 0
+		failed := 0
+
+		importOutline := func(outline OPMLOutline) {
+			if strings.TrimSpace(outline.XMLURL) == "" {
+				return
+			}
+			result, err := importFeedSourceFromURL(db, strings.TrimSpace(outline.Text), strings.TrimSpace(outline.XMLURL))
+			if err != nil {
+				failed++
+				return
+			}
+			if result.Imported {
+				imported++
+			} else {
+				reused++
+			}
+			if result.Source != nil {
+				syncFeedSource(db, *result.Source)
+			}
+		}
+
+		for _, outline := range opml.Body.Outlines {
+			importOutline(outline)
+			for _, subOutline := range outline.Outlines {
+				importOutline(subOutline)
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"message":  "OPML import completed",
+			"imported": imported,
+			"reused":   reused,
 			"failed":   failed,
 		})
 	}

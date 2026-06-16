@@ -12,3 +12,4 @@ output.txt
 nvim.log
 .claude/
 .codegraph/
+.gstack/

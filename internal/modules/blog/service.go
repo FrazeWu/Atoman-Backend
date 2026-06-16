@@ -151,14 +151,28 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 		return model.Post{}, err
 	}
 
+	if err := s.ensureDefaultCollectionForChannel(channel.ID); err != nil {
+		return model.Post{}, err
+	}
+	var defaultCollection model.Collection
+	if err := s.db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&defaultCollection).Error; err != nil {
+		return model.Post{}, err
+	}
+	collectionsToAssign := []model.Collection{defaultCollection}
 	if len(collectionIDs) > 0 {
 		collections := make([]model.Collection, 0, len(collectionIDs))
 		if err := s.db.Where("id IN ?", collectionIDs).Find(&collections).Error; err != nil {
 			return model.Post{}, err
 		}
-		if err := s.db.Model(&post).Association("Collections").Append(collections); err != nil {
-			return model.Post{}, err
+		for _, collection := range collections {
+			if collection.ID == defaultCollection.ID {
+				continue
+			}
+			collectionsToAssign = append(collectionsToAssign, collection)
 		}
+	}
+	if err := s.db.Model(&post).Association("Collections").Append(collectionsToAssign); err != nil {
+		return model.Post{}, err
 	}
 
 	return post, nil

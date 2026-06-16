@@ -20,6 +20,27 @@ const (
 	authTokenTTL        = 30 * 24 * time.Hour
 )
 
+type authErrorCode string
+
+const (
+	authRequired              authErrorCode = "auth.required"
+	authInvalidToken          authErrorCode = "auth.invalid_token"
+	authInvalidClaims         authErrorCode = "auth.invalid_claims"
+	authUserNotFound          authErrorCode = "auth.user_not_found"
+	authAccountNotFound       authErrorCode = "auth.account_not_found"
+	authPasswordMismatch      authErrorCode = "auth.password_mismatch"
+	authTokenGenerationFailed authErrorCode = "auth.token_generation_failed"
+)
+
+func authError(c *gin.Context, status int, code authErrorCode, message string) {
+	c.JSON(status, gin.H{"code": string(code), "error": message})
+}
+
+func clearSessionAndAuthError(c *gin.Context, code authErrorCode, message string) {
+	clearAuthTokenCookie(c)
+	authError(c, http.StatusUnauthorized, code, message)
+}
+
 func HashPassword(password string) (string, error) {
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
@@ -245,14 +266,13 @@ func LogoutHandler() gin.HandlerFunc {
 // @Produce json
 // @Success 200 {object} AuthSuccessResponse
 // @Failure 401 {object} ErrorResponse
-// @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/auth/session [get]
 func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cookie, err := c.Cookie(authTokenCookieName)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+			authError(c, http.StatusUnauthorized, authRequired, "请先登录")
 			return
 		}
 
@@ -263,22 +283,22 @@ func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 			return []byte(os.Getenv("JWT_SECRET")), nil
 		})
 		if err != nil || !token.Valid {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			clearSessionAndAuthError(c, authInvalidToken, "登录状态已失效，请重新登录")
 			return
 		}
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			clearSessionAndAuthError(c, authInvalidClaims, "登录信息异常，请重新登录")
 			return
 		}
 		userID, ok := claims["user_id"].(string)
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
+			clearSessionAndAuthError(c, authInvalidClaims, "登录信息异常，请重新登录")
 			return
 		}
 		var user model.User
 		if err := db.Where("uuid = ?", userID).First(&user).Error; err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+			clearSessionAndAuthError(c, authUserNotFound, "账号不存在或已被移除，请重新登录")
 			return
 		}
 		if user.Role == "" {
@@ -311,7 +331,7 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 
 		var user model.User
 		if err := db.Where("username = ? OR email = ?", input.Username, input.Username).First(&user).Error; err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名或邮箱不存在"})
+			authError(c, http.StatusUnauthorized, authAccountNotFound, "账号不存在")
 			return
 		}
 		if user.Role == "" {
@@ -319,13 +339,13 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "用户名和密码不匹配"})
+			authError(c, http.StatusUnauthorized, authPasswordMismatch, "密码不正确")
 			return
 		}
 
 		tokenString, err := generateAuthToken(user)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+			authError(c, http.StatusInternalServerError, authTokenGenerationFailed, "登录服务暂时不可用，请稍后重试")
 			return
 		}
 
