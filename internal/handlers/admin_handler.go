@@ -176,7 +176,7 @@ func parseAdminListParams(c *gin.Context) (page int, limit int) {
 func adminFullTextBlogSourceQuery(db *gorm.DB) *gorm.DB {
 	return db.Model(&model.FeedSource{}).
 		Where("source_type = ?", "external_rss").
-		Where("rss_url NOT LIKE ?", "%/api/feed/rss/%").
+		Where("rss_url NOT LIKE ?", "%/feed/rss/%").
 		Where(`NOT EXISTS (
 			SELECT 1 FROM feed_items source_items
 			WHERE source_items.feed_source_id = feed_sources.id
@@ -194,7 +194,7 @@ func adminFullTextBlogItemQuery(db *gorm.DB) *gorm.DB {
 	return db.Model(&model.FeedItem{}).
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
 		Where("feed_sources.source_type = ?", "external_rss").
-		Where("feed_sources.rss_url NOT LIKE ?", "%/api/feed/rss/%").
+		Where("feed_sources.rss_url NOT LIKE ?", "%/feed/rss/%").
 		Where("COALESCE(feed_items.enclosure_url, '') = ''").
 		Where("COALESCE(feed_items.enclosure_type, '') NOT LIKE ?", "audio/%").
 		Where("COALESCE(feed_items.enclosure_type, '') NOT LIKE ?", "video/%").

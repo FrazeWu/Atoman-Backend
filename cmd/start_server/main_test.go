@@ -162,6 +162,40 @@ func TestBackfillInternalRSSFeedSourcesConvertsRelativeURLs(t *testing.T) {
 	}
 }
 
+func TestBackfillInternalRSSFeedSourcesConvertsV1RelativeURLs(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.FeedSource{})
+
+	user := model.User{Username: "v1user", Email: "v1@example.com", Password: "hashed"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		RssURL:     "/api/v1/feed/rss/v1user",
+		Hash:       uuid.NewString(),
+		Title:      "v1 rss",
+		Provider:   "rss",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	backfillInternalRSSFeedSources(db)
+
+	var updated model.FeedSource
+	if err := db.First(&updated, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("reload source: %v", err)
+	}
+	if updated.SourceType != "internal_user" {
+		t.Fatalf("expected source_type internal_user, got %s", updated.SourceType)
+	}
+	if updated.SourceID == nil || *updated.SourceID != user.UUID {
+		t.Fatalf("expected source_id %s, got %v", user.UUID, updated.SourceID)
+	}
+}
+
 func TestBackfillInternalRSSFeedSourcesMergesIntoExistingCanonicalSource(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.User{}, &model.FeedSource{}, &model.Subscription{})

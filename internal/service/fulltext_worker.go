@@ -81,7 +81,7 @@ func claimNextFullTextItem(db *gorm.DB, now time.Time) (model.FeedItem, model.Fe
 			Where("feed_items.next_full_text_attempt_at IS NULL OR feed_items.next_full_text_attempt_at <= ?", now).
 			Where("feed_sources.source_type = ?", "external_rss").
 			Where("feed_sources.full_text_enabled = ?", true).
-			Where("feed_sources.rss_url NOT LIKE ?", "%/api/feed/rss/%").
+			Where("feed_sources.rss_url NOT LIKE ?", "%/feed/rss/%").
 			Where("COALESCE(feed_items.enclosure_url, '') = ''").
 			Where("COALESCE(feed_items.enclosure_type, '') NOT LIKE ?", "audio/%").
 			Where("COALESCE(feed_items.enclosure_type, '') NOT LIKE ?", "video/%").

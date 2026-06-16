@@ -171,7 +171,7 @@ func backfillExternalRSSFullTextEnabled(db *gorm.DB) {
 	}
 }
 
-var internalRSSBackfillPattern = regexp.MustCompile(`(?:^|/)api/feed/rss/([^/?#]+)$`)
+var internalRSSBackfillPattern = regexp.MustCompile(`(?:^|/)api(?:/v1)?/feed/rss/([^/?#]+)$`)
 
 func resolveInternalRSSUserIDForBackfill(db *gorm.DB, rawURL string) (uuid.UUID, error) {
 	m := internalRSSBackfillPattern.FindStringSubmatch(strings.TrimSpace(rawURL))
@@ -254,7 +254,7 @@ func bootstrapOwnerFromEnv(db *gorm.DB) error {
 
 func backfillInternalRSSFeedSources(db *gorm.DB) {
 	var sources []model.FeedSource
-	if err := db.Where("source_type = ? AND rss_url LIKE ?", "external_rss", "/api/feed/rss/%").Find(&sources).Error; err != nil {
+	if err := db.Where("source_type = ? AND (rss_url LIKE ? OR rss_url LIKE ?)", "external_rss", "/api/feed/rss/%", "/api/v1/feed/rss/%").Find(&sources).Error; err != nil {
 		log.Printf("WARN: failed to load internal RSS feed source backfill candidates: %v", err)
 		return
 	}

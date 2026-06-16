@@ -82,6 +82,29 @@ func TestCreateAdminFeedSourceRejectsInternalRSSURL(t *testing.T) {
 	}
 }
 
+func TestCreateAdminFeedSourceRejectsInternalRSSURLV1(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAdminFeedFullTextTestDB(t)
+
+	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hashed"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	r := gin.New()
+	r.POST("/api/v1/admin/feed/fulltext/sources", CreateAdminFeedSource(db))
+
+	body := bytes.NewBufferString(`{"rss_url":"https://example.com/api/v1/feed/rss/alice","title":"Internal Feed"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/feed/fulltext/sources", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status=400 got=%d body=%s", w.Code, w.Body.String())
+	}
+}
+
 func TestUpdateAdminFeedSource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newAdminFeedFullTextTestDB(t)
