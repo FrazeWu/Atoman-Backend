@@ -414,7 +414,7 @@ func TestRetryAdminFeedFullTextItem(t *testing.T) {
 		FeedSourceID:          source.ID,
 		GUID:                  "retry-item",
 		Title:                 "Retry Item",
-		Link:                  "https://example.com/post",
+		Link:                  "https://93.184.216.34/post",
 		PublishedAt:           now,
 		FetchedAt:             now,
 		FullTextStatus:        service.FullTextStatusFailed,
