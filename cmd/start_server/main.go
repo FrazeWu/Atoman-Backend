@@ -318,16 +318,31 @@ func handlersSlugify(value string) string {
 	return mapped
 }
 
-func main() {
-	log.Println("Starting Atoman Backend Server...")
-
+func loadEnvironment() string {
 	if err := godotenv.Load(".env.dev"); err == nil {
-		log.Println("Loaded .env.dev")
+		return "Loaded .env.dev"
 	} else if err := godotenv.Load(".env"); err == nil {
-		log.Println("Loaded .env")
-	} else {
-		log.Println("No .env file found, using system environment variables")
+		return "Loaded .env"
 	}
+	return "No .env file found, using system environment variables"
+}
+
+func main() {
+	envMessage := loadEnvironment()
+
+	logs, err := setupLogging(loggingConfig{})
+	if err != nil {
+		log.Fatalf("Failed to initialize logging: %v", err)
+	}
+	defer func() {
+		if err := logs.Close(); err != nil {
+			log.Printf("WARN: failed to close log files: %v", err)
+		}
+	}()
+	fatalLogger := logs.FatalLogger
+
+	log.Println("Starting Atoman Backend Server...")
+	log.Println(envMessage)
 
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)
@@ -337,17 +352,17 @@ func main() {
 	}
 
 	if os.Getenv("JWT_SECRET") == "" {
-		log.Fatal("JWT_SECRET environment variable is required")
+		fatalLogger.Fatal("JWT_SECRET environment variable is required")
 	}
 
 	dbType := os.Getenv("DATABASE_TYPE")
 	if dbType == "" {
-		log.Fatal("DATABASE_TYPE environment variable is required (postgres)")
+		fatalLogger.Fatal("DATABASE_TYPE environment variable is required (postgres)")
 	}
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		log.Fatal("DATABASE_URL environment variable is required")
+		fatalLogger.Fatal("DATABASE_URL environment variable is required")
 	}
 
 	log.Printf("Connecting to %s database: %s", dbType, dbURL)
@@ -357,12 +372,12 @@ func main() {
 	case "postgres", "postgresql":
 		dialector = postgres.Open(dbURL)
 	default:
-		log.Fatal("Unsupported DATABASE_TYPE: ", dbType, " (expected: postgres)")
+		fatalLogger.Fatal("Unsupported DATABASE_TYPE: ", dbType, " (expected: postgres)")
 	}
 
 	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
-		log.Fatal("Failed to connect to database: ", err)
+		fatalLogger.Fatal("Failed to connect to database: ", err)
 	}
 	log.Println("Database connected successfully")
 
@@ -375,10 +390,10 @@ func main() {
 			log.Printf("WARN: failed to enable ltree extension: %v", err)
 		}
 		if err := prepareCommentTargetMigration(db); err != nil {
-			log.Fatal("Failed to prepare comment target migration: ", err)
+			fatalLogger.Fatal("Failed to prepare comment target migration: ", err)
 		}
 		if err := migrations.RunBlogGuestCommentsMigration(db); err != nil {
-			log.Fatal("Failed to run blog guest comments migration: ", err)
+			fatalLogger.Fatal("Failed to run blog guest comments migration: ", err)
 		}
 		if err := db.AutoMigrate(
 			&model.User{},
@@ -457,7 +472,7 @@ func main() {
 			&model.ForumModeratorAssignment{},
 			&model.SiteSetting{},
 		); err != nil {
-			log.Fatal("Failed to run migrations: ", err)
+			fatalLogger.Fatal("Failed to run migrations: ", err)
 		}
 		log.Println("Database migrations completed")
 
@@ -522,10 +537,12 @@ ON CONFLICT (key) DO NOTHING`)
 
 	log.Println("Initializing Casbin Enforcer...")
 	if err := middleware.InitCasbin(db); err != nil {
-		log.Fatal("Failed to initialize Casbin: ", err)
+		fatalLogger.Fatal("Failed to initialize Casbin: ", err)
 	}
 
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.Logger())
+	r.Use(gin.Recovery())
 	docs.SwaggerInfo.BasePath = "/api/v1"
 
 	// Configure allowed origins based on environment
@@ -598,6 +615,6 @@ ON CONFLICT (key) DO NOTHING`)
 
 	log.Printf("Server starting on port %s", port)
 	if err := r.Run(":" + port); err != nil {
-		log.Fatal("Failed to start server: ", err)
+		fatalLogger.Fatal("Failed to start server: ", err)
 	}
 }
