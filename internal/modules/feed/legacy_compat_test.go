@@ -1,4 +1,4 @@
-package handlers
+package feed
 
 import (
 	"bytes"
@@ -143,14 +143,6 @@ func seedAdminFeedSource(t *testing.T, db *gorm.DB, title string, hidden bool) m
 func withFeedAuth(userID uuid.UUID, h gin.HandlerFunc) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Set("user_id", userID)
-		h(c)
-	}
-}
-
-func withFeedAuthRole(userID uuid.UUID, role string, h gin.HandlerFunc) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Set("user_id", userID)
-		c.Set("role", role)
 		h(c)
 	}
 }
@@ -421,7 +413,7 @@ func TestImportGlobalOPMLRejectsNonAdminUsers(t *testing.T) {
 	user := seedFeedTestUser(t, db)
 
 	router := gin.New()
-	SetupFeedRoutes(router, db)
+	RegisterRoutes(router.Group("/api/v1/feed"), NewService(db))
 
 	opml := `<?xml version="1.0"?><opml version="2.0"><body><outline text="User Feed" type="rss" xmlUrl="https://example.com/user.xml" /></body></opml>`
 	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
@@ -442,7 +434,7 @@ func TestImportGlobalOPMLAllowsAdminThroughRealRoute(t *testing.T) {
 	admin := seedFeedAdminUser(t, db)
 
 	router := gin.New()
-	SetupFeedRoutes(router, db)
+	RegisterRoutes(router.Group("/api/v1/feed"), NewService(db))
 
 	opml := `<?xml version="1.0"?><opml version="2.0"><body><outline text="Admin Feed" type="rss" xmlUrl="https://example.com/admin.xml" /></body></opml>`
 	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
@@ -778,6 +770,33 @@ func TestDiscoverFeedCandidatesRejectsInvalidURL(t *testing.T) {
 	}
 }
 
+func TestDiscoverFeedCandidatesAcceptsDirectFeedURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/discover", withFeedAuth(user.UUID, DiscoverFeedCandidates()))
+
+	body := strings.NewReader(`{"url":"http://www.ruanyifeng.com/blog/atom.xml"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/discover", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"feed_url":"http://www.ruanyifeng.com/blog/atom.xml"`) {
+		t.Fatalf("expected direct feed url candidate, got body %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"is_default":true`) {
+		t.Fatalf("expected direct feed url candidate to be default, got body %s", rr.Body.String())
+	}
+}
+
 func TestFeedSourceMVPMigrationSupportsNewColumns(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newFeedHandlerTestDB(t)
@@ -1015,88 +1034,6 @@ func TestCreateSubscriptionFromProviderCreatesRSSHubSource(t *testing.T) {
 	}
 	if !strings.Contains(source.RssURL, "/github/repo/DIYgod/RSSHub") {
 		t.Fatalf("expected rsshub github repo url, got %q", source.RssURL)
-	}
-}
-
-func TestAdminListFeedSourcesRequiresAdmin(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := newFeedHandlerTestDB(t)
-	user := seedFeedTestUser(t, db)
-
-	router := gin.New()
-	admin := router.Group("/api/v1/admin")
-	admin.Use(withFeedAuth(user.UUID, middleware.AdminMiddleware(db)))
-	admin.GET("/feed/sources", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"ok": true})
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/sources", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("expected status %d, got %d with body %s", http.StatusForbidden, rr.Code, rr.Body.String())
-	}
-}
-
-func TestAdminListFeedSourcesReturnsSourceRows(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := newFeedHandlerTestDB(t)
-	adminUser := seedFeedAdminUser(t, db)
-	seedAdminFeedSource(t, db, "RSSHub Source", false)
-
-	router := gin.New()
-	admin := router.Group("/api/v1/admin")
-	admin.Use(withFeedAuthRole(adminUser.UUID, "admin", middleware.AdminMiddleware(db)))
-	admin.GET("/feed/sources", AdminListFeedSources(db))
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/sources", nil)
-	rr := httptest.NewRecorder()
-	router.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
-	}
-
-	var payload struct {
-		Items []struct {
-			Title         string     `json:"title"`
-			Provider      string     `json:"provider"`
-			SourceType    string     `json:"source_type"`
-			HealthStatus  string     `json:"health_status"`
-			LastFetchedAt *time.Time `json:"last_fetched_at"`
-			Hidden        bool       `json:"hidden"`
-			RssURL        string     `json:"rss_url"`
-			SiteURL       string     `json:"site_url"`
-			CanonicalURL  string     `json:"canonical_url"`
-		} `json:"items"`
-	}
-	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
-		t.Fatalf("decode payload: %v", err)
-	}
-	if len(payload.Items) != 1 {
-		t.Fatalf("expected 1 source row, got %d", len(payload.Items))
-	}
-	if payload.Items[0].Provider != "rsshub" {
-		t.Fatalf("expected provider rsshub, got %q", payload.Items[0].Provider)
-	}
-	if payload.Items[0].Title != "RSSHub Source" {
-		t.Fatalf("expected title RSSHub Source, got %q", payload.Items[0].Title)
-	}
-	if payload.Items[0].SourceType != "external_rss" {
-		t.Fatalf("expected source_type external_rss, got %q", payload.Items[0].SourceType)
-	}
-	if payload.Items[0].HealthStatus != "healthy" {
-		t.Fatalf("expected health_status healthy, got %q", payload.Items[0].HealthStatus)
-	}
-	if payload.Items[0].LastFetchedAt == nil {
-		t.Fatal("expected last_fetched_at populated")
-	}
-	if payload.Items[0].Hidden {
-		t.Fatal("expected hidden false")
-	}
-	if payload.Items[0].RssURL == "" || payload.Items[0].SiteURL == "" || payload.Items[0].CanonicalURL == "" {
-		t.Fatalf("expected url skeleton fields present, got %#v", payload.Items[0])
 	}
 }
 

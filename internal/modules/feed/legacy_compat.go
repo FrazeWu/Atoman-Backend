@@ -1,4 +1,4 @@
-package handlers
+package feed
 
 import (
 	"crypto/sha256"
@@ -20,53 +20,9 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
-	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/service"
 )
-
-func SetupFeedRoutes(router *gin.Engine, db *gorm.DB) {
-	feed := router.Group("/api/v1/feed")
-	{
-		feed.GET("/rss/:username", GetUserRSS(db))
-
-		protected := feed.Group("")
-		protected.Use(middleware.AuthMiddleware())
-		{
-			protected.POST("/discover", DiscoverFeedCandidates())
-			protected.POST("/sources/create-from-provider", CreateSubscriptionFromProvider(db))
-			protected.GET("/subscriptions", GetSubscriptions(db))
-			protected.POST("/subscriptions", CreateSubscription(db))
-			protected.DELETE("/subscriptions/:id", DeleteSubscription(db))
-			protected.PUT("/subscriptions/:id", UpdateSubscription(db))
-			protected.GET("/stats", GetFeedStats(db))
-			protected.GET("/items/:id", GetFeedItem(db))
-			protected.GET("/groups", GetSubscriptionGroups(db))
-			protected.POST("/groups", CreateSubscriptionGroup(db))
-			protected.PUT("/groups/:id", UpdateSubscriptionGroup(db))
-			protected.DELETE("/groups/:id", DeleteSubscriptionGroup(db))
-			protected.PUT("/subscriptions/:id/group", SetSubscriptionGroup(db))
-			protected.POST("/opml/import", ImportOPML(db))
-			protected.GET("/opml/export", ExportOPML(db))
-			protected.POST("/sources/opml/import", middleware.AdminMiddleware(db), ImportGlobalOPML(db))
-			protected.GET("/stars", GetStarredItems(db))
-			protected.GET("/star-groups", GetFeedStarGroups(db))
-			protected.POST("/star-groups", CreateFeedStarGroup(db))
-			protected.PUT("/star-groups/:id", UpdateFeedStarGroup(db))
-			protected.DELETE("/star-groups/:id", DeleteFeedStarGroup(db))
-			protected.PUT("/stars/:feedItemId/group", SetFeedStarGroup(db))
-			protected.GET("/subscriptions/search", SearchSubscriptions(db))
-			protected.POST("/subscriptions/:id/health", CheckSubscriptionHealth(db))
-			protected.POST("/subscriptions/health/check-all", CheckAllSubscriptionsHealth(db))
-			protected.POST("/subscribe/channel/:channel_id", SubscribeChannel(db))
-			protected.DELETE("/subscribe/channel/:channel_id", UnsubscribeChannel(db))
-			protected.GET("/subscribe/channel/:channel_id/status", CheckChannelSubscription(db))
-			protected.POST("/subscribe/collection/:collection_id", SubscribeCollection(db))
-			protected.DELETE("/subscribe/collection/:collection_id", UnsubscribeCollection(db))
-			protected.GET("/subscribe/collection/:collection_id/status", CheckCollectionSubscription(db))
-		}
-	}
-}
 
 const defaultSubscriptionGroupName = "默认分组"
 
@@ -147,6 +103,10 @@ func buildFeedSourceHash(targetType string, targetID *uuid.UUID, rssURL string) 
 	h := sha256.New()
 	h.Write([]byte(raw))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func BuildFeedSourceHash(targetType string, targetID *uuid.UUID, rssURL string) string {
+	return buildFeedSourceHash(targetType, targetID, rssURL)
 }
 
 func populateFeedSourceTitle(db *gorm.DB, source *model.FeedSource, fallbackTitle string) {
@@ -356,6 +316,10 @@ func findOrCreateFeedSource(db *gorm.DB, targetType string, targetID *uuid.UUID,
 	return &source, nil
 }
 
+func FindOrCreateFeedSource(db *gorm.DB, targetType string, targetID *uuid.UUID, rssURL, fallbackTitle, providerOverride string) (*model.FeedSource, error) {
+	return findOrCreateFeedSource(db, targetType, targetID, rssURL, fallbackTitle, providerOverride)
+}
+
 // internalRSSPattern 匹配 /api/feed/rss/:username、/api/v1/feed/rss/:username 及对应绝对 URL
 var internalRSSPattern = regexp.MustCompile(`(?:^|/)api(?:/v1)?/feed/rss/([^/?#]+)$`)
 
@@ -371,6 +335,10 @@ func resolveInternalRSSURL(db *gorm.DB, rawURL string) (uuid.UUID, error) {
 		return uuid.UUID{}, err
 	}
 	return user.UUID, nil
+}
+
+func ResolveInternalRSSURL(db *gorm.DB, rawURL string) (uuid.UUID, error) {
+	return resolveInternalRSSURL(db, rawURL)
 }
 
 // CreateSubscription godoc
@@ -489,8 +457,36 @@ func DiscoverFeedCandidates() gin.HandlerFunc {
 			return
 		}
 
+		if isLikelyDirectFeedURL(u) {
+			c.JSON(http.StatusOK, gin.H{"candidates": []service.FeedDiscoveryCandidate{
+				{
+					Title:     rawURL,
+					FeedURL:   rawURL,
+					SiteURL:   rawURL,
+					Kind:      "direct",
+					Score:     100,
+					Reason:    "direct feed URL",
+					IsDefault: true,
+				},
+			}})
+			return
+		}
+
 		c.JSON(http.StatusOK, gin.H{"candidates": []service.FeedDiscoveryCandidate{}})
 	}
+}
+
+func isLikelyDirectFeedURL(u *url.URL) bool {
+	path := strings.ToLower(strings.TrimSpace(u.Path))
+	if path == "" {
+		return false
+	}
+	return strings.HasSuffix(path, ".xml") ||
+		strings.HasSuffix(path, ".rss") ||
+		strings.HasSuffix(path, ".atom") ||
+		strings.HasSuffix(path, "/rss") ||
+		strings.HasSuffix(path, "/atom") ||
+		strings.HasSuffix(path, "/feed")
 }
 
 func CreateSubscriptionFromProvider(db *gorm.DB) gin.HandlerFunc {

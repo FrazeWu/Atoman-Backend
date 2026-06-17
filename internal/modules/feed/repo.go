@@ -28,6 +28,19 @@ func (r *Repo) ListSubscriptionsWithSources(userID uuid.UUID, query FeedQuery) (
 	return subscriptions, err
 }
 
+func (r *Repo) ListVisibleFeedSources(query FeedQuery) ([]model.FeedSource, error) {
+	db := r.db.Model(&model.FeedSource{}).Where("hidden = ?", false)
+	if query.SourceType != "" {
+		db = db.Where("source_type = ?", query.SourceType)
+	}
+	if query.SourceID != uuid.Nil {
+		db = db.Where("id = ?", query.SourceID)
+	}
+	var sources []model.FeedSource
+	err := db.Find(&sources).Error
+	return sources, err
+}
+
 func (r *Repo) ListPublishedPostsByUserIDs(userIDs []uuid.UUID) ([]model.Post, error) {
 	if len(userIDs) == 0 {
 		return []model.Post{}, nil

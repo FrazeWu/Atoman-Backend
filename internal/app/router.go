@@ -49,7 +49,6 @@ func RegisterV1Routes(
 	handlers.SetupBlogChannelRoutes(r, db)
 	handlers.SetupBlogInteractionRoutes(r, db)
 	handlers.SetupBlogUploadRoutes(r, db, s3Client)
-	handlers.SetupFeedRoutes(r, db)
 	handlers.SetupSongRoutes(r, db, s3Client)
 	handlers.SetupAlbumRoutes(r, db, s3Client)
 	handlers.SetupArtistRoutes(r, db)

@@ -19,6 +19,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	feedmodule "atoman/internal/modules/feed"
 	"atoman/internal/service"
 	"atoman/internal/storage"
 )
@@ -146,7 +147,7 @@ func normalizeExternalRSSURL(db *gorm.DB, rawURL string) (string, error) {
 	if trimmed == "" {
 		return "", errors.New("rss_url is required")
 	}
-	if _, err := resolveInternalRSSURL(db, trimmed); err == nil {
+	if _, err := feedmodule.ResolveInternalRSSURL(db, trimmed); err == nil {
 		return "", errors.New("Internal RSS sources are managed separately")
 	}
 
@@ -622,7 +623,7 @@ func CreateAdminFeedSource(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		source, err := findOrCreateFeedSource(db, "external_rss", nil, rssURL, input.Title, "")
+		source, err := feedmodule.FindOrCreateFeedSource(db, "external_rss", nil, rssURL, input.Title, "")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create feed source"})
 			return
@@ -677,7 +678,7 @@ func UpdateAdminFeedSource(db *gorm.DB) gin.HandlerFunc {
 
 		updates := map[string]any{
 			"rss_url": rssURL,
-			"hash":    buildFeedSourceHash("external_rss", nil, rssURL),
+			"hash":    feedmodule.BuildFeedSourceHash("external_rss", nil, rssURL),
 			"title":   strings.TrimSpace(input.Title),
 		}
 		if strings.TrimSpace(input.Title) == "" {

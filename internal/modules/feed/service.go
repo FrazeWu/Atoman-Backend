@@ -24,7 +24,7 @@ func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db
 
 func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) ([]TimelineItemDTO, int64, error) {
 	if user.ID == uuid.Nil {
-		return nil, 0, apperr.Unauthorized("Login required")
+		return s.GetPublicFeed(query)
 	}
 
 	subscriptions, err := s.repo.ListSubscriptionsWithSources(user.ID, query)
@@ -114,11 +114,45 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	return paged, total, nil
 }
 
-func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]TimelineItemDTO, int64, error) {
-	if user.ID == uuid.Nil {
-		return nil, 0, apperr.Unauthorized("Login required")
+func (s *Service) GetPublicFeed(query FeedQuery) ([]TimelineItemDTO, int64, error) {
+	page := normalizedPage(query.Page)
+	limit := normalizedPageSize(query.PageSize)
+	offset := (page - 1) * limit
+
+	posts, err := s.repo.ListExplorePosts(limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	sources, err := s.repo.ListVisibleFeedSources(query)
+	if err != nil {
+		return nil, 0, err
 	}
 
+	feedSourceIDs := make([]uuid.UUID, 0, len(sources))
+	for _, source := range sources {
+		feedSourceIDs = append(feedSourceIDs, source.ID)
+	}
+	feedItems, err := s.repo.ListFeedItemsBySourceIDs(dedupeUUIDs(feedSourceIDs))
+	if err != nil {
+		return nil, 0, err
+	}
+	legacyfeed.AnnotateDuplicateFeedItems(feedItems)
+
+	items := make([]TimelineItemDTO, 0, len(posts)+len(feedItems))
+	for i := range posts {
+		items = append(items, TimelineItemDTO{Type: "post", Post: &posts[i], PublishedAt: posts[i].CreatedAt})
+	}
+	for i := range feedItems {
+		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt})
+	}
+
+	items = filterTimeline(items, query)
+	sortTimeline(items)
+	paged, total := paginateTimeline(items, page, limit)
+	return paged, total, nil
+}
+
+func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]TimelineItemDTO, int64, error) {
 	page := normalizedPage(query.Page)
 	limit := normalizedPageSize(query.PageSize)
 	offset := (page - 1) * limit
@@ -131,9 +165,12 @@ func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]T
 		return nil, 0, err
 	}
 	legacyfeed.AnnotateDuplicateFeedItems(feedItems)
-	readMap, err := s.readMap(user.ID, feedItems)
-	if err != nil {
-		return nil, 0, err
+	readMap := map[uuid.UUID]bool{}
+	if user.ID != uuid.Nil {
+		readMap, err = s.readMap(user.ID, feedItems)
+		if err != nil {
+			return nil, 0, err
+		}
 	}
 
 	items := make([]TimelineItemDTO, 0, len(posts)+len(feedItems))

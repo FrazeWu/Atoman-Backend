@@ -1,6 +1,9 @@
 package handlers
 
-import "atoman/internal/model"
+import (
+	"atoman/internal/model"
+	feedmodule "atoman/internal/modules/feed"
+)
 
 type ErrorResponse struct {
 	Error   string `json:"error" example:"用户名和密码不匹配"`
@@ -623,16 +626,16 @@ type SubscriptionListResponse struct {
 }
 
 type TimelineResponse struct {
-	Data    []TimelineItem `json:"data"`
-	Total   int            `json:"total" example:"20"`
-	Page    int            `json:"page" example:"1"`
-	Limit   int            `json:"limit" example:"20"`
-	Message string         `json:"message" example:"ok"`
+	Data    []feedmodule.TimelineItem `json:"data"`
+	Total   int                       `json:"total" example:"20"`
+	Page    int                       `json:"page" example:"1"`
+	Limit   int                       `json:"limit" example:"20"`
+	Message string                    `json:"message" example:"ok"`
 }
 
 type FeedStatsResponse struct {
-	Data    FeedStatsData `json:"data"`
-	Message string        `json:"message" example:"ok"`
+	Data    feedmodule.FeedStatsData `json:"data"`
+	Message string                   `json:"message" example:"ok"`
 }
 
 type SubscriptionGroupResponse struct {
@@ -712,7 +715,7 @@ type SearchSubscriptionsResponse struct {
 }
 
 type FeedItemResponse struct {
-	Data FeedItemDetailResponse `json:"data"`
+	Data feedmodule.FeedItemDetailResponse `json:"data"`
 }
 
 type SubscriptionActionResponse struct {

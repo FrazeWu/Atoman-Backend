@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"atoman/internal/middleware"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -18,8 +19,12 @@ type Handler struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
-	group.GET("/timeline", h.getSubscribedFeed)
-	group.GET("/explore", h.getExploreFeed)
+	group.GET("/timeline", middleware.OptionalAuthMiddleware(), h.getSubscribedFeed)
+	group.GET("/explore", middleware.OptionalAuthMiddleware(), h.getExploreFeed)
+
+	group.GET("/rss/:username", GetUserRSS(service.db))
+	group.GET("/items/:id", GetFeedItem(service.db))
+
 	group.POST("/timeline/mark-read", h.markRead)
 	group.POST("/timeline/mark-all-read", h.markAllRead)
 	group.POST("/timeline/mark-all-unread", h.markAllUnread)
@@ -27,14 +32,45 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/reading-list", h.listReadingList)
 	group.POST("/reading-list", h.toggleReadingList)
 	group.DELETE("/reading-list/:id", h.removeReadingListItem)
+
+	protected := group.Group("")
+	protected.Use(middleware.AuthMiddleware())
+	{
+		protected.POST("/discover", DiscoverFeedCandidates())
+		protected.POST("/sources/create-from-provider", CreateSubscriptionFromProvider(service.db))
+		protected.GET("/subscriptions", GetSubscriptions(service.db))
+		protected.POST("/subscriptions", CreateSubscription(service.db))
+		protected.DELETE("/subscriptions/:id", DeleteSubscription(service.db))
+		protected.PUT("/subscriptions/:id", UpdateSubscription(service.db))
+		protected.GET("/stats", GetFeedStats(service.db))
+		protected.GET("/groups", GetSubscriptionGroups(service.db))
+		protected.POST("/groups", CreateSubscriptionGroup(service.db))
+		protected.PUT("/groups/:id", UpdateSubscriptionGroup(service.db))
+		protected.DELETE("/groups/:id", DeleteSubscriptionGroup(service.db))
+		protected.PUT("/subscriptions/:id/group", SetSubscriptionGroup(service.db))
+		protected.POST("/opml/import", ImportOPML(service.db))
+		protected.GET("/opml/export", ExportOPML(service.db))
+		protected.POST("/sources/opml/import", middleware.AdminMiddleware(service.db), ImportGlobalOPML(service.db))
+		protected.GET("/stars", GetStarredItems(service.db))
+		protected.GET("/star-groups", GetFeedStarGroups(service.db))
+		protected.POST("/star-groups", CreateFeedStarGroup(service.db))
+		protected.PUT("/star-groups/:id", UpdateFeedStarGroup(service.db))
+		protected.DELETE("/star-groups/:id", DeleteFeedStarGroup(service.db))
+		protected.PUT("/stars/:feedItemId/group", SetFeedStarGroup(service.db))
+		protected.GET("/subscriptions/search", SearchSubscriptions(service.db))
+		protected.POST("/subscriptions/:id/health", CheckSubscriptionHealth(service.db))
+		protected.POST("/subscriptions/health/check-all", CheckAllSubscriptionsHealth(service.db))
+		protected.POST("/subscribe/channel/:channel_id", SubscribeChannel(service.db))
+		protected.DELETE("/subscribe/channel/:channel_id", UnsubscribeChannel(service.db))
+		protected.GET("/subscribe/channel/:channel_id/status", CheckChannelSubscription(service.db))
+		protected.POST("/subscribe/collection/:collection_id", SubscribeCollection(service.db))
+		protected.DELETE("/subscribe/collection/:collection_id", UnsubscribeCollection(service.db))
+		protected.GET("/subscribe/collection/:collection_id/status", CheckCollectionSubscription(service.db))
+	}
 }
 
 func (h *Handler) getSubscribedFeed(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
+	user, _ := authctx.Current(c)
 	items, total, err := h.service.GetSubscribedFeed(user, queryFromContext(c))
 	if err != nil {
 		httpx.Error(c, err)
@@ -44,11 +80,7 @@ func (h *Handler) getSubscribedFeed(c *gin.Context) {
 }
 
 func (h *Handler) getExploreFeed(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
+	user, _ := authctx.Current(c)
 	items, total, err := h.service.GetExploreFeed(user, queryFromContext(c))
 	if err != nil {
 		httpx.Error(c, err)
@@ -210,6 +242,9 @@ func queryFromContext(c *gin.Context) FeedQuery {
 	}
 	if raw := c.Query("is_read"); raw != "" {
 		value := raw == "true"
+		query.IsRead = &value
+	} else if c.Query("unread_only") == "true" {
+		value := false
 		query.IsRead = &value
 	}
 	return query

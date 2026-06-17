@@ -201,7 +201,6 @@ func main() {
 	handlers.SetupBlogPostRoutes(r, db)
 	handlers.SetupBlogInteractionRoutes(r, db)
 	handlers.SetupBlogUploadRoutes(r, db, s3Client)
-	handlers.SetupFeedRoutes(r, db)
 	handlers.SetupNotificationRoutes(r, db)
 	handlers.SetupSongRoutes(r, db, s3Client)
 	handlers.SetupAlbumRoutes(r, db, s3Client)

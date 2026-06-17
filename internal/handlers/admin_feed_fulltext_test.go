@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
+	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/service"
 	"atoman/internal/testdb"
@@ -260,6 +261,129 @@ func TestAdminDeleteFeedSourceCleansDependentFeedItemTables(t *testing.T) {
 	assertTableEmpty("feed_item_reads", &model.FeedItemRead{})
 	assertTableEmpty("feed_item_stars", &model.FeedItemStar{})
 	assertTableEmpty("reading_list_items", &model.ReadingListItem{})
+}
+
+func TestAdminListFeedSourcesRequiresAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAdminFeedFullTextTestDB(t)
+	user := model.User{
+		Username: "feeduser_" + uuid.NewString()[:8],
+		Email:    uuid.NewString() + "@example.com",
+		Password: "secret",
+		Role:     "user",
+		IsActive: true,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	router := gin.New()
+	admin := router.Group("/api/v1/admin")
+	admin.Use(func(c *gin.Context) {
+		c.Set("user_id", user.UUID)
+		middleware.AdminMiddleware(db)(c)
+	})
+	admin.GET("/feed/sources", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/sources", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusForbidden, rr.Code, rr.Body.String())
+	}
+}
+
+func TestAdminListFeedSourcesReturnsSourceRows(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAdminFeedFullTextTestDB(t)
+	adminUser := model.User{
+		Username: "feedadmin_" + uuid.NewString()[:8],
+		Email:    uuid.NewString() + "@example.com",
+		Password: "secret",
+		Role:     "admin",
+		IsActive: true,
+	}
+	if err := db.Create(&adminUser).Error; err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	source := model.FeedSource{
+		SourceType:    "external_rss",
+		Provider:      "rsshub",
+		RssURL:        "https://rsshub.app/example/" + uuid.NewString(),
+		CanonicalURL:  "https://rsshub.app/example/" + uuid.NewString(),
+		SiteURL:       "https://example.com/" + uuid.NewString(),
+		Hash:          "admin-feed-source-" + uuid.NewString(),
+		Title:         "RSSHub Source",
+		Hidden:        false,
+		HealthStatus:  "healthy",
+		LastFetchedAt: &now,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create admin feed source: %v", err)
+	}
+
+	router := gin.New()
+	admin := router.Group("/api/v1/admin")
+	admin.Use(func(c *gin.Context) {
+		c.Set("user_id", adminUser.UUID)
+		c.Set("role", "admin")
+		middleware.AdminMiddleware(db)(c)
+	})
+	admin.GET("/feed/sources", AdminListFeedSources(db))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/sources", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Items []struct {
+			Title         string     `json:"title"`
+			Provider      string     `json:"provider"`
+			SourceType    string     `json:"source_type"`
+			HealthStatus  string     `json:"health_status"`
+			LastFetchedAt *time.Time `json:"last_fetched_at"`
+			Hidden        bool       `json:"hidden"`
+			RssURL        string     `json:"rss_url"`
+			SiteURL       string     `json:"site_url"`
+			CanonicalURL  string     `json:"canonical_url"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("expected 1 source row, got %d", len(payload.Items))
+	}
+	if payload.Items[0].Provider != "rsshub" {
+		t.Fatalf("expected provider rsshub, got %q", payload.Items[0].Provider)
+	}
+	if payload.Items[0].Title != "RSSHub Source" {
+		t.Fatalf("expected title RSSHub Source, got %q", payload.Items[0].Title)
+	}
+	if payload.Items[0].SourceType != "external_rss" {
+		t.Fatalf("expected source_type external_rss, got %q", payload.Items[0].SourceType)
+	}
+	if payload.Items[0].HealthStatus != "healthy" {
+		t.Fatalf("expected health_status healthy, got %q", payload.Items[0].HealthStatus)
+	}
+	if payload.Items[0].LastFetchedAt == nil {
+		t.Fatal("expected last_fetched_at populated")
+	}
+	if payload.Items[0].Hidden {
+		t.Fatal("expected hidden false")
+	}
+	if payload.Items[0].RssURL == "" || payload.Items[0].SiteURL == "" || payload.Items[0].CanonicalURL == "" {
+		t.Fatalf("expected url skeleton fields present, got %#v", payload.Items[0])
+	}
 }
 
 func TestUpdateAdminFeedSourceRejectsInternalSource(t *testing.T) {

@@ -320,6 +320,46 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/feed/discover", bytes.NewBufferString(`{"url":"https://example.com/feed.xml"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected feed discover route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/feed/groups", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected feed groups route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/feed/stars?page=1&limit=20", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected feed stars route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	item := model.FeedItem{
+		FeedSourceID: source.ID,
+		GUID:         "router-feed-item",
+		Title:        "Router Feed Item",
+		Link:         "https://example.com/item",
+		PublishedAt:  time.Now().UTC(),
+		FetchedAt:    time.Now().UTC(),
+	}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatalf("create feed item: %v", err)
+	}
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/feed/items/"+item.ID.String(), nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected feed item detail route to return 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodDelete, "/api/v1/feed/reading-list/00000000-0000-0000-0000-000000000001", nil)
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {

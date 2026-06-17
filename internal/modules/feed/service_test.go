@@ -279,3 +279,20 @@ func TestGetExploreFeedUsesPageAndReturnsTotal(t *testing.T) {
 		t.Fatalf("expected page 2 to differ from page 1, got %#v and %#v", page1, page2)
 	}
 }
+
+func TestGetExploreFeedAllowsAnonymousPublicRead(t *testing.T) {
+	service, _, _ := newFeedTestService(t)
+
+	items, total, err := service.GetExploreFeed(authctx.CurrentUser{}, FeedQuery{Page: 1, PageSize: 20, Sort: "popular"})
+	if err != nil {
+		t.Fatalf("anonymous explore feed should be public: %v", err)
+	}
+	if total == 0 || len(items) == 0 {
+		t.Fatalf("expected anonymous explore feed to include public items, got total=%d len=%d", total, len(items))
+	}
+	for _, item := range items {
+		if item.IsRead {
+			t.Fatalf("anonymous explore items should not include user read state: %#v", item)
+		}
+	}
+}
