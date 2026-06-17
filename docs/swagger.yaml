@@ -28,6 +28,356 @@ definitions:
     required:
     - collection_id
     type: object
+  feed.ErrorResponse:
+    properties:
+      error:
+        example: invalid request
+        type: string
+    type: object
+  feed.FeedHealthCheckListResponse:
+    properties:
+      checked_count:
+        example: 5
+        type: integer
+      results:
+        items:
+          $ref: '#/definitions/feed.FeedHealthCheckResponse'
+        type: array
+    type: object
+  feed.FeedHealthCheckResponse:
+    properties:
+      error_message:
+        example: ""
+        type: string
+      health_status:
+        example: healthy
+        type: string
+      last_checked:
+        example: "2026-05-25T11:00:00Z"
+        format: date-time
+        type: string
+      reason:
+        example: internal subscription has no external URL
+        type: string
+      skipped:
+        example: true
+        type: boolean
+      subscription_id:
+        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
+        format: uuid
+        type: string
+    type: object
+  feed.FeedItemDetailResponse:
+    properties:
+      author:
+        type: string
+      content_html:
+        type: string
+      content_source:
+        type: string
+      duration:
+        type: string
+      enclosure_type:
+        type: string
+      enclosure_url:
+        type: string
+      feed_item:
+        $ref: '#/definitions/model.FeedItem'
+      feed_source:
+        $ref: '#/definitions/model.FeedSource'
+      id:
+        type: string
+      image_url:
+        type: string
+      link:
+        type: string
+      published_at:
+        type: string
+      summary:
+        type: string
+      title:
+        type: string
+    type: object
+  feed.FeedItemResponse:
+    properties:
+      data:
+        $ref: '#/definitions/feed.FeedItemDetailResponse'
+    type: object
+  feed.FeedSourceStat:
+    properties:
+      count:
+        type: integer
+      feed_source_id:
+        type: string
+      title:
+        type: string
+    type: object
+  feed.FeedStatsData:
+    properties:
+      period:
+        type: string
+      points:
+        items:
+          $ref: '#/definitions/feed.FeedStatsPoint'
+        type: array
+      source_breakdown:
+        items:
+          $ref: '#/definitions/feed.FeedSourceStat'
+        type: array
+      total_read:
+        type: integer
+    type: object
+  feed.FeedStatsPoint:
+    properties:
+      count:
+        type: integer
+      label:
+        type: string
+    type: object
+  feed.FeedStatsResponse:
+    properties:
+      data:
+        $ref: '#/definitions/feed.FeedStatsData'
+      message:
+        example: ok
+        type: string
+    type: object
+  feed.GroupInput:
+    properties:
+      name:
+        type: string
+    required:
+    - name
+    type: object
+  feed.MarkReadInput:
+    properties:
+      feed_item_ids:
+        items:
+          type: string
+        type: array
+    required:
+    - feed_item_ids
+    type: object
+  feed.MessageResponse:
+    properties:
+      message:
+        example: ok
+        type: string
+    type: object
+  feed.OPMLImportResponse:
+    properties:
+      failed:
+        example: 1
+        type: integer
+      imported:
+        example: 12
+        type: integer
+      message:
+        example: OPML import completed
+        type: string
+      reused:
+        example: 3
+        type: integer
+    type: object
+  feed.ReadingListResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/model.ReadingListItem'
+        type: array
+      page:
+        example: 1
+        type: integer
+      total:
+        example: 12
+        type: integer
+    type: object
+  feed.SaveToggleResponse:
+    properties:
+      saved:
+        example: true
+        type: boolean
+    type: object
+  feed.SearchSubscriptionsResponse:
+    properties:
+      count:
+        example: 5
+        type: integer
+      data:
+        items:
+          $ref: '#/definitions/model.Subscription'
+        type: array
+    type: object
+  feed.SetGroupInput:
+    properties:
+      group_id:
+        type: string
+    type: object
+  feed.StarToggleInput:
+    properties:
+      feed_item_id:
+        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
+        format: uuid
+        type: string
+    required:
+    - feed_item_id
+    type: object
+  feed.StarToggleResponse:
+    properties:
+      message:
+        example: Item starred
+        type: string
+      starred:
+        example: true
+        type: boolean
+    type: object
+  feed.StarredFeedItem:
+    properties:
+      author:
+        example: Fafa
+        type: string
+      id:
+        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
+        format: uuid
+        type: string
+      link:
+        example: https://example.com/post
+        type: string
+      published_at:
+        example: "2026-05-25T11:00:00Z"
+        format: date-time
+        type: string
+      source_image_url:
+        example: https://example.com/logo.png
+        type: string
+      source_site_url:
+        example: https://example.com/feed.xml
+        type: string
+      source_title:
+        example: My Feed
+        type: string
+      summary:
+        example: Summary text
+        type: string
+      title:
+        example: An interesting post
+        type: string
+    type: object
+  feed.StarredItemsResponse:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/feed.StarredFeedItem'
+        type: array
+      page:
+        example: 1
+        type: integer
+      total:
+        example: 20
+        type: integer
+    type: object
+  feed.SubscriptionActionResponse:
+    properties:
+      message:
+        example: Subscribed successfully
+        type: string
+      subscription:
+        $ref: '#/definitions/model.Subscription'
+    type: object
+  feed.SubscriptionGroupListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.SubscriptionGroup'
+        type: array
+      message:
+        example: ok
+        type: string
+    type: object
+  feed.SubscriptionGroupResponse:
+    properties:
+      data:
+        $ref: '#/definitions/model.SubscriptionGroup'
+      message:
+        example: ok
+        type: string
+    type: object
+  feed.SubscriptionInput:
+    properties:
+      rss_url:
+        type: string
+      target_id:
+        type: string
+      target_type:
+        enum:
+        - internal_user
+        - internal_channel
+        - internal_collection
+        - external_rss
+        type: string
+      title:
+        type: string
+    required:
+    - target_type
+    type: object
+  feed.SubscriptionListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.Subscription'
+        type: array
+      message:
+        example: ok
+        type: string
+    type: object
+  feed.SubscriptionResponse:
+    properties:
+      data:
+        $ref: '#/definitions/model.Subscription'
+      message:
+        example: ok
+        type: string
+    type: object
+  feed.SubscriptionStatusResponse:
+    properties:
+      subscribed:
+        example: true
+        type: boolean
+      subscription:
+        $ref: '#/definitions/model.Subscription'
+    type: object
+  feed.TimelineItem:
+    properties:
+      feed_item:
+        $ref: '#/definitions/model.FeedItem'
+      is_read:
+        type: boolean
+      post:
+        $ref: '#/definitions/model.Post'
+      published_at:
+        type: string
+      type:
+        type: string
+    type: object
+  feed.TimelineResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/feed.TimelineItem'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      message:
+        example: ok
+        type: string
+      page:
+        example: 1
+        type: integer
+      total:
+        example: 20
+        type: integer
+    type: object
   handlers.AnnotationGroup:
     properties:
       annotations:
@@ -811,114 +1161,6 @@ definitions:
       visibility:
         type: string
     type: object
-  handlers.FeedHealthCheckListResponse:
-    properties:
-      checked_count:
-        example: 5
-        type: integer
-      results:
-        items:
-          $ref: '#/definitions/handlers.FeedHealthCheckResponse'
-        type: array
-    type: object
-  handlers.FeedHealthCheckResponse:
-    properties:
-      error_message:
-        example: ""
-        type: string
-      health_status:
-        example: healthy
-        type: string
-      last_checked:
-        example: "2026-05-25T11:00:00Z"
-        format: date-time
-        type: string
-      reason:
-        example: internal subscription — no external URL to check
-        type: string
-      skipped:
-        example: true
-        type: boolean
-      subscription_id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
-        format: uuid
-        type: string
-    type: object
-  handlers.FeedItemDetailResponse:
-    properties:
-      author:
-        type: string
-      content_html:
-        type: string
-      content_source:
-        type: string
-      duration:
-        type: string
-      enclosure_type:
-        type: string
-      enclosure_url:
-        type: string
-      feed_item:
-        $ref: '#/definitions/model.FeedItem'
-      feed_source:
-        $ref: '#/definitions/model.FeedSource'
-      id:
-        type: string
-      image_url:
-        type: string
-      link:
-        type: string
-      published_at:
-        type: string
-      summary:
-        type: string
-      title:
-        type: string
-    type: object
-  handlers.FeedItemResponse:
-    properties:
-      data:
-        $ref: '#/definitions/handlers.FeedItemDetailResponse'
-    type: object
-  handlers.FeedSourceStat:
-    properties:
-      count:
-        type: integer
-      feed_source_id:
-        type: string
-      title:
-        type: string
-    type: object
-  handlers.FeedStatsData:
-    properties:
-      period:
-        type: string
-      points:
-        items:
-          $ref: '#/definitions/handlers.FeedStatsPoint'
-        type: array
-      source_breakdown:
-        items:
-          $ref: '#/definitions/handlers.FeedSourceStat'
-        type: array
-      total_read:
-        type: integer
-    type: object
-  handlers.FeedStatsPoint:
-    properties:
-      count:
-        type: integer
-      label:
-        type: string
-    type: object
-  handlers.FeedStatsResponse:
-    properties:
-      data:
-        $ref: '#/definitions/handlers.FeedStatsData'
-      message:
-        example: ok
-        type: string
-    type: object
   handlers.FoldArgumentInput:
     properties:
       fold_note:
@@ -1102,13 +1344,6 @@ definitions:
         example: Updated title
         type: string
     type: object
-  handlers.GroupInput:
-    properties:
-      name:
-        type: string
-    required:
-    - name
-    type: object
   handlers.ImageUploadResponse:
     properties:
       image_url:
@@ -1151,15 +1386,6 @@ definitions:
     required:
     - password
     - username
-    type: object
-  handlers.MarkReadInput:
-    properties:
-      feed_item_ids:
-        items:
-          type: string
-        type: array
-    required:
-    - feed_item_ids
     type: object
   handlers.MessageResponse:
     properties:
@@ -1214,18 +1440,6 @@ definitions:
       total:
         example: 15
         type: integer
-    type: object
-  handlers.OPMLImportResponse:
-    properties:
-      failed:
-        example: 1
-        type: integer
-      imported:
-        example: 12
-        type: integer
-      message:
-        example: OPML import completed
-        type: string
     type: object
   handlers.OnboardingCompleteResponse:
     properties:
@@ -1372,19 +1586,6 @@ definitions:
         example: https://atoman.org
         type: string
     type: object
-  handlers.ReadingListResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/model.ReadingListItem'
-        type: array
-      page:
-        example: 1
-        type: integer
-      total:
-        example: 12
-        type: integer
-    type: object
   handlers.ReferenceInput:
     properties:
       reference_id:
@@ -1477,22 +1678,6 @@ definitions:
         example: 内容已核验，可合并
         type: string
     type: object
-  handlers.SaveToggleResponse:
-    properties:
-      saved:
-        example: true
-        type: boolean
-    type: object
-  handlers.SearchSubscriptionsResponse:
-    properties:
-      count:
-        example: 5
-        type: integer
-      data:
-        items:
-          $ref: '#/definitions/model.Subscription'
-        type: array
-    type: object
   handlers.SearchUserSummary:
     properties:
       avatar_url:
@@ -1527,11 +1712,6 @@ definitions:
         type: string
     required:
     - email
-    type: object
-  handlers.SetGroupInput:
-    properties:
-      group_id:
-        type: string
     type: object
   handlers.SetProtectionInput:
     properties:
@@ -1645,156 +1825,10 @@ definitions:
         example: 2026
         type: integer
     type: object
-  handlers.StarToggleInput:
-    properties:
-      feed_item_id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
-        format: uuid
-        type: string
-    required:
-    - feed_item_id
-    type: object
-  handlers.StarToggleResponse:
-    properties:
-      message:
-        example: Item starred
-        type: string
-      starred:
-        example: true
-        type: boolean
-    type: object
-  handlers.StarredFeedItem:
-    properties:
-      author:
-        example: Fafa
-        type: string
-      id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
-        format: uuid
-        type: string
-      link:
-        example: https://example.com/post
-        type: string
-      published_at:
-        example: "2026-05-25T11:00:00Z"
-        format: date-time
-        type: string
-      source_image_url:
-        example: https://example.com/logo.png
-        type: string
-      source_site_url:
-        example: https://example.com/feed.xml
-        type: string
-      source_title:
-        example: My Feed
-        type: string
-      summary:
-        example: Summary text
-        type: string
-      title:
-        example: An interesting post
-        type: string
-    type: object
-  handlers.StarredItemsResponse:
-    properties:
-      items:
-        items:
-          $ref: '#/definitions/handlers.StarredFeedItem'
-        type: array
-      page:
-        example: 1
-        type: integer
-      total:
-        example: 20
-        type: integer
-    type: object
-  handlers.SubscriptionActionResponse:
-    properties:
-      message:
-        example: Subscribed successfully
-        type: string
-      subscription:
-        $ref: '#/definitions/model.Subscription'
-    type: object
-  handlers.SubscriptionGroupListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.SubscriptionGroup'
-        type: array
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.SubscriptionGroupResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.SubscriptionGroup'
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.SubscriptionInput:
-    properties:
-      rss_url:
-        type: string
-      target_id:
-        type: string
-      target_type:
-        enum:
-        - internal_user
-        - internal_channel
-        - internal_collection
-        - external_rss
-        type: string
-      title:
-        type: string
-    required:
-    - target_type
-    type: object
-  handlers.SubscriptionListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.Subscription'
-        type: array
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.SubscriptionResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.Subscription'
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.SubscriptionStatusResponse:
-    properties:
-      subscribed:
-        example: true
-        type: boolean
-      subscription:
-        $ref: '#/definitions/model.Subscription'
-    type: object
   handlers.TimelineEventResponse:
     properties:
       data:
         $ref: '#/definitions/model.TimelineEvent'
-    type: object
-  handlers.TimelineItem:
-    properties:
-      feed_item:
-        $ref: '#/definitions/model.FeedItem'
-      is_read:
-        type: boolean
-      post:
-        $ref: '#/definitions/model.Post'
-      published_at:
-        type: string
-      type:
-        type: string
     type: object
   handlers.TimelinePersonListResponse:
     properties:
@@ -1816,25 +1850,6 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/model.TimelinePerson'
-    type: object
-  handlers.TimelineResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/handlers.TimelineItem'
-        type: array
-      limit:
-        example: 20
-        type: integer
-      message:
-        example: ok
-        type: string
-      page:
-        example: 1
-        type: integer
-      total:
-        example: 20
-        type: integer
     type: object
   handlers.TimelineRevisionListResponse:
     properties:
@@ -2181,6 +2196,8 @@ definitions:
         type: string
       entry_status:
         type: string
+      hot_score:
+        type: number
       id:
         type: string
       release_date:
@@ -8049,11 +8066,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.TimelineResponse'
+            $ref: '#/definitions/feed.TimelineResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8069,11 +8086,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SubscriptionGroupListResponse'
+            $ref: '#/definitions/feed.SubscriptionGroupListResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8090,22 +8107,22 @@ paths:
         name: input
         required: true
         schema:
-          $ref: '#/definitions/handlers.GroupInput'
+          $ref: '#/definitions/feed.GroupInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/handlers.SubscriptionGroupResponse'
+            $ref: '#/definitions/feed.SubscriptionGroupResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8127,19 +8144,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
+            $ref: '#/definitions/feed.MessageResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8161,26 +8178,26 @@ paths:
         name: input
         required: true
         schema:
-          $ref: '#/definitions/handlers.GroupInput'
+          $ref: '#/definitions/feed.GroupInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
+            $ref: '#/definitions/feed.MessageResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8202,19 +8219,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.FeedItemResponse'
+            $ref: '#/definitions/feed.FeedItemResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8234,7 +8251,7 @@ paths:
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8258,15 +8275,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.OPMLImportResponse'
+            $ref: '#/definitions/feed.OPMLImportResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8291,11 +8308,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.ReadingListResponse'
+            $ref: '#/definitions/feed.ReadingListResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8312,26 +8329,26 @@ paths:
         name: input
         required: true
         schema:
-          $ref: '#/definitions/handlers.StarToggleInput'
+          $ref: '#/definitions/feed.StarToggleInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SaveToggleResponse'
+            $ref: '#/definitions/feed.SaveToggleResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8391,12 +8408,40 @@ paths:
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       summary: 获取用户博客 RSS
+      tags:
+      - feed
+  /api/v1/feed/sources/opml/export:
+    get:
+      description: 管理员导出全站 external_rss 订阅源为 OPML 文件，不包含用户订阅关系。
+      produces:
+      - application/x-opml+xml
+      responses:
+        "200":
+          description: OPML XML
+          schema:
+            type: string
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 导出全局 OPML 订阅源
       tags:
       - feed
   /api/v1/feed/sources/opml/import:
@@ -8416,23 +8461,23 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.OPMLImportResponse'
+            $ref: '#/definitions/feed.OPMLImportResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "401":
           description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8457,11 +8502,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.StarredItemsResponse'
+            $ref: '#/definitions/feed.StarredItemsResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8486,15 +8531,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.FeedStatsResponse'
+            $ref: '#/definitions/feed.FeedStatsResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8516,19 +8561,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
+            $ref: '#/definitions/feed.MessageResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8549,23 +8594,23 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SubscriptionActionResponse'
+            $ref: '#/definitions/feed.SubscriptionActionResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8587,11 +8632,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SubscriptionStatusResponse'
+            $ref: '#/definitions/feed.SubscriptionStatusResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8613,19 +8658,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
+            $ref: '#/definitions/feed.MessageResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8646,23 +8691,23 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SubscriptionActionResponse'
+            $ref: '#/definitions/feed.SubscriptionActionResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "409":
           description: Conflict
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8684,11 +8729,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SubscriptionStatusResponse'
+            $ref: '#/definitions/feed.SubscriptionStatusResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8704,11 +8749,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SubscriptionListResponse'
+            $ref: '#/definitions/feed.SubscriptionListResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8725,22 +8770,22 @@ paths:
         name: input
         required: true
         schema:
-          $ref: '#/definitions/handlers.SubscriptionInput'
+          $ref: '#/definitions/feed.SubscriptionInput'
       produces:
       - application/json
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/handlers.SubscriptionResponse'
+            $ref: '#/definitions/feed.SubscriptionResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8762,11 +8807,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
+            $ref: '#/definitions/feed.MessageResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8830,22 +8875,22 @@ paths:
         name: input
         required: true
         schema:
-          $ref: '#/definitions/handlers.SetGroupInput'
+          $ref: '#/definitions/feed.SetGroupInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
+            $ref: '#/definitions/feed.MessageResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8867,19 +8912,19 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.FeedHealthCheckResponse'
+            $ref: '#/definitions/feed.FeedHealthCheckResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8895,11 +8940,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.FeedHealthCheckListResponse'
+            $ref: '#/definitions/feed.FeedHealthCheckListResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8925,15 +8970,15 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.SearchSubscriptionsResponse'
+            $ref: '#/definitions/feed.SearchSubscriptionsResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8981,11 +9026,11 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.TimelineResponse'
+            $ref: '#/definitions/feed.TimelineResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9001,7 +9046,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
+            $ref: '#/definitions/feed.MessageResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9017,7 +9062,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
+            $ref: '#/definitions/feed.MessageResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9035,18 +9080,18 @@ paths:
         name: input
         required: true
         schema:
-          $ref: '#/definitions/handlers.MarkReadInput'
+          $ref: '#/definitions/feed.MarkReadInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
+            $ref: '#/definitions/feed.MessageResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9064,26 +9109,26 @@ paths:
         name: input
         required: true
         schema:
-          $ref: '#/definitions/handlers.StarToggleInput'
+          $ref: '#/definitions/feed.StarToggleInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.StarToggleResponse'
+            $ref: '#/definitions/feed.StarToggleResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "404":
           description: Not Found
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/feed.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []

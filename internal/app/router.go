@@ -5,6 +5,7 @@ import (
 
 	"atoman/internal/collab"
 	"atoman/internal/handlers"
+	"atoman/internal/middleware"
 	"atoman/internal/modules/blog"
 	"atoman/internal/modules/debate"
 	"atoman/internal/modules/debate_voting"
@@ -15,7 +16,6 @@ import (
 	"atoman/internal/modules/music"
 	"atoman/internal/modules/notification"
 	"atoman/internal/modules/subscription"
-	"atoman/internal/middleware"
 	"atoman/internal/service"
 
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -44,11 +44,13 @@ func RegisterV1Routes(
 	music.RegisterRoutes(group.Group("/music"), music.NewService(db))
 
 	handlers.SetupAuthRoutes(r, db, emailService)
+	handlers.SetupSiteRoutes(r, db)
 	handlers.SetupOnboardingRoutes(r, db)
 	handlers.SetupUserRoutes(r, db)
 	handlers.SetupBlogChannelRoutes(r, db)
 	handlers.SetupBlogInteractionRoutes(r, db)
 	handlers.SetupBlogUploadRoutes(r, db, s3Client)
+	handlers.SetupUploadRoutes(r, db, s3Client)
 	handlers.SetupSongRoutes(r, db, s3Client)
 	handlers.SetupAlbumRoutes(r, db, s3Client)
 	handlers.SetupArtistRoutes(r, db)

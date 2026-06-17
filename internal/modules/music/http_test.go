@@ -98,6 +98,192 @@ func TestRegisterRoutesSubmitEditReturnsCreatedOpenEdit(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesListsArtistsThroughMusicV1(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Visible Artist", Bio: "bio", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/artists?q=visible", nil)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []model.Artist `json:"data"`
+		Meta struct {
+			Page     int  `json:"page"`
+			PageSize int  `json:"page_size"`
+			Total    int  `json:"total"`
+			HasMore  bool `json:"has_more"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].Name != "Visible Artist" {
+		t.Fatalf("unexpected artists response: %#v", resp.Data)
+	}
+	if resp.Meta.Page != 1 || resp.Meta.PageSize != 20 || resp.Meta.Total != 1 || resp.Meta.HasMore {
+		t.Fatalf("unexpected pagination meta: %#v", resp.Meta)
+	}
+}
+
+func TestRegisterRoutesListAlbumsSortsByHotScore(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Discovery Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	albums := []model.Album{
+		{Title: "Low Heat", EntryStatus: "open", Status: "open", HotScore: 1.5},
+		{Title: "High Heat", EntryStatus: "open", Status: "open", HotScore: 42.25},
+		{Title: "Mid Heat", EntryStatus: "open", Status: "open", HotScore: 7},
+	}
+	for i := range albums {
+		if err := db.Create(&albums[i]).Error; err != nil {
+			t.Fatalf("create album %d: %v", i, err)
+		}
+		if err := db.Model(&albums[i]).Association("Artists").Append(&artist); err != nil {
+			t.Fatalf("append artist to album %d: %v", i, err)
+		}
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/albums?sort=hot&page_size=10", nil)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []model.Album `json:"data"`
+		Meta struct {
+			Total int `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 3 || resp.Meta.Total != 3 {
+		t.Fatalf("unexpected album count: data=%#v meta=%#v", resp.Data, resp.Meta)
+	}
+	gotTitles := []string{resp.Data[0].Title, resp.Data[1].Title, resp.Data[2].Title}
+	wantTitles := []string{"High Heat", "Mid Heat", "Low Heat"}
+	for i := range wantTitles {
+		if gotTitles[i] != wantTitles[i] {
+			t.Fatalf("expected hot order %v, got %v", wantTitles, gotTitles)
+		}
+	}
+	if resp.Data[0].HotScore != 42.25 {
+		t.Fatalf("expected hot_score in response, got %#v", resp.Data[0])
+	}
+}
+
+func TestRegisterRoutesListAlbumsSearchesArtistNames(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	visibleArtist := model.Artist{Name: "Searchable Artist", EntryStatus: "open"}
+	otherArtist := model.Artist{Name: "Other Artist", EntryStatus: "open"}
+	if err := db.Create(&visibleArtist).Error; err != nil {
+		t.Fatalf("create visible artist: %v", err)
+	}
+	if err := db.Create(&otherArtist).Error; err != nil {
+		t.Fatalf("create other artist: %v", err)
+	}
+	visibleAlbum := model.Album{Title: "Title Does Not Match", EntryStatus: "open", Status: "open"}
+	otherAlbum := model.Album{Title: "Other Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&visibleAlbum).Error; err != nil {
+		t.Fatalf("create visible album: %v", err)
+	}
+	if err := db.Create(&otherAlbum).Error; err != nil {
+		t.Fatalf("create other album: %v", err)
+	}
+	if err := db.Model(&visibleAlbum).Association("Artists").Append(&visibleArtist); err != nil {
+		t.Fatalf("append visible artist: %v", err)
+	}
+	if err := db.Model(&otherAlbum).Association("Artists").Append(&otherArtist); err != nil {
+		t.Fatalf("append other artist: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/albums?q=searchable", nil)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []model.Album `json:"data"`
+		Meta struct {
+			Total int `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Meta.Total != 1 || resp.Data[0].Title != "Title Does Not Match" {
+		t.Fatalf("unexpected artist-name search response: data=%#v meta=%#v", resp.Data, resp.Meta)
+	}
+}
+
+func TestRegisterRoutesListAlbumsSearchesArtistNamesWithHotSort(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Ranked Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	lowAlbum := model.Album{Title: "Low Ranked", EntryStatus: "open", Status: "open", HotScore: 1}
+	highAlbum := model.Album{Title: "High Ranked", EntryStatus: "open", Status: "open", HotScore: 9}
+	if err := db.Create(&lowAlbum).Error; err != nil {
+		t.Fatalf("create low album: %v", err)
+	}
+	if err := db.Create(&highAlbum).Error; err != nil {
+		t.Fatalf("create high album: %v", err)
+	}
+	if err := db.Model(&lowAlbum).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append low artist: %v", err)
+	}
+	if err := db.Model(&highAlbum).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append high artist: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/albums?q=ranked&sort=hot", nil)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []model.Album `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 2 || resp.Data[0].Title != "High Ranked" || resp.Data[1].Title != "Low Ranked" {
+		t.Fatalf("expected searched albums in hot order, got %#v", resp.Data)
+	}
+}
+
+func TestAlbumSortOrdersSupportsRandomMode(t *testing.T) {
+	got := albumSortOrders("random")
+
+	if len(got) != 1 || got[0] != "RANDOM()" {
+		t.Fatalf("expected RANDOM() order, got %#v", got)
+	}
+}
+
 func TestRegisterRoutesSubmitEditRequiresCurrentUser(t *testing.T) {
 	service, _, _ := newMusicHTTPTestService(t)
 	r := newMusicHTTPRouter(service, nil)

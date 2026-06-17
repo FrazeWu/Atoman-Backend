@@ -4,7 +4,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
+	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -20,12 +22,146 @@ type Handler struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
+	group.GET("/artists", h.listArtists)
+	group.GET("/artists/:artistId", h.getArtist)
+	group.GET("/albums", h.listAlbums)
+	group.GET("/albums/:albumId", h.getAlbum)
 	group.POST("/edits", h.submitEdit)
 	group.GET("/edits/:editId", h.getEdit)
 	group.POST("/edits/:editId/votes", h.voteEdit)
 	group.POST("/edits/:editId/approve", h.approveEdit)
 	group.POST("/edits/:editId/reject", h.rejectEdit)
 	group.POST("/edits/:editId/cancel", h.cancelEdit)
+}
+
+func (h *Handler) listArtists(c *gin.Context) {
+	page, pageSize := httpx.PageParams(c)
+	query := strings.TrimSpace(c.Query("q"))
+
+	db := h.service.db.Model(&model.Artist{}).Where("COALESCE(entry_status, '') <> ?", "closed")
+	if query != "" {
+		like := "%" + strings.ToLower(query) + "%"
+		db = db.Where("LOWER(name) LIKE ?", like)
+	}
+
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	var artists []model.Artist
+	if err := db.Order("name ASC").Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&artists).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	httpx.List(c, artists, page, pageSize, total)
+}
+
+func (h *Handler) getArtist(c *gin.Context) {
+	artistID, err := parseMusicID(c.Param("artistId"), "artistId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	var artist model.Artist
+	if err := h.service.db.Preload("Albums.Artists").First(&artist, "id = ?", artistID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(c, apperr.NotFound("music.artist_not_found", "Artist not found"))
+			return
+		}
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, artist)
+}
+
+func (h *Handler) listAlbums(c *gin.Context) {
+	page, pageSize := httpx.PageParams(c)
+	query := strings.TrimSpace(c.Query("q"))
+	artistIDRaw := strings.TrimSpace(c.Query("artist_id"))
+	sort := strings.TrimSpace(c.Query("sort"))
+
+	db := h.service.db.Model(&model.Album{}).Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed")
+	joinedArtists := false
+	if query != "" {
+		like := "%" + strings.ToLower(query) + "%"
+		db = db.
+			Joins("LEFT JOIN album_artists AS search_album_artists ON search_album_artists.album_id = \"Albums\".id").
+			Joins("LEFT JOIN \"Artists\" AS search_artists ON search_artists.id = search_album_artists.artist_id")
+		joinedArtists = true
+		db = db.Where("LOWER(\"Albums\".title) LIKE ? OR LOWER(search_artists.name) LIKE ?", like, like)
+	}
+	if artistIDRaw != "" {
+		artistID, err := parseMusicID(artistIDRaw, "artist_id")
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		db = db.Joins("JOIN album_artists AS filter_album_artists ON filter_album_artists.album_id = \"Albums\".id").Where("filter_album_artists.artist_id = ?", artistID)
+		joinedArtists = true
+	}
+
+	var total int64
+	countDB := db
+	if joinedArtists {
+		countDB = countDB.Distinct("\"Albums\".id")
+	}
+	if err := countDB.Count(&total).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	var albums []model.Album
+	findDB := db.Preload("Artists").Preload("Songs")
+	if joinedArtists {
+		findDB = findDB.Distinct("\"Albums\".*")
+	}
+	for _, order := range albumSortOrders(sort) {
+		findDB = findDB.Order(order)
+	}
+	if err := findDB.Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&albums).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	httpx.List(c, albums, page, pageSize, total)
+}
+
+func (h *Handler) getAlbum(c *gin.Context) {
+	albumID, err := parseMusicID(c.Param("albumId"), "albumId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	var album model.Album
+	if err := h.service.db.Preload("Artists").Preload("Songs").First(&album, "id = ?", albumID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(c, apperr.NotFound("music.album_not_found", "Album not found"))
+			return
+		}
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, album)
+}
+
+func albumSortOrders(sort string) []string {
+	switch sort {
+	case "hot":
+		return []string{"\"Albums\".hot_score DESC", "\"Albums\".updated_at DESC", "\"Albums\".title ASC"}
+	case "random":
+		return []string{"RANDOM()"}
+	case "-created_at":
+		return []string{"\"Albums\".created_at DESC", "\"Albums\".title ASC"}
+	case "release_date":
+		return []string{"\"Albums\".release_date ASC", "\"Albums\".title ASC"}
+	default:
+		return []string{"\"Albums\".release_date ASC", "\"Albums\".title ASC"}
+	}
 }
 
 func (h *Handler) submitEdit(c *gin.Context) {
@@ -188,9 +324,13 @@ func (h *Handler) cancelEdit(c *gin.Context) {
 }
 
 func parseEditID(raw string) (uuid.UUID, error) {
+	return parseMusicID(raw, "editId")
+}
+
+func parseMusicID(raw string, field string) (uuid.UUID, error) {
 	id, err := uuid.Parse(raw)
 	if err != nil {
-		return uuid.Nil, apperr.BadRequest("validation.invalid_request", "editId must be a valid UUID")
+		return uuid.Nil, apperr.BadRequest("validation.invalid_request", field+" must be a valid UUID")
 	}
 	return id, nil
 }

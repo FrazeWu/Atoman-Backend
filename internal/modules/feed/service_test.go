@@ -214,6 +214,98 @@ func TestListReadingListReturnsPagedItems(t *testing.T) {
 	}
 }
 
+func TestSubscribedFeedAndExploreExcludeHiddenFeedSources(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	hiddenSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://hidden.example.com/feed.xml",
+		Hash:         "hidden-rss-hash",
+		Title:        "Hidden Feed",
+		Hidden:       true,
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&hiddenSource).Error; err != nil {
+		t.Fatalf("create hidden source: %v", err)
+	}
+	hiddenItem := model.FeedItem{
+		FeedSourceID: hiddenSource.ID,
+		GUID:         "hidden-guid",
+		Title:        "Hidden item",
+		Link:         "https://hidden.example.com/items/1",
+		PublishedAt:  time.Now().UTC(),
+		FetchedAt:    time.Now().UTC(),
+	}
+	if err := db.Create(&hiddenItem).Error; err != nil {
+		t.Fatalf("create hidden feed item: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: hiddenSource.ID, Title: "Hidden Feed"}).Error; err != nil {
+		t.Fatalf("create hidden subscription: %v", err)
+	}
+
+	subscribedItems, _, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 100})
+	if err != nil {
+		t.Fatalf("get subscribed feed: %v", err)
+	}
+	for _, item := range subscribedItems {
+		if item.Type == "feed_item" && item.FeedItem != nil && item.FeedItem.ID == hiddenItem.ID {
+			t.Fatalf("hidden feed item leaked into subscribed feed: %#v", item)
+		}
+	}
+
+	exploreItems, _, err := service.GetExploreFeed(user, FeedQuery{Page: 1, PageSize: 100, Sort: "popular"})
+	if err != nil {
+		t.Fatalf("get explore feed: %v", err)
+	}
+	for _, item := range exploreItems {
+		if item.Type == "feed_item" && item.FeedItem != nil && item.FeedItem.ID == hiddenItem.ID {
+			t.Fatalf("hidden feed item leaked into explore feed: %#v", item)
+		}
+	}
+}
+
+func TestMarkAllReadSkipsHiddenFeedSources(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	hiddenSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://hidden.example.com/feed.xml",
+		Hash:         "hidden-mark-read-rss-hash",
+		Title:        "Hidden Feed",
+		Hidden:       true,
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&hiddenSource).Error; err != nil {
+		t.Fatalf("create hidden source: %v", err)
+	}
+	hiddenItem := model.FeedItem{
+		FeedSourceID: hiddenSource.ID,
+		GUID:         "hidden-mark-read-guid",
+		Title:        "Hidden mark read item",
+		Link:         "https://hidden.example.com/items/mark-read",
+		PublishedAt:  time.Now().UTC(),
+		FetchedAt:    time.Now().UTC(),
+	}
+	if err := db.Create(&hiddenItem).Error; err != nil {
+		t.Fatalf("create hidden feed item: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: hiddenSource.ID, Title: "Hidden Feed"}).Error; err != nil {
+		t.Fatalf("create hidden subscription: %v", err)
+	}
+
+	if err := service.MarkAllRead(user); err != nil {
+		t.Fatalf("mark all read: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.FeedItemRead{}).Where("user_id = ? AND feed_item_id = ?", user.ID, hiddenItem.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count hidden read records: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected hidden feed item to stay unread, got %d read records", count)
+	}
+}
+
 func TestRemoveReadingListItemDeletesUserItem(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	var feedItem model.FeedItem

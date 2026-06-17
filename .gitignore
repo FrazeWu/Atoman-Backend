@@ -13,3 +13,5 @@ nvim.log
 .claude/
 .codegraph/
 .gstack/
+nginx/ssl/*
+!nginx/ssl/README.md

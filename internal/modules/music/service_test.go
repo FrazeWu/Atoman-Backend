@@ -69,7 +69,10 @@ func TestApproveCreateArtistAppliesThroughEdit(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	moderator := createModerator(t, db)
 
-	edit, err := svc.SubmitEdit(user, SubmitEditRequest{Type: "create_artist", EntityType: "artist", Payload: map[string]any{"name": "New Artist"}, Reason: "new artist"})
+	edit, err := svc.SubmitEdit(user, SubmitEditRequest{Type: "create_artist", EntityType: "artist", Payload: map[string]any{
+		"name":       "New Artist",
+		"birth_date": "1990-05-21",
+	}, Reason: "new artist"})
 	if err != nil {
 		t.Fatalf("submit edit: %v", err)
 	}
@@ -86,6 +89,9 @@ func TestApproveCreateArtistAppliesThroughEdit(t *testing.T) {
 	if err := db.Where("name = ?", "New Artist").First(&artist).Error; err != nil {
 		t.Fatalf("expected artist created: %v", err)
 	}
+	if artist.BirthDate == nil || artist.BirthDate.Format("2006-01-02") != "1990-05-21" || artist.BirthYear != 1990 {
+		t.Fatalf("expected full birth date and derived year, got %#v", artist)
+	}
 
 	var decisions int64
 	db.Model(&model.MusicEditDecision{}).Where("edit_id = ?", edit.ID).Count(&decisions)
@@ -97,6 +103,54 @@ func TestApproveCreateArtistAppliesThroughEdit(t *testing.T) {
 	db.Model(&model.AuditLog{}).Where("action = ?", "music.edit.approve").Count(&audits)
 	if audits != 1 {
 		t.Fatalf("expected audit log, got %d", audits)
+	}
+}
+
+func TestApproveCreateAlbumAppliesThroughEdit(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	moderator := createModerator(t, db)
+
+	artist := model.Artist{Name: "Album Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+
+	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
+		Type:       "create_album",
+		EntityType: "album",
+		Payload: map[string]any{
+			"title":        "New Album",
+			"artist_ids":   []any{artist.ID.String()},
+			"release_date": "2026-06-17",
+			"album_type":   "album",
+			"description":  "release notes",
+		},
+		Reason: "new album",
+	})
+	if err != nil {
+		t.Fatalf("submit edit: %v", err)
+	}
+
+	applied, err := svc.ApproveEdit(moderator, edit.ID, "verified")
+	if err != nil {
+		t.Fatalf("approve edit: %v", err)
+	}
+	if applied.Status != "applied" {
+		t.Fatalf("expected applied, got %s", applied.Status)
+	}
+
+	var album model.Album
+	if err := db.Preload("Artists").Where("title = ?", "New Album").First(&album).Error; err != nil {
+		t.Fatalf("expected album created: %v", err)
+	}
+	if album.EntryStatus != "open" || album.AlbumType != "album" || album.ReleaseDate.Format("2006-01-02") != "2026-06-17" {
+		t.Fatalf("unexpected album fields: %#v", album)
+	}
+	if album.HotScore != 0 {
+		t.Fatalf("expected new album hot score to default to 0, got %f", album.HotScore)
+	}
+	if len(album.Artists) != 1 || album.Artists[0].ID != artist.ID {
+		t.Fatalf("expected album linked to artist, got %#v", album.Artists)
 	}
 }
 

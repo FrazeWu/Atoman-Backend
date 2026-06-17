@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,6 +17,21 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 )
+
+func signedRouterTokenForTest(t *testing.T, user model.User) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id":  user.UUID.String(),
+		"username": user.Username,
+		"role":     user.Role,
+		"exp":      time.Now().Add(time.Hour).Unix(),
+	})
+	signed, err := token.SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return signed
+}
 
 func TestRegisterV1RoutesMountsMusicSubmitEdit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -59,6 +75,48 @@ func TestRegisterV1RoutesMountsMusicSubmitEdit(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRegisterV1RoutesMountsS3OnlyUploads(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{})
+	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("purpose", "music.cover"); err != nil {
+		t.Fatalf("write purpose: %v", err)
+	}
+	part, err := writer.CreateFormFile("file", "avatar.png")
+	if err != nil {
+		t.Fatalf("create file field: %v", err)
+	}
+	if _, err := part.Write([]byte("png-data")); err != nil {
+		t.Fatalf("write file field: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	r := gin.New()
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
+	req.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected uploads route to be mounted, got 404")
+	}
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected mounted uploads route to fail without S3, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -199,6 +257,60 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound || !bytes.Contains(w.Body.Bytes(), []byte("blog.post_not_found")) {
 		t.Fatalf("expected mounted blog post collection remove route to return blog.post_not_found, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRegisterV1RoutesMountsSiteResolve(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{})
+
+	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	channel := model.Channel{UserID: &user.UUID, Name: "Design", Slug: "design"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	r := gin.New()
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+
+	cases := []struct {
+		path     string
+		wantCode int
+		wantType string
+	}{
+		{path: "/api/v1/site/resolve/feed", wantCode: http.StatusOK, wantType: "module"},
+		{path: "/api/v1/site/resolve/alice", wantCode: http.StatusOK, wantType: "user"},
+		{path: "/api/v1/site/resolve/design", wantCode: http.StatusOK, wantType: "channel"},
+		{path: "/api/v1/site/resolve/missing", wantCode: http.StatusNotFound},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+			r.ServeHTTP(w, req)
+			if w.Code != tc.wantCode {
+				t.Fatalf("expected %d, got %d: %s", tc.wantCode, w.Code, w.Body.String())
+			}
+			if tc.wantType == "" {
+				return
+			}
+			var payload struct {
+				Data struct {
+					Type string `json:"type"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if payload.Data.Type != tc.wantType {
+				t.Fatalf("expected type %q, got %q", tc.wantType, payload.Data.Type)
+			}
+		})
 	}
 }
 
@@ -361,6 +473,7 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 
 	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodDelete, "/api/v1/feed/reading-list/00000000-0000-0000-0000-000000000001", nil)
+	req.Header.Set("Authorization", "Bearer "+signed)
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected missing reading-list item to return 404, got %d: %s", w.Code, w.Body.String())

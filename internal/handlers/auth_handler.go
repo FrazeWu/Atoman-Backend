@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -185,6 +187,20 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 			return
 		}
 
+		input.Username = strings.ToLower(strings.TrimSpace(input.Username))
+		if err := service.NewSiteNamespaceService(db).ValidateUsernameAvailable(c.Request.Context(), input.Username); err != nil {
+			if errors.Is(err, service.ErrSiteHandleReserved) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Site handle is reserved"})
+				return
+			}
+			if errors.Is(err, service.ErrSiteHandleTaken) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Site handle is already in use"})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid site handle"})
+			return
+		}
+
 		// Verify email verification code first
 		valid, err := emailService.VerifyCode(input.Email, input.VerificationCode)
 		if err != nil {
@@ -272,7 +288,7 @@ func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cookie, err := c.Cookie(authTokenCookieName)
 		if err != nil {
-			authError(c, http.StatusUnauthorized, authRequired, "请先登录")
+			c.Status(http.StatusNoContent)
 			return
 		}
 

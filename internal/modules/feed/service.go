@@ -203,6 +203,13 @@ func (s *Service) MarkRead(user authctx.CurrentUser, ids []uuid.UUID) error {
 	return s.repo.MarkRead(user.ID, dedupeUUIDs(ids))
 }
 
+func (s *Service) MarkUnread(user authctx.CurrentUser, ids []uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.repo.DeleteReads(user.ID, dedupeUUIDs(ids))
+}
+
 func (s *Service) MarkAllRead(user authctx.CurrentUser) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")

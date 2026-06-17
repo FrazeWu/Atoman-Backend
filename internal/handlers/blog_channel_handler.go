@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/service"
 )
 
 // SetupBlogChannelRoutes configures blog channel and collection routes
@@ -64,6 +66,18 @@ type DeleteChannelInput struct {
 	Password        string `json:"password" binding:"required"`
 	MoveContent     bool   `json:"move_content"`
 	TargetChannelID string `json:"target_channel_id"`
+}
+
+func writeChannelSlugError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrSiteHandleReserved) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Channel slug is reserved"})
+		return
+	}
+	if errors.Is(err, service.ErrSiteHandleTaken) {
+		c.JSON(http.StatusConflict, gin.H{"error": "Channel slug is already in use"})
+		return
+	}
+	c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel slug"})
 }
 
 // EnsureDefaultChannel creates a default channel for the authenticated user if they don't have one
@@ -224,13 +238,24 @@ func CreateChannel(db *gorm.DB) gin.HandlerFunc {
 		userID := userIDVal.(uuid.UUID)
 
 		slugSource := input.Slug
-		if strings.TrimSpace(slugSource) == "" {
+		if strings.TrimSpace(slugSource) != "" {
+			slug, err := validateExplicitChannelSlug(db, slugSource, nil)
+			if err != nil {
+				writeChannelSlugError(c, err)
+				return
+			}
+			slugSource = slug
+		} else {
 			slugSource = input.Name
 		}
-		slug, err := uniqueChannelSlug(db, slugSource, nil)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate channel slug"})
-			return
+		slug := slugSource
+		if strings.TrimSpace(input.Slug) == "" {
+			var err error
+			slug, err = uniqueChannelSlug(db, slugSource, nil)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate channel slug"})
+				return
+			}
 		}
 
 		channel := model.Channel{
@@ -315,13 +340,24 @@ func UpdateChannel(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		slugSource := input.Slug
-		if strings.TrimSpace(slugSource) == "" {
+		if strings.TrimSpace(slugSource) != "" {
+			slug, err := validateExplicitChannelSlug(db, slugSource, &excludeID)
+			if err != nil {
+				writeChannelSlugError(c, err)
+				return
+			}
+			slugSource = slug
+		} else {
 			slugSource = input.Name
 		}
-		slug, err := uniqueChannelSlug(db, slugSource, &excludeID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate channel slug"})
-			return
+		slug := slugSource
+		if strings.TrimSpace(input.Slug) == "" {
+			var err error
+			slug, err = uniqueChannelSlug(db, slugSource, &excludeID)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate channel slug"})
+				return
+			}
 		}
 
 		if err := db.Model(&channel).Updates(model.Channel{

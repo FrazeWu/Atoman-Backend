@@ -1,6 +1,7 @@
 package blog
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/audit"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/sitehandle"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -304,13 +306,14 @@ func (s *Service) uniqueChannelSlug(base string) (string, error) {
 	baseSlug := slugify(base)
 	candidate := baseSlug
 	counter := 2
+	namespace := sitehandle.NewService(s.db)
 	for {
-		var count int64
-		if err := s.db.Model(&model.Channel{}).Where("slug = ?", candidate).Count(&count).Error; err != nil {
-			return "", err
-		}
-		if count == 0 {
+		err := namespace.ValidateChannelSlugAvailable(context.Background(), candidate, nil)
+		if err == nil {
 			return candidate, nil
+		}
+		if !errors.Is(err, sitehandle.ErrReserved) && !errors.Is(err, sitehandle.ErrTaken) {
+			return "", err
 		}
 		candidate = fmt.Sprintf("%s-%d", baseSlug, counter)
 		counter++

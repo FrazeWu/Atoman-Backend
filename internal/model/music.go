@@ -12,6 +12,7 @@ type Artist struct {
 	Bio         string        `json:"bio" gorm:"type:text"`
 	ImageURL    string        `json:"image_url"`
 	Nationality string        `json:"nationality"`
+	BirthDate   *time.Time    `json:"birth_date,omitempty" gorm:"type:date"`
 	BirthYear   int           `json:"birth_year"`
 	DeathYear   int           `json:"death_year"`
 	Members     string        `json:"members" gorm:"type:text"`
@@ -35,6 +36,7 @@ type Album struct {
 	CoverSource string     `json:"cover_source" gorm:"default:'local'"`
 	Status      string     `json:"status" gorm:"default:'open'"`
 	AlbumType   string     `json:"album_type" gorm:"default:'album'"`
+	HotScore    float64    `json:"hot_score" gorm:"default:0;index"`
 	EntryStatus string     `json:"entry_status" gorm:"default:'open'"`
 	UploadedBy  *uuid.UUID `json:"uploaded_by" gorm:"type:uuid"`
 	User        *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`

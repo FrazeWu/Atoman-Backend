@@ -13,9 +13,11 @@ type Repo struct{ db *gorm.DB }
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
 func (r *Repo) ListSubscriptionsWithSources(userID uuid.UUID, query FeedQuery) ([]model.Subscription, error) {
-	db := r.db.Model(&model.Subscription{}).Where("subscriptions.user_id = ?", userID)
+	db := r.db.Model(&model.Subscription{}).
+		Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+		Where("subscriptions.user_id = ? AND feed_sources.hidden = ?", userID, false)
 	if query.SourceType != "" {
-		db = db.Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").Where("feed_sources.source_type = ?", query.SourceType)
+		db = db.Where("feed_sources.source_type = ?", query.SourceType)
 	}
 	if query.SourceID != uuid.Nil {
 		db = db.Where("subscriptions.id = ?", query.SourceID)
@@ -73,7 +75,11 @@ func (r *Repo) ListFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID) ([]model.Feed
 		return []model.FeedItem{}, nil
 	}
 	var items []model.FeedItem
-	err := r.db.Preload("FeedSource").Where("feed_source_id IN ?", feedSourceIDs).Order("published_at DESC").Find(&items).Error
+	err := r.db.Preload("FeedSource").
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false).
+		Order("feed_items.published_at DESC").
+		Find(&items).Error
 	return items, err
 }
 
@@ -105,7 +111,7 @@ func (r *Repo) ListSubscribedExternalFeedItems(userID uuid.UUID) ([]model.FeedIt
 	err := r.db.
 		Joins("JOIN subscriptions ON subscriptions.feed_source_id = feed_items.feed_source_id").
 		Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
-		Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", userID, "external_rss").
+		Where("subscriptions.user_id = ? AND feed_sources.source_type = ? AND feed_sources.hidden = ?", userID, "external_rss", false).
 		Preload("FeedSource").
 		Find(&items).Error
 	return items, err
@@ -132,7 +138,11 @@ func (r *Repo) CountExplorePosts() (int64, error) {
 
 func (r *Repo) ListExploreFeedItems(sort string, limit int, offset int) ([]model.FeedItem, error) {
 	var items []model.FeedItem
-	db := r.db.Preload("FeedSource").Offset(offset).Limit(limit)
+	db := r.db.Preload("FeedSource").
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_sources.hidden = ?", false).
+		Offset(offset).
+		Limit(limit)
 	if sort == "popular" {
 		db = db.Select("feed_items.*, (SELECT COUNT(*) FROM feed_item_stars WHERE feed_item_stars.feed_item_id = feed_items.id) as star_count").Order("star_count DESC, published_at DESC")
 	} else {
@@ -144,7 +154,10 @@ func (r *Repo) ListExploreFeedItems(sort string, limit int, offset int) ([]model
 
 func (r *Repo) CountExploreFeedItems() (int64, error) {
 	var count int64
-	err := r.db.Model(&model.FeedItem{}).Count(&count).Error
+	err := r.db.Model(&model.FeedItem{}).
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_sources.hidden = ?", false).
+		Count(&count).Error
 	return count, err
 }
 

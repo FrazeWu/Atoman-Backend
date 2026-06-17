@@ -71,6 +71,30 @@ func TestRegisterRoutesCreatePostRequiresCurrentUser(t *testing.T) {
 	}
 }
 
+func TestCreateDefaultChannelForUserSkipsReservedAndUserHandles(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	other := model.User{Username: "design", Email: "design@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+
+	reservedChannel, err := service.CreateDefaultChannelForUser(user.ID, "feed")
+	if err != nil {
+		t.Fatalf("create reserved-name channel: %v", err)
+	}
+	if reservedChannel.Slug == "feed" {
+		t.Fatalf("expected reserved feed slug to be skipped")
+	}
+
+	userChannel, err := service.CreateDefaultChannelForUser(other.UUID, "design")
+	if err != nil {
+		t.Fatalf("create username-colliding channel: %v", err)
+	}
+	if userChannel.Slug == "design" {
+		t.Fatalf("expected username-colliding slug to be skipped")
+	}
+}
+
 func TestRegisterRoutesCreatePostRejectsInvalidJSON(t *testing.T) {
 	service, _, user := newBlogHTTPTestService(t)
 	r := newBlogHTTPRouter(service, &user)

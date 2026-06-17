@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/golang-jwt/jwt/v5"
@@ -30,10 +31,24 @@ func newAuthTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.UserSettings{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.UserSettings{}, &model.EmailVerificationCode{}, &model.Channel{}); err != nil {
 		t.Fatalf("migrate db: %v", err)
 	}
 	return db
+}
+
+func seedAuthVerificationCode(t *testing.T, db *gorm.DB, email string) {
+	t.Helper()
+
+	code := model.EmailVerificationCode{
+		Email:     email,
+		Code:      "123456",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+		Used:      false,
+	}
+	if err := db.Create(&code).Error; err != nil {
+		t.Fatalf("seed verification code: %v", err)
+	}
 }
 
 func signedAuthClaimsTokenForTest(t *testing.T, claims jwt.MapClaims) string {
@@ -86,7 +101,7 @@ func assertClearedAuthCookie(t *testing.T, w *httptest.ResponseRecorder) {
 	t.Fatalf("expected cleared auth cookie, got none")
 }
 
-func TestSessionHandlerReturnsAuthRequiredWhenCookieMissing(t *testing.T) {
+func TestSessionHandlerReturnsNoContentWhenCookieMissing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("JWT_SECRET", "test-secret")
 	db := newAuthTestDB(t)
@@ -98,12 +113,11 @@ func TestSessionHandlerReturnsAuthRequiredWhenCookieMissing(t *testing.T) {
 
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
 	}
-	payload := decodeAuthError(t, w.Body.String())
-	if payload.Code != "auth.required" || payload.Error != "请先登录" {
-		t.Fatalf("unexpected payload: %#v", payload)
+	if body := w.Body.String(); body != "" {
+		t.Fatalf("expected empty body, got %q", body)
 	}
 	if got := w.Header().Get("Set-Cookie"); got != "" {
 		t.Fatalf("expected no cookie clearing, got %q", got)
@@ -228,6 +242,66 @@ func TestLoginHandlerReturnsAccountNotFoundCode(t *testing.T) {
 	payload := decodeAuthError(t, w.Body.String())
 	if payload.Code != "auth.account_not_found" || payload.Error != "账号不存在" {
 		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestRegisterHandlerRejectsReservedUsername(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ENV", "development")
+	t.Setenv("GIN_MODE", gin.DebugMode)
+	t.Setenv("TURNSTILE_SECRET_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newAuthTestDB(t)
+	email := "feed-user@example.com"
+	seedAuthVerificationCode(t, db, email)
+
+	r := gin.New()
+	r.POST("/register", RegisterHandler(db, service.NewEmailServiceWithoutRedis(db)))
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"username":"feed","email":"`+email+`","password":"secret123","password_confirm":"secret123","verification_code":"123456"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "reserved") {
+		t.Fatalf("expected reserved error, got %s", w.Body.String())
+	}
+}
+
+func TestRegisterHandlerRejectsUsernameMatchingChannelSlug(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ENV", "development")
+	t.Setenv("GIN_MODE", gin.DebugMode)
+	t.Setenv("TURNSTILE_SECRET_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newAuthTestDB(t)
+	owner := model.User{Username: "owner", Email: "owner@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	channel := model.Channel{Name: "Design", Slug: "design", UserID: &owner.UUID}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	email := "design-user@example.com"
+	seedAuthVerificationCode(t, db, email)
+
+	r := gin.New()
+	r.POST("/register", RegisterHandler(db, service.NewEmailServiceWithoutRedis(db)))
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"username":"design","email":"`+email+`","password":"secret123","password_confirm":"secret123","verification_code":"123456"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "already in use") {
+		t.Fatalf("expected already in use error, got %s", w.Body.String())
 	}
 }
 

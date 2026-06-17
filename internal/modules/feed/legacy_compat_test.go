@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"log"
@@ -444,6 +445,153 @@ func TestImportGlobalOPMLAllowsAdminThroughRealRoute(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestImportGlobalOPMLSchedulesSyncAsynchronously(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	admin := seedFeedAdminUser(t, db)
+
+	originalSync := syncFeedSource
+	syncStarted := make(chan struct{}, 1)
+	syncRelease := make(chan struct{})
+	syncFeedSource = func(db *gorm.DB, source model.FeedSource) {
+		syncStarted <- struct{}{}
+		<-syncRelease
+	}
+	t.Cleanup(func() {
+		syncFeedSource = originalSync
+		close(syncRelease)
+	})
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.Use(func(c *gin.Context) {
+		c.Set("user_id", admin.UUID)
+		c.Set("role", admin.Role)
+		c.Next()
+	})
+	feed.POST("/sources/opml/import", ImportGlobalOPML(db))
+
+	opml := `<?xml version="1.0"?><opml version="2.0"><body><outline text="Slow Feed" type="rss" xmlUrl="https://example.com/slow.xml" /></body></opml>`
+	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
+	w := httptest.NewRecorder()
+
+	done := make(chan struct{})
+	go func() {
+		router.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	select {
+	case <-syncStarted:
+	case <-time.After(time.Second):
+		t.Fatal("expected import to schedule feed sync")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("expected import response without waiting for feed sync")
+	}
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected import to return 200, got %d with body %s", w.Code, w.Body.String())
+	}
+}
+
+func TestExportGlobalOPMLExportsExternalRSSOnly(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+
+	external := model.FeedSource{
+		SourceType: "external_rss",
+		RssURL:     "https://example.com/feed.xml",
+		Title:      "Example Feed",
+		Hash:       "export-external-" + uuid.NewString(),
+	}
+	if err := db.Create(&external).Error; err != nil {
+		t.Fatalf("create external source: %v", err)
+	}
+	internal := model.FeedSource{
+		SourceType: "internal_user",
+		RssURL:     "https://example.com/internal.xml",
+		Title:      "Internal Feed",
+		Hash:       "export-internal-" + uuid.NewString(),
+	}
+	if err := db.Create(&internal).Error; err != nil {
+		t.Fatalf("create internal source: %v", err)
+	}
+	blank := model.FeedSource{
+		SourceType: "external_rss",
+		RssURL:     "",
+		Title:      "Blank Feed",
+		Hash:       "export-blank-" + uuid.NewString(),
+	}
+	if err := db.Create(&blank).Error; err != nil {
+		t.Fatalf("create blank source: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.GET("/sources/opml/export", ExportGlobalOPML(db))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/sources/opml/export", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Type"); !strings.Contains(got, "application/x-opml+xml") {
+		t.Fatalf("expected OPML content type, got %q", got)
+	}
+	if got := w.Header().Get("Content-Disposition"); !strings.Contains(got, "atoman-feed-sources.opml") {
+		t.Fatalf("expected OPML attachment filename, got %q", got)
+	}
+	var parsed OPML
+	if err := xml.Unmarshal(w.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("decode exported OPML: %v", err)
+	}
+	if parsed.Head.Title != "Atoman Feed Sources" {
+		t.Fatalf("unexpected OPML title %q", parsed.Head.Title)
+	}
+	if len(parsed.Body.Outlines) != 1 {
+		t.Fatalf("expected one exported source, got %d: %#v", len(parsed.Body.Outlines), parsed.Body.Outlines)
+	}
+	outline := parsed.Body.Outlines[0]
+	if outline.Text != "Example Feed" || outline.Title != "Example Feed" || outline.Type != "rss" || outline.XMLURL != "https://example.com/feed.xml" {
+		t.Fatalf("unexpected exported outline: %#v", outline)
+	}
+}
+
+func TestExportGlobalOPMLRequiresAdminThroughRealRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+	admin := seedFeedAdminUser(t, db)
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), NewService(db))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/sources/opml/export", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, user))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin, got %d: %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/feed/sources/opml/export", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, admin))
+	w = httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for admin, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

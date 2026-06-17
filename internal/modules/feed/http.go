@@ -25,17 +25,17 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/rss/:username", GetUserRSS(service.db))
 	group.GET("/items/:id", GetFeedItem(service.db))
 
-	group.POST("/timeline/mark-read", h.markRead)
-	group.POST("/timeline/mark-all-read", h.markAllRead)
-	group.POST("/timeline/mark-all-unread", h.markAllUnread)
-	group.POST("/timeline/star", h.toggleStar)
-	group.GET("/reading-list", h.listReadingList)
-	group.POST("/reading-list", h.toggleReadingList)
-	group.DELETE("/reading-list/:id", h.removeReadingListItem)
-
 	protected := group.Group("")
 	protected.Use(middleware.AuthMiddleware())
 	{
+		protected.POST("/timeline/mark-read", h.markRead)
+		protected.POST("/timeline/mark-unread", h.markUnread)
+		protected.POST("/timeline/mark-all-read", h.markAllRead)
+		protected.POST("/timeline/mark-all-unread", h.markAllUnread)
+		protected.POST("/timeline/star", h.toggleStar)
+		protected.GET("/reading-list", h.listReadingList)
+		protected.POST("/reading-list", h.toggleReadingList)
+		protected.DELETE("/reading-list/:id", h.removeReadingListItem)
 		protected.POST("/discover", DiscoverFeedCandidates())
 		protected.POST("/sources/create-from-provider", CreateSubscriptionFromProvider(service.db))
 		protected.GET("/subscriptions", GetSubscriptions(service.db))
@@ -51,6 +51,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/opml/import", ImportOPML(service.db))
 		protected.GET("/opml/export", ExportOPML(service.db))
 		protected.POST("/sources/opml/import", middleware.AdminMiddleware(service.db), ImportGlobalOPML(service.db))
+		protected.GET("/sources/opml/export", middleware.AdminMiddleware(service.db), ExportGlobalOPML(service.db))
 		protected.GET("/stars", GetStarredItems(service.db))
 		protected.GET("/star-groups", GetFeedStarGroups(service.db))
 		protected.POST("/star-groups", CreateFeedStarGroup(service.db))
@@ -103,6 +104,26 @@ func (h *Handler) markRead(c *gin.Context) {
 		return
 	}
 	if err := h.service.MarkRead(user, req.FeedItemIDs); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) markUnread(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req struct {
+		FeedItemIDs []uuid.UUID `json:"feed_item_ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	if err := h.service.MarkUnread(user, req.FeedItemIDs); err != nil {
 		httpx.Error(c, err)
 		return
 	}

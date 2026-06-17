@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	"atoman/internal/service"
 )
 
 const defaultCollectionName = "默认专栏"
@@ -40,24 +42,28 @@ func uniqueChannelSlug(db *gorm.DB, base string, excludeID *uuid.UUID) (string, 
 	baseSlug := slugify(base)
 	candidate := baseSlug
 	counter := 2
+	namespace := service.NewSiteNamespaceService(db)
 
 	for {
-		query := db.Model(&model.Channel{}).Where("slug = ?", candidate)
-		if excludeID != nil {
-			query = query.Where("id <> ?", *excludeID)
-		}
-
-		var count int64
-		if err := query.Count(&count).Error; err != nil {
-			return "", err
-		}
-		if count == 0 {
+		err := namespace.ValidateChannelSlugAvailable(context.Background(), candidate, excludeID)
+		if err == nil {
 			return candidate, nil
+		}
+		if !errors.Is(err, service.ErrSiteHandleReserved) && !errors.Is(err, service.ErrSiteHandleTaken) {
+			return "", err
 		}
 
 		candidate = fmt.Sprintf("%s-%d", baseSlug, counter)
 		counter++
 	}
+}
+
+func validateExplicitChannelSlug(db *gorm.DB, raw string, excludeID *uuid.UUID) (string, error) {
+	slug := slugify(raw)
+	if err := service.NewSiteNamespaceService(db).ValidateChannelSlugAvailable(context.Background(), slug, excludeID); err != nil {
+		return "", err
+	}
+	return slug, nil
 }
 
 func channelNameExists(db *gorm.DB, name string, excludeID *uuid.UUID) (bool, error) {
