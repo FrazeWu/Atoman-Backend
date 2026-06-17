@@ -1,7 +1,10 @@
 package feed
 
 import (
+	"bytes"
 	"fmt"
+	"log"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +14,7 @@ import (
 	"atoman/internal/testdb"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) {
@@ -186,6 +190,110 @@ func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 	}
 	if feedItemCount != 1 {
 		t.Fatalf("expected duplicate filter to leave 1 feed item, got %d", feedItemCount)
+	}
+}
+
+func TestGetSubscribedFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	if err := db.Exec("DELETE FROM subscriptions WHERE feed_source_id IN (SELECT id FROM feed_sources WHERE source_type <> ?)", "external_rss").Error; err != nil {
+		t.Fatalf("delete internal subscriptions: %v", err)
+	}
+
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+
+	now := time.Now().UTC()
+	for i := 0; i < 3; i++ {
+		item := model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         fmt.Sprintf("paged-guid-%d", i),
+			Title:        fmt.Sprintf("Paged feed item %d", i),
+			Link:         fmt.Sprintf("https://example.com/paged/%d", i),
+			PublishedAt:  now.Add(time.Duration(i) * time.Minute),
+			FetchedAt:    now.Add(time.Duration(i) * time.Minute),
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create paged feed item: %v", err)
+		}
+	}
+
+	var sql bytes.Buffer
+	loggedDB := db.Session(&gorm.Session{
+		Logger: logger.New(log.New(&sql, "", 0), logger.Config{
+			LogLevel: logger.Info,
+			Colorful: false,
+		}),
+	})
+	service = NewService(loggedDB)
+
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 1})
+	if err != nil {
+		t.Fatalf("get subscribed feed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one item on first page, got %d", len(items))
+	}
+	if total <= int64(len(items)) {
+		t.Fatalf("expected total to reflect all matching items, got total=%d len=%d", total, len(items))
+	}
+
+	queries := sql.String()
+	feedItemQueryStart := strings.Index(queries, "FROM `feed_items`")
+	if feedItemQueryStart == -1 || !strings.Contains(strings.ToUpper(queries[feedItemQueryStart:]), "LIMIT 1") {
+		t.Fatalf("expected feed item timeline query to be limited to requested page, got SQL:\n%s", queries)
+	}
+}
+
+func TestGetPublicFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+
+	now := time.Now().UTC()
+	for i := 0; i < 3; i++ {
+		item := model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         fmt.Sprintf("public-paged-guid-%d", i),
+			Title:        fmt.Sprintf("Public paged feed item %d", i),
+			Link:         fmt.Sprintf("https://example.com/public-paged/%d", i),
+			PublishedAt:  now.Add(time.Duration(i) * time.Minute),
+			FetchedAt:    now.Add(time.Duration(i) * time.Minute),
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create public paged feed item: %v", err)
+		}
+	}
+
+	var sql bytes.Buffer
+	loggedDB := db.Session(&gorm.Session{
+		Logger: logger.New(log.New(&sql, "", 0), logger.Config{
+			LogLevel: logger.Info,
+			Colorful: false,
+		}),
+	})
+	service = NewService(loggedDB)
+
+	items, total, err := service.GetPublicFeed(FeedQuery{Page: 1, PageSize: 1})
+	if err != nil {
+		t.Fatalf("get public feed: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one item on first page, got %d", len(items))
+	}
+	if total <= int64(len(items)) {
+		t.Fatalf("expected total to reflect all matching public items, got total=%d len=%d", total, len(items))
+	}
+
+	queries := sql.String()
+	feedItemQueryStart := strings.Index(queries, "FROM `feed_items`")
+	if feedItemQueryStart == -1 || !strings.Contains(strings.ToUpper(queries[feedItemQueryStart:]), "LIMIT 1") {
+		t.Fatalf("expected public feed item query to be limited to requested page, got SQL:\n%s", queries)
 	}
 }
 

@@ -83,6 +83,33 @@ func (r *Repo) ListFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID) ([]model.Feed
 	return items, err
 }
 
+func (r *Repo) ListFeedItemsBySourceIDsPaged(feedSourceIDs []uuid.UUID, limit int, offset int) ([]model.FeedItem, error) {
+	if len(feedSourceIDs) == 0 {
+		return []model.FeedItem{}, nil
+	}
+	var items []model.FeedItem
+	err := r.db.Preload("FeedSource").
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false).
+		Order("feed_items.published_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&items).Error
+	return items, err
+}
+
+func (r *Repo) CountFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID) (int64, error) {
+	if len(feedSourceIDs) == 0 {
+		return 0, nil
+	}
+	var count int64
+	err := r.db.Model(&model.FeedItem{}).
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *Repo) ListReadItems(userID uuid.UUID, feedItemIDs []uuid.UUID) ([]model.FeedItemRead, error) {
 	if len(feedItemIDs) == 0 {
 		return []model.FeedItemRead{}, nil

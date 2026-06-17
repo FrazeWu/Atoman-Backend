@@ -61,25 +61,33 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 		}
 	}
 
+	userIDs = dedupeUUIDs(userIDs)
+	channelIDs = dedupeUUIDs(channelIDs)
+	collectionIDs = dedupeUUIDs(collectionIDs)
+	feedSourceIDs = dedupeUUIDs(feedSourceIDs)
+	if len(userIDs) == 0 && len(channelIDs) == 0 && len(collectionIDs) == 0 && !query.HideDuplicates {
+		return s.getSubscribedExternalFeed(user.ID, feedSourceIDs, query)
+	}
+
 	posts := make([]model.Post, 0)
-	userPosts, err := s.repo.ListPublishedPostsByUserIDs(dedupeUUIDs(userIDs))
+	userPosts, err := s.repo.ListPublishedPostsByUserIDs(userIDs)
 	if err != nil {
 		return nil, 0, err
 	}
 	posts = append(posts, userPosts...)
-	channelPosts, err := s.repo.ListPublishedPostsByChannelIDs(dedupeUUIDs(channelIDs))
+	channelPosts, err := s.repo.ListPublishedPostsByChannelIDs(channelIDs)
 	if err != nil {
 		return nil, 0, err
 	}
 	posts = append(posts, channelPosts...)
-	collectionPosts, err := s.repo.ListPublishedPostsByCollectionIDs(dedupeUUIDs(collectionIDs))
+	collectionPosts, err := s.repo.ListPublishedPostsByCollectionIDs(collectionIDs)
 	if err != nil {
 		return nil, 0, err
 	}
 	posts = append(posts, collectionPosts...)
 	posts = dedupePosts(posts)
 
-	feedItems, err := s.repo.ListFeedItemsBySourceIDs(dedupeUUIDs(feedSourceIDs))
+	feedItems, err := s.repo.ListFeedItemsBySourceIDs(feedSourceIDs)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -114,11 +122,119 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	return paged, total, nil
 }
 
+func (s *Service) getSubscribedExternalFeed(userID uuid.UUID, feedSourceIDs []uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {
+	if len(feedSourceIDs) == 0 {
+		return []TimelineItemDTO{}, 0, nil
+	}
+	if query.IsRead != nil {
+		return s.getSubscribedExternalFeedWithReadFilter(userID, feedSourceIDs, query)
+	}
+
+	page := normalizedPage(query.Page)
+	limit := normalizedPageSize(query.PageSize)
+	offset := (page - 1) * limit
+	feedItems, err := s.repo.ListFeedItemsBySourceIDsPaged(feedSourceIDs, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	readMap, err := s.readMap(userID, feedItems)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]TimelineItemDTO, 0, len(feedItems))
+	for i := range feedItems {
+		items = append(items, TimelineItemDTO{
+			Type:        "feed_item",
+			FeedItem:    &feedItems[i],
+			PublishedAt: feedItems[i].PublishedAt,
+			IsRead:      readMap[feedItems[i].ID],
+		})
+	}
+	total, err := s.repo.CountFeedItemsBySourceIDs(feedSourceIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+func (s *Service) getSubscribedExternalFeedWithReadFilter(userID uuid.UUID, feedSourceIDs []uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {
+	feedItems, err := s.repo.ListFeedItemsBySourceIDs(feedSourceIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	readMap, err := s.readMap(userID, feedItems)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]TimelineItemDTO, 0, len(feedItems))
+	for i := range feedItems {
+		items = append(items, TimelineItemDTO{
+			Type:        "feed_item",
+			FeedItem:    &feedItems[i],
+			PublishedAt: feedItems[i].PublishedAt,
+			IsRead:      readMap[feedItems[i].ID],
+		})
+	}
+	items = filterTimeline(items, query)
+	paged, total := paginateTimeline(items, normalizedPage(query.Page), normalizedPageSize(query.PageSize))
+	return paged, total, nil
+}
+
 func (s *Service) GetPublicFeed(query FeedQuery) ([]TimelineItemDTO, int64, error) {
 	page := normalizedPage(query.Page)
 	limit := normalizedPageSize(query.PageSize)
 	offset := (page - 1) * limit
 
+	if query.HideDuplicates {
+		return s.getPublicFeedWithDuplicateFilter(query, page, limit)
+	}
+	if query.IsRead != nil && *query.IsRead {
+		return []TimelineItemDTO{}, 0, nil
+	}
+
+	candidateLimit := offset + limit
+	posts, err := s.repo.ListExplorePosts(candidateLimit, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	sources, err := s.repo.ListVisibleFeedSources(query)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	feedSourceIDs := make([]uuid.UUID, 0, len(sources))
+	for _, source := range sources {
+		feedSourceIDs = append(feedSourceIDs, source.ID)
+	}
+	feedItems, err := s.repo.ListFeedItemsBySourceIDsPaged(dedupeUUIDs(feedSourceIDs), candidateLimit, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	items := make([]TimelineItemDTO, 0, len(posts)+len(feedItems))
+	for i := range posts {
+		items = append(items, TimelineItemDTO{Type: "post", Post: &posts[i], PublishedAt: posts[i].CreatedAt})
+	}
+	for i := range feedItems {
+		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt})
+	}
+
+	items = filterTimeline(items, query)
+	sortTimeline(items)
+	paged, _ := paginateTimeline(items, page, limit)
+	postTotal, err := s.repo.CountExplorePosts()
+	if err != nil {
+		return nil, 0, err
+	}
+	feedTotal, err := s.repo.CountFeedItemsBySourceIDs(dedupeUUIDs(feedSourceIDs))
+	if err != nil {
+		return nil, 0, err
+	}
+	return paged, postTotal + feedTotal, nil
+}
+
+func (s *Service) getPublicFeedWithDuplicateFilter(query FeedQuery, page int, limit int) ([]TimelineItemDTO, int64, error) {
+	offset := (page - 1) * limit
 	posts, err := s.repo.ListExplorePosts(limit, offset)
 	if err != nil {
 		return nil, 0, err
