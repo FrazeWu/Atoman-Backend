@@ -353,6 +353,24 @@ func TestParseExploreSourceTimestamp(t *testing.T) {
 	}
 }
 
+func TestParseExploreSourceTimestampRFC3339Nano(t *testing.T) {
+	raw := "2026-06-19T02:31:53.123456789Z"
+	parsed, err := parseExploreSourceTimestamp(raw)
+	if err != nil {
+		t.Fatalf("parse RFC3339Nano explore source timestamp: %v", err)
+	}
+	expected := time.Date(2026, time.June, 19, 2, 31, 53, 123456789, time.UTC)
+	if !parsed.Equal(expected) {
+		t.Fatalf("expected %s, got %s", expected.Format(time.RFC3339Nano), parsed.Format(time.RFC3339Nano))
+	}
+}
+
+func TestParseExploreSourceTimestampInvalid(t *testing.T) {
+	if _, err := parseExploreSourceTimestamp("not-a-timestamp"); err == nil {
+		t.Fatal("expected invalid timestamp to return an error")
+	}
+}
+
 func TestListReadingListReturnsPagedItems(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	var feedItem model.FeedItem
