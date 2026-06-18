@@ -26,19 +26,35 @@ func parseAuthToken(tokenString string) (*jwt.Token, error) {
 	})
 }
 
-func authTokenFromRequest(c *gin.Context) string {
+func authTokenCandidatesFromRequest(c *gin.Context) []string {
+	candidates := make([]string, 0, 2)
 	tokenString := c.GetHeader("Authorization")
 	if strings.HasPrefix(tokenString, "Bearer ") {
-		return strings.TrimPrefix(tokenString, "Bearer ")
+		tokenString = strings.TrimPrefix(tokenString, "Bearer ")
 	}
 	if tokenString != "" {
-		return tokenString
+		candidates = append(candidates, tokenString)
 	}
 	cookie, err := c.Cookie("atoman_token")
-	if err != nil {
-		return ""
+	if err == nil && cookie != "" {
+		candidates = append(candidates, cookie)
 	}
-	return cookie
+	return candidates
+}
+
+func resolveAuthClaims(c *gin.Context) (jwt.MapClaims, bool) {
+	for _, tokenString := range authTokenCandidatesFromRequest(c) {
+		token, err := parseAuthToken(tokenString)
+		if err != nil || !token.Valid {
+			continue
+		}
+		claims, ok := token.Claims.(jwt.MapClaims)
+		if !ok || !setAuthContext(c, claims) {
+			continue
+		}
+		return claims, true
+	}
+	return nil, false
 }
 
 func setAuthContext(c *gin.Context, claims jwt.MapClaims) bool {
@@ -70,24 +86,13 @@ func setAuthContext(c *gin.Context, claims jwt.MapClaims) bool {
 // AuthMiddleware validates JWT tokens and sets user context
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenString := authTokenFromRequest(c)
-		if tokenString == "" {
+		if len(authTokenCandidatesFromRequest(c)) == 0 {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
 			c.Abort()
 			return
 		}
-
-		token, err := parseAuthToken(tokenString)
-
-		if err != nil || !token.Valid {
+		if _, ok := resolveAuthClaims(c); !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-			c.Abort()
-			return
-		}
-
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok || !setAuthContext(c, claims) {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token claims"})
 			c.Abort()
 			return
 		}
@@ -98,29 +103,13 @@ func AuthMiddleware() gin.HandlerFunc {
 // OptionalAuthMiddleware validates JWT if present, but does not block if missing
 func OptionalAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		tokenString := authTokenFromRequest(c)
-		if tokenString == "" {
+		if len(authTokenCandidatesFromRequest(c)) == 0 {
 			c.Next()
 			return
 		}
-
-		token, err := parseAuthToken(tokenString)
-
-		if err != nil {
-			log.Printf("[Auth] JWT parse error: %v", err)
-			c.Next()
-			return
+		if _, ok := resolveAuthClaims(c); !ok {
+			log.Printf("[Auth] No valid auth token found in request candidates")
 		}
-
-		if !token.Valid {
-			c.Next()
-			return
-		}
-
-		if claims, ok := token.Claims.(jwt.MapClaims); ok && !setAuthContext(c, claims) {
-			log.Printf("[Auth] Invalid token claims")
-		}
-
 		c.Next()
 	}
 }
