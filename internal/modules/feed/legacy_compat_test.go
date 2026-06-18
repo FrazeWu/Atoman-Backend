@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -146,6 +147,12 @@ func withFeedAuth(userID uuid.UUID, h gin.HandlerFunc) gin.HandlerFunc {
 		c.Set("user_id", userID)
 		h(c)
 	}
+}
+
+type feedDiscoveryRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f feedDiscoveryRoundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func newOPMLUploadRequest(t *testing.T, path string, opml string) *http.Request {
@@ -945,6 +952,161 @@ func TestDiscoverFeedCandidatesAcceptsDirectFeedURL(t *testing.T) {
 	}
 }
 
+func TestDiscoverFeedCandidatesFetchesWebsiteAlternateFeeds(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+
+	originalClient := feedDiscoveryHTTPClient
+	originalResolver := resolveFeedDiscoveryHostname
+	feedDiscoveryHTTPClient = &http.Client{Transport: feedDiscoveryRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet {
+			t.Fatalf("expected GET request, got %s", req.Method)
+		}
+		if req.URL.String() != "https://example.com/blog" {
+			t.Fatalf("expected request to target website, got %s", req.URL.String())
+		}
+		if req.Header.Get("User-Agent") == "" {
+			t.Fatal("expected feed discovery request to set a user agent")
+		}
+		html := `<html><head>
+			<link rel="alternate" type="application/rss+xml" title="Main Feed" href="/feed.xml">
+			<link rel="alternate" type="application/atom+xml" title="Updates" href="atom.xml">
+		</head></html>`
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+			Body:       io.NopCloser(strings.NewReader(html)),
+			Request:    req,
+		}, nil
+	})}
+	resolveFeedDiscoveryHostname = func(host string) ([]net.IP, error) {
+		if host != "example.com" {
+			t.Fatalf("expected resolver to check example.com, got %s", host)
+		}
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	defer func() {
+		feedDiscoveryHTTPClient = originalClient
+		resolveFeedDiscoveryHostname = originalResolver
+	}()
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/discover", withFeedAuth(user.UUID, DiscoverFeedCandidates()))
+
+	body := strings.NewReader(`{"url":"https://example.com/blog"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/discover", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Candidates []service.FeedDiscoveryCandidate `json:"candidates"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Candidates) != 2 {
+		t.Fatalf("expected 2 discovered candidates, got %d with body %s", len(payload.Candidates), rr.Body.String())
+	}
+	if payload.Candidates[0].FeedURL != "https://example.com/feed.xml" {
+		t.Fatalf("expected main feed first, got %q", payload.Candidates[0].FeedURL)
+	}
+	if !payload.Candidates[0].IsDefault {
+		t.Fatal("expected first discovered candidate to be default")
+	}
+}
+
+func TestDiscoverFeedCandidatesReturnsEmptyArrayWhenWebsiteHasNoFeeds(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+
+	originalClient := feedDiscoveryHTTPClient
+	originalResolver := resolveFeedDiscoveryHostname
+	feedDiscoveryHTTPClient = &http.Client{Transport: feedDiscoveryRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+			Body:       io.NopCloser(strings.NewReader(`<html><head><title>No Feed</title></head></html>`)),
+			Request:    req,
+		}, nil
+	})}
+	resolveFeedDiscoveryHostname = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	defer func() {
+		feedDiscoveryHTTPClient = originalClient
+		resolveFeedDiscoveryHostname = originalResolver
+	}()
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/discover", withFeedAuth(user.UUID, DiscoverFeedCandidates()))
+
+	body := strings.NewReader(`{"url":"https://example.com/no-feed"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/discover", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"candidates":[]`) {
+		t.Fatalf("expected empty candidates array, got body %s", rr.Body.String())
+	}
+}
+
+func TestDiscoverFeedCandidatesBlocksPrivateNetworkFetches(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+
+	called := false
+	originalClient := feedDiscoveryHTTPClient
+	feedDiscoveryHTTPClient = &http.Client{Transport: feedDiscoveryRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/html"}},
+			Body:       io.NopCloser(strings.NewReader(`<html></html>`)),
+			Request:    req,
+		}, nil
+	})}
+	defer func() {
+		feedDiscoveryHTTPClient = originalClient
+	}()
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/discover", withFeedAuth(user.UUID, DiscoverFeedCandidates()))
+
+	body := strings.NewReader(`{"url":"http://127.0.0.1/page"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/discover", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if called {
+		t.Fatal("expected private network URL to be rejected before HTTP fetch")
+	}
+	if !strings.Contains(rr.Body.String(), "url is not allowed for feed discovery") {
+		t.Fatalf("expected blocked URL message, got body %s", rr.Body.String())
+	}
+}
+
 func TestFeedSourceMVPMigrationSupportsNewColumns(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newFeedHandlerTestDB(t)
@@ -1182,6 +1344,741 @@ func TestCreateSubscriptionFromProviderCreatesRSSHubSource(t *testing.T) {
 	}
 	if !strings.Contains(source.RssURL, "/github/repo/DIYgod/RSSHub") {
 		t.Fatalf("expected rsshub github repo url, got %q", source.RssURL)
+	}
+}
+
+func TestResolveSubscriptionInputDetectsGithubRepository(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/resolve", withFeedAuth(user.UUID, ResolveSubscriptionInput(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/resolve", strings.NewReader(`{"input":"https://github.com/DIYgod/RSSHub"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	if strings.Contains(body, "00000000-0000-0000-0000-000000000000") {
+		t.Fatalf("expected new source response to omit zero UUID, got body %s", body)
+	}
+	if !strings.Contains(body, `"candidates":[]`) {
+		t.Fatalf("expected stable empty candidates array, got body %s", body)
+	}
+	if !strings.Contains(body, `"subscription":null`) {
+		t.Fatalf("expected absent subscription to be null, got body %s", body)
+	}
+
+	var payload AutoSubscriptionResolveResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Status != "new_source" {
+		t.Fatalf("expected status new_source, got %q", payload.Status)
+	}
+	if payload.Source == nil {
+		t.Fatal("expected source")
+	}
+	if payload.Source.Provider != "rsshub" {
+		t.Fatalf("expected provider rsshub, got %q", payload.Source.Provider)
+	}
+	if payload.Source.RssURL != "https://rsshub.app/github/repo/DIYgod/RSSHub" {
+		t.Fatalf("expected rsshub github repo url, got %q", payload.Source.RssURL)
+	}
+	if payload.Source.SiteURL != "https://github.com/DIYgod/RSSHub" {
+		t.Fatalf("expected github site url, got %q", payload.Source.SiteURL)
+	}
+}
+
+func TestResolveSubscriptionInputInvalidURLReturnsStatusResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/resolve", withFeedAuth(user.UUID, ResolveSubscriptionInput(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/resolve", strings.NewReader(`{"input":"not a url"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var payload AutoSubscriptionResolveResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Status != "invalid" {
+		t.Fatalf("expected status invalid, got %q", payload.Status)
+	}
+}
+
+func TestResolveSubscriptionInputReportsAlreadySubscribedSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+
+	source := model.FeedSource{
+		SourceType:   "external_rss",
+		Provider:     "rss",
+		RssURL:       "https://example.com/feed.xml",
+		CanonicalURL: "https://example.com/feed.xml",
+		Hash:         buildFeedSourceHash("external_rss", nil, "https://example.com/feed.xml"),
+		Title:        "Example Feed",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	subscription := model.Subscription{
+		UserID:       user.UUID,
+		FeedSourceID: source.ID,
+		Title:        "Example Feed",
+	}
+	if err := db.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/resolve", withFeedAuth(user.UUID, ResolveSubscriptionInput(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/resolve", strings.NewReader(`{"input":"https://example.com/feed.xml/"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var payload AutoSubscriptionResolveResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Status != "already_subscribed" {
+		t.Fatalf("expected status already_subscribed, got %q", payload.Status)
+	}
+	if payload.Subscription == nil {
+		t.Fatal("expected subscription")
+	}
+	if payload.Subscription.ID != subscription.ID {
+		t.Fatalf("expected subscription ID %s, got %s", subscription.ID, payload.Subscription.ID)
+	}
+}
+
+func TestResolveSubscriptionInputReportsExistingSourceForAnotherUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+
+	source := model.FeedSource{
+		SourceType:   "external_rss",
+		Provider:     "rss",
+		RssURL:       "https://example.com/feed.xml",
+		CanonicalURL: "https://example.com/feed.xml",
+		Hash:         buildFeedSourceHash("external_rss", nil, "https://example.com/feed.xml"),
+		Title:        "Example Feed",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/resolve", withFeedAuth(user.UUID, ResolveSubscriptionInput(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/resolve", strings.NewReader(`{"input":"https://example.com/feed.xml/"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var payload AutoSubscriptionResolveResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Status != "existing_source" {
+		t.Fatalf("expected status existing_source, got %q", payload.Status)
+	}
+	if payload.Source == nil {
+		t.Fatal("expected source")
+	}
+	if payload.Source.ID == nil {
+		t.Fatal("expected source ID")
+	}
+	if *payload.Source.ID != source.ID {
+		t.Fatalf("expected source ID %s, got %s", source.ID, *payload.Source.ID)
+	}
+}
+
+func TestResolveSubscriptionInputReturnsMultipleCandidatesForWebsite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+
+	originalClient := feedDiscoveryHTTPClient
+	feedDiscoveryHTTPClient = &http.Client{
+		Transport: feedDiscoveryRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			html := `<html><head>
+<link rel="alternate" type="application/rss+xml" title="Main Feed" href="/feed.xml">
+<link rel="alternate" type="application/atom+xml" title="Updates" href="/updates.atom">
+</head><body></body></html>`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/html"}},
+				Body:       io.NopCloser(strings.NewReader(html)),
+				Request:    req,
+			}, nil
+		}),
+	}
+	defer func() {
+		feedDiscoveryHTTPClient = originalClient
+	}()
+
+	originalResolver := resolveFeedDiscoveryHostname
+	resolveFeedDiscoveryHostname = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	defer func() {
+		resolveFeedDiscoveryHostname = originalResolver
+	}()
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/resolve", withFeedAuth(user.UUID, ResolveSubscriptionInput(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/resolve", strings.NewReader(`{"input":"https://example.com/blog"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var payload AutoSubscriptionResolveResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Status != "multiple_candidates" {
+		t.Fatalf("expected status multiple_candidates, got %q", payload.Status)
+	}
+	if len(payload.Candidates) != 2 {
+		t.Fatalf("expected 2 candidates, got %d", len(payload.Candidates))
+	}
+	if payload.Candidates[0].Status != "new_source" {
+		t.Fatalf("expected first candidate status new_source, got %q", payload.Candidates[0].Status)
+	}
+}
+
+func TestResolveSubscriptionInputAcceptsDirectRSSWithoutFeedPathSuffix(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+
+	originalClient := feedDiscoveryHTTPClient
+	originalResolver := resolveFeedDiscoveryHostname
+	feedDiscoveryHTTPClient = &http.Client{Transport: feedDiscoveryRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != "https://example.com/frontpage" {
+			t.Fatalf("expected direct feed probe, got %s", req.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
+			Body:       io.NopCloser(strings.NewReader(`<?xml version="1.0"?><rss version="2.0"><channel><title>Frontpage</title></channel></rss>`)),
+			Request:    req,
+		}, nil
+	})}
+	resolveFeedDiscoveryHostname = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	defer func() {
+		feedDiscoveryHTTPClient = originalClient
+		resolveFeedDiscoveryHostname = originalResolver
+	}()
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/resolve", withFeedAuth(user.UUID, ResolveSubscriptionInput(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/resolve", strings.NewReader(`{"input":"https://example.com/frontpage"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	var payload AutoSubscriptionResolveResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Status != "new_source" {
+		t.Fatalf("expected status new_source, got %q with body %s", payload.Status, rr.Body.String())
+	}
+	if payload.Source == nil || payload.Source.RssURL != "https://example.com/frontpage" {
+		t.Fatalf("expected direct rss source, got %#v", payload.Source)
+	}
+	if len(payload.Candidates) != 0 {
+		t.Fatalf("expected no candidates for direct rss, got %d", len(payload.Candidates))
+	}
+}
+
+func TestAutoAddSubscriptionCreatesRSSHubSourceFromGithubRepository(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://github.com/DIYgod/RSSHub","title":"RSSHub Repo"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusCreated, rr.Code, rr.Body.String())
+	}
+
+	var sources []model.FeedSource
+	if err := db.Find(&sources).Error; err != nil {
+		t.Fatalf("load feed sources: %v", err)
+	}
+	if len(sources) != 1 {
+		t.Fatalf("expected 1 feed source, got %d", len(sources))
+	}
+	source := sources[0]
+	if source.Provider != "rsshub" {
+		t.Fatalf("expected provider rsshub, got %q", source.Provider)
+	}
+	if source.RssURL != "https://rsshub.app/github/repo/DIYgod/RSSHub" {
+		t.Fatalf("expected rsshub github repo url, got %q", source.RssURL)
+	}
+	if source.SiteURL != "https://github.com/DIYgod/RSSHub" {
+		t.Fatalf("expected github site url, got %q", source.SiteURL)
+	}
+	if count := countSubscriptionsForUser(t, db, user.UUID); count != 1 {
+		t.Fatalf("expected 1 subscription, got %d", count)
+	}
+}
+
+func TestAutoAddSubscriptionReusesExistingSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	source := model.FeedSource{
+		SourceType:   "external_rss",
+		Provider:     "rss",
+		RssURL:       "https://example.com/feed.xml",
+		CanonicalURL: "https://example.com/feed.xml",
+		Hash:         buildFeedSourceHash("external_rss", nil, "https://example.com/feed.xml"),
+		Title:        "Example Feed",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://example.com/feed.xml/"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusCreated, rr.Code, rr.Body.String())
+	}
+
+	var count int64
+	if err := db.Model(&model.FeedSource{}).Count(&count).Error; err != nil {
+		t.Fatalf("count feed sources: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected feed source count to remain 1, got %d", count)
+	}
+}
+
+func TestAutoAddSubscriptionDoesNotFetchSourceTitleDuringCreate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	fetched := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fetched = true
+		w.Header().Set("Content-Type", "application/rss+xml")
+		_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>Remote Title</title></channel></rss>`))
+	}))
+	defer server.Close()
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(fmt.Sprintf(`{"input":%q,"title":"Request Title"}`, server.URL+"/feed.xml")))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusCreated, rr.Code, rr.Body.String())
+	}
+	if fetched {
+		t.Fatal("expected auto-add source creation not to fetch RSS metadata synchronously")
+	}
+
+	var source model.FeedSource
+	if err := db.First(&source).Error; err != nil {
+		t.Fatalf("load feed source: %v", err)
+	}
+	if source.Title != "Request Title" {
+		t.Fatalf("expected fallback title to be preserved, got %q", source.Title)
+	}
+}
+
+func TestAutoAddSubscriptionAcceptsDirectRSSWithoutFeedPathSuffix(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	originalClient := feedDiscoveryHTTPClient
+	originalResolver := resolveFeedDiscoveryHostname
+	feedDiscoveryHTTPClient = &http.Client{Transport: feedDiscoveryRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
+			Body:       io.NopCloser(strings.NewReader(`<?xml version="1.0"?><rss version="2.0"><channel><title>Frontpage</title></channel></rss>`)),
+			Request:    req,
+		}, nil
+	})}
+	resolveFeedDiscoveryHostname = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	defer func() {
+		feedDiscoveryHTTPClient = originalClient
+		resolveFeedDiscoveryHostname = originalResolver
+	}()
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://example.com/frontpage","title":"Frontpage"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusCreated, rr.Code, rr.Body.String())
+	}
+
+	var source model.FeedSource
+	if err := db.First(&source).Error; err != nil {
+		t.Fatalf("load source: %v", err)
+	}
+	if source.RssURL != "https://example.com/frontpage" {
+		t.Fatalf("expected unsuffixed direct rss url, got %q", source.RssURL)
+	}
+}
+
+func TestAutoAddSubscriptionRequiresCandidateWhenMultipleFeedsExist(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	originalClient := feedDiscoveryHTTPClient
+	feedDiscoveryHTTPClient = &http.Client{
+		Transport: feedDiscoveryRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			html := `<html><head>
+<link rel="alternate" type="application/rss+xml" title="Main Feed" href="/feed.xml">
+<link rel="alternate" type="application/atom+xml" title="Updates" href="/updates.atom">
+</head><body></body></html>`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/html"}},
+				Body:       io.NopCloser(strings.NewReader(html)),
+				Request:    req,
+			}, nil
+		}),
+	}
+	defer func() {
+		feedDiscoveryHTTPClient = originalClient
+	}()
+
+	originalResolver := resolveFeedDiscoveryHostname
+	resolveFeedDiscoveryHostname = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	defer func() {
+		resolveFeedDiscoveryHostname = originalResolver
+	}()
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://example.com/blog"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "candidate_feed_url is required") {
+		t.Fatalf("expected candidate required message, got body %s", rr.Body.String())
+	}
+}
+
+func TestAutoAddSubscriptionUsesSelectedCandidate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://example.com/blog","candidate_feed_url":"https://example.com/feed.xml","title":"Main Feed"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusCreated, rr.Code, rr.Body.String())
+	}
+
+	var source model.FeedSource
+	if err := db.First(&source).Error; err != nil {
+		t.Fatalf("load feed source: %v", err)
+	}
+	if source.RssURL != "https://example.com/feed.xml" {
+		t.Fatalf("expected selected candidate rss url, got %q", source.RssURL)
+	}
+}
+
+func TestAutoAddSubscriptionRejectsAlreadySubscribedSource(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	source := model.FeedSource{
+		SourceType:   "external_rss",
+		Provider:     "rss",
+		RssURL:       "https://example.com/feed.xml",
+		CanonicalURL: "https://example.com/feed.xml",
+		Hash:         buildFeedSourceHash("external_rss", nil, "https://example.com/feed.xml"),
+		Title:        "Example Feed",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	subscription := model.Subscription{
+		UserID:       user.UUID,
+		FeedSourceID: source.ID,
+		Title:        "Example Feed",
+	}
+	if err := db.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://example.com/feed.xml/"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusConflict, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Already subscribed to this source") {
+		t.Fatalf("expected already subscribed message, got body %s", rr.Body.String())
+	}
+}
+
+func TestAutoAddSubscriptionMapsDuplicateSubscriptionInsertToConflict(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	db.Config.Logger = gormlogger.Default.LogMode(gormlogger.Silent)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	source := model.FeedSource{
+		SourceType:      "external_rss",
+		Provider:        "rss",
+		RssURL:          "https://example.com/race.xml",
+		CanonicalURL:    "https://example.com/race.xml",
+		Hash:            buildFeedSourceHash("external_rss", nil, "https://example.com/race.xml"),
+		Title:           "Race Feed",
+		HealthStatus:    "healthy",
+		FullTextEnabled: true,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	insertedCompetingSubscription := false
+	callbackName := "auto_add_duplicate_subscription_race"
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement == nil || tx.Statement.Schema == nil || tx.Statement.Schema.Table != "subscriptions" || insertedCompetingSubscription {
+			return
+		}
+		insertedCompetingSubscription = true
+		competing := model.Subscription{
+			UserID:       user.UUID,
+			FeedSourceID: source.ID,
+			Title:        "Competing",
+		}
+		if err := tx.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&competing).Error; err != nil {
+			tx.AddError(err)
+		}
+	}); err != nil {
+		t.Fatalf("register create callback: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := db.Callback().Create().Remove(callbackName); err != nil {
+			t.Fatalf("remove create callback: %v", err)
+		}
+	})
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://example.com/race.xml"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusConflict, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Already subscribed to this source") {
+		t.Fatalf("expected already subscribed message, got body %s", rr.Body.String())
+	}
+}
+
+func TestAutoAddSubscriptionRejectsHostlessCandidateFeedURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://example.com","candidate_feed_url":"https:/feed.xml"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "candidate_feed_url must be an absolute http/https URL") {
+		t.Fatalf("expected absolute http/https candidate message, got body %s", rr.Body.String())
+	}
+}
+
+func TestAutoAddSubscriptionRejectsHostlessDirectFeedInput(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https:/feed.xml"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "input must be an absolute http/https URL") {
+		t.Fatalf("expected absolute http/https input message, got body %s", rr.Body.String())
+	}
+}
+
+func TestAutoAddSubscriptionRejectsGithubRepositoryWithEncodedSlashSegment(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://github.com/DIYgod%2Fbad/RSSHub"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "input must be an absolute http/https URL") {
+		t.Fatalf("expected invalid input message, got body %s", rr.Body.String())
+	}
+}
+
+func TestAutoAddSubscriptionRejectsGithubRepositoryWithEncodedURLDelimiterSegment(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://github.com/DIYgod/RSSHub%3Fbad"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "input must be an absolute http/https URL") {
+		t.Fatalf("expected invalid input message, got body %s", rr.Body.String())
 	}
 }
 

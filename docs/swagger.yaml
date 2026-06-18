@@ -28,6 +28,77 @@ definitions:
     required:
     - collection_id
     type: object
+  feed.AutoSubscriptionAddRequest:
+    properties:
+      candidate_feed_url:
+        type: string
+      group_id:
+        type: string
+      input:
+        type: string
+      title:
+        type: string
+    type: object
+  feed.AutoSubscriptionCandidate:
+    properties:
+      feed_url:
+        type: string
+      is_default:
+        type: boolean
+      kind:
+        type: string
+      reason:
+        type: string
+      score:
+        type: integer
+      site_url:
+        type: string
+      source:
+        $ref: '#/definitions/feed.AutoSubscriptionSource'
+      status:
+        type: string
+      subscription:
+        $ref: '#/definitions/model.Subscription'
+      title:
+        type: string
+    type: object
+  feed.AutoSubscriptionResolveRequest:
+    properties:
+      input:
+        type: string
+    type: object
+  feed.AutoSubscriptionResolveResponse:
+    properties:
+      candidates:
+        items:
+          $ref: '#/definitions/feed.AutoSubscriptionCandidate'
+        type: array
+      message:
+        type: string
+      source:
+        $ref: '#/definitions/feed.AutoSubscriptionSource'
+      status:
+        type: string
+      subscription:
+        $ref: '#/definitions/model.Subscription'
+    type: object
+  feed.AutoSubscriptionSource:
+    properties:
+      canonical_url:
+        type: string
+      id:
+        type: string
+      provider:
+        type: string
+      rss_url:
+        type: string
+      site_url:
+        type: string
+      source_type:
+        type: string
+      title:
+        type: string
+    type: object
   feed.ErrorResponse:
     properties:
       error:
@@ -2180,6 +2251,17 @@ definitions:
     required:
     - vote_type
     type: object
+  handlers.uploadAssetResponse:
+    properties:
+      content_type:
+        type: string
+      key:
+        type: string
+      size:
+        type: integer
+      url:
+        type: string
+    type: object
   model.Album:
     properties:
       album_type:
@@ -2349,6 +2431,8 @@ definitions:
           $ref: '#/definitions/model.ArtistAlias'
         type: array
       bio:
+        type: string
+      birth_date:
         type: string
       birth_year:
         type: integer
@@ -8931,6 +9015,43 @@ paths:
       summary: 检查单个订阅健康状态
       tags:
       - feed
+  /api/v1/feed/subscriptions/auto-add:
+    post:
+      consumes:
+      - application/json
+      description: 根据原始输入或用户选择的候选 feed URL 创建或复用来源并添加当前用户订阅。
+      parameters:
+      - description: 自动添加订阅输入
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/feed.AutoSubscriptionAddRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/feed.SubscriptionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 自动添加订阅
+      tags:
+      - feed
   /api/v1/feed/subscriptions/health/check-all:
     post:
       description: 批量检测当前用户所有订阅的健康状态。
@@ -8949,6 +9070,35 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 检查全部订阅健康状态
+      tags:
+      - feed
+  /api/v1/feed/subscriptions/resolve:
+    post:
+      consumes:
+      - application/json
+      description: 检测输入 URL 是否对应已订阅来源、已有来源、新来源或多个候选，不创建订阅。
+      parameters:
+      - description: 订阅来源输入
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/feed.AutoSubscriptionResolveRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.AutoSubscriptionResolveResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 自动检测订阅来源
       tags:
       - feed
   /api/v1/feed/subscriptions/search:
@@ -11823,6 +11973,47 @@ paths:
       summary: 新增人物地点轨迹
       tags:
       - timeline
+  /api/v1/uploads:
+    post:
+      consumes:
+      - multipart/form-data
+      description: 上传音乐封面或音频资源。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。
+      parameters:
+      - description: 文件
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: 用途：music.cover / music.audio
+        in: formData
+        name: purpose
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.uploadAssetResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 上传媒体资源
+      tags:
+      - uploads
   /api/v1/users/{id}/follow:
     delete:
       description: 当前用户取消关注指定 UUID 用户。

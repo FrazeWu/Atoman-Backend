@@ -8334,6 +8334,66 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/subscriptions/auto-add": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "根据原始输入或用户选择的候选 feed URL 创建或复用来源并添加当前用户订阅。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "自动添加订阅",
+                "parameters": [
+                    {
+                        "description": "自动添加订阅输入",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.AutoSubscriptionAddRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/feed/subscriptions/health/check-all": {
             "post": {
                 "security": [
@@ -8361,6 +8421,54 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/subscriptions/resolve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "检测输入 URL 是否对应已订阅来源、已有来源、新来源或多个候选，不创建订阅。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "自动检测订阅来源",
+                "parameters": [
+                    {
+                        "description": "订阅来源输入",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.AutoSubscriptionResolveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.AutoSubscriptionResolveResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
                         }
@@ -13146,6 +13254,71 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/uploads": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "上传音乐封面或音频资源。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。",
+                "consumes": [
+                    "multipart/form-data"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "uploads"
+                ],
+                "summary": "上传媒体资源",
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "文件",
+                        "name": "file",
+                        "in": "formData",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "用途：music.cover / music.audio",
+                        "name": "purpose",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.uploadAssetResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/users/by-username/{username}": {
             "get": {
                 "description": "返回公开的用户摘要信息和关注统计。",
@@ -14380,6 +14553,115 @@ const docTemplate = `{
             ],
             "properties": {
                 "collection_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "feed.AutoSubscriptionAddRequest": {
+            "type": "object",
+            "properties": {
+                "candidate_feed_url": {
+                    "type": "string"
+                },
+                "group_id": {
+                    "type": "string"
+                },
+                "input": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "feed.AutoSubscriptionCandidate": {
+            "type": "object",
+            "properties": {
+                "feed_url": {
+                    "type": "string"
+                },
+                "is_default": {
+                    "type": "boolean"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "integer"
+                },
+                "site_url": {
+                    "type": "string"
+                },
+                "source": {
+                    "$ref": "#/definitions/feed.AutoSubscriptionSource"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subscription": {
+                    "$ref": "#/definitions/model.Subscription"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "feed.AutoSubscriptionResolveRequest": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string"
+                }
+            }
+        },
+        "feed.AutoSubscriptionResolveResponse": {
+            "type": "object",
+            "properties": {
+                "candidates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/feed.AutoSubscriptionCandidate"
+                    }
+                },
+                "message": {
+                    "type": "string"
+                },
+                "source": {
+                    "$ref": "#/definitions/feed.AutoSubscriptionSource"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "subscription": {
+                    "$ref": "#/definitions/model.Subscription"
+                }
+            }
+        },
+        "feed.AutoSubscriptionSource": {
+            "type": "object",
+            "properties": {
+                "canonical_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "provider": {
+                    "type": "string"
+                },
+                "rss_url": {
+                    "type": "string"
+                },
+                "site_url": {
+                    "type": "string"
+                },
+                "source_type": {
+                    "type": "string"
+                },
+                "title": {
                     "type": "string"
                 }
             }
@@ -17525,6 +17807,23 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.uploadAssetResponse": {
+            "type": "object",
+            "properties": {
+                "content_type": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
         "model.Album": {
             "type": "object",
             "properties": {
@@ -17773,6 +18072,9 @@ const docTemplate = `{
                     }
                 },
                 "bio": {
+                    "type": "string"
+                },
+                "birth_date": {
                     "type": "string"
                 },
                 "birth_year": {

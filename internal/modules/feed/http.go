@@ -39,6 +39,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/discover", DiscoverFeedCandidates())
 		protected.POST("/sources/create-from-provider", CreateSubscriptionFromProvider(service.db))
 		protected.GET("/subscriptions", GetSubscriptions(service.db))
+		protected.POST("/subscriptions/resolve", ResolveSubscriptionInput(service.db))
+		protected.POST("/subscriptions/auto-add", AutoAddSubscription(service.db))
 		protected.POST("/subscriptions", CreateSubscription(service.db))
 		protected.DELETE("/subscriptions/:id", DeleteSubscription(service.db))
 		protected.PUT("/subscriptions/:id", UpdateSubscription(service.db))
