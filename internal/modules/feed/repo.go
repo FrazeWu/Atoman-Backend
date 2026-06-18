@@ -3,6 +3,10 @@ package feed
 import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
+	"database/sql"
+	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -18,7 +22,7 @@ type ExploreSourceRow struct {
 	RSSURL            string     `json:"rss_url"`
 	SubscriptionCount int64      `json:"subscription_count"`
 	RecentItemCount   int64      `json:"recent_item_count"`
-	LastPublishedAt   string     `json:"last_published_at"`
+	LastPublishedAt   *time.Time `json:"last_published_at"`
 }
 
 func (r *Repo) ListSubscriptionsWithSources(userID uuid.UUID, query FeedQuery) ([]model.Subscription, error) {
@@ -236,7 +240,16 @@ func (r *Repo) CountExploreFeedItems() (int64, error) {
 }
 
 func (r *Repo) ListExploreSources(limit int, offset int) ([]ExploreSourceRow, error) {
-	var rows []ExploreSourceRow
+	type exploreSourceRowRaw struct {
+		ID                uuid.UUID
+		Title             string
+		RSSURL            string
+		SubscriptionCount int64
+		RecentItemCount   int64
+		LastPublishedAt   sql.NullString
+	}
+
+	var rawRows []exploreSourceRowRaw
 	err := r.db.Table("feed_sources").
 		Select(`
 			feed_sources.id,
@@ -255,8 +268,31 @@ func (r *Repo) ListExploreSources(limit int, offset int) ([]ExploreSourceRow, er
 		Order("subscription_count DESC, last_published_at DESC").
 		Offset(offset).
 		Limit(limit).
-		Scan(&rows).Error
-	return rows, err
+		Scan(&rawRows).Error
+	if err != nil {
+		return nil, err
+	}
+
+	rows := make([]ExploreSourceRow, 0, len(rawRows))
+	for _, raw := range rawRows {
+		row := ExploreSourceRow{
+			ID:                raw.ID,
+			Title:             raw.Title,
+			RSSURL:            raw.RSSURL,
+			SubscriptionCount: raw.SubscriptionCount,
+			RecentItemCount:   raw.RecentItemCount,
+		}
+		if raw.LastPublishedAt.Valid {
+			parsed, parseErr := parseExploreSourceTimestamp(raw.LastPublishedAt.String)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			row.LastPublishedAt = &parsed
+		}
+		rows = append(rows, row)
+	}
+
+	return rows, nil
 }
 
 func (r *Repo) CountExploreSources() (int64, error) {
@@ -268,6 +304,23 @@ func (r *Repo) CountExploreSources() (int64, error) {
 		Distinct("feed_sources.id").
 		Count(&count).Error
 	return count, err
+}
+
+func parseExploreSourceTimestamp(raw string) (time.Time, error) {
+	value := strings.TrimSpace(raw)
+	layouts := []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05-07:00",
+		"2006-01-02 15:04:05Z07:00",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("parse explore source timestamp %q", raw)
 }
 
 func (r *Repo) FeedItemExists(id uuid.UUID) (bool, error) {
