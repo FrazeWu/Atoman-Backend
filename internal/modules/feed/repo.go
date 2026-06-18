@@ -48,7 +48,10 @@ func (r *Repo) ListPublishedPostsByUserIDs(userIDs []uuid.UUID) ([]model.Post, e
 		return []model.Post{}, nil
 	}
 	var posts []model.Post
-	err := r.db.Preload("User").Where("status = ?", "published").Where("user_id IN ?", userIDs).Find(&posts).Error
+	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
+		Where("status = ?", "published").
+		Where("user_id IN ?", userIDs).
+		Find(&posts).Error
 	return posts, err
 }
 
@@ -57,7 +60,10 @@ func (r *Repo) ListPublishedPostsByChannelIDs(channelIDs []uuid.UUID) ([]model.P
 		return []model.Post{}, nil
 	}
 	var posts []model.Post
-	err := r.db.Preload("User").Where("status = ?", "published").Where("channel_id IN ?", channelIDs).Find(&posts).Error
+	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
+		Where("status = ?", "published").
+		Where("channel_id IN ?", channelIDs).
+		Find(&posts).Error
 	return posts, err
 }
 
@@ -66,7 +72,11 @@ func (r *Repo) ListPublishedPostsByCollectionIDs(collectionIDs []uuid.UUID) ([]m
 		return []model.Post{}, nil
 	}
 	var posts []model.Post
-	err := r.db.Preload("User").Joins("JOIN post_collections ON post_collections.post_id = posts.id").Where("posts.status = ?", "published").Where("post_collections.collection_id IN ?", collectionIDs).Find(&posts).Error
+	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
+		Joins("JOIN post_collections ON post_collections.post_id = posts.id").
+		Where("posts.status = ?", "published").
+		Where("post_collections.collection_id IN ?", collectionIDs).
+		Find(&posts).Error
 	return posts, err
 }
 
@@ -153,7 +163,12 @@ func (r *Repo) DeleteReads(userID uuid.UUID, ids []uuid.UUID) error {
 
 func (r *Repo) ListExplorePosts(limit int, offset int) ([]model.Post, error) {
 	var posts []model.Post
-	err := r.db.Preload("User").Where("status = ?", "published").Order("created_at DESC").Offset(offset).Limit(limit).Find(&posts).Error
+	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
+		Where("status = ?", "published").
+		Order("created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&posts).Error
 	return posts, err
 }
 
