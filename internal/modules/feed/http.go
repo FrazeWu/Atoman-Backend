@@ -81,28 +81,12 @@ func (h *Handler) getSubscribedFeed(c *gin.Context) {
 			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "feed source id must be a valid uuid"))
 			return
 		}
-		page := normalizedPageFromQuery(c)
-		pageSize := normalizedPageSizeFromQuery(c)
-		offset := (page - 1) * pageSize
-		items, err := h.service.repo.ListFeedItemsBySourceID(feedSourceID, pageSize, offset)
+		items, total, err := h.service.GetPublicFeedBySourceID(feedSourceID, queryFromContext(c))
 		if err != nil {
 			httpx.Error(c, err)
 			return
 		}
-		total, err := h.service.repo.CountFeedItemsBySourceID(feedSourceID)
-		if err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		timeline := make([]TimelineItemDTO, 0, len(items))
-		for i := range items {
-			timeline = append(timeline, TimelineItemDTO{
-				Type:        "feed_item",
-				FeedItem:    &items[i],
-				PublishedAt: items[i].PublishedAt,
-			})
-		}
-		httpx.List(c, timeline, page, pageSize, total)
+		httpx.List(c, items, normalizedPageFromQuery(c), normalizedPageSizeFromQuery(c), total)
 		return
 	}
 	items, total, err := h.service.GetSubscribedFeed(user, queryFromContext(c))

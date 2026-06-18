@@ -297,6 +297,62 @@ func TestGetPublicFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
 	}
 }
 
+func TestGetPublicFeedBySourceIDReturnsOnlyRequestedSource(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+
+	otherSource := model.FeedSource{SourceType: "external_rss", RssURL: "https://other.example.com/feed.xml", Hash: "other-external-rss-hash", Title: "Other Feed"}
+	if err := db.Create(&otherSource).Error; err != nil {
+		t.Fatalf("create other source: %v", err)
+	}
+
+	otherPublishedAt := time.Now().Add(-10 * time.Minute).UTC()
+	otherItem := model.FeedItem{
+		FeedSourceID: otherSource.ID,
+		GUID:         "other-guid-1",
+		Title:        "Other feed item",
+		Link:         "https://other.example.com/items/1",
+		PublishedAt:  otherPublishedAt,
+		FetchedAt:    otherPublishedAt,
+	}
+	if err := db.Create(&otherItem).Error; err != nil {
+		t.Fatalf("create other feed item: %v", err)
+	}
+
+	items, total, err := service.GetPublicFeedBySourceID(source.ID, FeedQuery{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("get public feed by source id: %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("expected exactly one item from requested source, got total=%d len=%d", total, len(items))
+	}
+	if items[0].Type != "feed_item" || items[0].FeedItem == nil {
+		t.Fatalf("expected feed item timeline entry, got %#v", items[0])
+	}
+	if items[0].FeedItem.FeedSourceID != source.ID {
+		t.Fatalf("expected source %s, got %s", source.ID, items[0].FeedItem.FeedSourceID)
+	}
+	if items[0].FeedItem.Title != "Feed item" {
+		t.Fatalf("expected original source item title, got %s", items[0].FeedItem.Title)
+	}
+}
+
+func TestParseExploreSourceTimestamp(t *testing.T) {
+	raw := "2026-06-19 02:31:53.123456789+08:00"
+	parsed, err := parseExploreSourceTimestamp(raw)
+	if err != nil {
+		t.Fatalf("parse explore source timestamp: %v", err)
+	}
+	expected := time.Date(2026, time.June, 19, 2, 31, 53, 123456789, time.FixedZone("", 8*60*60))
+	if !parsed.Equal(expected) {
+		t.Fatalf("expected %s, got %s", expected.Format(time.RFC3339Nano), parsed.Format(time.RFC3339Nano))
+	}
+}
+
 func TestListReadingListReturnsPagedItems(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	var feedItem model.FeedItem

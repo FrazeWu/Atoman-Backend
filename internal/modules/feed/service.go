@@ -22,6 +22,33 @@ type Service struct {
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
 
+func (s *Service) GetPublicFeedBySourceID(feedSourceID uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {
+	page := normalizedPage(query.Page)
+	limit := normalizedPageSize(query.PageSize)
+	offset := (page - 1) * limit
+
+	feedItems, err := s.repo.ListFeedItemsBySourceID(feedSourceID, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	items := make([]TimelineItemDTO, 0, len(feedItems))
+	for i := range feedItems {
+		items = append(items, TimelineItemDTO{
+			Type:        "feed_item",
+			FeedItem:    &feedItems[i],
+			PublishedAt: feedItems[i].PublishedAt,
+		})
+	}
+
+	total, err := s.repo.CountFeedItemsBySourceID(feedSourceID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return items, total, nil
+}
+
 func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) ([]TimelineItemDTO, int64, error) {
 	if user.ID == uuid.Nil {
 		return s.GetPublicFeed(query)
