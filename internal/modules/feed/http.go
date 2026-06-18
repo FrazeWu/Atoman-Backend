@@ -21,6 +21,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.GET("/timeline", middleware.OptionalAuthMiddleware(), h.getSubscribedFeed)
 	group.GET("/explore", middleware.OptionalAuthMiddleware(), h.getExploreFeed)
+	group.GET("/explore/sources", GetExploreSources(service.db))
 
 	group.GET("/rss/:username", GetUserRSS(service.db))
 	group.GET("/items/:id", GetFeedItem(service.db))
@@ -74,6 +75,36 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 
 func (h *Handler) getSubscribedFeed(c *gin.Context) {
 	user, _ := authctx.Current(c)
+	if raw := c.Query("feed_source_id"); raw != "" {
+		feedSourceID, err := uuid.Parse(raw)
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "feed source id must be a valid uuid"))
+			return
+		}
+		page := normalizedPageFromQuery(c)
+		pageSize := normalizedPageSizeFromQuery(c)
+		offset := (page - 1) * pageSize
+		items, err := h.service.repo.ListFeedItemsBySourceID(feedSourceID, pageSize, offset)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		total, err := h.service.repo.CountFeedItemsBySourceID(feedSourceID)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		timeline := make([]TimelineItemDTO, 0, len(items))
+		for i := range items {
+			timeline = append(timeline, TimelineItemDTO{
+				Type:        "feed_item",
+				FeedItem:    &items[i],
+				PublishedAt: items[i].PublishedAt,
+			})
+		}
+		httpx.List(c, timeline, page, pageSize, total)
+		return
+	}
 	items, total, err := h.service.GetSubscribedFeed(user, queryFromContext(c))
 	if err != nil {
 		httpx.Error(c, err)

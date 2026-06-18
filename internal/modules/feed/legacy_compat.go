@@ -219,6 +219,45 @@ type SubscriptionStatusResponse struct {
 	Subscription model.Subscription `json:"subscription,omitempty"`
 }
 
+func GetExploreSources(db *gorm.DB) gin.HandlerFunc {
+	repo := NewRepo(db)
+	return func(c *gin.Context) {
+		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+		if page < 1 {
+			page = 1
+		}
+		if limit < 1 {
+			limit = 20
+		}
+		if limit > 100 {
+			limit = 100
+		}
+		offset := (page - 1) * limit
+
+		rows, err := repo.ListExploreSources(limit, offset)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch explore sources"})
+			return
+		}
+		total, err := repo.CountExploreSources()
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count explore sources"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{
+			"data": rows,
+			"meta": gin.H{
+				"page":      page,
+				"page_size": limit,
+				"total":     total,
+				"has_more":  int64(offset+len(rows)) < total,
+			},
+		})
+	}
+}
+
 func normalizeCanonicalFeedURL(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	trimmed = strings.TrimRight(trimmed, "/")

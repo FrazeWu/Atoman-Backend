@@ -12,6 +12,15 @@ type Repo struct{ db *gorm.DB }
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
+type ExploreSourceRow struct {
+	ID                uuid.UUID  `json:"id"`
+	Title             string     `json:"title"`
+	RSSURL            string     `json:"rss_url"`
+	SubscriptionCount int64      `json:"subscription_count"`
+	RecentItemCount   int64      `json:"recent_item_count"`
+	LastPublishedAt   string     `json:"last_published_at"`
+}
+
 func (r *Repo) ListSubscriptionsWithSources(userID uuid.UUID, query FeedQuery) ([]model.Subscription, error) {
 	db := r.db.Model(&model.Subscription{}).
 		Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
@@ -108,6 +117,29 @@ func (r *Repo) ListFeedItemsBySourceIDsPaged(feedSourceIDs []uuid.UUID, limit in
 	return items, err
 }
 
+func (r *Repo) ListFeedItemsBySourceID(feedSourceID uuid.UUID, limit int, offset int) ([]model.FeedItem, error) {
+	var items []model.FeedItem
+	err := r.db.Preload("FeedSource").
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_items.feed_source_id = ?", feedSourceID).
+		Where("feed_sources.hidden = ?", false).
+		Order("feed_items.published_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&items).Error
+	return items, err
+}
+
+func (r *Repo) CountFeedItemsBySourceID(feedSourceID uuid.UUID) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.FeedItem{}).
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_items.feed_source_id = ?", feedSourceID).
+		Where("feed_sources.hidden = ?", false).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *Repo) CountFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID) (int64, error) {
 	if len(feedSourceIDs) == 0 {
 		return 0, nil
@@ -199,6 +231,41 @@ func (r *Repo) CountExploreFeedItems() (int64, error) {
 	err := r.db.Model(&model.FeedItem{}).
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
 		Where("feed_sources.hidden = ?", false).
+		Count(&count).Error
+	return count, err
+}
+
+func (r *Repo) ListExploreSources(limit int, offset int) ([]ExploreSourceRow, error) {
+	var rows []ExploreSourceRow
+	err := r.db.Table("feed_sources").
+		Select(`
+			feed_sources.id,
+			feed_sources.title,
+			feed_sources.rss_url,
+			COUNT(DISTINCT subscriptions.id) AS subscription_count,
+			COUNT(DISTINCT feed_items.id) AS recent_item_count,
+			MAX(feed_items.published_at) AS last_published_at
+		`).
+		Joins("LEFT JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id").
+		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
+		Where("feed_sources.source_type = ?", "external_rss").
+		Where("feed_sources.hidden = ?", false).
+		Group("feed_sources.id").
+		Having("COUNT(DISTINCT feed_items.id) > 0").
+		Order("subscription_count DESC, last_published_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Scan(&rows).Error
+	return rows, err
+}
+
+func (r *Repo) CountExploreSources() (int64, error) {
+	var count int64
+	err := r.db.Table("feed_sources").
+		Joins("JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
+		Where("feed_sources.source_type = ?", "external_rss").
+		Where("feed_sources.hidden = ?", false).
+		Distinct("feed_sources.id").
 		Count(&count).Error
 	return count, err
 }

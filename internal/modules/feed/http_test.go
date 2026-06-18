@@ -56,6 +56,75 @@ func TestGetExploreFeedHandlerAllowsAnonymousPublicRead(t *testing.T) {
 	}
 }
 
+func TestGetExploreSourcesHandlerAllowsAnonymousPublicRead(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, _, _ := newFeedTestService(t)
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/explore/sources?page=1&limit=20", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected anonymous source explore to return 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID                string `json:"id"`
+			Title             string `json:"title"`
+			SubscriptionCount int64  `json:"subscription_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected source explore items, got body %s", rr.Body.String())
+	}
+}
+
+func TestGetSubscribedFeedHandlerAllowsPublicReadByFeedSourceID(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	var feedItem model.FeedItem
+	if err := db.Where("title = ?", "Feed item").First(&feedItem).Error; err != nil {
+		t.Fatalf("find feed item: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?feed_source_id="+feedItem.FeedSourceID.String(), nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected public source timeline to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []TimelineItemDTO `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 1 {
+		t.Fatalf("expected exactly one source timeline item, got %d with body %s", len(payload.Data), rr.Body.String())
+	}
+	if payload.Data[0].Type != "feed_item" || payload.Data[0].FeedItem == nil {
+		t.Fatalf("expected a feed item payload, got %#v", payload.Data[0])
+	}
+	if payload.Data[0].FeedItem.FeedSourceID != feedItem.FeedSourceID {
+		t.Fatalf("expected feed source %s, got %s", feedItem.FeedSourceID, payload.Data[0].FeedItem.FeedSourceID)
+	}
+}
+
 func TestTimelineWriteHandlersRequireAndAcceptRealAuthMiddleware(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
