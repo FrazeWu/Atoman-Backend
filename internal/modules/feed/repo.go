@@ -265,7 +265,9 @@ func (r *Repo) ListExploreSources(limit int, offset int) ([]ExploreSourceRow, er
 		Where("feed_sources.hidden = ?", false).
 		Group("feed_sources.id").
 		Having("COUNT(DISTINCT feed_items.id) > 0").
-		Order("subscription_count DESC, last_published_at DESC").
+		Order("subscription_count DESC").
+		Order("last_published_at DESC NULLS LAST").
+		Order("feed_sources.created_at DESC").
 		Offset(offset).
 		Limit(limit).
 		Scan(&rawRows).Error

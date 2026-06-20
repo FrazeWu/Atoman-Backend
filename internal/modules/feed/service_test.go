@@ -371,6 +371,167 @@ func TestParseExploreSourceTimestampInvalid(t *testing.T) {
 	}
 }
 
+func TestListExploreSourcesExcludesHiddenSources(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	hiddenSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://hidden-explore.example.com/feed.xml",
+		Hash:         "hidden-explore-source-hash",
+		Title:        "Hidden Explore Source",
+		Hidden:       true,
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&hiddenSource).Error; err != nil {
+		t.Fatalf("create hidden source: %v", err)
+	}
+
+	hiddenItem := model.FeedItem{
+		FeedSourceID: hiddenSource.ID,
+		GUID:         "hidden-explore-guid",
+		Title:        "Hidden Explore Item",
+		Link:         "https://hidden-explore.example.com/items/1",
+		PublishedAt:  time.Now().UTC(),
+		FetchedAt:    time.Now().UTC(),
+	}
+	if err := db.Create(&hiddenItem).Error; err != nil {
+		t.Fatalf("create hidden item: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: hiddenSource.ID, Title: hiddenSource.Title}).Error; err != nil {
+		t.Fatalf("create hidden subscription: %v", err)
+	}
+
+	rows, err := service.repo.ListExploreSources(20, 0)
+	if err != nil {
+		t.Fatalf("list explore sources: %v", err)
+	}
+	for _, row := range rows {
+		if row.ID == hiddenSource.ID {
+			t.Fatalf("hidden source leaked into explore sources: %#v", row)
+		}
+	}
+}
+
+func TestListExploreSourcesOrdersBySubscriptionCountThenFreshness(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	var baseline model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&baseline).Error; err != nil {
+		t.Fatalf("find baseline source: %v", err)
+	}
+
+	secondUser := model.User{Username: "bob", Email: "bob@example.com", Password: "hash", Role: authctx.RoleUser, DisplayName: "Bob", IsActive: true}
+	if err := db.Create(&secondUser).Error; err != nil {
+		t.Fatalf("create second user: %v", err)
+	}
+	thirdUser := model.User{Username: "carol", Email: "carol@example.com", Password: "hash", Role: authctx.RoleUser, DisplayName: "Carol", IsActive: true}
+	if err := db.Create(&thirdUser).Error; err != nil {
+		t.Fatalf("create third user: %v", err)
+	}
+
+	mostSubscribed := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://ranked-most.example.com/feed.xml",
+		Hash:         "ranked-most-source-hash",
+		Title:        "Ranked Most Subscribed",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&mostSubscribed).Error; err != nil {
+		t.Fatalf("create most subscribed source: %v", err)
+	}
+	if err := db.Model(&mostSubscribed).Update("created_at", time.Now().Add(-4*time.Hour).UTC()).Error; err != nil {
+		t.Fatalf("set most subscribed created_at: %v", err)
+	}
+
+	tiedOlder := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://ranked-tied-older.example.com/feed.xml",
+		Hash:         "ranked-tied-older-source-hash",
+		Title:        "Ranked Tied Older",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&tiedOlder).Error; err != nil {
+		t.Fatalf("create tied older source: %v", err)
+	}
+	if err := db.Model(&tiedOlder).Update("created_at", time.Now().Add(-3*time.Hour).UTC()).Error; err != nil {
+		t.Fatalf("set tied older created_at: %v", err)
+	}
+
+	tiedNewer := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://ranked-tied-newer.example.com/feed.xml",
+		Hash:         "ranked-tied-newer-source-hash",
+		Title:        "Ranked Tied Newer",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&tiedNewer).Error; err != nil {
+		t.Fatalf("create tied newer source: %v", err)
+	}
+	if err := db.Model(&tiedNewer).Update("created_at", time.Now().Add(-2*time.Hour).UTC()).Error; err != nil {
+		t.Fatalf("set tied newer created_at: %v", err)
+	}
+
+	publishedAt := time.Now().Add(-30 * time.Minute).UTC()
+	for _, tc := range []struct {
+		source model.FeedSource
+		guid   string
+		title  string
+	}{
+		{source: mostSubscribed, guid: "ranked-most-guid", title: "Ranked Most Item"},
+		{source: tiedOlder, guid: "ranked-tied-older-guid", title: "Ranked Tied Older Item"},
+		{source: tiedNewer, guid: "ranked-tied-newer-guid", title: "Ranked Tied Newer Item"},
+	} {
+		item := model.FeedItem{
+			FeedSourceID: tc.source.ID,
+			GUID:         tc.guid,
+			Title:        tc.title,
+			Link:         fmt.Sprintf("https://example.com/%s", tc.guid),
+			PublishedAt:  publishedAt,
+			FetchedAt:    publishedAt.Add(5 * time.Minute),
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create ranked feed item for %s: %v", tc.source.Title, err)
+		}
+	}
+
+	for _, sub := range []model.Subscription{
+		{UserID: secondUser.UUID, FeedSourceID: mostSubscribed.ID, Title: mostSubscribed.Title},
+		{UserID: thirdUser.UUID, FeedSourceID: mostSubscribed.ID, Title: mostSubscribed.Title},
+		{UserID: secondUser.UUID, FeedSourceID: tiedOlder.ID, Title: tiedOlder.Title},
+		{UserID: user.ID, FeedSourceID: tiedNewer.ID, Title: tiedNewer.Title},
+	} {
+		if err := db.Create(&sub).Error; err != nil {
+			t.Fatalf("create ranked subscription %+v: %v", sub, err)
+		}
+	}
+
+	rows, err := service.repo.ListExploreSources(20, 0)
+	if err != nil {
+		t.Fatalf("list explore sources: %v", err)
+	}
+	if len(rows) < 4 {
+		t.Fatalf("expected at least four explore sources, got %d", len(rows))
+	}
+
+	rowIndexByID := make(map[any]int, len(rows))
+	for i, row := range rows {
+		rowIndexByID[row.ID] = i
+	}
+
+	if rows[0].SubscriptionCount < rows[1].SubscriptionCount {
+		t.Fatalf("expected source ordering by subscription_count desc, got %#v", rows)
+	}
+	if rowIndexByID[mostSubscribed.ID] >= rowIndexByID[tiedNewer.ID] {
+		t.Fatalf("expected most subscribed source before tied newer source, got %#v", rows)
+	}
+	if rowIndexByID[tiedNewer.ID] >= rowIndexByID[tiedOlder.ID] {
+		t.Fatalf("expected newer created source to break complete ties, got %#v", rows)
+	}
+	if rowIndexByID[tiedOlder.ID] >= rowIndexByID[baseline.ID] {
+		t.Fatalf("expected fresher source to outrank older baseline on equal subscriptions, got %#v", rows)
+	}
+}
+
 func TestListReadingListReturnsPagedItems(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	var feedItem model.FeedItem
