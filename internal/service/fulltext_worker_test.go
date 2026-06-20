@@ -469,6 +469,36 @@ func TestSyncSingleRSSSetsInitialFullTextStatus(t *testing.T) {
 	}
 }
 
+func TestBuildModelFeedItemDisablesFullTextForCompleteFeedContent(t *testing.T) {
+	originalResolver := resolveFullTextHostname
+	resolveFullTextHostname = func(host string) ([]net.IP, error) {
+		if host == "allowed.example" {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		}
+		return nil, errors.New("unexpected host: " + host)
+	}
+	defer func() {
+		resolveFullTextHostname = originalResolver
+	}()
+
+	source := model.FeedSource{
+		SourceType:      "external_rss",
+		FullTextEnabled: true,
+	}
+	normalized := normalizeRSSItem(ExtRSSItem{
+		Title:   "Entry One",
+		Link:    "https://allowed.example/article",
+		GUID:    "entry-one",
+		Author:  "Alice",
+		Content: "<p>" + strings.Repeat("complete article body. ", 30) + "</p>",
+	}, "", "", time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC))
+
+	item := buildModelFeedItem(source, normalized, time.Date(2026, 6, 2, 8, 5, 0, 0, time.UTC))
+	if item.FullTextStatus != FullTextStatusDisabled {
+		t.Fatalf("status=%q", item.FullTextStatus)
+	}
+}
+
 func TestSyncSingleRSSFailureDoesNotMutateSourceState(t *testing.T) {
 	db, err := openFullTextWorkerTestDB(t)
 	if err != nil {

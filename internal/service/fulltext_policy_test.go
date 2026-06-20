@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,5 +120,73 @@ func TestIsFeedItemEligibleForFullText(t *testing.T) {
 	}
 	if IsFeedItemEligibleForFullText(internalSource, blogItem) {
 		t.Fatal("expected internal source excluded from full text")
+	}
+}
+
+func TestInferFeedContentQualityReturnsFalseForExcerptLikeContent(t *testing.T) {
+	content := "<p>short teaser only</p>"
+
+	if inferFeedContentQuality(content) {
+		t.Fatal("expected excerpt-like content to stay below fulltext threshold")
+	}
+}
+
+func TestInferFeedContentQualityReturnsTrueForLongArticleLikeContent(t *testing.T) {
+	content := "<p>" + strings.Repeat("complete article body. ", 30) + "</p>"
+
+	if !inferFeedContentQuality(content) {
+		t.Fatal("expected article-like content to cross fulltext threshold")
+	}
+}
+
+func TestDefaultFullTextStatusForSourceSkipsCompleteFeedContent(t *testing.T) {
+	originalResolver := resolveFullTextHostname
+	resolveFullTextHostname = func(host string) ([]net.IP, error) {
+		if host == "allowed.example" {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		}
+		return nil, errors.New("unexpected host: " + host)
+	}
+	defer func() {
+		resolveFullTextHostname = originalResolver
+	}()
+
+	source := model.FeedSource{
+		SourceType:      "external_rss",
+		FullTextEnabled: true,
+	}
+	item := model.FeedItem{
+		Link:    "https://allowed.example/article",
+		Summary: strings.Repeat("complete article body ", 20),
+	}
+
+	if status := defaultFullTextStatusForSource(source, item, true); status != FullTextStatusDisabled {
+		t.Fatalf("status=%q", status)
+	}
+}
+
+func TestDefaultFullTextStatusForSourceKeepsPendingForExcerptFeedContent(t *testing.T) {
+	originalResolver := resolveFullTextHostname
+	resolveFullTextHostname = func(host string) ([]net.IP, error) {
+		if host == "allowed.example" {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		}
+		return nil, errors.New("unexpected host: " + host)
+	}
+	defer func() {
+		resolveFullTextHostname = originalResolver
+	}()
+
+	source := model.FeedSource{
+		SourceType:      "external_rss",
+		FullTextEnabled: true,
+	}
+	item := model.FeedItem{
+		Link:    "https://allowed.example/article",
+		Summary: "short teaser",
+	}
+
+	if status := defaultFullTextStatusForSource(source, item, false); status != FullTextStatusPending {
+		t.Fatalf("status=%q", status)
 	}
 }

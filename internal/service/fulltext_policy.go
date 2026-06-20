@@ -42,6 +42,16 @@ func IsFeedItemEligibleForFullText(source model.FeedSource, item model.FeedItem)
 	return ValidateFullTextTargetURL(item.Link) == nil
 }
 
+func defaultFullTextStatusForSource(source model.FeedSource, item model.FeedItem, looksLikeFullText bool) string {
+	if !IsFeedItemEligibleForFullText(source, item) {
+		return FullTextStatusDisabled
+	}
+	if looksLikeFullText {
+		return FullTextStatusDisabled
+	}
+	return FullTextStatusPending
+}
+
 func isPodcastLikeFeedItem(item model.FeedItem) bool {
 	enclosureType := strings.ToLower(strings.TrimSpace(item.EnclosureType))
 	if strings.HasPrefix(enclosureType, "audio/") || strings.HasPrefix(enclosureType, "video/") {
