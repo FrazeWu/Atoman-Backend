@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -550,5 +551,26 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRegisterV1RoutesOnlyExposeApprovedNonAPIRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	r := gin.New()
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+
+	allowedPrefixes := []string{"/api/", "/uploads", "/swagger/", "/ws/user"}
+	for _, route := range r.Routes() {
+		allowed := false
+		for _, prefix := range allowedPrefixes {
+			if strings.HasPrefix(route.Path, prefix) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			t.Fatalf("route %s %s is outside /api and not in the explicit non-API allowlist", route.Method, route.Path)
+		}
 	}
 }

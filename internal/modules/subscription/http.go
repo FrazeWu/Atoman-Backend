@@ -3,6 +3,7 @@ package subscription
 import (
 	"net/http"
 
+	"atoman/internal/middleware"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -16,8 +17,20 @@ type Handler struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
-	group.POST("/subscriptions", h.createSubscription)
-	group.POST("/subscription-groups", h.createSubscriptionGroup)
+	protected := group.Group("")
+	protected.Use(requireCurrentUser())
+	protected.POST("/subscriptions", h.createSubscription)
+	protected.POST("/subscription-groups", h.createSubscriptionGroup)
+}
+
+func requireCurrentUser() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := authctx.Current(c); ok {
+			c.Next()
+			return
+		}
+		middleware.AuthMiddleware()(c)
+	}
 }
 
 func (h *Handler) createSubscription(c *gin.Context) {

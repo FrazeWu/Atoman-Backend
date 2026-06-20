@@ -163,6 +163,7 @@ func (BlogDraft) TableName() string { return "blog_drafts" }
 type PostCollection struct {
 	PostID       uuid.UUID `json:"post_id" gorm:"type:uuid;primaryKey"`
 	CollectionID uuid.UUID `json:"collection_id" gorm:"type:uuid;primaryKey"`
+	Position     int       `json:"position" gorm:"not null;default:0"`
 }
 
 func (PostCollection) TableName() string { return "post_collections" }

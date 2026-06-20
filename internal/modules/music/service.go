@@ -53,7 +53,36 @@ func (s *Service) SubmitEdit(user authctx.CurrentUser, req SubmitEditRequest) (m
 		SourcesJSON: string(sourcesJSON),
 		Votable:     true,
 	}
-	if err := s.repo.CreateEdit(&edit); err != nil {
+	autoApplyTypes := map[string]struct{}{
+		"create_artist": {},
+		"create_album":  {},
+		"update_artist": {},
+		"update_album":  {},
+	}
+
+	if _, shouldAutoApply := autoApplyTypes[req.Type]; !shouldAutoApply {
+		if err := s.repo.CreateEdit(&edit); err != nil {
+			return model.MusicEdit{}, err
+		}
+		return edit, nil
+	}
+
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		repo := NewRepo(tx)
+		if err := repo.CreateEdit(&edit); err != nil {
+			return err
+		}
+		if err := applyEdit(tx, &edit); err != nil {
+			edit.Status = "failed_prerequisite"
+			edit.FailureReason = err.Error()
+			return repo.SaveEdit(&edit)
+		}
+		edit.Status = "applied"
+		edit.AutoApplied = true
+		edit.Votable = false
+		return repo.SaveEdit(&edit)
+	})
+	if err != nil {
 		return model.MusicEdit{}, err
 	}
 	return edit, nil

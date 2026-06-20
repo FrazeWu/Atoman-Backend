@@ -6,6 +6,7 @@ type CreatePostRequest struct {
 	Title         string      `json:"title"`
 	Content       string      `json:"content"`
 	Excerpt       string      `json:"excerpt"`
+	Summary       string      `json:"summary"`
 	CoverURL      string      `json:"cover_url"`
 	ChannelID     uuid.UUID   `json:"channel_id"`
 	CollectionIDs []uuid.UUID `json:"collection_ids"`

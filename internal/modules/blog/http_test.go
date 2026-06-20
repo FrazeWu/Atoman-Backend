@@ -27,6 +27,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.Channel{},
 		&model.Collection{},
 		&model.Post{},
+		&model.PostCollection{},
 		&model.BlogPostRating{},
 		&model.BlogDraft{},
 		&model.AuditLog{},
@@ -209,6 +210,44 @@ func TestRegisterRoutesCreatePostReturnsCreatedPost(t *testing.T) {
 	}
 	if len(collections) != 1 || collections[0].ID != collection.ID {
 		t.Fatalf("expected created post to be assigned to default collection %s, got %#v", collection.ID, collections)
+	}
+}
+
+func TestRegisterRoutesCreatePostAcceptsSummaryField(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	body := map[string]any{
+		"title":      "HTTP Post",
+		"content":    "content",
+		"summary":    "summary from frontend",
+		"channel_id": channel.ID,
+		"visibility": "public",
+		"status":     "draft",
+	}
+	raw, _ := json.Marshal(body)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data model.Post `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.Summary != "summary from frontend" {
+		t.Fatalf("expected created post summary from summary field, got %#v", resp.Data.Summary)
 	}
 }
 
@@ -662,5 +701,55 @@ func TestRegisterRoutesRemovePostFromCollectionRemovesAssociation(t *testing.T) 
 	}
 	if len(reloaded.Collections) != 1 || reloaded.Collections[0].ID != defaultCollection.ID {
 		t.Fatalf("unexpected collections after remove: %#v", reloaded.Collections)
+	}
+}
+
+func TestRegisterRoutesReorderCollectionPostsPersistsPosition(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, defaultCollection := createOwnedChannelAndCollection(t, service, user, "Alice")
+	postA := createPostRecord(t, db, user.ID, &channel.ID, "Post A", "draft")
+	postB := createPostRecord(t, db, user.ID, &channel.ID, "Post B", "published")
+	postC := createPostRecord(t, db, user.ID, &channel.ID, "Post C", "draft")
+
+	if err := db.Create(&model.PostCollection{PostID: postA.ID, CollectionID: defaultCollection.ID, Position: 0}).Error; err != nil {
+		t.Fatalf("attach post A: %v", err)
+	}
+	if err := db.Create(&model.PostCollection{PostID: postB.ID, CollectionID: defaultCollection.ID, Position: 1}).Error; err != nil {
+		t.Fatalf("attach post B: %v", err)
+	}
+	if err := db.Create(&model.PostCollection{PostID: postC.ID, CollectionID: defaultCollection.ID, Position: 2}).Error; err != nil {
+		t.Fatalf("attach post C: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	body := map[string]any{
+		"post_ids": []string{postC.ID.String(), postA.ID.String(), postB.ID.String()},
+	}
+	raw, _ := json.Marshal(body)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/blog/collections/"+defaultCollection.ID.String()+"/posts/order", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var links []model.PostCollection
+	if err := db.Where("collection_id = ?", defaultCollection.ID).Order("position ASC").Find(&links).Error; err != nil {
+		t.Fatalf("reload positions: %v", err)
+	}
+	if len(links) != 3 {
+		t.Fatalf("expected 3 post links, got %d", len(links))
+	}
+	got := []uuid.UUID{links[0].PostID, links[1].PostID, links[2].PostID}
+	want := []uuid.UUID{postC.ID, postA.ID, postB.ID}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected order %v, got %v", want, got)
+		}
+		if links[i].Position != i {
+			t.Fatalf("expected position %d at index %d, got %d", i, i, links[i].Position)
+		}
 	}
 }

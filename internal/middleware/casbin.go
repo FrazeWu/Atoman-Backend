@@ -78,6 +78,9 @@ func initDefaultPolicies() {
 	if ok, _ := Enforcer.AddPolicy("anonymous", "/swagger/*", "(GET|HEAD)"); ok {
 		policyAdded = true
 	}
+	if ok, _ := Enforcer.AddPolicy("anonymous", "/ws/*", "GET"); ok {
+		policyAdded = true
+	}
 
 	// User policies (can do most things, ownership enforced by handlers)
 	if ok, _ := Enforcer.AddPolicy("user", "/api/*", "(GET|POST|PUT|PATCH|DELETE)"); ok {
@@ -89,6 +92,9 @@ func initDefaultPolicies() {
 	if ok, _ := Enforcer.AddPolicy("user", "/swagger/*", "(GET|HEAD)"); ok {
 		policyAdded = true
 	}
+	if ok, _ := Enforcer.AddPolicy("user", "/ws/*", "GET"); ok {
+		policyAdded = true
+	}
 
 	// Admin policies
 	if ok, _ := Enforcer.AddPolicy("admin", "/api/*", "(GET|POST|PUT|PATCH|DELETE)"); ok {
@@ -98,6 +104,9 @@ func initDefaultPolicies() {
 		policyAdded = true
 	}
 	if ok, _ := Enforcer.AddPolicy("admin", "/swagger/*", "(GET|HEAD)"); ok {
+		policyAdded = true
+	}
+	if ok, _ := Enforcer.AddPolicy("admin", "/ws/*", "GET"); ok {
 		policyAdded = true
 	}
 

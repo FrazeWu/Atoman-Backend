@@ -55,7 +55,7 @@ func newMusicHTTPRouter(service *Service, current *authctx.CurrentUser) *gin.Eng
 	return r
 }
 
-func TestRegisterRoutesSubmitEditReturnsCreatedOpenEdit(t *testing.T) {
+func TestRegisterRoutesSubmitEditReturnsCreatedAppliedEditForMainWikiFlow(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	r := newMusicHTTPRouter(service, &user)
 
@@ -85,7 +85,7 @@ func TestRegisterRoutesSubmitEditReturnsCreatedOpenEdit(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Data.ID == uuid.Nil || resp.Data.Status != "open" || resp.Data.SubmittedBy != user.ID {
+	if resp.Data.ID == uuid.Nil || resp.Data.Status != "applied" || !resp.Data.AutoApplied || resp.Data.SubmittedBy != user.ID {
 		t.Fatalf("unexpected response edit: %#v", resp.Data)
 	}
 
@@ -93,7 +93,7 @@ func TestRegisterRoutesSubmitEditReturnsCreatedOpenEdit(t *testing.T) {
 	if err := db.First(&persisted, "id = ?", resp.Data.ID).Error; err != nil {
 		t.Fatalf("load persisted edit: %v", err)
 	}
-	if persisted.Status != "open" || persisted.Type != "create_artist" {
+	if persisted.Status != "applied" || persisted.Type != "create_artist" {
 		t.Fatalf("unexpected persisted edit: %#v", persisted)
 	}
 }

@@ -93,3 +93,31 @@ func TestCasbinMiddlewareTreatsDeniedV1AuthPostsAsForbidden(t *testing.T) {
 		t.Fatalf("expected denied v1 auth POST to be forbidden, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestCasbinMiddlewareLetsUserWebSocketReachRouteAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	var err error
+	policyFile := t.TempDir() + "/policy.csv"
+	if err := os.WriteFile(policyFile, nil, 0o600); err != nil {
+		t.Fatalf("create policy file: %v", err)
+	}
+	Enforcer, err = casbin.NewEnforcer(testCasbinModel(t), fileadapter.NewAdapter(policyFile))
+	if err != nil {
+		t.Fatalf("create enforcer: %v", err)
+	}
+	initDefaultPolicies()
+
+	r := gin.New()
+	r.Use(CasbinMiddleware())
+	r.GET("/ws/user", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ws/user?token=browser-websocket-token", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected user websocket route to pass Casbin and handle its own token, got %d: %s", w.Code, w.Body.String())
+	}
+}

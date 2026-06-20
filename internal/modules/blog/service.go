@@ -139,12 +139,17 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 		}
 	}
 
+	summary := strings.TrimSpace(req.Summary)
+	if summary == "" {
+		summary = strings.TrimSpace(req.Excerpt)
+	}
+
 	post := model.Post{
 		UserID:     user.ID,
 		ChannelID:  &channel.ID,
 		Title:      strings.TrimSpace(req.Title),
 		Content:    strings.TrimSpace(req.Content),
-		Summary:    strings.TrimSpace(req.Excerpt),
+		Summary:    summary,
 		CoverURL:   strings.TrimSpace(req.CoverURL),
 		Visibility: visibility,
 		Status:     status,
@@ -246,6 +251,80 @@ func (s *Service) recalculateRating(postID uuid.UUID, myScore *int) (RatingSumma
 	}
 
 	return summary, nil
+}
+
+func (s *Service) appendPostCollectionAtTail(postID uuid.UUID, collectionID uuid.UUID) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var link model.PostCollection
+		if err := tx.Where("post_id = ? AND collection_id = ?", postID, collectionID).First(&link).Error; err != nil {
+			return err
+		}
+
+		var maxPosition int
+		if err := tx.Model(&model.PostCollection{}).
+			Where("collection_id = ?", collectionID).
+			Select("COALESCE(MAX(position), -1)").
+			Scan(&maxPosition).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&model.PostCollection{}).
+			Where("post_id = ? AND collection_id = ?", postID, collectionID).
+			Update("position", maxPosition+1).Error
+	})
+}
+
+func (s *Service) reorderCollectionPosts(collection model.Collection, orderedPostIDs []uuid.UUID, userID uuid.UUID) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var links []model.PostCollection
+		if err := tx.Where("collection_id = ?", collection.ID).Find(&links).Error; err != nil {
+			return err
+		}
+		if len(links) != len(orderedPostIDs) {
+			return apperr.BadRequest("validation.invalid_request", "post_ids must include every post in the collection")
+		}
+
+		linkSet := make(map[uuid.UUID]model.PostCollection, len(links))
+		for _, link := range links {
+			linkSet[link.PostID] = link
+		}
+
+		for _, postID := range orderedPostIDs {
+			link, exists := linkSet[postID]
+			if !exists {
+				return apperr.BadRequest("validation.invalid_request", "post_ids contains a post outside this collection")
+			}
+			if link.CollectionID != collection.ID {
+				return apperr.BadRequest("validation.invalid_request", "post_ids contains a post outside this collection")
+			}
+		}
+
+		var posts []model.Post
+		if err := tx.Where("id IN ?", orderedPostIDs).Find(&posts).Error; err != nil {
+			return err
+		}
+		if len(posts) != len(orderedPostIDs) {
+			return apperr.BadRequest("validation.invalid_request", "post_ids contains an unknown post")
+		}
+		for _, post := range posts {
+			if post.UserID != userID {
+				return apperr.Forbidden("blog.post_forbidden", "You don't have permission to reorder this collection")
+			}
+			if post.ChannelID == nil || *post.ChannelID != collection.ChannelID {
+				return apperr.BadRequest("validation.invalid_request", "post_ids contains a post outside this collection channel")
+			}
+		}
+
+		for position, postID := range orderedPostIDs {
+			if err := tx.Model(&model.PostCollection{}).
+				Where("collection_id = ? AND post_id = ?", collection.ID, postID).
+				Update("position", position).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }
 
 func ensureDefaultCollectionName() string {

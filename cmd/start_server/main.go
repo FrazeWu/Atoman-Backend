@@ -395,6 +395,9 @@ func main() {
 		if err := migrations.RunBlogGuestCommentsMigration(db); err != nil {
 			fatalLogger.Fatal("Failed to run blog guest comments migration: ", err)
 		}
+		if err := migrations.RunBlogCollectionPostOrderMigration(db); err != nil {
+			fatalLogger.Fatal("Failed to run blog collection post order migration: ", err)
+		}
 		if err := db.AutoMigrate(
 			&model.User{},
 			&model.UserSettings{},
@@ -407,6 +410,7 @@ func main() {
 			&model.Channel{},
 			&model.Collection{},
 			&model.Post{},
+			&model.PostCollection{},
 			&model.BlogPostRating{},
 			&model.BlogDraft{},
 			&model.MediaAsset{},

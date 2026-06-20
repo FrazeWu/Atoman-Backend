@@ -44,6 +44,10 @@ type collectionActionInput struct {
 	CollectionID uuid.UUID `json:"collection_id" binding:"required"`
 }
 
+type reorderCollectionPostsInput struct {
+	PostIDs []string `json:"post_ids"`
+}
+
 type blogDraftInput struct {
 	ContextKey    string   `json:"context_key" binding:"required"`
 	SourcePostID  string   `json:"source_post_id"`
@@ -88,6 +92,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/posts/:id/unpin", h.unpinPost)
 	group.POST("/posts/:id/collections", h.addPostToCollection)
 	group.DELETE("/posts/:id/collections/:collection_id", h.removePostFromCollection)
+	group.PUT("/collections/:id/posts/order", h.reorderCollectionPosts)
 	group.GET("/drafts", h.getBlogDraft)
 	group.PUT("/drafts", h.putBlogDraft)
 	group.DELETE("/drafts", h.deleteBlogDraft)
@@ -119,9 +124,10 @@ func (h *Handler) listPosts(c *gin.Context) {
 	}
 	if collectionID := c.Query("collection_id"); collectionID != "" {
 		query = query.Joins("JOIN post_collections pc ON pc.post_id = posts.id").Where("pc.collection_id = ?", collectionID)
+		query = query.Order("pc.position ASC")
+	} else {
+		query = query.Order("pinned DESC, created_at DESC")
 	}
-
-	query = query.Order("pinned DESC, created_at DESC")
 	if limit > 0 {
 		query = query.Limit(limit)
 	}
@@ -690,6 +696,10 @@ func (h *Handler) addPostToCollection(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	if err := h.service.appendPostCollectionAtTail(post.ID, collection.ID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
 
@@ -758,6 +768,67 @@ func (h *Handler) removePostFromCollection(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
+}
+
+func (h *Handler) reorderCollectionPosts(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+
+	collectionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "collection_id must be a valid UUID"))
+		return
+	}
+
+	var req reorderCollectionPostsInput
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if len(req.PostIDs) == 0 {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "post_ids is required"))
+		return
+	}
+
+	var collection model.Collection
+	if err := h.service.db.Preload("Channel").First(&collection, "id = ?", collectionID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(c, apperr.NotFound("blog.collection_not_found", "Collection not found"))
+			return
+		}
+		httpx.Error(c, err)
+		return
+	}
+	if collection.Channel == nil || collection.Channel.UserID == nil || *collection.Channel.UserID != user.ID {
+		httpx.Error(c, apperr.Forbidden("blog.collection_forbidden", "You don't have permission to reorder this collection"))
+		return
+	}
+
+	postIDs := make([]uuid.UUID, 0, len(req.PostIDs))
+	seen := make(map[uuid.UUID]struct{}, len(req.PostIDs))
+	for _, raw := range req.PostIDs {
+		postID, err := uuid.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "post_ids must contain valid UUIDs"))
+			return
+		}
+		if _, exists := seen[postID]; exists {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "post_ids must be unique"))
+			return
+		}
+		seen[postID] = struct{}{}
+		postIDs = append(postIDs, postID)
+	}
+
+	if err := h.service.reorderCollectionPosts(collection, postIDs, user.ID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
 

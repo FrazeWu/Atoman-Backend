@@ -57,6 +57,10 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("feed source management mvp migration: %w", err)
 	}
 
+	if err := migrations.RunBlogCollectionPostOrderMigration(db); err != nil {
+		return fmt.Errorf("blog collection post order migration: %w", err)
+	}
+
 	if err := migrateSchema(db); err != nil {
 		return err
 	}
@@ -70,6 +74,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.Channel{},
 		&model.Collection{},
 		&model.Post{},
+		&model.PostCollection{},
 		&model.Comment{},
 		&model.AuditLog{},
 		&model.MediaAsset{},
