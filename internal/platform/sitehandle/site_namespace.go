@@ -22,7 +22,7 @@ var handlePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,28}[a-z0-9]$`)
 
 // New public website features should reserve their handle here before launch.
 var reservedHandles = map[string]struct{}{
-	"feed": {}, "kanbo": {}, "music": {}, "blog": {}, "forum": {},
+	"feed": {}, "media": {}, "kanbo": {}, "music": {}, "blog": {}, "forum": {},
 	"debate": {}, "timeline": {}, "podcast": {}, "video": {},
 	"www": {}, "api": {}, "admin": {}, "root": {}, "portal": {},
 	"auth": {}, "login": {}, "logout": {}, "register": {}, "signup": {}, "signin": {},
@@ -31,7 +31,7 @@ var reservedHandles = map[string]struct{}{
 	"post": {}, "posts": {}, "article": {}, "articles": {}, "collection": {}, "collections": {},
 	"topic": {}, "topics": {}, "comment": {}, "comments": {}, "bookmark": {}, "bookmarks": {},
 	"notification": {}, "notifications": {}, "inbox": {}, "dm": {}, "message": {}, "messages": {},
-	"search": {}, "explore": {}, "discover": {}, "upload": {}, "uploads": {}, "media": {},
+	"search": {}, "explore": {}, "discover": {}, "upload": {}, "uploads": {},
 	"song": {}, "songs": {}, "album": {}, "albums": {}, "artist": {}, "artists": {},
 	"playlist": {}, "playlists": {}, "watch": {}, "episode": {}, "episodes": {},
 	"subscription": {}, "subscriptions": {}, "rss": {}, "atom": {}, "feed-source": {},

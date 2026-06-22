@@ -125,7 +125,7 @@ func DefaultSiteAccessMatrix() SiteAccessMatrix {
 		Version: SiteAccessPayloadVersion,
 		Modules: map[string]SiteAccessModule{
 			"feed":     defaultAccessModule("subscription.manage"),
-			"kanbo":    defaultAccessModule(),
+			"media":    defaultAccessModule(),
 			"music":    defaultAccessModule("music.submit", "music.review"),
 			"blog":     defaultAccessModule("post.create", "channel.manage"),
 			"forum":    defaultAccessModule("topic.create", "category.request"),

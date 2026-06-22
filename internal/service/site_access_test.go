@@ -2,12 +2,12 @@ package service
 
 import "testing"
 
-func TestSaveInputAcceptsKanboModule(t *testing.T) {
+func TestSaveInputAcceptsMediaModule(t *testing.T) {
 	input := DefaultSiteAccessMatrix().ToInput()
 	enabled := true
-	input.Modules["kanbo"] = SiteAccessModuleInput{Enabled: &enabled}
+	input.Modules["media"] = SiteAccessModuleInput{Enabled: &enabled}
 
 	if err := validateSiteAccessInput(input); err != nil {
-		t.Fatalf("validate site access input with kanbo: %v", err)
+		t.Fatalf("validate site access input with media: %v", err)
 	}
 }
