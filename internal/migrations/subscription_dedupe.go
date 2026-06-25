@@ -10,6 +10,10 @@ import (
 // (user_id, feed_source_id) pair before the unique index is created.
 // It keeps the earliest created row in each group.
 func DeduplicateSubscriptions(db *gorm.DB) error {
+	if !db.Migrator().HasTable("subscriptions") {
+		return nil
+	}
+
 	switch db.Dialector.Name() {
 	case "postgres":
 		return db.Exec(`

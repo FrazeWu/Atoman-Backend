@@ -45,6 +45,10 @@ func main() {
 }
 
 func runMigrations(db *gorm.DB) error {
+	if err := preparePostgresExtensions(db); err != nil {
+		return err
+	}
+
 	if err := migrations.DeduplicateSubscriptions(db); err != nil {
 		return fmt.Errorf("deduplicate subscriptions: %w", err)
 	}
@@ -65,6 +69,16 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	return nil
+}
+
+func preparePostgresExtensions(db *gorm.DB) error {
+	if db.Dialector.Name() != "postgres" {
+		return nil
+	}
+	if err := db.Exec("CREATE EXTENSION IF NOT EXISTS ltree").Error; err != nil {
+		return fmt.Errorf("enable ltree extension: %w", err)
+	}
 	return nil
 }
 
