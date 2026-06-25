@@ -20,9 +20,8 @@ var (
 
 var handlePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,28}[a-z0-9]$`)
 
-// New public website features should reserve their handle here before launch.
 var reservedHandles = map[string]struct{}{
-	"feed": {}, "media": {}, "kanbo": {}, "music": {}, "blog": {}, "forum": {},
+	"feed": {}, "media": {}, "music": {}, "blog": {}, "forum": {},
 	"debate": {}, "timeline": {}, "podcast": {}, "video": {},
 	"www": {}, "api": {}, "admin": {}, "root": {}, "portal": {},
 	"auth": {}, "login": {}, "logout": {}, "register": {}, "signup": {}, "signin": {},
