@@ -522,13 +522,9 @@ ON CONFLICT (key) DO NOTHING`)
 		var err error
 		s3Client, err = storage.InitS3Client()
 		if err != nil {
-			log.Println("WARN: Failed to create S3 client:", err)
-			log.Println("S3 storage disabled, falling back to local storage")
-			s3Client = nil
+			fatalLogger.Fatal("Failed to create S3 client: ", err)
 		} else if err := storage.ValidateS3Connection(s3Client); err != nil {
-			log.Println("WARN: Failed to validate S3 connection:", err)
-			log.Println("S3 storage disabled, falling back to local storage")
-			s3Client = nil
+			fatalLogger.Fatal("Failed to validate S3 connection: ", err)
 		} else {
 			log.Println("S3 storage initialized")
 		}
@@ -598,10 +594,11 @@ ON CONFLICT (key) DO NOTHING`)
 	r.Use(middleware.OptionalAuthMiddleware())
 	r.Use(middleware.CasbinMiddleware())
 
-	// Serve static files from uploads directory
-	r.Static("/uploads", "./uploads")
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
-	log.Println("Static files served from ./uploads directory")
+	if os.Getenv("STORAGE_TYPE") == "local" {
+		r.Static("/uploads", "./uploads")
+		log.Println("Static files served from ./uploads directory")
+	}
 
 	userHub := collab.NewUserHub()
 	collabHub := collab.NewHub()

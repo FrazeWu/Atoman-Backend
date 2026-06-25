@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.prod.example
 .gocache/
 /bin/
 /dist/
@@ -15,3 +16,4 @@ nvim.log
 .gstack/
 nginx/ssl/*
 !nginx/ssl/README.md
+local-scripts/
