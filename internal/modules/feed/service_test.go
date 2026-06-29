@@ -474,6 +474,57 @@ func TestListExploreSourcesExcludesHiddenSources(t *testing.T) {
 	}
 }
 
+func TestListExploreSourcesIncludesRecentItemPreviews(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+
+	publishedAt := time.Now().UTC()
+	for i, title := range []string{"Fourth newest", "Third newest", "Second newest", "Newest"} {
+		item := model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         fmt.Sprintf("preview-guid-%d", i),
+			Title:        title,
+			Link:         fmt.Sprintf("https://example.com/previews/%d", i),
+			PublishedAt:  publishedAt.Add(time.Duration(i) * time.Minute),
+			FetchedAt:    publishedAt.Add(time.Duration(i) * time.Minute),
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create preview item %s: %v", title, err)
+		}
+	}
+
+	rows, err := service.repo.ListExploreSources(20, 0)
+	if err != nil {
+		t.Fatalf("list explore sources: %v", err)
+	}
+
+	var target *ExploreSourceRow
+	for i := range rows {
+		if rows[i].ID == source.ID {
+			target = &rows[i]
+			break
+		}
+	}
+	if target == nil {
+		t.Fatalf("expected source %s in explore rows, got %#v", source.ID, rows)
+	}
+
+	if len(target.RecentItems) != 3 {
+		t.Fatalf("expected 3 recent item previews, got %#v", target.RecentItems)
+	}
+	gotTitles := []string{target.RecentItems[0].Title, target.RecentItems[1].Title, target.RecentItems[2].Title}
+	wantTitles := []string{"Newest", "Second newest", "Third newest"}
+	for i := range wantTitles {
+		if gotTitles[i] != wantTitles[i] {
+			t.Fatalf("expected preview titles %#v, got %#v", wantTitles, gotTitles)
+		}
+	}
+}
+
 func TestListExploreSourcesOrdersBySubscriptionCountThenFreshness(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 

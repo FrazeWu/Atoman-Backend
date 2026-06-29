@@ -77,6 +77,10 @@ func TestGetExploreSourcesHandlerAllowsAnonymousPublicRead(t *testing.T) {
 			ID                string `json:"id"`
 			Title             string `json:"title"`
 			SubscriptionCount int64  `json:"subscription_count"`
+			RecentItems       []struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"recent_items"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
@@ -84,6 +88,12 @@ func TestGetExploreSourcesHandlerAllowsAnonymousPublicRead(t *testing.T) {
 	}
 	if len(payload.Data) == 0 {
 		t.Fatalf("expected source explore items, got body %s", rr.Body.String())
+	}
+	if len(payload.Data[0].RecentItems) == 0 {
+		t.Fatalf("expected source explore item previews, got body %s", rr.Body.String())
+	}
+	if payload.Data[0].RecentItems[0].Title == "" {
+		t.Fatalf("expected source explore preview title, got body %s", rr.Body.String())
 	}
 }
 

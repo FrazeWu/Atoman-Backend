@@ -17,12 +17,19 @@ type Repo struct{ db *gorm.DB }
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
 type ExploreSourceRow struct {
-	ID                uuid.UUID  `json:"id"`
-	Title             string     `json:"title"`
-	RSSURL            string     `json:"rss_url"`
-	SubscriptionCount int64      `json:"subscription_count"`
-	RecentItemCount   int64      `json:"recent_item_count"`
-	LastPublishedAt   *time.Time `json:"last_published_at"`
+	ID                uuid.UUID                 `json:"id"`
+	Title             string                    `json:"title"`
+	RSSURL            string                    `json:"rss_url"`
+	SubscriptionCount int64                     `json:"subscription_count"`
+	RecentItemCount   int64                     `json:"recent_item_count"`
+	LastPublishedAt   *time.Time                `json:"last_published_at"`
+	RecentItems       []ExploreSourceRecentItem `json:"recent_items"`
+}
+
+type ExploreSourceRecentItem struct {
+	ID          uuid.UUID `json:"id"`
+	Title       string    `json:"title"`
+	PublishedAt time.Time `json:"published_at"`
 }
 
 func (r *Repo) ListSubscriptionsWithSources(userID uuid.UUID, query FeedQuery) ([]model.Subscription, error) {
@@ -276,6 +283,7 @@ func (r *Repo) ListExploreSources(limit int, offset int) ([]ExploreSourceRow, er
 	}
 
 	rows := make([]ExploreSourceRow, 0, len(rawRows))
+	sourceIDs := make([]uuid.UUID, 0, len(rawRows))
 	for _, raw := range rawRows {
 		row := ExploreSourceRow{
 			ID:                raw.ID,
@@ -292,9 +300,50 @@ func (r *Repo) ListExploreSources(limit int, offset int) ([]ExploreSourceRow, er
 			row.LastPublishedAt = &parsed
 		}
 		rows = append(rows, row)
+		sourceIDs = append(sourceIDs, raw.ID)
+	}
+
+	if err := r.attachExploreSourceRecentItems(rows, sourceIDs); err != nil {
+		return nil, err
 	}
 
 	return rows, nil
+}
+
+func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs []uuid.UUID) error {
+	if len(rows) == 0 {
+		return nil
+	}
+
+	var items []model.FeedItem
+	if err := r.db.
+		Where("feed_source_id IN ?", sourceIDs).
+		Order("published_at DESC").
+		Order("created_at DESC").
+		Find(&items).Error; err != nil {
+		return err
+	}
+
+	rowIndexBySourceID := make(map[uuid.UUID]int, len(rows))
+	for i, row := range rows {
+		rowIndexBySourceID[row.ID] = i
+	}
+
+	countBySourceID := make(map[uuid.UUID]int, len(rows))
+	for _, item := range items {
+		rowIndex, ok := rowIndexBySourceID[item.FeedSourceID]
+		if !ok || countBySourceID[item.FeedSourceID] >= 3 {
+			continue
+		}
+		rows[rowIndex].RecentItems = append(rows[rowIndex].RecentItems, ExploreSourceRecentItem{
+			ID:          item.ID,
+			Title:       item.Title,
+			PublishedAt: item.PublishedAt,
+		})
+		countBySourceID[item.FeedSourceID]++
+	}
+
+	return nil
 }
 
 func (r *Repo) CountExploreSources() (int64, error) {
