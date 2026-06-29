@@ -20,6 +20,7 @@ type ExploreSourceRow struct {
 	ID                uuid.UUID                 `json:"id"`
 	Title             string                    `json:"title"`
 	RSSURL            string                    `json:"rss_url"`
+	Category          string                    `json:"category"`
 	SubscriptionCount int64                     `json:"subscription_count"`
 	RecentItemCount   int64                     `json:"recent_item_count"`
 	LastPublishedAt   *time.Time                `json:"last_published_at"`
@@ -27,9 +28,10 @@ type ExploreSourceRow struct {
 }
 
 type ExploreSourceRecentItem struct {
-	ID          uuid.UUID `json:"id"`
-	Title       string    `json:"title"`
-	PublishedAt time.Time `json:"published_at"`
+	ID            uuid.UUID `json:"id"`
+	Title         string    `json:"title"`
+	PublishedAt   time.Time `json:"published_at"`
+	EnclosureType string    `json:"enclosure_type"`
 }
 
 func (r *Repo) ListSubscriptionsWithSources(userID uuid.UUID, query FeedQuery) ([]model.Subscription, error) {
@@ -246,22 +248,24 @@ func (r *Repo) CountExploreFeedItems() (int64, error) {
 	return count, err
 }
 
-func (r *Repo) ListExploreSources(limit int, offset int) ([]ExploreSourceRow, error) {
+func (r *Repo) ListExploreSources(limit int, offset int, category string) ([]ExploreSourceRow, error) {
 	type exploreSourceRowRaw struct {
 		ID                uuid.UUID
 		Title             string
 		RSSURL            string
+		Category          string
 		SubscriptionCount int64
 		RecentItemCount   int64
 		LastPublishedAt   sql.NullString
 	}
 
 	var rawRows []exploreSourceRowRaw
-	err := r.db.Table("feed_sources").
+	db := r.db.Table("feed_sources").
 		Select(`
 			feed_sources.id,
 			feed_sources.title,
 			feed_sources.rss_url,
+			feed_sources.category,
 			COUNT(DISTINCT subscriptions.id) AS subscription_count,
 			COUNT(DISTINCT feed_items.id) AS recent_item_count,
 			MAX(feed_items.published_at) AS last_published_at
@@ -269,7 +273,11 @@ func (r *Repo) ListExploreSources(limit int, offset int) ([]ExploreSourceRow, er
 		Joins("LEFT JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id").
 		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
 		Where("feed_sources.source_type = ?", "external_rss").
-		Where("feed_sources.hidden = ?", false).
+		Where("feed_sources.hidden = ?", false)
+	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
+		db = applyExploreSourceCategoryFilter(db, normalizedCategory)
+	}
+	err := db.
 		Group("feed_sources.id").
 		Having("COUNT(DISTINCT feed_items.id) > 0").
 		Order("subscription_count DESC").
@@ -289,6 +297,7 @@ func (r *Repo) ListExploreSources(limit int, offset int) ([]ExploreSourceRow, er
 			ID:                raw.ID,
 			Title:             raw.Title,
 			RSSURL:            raw.RSSURL,
+			Category:          normalizeFeedSourceCategory(raw.Category),
 			SubscriptionCount: raw.SubscriptionCount,
 			RecentItemCount:   raw.RecentItemCount,
 		}
@@ -336,25 +345,122 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 			continue
 		}
 		rows[rowIndex].RecentItems = append(rows[rowIndex].RecentItems, ExploreSourceRecentItem{
-			ID:          item.ID,
-			Title:       item.Title,
-			PublishedAt: item.PublishedAt,
+			ID:            item.ID,
+			Title:         item.Title,
+			PublishedAt:   item.PublishedAt,
+			EnclosureType: item.EnclosureType,
 		})
 		countBySourceID[item.FeedSourceID]++
+	}
+
+	for i := range rows {
+		if rows[i].Category == "" {
+			rows[i].Category = inferFeedSourceCategory(rows[i])
+		}
 	}
 
 	return nil
 }
 
-func (r *Repo) CountExploreSources() (int64, error) {
+func (r *Repo) CountExploreSources(category string) (int64, error) {
 	var count int64
-	err := r.db.Table("feed_sources").
+	db := r.db.Table("feed_sources").
 		Joins("JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
 		Where("feed_sources.source_type = ?", "external_rss").
-		Where("feed_sources.hidden = ?", false).
+		Where("feed_sources.hidden = ?", false)
+	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
+		db = applyExploreSourceCategoryFilter(db, normalizedCategory)
+	}
+	err := db.
 		Distinct("feed_sources.id").
 		Count(&count).Error
 	return count, err
+}
+
+func normalizeFeedSourceCategory(category string) string {
+	switch strings.ToLower(strings.TrimSpace(category)) {
+	case "blog", "news", "social", "video", "forum", "podcast":
+		return strings.ToLower(strings.TrimSpace(category))
+	default:
+		return ""
+	}
+}
+
+func defaultFeedSourceCategory(category string) string {
+	if normalized := normalizeFeedSourceCategory(category); normalized != "" {
+		return normalized
+	}
+	return "blog"
+}
+
+func applyExploreSourceCategoryFilter(db *gorm.DB, category string) *gorm.DB {
+	if category == "blog" {
+		return db.Where(`
+			COALESCE(NULLIF(feed_sources.category, ''), '') = 'blog'
+			OR (
+				COALESCE(NULLIF(feed_sources.category, ''), '') = ''
+				AND NOT (` + exploreSourceInferredCategorySQL("news") + `)
+				AND NOT (` + exploreSourceInferredCategorySQL("social") + `)
+				AND NOT (` + exploreSourceInferredCategorySQL("video") + `)
+				AND NOT (` + exploreSourceInferredCategorySQL("forum") + `)
+				AND NOT (` + exploreSourceInferredCategorySQL("podcast") + `)
+			)
+		`)
+	}
+	return db.Where(`
+		COALESCE(NULLIF(feed_sources.category, ''), '') = ?
+		OR (
+			COALESCE(NULLIF(feed_sources.category, ''), '') = ''
+			AND (`+exploreSourceInferredCategorySQL(category)+`)
+		)
+	`, category)
+}
+
+func exploreSourceInferredCategorySQL(category string) string {
+	textValue := "LOWER(COALESCE(feed_sources.title, '') || ' ' || COALESCE(feed_sources.rss_url, ''))"
+	switch category {
+	case "news":
+		return textValue + " LIKE '%news%' OR " + textValue + " LIKE '%新闻%' OR " + textValue + " LIKE '%36kr%' OR " + textValue + " LIKE '%36氪%' OR " + textValue + " LIKE '%ftchinese%' OR " + textValue + " LIKE '%nytimes%' OR " + textValue + " LIKE '%media%'"
+	case "social":
+		return textValue + " LIKE '%x.com%' OR " + textValue + " LIKE '%twitter%' OR " + textValue + " LIKE '%zhihu%' OR " + textValue + " LIKE '%jike%' OR " + textValue + " LIKE '%reddit%' OR " + textValue + " LIKE '%社交%'"
+	case "video":
+		return textValue + " LIKE '%youtube%' OR " + textValue + " LIKE '%bilibili%' OR " + textValue + " LIKE '%video%' OR " + textValue + " LIKE '%视频%' OR EXISTS (SELECT 1 FROM feed_items category_items WHERE category_items.feed_source_id = feed_sources.id AND LOWER(category_items.enclosure_type) LIKE 'video/%')"
+	case "forum":
+		return textValue + " LIKE '%forum%' OR " + textValue + " LIKE '%bbs%' OR " + textValue + " LIKE '%discourse%' OR " + textValue + " LIKE '%v2ex%' OR " + textValue + " LIKE '%nodeseek%' OR " + textValue + " LIKE '%linux.do%' OR " + textValue + " LIKE '%论坛%'"
+	case "podcast":
+		return textValue + " LIKE '%xiaoyuzhou%' OR " + textValue + " LIKE '%podcast%' OR " + textValue + " LIKE '%播客%' OR EXISTS (SELECT 1 FROM feed_items category_items WHERE category_items.feed_source_id = feed_sources.id AND LOWER(category_items.enclosure_type) LIKE 'audio/%')"
+	default:
+		return "FALSE"
+	}
+}
+
+func inferFeedSourceCategory(row ExploreSourceRow) string {
+	value := strings.ToLower(row.Title + " " + row.RSSURL)
+	for _, item := range row.RecentItems {
+		enclosureType := strings.ToLower(item.EnclosureType)
+		if strings.HasPrefix(enclosureType, "audio/") {
+			return "podcast"
+		}
+		if strings.HasPrefix(enclosureType, "video/") {
+			return "video"
+		}
+	}
+	if strings.Contains(value, "xiaoyuzhou") || strings.Contains(value, "podcast") || strings.Contains(value, "播客") {
+		return "podcast"
+	}
+	if strings.Contains(value, "youtube") || strings.Contains(value, "bilibili") || strings.Contains(value, "video") || strings.Contains(value, "视频") {
+		return "video"
+	}
+	if strings.Contains(value, "forum") || strings.Contains(value, "bbs") || strings.Contains(value, "discourse") || strings.Contains(value, "v2ex") || strings.Contains(value, "nodeseek") || strings.Contains(value, "linux.do") || strings.Contains(value, "论坛") {
+		return "forum"
+	}
+	if strings.Contains(value, "x.com") || strings.Contains(value, "twitter") || strings.Contains(value, "zhihu") || strings.Contains(value, "jike") || strings.Contains(value, "reddit") || strings.Contains(value, "社交") {
+		return "social"
+	}
+	if strings.Contains(value, "news") || strings.Contains(value, "新闻") || strings.Contains(value, "36kr") || strings.Contains(value, "36氪") || strings.Contains(value, "ftchinese") || strings.Contains(value, "nytimes") || strings.Contains(value, "media") {
+		return "news"
+	}
+	return "blog"
 }
 
 func parseExploreSourceTimestamp(raw string) (time.Time, error) {

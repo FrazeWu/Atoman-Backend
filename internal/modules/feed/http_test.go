@@ -77,6 +77,7 @@ func TestGetExploreSourcesHandlerAllowsAnonymousPublicRead(t *testing.T) {
 			ID                string `json:"id"`
 			Title             string `json:"title"`
 			SubscriptionCount int64  `json:"subscription_count"`
+			Category          string `json:"category"`
 			RecentItems       []struct {
 				ID    string `json:"id"`
 				Title string `json:"title"`
@@ -94,6 +95,67 @@ func TestGetExploreSourcesHandlerAllowsAnonymousPublicRead(t *testing.T) {
 	}
 	if payload.Data[0].RecentItems[0].Title == "" {
 		t.Fatalf("expected source explore preview title, got body %s", rr.Body.String())
+	}
+	if payload.Data[0].Category == "" {
+		t.Fatalf("expected source explore category, got body %s", rr.Body.String())
+	}
+}
+
+func TestGetExploreSourcesHandlerFiltersByCategory(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	newsSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://category-http-news.example.com/feed.xml",
+		Hash:         "category-http-news-source-hash",
+		Title:        "HTTP Category News",
+		Category:     "news",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&newsSource).Error; err != nil {
+		t.Fatalf("create news source: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&model.FeedItem{
+		FeedSourceID: newsSource.ID,
+		GUID:         "category-http-news-item",
+		Title:        "HTTP Category News Item",
+		Link:         "https://category-http-news.example.com/item",
+		PublishedAt:  now,
+		FetchedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("create news item: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/explore/sources?page=1&limit=20&category=news", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected category source explore to return 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID       string `json:"id"`
+			Category string `json:"category"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected category source explore items, got body %s", rr.Body.String())
+	}
+	for _, row := range payload.Data {
+		if row.Category != "news" {
+			t.Fatalf("expected only news category rows, got body %s", rr.Body.String())
+		}
 	}
 }
 

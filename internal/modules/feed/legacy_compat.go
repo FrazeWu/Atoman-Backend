@@ -233,14 +233,15 @@ func GetExploreSources(db *gorm.DB) gin.HandlerFunc {
 		if limit > 100 {
 			limit = 100
 		}
+		category := c.Query("category")
 		offset := (page - 1) * limit
 
-		rows, err := repo.ListExploreSources(limit, offset)
+		rows, err := repo.ListExploreSources(limit, offset, category)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch explore sources"})
 			return
 		}
-		total, err := repo.CountExploreSources()
+		total, err := repo.CountExploreSources(category)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count explore sources"})
 			return
@@ -465,6 +466,7 @@ func findOrCreateFeedSource(db *gorm.DB, targetType string, targetID *uuid.UUID,
 		SourceType:      targetType,
 		SourceID:        targetID,
 		Provider:        provider,
+		Category:        "blog",
 		RssURL:          trimmedURL,
 		CanonicalURL:    canonicalURL,
 		SiteURL:         "",

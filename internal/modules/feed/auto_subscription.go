@@ -26,6 +26,7 @@ type AutoSubscriptionAddRequest struct {
 	CandidateFeedURL string     `json:"candidate_feed_url"`
 	Title            string     `json:"title"`
 	GroupID          *uuid.UUID `json:"group_id"`
+	Category         string     `json:"category"`
 }
 
 type AutoSubscriptionCandidate struct {
@@ -45,6 +46,7 @@ type AutoSubscriptionSource struct {
 	ID           *uuid.UUID `json:"id,omitempty"`
 	Provider     string     `json:"provider"`
 	SourceType   string     `json:"source_type"`
+	Category     string     `json:"category"`
 	Title        string     `json:"title"`
 	RssURL       string     `json:"rss_url"`
 	SiteURL      string     `json:"site_url"`
@@ -66,6 +68,7 @@ type autoSubscriptionTarget struct {
 	RssURL     string
 	SiteURL    string
 	Canonical  string
+	Category   string
 }
 
 type autoSubscriptionHTTPError struct {
@@ -314,6 +317,7 @@ func sourceDTOFromTarget(target autoSubscriptionTarget) *AutoSubscriptionSource 
 	return &AutoSubscriptionSource{
 		Provider:     target.Provider,
 		SourceType:   target.SourceType,
+		Category:     defaultFeedSourceCategory(target.Category),
 		Title:        target.Title,
 		RssURL:       target.RssURL,
 		SiteURL:      target.SiteURL,
@@ -326,6 +330,7 @@ func sourceDTOFromModel(source model.FeedSource) *AutoSubscriptionSource {
 		ID:           &source.ID,
 		Provider:     source.Provider,
 		SourceType:   source.SourceType,
+		Category:     defaultFeedSourceCategory(source.Category),
 		Title:        source.Title,
 		RssURL:       source.RssURL,
 		SiteURL:      source.SiteURL,
@@ -558,6 +563,7 @@ func autoSubscriptionTargetForAdd(db *gorm.DB, userID uuid.UUID, input AutoSubsc
 		return autoSubscriptionTarget{
 			Provider:   "rss",
 			SourceType: "external_rss",
+			Category:   defaultFeedSourceCategory(input.Category),
 			Title:      firstNonBlank(input.Title, rssURL),
 			RssURL:     rssURL,
 			SiteURL:    validAutoSubscriptionSiteURL(input.Input),
@@ -572,6 +578,7 @@ func autoSubscriptionTargetForAdd(db *gorm.DB, userID uuid.UUID, input AutoSubsc
 
 	if target, ok := githubRepositoryTarget(u); ok {
 		target.Title = firstNonBlank(input.Title, target.Title)
+		target.Category = defaultFeedSourceCategory(input.Category)
 		return target, nil
 	}
 	if malformedGithubRepositoryPath(u) {
@@ -580,12 +587,16 @@ func autoSubscriptionTargetForAdd(db *gorm.DB, userID uuid.UUID, input AutoSubsc
 
 	canonicalInput := normalizeCanonicalFeedURL(u.String())
 	if directURL, err := url.Parse(canonicalInput); err == nil && isLikelyDirectFeedURL(directURL) {
-		return autoSubscriptionTargetFromDirectFeedURL(canonicalInput, firstNonBlank(input.Title, canonicalInput)), nil
+		target := autoSubscriptionTargetFromDirectFeedURL(canonicalInput, firstNonBlank(input.Title, canonicalInput))
+		target.Category = defaultFeedSourceCategory(input.Category)
+		return target, nil
 	}
 	if ok, err := probeAutoSubscriptionDirectFeedURL(u); err != nil {
 		return autoSubscriptionTarget{}, err
 	} else if ok {
-		return autoSubscriptionTargetFromDirectFeedURL(canonicalInput, firstNonBlank(input.Title, canonicalInput)), nil
+		target := autoSubscriptionTargetFromDirectFeedURL(canonicalInput, firstNonBlank(input.Title, canonicalInput))
+		target.Category = defaultFeedSourceCategory(input.Category)
+		return target, nil
 	}
 
 	response, _, err := resolveDiscoveredSubscriptionInput(db, userID, u)
@@ -609,7 +620,9 @@ func autoSubscriptionTargetForAdd(db *gorm.DB, userID uuid.UUID, input AutoSubsc
 
 	candidate := response.Candidates[0]
 	if candidate.Source != nil {
-		return autoSubscriptionTargetFromSource(*candidate.Source, input.Title), nil
+		target := autoSubscriptionTargetFromSource(*candidate.Source, input.Title)
+		target.Category = defaultFeedSourceCategory(input.Category)
+		return target, nil
 	}
 
 	feedURL := normalizeCanonicalFeedURL(candidate.FeedURL)
@@ -619,6 +632,7 @@ func autoSubscriptionTargetForAdd(db *gorm.DB, userID uuid.UUID, input AutoSubsc
 	return autoSubscriptionTarget{
 		Provider:   "rss",
 		SourceType: "external_rss",
+		Category:   defaultFeedSourceCategory(input.Category),
 		Title:      firstNonBlank(input.Title, candidate.Title, feedURL),
 		RssURL:     feedURL,
 		SiteURL:    candidate.SiteURL,
@@ -692,6 +706,7 @@ func findOrCreateAutoAddFeedSource(db *gorm.DB, target autoSubscriptionTarget, f
 		RssURL:          rssURL,
 		CanonicalURL:    canonicalURL,
 		SiteURL:         firstNonBlank(target.SiteURL),
+		Category:        defaultFeedSourceCategory(target.Category),
 		Hash:            sourceHash,
 		Title:           firstNonBlank(fallbackTitle, target.Title, rssURL),
 		HealthStatus:    "healthy",
@@ -776,6 +791,10 @@ func updateAutoAddFeedSource(db *gorm.DB, source *model.FeedSource, target autoS
 	if strings.TrimSpace(source.SiteURL) == "" && strings.TrimSpace(target.SiteURL) != "" {
 		updates["site_url"] = target.SiteURL
 		source.SiteURL = target.SiteURL
+	}
+	if defaultFeedSourceCategory(source.Category) == "blog" && defaultFeedSourceCategory(target.Category) != "blog" {
+		updates["category"] = defaultFeedSourceCategory(target.Category)
+		source.Category = defaultFeedSourceCategory(target.Category)
 	}
 	if strings.TrimSpace(source.Title) == "" {
 		title := firstNonBlank(fallbackTitle, target.Title, rssURL)
@@ -874,6 +893,7 @@ func autoSubscriptionTargetFromSource(source AutoSubscriptionSource, title strin
 	return autoSubscriptionTarget{
 		Provider:   firstNonBlank(source.Provider, "rss"),
 		SourceType: firstNonBlank(source.SourceType, "external_rss"),
+		Category:   defaultFeedSourceCategory(source.Category),
 		Title:      firstNonBlank(title, source.Title, rssURL),
 		RssURL:     rssURL,
 		SiteURL:    source.SiteURL,

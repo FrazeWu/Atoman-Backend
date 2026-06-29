@@ -463,7 +463,7 @@ func TestListExploreSourcesExcludesHiddenSources(t *testing.T) {
 		t.Fatalf("create hidden subscription: %v", err)
 	}
 
-	rows, err := service.repo.ListExploreSources(20, 0)
+	rows, err := service.repo.ListExploreSources(20, 0, "")
 	if err != nil {
 		t.Fatalf("list explore sources: %v", err)
 	}
@@ -497,7 +497,7 @@ func TestListExploreSourcesIncludesRecentItemPreviews(t *testing.T) {
 		}
 	}
 
-	rows, err := service.repo.ListExploreSources(20, 0)
+	rows, err := service.repo.ListExploreSources(20, 0, "")
 	if err != nil {
 		t.Fatalf("list explore sources: %v", err)
 	}
@@ -521,6 +521,65 @@ func TestListExploreSourcesIncludesRecentItemPreviews(t *testing.T) {
 	for i := range wantTitles {
 		if gotTitles[i] != wantTitles[i] {
 			t.Fatalf("expected preview titles %#v, got %#v", wantTitles, gotTitles)
+		}
+	}
+}
+
+func TestListExploreSourcesFiltersByCategory(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	newsSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://news.example.com/feed.xml",
+		Hash:         "category-news-source-hash",
+		Title:        "Category News",
+		Category:     "news",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&newsSource).Error; err != nil {
+		t.Fatalf("create news source: %v", err)
+	}
+	blogSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://blog.example.com/feed.xml",
+		Hash:         "category-blog-source-hash",
+		Title:        "Category Blog",
+		Category:     "blog",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&blogSource).Error; err != nil {
+		t.Fatalf("create blog source: %v", err)
+	}
+
+	publishedAt := time.Now().UTC()
+	for _, source := range []model.FeedSource{newsSource, blogSource} {
+		item := model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         "category-item-" + source.ID.String(),
+			Title:        source.Title + " Item",
+			Link:         "https://example.com/category-item",
+			PublishedAt:  publishedAt,
+			FetchedAt:    publishedAt,
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create category feed item: %v", err)
+		}
+	}
+
+	rows, err := service.repo.ListExploreSources(20, 0, "news")
+	if err != nil {
+		t.Fatalf("list news explore sources: %v", err)
+	}
+
+	if len(rows) == 0 {
+		t.Fatal("expected news category rows")
+	}
+	for _, row := range rows {
+		if row.Category != "news" {
+			t.Fatalf("expected only news rows, got %#v", rows)
+		}
+		if row.ID == blogSource.ID {
+			t.Fatalf("blog source leaked into news category rows: %#v", rows)
 		}
 	}
 }
@@ -618,7 +677,7 @@ func TestListExploreSourcesOrdersBySubscriptionCountThenFreshness(t *testing.T) 
 		}
 	}
 
-	rows, err := service.repo.ListExploreSources(20, 0)
+	rows, err := service.repo.ListExploreSources(20, 0, "")
 	if err != nil {
 		t.Fatalf("list explore sources: %v", err)
 	}

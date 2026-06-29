@@ -217,6 +217,7 @@ type FeedSource struct {
 	SourceType            string     `json:"source_type" gorm:"not null;index:idx_feed_sources_type_enabled,priority:1"` // internal_user | internal_channel | internal_collection | external_rss
 	SourceID              *uuid.UUID `json:"source_id" gorm:"type:uuid"`                                                 // 站内资源 ID（外部 RSS 时为 null）
 	Provider              string     `json:"provider" gorm:"not null;default:'rss';index"`
+	Category              string     `json:"category" gorm:"not null;default:'blog';index"`
 	RssURL                string     `json:"rss_url" gorm:"type:text"`
 	CanonicalURL          string     `json:"canonical_url" gorm:"type:text;index"`
 	SiteURL               string     `json:"site_url" gorm:"type:text"`
