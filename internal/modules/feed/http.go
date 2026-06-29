@@ -3,6 +3,7 @@ package feed
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"atoman/internal/middleware"
 	"atoman/internal/platform/apperr"
@@ -267,6 +268,7 @@ func queryFromContext(c *gin.Context) FeedQuery {
 		SourceType:     c.Query("source_type"),
 		HideDuplicates: c.Query("hide_duplicates") == "true",
 		Sort:           c.DefaultQuery("sort", "recent"),
+		Search:         strings.TrimSpace(c.Query("q")),
 	}
 	if raw := c.Query("source_id"); raw != "" {
 		if id, err := uuid.Parse(raw); err == nil {

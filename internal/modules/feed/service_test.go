@@ -193,6 +193,68 @@ func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 	}
 }
 
+func TestGetSubscribedFeedSearchesTitleSummaryAndSource(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+	source.Title = "Example Source Search"
+	if err := db.Save(&source).Error; err != nil {
+		t.Fatalf("update source title: %v", err)
+	}
+
+	var feedItem model.FeedItem
+	if err := db.Where("title = ?", "Feed item").First(&feedItem).Error; err != nil {
+		t.Fatalf("find feed item: %v", err)
+	}
+	feedItem.Summary = "A rare citrus summary"
+	if err := db.Save(&feedItem).Error; err != nil {
+		t.Fatalf("update feed item summary: %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		search    string
+		wantType  string
+		wantTitle string
+	}{
+		{name: "internal post title", search: "Channel post", wantType: "post", wantTitle: "Channel post"},
+		{name: "external summary", search: "rare citrus", wantType: "feed_item", wantTitle: "Feed item"},
+		{name: "external source", search: "source search", wantType: "feed_item", wantTitle: "Feed item"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, Search: tc.search})
+			if err != nil {
+				t.Fatalf("get subscribed feed: %v", err)
+			}
+			if total == 0 || len(items) == 0 {
+				t.Fatalf("expected search results for %q", tc.search)
+			}
+			for _, item := range items {
+				switch {
+				case tc.wantType == "post" && item.Type == "post" && item.Post != nil && item.Post.Title == tc.wantTitle:
+					return
+				case tc.wantType == "feed_item" && item.Type == "feed_item" && item.FeedItem != nil && item.FeedItem.Title == tc.wantTitle:
+					return
+				}
+			}
+			t.Fatalf("expected %s title %q in results: %#v", tc.wantType, tc.wantTitle, items)
+		})
+	}
+
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, Search: "definitely absent"})
+	if err != nil {
+		t.Fatalf("get subscribed feed: %v", err)
+	}
+	if total != 0 || len(items) != 0 {
+		t.Fatalf("expected no results for absent query, got total=%d items=%#v", total, items)
+	}
+}
+
 func TestGetSubscribedFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 

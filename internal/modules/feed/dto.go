@@ -17,6 +17,7 @@ type FeedQuery struct {
 	IsRead         *bool     `json:"is_read" form:"is_read"`
 	HideDuplicates bool      `json:"hide_duplicates" form:"hide_duplicates"`
 	Sort           string    `json:"sort" form:"sort"`
+	Search         string    `json:"q" form:"q"`
 }
 
 type TimelineItemDTO struct {

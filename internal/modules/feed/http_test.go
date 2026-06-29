@@ -306,6 +306,40 @@ func TestGetSubscribedFeedHandlerParsesUnreadOnlyFilter(t *testing.T) {
 	}
 }
 
+func TestGetSubscribedFeedHandlerParsesSearchQuery(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, _, user := newFeedTestService(t)
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?q=Feed+item", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []TimelineItemDTO `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected search results for q, got body %s", rr.Body.String())
+	}
+	for _, item := range payload.Data {
+		if item.Type == "feed_item" && item.FeedItem != nil && item.FeedItem.Title == "Feed item" {
+			return
+		}
+	}
+	t.Fatalf("expected Feed item result for q, got %#v", payload.Data)
+}
+
 func TestMarkUnreadHandlerDeletesReadRecord(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)

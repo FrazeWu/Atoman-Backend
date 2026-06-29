@@ -92,7 +92,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	channelIDs = dedupeUUIDs(channelIDs)
 	collectionIDs = dedupeUUIDs(collectionIDs)
 	feedSourceIDs = dedupeUUIDs(feedSourceIDs)
-	if len(userIDs) == 0 && len(channelIDs) == 0 && len(collectionIDs) == 0 && !query.HideDuplicates {
+	if len(userIDs) == 0 && len(channelIDs) == 0 && len(collectionIDs) == 0 && !query.HideDuplicates && strings.TrimSpace(query.Search) == "" {
 		return s.getSubscribedExternalFeed(user.ID, feedSourceIDs, query)
 	}
 
@@ -494,9 +494,42 @@ func filterTimeline(items []TimelineItemDTO, query FeedQuery) []TimelineItemDTO 
 		if query.HideDuplicates && item.Type == "feed_item" && item.FeedItem != nil && item.FeedItem.IsDuplicate {
 			continue
 		}
+		if !matchesTimelineSearch(item, query.Search) {
+			continue
+		}
 		filtered = append(filtered, item)
 	}
 	return filtered
+}
+
+func matchesTimelineSearch(item TimelineItemDTO, search string) bool {
+	needle := strings.ToLower(strings.TrimSpace(search))
+	if needle == "" {
+		return true
+	}
+	for _, value := range timelineSearchValues(item) {
+		if strings.Contains(strings.ToLower(value), needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func timelineSearchValues(item TimelineItemDTO) []string {
+	values := make([]string, 0, 6)
+	if item.Post != nil {
+		values = append(values, item.Post.Title, item.Post.Summary)
+		if item.Post.Channel != nil {
+			values = append(values, item.Post.Channel.Name, item.Post.Channel.Slug)
+		}
+	}
+	if item.FeedItem != nil {
+		values = append(values, item.FeedItem.Title, item.FeedItem.Summary)
+		if item.FeedItem.FeedSource != nil {
+			values = append(values, item.FeedItem.FeedSource.Title, item.FeedItem.FeedSource.RssURL)
+		}
+	}
+	return values
 }
 
 func sortTimeline(items []TimelineItemDTO) {
