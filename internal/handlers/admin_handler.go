@@ -1005,16 +1005,6 @@ func RejectSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			return
 		}
 
-		if song.AudioSource == "local" && song.AudioURL != "" {
-			localPath := storage.GetLocalPathFromURL(song.AudioURL)
-			storage.DeleteLocalFile(localPath)
-		}
-
-		if song.CoverSource == "local" && song.CoverURL != "" {
-			localPath := storage.GetLocalPathFromURL(song.CoverURL)
-			storage.DeleteLocalFile(localPath)
-		}
-
 		if err := storage.DeleteSongAndS3Objects(db, s3Client, &song); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete song and associated files"})
 			return
@@ -1268,11 +1258,6 @@ func RejectAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		if err := db.First(&album, "id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Album not found"})
 			return
-		}
-
-		if album.CoverSource == "local" && album.CoverURL != "" {
-			localPath := storage.GetLocalPathFromURL(album.CoverURL)
-			storage.DeleteLocalFile(localPath)
 		}
 
 		if err := storage.DeleteAlbumAndS3Objects(db, s3Client, &album); err != nil {

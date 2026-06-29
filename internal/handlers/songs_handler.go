@@ -90,6 +90,7 @@ func SetupSongRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // @Tags music-songs
 // @Produce json
 // @Success 200 {array} SongPublicItem
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/songs [get]
 func GetSongsHandler(db *gorm.DB) gin.HandlerFunc {
@@ -237,6 +238,7 @@ func GetSongHandler(db *gorm.DB) gin.HandlerFunc {
 // @Param cover formData file false "封面文件"
 // @Success 201 {object} model.Song
 // @Failure 400 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -258,7 +260,7 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			if err != nil {
 				releaseDate = time.Now()
 			}
-		} else {
+		} else if os.Getenv("STORAGE_TYPE") == "local" {
 			releaseDate = time.Now()
 		}
 
@@ -308,7 +310,7 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			audioURL = input.AudioURL
 			if strings.HasPrefix(audioURL, "/uploads/") {
 				audioSource = "local"
-			} else {
+			} else if os.Getenv("STORAGE_TYPE") == "local" {
 				audioSource = "s3"
 			}
 		} else {
@@ -319,7 +321,11 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			}
 			defer file.Close()
 
-			if s3Client != nil && os.Getenv("STORAGE_TYPE") == "s3" {
+			if os.Getenv("STORAGE_TYPE") == "s3" {
+					if !requireS3(c, s3Client) {
+						return
+					}
+
 				safeArtist := storage.SanitizeName(input.Artist)
 				safeAlbum := storage.SanitizeName(input.Album)
 				key := "music/" + safeArtist + "/" + safeAlbum + "/" + header.Filename
@@ -359,7 +365,11 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			if err == nil {
 				defer coverFile.Close()
 
-				if s3Client != nil && os.Getenv("STORAGE_TYPE") == "s3" {
+				if os.Getenv("STORAGE_TYPE") == "s3" {
+					if !requireS3(c, s3Client) {
+						return
+					}
+
 					safeArtist := storage.SanitizeName(input.Artist)
 					safeAlbum := storage.SanitizeName(input.Album)
 					coverKey := "music/" + safeArtist + "/" + safeAlbum + "/cover_" + coverHeader.Filename
@@ -495,6 +505,7 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 // @Failure 401 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -569,7 +580,10 @@ func UpdateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 				safeAlbum = "Unknown Album"
 			}
 
-			if s3Client != nil && os.Getenv("STORAGE_TYPE") == "s3" {
+			if os.Getenv("STORAGE_TYPE") == "s3" {
+					if !requireS3(c, s3Client) {
+						return
+					}
 				coverKey := "music/" + safeArtist + "/" + safeAlbum + "/cover_" + coverHeader.Filename
 
 				_, err = s3Client.PutObject(&s3.PutObjectInput{

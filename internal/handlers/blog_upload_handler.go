@@ -38,6 +38,7 @@ func SetupBlogUploadRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // @Success 200 {object} UploadURLResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -102,8 +103,7 @@ func UploadBlogImage(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		}
 
 		// S3 upload
-		if s3Client == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Storage not configured"})
+		if !requireS3(c, s3Client) {
 			return
 		}
 		_, err = s3Client.PutObject(&s3.PutObjectInput{

@@ -468,6 +468,7 @@ func buildPodcastRSS(ch model.Channel, episodes []model.PodcastEpisode, siteURL 
 // @Param audio formData file true "音频文件"
 // @Success 200 {object} UploadURLResponse
 // @Failure 400 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -549,8 +550,7 @@ func UploadPodcastAudio(s3Client *s3.S3) gin.HandlerFunc {
 			return
 		}
 
-		if s3Client == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "存储未配置"})
+		if !requireS3(c, s3Client) {
 			return
 		}
 		if _, err := s3Client.PutObject(&s3.PutObjectInput{
@@ -579,6 +579,7 @@ func UploadPodcastAudio(s3Client *s3.S3) gin.HandlerFunc {
 // @Param cover formData file true "封面文件"
 // @Success 200 {object} UploadURLResponse
 // @Failure 400 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -634,8 +635,7 @@ func UploadPodcastCover(s3Client *s3.S3) gin.HandlerFunc {
 			return
 		}
 
-		if s3Client == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "存储未配置"})
+		if !requireS3(c, s3Client) {
 			return
 		}
 		if _, err := s3Client.PutObject(&s3.PutObjectInput{

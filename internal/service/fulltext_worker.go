@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -20,12 +22,12 @@ const (
 	FullTextWorkerTimeout        = 10 * time.Second
 	FullTextWorkerMaxAttempts    = 4
 
-	fullTextWorkerInterval       = 2 * time.Minute
-	fullTextWorkerStartupDelay   = 10 * time.Second
-	fullTextWorkerBatchSize      = FullTextWorkerConcurrency
-	fullTextStaleFetchAfter      = 20 * time.Minute
-	fullTextMaxResponseBytes     = 5 * 1024 * 1024
-	fullTextMaxRedirects         = 5
+	fullTextWorkerInterval     = 2 * time.Minute
+	fullTextWorkerStartupDelay = 120 * time.Second
+	fullTextWorkerBatchSize    = 4
+	fullTextStaleFetchAfter    = 20 * time.Minute
+	fullTextMaxResponseBytes   = 5 * 1024 * 1024
+	fullTextMaxRedirects       = 5
 	fullTextRedirectLimitMessage = "stopped after too many redirects"
 )
 
@@ -39,25 +41,60 @@ var fullTextHTTPClient = &http.Client{
 	},
 }
 
-func StartFullTextWorker(db *gorm.DB) {
-	go func() {
-		time.Sleep(fullTextWorkerStartupDelay)
-		runFullTextCycle(db, time.Now())
+type fullTextWorkerConfig struct {
+	Enabled      bool
+	StartupDelay time.Duration
+	Interval     time.Duration
+	BatchSize    int
+}
 
-		ticker := time.NewTicker(fullTextWorkerInterval)
+func parseEnvPositiveInt(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		log.Printf("WARN: invalid %s=%q; using default %d", name, raw, fallback)
+		return fallback
+	}
+	return value
+}
+
+func loadFullTextWorkerConfig() fullTextWorkerConfig {
+	return fullTextWorkerConfig{
+		Enabled:      parseEnvBool("FULLTEXT_WORKER_ENABLED", FullTextWorkerEnabledDefault),
+		StartupDelay: parseEnvDuration("FULLTEXT_WORKER_STARTUP_DELAY", fullTextWorkerStartupDelay),
+		Interval:     parseEnvDuration("FULLTEXT_WORKER_INTERVAL", fullTextWorkerInterval),
+		BatchSize:    parseEnvPositiveInt("FULLTEXT_WORKER_BATCH_SIZE", fullTextWorkerBatchSize),
+	}
+}
+
+func StartFullTextWorker(db *gorm.DB) {
+	cfg := loadFullTextWorkerConfig()
+	if !cfg.Enabled {
+		log.Println("fulltext worker disabled by FULLTEXT_WORKER_ENABLED=false")
+		return
+	}
+
+	go func() {
+		time.Sleep(cfg.StartupDelay)
+		runFullTextCycle(db, time.Now(), cfg.BatchSize)
+
+		ticker := time.NewTicker(cfg.Interval)
 		defer ticker.Stop()
 		for range ticker.C {
-			runFullTextCycle(db, time.Now())
+			runFullTextCycle(db, time.Now(), cfg.BatchSize)
 		}
 	}()
 }
 
-func runFullTextCycle(db *gorm.DB, now time.Time) {
+func runFullTextCycle(db *gorm.DB, now time.Time, batchSize int) {
 	if err := recoverStaleFullTextFetches(db, now); err != nil {
 		log.Printf("fulltext worker recover stale fetches failed: %v", err)
 	}
 
-	for i := 0; i < fullTextWorkerBatchSize; i++ {
+	for i := 0; i < batchSize; i++ {
 		item, source, ok, err := claimNextFullTextItem(db, now)
 		if err != nil {
 			log.Printf("fulltext worker claim failed: %v", err)
@@ -102,8 +139,8 @@ func claimNextFullTextItem(db *gorm.DB, now time.Time) (model.FeedItem, model.Fe
 		oldStatus := candidate.FullTextStatus
 		attemptCount := candidate.FullTextAttemptCount + 1
 		updates := map[string]any{
-			"full_text_status":          FullTextStatusFetching,
-			"full_text_attempt_count":   attemptCount,
+			"full_text_status":        FullTextStatusFetching,
+			"full_text_attempt_count": attemptCount,
 			"last_full_text_attempt_at": &now,
 			"next_full_text_attempt_at": nil,
 		}

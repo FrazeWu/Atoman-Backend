@@ -341,6 +341,7 @@ func (h *dmHandler) unreadCount(c *gin.Context) {
 // @Param image formData file true "图片文件"
 // @Success 200 {object} ImageUploadResponse
 // @Failure 400 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -396,8 +397,7 @@ func (h *dmHandler) uploadImage(c *gin.Context) {
 		return
 	}
 
-	if h.s3 == nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Storage not configured"})
+	if !requireS3(c, h.s3) {
 		return
 	}
 	if _, err := h.s3.PutObject(&s3.PutObjectInput{

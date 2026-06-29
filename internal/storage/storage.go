@@ -97,9 +97,50 @@ func ValidateS3Connection(s3Client *s3.S3) error {
 	return nil
 }
 
+// isLocalUploadURL reports whether a stored URL points to the local uploads tree.
+func isLocalUploadURL(rawURL string) bool {
+	return strings.HasPrefix(strings.TrimSpace(rawURL), "/uploads/")
+}
+
+// s3ObjectKeyFromURL extracts an object key from a configured S3/R2 URL.
+// It returns false for local upload URLs or URLs that do not match S3_URL_PREFIX.
+func s3ObjectKeyFromURL(rawURL string) (string, bool) {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" || isLocalUploadURL(trimmed) {
+		return "", false
+	}
+
+	prefix := strings.TrimRight(os.Getenv("S3_URL_PREFIX"), "/")
+	if prefix == "" {
+		return "", false
+	}
+	if !strings.HasPrefix(trimmed, prefix+"/") {
+		return "", false
+	}
+
+	key := strings.TrimPrefix(trimmed, prefix+"/")
+	if key == "" {
+		return "", false
+	}
+	return key, true
+}
+
 // DeleteS3Object deletes an object from the configured S3 bucket
 func DeleteS3Object(s3Client *s3.S3, key string) error {
+	if key == "" {
+		return nil
+	}
+	if s3Client == nil {
+		log.Printf("Skipping S3 object deletion for %s: S3 client unavailable", key)
+		return nil
+	}
+
 	bucket := os.Getenv("S3_BUCKET")
+	if bucket == "" {
+		log.Printf("Skipping S3 object deletion for %s: S3 bucket not configured", key)
+		return nil
+	}
+
 	_, err := s3Client.DeleteObject(&s3.DeleteObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
@@ -114,8 +155,7 @@ func DeleteS3Object(s3Client *s3.S3, key string) error {
 
 // DeleteAlbumAndS3Objects deletes an album record and its associated S3 cover image
 func DeleteAlbumAndS3Objects(db *gorm.DB, s3Client *s3.S3, album *model.Album) error {
-	if album.CoverURL != "" {
-		coverKey := strings.TrimPrefix(album.CoverURL, os.Getenv("S3_URL_PREFIX")+"/")
+	if coverKey, ok := s3ObjectKeyFromURL(album.CoverURL); ok {
 		if err := DeleteS3Object(s3Client, coverKey); err != nil {
 			log.Printf("Failed to delete cover file %s from S3: %v", coverKey, err)
 			// Don't return error here, try to delete from DB anyway
@@ -301,23 +341,25 @@ func DeleteSongAndS3Objects(db *gorm.DB, s3Client *s3.S3, song *model.Song) erro
 				DeleteLocalFile(localPath)
 			}
 		} else if song.AudioSource == "s3" {
-			audioKey := strings.TrimPrefix(song.AudioURL, os.Getenv("S3_URL_PREFIX")+"/")
-			if err := DeleteS3Object(s3Client, audioKey); err != nil {
-				log.Printf("Failed to delete audio file %s from S3: %v", audioKey, err)
+			if audioKey, ok := s3ObjectKeyFromURL(song.AudioURL); ok {
+				if err := DeleteS3Object(s3Client, audioKey); err != nil {
+					log.Printf("Failed to delete audio file %s from S3: %v", audioKey, err)
+				}
 			}
 		}
 	}
 
 	if song.CoverURL != "" && (song.Album == nil || song.CoverURL != song.Album.CoverURL) {
-		if song.CoverSource == "local" {
+		if song.CoverSource == "local" || isLocalUploadURL(song.CoverURL) {
 			localPath := GetLocalPathFromURL(song.CoverURL)
 			if localPath != "" {
 				DeleteLocalFile(localPath)
 			}
 		} else if song.CoverSource == "s3" {
-			coverKey := strings.TrimPrefix(song.CoverURL, os.Getenv("S3_URL_PREFIX")+"/")
-			if err := DeleteS3Object(s3Client, coverKey); err != nil {
-				log.Printf("Failed to delete cover file %s from S3: %v", coverKey, err)
+			if coverKey, ok := s3ObjectKeyFromURL(song.CoverURL); ok {
+				if err := DeleteS3Object(s3Client, coverKey); err != nil {
+					log.Printf("Failed to delete cover file %s from S3: %v", coverKey, err)
+				}
 			}
 		}
 	}

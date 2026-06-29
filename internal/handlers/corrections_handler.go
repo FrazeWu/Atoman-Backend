@@ -52,6 +52,7 @@ func SetupCorrectionRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // @Param input body SongCorrectionInput true "歌曲纠错输入"
 // @Success 201 {object} CorrectionSubmissionResponse
 // @Failure 400 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -127,6 +128,7 @@ func CreateSongCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Success 201 {object} CorrectionSubmissionResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -217,6 +219,9 @@ func CreateAlbumCorrectionHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc 
 			safeAlbum := strings.ReplaceAll(originalAlbum.Title, "/", "-")
 			coverKey := "album_covers/pending/" + safeAlbum + "/" + input.Cover.Filename
 
+			if !requireS3(c, s3Client) {
+				return
+			}
 			_, err = s3Client.PutObject(&s3.PutObjectInput{
 				Bucket: aws.String(os.Getenv("S3_BUCKET")),
 				Key:    aws.String(coverKey),

@@ -79,6 +79,7 @@ func SetupUploadRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // @Success 201 {object} uploadAssetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -90,8 +91,7 @@ func UploadAsset(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			httpx.Error(c, apperr.Unauthorized("Authentication is required"))
 			return
 		}
-		if s3Client == nil {
-			httpx.Error(c, apperr.Internal(fmt.Errorf("s3 storage is not configured")))
+		if !requireS3(c, s3Client) {
 			return
 		}
 		bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))

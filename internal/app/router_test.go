@@ -116,8 +116,11 @@ func TestRegisterV1RoutesMountsS3OnlyUploads(t *testing.T) {
 	if w.Code == http.StatusNotFound {
 		t.Fatalf("expected uploads route to be mounted, got 404")
 	}
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected mounted uploads route to fail without S3, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected mounted uploads route to return 503 without S3, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != `{"code":"storage.unavailable","error":"Storage service is unavailable"}` {
+		t.Fatalf("unexpected body: %s", w.Body.String())
 	}
 }
 

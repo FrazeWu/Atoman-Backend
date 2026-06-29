@@ -68,6 +68,7 @@ func boundedListLimit(raw string, fallback int, max int) int {
 // @Param video formData file true "视频文件"
 // @Success 200 {object} UploadURLResponse
 // @Failure 400 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -132,8 +133,7 @@ func UploadVideoFile(s3Client *s3.S3) gin.HandlerFunc {
 			return
 		}
 
-		if s3Client == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "存储未配置"})
+		if !requireS3(c, s3Client) {
 			return
 		}
 		if _, err := s3Client.PutObject(&s3.PutObjectInput{
@@ -162,6 +162,7 @@ func UploadVideoFile(s3Client *s3.S3) gin.HandlerFunc {
 // @Param cover formData file true "封面文件"
 // @Success 200 {object} UploadURLResponse
 // @Failure 400 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -212,8 +213,7 @@ func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 			return
 		}
 
-		if s3Client == nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "存储未配置"})
+		if !requireS3(c, s3Client) {
 			return
 		}
 		if _, err := s3Client.PutObject(&s3.PutObjectInput{
@@ -365,6 +365,7 @@ func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 // @Param input body VideoCreateInput true "视频创建输入"
 // @Success 201 {object} model.Video
 // @Failure 400 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -773,6 +774,7 @@ func buildVideoRSS(ch model.Channel, videos []model.Video, siteURL string) strin
 // @Param id path string true "视频 UUID"
 // @Success 200 {object} CommentListResponse
 // @Failure 400 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/videos/{id}/comments [get]
 func GetVideoComments(db *gorm.DB) gin.HandlerFunc {

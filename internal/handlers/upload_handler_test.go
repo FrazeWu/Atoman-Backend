@@ -177,8 +177,11 @@ func TestUploadMusicAssetRequiresS3Storage(t *testing.T) {
 
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500 when S3 is unavailable, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when S3 is unavailable, got %d: %s", w.Code, w.Body.String())
+	}
+	if w.Body.String() != `{"code":"storage.unavailable","error":"Storage service is unavailable"}` {
+		t.Fatalf("unexpected body: %s", w.Body.String())
 	}
 	var count int64
 	if err := db.Model(&model.MediaAsset{}).Count(&count).Error; err != nil {

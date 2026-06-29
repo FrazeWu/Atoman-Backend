@@ -7,7 +7,9 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -113,6 +115,12 @@ type normalizedFeedItem struct {
 }
 
 var rssFetchHTTPClient = &http.Client{Timeout: 10 * time.Second}
+
+type rssCronConfig struct {
+	Enabled      bool
+	StartupDelay time.Duration
+	Interval     time.Duration
+}
 
 type ExtAtomAuthor struct {
 	Name  string `xml:"name"`
@@ -310,6 +318,40 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func parseEnvBool(name string, fallback bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		log.Printf("WARN: invalid %s=%q; using default %t", name, raw, fallback)
+		return fallback
+	}
+	return value
+}
+
+func parseEnvDuration(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		log.Printf("WARN: invalid %s=%q; using default %s", name, raw, fallback)
+		return fallback
+	}
+	return value
+}
+
+func loadRSSCronConfig() rssCronConfig {
+	return rssCronConfig{
+		Enabled:      parseEnvBool("RSS_CRON_ENABLED", true),
+		StartupDelay: parseEnvDuration("RSS_CRON_STARTUP_DELAY", 60*time.Second),
+		Interval:     parseEnvDuration("RSS_CRON_INTERVAL", 15*time.Minute),
+	}
+}
+
 func buildModelFeedItem(src model.FeedSource, normalized normalizedFeedItem, fetchedAt time.Time) model.FeedItem {
 	newFeedItem := model.FeedItem{
 		FeedSourceID:  src.ID,
@@ -371,19 +413,21 @@ func applyFetchedSourceUpdates(db *gorm.DB, src *model.FeedSource, sourceTitle s
 
 // StartRSSCron starts a background worker that fetches all unique RSS URLs periodically
 func StartRSSCron(db *gorm.DB) {
+	cfg := loadRSSCronConfig()
+	if !cfg.Enabled {
+		log.Println("RSS cron worker disabled by RSS_CRON_ENABLED=false")
+		return
+	}
+
 	go func() {
-		// Wait a few seconds before starting the first sync to not block server startup
-		time.Sleep(5 * time.Second)
-		// Run immediately first
+		time.Sleep(cfg.StartupDelay)
 		log.Println("Starting initial RSS sync...")
 		syncAllRSSFeeds(db)
 
-		// Then run every 15 minutes
-		ticker := time.NewTicker(15 * time.Minute)
+		ticker := time.NewTicker(cfg.Interval)
 		defer ticker.Stop()
 
-		for {
-			<-ticker.C
+		for range ticker.C {
 			log.Println("Running scheduled RSS sync...")
 			syncAllRSSFeeds(db)
 		}
@@ -391,6 +435,14 @@ func StartRSSCron(db *gorm.DB) {
 }
 
 func syncAllRSSFeeds(db *gorm.DB) {
+	total := 0
+	success := 0
+	failed := 0
+	skipped := 0
+	defer func() {
+		log.Printf("RSS sync completed: total=%d success=%d failed=%d skipped=%d", total, success, failed, skipped)
+	}()
+
 	// 1. Get all unique active RSS URLs to minimize HTTP calls
 	var uniqueURLs []string
 	if err := db.Model(&model.FeedSource{}).
@@ -403,11 +455,14 @@ func syncAllRSSFeeds(db *gorm.DB) {
 
 	for _, url := range uniqueURLs {
 		if url == "" {
+			skipped++
 			continue
 		}
+		total++
 		// 跳过相对路径或非 http(s) URL（内部 RSS 端点误存为 external_rss 时的兜底保护）
 		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 			log.Printf("RSS sync skipping non-absolute URL: %s", url)
+			skipped++
 			continue
 		}
 
@@ -415,28 +470,39 @@ func syncAllRSSFeeds(db *gorm.DB) {
 		items, sourceTitle, sourceCoverURL, err := FetchAndParseRSS(url)
 		if err != nil {
 			log.Printf("Failed to fetch RSS %s: %v", url, err)
+			failed++
 			continue
 		}
 
 		// 3. Find all FeedSources (users subscribed) to this URL
 		var sources []model.FeedSource
 		if err := db.Where("source_type = ? AND rss_url = ?", "external_rss", url).Find(&sources).Error; err != nil {
+			log.Printf("failed to fetch feed sources for %s: %v", url, err)
+			failed++
 			continue
 		}
 
 		now := time.Now()
+		urlFailed := false
 
 		for _, src := range sources {
 			if err := persistParsedFeedItems(db, src, items, sourceTitle, sourceCoverURL, now); err != nil {
 				log.Printf("failed to persist feed items for %s: %v", src.RssURL, err)
+				urlFailed = true
 				continue
 			}
 			if err := applyFetchedSourceUpdates(db, &src, sourceTitle, sourceCoverURL, now); err != nil {
 				log.Printf("failed to update source metadata for %s: %v", src.RssURL, err)
+				urlFailed = true
 			}
 		}
+
+		if urlFailed {
+			failed++
+			continue
+		}
+		success++
 	}
-	log.Println("RSS sync completed")
 }
 
 func SyncSingleRSS(db *gorm.DB, src model.FeedSource) {

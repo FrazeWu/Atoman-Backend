@@ -47,6 +47,7 @@ func SetupAlbumRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // @Tags music-albums
 // @Produce json
 // @Success 200 {array} model.Album
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/albums [get]
 func GetAlbumsHandler(db *gorm.DB) gin.HandlerFunc {
@@ -71,6 +72,7 @@ func GetAlbumsHandler(db *gorm.DB) gin.HandlerFunc {
 // @Param id path string true "专辑 UUID"
 // @Success 200 {object} model.Album
 // @Failure 404 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/albums/{id} [get]
 func GetAlbumHandler(db *gorm.DB) gin.HandlerFunc {
@@ -106,6 +108,7 @@ func GetAlbumHandler(db *gorm.DB) gin.HandlerFunc {
 // @Success 201 {object} model.Album
 // @Failure 400 {object} ErrorResponse
 // @Failure 409 {object} ConflictWithIDResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -167,7 +170,11 @@ func CreateAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			safeAlbum := storage.SanitizeName(input.Title)
 			coverKey := "music/" + safeArtist + "/" + safeAlbum + "/cover_" + coverHeader.Filename
 
-			if s3Client != nil && os.Getenv("STORAGE_TYPE") == "s3" {
+			if os.Getenv("STORAGE_TYPE") == "s3" {
+					if !requireS3(c, s3Client) {
+						return
+					}
+
 				_, err = s3Client.PutObject(&s3.PutObjectInput{
 					Bucket: aws.String(os.Getenv("S3_BUCKET")),
 					Key:    aws.String(coverKey),
@@ -290,6 +297,7 @@ func splitArtistNames(value string) []string {
 // @Failure 401 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 503 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -348,7 +356,11 @@ func UpdateAlbumHandler(db *gorm.DB, s3Client *s3.S3, revisionService *service.R
 				safeAlbum = "Unknown Album"
 			}
 
-			if s3Client != nil && os.Getenv("STORAGE_TYPE") == "s3" {
+			if os.Getenv("STORAGE_TYPE") == "s3" {
+					if !requireS3(c, s3Client) {
+						return
+					}
+
 				coverKey := "music/" + safeArtist + "/" + safeAlbum + "/cover_" + coverHeader.Filename
 
 				_, err = s3Client.PutObject(&s3.PutObjectInput{

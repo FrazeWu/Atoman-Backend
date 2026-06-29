@@ -218,15 +218,34 @@ func mergeInternalRSSFeedSourceIntoCanonical(tx *gorm.DB, legacy model.FeedSourc
 	return tx.Delete(&model.FeedSource{}, "id = ?", legacy.ID).Error
 }
 
+func missingOwnerEnvVars(username string, email string, password string) []string {
+	missing := make([]string, 0, 3)
+	if strings.TrimSpace(username) == "" {
+		missing = append(missing, "OWNER_USERNAME")
+	}
+	if strings.TrimSpace(email) == "" {
+		missing = append(missing, "OWNER_EMAIL")
+	}
+	if strings.TrimSpace(password) == "" {
+		missing = append(missing, "OWNER_PASSWORD")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return missing
+}
+
 func bootstrapOwnerFromEnv(db *gorm.DB) error {
 	username := strings.TrimSpace(os.Getenv("OWNER_USERNAME"))
 	email := strings.TrimSpace(os.Getenv("OWNER_EMAIL"))
 	password := os.Getenv("OWNER_PASSWORD")
-	if username == "" && email == "" && password == "" {
+	missing := missingOwnerEnvVars(username, email, password)
+	if len(missing) == 3 {
+		log.Println("Owner bootstrap disabled: OWNER_* variables are empty")
 		return nil
 	}
-	if username == "" || email == "" || password == "" {
-		log.Printf("WARN: skipping owner bootstrap because OWNER_USERNAME, OWNER_EMAIL, and OWNER_PASSWORD must all be set")
+	if len(missing) > 0 {
+		log.Printf("WARN: owner bootstrap partially configured; missing %s", strings.Join(missing, ", "))
 		return nil
 	}
 
@@ -247,7 +266,7 @@ func bootstrapOwnerFromEnv(db *gorm.DB) error {
 		return err
 	}
 	if created {
-		log.Printf("owner user %q created", user.Username)
+		log.Printf("owner user %q bootstrapped successfully", user.Username)
 	}
 	return nil
 }
@@ -325,6 +344,26 @@ func loadEnvironment() string {
 		return "Loaded .env"
 	}
 	return "No .env file found, using system environment variables"
+}
+
+func initializeStorageClient() *s3.S3 {
+	if os.Getenv("STORAGE_TYPE") == "local" {
+		log.Println("Storage mode: local (S3 disabled)")
+		return nil
+	}
+
+	s3Client, err := storage.InitS3Client()
+	if err != nil {
+		log.Printf("WARN: S3 storage unavailable; storage-backed endpoints will return 503: %v", err)
+		return nil
+	}
+	if err := storage.ValidateS3Connection(s3Client); err != nil {
+		log.Printf("WARN: S3 storage unavailable; storage-backed endpoints will return 503: %v", err)
+		return nil
+	}
+
+	log.Println("S3 storage initialized")
+	return s3Client
 }
 
 func main() {
@@ -527,24 +566,9 @@ ON CONFLICT (key) DO NOTHING`)
 	emailService := service.NewEmailServiceWithoutRedis(db)
 	log.Println("Email service initialized (Redis disabled)")
 
-	var s3Client *s3.S3
-	if os.Getenv("STORAGE_TYPE") == "local" {
-		log.Println("Storage mode: local (S3 disabled)")
-	} else {
-		var err error
-		s3Client, err = storage.InitS3Client()
-		if err != nil {
-			fatalLogger.Fatal("Failed to create S3 client: ", err)
-		} else if err := storage.ValidateS3Connection(s3Client); err != nil {
-			fatalLogger.Fatal("Failed to validate S3 connection: ", err)
-		} else {
-			log.Println("S3 storage initialized")
-		}
-	}
+	s3Client := initializeStorageClient()
 
-	log.Println("Starting background RSS cron worker...")
 	service.StartRSSCron(db)
-	log.Println("Starting background full text worker...")
 	service.StartFullTextWorker(db)
 
 	log.Println("Initializing Casbin Enforcer...")
