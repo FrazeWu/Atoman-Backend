@@ -44,6 +44,9 @@ func ExtractAndSanitizeFullText(sourceURL string, body io.Reader) (FullTextResul
 	if cleanHTML == "" {
 		return FullTextResult{}, FullTextErrorSanitizeEmpty, errors.New("sanitized html empty")
 	}
+	if looksLikeLoginWallText(text) {
+		return FullTextResult{}, FullTextErrorLoginWallDetected, errors.New("login or app wall detected")
+	}
 	if utf8.RuneCountInString(text) < fullTextMinimumCharacters {
 		return FullTextResult{}, FullTextErrorExtractTooShort, errors.New("content too short")
 	}
@@ -52,6 +55,42 @@ func ExtractAndSanitizeFullText(sourceURL string, body io.Reader) (FullTextResul
 		HTML:      cleanHTML,
 		WordCount: utf8.RuneCountInString(text),
 	}, "", nil
+}
+
+func looksLikeLoginWallText(text string) bool {
+	normalized := strings.ToLower(compactFullTextText(text))
+	if normalized == "" {
+		return false
+	}
+
+	score := 0
+	for _, phrase := range []string{
+		"登录后继续阅读",
+		"登录后查看",
+		"立即登录",
+		"注册账号",
+		"验证码登录",
+		"微信扫码登录",
+		"打开 app",
+		"打开app",
+		"下载客户端",
+		"阅读全文",
+		"已复制链接",
+		"continue reading",
+		"sign in",
+		"log in",
+	} {
+		if strings.Contains(normalized, phrase) {
+			score++
+		}
+	}
+	if score >= 2 {
+		return true
+	}
+
+	loginCount := strings.Count(normalized, "登录") + strings.Count(normalized, "login")
+	appCount := strings.Count(normalized, "app") + strings.Count(normalized, "客户端")
+	return loginCount >= 3 && appCount >= 1
 }
 
 func pickFullTextContentNode(doc *html.Node) *html.Node {

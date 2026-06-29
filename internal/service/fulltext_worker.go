@@ -22,13 +22,14 @@ const (
 	FullTextWorkerTimeout        = 10 * time.Second
 	FullTextWorkerMaxAttempts    = 4
 
-	fullTextWorkerInterval     = 2 * time.Minute
-	fullTextWorkerStartupDelay = 120 * time.Second
-	fullTextWorkerBatchSize    = 4
-	fullTextStaleFetchAfter    = 20 * time.Minute
-	fullTextMaxResponseBytes   = 5 * 1024 * 1024
-	fullTextMaxRedirects       = 5
-	fullTextRedirectLimitMessage = "stopped after too many redirects"
+	fullTextWorkerInterval              = 2 * time.Minute
+	fullTextWorkerStartupDelay          = 120 * time.Second
+	fullTextWorkerBatchSize             = 4
+	fullTextStaleFetchAfter             = 20 * time.Minute
+	fullTextMaxResponseBytes            = 5 * 1024 * 1024
+	fullTextMaxRedirects                = 5
+	fullTextRedirectLimitMessage        = "stopped after too many redirects"
+	fullTextAutoDisableFailureThreshold = 3
 )
 
 var fullTextHTTPClient = &http.Client{
@@ -139,8 +140,8 @@ func claimNextFullTextItem(db *gorm.DB, now time.Time) (model.FeedItem, model.Fe
 		oldStatus := candidate.FullTextStatus
 		attemptCount := candidate.FullTextAttemptCount + 1
 		updates := map[string]any{
-			"full_text_status":        FullTextStatusFetching,
-			"full_text_attempt_count": attemptCount,
+			"full_text_status":          FullTextStatusFetching,
+			"full_text_attempt_count":   attemptCount,
 			"last_full_text_attempt_at": &now,
 			"next_full_text_attempt_at": nil,
 		}
@@ -269,12 +270,29 @@ func markFullTextFailure(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 	source.FullTextLastFailureAt = &now
 	source.FullTextLastErrorCode = errorCode
 	source.FullTextLastError = errorMessage
+	if shouldAutoDisableFullTextSource(errorCode, source.FullTextFailureCount) {
+		source.FullTextEnabled = false
+	}
+
 	return db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(map[string]any{
+		"full_text_enabled":         source.FullTextEnabled,
 		"full_text_failure_count":   source.FullTextFailureCount,
 		"full_text_last_failure_at": source.FullTextLastFailureAt,
 		"full_text_last_error_code": source.FullTextLastErrorCode,
 		"full_text_last_error":      source.FullTextLastError,
 	}).Error
+}
+
+func shouldAutoDisableFullTextSource(errorCode string, failureCount int) bool {
+	if failureCount < fullTextAutoDisableFailureThreshold {
+		return false
+	}
+	switch errorCode {
+	case FullTextErrorLoginWallDetected, FullTextErrorExtractTooShort, FullTextErrorSanitizeEmpty:
+		return true
+	default:
+		return false
+	}
 }
 
 func markFullTextDisabled(db *gorm.DB, item *model.FeedItem) error {

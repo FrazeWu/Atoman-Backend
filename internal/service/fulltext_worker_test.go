@@ -85,6 +85,50 @@ func TestMarkFullTextFailureSchedulesRetry(t *testing.T) {
 	}
 }
 
+func TestMarkFullTextFailureAutoDisablesSourceAfterRepeatedLoginWalls(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 6, 29, 8, 0, 0, 0, time.UTC)
+	source := model.FeedSource{
+		SourceType:           "external_rss",
+		Hash:                 "worker-source-login-wall",
+		RssURL:               "https://example.com/feed.xml",
+		FullTextEnabled:      true,
+		FullTextFailureCount: fullTextAutoDisableFailureThreshold - 1,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	item := model.FeedItem{
+		FeedSourceID:         source.ID,
+		GUID:                 "worker-item-login-wall",
+		Link:                 "https://example.com/post",
+		FullTextStatus:       FullTextStatusFetching,
+		FullTextAttemptCount: 1,
+	}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := markFullTextFailure(db, &item, &source, FullTextErrorLoginWallDetected, "login wall detected", now); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotSource model.FeedSource
+	if err := db.First(&gotSource, "id = ?", source.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if gotSource.FullTextEnabled {
+		t.Fatal("expected repeated login walls to disable source fulltext")
+	}
+	if gotSource.FullTextLastErrorCode != FullTextErrorLoginWallDetected {
+		t.Fatalf("last_error_code=%s", gotSource.FullTextLastErrorCode)
+	}
+}
+
 func TestMarkFullTextSuccessAndDisabled(t *testing.T) {
 	db, err := openFullTextWorkerTestDB(t)
 	if err != nil {

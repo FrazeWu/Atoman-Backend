@@ -185,6 +185,31 @@ func TestExtractAndSanitizeFullText_RemovesObviousNonContentSections(t *testing.
 	}
 }
 
+func TestExtractAndSanitizeFullText_RejectsLoginWallShell(t *testing.T) {
+	html := `
+	<html><body>
+	<main>
+	  <section class="article-content">
+	    <h1>36氪文章</h1>
+	    <p>登录后继续阅读完整文章，立即登录或注册账号查看更多精彩内容。</p>
+	    <p>请打开 App 阅读全文，下载客户端，验证码登录，微信扫码登录，已复制链接。</p>
+	    <p>登录后继续阅读完整文章，立即登录或注册账号查看更多精彩内容。</p>
+	    <p>请打开 App 阅读全文，下载客户端，验证码登录，微信扫码登录，已复制链接。</p>
+	    <p>登录后继续阅读完整文章，立即登录或注册账号查看更多精彩内容。</p>
+	    <p>请打开 App 阅读全文，下载客户端，验证码登录，微信扫码登录，已复制链接。</p>
+	  </section>
+	</main>
+	</body></html>`
+
+	_, errCode, err := ExtractAndSanitizeFullText("https://36kr.com/p/123", strings.NewReader(html))
+	if err == nil {
+		t.Fatal("expected login wall extraction to fail")
+	}
+	if errCode != FullTextErrorLoginWallDetected {
+		t.Fatalf("got %s", errCode)
+	}
+}
+
 func TestExtractAndSanitizeFullText_PreservesWhitespaceAroundInlineElements(t *testing.T) {
 	html := `
 	<html><body>
