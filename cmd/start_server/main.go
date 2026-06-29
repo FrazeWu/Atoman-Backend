@@ -386,18 +386,27 @@ func main() {
 		log.Println("Running database migrations...")
 
 		// Enable required PostgreSQL extensions
+		log.Println("Migration step: enable ltree extension")
 		if err := db.Exec("CREATE EXTENSION IF NOT EXISTS ltree").Error; err != nil {
 			log.Printf("WARN: failed to enable ltree extension: %v", err)
 		}
+		log.Println("Migration step completed: enable ltree extension")
+		log.Println("Migration step: prepare comment target")
 		if err := prepareCommentTargetMigration(db); err != nil {
 			fatalLogger.Fatal("Failed to prepare comment target migration: ", err)
 		}
+		log.Println("Migration step completed: prepare comment target")
+		log.Println("Migration step: blog guest comments")
 		if err := migrations.RunBlogGuestCommentsMigration(db); err != nil {
 			fatalLogger.Fatal("Failed to run blog guest comments migration: ", err)
 		}
+		log.Println("Migration step completed: blog guest comments")
+		log.Println("Migration step: blog collection post order")
 		if err := migrations.RunBlogCollectionPostOrderMigration(db); err != nil {
 			fatalLogger.Fatal("Failed to run blog collection post order migration: ", err)
 		}
+		log.Println("Migration step completed: blog collection post order")
+		log.Println("Migration step: auto migrate models")
 		if err := db.AutoMigrate(
 			&model.User{},
 			&model.UserSettings{},
@@ -478,11 +487,14 @@ func main() {
 		); err != nil {
 			fatalLogger.Fatal("Failed to run migrations: ", err)
 		}
+		log.Println("Migration step completed: auto migrate models")
 		log.Println("Database migrations completed")
 
+		log.Println("Migration step: notification/dm indexes")
 		if err := migrations.RunNotificationDMIndexes(db); err != nil {
 			log.Printf("WARN: notification/dm index migration failed: %v", err)
 		}
+		log.Println("Migration step completed: notification/dm indexes")
 
 		// Seed default site settings (idempotent)
 		db.Exec(`INSERT INTO site_settings (key, value, description, updated_at)

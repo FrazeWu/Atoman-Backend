@@ -18,10 +18,11 @@ type UserMessage struct {
 }
 
 type userClient struct {
-	conn   *websocket.Conn
-	send   chan []byte
-	userID uuid.UUID
-	hub    *UserHub
+	conn      *websocket.Conn
+	send      chan []byte
+	userID    uuid.UUID
+	hub       *UserHub
+	leaveOnce sync.Once
 }
 
 type UserHub struct {
@@ -109,7 +110,7 @@ func (h *UserHub) ServeWS(c *gin.Context, jwtSecret string) {
 
 func (c *userClient) writePump() {
 	defer func() {
-		c.hub.leave <- c
+		c.leaveOnce.Do(func() { c.hub.leave <- c })
 		c.conn.Close()
 	}()
 	for msg := range c.send {
@@ -121,7 +122,7 @@ func (c *userClient) writePump() {
 
 func (c *userClient) readPump() {
 	defer func() {
-		c.hub.leave <- c
+		c.leaveOnce.Do(func() { c.hub.leave <- c })
 		c.conn.Close()
 	}()
 	c.conn.SetReadLimit(512)

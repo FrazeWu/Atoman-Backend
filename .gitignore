@@ -9,6 +9,8 @@
 /build/
 /coverage/
 /tmp/
+log/
+start_server
 output.txt
 nvim.log
 .claude/
