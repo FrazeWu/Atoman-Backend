@@ -15,6 +15,7 @@ import (
 	"atoman/internal/modules/forum_moderation"
 	"atoman/internal/modules/music"
 	"atoman/internal/modules/notification"
+	"atoman/internal/modules/portal"
 	"atoman/internal/modules/subscription"
 	"atoman/internal/service"
 
@@ -42,6 +43,7 @@ func RegisterV1Routes(
 	debate.RegisterRoutes(group, debate.NewService(db))
 	debate_voting.RegisterRoutes(group, debate_voting.NewService(db))
 	music.RegisterRoutes(group.Group("/music"), music.NewService(db))
+	portal.RegisterRoutes(group.Group("/portal"), portal.NewService(db))
 
 	handlers.SetupAuthRoutes(r, db, emailService)
 	handlers.SetupSiteRoutes(r, db)
