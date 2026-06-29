@@ -11,6 +11,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/service"
 )
 
@@ -152,7 +153,7 @@ func UpdateArtistHandler(db *gorm.DB, revisionService *service.RevisionService) 
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 		userRole := c.GetString("role")
 		autoApprove := userRole == "admin"
@@ -293,7 +294,7 @@ func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionS
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 		userRole := c.GetString("role")
 		autoApprove := userRole == "admin"
@@ -355,7 +356,7 @@ func RevertArtistHandler(revisionService *service.RevisionService) gin.HandlerFu
 		}
 		c.ShouldBindJSON(&input)
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 		revision, err := revisionService.RevertToRevision("artist", artistID, version, editorUUID, input.EditSummary)
 		if err != nil {
@@ -507,7 +508,7 @@ func MergeArtistsHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		mergedByUUID, _ := uuid.Parse(userID)
 
 		if err := db.Transaction(func(tx *gorm.DB) error {

@@ -1,22 +1,17 @@
 package handlers
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
 const turnstileSiteverifyURL = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
-
-type turnstileVerifyRequest struct {
-	Secret   string `json:"secret"`
-	Response string `json:"response"`
-	RemoteIP string `json:"remoteip,omitempty"`
-}
 
 type turnstileVerifyResponse struct {
 	Success    bool     `json:"success"`
@@ -40,17 +35,15 @@ func verifyTurnstileToken(token string, remoteIP string) error {
 		return fmt.Errorf("Turnstile verification is required")
 	}
 
-	payload, err := json.Marshal(turnstileVerifyRequest{
-		Secret:   secret,
-		Response: token,
-		RemoteIP: remoteIP,
-	})
-	if err != nil {
-		return fmt.Errorf("Failed to prepare Turnstile verification")
+	form := url.Values{}
+	form.Set("secret", secret)
+	form.Set("response", token)
+	if strings.TrimSpace(remoteIP) != "" {
+		form.Set("remoteip", remoteIP)
 	}
 
 	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Post(turnstileSiteverifyURL, "application/json", bytes.NewReader(payload))
+	resp, err := client.Post(turnstileSiteverifyURL, "application/x-www-form-urlencoded", strings.NewReader(form.Encode()))
 	if err != nil {
 		return fmt.Errorf("Failed to verify Turnstile token")
 	}

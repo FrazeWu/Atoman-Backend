@@ -23,6 +23,9 @@ func TestSetAndGetCurrentUser(t *testing.T) {
 	if !ok || legacyID != id {
 		t.Fatalf("expected legacy user_id %s, got %#v", id, legacyID)
 	}
+	if got := CurrentUserIDString(c); got != id.String() {
+		t.Fatalf("expected legacy user_id string %s, got %q", id, got)
+	}
 	legacyAltID, ok := c.Get("userID")
 	if !ok || legacyAltID != id {
 		t.Fatalf("expected legacy userID %s, got %#v", id, legacyAltID)

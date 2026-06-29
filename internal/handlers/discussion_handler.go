@@ -10,6 +10,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 )
 
 // SetupDiscussionRoutes registers discussion-related routes
@@ -266,7 +267,7 @@ func CreateAlbumDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		userUUID, _ := uuid.Parse(userID)
 
 		discussion := model.Discussion{
@@ -319,7 +320,7 @@ func CreateSongDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		userUUID, _ := uuid.Parse(userID)
 
 		discussion := model.Discussion{
@@ -383,7 +384,7 @@ func ReplyToDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		userUUID, _ := uuid.Parse(userID)
 
 		reply := model.Discussion{
@@ -439,7 +440,7 @@ func UpdateAlbumDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		// Check ownership
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		userRole := c.GetString("role")
 		if discussion.UserID.String() != userID && userRole != "admin" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "You can only edit your own discussions"})
@@ -517,7 +518,7 @@ func DeleteAlbumDiscussionHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		userRole := c.GetString("role")
 		if discussion.UserID.String() != userID && userRole != "admin" {
 			c.JSON(http.StatusForbidden, gin.H{"error": "You can only delete your own discussions"})

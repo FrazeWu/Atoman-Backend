@@ -29,8 +29,22 @@ func SetCurrentUser(c *gin.Context, user CurrentUser) {
 	// Temporary compatibility for legacy handlers. New code must use Current().
 	c.Set("user_id", user.ID)
 	c.Set("userID", user.ID)
+	c.Set("user_id_string", user.ID.String())
 	c.Set("username", user.Username)
 	c.Set("role", user.Role)
+}
+
+func CurrentUserIDString(c *gin.Context) string {
+	if value, ok := c.Get("user_id_string"); ok {
+		if userID, ok := value.(string); ok {
+			return userID
+		}
+	}
+	user, ok := Current(c)
+	if !ok {
+		return ""
+	}
+	return user.ID.String()
 }
 
 func Current(c *gin.Context) (CurrentUser, bool) {

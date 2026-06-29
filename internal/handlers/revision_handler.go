@@ -10,6 +10,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/service"
 )
 
@@ -206,7 +207,7 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 		}
 
 		// Get user info
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 
 		// Check if user is admin for auto-approval
@@ -298,7 +299,7 @@ func RevertAlbumHandler(revisionService *service.RevisionService) gin.HandlerFun
 		}
 		c.ShouldBindJSON(&input)
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 
 		revision, err := revisionService.RevertToRevision(
@@ -460,7 +461,7 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 		userRole := c.GetString("role")
 		autoApprove := (userRole == "admin")
@@ -537,7 +538,7 @@ func RevertSongHandler(revisionService *service.RevisionService) gin.HandlerFunc
 		}
 		c.ShouldBindJSON(&input)
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 
 		revision, err := revisionService.RevertToRevision(
@@ -588,7 +589,7 @@ func ApproveRevisionHandler(revisionService *service.RevisionService) gin.Handle
 		}
 		c.ShouldBindJSON(&input)
 
-		reviewerID := c.GetString("user_id")
+		reviewerID := authctx.CurrentUserIDString(c)
 		reviewerUUID, _ := uuid.Parse(reviewerID)
 
 		if err := revisionService.ApproveRevision(revisionID, reviewerUUID, input.ReviewNotes); err != nil {
@@ -631,7 +632,7 @@ func RejectRevisionHandler(revisionService *service.RevisionService) gin.Handler
 			return
 		}
 
-		reviewerID := c.GetString("user_id")
+		reviewerID := authctx.CurrentUserIDString(c)
 		reviewerUUID, _ := uuid.Parse(reviewerID)
 
 		if err := revisionService.RejectRevision(revisionID, reviewerUUID, input.ReviewNotes); err != nil {

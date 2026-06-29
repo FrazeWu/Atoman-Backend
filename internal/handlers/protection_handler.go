@@ -11,6 +11,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 )
 
 // SetupProtectionRoutes registers content protection routes
@@ -257,7 +258,7 @@ func setProtectionHandler(db *gorm.DB, contentType string) gin.HandlerFunc {
 			return
 		}
 
-		adminID := c.GetString("user_id")
+		adminID := authctx.CurrentUserIDString(c)
 		adminUUID, _ := uuid.Parse(adminID)
 
 		// Parse expiration if provided
@@ -494,7 +495,7 @@ func UpdateAlbumStatusHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		// Create a status change revision
-		adminID := c.GetString("user_id")
+		adminID := authctx.CurrentUserIDString(c)
 		adminUUID, _ := uuid.Parse(adminID)
 
 		// Get current revision to form chain

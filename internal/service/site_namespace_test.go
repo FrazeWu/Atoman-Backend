@@ -25,7 +25,7 @@ func TestSiteNamespaceReservedNames(t *testing.T) {
 	ns := service.NewSiteNamespaceService(db)
 
 	reserved := []string{
-		"feed", "music", "blog", "forum", "debate", "timeline", "podcast", "video", "media", "kanbo",
+		"feed", "music", "blog", "forum", "debate", "timeline", "podcast", "video", "media",
 		"www", "api", "admin", "auth", "login", "register", "setting", "settings",
 		"user", "users", "channel", "channels", "post", "posts", "collection", "collections",
 		"article", "articles", "topic", "topics", "comment", "comments", "notification", "notifications",

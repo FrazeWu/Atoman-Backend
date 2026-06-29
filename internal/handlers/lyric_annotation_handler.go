@@ -9,6 +9,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 )
 
 func SetupLyricAnnotationRoutes(router *gin.Engine, db *gorm.DB) {
@@ -102,7 +103,7 @@ func CreateSongAnnotationHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		userUUID, _ := uuid.Parse(userID)
 
 		annotation := model.LyricAnnotation{
@@ -151,7 +152,7 @@ func UpdateSongAnnotationHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		userUUID, _ := uuid.Parse(userID)
 
 		var annotation model.LyricAnnotation
@@ -210,7 +211,7 @@ func DeleteSongAnnotationHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		userID := c.GetString("user_id")
+		userID := authctx.CurrentUserIDString(c)
 		userUUID, _ := uuid.Parse(userID)
 		userRole := c.GetString("role")
 
