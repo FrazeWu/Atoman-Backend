@@ -916,7 +916,7 @@ If a safe local env is available, run with invalid S3 credentials and a valid da
 
 ```bash
 cd /home/fa/Atoman/Atoman-Backend
-STORAGE_TYPE=s3 AWS_ACCESS_KEY_ID=bad AWS_SECRET_ACCESS_KEY=bad go run cmd/start_server/main.go
+STORAGE_TYPE=s3 AWS_ACCESS_KEY_ID=bad AWS_SECRET_ACCESS_KEY=bad go run ./cmd/start_server
 ```
 
 Expected log contains:

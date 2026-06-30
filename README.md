@@ -18,9 +18,32 @@ Go backend service for API, authentication, data models, migrations, storage, an
 ```bash
 go build ./...
 go run cmd/migrate/main.go
-go run cmd/start_server/main.go
+ENV_FILE=.env.dev go run ./cmd/start_server
 go run cmd/create_admin/main.go
 ```
+
+## Environment Files
+
+Backend keeps three environment files:
+
+- `.env.example`: local template without real secrets
+- `.env.dev`: local development values
+- `.env.prod`: production values
+
+Use the startup command with an explicit env file:
+
+```bash
+ENV_FILE=.env.dev go run ./cmd/start_server
+ENV_FILE=.env.prod go run ./cmd/start_server
+```
+
+Local development uses:
+
+- `BASE_URL=http://localhost:8080`
+- local PostgreSQL via `DATABASE_URL`
+- local MinIO via `S3_ENDPOINT=http://localhost:9100`
+- empty `TURNSTILE_SECRET_KEY`
+- empty `AUTH_COOKIE_DOMAIN`
 
 ## Project Layout
 
@@ -41,21 +64,10 @@ go run cmd/create_admin/main.go
 Build the server binary:
 
 ```bash
-cd /home/fa/Atoman-Backend
 go build -o start_server ./cmd/start_server
 ```
 
-The production runtime reads environment variables from:
-
-```bash
-/home/fa/Atoman-Backend/.env.prod
-```
-
-Current deployment uses:
-
-- `BASE_URL=https://api.atoman.org`
-- PostgreSQL via `DATABASE_URL`
-- Cloudflare R2 via `S3_*` and `AWS_*`
+Production runtime reads environment variables from `.env.prod` through `systemd` or shell environment injection.
 
 ## systemd Deployment
 
@@ -145,6 +157,13 @@ The root path `/` intentionally returns `404`.
 
 ## Verification
 
+Local dependencies:
+
+```bash
+cd ..
+docker compose -f docker-compose.dev.yml up -d
+```
+
 Local backend:
 
 ```bash
@@ -169,4 +188,5 @@ openssl s_client -connect api.atoman.org:443 -servername api.atoman.org </dev/nu
 
 - API changes must be reflected in the API docs.
 - Run `go build ./...` before considering backend changes complete.
-- `STORAGE_TYPE=s3` is expected in production. Startup now fails fast if S3 initialization or validation fails.
+- Production does not use Docker Compose for the application process.
+- `docker-compose.dev.yml` is only for local PostgreSQL and MinIO dependencies.
