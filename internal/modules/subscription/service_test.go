@@ -103,3 +103,57 @@ func TestSubscriptionGroupRejectsDuplicateUserName(t *testing.T) {
 		t.Fatalf("expected 1 default group, got %d", count)
 	}
 }
+
+func TestCreateSubscriptionTreatsTrailingSlashExternalRSSAsSameSource(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{},
+		&model.FeedSource{},
+		&model.SubscriptionGroup{},
+		&model.Subscription{},
+	)
+
+	service := NewService(db)
+	user := model.User{Username: "alice_" + uuid.NewString()[:8], Email: uuid.NewString() + "@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	currentUser := authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser}
+	firstReq := CreateSubscriptionRequest{
+		TargetType: "external_rss",
+		RSSURL:     "https://example.com/feed.xml",
+		Title:      "Example Feed",
+	}
+	secondReq := CreateSubscriptionRequest{
+		TargetType: "external_rss",
+		RSSURL:     "https://example.com/feed.xml/",
+		Title:      "Example Feed",
+	}
+
+	firstCreated, err := service.CreateSubscription(currentUser, firstReq)
+	if err != nil {
+		t.Fatalf("create initial subscription: %v", err)
+	}
+
+	secondCreated, err := service.CreateSubscription(currentUser, secondReq)
+	if err == nil {
+		t.Fatalf("expected trailing slash subscription to conflict, got created id %s", secondCreated.ID)
+	}
+
+	var sourceCount int64
+	if err := db.Model(&model.FeedSource{}).Count(&sourceCount).Error; err != nil {
+		t.Fatalf("count feed sources: %v", err)
+	}
+	if sourceCount != 1 {
+		t.Fatalf("expected 1 feed source, got %d", sourceCount)
+	}
+
+	var source model.FeedSource
+	if err := db.First(&source, "id = ?", firstCreated.FeedSourceID).Error; err != nil {
+		t.Fatalf("load feed source: %v", err)
+	}
+	if source.RssURL != "https://example.com/feed.xml" {
+		t.Fatalf("expected normalized rss_url, got %q", source.RssURL)
+	}
+}

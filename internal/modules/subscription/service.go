@@ -46,6 +46,7 @@ func (s *Service) CreateSubscription(user authctx.CurrentUser, req CreateSubscri
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return model.Subscription{}, apperr.BadRequest("validation.invalid_request", "rss_url must be an absolute http/https URL")
 	}
+	rssURL = normalizeExternalRSSURL(parsed)
 
 	title := strings.TrimSpace(req.Title)
 
@@ -196,7 +197,7 @@ func findOrCreateExternalFeedSource(repo *Repo, rssURL string, title string) (mo
 func buildFeedSourceHash(targetType string, targetID *uuid.UUID, rssURL string) string {
 	var raw string
 	if targetType == "external_rss" {
-		raw = strings.TrimSpace(rssURL)
+		raw = normalizeExternalRSSURLString(rssURL)
 	} else {
 		raw = fmt.Sprintf("%s:%s", targetType, targetID.String())
 	}
@@ -204,4 +205,19 @@ func buildFeedSourceHash(targetType string, targetID *uuid.UUID, rssURL string) 
 	h := sha256.New()
 	h.Write([]byte(raw))
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+func normalizeExternalRSSURL(parsed *url.URL) string {
+	normalized := *parsed
+	normalized.Path = strings.TrimRight(normalized.Path, "/")
+	return normalized.String()
+}
+
+func normalizeExternalRSSURLString(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	parsed, err := url.ParseRequestURI(trimmed)
+	if err != nil {
+		return trimmed
+	}
+	return normalizeExternalRSSURL(parsed)
 }
