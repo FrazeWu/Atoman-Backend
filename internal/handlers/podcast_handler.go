@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -111,6 +112,7 @@ func GetPodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 		var ep model.PodcastEpisode
 		if err := db.Preload("Post.Collections").Preload("Channel").
+			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
 			First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
 			return
@@ -163,6 +165,16 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		chID, err := uuid.Parse(input.ChannelID)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid channel_id"})
+			return
+		}
+
+		var channel model.Channel
+		if err := db.First(&channel, "id = ?", chID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+			return
+		}
+		if !ownsChannel(channel.UserID, userID) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
 
@@ -525,6 +537,10 @@ func UploadPodcastAudio(s3Client *s3.S3) gin.HandlerFunc {
 				return
 			}
 		}
+		if !podcastAudioContentAllowed(file, ct, ext) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "音频文件内容与类型不匹配"})
+			return
+		}
 
 		const maxSize = 500 * 1024 * 1024 // 500 MB
 		if header.Size > maxSize {
@@ -609,6 +625,10 @@ func UploadPodcastCover(s3Client *s3.S3) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "封面仅支持 JPEG、PNG、WebP、GIF"})
 			return
 		}
+		if !podcastUploadContentTypeMatches(file, ct) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "封面图片内容与类型不匹配"})
+			return
+		}
 
 		const maxSize = 5 * 1024 * 1024 // 5 MB
 		if header.Size > maxSize {
@@ -650,5 +670,55 @@ func UploadPodcastCover(s3Client *s3.S3) gin.HandlerFunc {
 		}
 		coverURL := strings.TrimRight(os.Getenv("S3_URL_PREFIX"), "/") + "/" + s3Key
 		c.JSON(http.StatusOK, gin.H{"url": coverURL})
+	}
+}
+
+func podcastUploadContentTypeMatches(file interface {
+	Read([]byte) (int, error)
+	Seek(int64, int) (int64, error)
+}, expected string) bool {
+	var header [512]byte
+	n, err := file.Read(header[:])
+	if err != nil && err != io.EOF {
+		return false
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+	return http.DetectContentType(header[:n]) == expected
+}
+
+func podcastAudioContentAllowed(file interface {
+	Read([]byte) (int, error)
+	Seek(int64, int) (int64, error)
+}, declared string, ext string) bool {
+	sniffable := map[string]bool{
+		"audio/mpeg":     true,
+		"audio/mp3":      true,
+		"audio/wav":      true,
+		"audio/x-wav":    true,
+		"audio/vnd.wave": true,
+	}
+	if !sniffable[declared] && ext != ".mp3" && ext != ".wav" {
+		return true
+	}
+
+	var header [512]byte
+	n, err := file.Read(header[:])
+	if err != nil && err != io.EOF {
+		return false
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+
+	detected := http.DetectContentType(header[:n])
+	switch ext {
+	case ".mp3":
+		return detected == "audio/mpeg"
+	case ".wav":
+		return detected == "audio/wave"
+	default:
+		return false
 	}
 }

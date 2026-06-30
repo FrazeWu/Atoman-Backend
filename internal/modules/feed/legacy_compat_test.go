@@ -40,6 +40,8 @@ func newFeedHandlerTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionGroup{}, &model.Subscription{}, &model.FeedSource{}, &model.FeedItem{}, &model.FeedItemRead{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
 	return db
 }
 
@@ -54,6 +56,8 @@ func newFeedHandlerTestDBWithLogBuffer(t *testing.T, sink io.Writer) *gorm.DB {
 	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionGroup{}, &model.Subscription{}, &model.FeedSource{}, &model.FeedItem{}, &model.FeedItemRead{}); err != nil {
 		t.Fatalf("migrate with logger: %v", err)
 	}
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
 	return db
 }
 
@@ -206,6 +210,73 @@ func signedFeedTokenForTest(t *testing.T, user model.User) string {
 		t.Fatalf("sign token: %v", err)
 	}
 	return signed
+}
+
+func TestLegacyExploreFeedDefaultsAndUnknownSortUseRecentOrder(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+	}{
+		{name: "default", path: "/api/v1/feed/explore?limit=2"},
+		{name: "unknown", path: "/api/v1/feed/explore?sort=not-a-real-sort&limit=2"},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			var logs bytes.Buffer
+			db := newFeedHandlerTestDBWithLogBuffer(t, &logs)
+			source := model.FeedSource{
+				SourceType:   "external_rss",
+				RssURL:       "https://legacy-sort.example.com/feed.xml",
+				Hash:         "legacy-sort-" + tt.name,
+				Title:        "Legacy Sort Feed",
+				HealthStatus: "healthy",
+			}
+			if err := db.Create(&source).Error; err != nil {
+				t.Fatalf("create source: %v", err)
+			}
+			now := time.Now().UTC().Truncate(time.Second)
+			if err := db.Create(&model.FeedItem{
+				FeedSourceID: source.ID,
+				GUID:         "legacy-sort-older-" + tt.name,
+				Title:        "Older legacy sort item",
+				Link:         "https://legacy-sort.example.com/older",
+				PublishedAt:  now.Add(-time.Hour),
+				FetchedAt:    now,
+			}).Error; err != nil {
+				t.Fatalf("create older item: %v", err)
+			}
+			if err := db.Create(&model.FeedItem{
+				FeedSourceID: source.ID,
+				GUID:         "legacy-sort-newer-" + tt.name,
+				Title:        "Newer legacy sort item",
+				Link:         "https://legacy-sort.example.com/newer",
+				PublishedAt:  now,
+				FetchedAt:    now,
+			}).Error; err != nil {
+				t.Fatalf("create newer item: %v", err)
+			}
+
+			router := gin.New()
+			router.GET("/api/v1/feed/explore", GetExploreFeed(db))
+
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			rr := httptest.NewRecorder()
+			router.ServeHTTP(rr, req)
+
+			if rr.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d with body %s", rr.Code, rr.Body.String())
+			}
+			sql := strings.ToUpper(logs.String())
+			if strings.Contains(sql, "RANDOM()") {
+				t.Fatalf("expected recent order, got random SQL:\n%s", logs.String())
+			}
+			if !strings.Contains(sql, "ORDER BY PUBLISHED_AT DESC") {
+				t.Fatalf("expected published_at DESC order, got SQL:\n%s", logs.String())
+			}
+		})
+	}
 }
 
 func TestImportGlobalOPMLCreatesFeedSourcesWithoutSubscriptions(t *testing.T) {
@@ -1182,6 +1253,89 @@ func TestCreateSubscriptionReusesExistingFeedSourceForSameCanonicalURL(t *testin
 	}
 	if sources[0].CanonicalURL != "https://example.com/feed.xml" {
 		t.Fatalf("expected canonical url normalized, got %q", sources[0].CanonicalURL)
+	}
+}
+
+func TestCreateSubscriptionAllowsResubscribeAfterSoftDelete(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions", withFeedAuth(user.UUID, CreateSubscription(db)))
+	feed.DELETE("/subscriptions/:id", withFeedAuth(user.UUID, DeleteSubscription(db)))
+
+	first := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions", strings.NewReader(`{"target_type":"external_rss","rss_url":"https://example.com/feed.xml","title":"Example Feed"}`))
+	first.Header.Set("Content-Type", "application/json")
+	firstRR := httptest.NewRecorder()
+	router.ServeHTTP(firstRR, first)
+	if firstRR.Code != http.StatusCreated {
+		t.Fatalf("expected first subscription status %d, got %d with body %s", http.StatusCreated, firstRR.Code, firstRR.Body.String())
+	}
+
+	var firstPayload struct {
+		Data model.Subscription `json:"data"`
+	}
+	if err := json.Unmarshal(firstRR.Body.Bytes(), &firstPayload); err != nil {
+		t.Fatalf("decode first subscription: %v", err)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/feed/subscriptions/"+firstPayload.Data.ID.String(), nil)
+	deleteRR := httptest.NewRecorder()
+	router.ServeHTTP(deleteRR, deleteReq)
+	if deleteRR.Code != http.StatusOK {
+		t.Fatalf("expected delete status %d, got %d with body %s", http.StatusOK, deleteRR.Code, deleteRR.Body.String())
+	}
+
+	second := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions", strings.NewReader(`{"target_type":"external_rss","rss_url":"https://example.com/feed.xml","title":"Example Feed"}`))
+	second.Header.Set("Content-Type", "application/json")
+	secondRR := httptest.NewRecorder()
+	router.ServeHTTP(secondRR, second)
+	if secondRR.Code != http.StatusCreated {
+		t.Fatalf("expected resubscribe status %d, got %d with body %s", http.StatusCreated, secondRR.Code, secondRR.Body.String())
+	}
+
+	var activeCount int64
+	if err := db.Model(&model.Subscription{}).
+		Where("user_id = ? AND feed_source_id = ?", user.UUID, firstPayload.Data.FeedSourceID).
+		Count(&activeCount).Error; err != nil {
+		t.Fatalf("count active subscriptions: %v", err)
+	}
+	if activeCount != 1 {
+		t.Fatalf("expected 1 active subscription, got %d", activeCount)
+	}
+}
+
+func TestCreateSubscriptionMapsDuplicateToAlreadySubscribed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscriptions", withFeedAuth(user.UUID, CreateSubscription(db)))
+
+	first := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions", strings.NewReader(`{"target_type":"external_rss","rss_url":"https://example.com/race.xml"}`))
+	first.Header.Set("Content-Type", "application/json")
+	firstRR := httptest.NewRecorder()
+	router.ServeHTTP(firstRR, first)
+	if firstRR.Code != http.StatusCreated {
+		t.Fatalf("expected first subscription status %d, got %d with body %s", http.StatusCreated, firstRR.Code, firstRR.Body.String())
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions", strings.NewReader(`{"target_type":"external_rss","rss_url":"https://example.com/race.xml"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "Already subscribed to this source") {
+		t.Fatalf("expected already subscribed message, got body %s", rr.Body.String())
 	}
 }
 
@@ -2256,5 +2410,82 @@ func TestFeedItemStarMigrationPreservesExistingRowsWithNullGroup(t *testing.T) {
 	}
 	if !db.Migrator().HasColumn(&model.FeedItemStar{}, "GroupID") {
 		t.Fatal("expected feed_item_stars.group_id column")
+	}
+}
+
+func TestGetStarredItemsReturnsStableTotalAcrossPages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	if err := db.AutoMigrate(&model.FeedStarGroup{}, &model.FeedItemStar{}); err != nil {
+		t.Fatalf("migrate starred models: %v", err)
+	}
+
+	user := seedFeedTestUser(t, db)
+	source := seedAdminFeedSource(t, db, "Starred Feed", false)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	for i := 1; i <= 3; i++ {
+		item := model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         fmt.Sprintf("star-guid-%d", i),
+			Title:        fmt.Sprintf("Starred Item %d", i),
+			Link:         fmt.Sprintf("https://example.com/items/%d", i),
+			PublishedAt:  now.Add(-time.Duration(i) * time.Minute),
+			FetchedAt:    now,
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create feed item %d: %v", i, err)
+		}
+		if err := db.Create(&model.FeedItemStar{
+			UserID:     user.UUID,
+			FeedItemID: item.ID,
+			StarredAt:  now.Add(-time.Duration(i) * time.Minute),
+		}).Error; err != nil {
+			t.Fatalf("create star %d: %v", i, err)
+		}
+	}
+
+	router := gin.New()
+	router.GET("/api/v1/feed/stars", withFeedAuth(user.UUID, GetStarredItems(db)))
+
+	type response struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+		Page  int `json:"page"`
+		Total int `json:"total"`
+	}
+
+	requestPage := func(page int) response {
+		t.Helper()
+
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/feed/stars?page=%d&limit=2", page), nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("page %d: expected status 200, got %d with body %s", page, rr.Code, rr.Body.String())
+		}
+
+		var payload response
+		if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("page %d: decode response: %v", page, err)
+		}
+		return payload
+	}
+
+	page1 := requestPage(1)
+	if page1.Total != 3 {
+		t.Fatalf("expected page 1 total 3, got %d body=%+v", page1.Total, page1)
+	}
+	if len(page1.Items) != 2 {
+		t.Fatalf("expected page 1 to return 2 items, got %d", len(page1.Items))
+	}
+
+	page2 := requestPage(2)
+	if page2.Total != 3 {
+		t.Fatalf("expected page 2 total 3, got %d body=%+v", page2.Total, page2)
+	}
+	if len(page2.Items) != 1 {
+		t.Fatalf("expected page 2 to return 1 item, got %d", len(page2.Items))
 	}
 }

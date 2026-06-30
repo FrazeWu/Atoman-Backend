@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -135,8 +136,21 @@ func (s *UserBootstrapService) ensureDefaultSubscriptionGroup(userID uuid.UUID) 
 		UserID: userID,
 		Name:   defaultSubscriptionGroupName,
 	}
-	if err := s.db.Create(&group).Error; err != nil {
-		return nil, err
+	result := s.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "name"}},
+		TargetWhere: clause.Where{Exprs: []clause.Expression{
+			clause.Eq{Column: clause.Column{Name: "deleted_at"}, Value: nil},
+		}},
+		DoNothing: true,
+	}).Create(&group)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected == 0 {
+		err = s.db.Where("user_id = ? AND name = ?", userID, defaultSubscriptionGroupName).First(&group).Error
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return &group, nil

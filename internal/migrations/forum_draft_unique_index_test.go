@@ -12,7 +12,20 @@ import (
 
 func TestRunForumDraftUniqueIndexDeduplicatesAndCreatesIndex(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.ForumDraft{})
+	if err := db.Exec(`
+CREATE TABLE forum_drafts (
+	id TEXT PRIMARY KEY,
+	created_at DATETIME,
+	updated_at DATETIME,
+	deleted_at DATETIME,
+	user_id TEXT NOT NULL,
+	context_key TEXT NOT NULL,
+	title TEXT,
+	content TEXT,
+	tags TEXT
+)`).Error; err != nil {
+		t.Fatalf("create legacy forum_drafts table: %v", err)
+	}
 
 	userID := uuid.MustParse("11111111-1111-7111-8111-111111111111")
 	contextKey := "reply:topic-1"

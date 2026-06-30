@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -57,6 +58,23 @@ func boundedListLimit(raw string, fallback int, max int) int {
 	return limit
 }
 
+func sniffMultipartContentType(file multipartFile) (string, error) {
+	buffer := make([]byte, 512)
+	n, err := file.Read(buffer)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return "", err
+	}
+	return http.DetectContentType(buffer[:n]), nil
+}
+
+type multipartFile interface {
+	io.Reader
+	io.Seeker
+}
+
 // UploadVideoFile accepts a multipart video file and stores it locally or in S3.
 // Field name: "video". Returns { "url": "..." }.
 // UploadVideoFile godoc
@@ -84,7 +102,11 @@ func UploadVideoFile(s3Client *s3.S3) gin.HandlerFunc {
 		}
 		defer file.Close()
 
-		ct := header.Header.Get("Content-Type")
+		ct, err := sniffMultipartContentType(file)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无法读取视频文件"})
+			return
+		}
 		allowedVideo := map[string]string{
 			"video/mp4":       ".mp4",
 			"video/webm":      ".webm",
@@ -94,19 +116,8 @@ func UploadVideoFile(s3Client *s3.S3) gin.HandlerFunc {
 		}
 		ext, ok := allowedVideo[ct]
 		if !ok {
-			// Fallback: derive from filename
-			orig := strings.ToLower(header.Filename)
-			switch {
-			case strings.HasSuffix(orig, ".mp4"):
-				ext = ".mp4"
-			case strings.HasSuffix(orig, ".webm"):
-				ext = ".webm"
-			case strings.HasSuffix(orig, ".mov"):
-				ext = ".mov"
-			default:
-				c.JSON(http.StatusBadRequest, gin.H{"error": "仅支持 MP4、WebM、MOV 格式"})
-				return
-			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "仅支持 MP4、WebM、MOV 格式"})
+			return
 		}
 
 		const maxSize = 2 * 1024 * 1024 * 1024 // 2 GB
@@ -178,7 +189,11 @@ func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 		}
 		defer file.Close()
 
-		ct := header.Header.Get("Content-Type")
+		ct, err := sniffMultipartContentType(file)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "无法读取封面图片"})
+			return
+		}
 		allowedImg := map[string]bool{
 			"image/jpeg": true, "image/png": true,
 			"image/webp": true, "image/gif": true,
@@ -329,12 +344,18 @@ func GetVideo(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 		var video model.Video
 		if err := db.Preload("Channel").Preload("Tags").Preload("Collections").
+			Where("status = ? AND visibility = ?", "published", "public").
 			First(&video, "id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
 		c.JSON(http.StatusOK, video)
 	}
+}
+
+func firstPublicVideo(db *gorm.DB, id uuid.UUID, video *model.Video) error {
+	return db.Where("status = ? AND visibility = ?", "published", "public").
+		First(video, "id = ?", id).Error
 }
 
 // IncrementVideoView adds 1 to view_count. No auth required.
@@ -417,28 +438,33 @@ func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 			Status:       status,
 		}
 
-		if err := db.Create(&video).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		if err := service.EnsureVideoPreviewJob(db, &video); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "processing job failed: " + err.Error()})
-			return
-		}
-
-		if len(input.Tags) > 0 {
-			if err := attachVideoTags(db, &video, input.Tags); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "tags failed: " + err.Error()})
-				return
+		statusCode := http.StatusInternalServerError
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&video).Error; err != nil {
+				return err
 			}
-		}
 
-		if len(input.CollectionIDs) > 0 {
-			if err := assignVideoCollections(db, &video, input.CollectionIDs); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
+			if err := service.EnsureVideoPreviewJob(tx, &video); err != nil {
+				return fmt.Errorf("processing job failed: %w", err)
 			}
+
+			if len(input.Tags) > 0 {
+				if err := attachVideoTags(tx, &video, input.Tags); err != nil {
+					return fmt.Errorf("tags failed: %w", err)
+				}
+			}
+
+			if len(input.CollectionIDs) > 0 {
+				if err := assignVideoCollections(tx, &video, input.CollectionIDs); err != nil {
+					statusCode = http.StatusBadRequest
+					return err
+				}
+			}
+
+			return nil
+		}); err != nil {
+			c.JSON(statusCode, gin.H{"error": err.Error()})
+			return
 		}
 
 		db.Preload("Channel").Preload("Tags").Preload("Collections").First(&video, "id = ?", video.ID)
@@ -513,38 +539,45 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 			updates["status"] = *input.Status
 		}
 
-		if len(updates) > 0 {
-			if err := db.Model(&video).Updates(updates).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
+		statusCode := http.StatusInternalServerError
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if len(updates) > 0 {
+				if err := tx.Model(&video).Updates(updates).Error; err != nil {
+					return err
+				}
+				if input.ChannelID != nil {
+					video.ChannelID = input.ChannelID
+				}
 			}
-		}
 
-		if input.Tags != nil {
-			if err := db.Model(&video).Association("Tags").Unscoped().Clear(); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			if len(input.Tags) > 0 {
-				if err := attachVideoTags(db, &video, input.Tags); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-					return
+			if input.Tags != nil {
+				if err := tx.Model(&video).Association("Tags").Unscoped().Clear(); err != nil {
+					return err
+				}
+				if len(input.Tags) > 0 {
+					if err := attachVideoTags(tx, &video, input.Tags); err != nil {
+						return err
+					}
 				}
 			}
-		}
 
-		if input.CollectionIDs != nil {
-			if len(input.CollectionIDs) == 0 {
-				if err := db.Model(&video).Association("Collections").Clear(); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-					return
-				}
-			} else {
-				if err := assignVideoCollections(db, &video, input.CollectionIDs); err != nil {
-					c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-					return
+			if input.CollectionIDs != nil {
+				if len(input.CollectionIDs) == 0 {
+					if err := tx.Model(&video).Association("Collections").Clear(); err != nil {
+						return err
+					}
+				} else {
+					if err := assignVideoCollections(tx, &video, input.CollectionIDs); err != nil {
+						statusCode = http.StatusBadRequest
+						return err
+					}
 				}
 			}
+
+			return nil
+		}); err != nil {
+			c.JSON(statusCode, gin.H{"error": err.Error()})
+			return
 		}
 
 		db.Preload("Channel").Preload("Tags").Preload("Collections").First(&video, "id = ?", video.ID)
@@ -785,6 +818,12 @@ func GetVideoComments(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		var video model.Video
+		if err := firstPublicVideo(db, videoID, &video); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Video not found"})
+			return
+		}
+
 		var comments []model.Comment
 		if err := db.Preload("User").
 			Where("target_type = ? AND target_id = ? AND status = ?", "video", videoID, "visible").
@@ -834,7 +873,7 @@ func CreateVideoComment(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var video model.Video
-		if err := db.First(&video, "id = ?", videoID).Error; err != nil {
+		if err := firstPublicVideo(db, videoID, &video); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Video not found"})
 			return
 		}

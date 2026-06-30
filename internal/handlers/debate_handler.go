@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -8,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
@@ -421,27 +423,42 @@ func VoteToConclude(db *gorm.DB) gin.HandlerFunc {
 		userID, _ := c.Get("user_id")
 		userUUID := userID.(uuid.UUID)
 
-		// Check if user already voted to conclude
-		var existing model.DebateConcludeVote
-		if err := db.Where("debate_id = ? AND user_id = ?", debate.ID, userUUID).First(&existing).Error; err == nil {
+		err := db.Transaction(func(tx *gorm.DB) error {
+			var existing model.DebateConcludeVote
+			if err := tx.Where("debate_id = ? AND user_id = ?", debate.ID, userUUID).First(&existing).Error; err == nil {
+				return gorm.ErrDuplicatedKey
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+
+			vote := model.DebateConcludeVote{
+				DebateID: debate.ID,
+				UserID:   userUUID,
+			}
+			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&vote)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				return gorm.ErrDuplicatedKey
+			}
+
+			return tx.Model(&model.Debate{}).Where("id = ?", debate.ID).
+				UpdateColumn("conclude_vote_count", gorm.Expr("conclude_vote_count + 1")).Error
+		})
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
 			c.JSON(http.StatusConflict, gin.H{"error": "Already voted to conclude"})
 			return
 		}
-
-		vote := model.DebateConcludeVote{
-			DebateID: debate.ID,
-			UserID:   userUUID,
-		}
-		if err := db.Create(&vote).Error; err != nil {
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record vote"})
 			return
 		}
 
-		newCount := debate.ConcludeVoteCount + 1
-		db.Model(&debate).Update("conclude_vote_count", newCount)
+		db.First(&debate, debate.ID)
 
 		// Auto-conclude if threshold reached
-		if newCount >= debate.ConcludeThreshold {
+		if debate.ConcludeVoteCount >= debate.ConcludeThreshold {
 			now := time.Now()
 			db.Model(&debate).Updates(map[string]interface{}{
 				"status":          "concluded",
@@ -928,40 +945,55 @@ func VoteArgument(db *gorm.DB) gin.HandlerFunc {
 		userID, _ := c.Get("user_id")
 		userUUID := userID.(uuid.UUID)
 
-		// Check if user already voted
-		var existingVote model.DebateVote
-		result := db.Where("argument_id = ? AND user_id = ?", argumentID, userUUID).First(&existingVote)
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			var existingVote model.DebateVote
+			result := tx.Where("argument_id = ? AND user_id = ?", argument.ID, userUUID).First(&existingVote)
+			if result.Error == nil {
+				if existingVote.VoteType == input.VoteType {
+					if err := tx.Unscoped().Delete(&existingVote).Error; err != nil {
+						return err
+					}
+					return tx.Model(&model.Argument{}).Where("id = ?", argument.ID).
+						UpdateColumn("vote_count", gorm.Expr("vote_count - ?", existingVote.VoteType)).Error
+				}
 
-		if result.Error == nil {
-			// Update existing vote
-			if existingVote.VoteType == input.VoteType {
-				// Same vote, remove it
-				db.Delete(&existingVote)
-				db.Model(&argument).Update("vote_count", argument.VoteCount-existingVote.VoteType)
-			} else {
-				// Different vote, update and record history
 				oldVoteType := existingVote.VoteType
-				db.Model(&existingVote).Update("vote_type", input.VoteType)
-				db.Model(&argument).Update("vote_count", argument.VoteCount-oldVoteType+input.VoteType)
-
-				// Record history
+				if err := tx.Model(&existingVote).Update("vote_type", input.VoteType).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&model.Argument{}).Where("id = ?", argument.ID).
+					UpdateColumn("vote_count", gorm.Expr("vote_count - ? + ?", oldVoteType, input.VoteType)).Error; err != nil {
+					return err
+				}
 				history := model.VoteHistory{
 					ArgumentID:  argument.ID,
 					UserID:      userUUID,
 					OldVoteType: oldVoteType,
 					NewVoteType: input.VoteType,
 				}
-				db.Create(&history)
+				return tx.Create(&history).Error
 			}
-		} else {
-			// Create new vote
+			if !errors.Is(result.Error, gorm.ErrRecordNotFound) {
+				return result.Error
+			}
+
 			vote := model.DebateVote{
 				ArgumentID: argument.ID,
 				UserID:     userUUID,
 				VoteType:   input.VoteType,
 			}
-			db.Create(&vote)
-			db.Model(&argument).Update("vote_count", argument.VoteCount+input.VoteType)
+			createResult := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&vote)
+			if createResult.Error != nil {
+				return createResult.Error
+			}
+			if createResult.RowsAffected == 0 {
+				return nil
+			}
+			return tx.Model(&model.Argument{}).Where("id = ?", argument.ID).
+				UpdateColumn("vote_count", gorm.Expr("vote_count + ?", input.VoteType)).Error
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to record vote"})
+			return
 		}
 
 		db.Preload("User").First(&argument, argument.ID)
@@ -995,8 +1027,16 @@ func RemoveVote(db *gorm.DB) gin.HandlerFunc {
 		var argument model.Argument
 		db.First(&argument, argumentID)
 
-		db.Delete(&vote)
-		db.Model(&argument).Update("vote_count", argument.VoteCount-vote.VoteType)
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Unscoped().Delete(&vote).Error; err != nil {
+				return err
+			}
+			return tx.Model(&model.Argument{}).Where("id = ?", argument.ID).
+				UpdateColumn("vote_count", gorm.Expr("vote_count - ?", vote.VoteType)).Error
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove vote"})
+			return
+		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "Vote removed"})
 	}

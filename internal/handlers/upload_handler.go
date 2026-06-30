@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -120,6 +121,10 @@ func UploadAsset(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			httpx.Error(c, apperr.BadRequest("upload.invalid_content_type", "Unsupported file type"))
 			return
 		}
+		if !uploadContentMatchesDeclared(file, contentType) {
+			httpx.Error(c, apperr.BadRequest("upload.content_type_mismatch", "File content does not match declared type"))
+			return
+		}
 		if header.Size <= 0 {
 			httpx.Error(c, apperr.BadRequest("upload.empty_file", "File is empty"))
 			return
@@ -172,6 +177,26 @@ func allowedImageUploadTypes() map[string]bool {
 		"image/gif":  true,
 		"image/webp": true,
 	}
+}
+
+func uploadContentMatchesDeclared(file interface {
+	Read([]byte) (int, error)
+	Seek(int64, int) (int64, error)
+}, declared string) bool {
+	if !strings.HasPrefix(declared, "image/") {
+		return true
+	}
+
+	var header [512]byte
+	n, err := file.Read(header[:])
+	if err != nil && err != io.EOF {
+		return false
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+
+	return http.DetectContentType(header[:n]) == declared
 }
 
 func uniqueUploadFilename(originalName string, contentType string) string {

@@ -15,6 +15,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/storage"
 )
 
@@ -322,13 +323,18 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			defer file.Close()
 
 			if os.Getenv("STORAGE_TYPE") == "s3" {
-					if !requireS3(c, s3Client) {
-						return
-					}
+				if !requireS3(c, s3Client) {
+					return
+				}
 
 				safeArtist := storage.SanitizeName(input.Artist)
 				safeAlbum := storage.SanitizeName(input.Album)
-				key := "music/" + safeArtist + "/" + safeAlbum + "/" + header.Filename
+				safeFilename, err := storage.SafeUploadFilename(header.Filename)
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid audio filename"})
+					return
+				}
+				key := "music/" + safeArtist + "/" + safeAlbum + "/" + safeFilename
 				_, err = s3Client.PutObject(&s3.PutObjectInput{
 					Bucket: aws.String(os.Getenv("S3_BUCKET")),
 					Key:    aws.String(key),
@@ -365,6 +371,11 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			if err == nil {
 				defer coverFile.Close()
 
+				if status, message := validateUploadedImageFile(coverFile, coverHeader); status != http.StatusOK {
+					c.JSON(status, gin.H{"error": message})
+					return
+				}
+
 				if os.Getenv("STORAGE_TYPE") == "s3" {
 					if !requireS3(c, s3Client) {
 						return
@@ -372,7 +383,12 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 
 					safeArtist := storage.SanitizeName(input.Artist)
 					safeAlbum := storage.SanitizeName(input.Album)
-					coverKey := "music/" + safeArtist + "/" + safeAlbum + "/cover_" + coverHeader.Filename
+					safeCoverFilename, err := storage.SafeUploadFilename("cover_" + coverHeader.Filename)
+					if err != nil {
+						c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cover filename"})
+						return
+					}
+					coverKey := "music/" + safeArtist + "/" + safeAlbum + "/" + safeCoverFilename
 					_, err = s3Client.PutObject(&s3.PutObjectInput{
 						Bucket: aws.String(os.Getenv("S3_BUCKET")),
 						Key:    aws.String(coverKey),
@@ -571,6 +587,11 @@ func UpdateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		if err == nil {
 			defer coverFile.Close()
 
+			if status, message := validateUploadedImageFile(coverFile, coverHeader); status != http.StatusOK {
+				c.JSON(status, gin.H{"error": message})
+				return
+			}
+
 			safeArtist := strings.ReplaceAll(input.Artist, "/", "-")
 			if safeArtist == "" {
 				safeArtist = "Unknown Artist"
@@ -581,10 +602,15 @@ func UpdateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			}
 
 			if os.Getenv("STORAGE_TYPE") == "s3" {
-					if !requireS3(c, s3Client) {
-						return
-					}
-				coverKey := "music/" + safeArtist + "/" + safeAlbum + "/cover_" + coverHeader.Filename
+				if !requireS3(c, s3Client) {
+					return
+				}
+				safeCoverFilename, err := storage.SafeUploadFilename("cover_" + coverHeader.Filename)
+				if err != nil {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid cover filename"})
+					return
+				}
+				coverKey := "music/" + safeArtist + "/" + safeAlbum + "/" + safeCoverFilename
 
 				_, err = s3Client.PutObject(&s3.PutObjectInput{
 					Bucket: aws.String(os.Getenv("S3_BUCKET")),
@@ -703,6 +729,17 @@ func DeleteSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		var song model.Song
 		if err := db.First(&song, "id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Song not found"})
+			return
+		}
+
+		currentUser, ok := authctx.Current(c)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+			return
+		}
+		isOwner := song.UploadedBy != nil && *song.UploadedBy == currentUser.ID
+		if !isOwner && !authctx.RoleAtLeast(currentUser.Role, authctx.RoleAdmin) {
+			c.JSON(http.StatusForbidden, gin.H{"error": "You can only delete your own songs"})
 			return
 		}
 

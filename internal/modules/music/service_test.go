@@ -1,9 +1,12 @@
 package music
 
 import (
+	"errors"
+	"sync"
 	"testing"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
@@ -41,6 +44,159 @@ func createModerator(t *testing.T, db *gorm.DB) authctx.CurrentUser {
 		t.Fatalf("create moderator: %v", err)
 	}
 	return authctx.CurrentUser{ID: moderatorModel.UUID, Username: moderatorModel.Username, Role: authctx.RoleModerator}
+}
+
+func TestApproveEditOnlyAllowsOneDecision(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	moderator := createModerator(t, db)
+	edit := model.MusicEdit{
+		Type:        "create_artist",
+		EntityType:  "artist",
+		SubmittedBy: user.ID,
+		Status:      "open",
+		Reason:      "seed edit",
+		PayloadJSON: `{"name":"Approve Once Artist"}`,
+		ChangesJSON: "{}",
+		SourcesJSON: "[]",
+		Votable:     true,
+	}
+	if err := db.Create(&edit).Error; err != nil {
+		t.Fatalf("create edit: %v", err)
+	}
+
+	first, err := svc.ApproveEdit(moderator, edit.ID, "approve once")
+	if err != nil {
+		t.Fatalf("first approve: %v", err)
+	}
+	if first.Status != "applied" {
+		t.Fatalf("expected applied edit, got %#v", first)
+	}
+
+	_, err = svc.ApproveEdit(moderator, edit.ID, "approve twice")
+	if !isEditNotOpenError(err) {
+		t.Fatalf("expected edit_not_open on second approve, got %v", err)
+	}
+
+	var decisions int64
+	if err := db.Model(&model.MusicEditDecision{}).Where("edit_id = ?", edit.ID).Count(&decisions).Error; err != nil {
+		t.Fatalf("count decisions: %v", err)
+	}
+	if decisions != 1 {
+		t.Fatalf("expected one decision, got %d", decisions)
+	}
+}
+
+func TestApproveThenRejectEditOnlyAllowsOneDecisionAndOneApply(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	moderator := createModerator(t, db)
+	edit := model.MusicEdit{
+		Type:        "create_artist",
+		EntityType:  "artist",
+		SubmittedBy: user.ID,
+		Status:      "open",
+		Reason:      "seed artist",
+		PayloadJSON: `{"name":"One Shot Artist"}`,
+		ChangesJSON: "{}",
+		SourcesJSON: "[]",
+		Votable:     true,
+	}
+	if err := db.Create(&edit).Error; err != nil {
+		t.Fatalf("create edit: %v", err)
+	}
+
+	if _, err := svc.ApproveEdit(moderator, edit.ID, "approve"); err != nil {
+		t.Fatalf("approve edit: %v", err)
+	}
+	_, err := svc.RejectEdit(moderator, edit.ID, "reject too late")
+	if !isEditNotOpenError(err) {
+		t.Fatalf("expected edit_not_open on reject after approve, got %v", err)
+	}
+
+	var artists int64
+	if err := db.Model(&model.Artist{}).Where("name = ?", "One Shot Artist").Count(&artists).Error; err != nil {
+		t.Fatalf("count artists: %v", err)
+	}
+	if artists != 1 {
+		t.Fatalf("expected one applied artist, got %d", artists)
+	}
+
+	var decisions int64
+	if err := db.Model(&model.MusicEditDecision{}).Where("edit_id = ?", edit.ID).Count(&decisions).Error; err != nil {
+		t.Fatalf("count decisions: %v", err)
+	}
+	if decisions != 1 {
+		t.Fatalf("expected one decision, got %d", decisions)
+	}
+}
+
+func isEditNotOpenError(err error) bool {
+	var appErr *apperr.AppError
+	return errors.As(err, &appErr) && appErr.Code == "music.edit_not_open"
+}
+
+func TestConcurrentApproveEditOnlyAppliesOnce(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	moderator := createModerator(t, db)
+	edit := model.MusicEdit{
+		Type:        "create_artist",
+		EntityType:  "artist",
+		SubmittedBy: user.ID,
+		Status:      "open",
+		Reason:      "seed artist",
+		PayloadJSON: `{"name":"Concurrent Artist"}`,
+		ChangesJSON: "{}",
+		SourcesJSON: "[]",
+		Votable:     true,
+	}
+	if err := db.Create(&edit).Error; err != nil {
+		t.Fatalf("create edit: %v", err)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := svc.ApproveEdit(moderator, edit.ID, "approve")
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	successes := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		if !isEditNotOpenError(err) {
+			t.Fatalf("expected losing approval to return edit_not_open, got %v", err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("expected exactly one successful approval, got %d", successes)
+	}
+
+	var artists int64
+	if err := db.Model(&model.Artist{}).Where("name = ?", "Concurrent Artist").Count(&artists).Error; err != nil {
+		t.Fatalf("count artists: %v", err)
+	}
+	if artists != 1 {
+		t.Fatalf("expected one applied artist, got %d", artists)
+	}
+
+	var decisions int64
+	if err := db.Model(&model.MusicEditDecision{}).Where("edit_id = ?", edit.ID).Count(&decisions).Error; err != nil {
+		t.Fatalf("count decisions: %v", err)
+	}
+	if decisions != 1 {
+		t.Fatalf("expected one decision, got %d", decisions)
+	}
 }
 
 func TestSubmitEditAutoAppliesUpdateArtistForMainWikiFlow(t *testing.T) {

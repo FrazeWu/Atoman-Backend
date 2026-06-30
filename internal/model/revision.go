@@ -9,11 +9,11 @@ import (
 // Revision represents a version of Album/Song/Artist content
 type Revision struct {
 	Base
-	ContentType string    `json:"content_type" gorm:"not null;index"` // 'album' / 'song' / 'artist'
-	ContentID   uuid.UUID `json:"content_id" gorm:"type:uuid;not null;index"`
+	ContentType string    `json:"content_type" gorm:"not null;index;uniqueIndex:idx_revisions_content_version,priority:1;uniqueIndex:idx_revisions_current_content,priority:1,where:is_current = true"` // 'album' / 'song' / 'artist'
+	ContentID   uuid.UUID `json:"content_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_revisions_content_version,priority:2;uniqueIndex:idx_revisions_current_content,priority:2,where:is_current = true"`
 
 	// Version control
-	VersionNumber      int        `json:"version_number" gorm:"not null"`
+	VersionNumber      int        `json:"version_number" gorm:"not null;uniqueIndex:idx_revisions_content_version,priority:3"`
 	PreviousRevisionID *uuid.UUID `json:"previous_revision_id" gorm:"type:uuid"`
 	PreviousRevision   *Revision  `json:"previous_revision,omitempty" gorm:"foreignKey:PreviousRevisionID;references:ID"`
 
@@ -27,11 +27,11 @@ type Revision struct {
 	EditType    string    `json:"edit_type" gorm:"default:'edit'"` // 'creation' / 'edit' / 'revert'
 
 	// Status and review
-	Status       string     `json:"status" gorm:"default:'pending'"` // 'draft' / 'pending' / 'approved' / 'rejected' / 'superseded'
-	ReviewerID   *uuid.UUID `json:"reviewer_id" gorm:"type:uuid"`
-	Reviewer     *User      `json:"reviewer,omitempty" gorm:"foreignKey:ReviewerID;references:UUID"`
-	ReviewedAt   *time.Time `json:"reviewed_at"`
-	ReviewNotes  string     `json:"review_notes" gorm:"type:text"`
+	Status      string     `json:"status" gorm:"default:'pending'"` // 'draft' / 'pending' / 'approved' / 'rejected' / 'superseded'
+	ReviewerID  *uuid.UUID `json:"reviewer_id" gorm:"type:uuid"`
+	Reviewer    *User      `json:"reviewer,omitempty" gorm:"foreignKey:ReviewerID;references:UUID"`
+	ReviewedAt  *time.Time `json:"reviewed_at"`
+	ReviewNotes string     `json:"review_notes" gorm:"type:text"`
 
 	// Metadata
 	IsCurrent bool      `json:"is_current" gorm:"default:false;index"` // Whether this is the currently active version
@@ -49,8 +49,8 @@ type EditConflict struct {
 	ContentID   uuid.UUID `json:"content_id" gorm:"type:uuid;not null;index"`
 
 	// Conflicting revisions
-	BaseRevisionID     uuid.UUID `json:"base_revision_id" gorm:"type:uuid;not null"`       // Base revision user was editing from
-	ConflictRevisionID uuid.UUID `json:"conflict_revision_id" gorm:"type:uuid;not null"`   // Revision that conflicts
+	BaseRevisionID     uuid.UUID `json:"base_revision_id" gorm:"type:uuid;not null"`     // Base revision user was editing from
+	ConflictRevisionID uuid.UUID `json:"conflict_revision_id" gorm:"type:uuid;not null"` // Revision that conflicts
 	BaseRevision       *Revision `json:"base_revision,omitempty" gorm:"foreignKey:BaseRevisionID;references:ID"`
 	ConflictRevision   *Revision `json:"conflict_revision,omitempty" gorm:"foreignKey:ConflictRevisionID;references:ID"`
 
@@ -61,11 +61,11 @@ type EditConflict struct {
 	Value2    string `json:"value2" gorm:"type:text"` // Conflicting value
 
 	// Resolution
-	ResolvedValue     *string    `json:"resolved_value" gorm:"type:text"`
-	ResolvedBy        *uuid.UUID `json:"resolved_by" gorm:"type:uuid"`
-	ResolvedByUser    *User      `json:"resolved_by_user,omitempty" gorm:"foreignKey:ResolvedBy;references:UUID"`
-	ResolvedAt        *time.Time `json:"resolved_at"`
-	ResolutionType    string     `json:"resolution_type"` // 'auto_merge' / 'manual' / 'keep_mine' / 'take_theirs'
+	ResolvedValue  *string    `json:"resolved_value" gorm:"type:text"`
+	ResolvedBy     *uuid.UUID `json:"resolved_by" gorm:"type:uuid"`
+	ResolvedByUser *User      `json:"resolved_by_user,omitempty" gorm:"foreignKey:ResolvedBy;references:UUID"`
+	ResolvedAt     *time.Time `json:"resolved_at"`
+	ResolutionType string     `json:"resolution_type"` // 'auto_merge' / 'manual' / 'keep_mine' / 'take_theirs'
 
 	Status    string    `json:"status" gorm:"default:'unresolved'"` // 'unresolved' / 'resolved'
 	CreatedAt time.Time `json:"created_at"`
@@ -108,9 +108,9 @@ type Discussion struct {
 	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null"`
 	User   *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
 
-	Content  string     `json:"content" gorm:"type:text;not null"` // Markdown format
-	ParentID *uuid.UUID `json:"parent_id" gorm:"type:uuid"`        // For nested replies
-	Parent   *Discussion `json:"parent,omitempty" gorm:"foreignKey:ParentID;references:ID"`
+	Content  string       `json:"content" gorm:"type:text;not null"` // Markdown format
+	ParentID *uuid.UUID   `json:"parent_id" gorm:"type:uuid"`        // For nested replies
+	Parent   *Discussion  `json:"parent,omitempty" gorm:"foreignKey:ParentID;references:ID"`
 	Replies  []Discussion `json:"replies,omitempty" gorm:"foreignKey:ParentID"`
 
 	Status string `json:"status" gorm:"default:'active'"` // 'active' / 'resolved' / 'deleted'
@@ -122,4 +122,18 @@ type Discussion struct {
 
 func (Discussion) TableName() string {
 	return "discussions"
+}
+
+// DiscussionReadState stores read progress per user instead of on the discussion row.
+type DiscussionReadState struct {
+	Base
+	DiscussionID uuid.UUID  `json:"discussion_id" gorm:"type:uuid;not null;uniqueIndex:idx_discussion_read_states_discussion_user,priority:1"`
+	Discussion   Discussion `json:"-" gorm:"foreignKey:DiscussionID;references:ID"`
+	UserID       uuid.UUID  `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_discussion_read_states_discussion_user,priority:2"`
+	User         *User      `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	ReadAt       time.Time  `json:"read_at" gorm:"not null;index"`
+}
+
+func (DiscussionReadState) TableName() string {
+	return "discussion_read_states"
 }

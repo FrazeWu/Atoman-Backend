@@ -230,15 +230,25 @@ func (s *Service) ApproveEdit(user authctx.CurrentUser, editID uuid.UUID, reason
 	var out model.MusicEdit
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		repo := NewRepo(tx)
+		claimed, err := repo.ClaimOpenEdit(editID, "applying")
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			if _, err := repo.GetEdit(editID); errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("music.edit_not_found", "Edit not found")
+			} else if err != nil {
+				return err
+			}
+			return apperr.Unprocessable("music.edit_not_open", "Edit is not open")
+		}
+
 		edit, err := repo.GetEdit(editID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return apperr.NotFound("music.edit_not_found", "Edit not found")
 			}
 			return err
-		}
-		if edit.Status != "open" {
-			return apperr.Unprocessable("music.edit_not_open", "Edit is not open")
 		}
 		if err := applyEdit(tx, &edit); err != nil {
 			return err
@@ -280,15 +290,25 @@ func (s *Service) RejectEdit(user authctx.CurrentUser, editID uuid.UUID, reason 
 	var out model.MusicEdit
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		repo := NewRepo(tx)
+		claimed, err := repo.ClaimOpenEdit(editID, "rejected")
+		if err != nil {
+			return err
+		}
+		if !claimed {
+			if _, err := repo.GetEdit(editID); errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("music.edit_not_found", "Edit not found")
+			} else if err != nil {
+				return err
+			}
+			return apperr.Unprocessable("music.edit_not_open", "Edit is not open")
+		}
+
 		edit, err := repo.GetEdit(editID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return apperr.NotFound("music.edit_not_found", "Edit not found")
 			}
 			return err
-		}
-		if edit.Status != "open" {
-			return apperr.Unprocessable("music.edit_not_open", "Edit is not open")
 		}
 
 		edit.Status = "rejected"

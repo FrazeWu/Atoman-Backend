@@ -73,6 +73,10 @@ func UploadBlogImage(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Only JPEG, PNG, GIF, and WebP images are allowed"})
 			return
 		}
+		if !uploadContentMatchesDeclared(file, contentType) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "File content does not match declared image type"})
+			return
+		}
 
 		// Validate file size (max 5 MB)
 		const maxSize = 5 * 1024 * 1024

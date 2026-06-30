@@ -428,35 +428,37 @@ func (h *Handler) updatePost(c *gin.Context) {
 		updates["allow_comments"] = *req.AllowComments
 	}
 
-	if err := h.service.db.Model(&post).Updates(updates).Error; err != nil {
+	shouldUpdateCollections := req.ChannelID != nil || req.CollectionIDs != nil
+	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&post).Updates(updates).Error; err != nil {
+			return err
+		}
+
+		if shouldUpdateCollections {
+			if targetChannelID != nil {
+				defaultCollection, err := ensureDefaultCollection(tx, *targetChannelID)
+				if err != nil {
+					return err
+				}
+				collectionsToAssign := make([]model.Collection, 0, len(selectedCollections)+1)
+				collectionsToAssign = append(collectionsToAssign, *defaultCollection)
+				for _, collection := range selectedCollections {
+					if collection.ID == defaultCollection.ID {
+						continue
+					}
+					collectionsToAssign = append(collectionsToAssign, collection)
+				}
+				if err := tx.Model(&post).Association("Collections").Replace(collectionsToAssign); err != nil {
+					return err
+				}
+			} else if err := tx.Model(&post).Association("Collections").Clear(); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		httpx.Error(c, err)
 		return
-	}
-
-	shouldUpdateCollections := req.ChannelID != nil || req.CollectionIDs != nil
-	if shouldUpdateCollections {
-		if targetChannelID != nil {
-			defaultCollection, err := ensureDefaultCollection(h.service.db, *targetChannelID)
-			if err != nil {
-				httpx.Error(c, err)
-				return
-			}
-			collectionsToAssign := make([]model.Collection, 0, len(selectedCollections)+1)
-			collectionsToAssign = append(collectionsToAssign, *defaultCollection)
-			for _, collection := range selectedCollections {
-				if collection.ID == defaultCollection.ID {
-					continue
-				}
-				collectionsToAssign = append(collectionsToAssign, collection)
-			}
-			if err := h.service.db.Model(&post).Association("Collections").Replace(collectionsToAssign); err != nil {
-				httpx.Error(c, err)
-				return
-			}
-		} else if err := h.service.db.Model(&post).Association("Collections").Clear(); err != nil {
-			httpx.Error(c, err)
-			return
-		}
 	}
 
 	if err := h.service.db.Preload("Channel").Preload("Collections").First(&post, "id = ?", post.ID).Error; err != nil {

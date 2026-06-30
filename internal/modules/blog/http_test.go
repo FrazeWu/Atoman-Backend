@@ -213,6 +213,41 @@ func TestRegisterRoutesCreatePostReturnsCreatedPost(t *testing.T) {
 	}
 }
 
+func TestCreatePostRollsBackWhenCollectionAssociationFails(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	if err := db.Exec(`
+		CREATE TRIGGER fail_post_collection_insert
+		BEFORE INSERT ON post_collections
+		BEGIN
+			SELECT RAISE(FAIL, 'post collection failed');
+		END;
+	`).Error; err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	_, err = service.CreatePost(user, CreatePostRequest{
+		Title:     "Should Roll Back",
+		Content:   "content",
+		ChannelID: channel.ID,
+		Status:    "draft",
+	})
+	if err == nil {
+		t.Fatal("expected create post to fail")
+	}
+
+	var count int64
+	if err := db.Model(&model.Post{}).Where("title = ?", "Should Roll Back").Count(&count).Error; err != nil {
+		t.Fatalf("count posts: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected post insert rolled back, count=%d", count)
+	}
+}
+
 func TestRegisterRoutesCreatePostAcceptsSummaryField(t *testing.T) {
 	service, _, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
@@ -378,6 +413,56 @@ func TestRegisterRoutesUpdatePostUpdatesOwnedPost(t *testing.T) {
 	}
 	if len(updated.Collections) != 2 {
 		t.Fatalf("expected default and selected collection, got %#v", updated.Collections)
+	}
+}
+
+func TestRegisterRoutesUpdatePostRollsBackWhenCollectionAssociationFails(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, defaultCollection := createOwnedChannelAndCollection(t, service, user, "Alice")
+	post := createPostRecord(t, db, user.ID, &channel.ID, "Before", "draft")
+	if err := db.Model(&post).Association("Collections").Append(&defaultCollection); err != nil {
+		t.Fatalf("attach default collection: %v", err)
+	}
+	secondary := model.Collection{ChannelID: channel.ID, Name: "Featured", Description: "featured"}
+	if err := db.Create(&secondary).Error; err != nil {
+		t.Fatalf("create secondary collection: %v", err)
+	}
+	if err := db.Exec(`
+		CREATE TRIGGER fail_post_collection_insert
+		BEFORE INSERT ON post_collections
+		BEGIN
+			SELECT RAISE(FAIL, 'post collection failed');
+		END;
+	`).Error; err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	body := map[string]any{
+		"title":          "After",
+		"content":        "updated body",
+		"channel_id":     channel.ID.String(),
+		"collection_ids": []string{secondary.ID.String()},
+	}
+	raw, _ := json.Marshal(body)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/blog/posts/"+post.ID.String(), bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code == http.StatusOK {
+		t.Fatalf("expected update to fail, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var reloaded model.Post
+	if err := db.Preload("Collections").First(&reloaded, "id = ?", post.ID).Error; err != nil {
+		t.Fatalf("reload post: %v", err)
+	}
+	if reloaded.Title != "Before" {
+		t.Fatalf("expected post update rolled back, got title %q", reloaded.Title)
+	}
+	if len(reloaded.Collections) != 1 || reloaded.Collections[0].ID != defaultCollection.ID {
+		t.Fatalf("expected old collection association preserved, got %#v", reloaded.Collections)
 	}
 }
 

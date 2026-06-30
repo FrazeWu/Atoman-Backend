@@ -140,6 +140,8 @@ func extractUserIDFromRequest(c *gin.Context, jwtSecret string) (uuid.UUID, erro
 		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
 	} else if q := c.Query("token"); q != "" {
 		tokenStr = q
+	} else if cookie, err := c.Cookie("atoman_token"); err == nil {
+		tokenStr = cookie
 	}
 	if tokenStr == "" {
 		return uuid.Nil, jwt.ErrTokenMalformed

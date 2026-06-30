@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode"
@@ -54,6 +55,27 @@ func SanitizeName(name string) string {
 	}
 
 	return result
+}
+
+// SafeUploadFilename returns a single safe path segment for uploaded files.
+func SafeUploadFilename(filename string) (string, error) {
+	name := strings.TrimSpace(filename)
+	if name == "" || name == "." || name == ".." {
+		return "", fmt.Errorf("invalid upload filename")
+	}
+	if strings.ContainsAny(name, `/\`) {
+		return "", fmt.Errorf("upload filename must not contain path separators")
+	}
+
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	safeBase := SanitizeName(base)
+	if ext == "" {
+		return safeBase, nil
+	}
+
+	safeExt := SanitizeName(strings.TrimPrefix(ext, "."))
+	return safeBase + "." + safeExt, nil
 }
 
 // InitS3Client initializes and returns an S3 client configured for Oracle Object Storage
@@ -188,15 +210,31 @@ func SaveFileLocally(file interface{}, filename, artist, album string) (string, 
 	// Create sanitized directory names for consistency
 	safeArtist := SanitizeName(artist)
 	safeAlbum := SanitizeName(album)
+	safeFilename, err := SafeUploadFilename(filename)
+	if err != nil {
+		return "", "", err
+	}
 
 	// Create directory structure: uploads/music/artist/album/
-	dir := "uploads/music/" + safeArtist + "/" + safeAlbum
+	dir := filepath.Join("uploads", "music", safeArtist, safeAlbum)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return "", "", err
 	}
 
 	// Create local file path
-	localPath := dir + "/" + filename
+	localPath := filepath.Join(dir, safeFilename)
+	dirAbs, err := filepath.Abs(dir)
+	if err != nil {
+		return "", "", err
+	}
+	localAbs, err := filepath.Abs(localPath)
+	if err != nil {
+		return "", "", err
+	}
+	rel, err := filepath.Rel(dirAbs, localAbs)
+	if err != nil || rel == "." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) {
+		return "", "", fmt.Errorf("upload path escapes target directory")
+	}
 
 	// Create file
 	dst, err := os.Create(localPath)
@@ -223,7 +261,7 @@ func SaveFileLocally(file interface{}, filename, artist, album string) (string, 
 	}
 
 	// Generate local URL (relative path for serving)
-	localURL := "/uploads/music/" + safeArtist + "/" + safeAlbum + "/" + filename
+	localURL := "/uploads/music/" + safeArtist + "/" + safeAlbum + "/" + safeFilename
 
 	log.Printf("File saved locally: %s", localPath)
 	return localPath, localURL, nil

@@ -1,8 +1,11 @@
 package main
 
 import (
+	"errors"
 	"log"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -38,7 +41,7 @@ func main() {
 		log.Fatal("DATABASE_URL environment variable is required")
 	}
 
-	log.Printf("Connecting to %s database: %s", dbType, dbURL)
+	log.Printf("Connecting to %s", databaseLogTarget(dbType, dbURL))
 
 	var dialector gorm.Dialector
 	switch dbType {
@@ -54,10 +57,15 @@ func main() {
 	}
 	log.Println("Database connected successfully")
 
+	uploadsRoot, err := uploadsRootFromEnv()
+	if err != nil {
+		log.Fatal("Invalid UPLOADS_ROOT: ", err)
+	}
+
 	worker := service.VideoPreviewWorker{
 		DB: db,
 		Generator: service.FFmpegPreviewGenerator{
-			UploadsRoot: ".",
+			UploadsRoot: uploadsRoot,
 		},
 		MaxAttempts: 3,
 	}
@@ -71,4 +79,68 @@ func main() {
 			time.Sleep(5 * time.Second)
 		}
 	}
+}
+
+func uploadsRootFromEnv() (string, error) {
+	root := strings.TrimSpace(os.Getenv("UPLOADS_ROOT"))
+	if root == "" {
+		return "", errors.New("UPLOADS_ROOT is required for video_worker")
+	}
+
+	info, err := os.Stat(root)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return "", os.ErrInvalid
+	}
+	return root, nil
+}
+
+func databaseLogTarget(dbType string, rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if strings.Contains(rawURL, "=") && !strings.Contains(rawURL, "://") {
+		return databaseLogTargetFromDSN(dbType, rawURL)
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return strings.TrimSpace(dbType) + " database"
+	}
+
+	parts := []string{strings.TrimSpace(dbType) + " database"}
+	if host := parsed.Host; host != "" {
+		parts = append(parts, "host="+host)
+	}
+	if dbName := strings.TrimPrefix(parsed.EscapedPath(), "/"); dbName != "" {
+		if decoded, err := url.PathUnescape(dbName); err == nil {
+			dbName = decoded
+		}
+		parts = append(parts, "dbname="+dbName)
+	}
+	return strings.Join(parts, " ")
+}
+
+func databaseLogTargetFromDSN(dbType string, dsn string) string {
+	values := map[string]string{}
+	for _, field := range strings.Fields(dsn) {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok {
+			continue
+		}
+		values[key] = strings.Trim(value, "'\"")
+	}
+
+	parts := []string{strings.TrimSpace(dbType) + " database"}
+	host := values["host"]
+	if port := values["port"]; host != "" && port != "" {
+		host += ":" + port
+	}
+	if host != "" {
+		parts = append(parts, "host="+host)
+	}
+	if dbName := values["dbname"]; dbName != "" {
+		parts = append(parts, "dbname="+dbName)
+	}
+	return strings.Join(parts, " ")
 }

@@ -38,7 +38,7 @@ var fullTextHTTPClient = &http.Client{
 		if len(via) >= fullTextMaxRedirects {
 			return errors.New(fullTextRedirectLimitMessage)
 		}
-		return nil
+		return ValidateFullTextTargetURL(req.URL.String())
 	},
 }
 

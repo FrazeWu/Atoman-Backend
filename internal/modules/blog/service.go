@@ -154,31 +154,34 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 		Visibility: visibility,
 		Status:     status,
 	}
-	if err := s.db.Create(&post).Error; err != nil {
-		return model.Post{}, err
-	}
 
-	if err := s.ensureDefaultCollectionForChannel(channel.ID); err != nil {
-		return model.Post{}, err
-	}
-	var defaultCollection model.Collection
-	if err := s.db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&defaultCollection).Error; err != nil {
-		return model.Post{}, err
-	}
-	collectionsToAssign := []model.Collection{defaultCollection}
-	if len(collectionIDs) > 0 {
-		collections := make([]model.Collection, 0, len(collectionIDs))
-		if err := s.db.Where("id IN ?", collectionIDs).Find(&collections).Error; err != nil {
-			return model.Post{}, err
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&post).Error; err != nil {
+			return err
 		}
-		for _, collection := range collections {
-			if collection.ID == defaultCollection.ID {
-				continue
+
+		if err := s.ensureDefaultCollectionForChannelDB(tx, channel.ID); err != nil {
+			return err
+		}
+		var defaultCollection model.Collection
+		if err := tx.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&defaultCollection).Error; err != nil {
+			return err
+		}
+		collectionsToAssign := []model.Collection{defaultCollection}
+		if len(collectionIDs) > 0 {
+			collections := make([]model.Collection, 0, len(collectionIDs))
+			if err := tx.Where("id IN ?", collectionIDs).Find(&collections).Error; err != nil {
+				return err
 			}
-			collectionsToAssign = append(collectionsToAssign, collection)
+			for _, collection := range collections {
+				if collection.ID == defaultCollection.ID {
+					continue
+				}
+				collectionsToAssign = append(collectionsToAssign, collection)
+			}
 		}
-	}
-	if err := s.db.Model(&post).Association("Collections").Append(collectionsToAssign); err != nil {
+		return tx.Model(&post).Association("Collections").Append(collectionsToAssign)
+	}); err != nil {
 		return model.Post{}, err
 	}
 
@@ -332,8 +335,12 @@ func ensureDefaultCollectionName() string {
 }
 
 func (s *Service) ensureDefaultCollectionForChannel(channelID uuid.UUID) error {
+	return s.ensureDefaultCollectionForChannelDB(s.db, channelID)
+}
+
+func (s *Service) ensureDefaultCollectionForChannelDB(db *gorm.DB, channelID uuid.UUID) error {
 	var collection model.Collection
-	err := s.db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
+	err := db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
 	if err == nil {
 		return nil
 	}
@@ -343,9 +350,9 @@ func (s *Service) ensureDefaultCollectionForChannel(channelID uuid.UUID) error {
 
 	name := ensureDefaultCollectionName()
 	var softDeleted model.Collection
-	softErr := s.db.Unscoped().Where("channel_id = ? AND name = ?", channelID, name).First(&softDeleted).Error
+	softErr := db.Unscoped().Where("channel_id = ? AND name = ?", channelID, name).First(&softDeleted).Error
 	if softErr == nil && softDeleted.DeletedAt.Valid {
-		return s.db.Unscoped().Model(&softDeleted).Updates(map[string]any{
+		return db.Unscoped().Model(&softDeleted).Updates(map[string]any{
 			"deleted_at": nil,
 			"is_default": true,
 			"name":       name,
@@ -361,7 +368,7 @@ func (s *Service) ensureDefaultCollectionForChannel(channelID uuid.UUID) error {
 		Description: "默认合集",
 		IsDefault:   true,
 	}
-	return s.db.Create(&collection).Error
+	return db.Create(&collection).Error
 }
 
 func isChannelBanned(channel model.Channel) bool {

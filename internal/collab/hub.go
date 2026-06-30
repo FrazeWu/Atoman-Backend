@@ -8,7 +8,11 @@ package collab
 
 import (
 	"net/http"
+	"os"
+	"strings"
 	"sync"
+
+	"atoman/internal/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -17,8 +21,32 @@ import (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
-	// Allow all origins in dev; in prod this should be restricted.
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin:     checkWebSocketOrigin,
+}
+
+func checkWebSocketOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+
+	for _, allowed := range allowedWebSocketOrigins() {
+		if origin == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func allowedWebSocketOrigins() []string {
+	origins := config.DefaultAllowedOrigins()
+	for _, origin := range strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",") {
+		origin = strings.TrimSpace(origin)
+		if origin != "" {
+			origins = append(origins, origin)
+		}
+	}
+	return origins
 }
 
 // client represents a single WebSocket connection inside a room.

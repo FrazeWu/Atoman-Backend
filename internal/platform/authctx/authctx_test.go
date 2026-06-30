@@ -1,6 +1,9 @@
 package authctx
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -35,6 +38,42 @@ func TestSetAndGetCurrentUser(t *testing.T) {
 	}
 	if got := c.GetString("role"); got != RoleUser {
 		t.Fatalf("expected legacy role user, got %q", got)
+	}
+}
+
+func TestCurrentUserIDStringReturnsUUIDStringAfterSetCurrentUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(nil)
+	id := uuid.New()
+	SetCurrentUser(c, CurrentUser{ID: id, Username: "alice", Role: RoleUser})
+
+	if got := c.GetString("user_id"); got != "" {
+		t.Fatalf("expected Gin GetString(user_id) to stay empty for uuid.UUID legacy value, got %q", got)
+	}
+	if got := CurrentUserIDString(c); got != id.String() {
+		t.Fatalf("expected CurrentUserIDString to return %s, got %q", id.String(), got)
+	}
+}
+
+func TestNamedLegacyHandlersDoNotReadUserIDWithGetString(t *testing.T) {
+	files := []string{
+		"lyric_annotation_handler.go",
+		"discussion_handler.go",
+		"artist_wiki_handler.go",
+		"revision_handler.go",
+		"protection_handler.go",
+	}
+	for _, file := range files {
+		t.Run(file, func(t *testing.T) {
+			path := filepath.Join("..", "..", "handlers", file)
+			content, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			if strings.Contains(string(content), `GetString("user_id")`) {
+				t.Fatalf("%s still reads user_id with Gin GetString", path)
+			}
+		})
 	}
 }
 

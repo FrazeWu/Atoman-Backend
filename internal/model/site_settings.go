@@ -8,6 +8,7 @@ type SiteSetting struct {
 	Key         string    `json:"key" gorm:"primaryKey"`
 	Value       string    `json:"value" gorm:"not null"`
 	Description string    `json:"description"`
+	Revision    int       `json:"revision" gorm:"not null;default:1"`
 	UpdatedAt   time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 

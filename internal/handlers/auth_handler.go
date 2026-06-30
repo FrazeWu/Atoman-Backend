@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
+	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/service"
 )
@@ -151,6 +152,8 @@ type VerifyEmailInput struct {
 
 // SetupAuthRoutes configures authentication routes
 func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.EmailService) {
+	middleware.SetAuthDB(db)
+
 	auth := router.Group("/api/v1/auth")
 	{
 		auth.POST("/register", RegisterHandler(db, emailService))
@@ -313,7 +316,7 @@ func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		var user model.User
-		if err := db.Where("uuid = ?", userID).First(&user).Error; err != nil {
+		if err := db.Where("uuid = ? AND is_active = ?", userID, true).First(&user).Error; err != nil {
 			clearSessionAndAuthError(c, authUserNotFound, "账号不存在或已被移除，请重新登录")
 			return
 		}
@@ -346,7 +349,7 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var user model.User
-		if err := db.Where("username = ? OR email = ?", input.Username, input.Username).First(&user).Error; err != nil {
+		if err := db.Where("(username = ? OR email = ?) AND is_active = ?", input.Username, input.Username, true).First(&user).Error; err != nil {
 			authError(c, http.StatusUnauthorized, authAccountNotFound, "账号不存在")
 			return
 		}
@@ -397,15 +400,10 @@ func SendVerificationHandler(emailService *service.EmailService) gin.HandlerFunc
 		}
 
 		// Send verification code
-		code, err := emailService.SendVerificationCode(input.Email)
+		_, err := emailService.SendVerificationCode(input.Email)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification code", "details": err.Error()})
 			return
-		}
-
-		// Log the code in development mode for debugging
-		if os.Getenv("GIN_MODE") != "release" {
-			println("[DEBUG] Verification code for", input.Email, ":", code)
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "Verification code sent"})

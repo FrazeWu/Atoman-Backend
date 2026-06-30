@@ -53,6 +53,10 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("deduplicate subscriptions: %w", err)
 	}
 
+	if err := migrations.DeduplicateSubscriptionGroups(db); err != nil {
+		return fmt.Errorf("deduplicate subscription groups: %w", err)
+	}
+
 	if err := migrations.RunBlogGuestCommentsMigration(db); err != nil {
 		return fmt.Errorf("blog guest comments migration: %w", err)
 	}
@@ -63,6 +67,10 @@ func runMigrations(db *gorm.DB) error {
 
 	if err := migrations.RunBlogCollectionPostOrderMigration(db); err != nil {
 		return fmt.Errorf("blog collection post order migration: %w", err)
+	}
+
+	if err := migrations.DeduplicateBlogInteractions(db); err != nil {
+		return fmt.Errorf("deduplicate blog interactions: %w", err)
 	}
 
 	if err := migrateSchema(db); err != nil {
@@ -81,8 +89,20 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("subscription unique index migration: %w", err)
 	}
 
+	if err := migrations.RunSubscriptionGroupUniqueIndex(db); err != nil {
+		return fmt.Errorf("subscription group unique index migration: %w", err)
+	}
+
 	if err := migrations.RunFeedItemUniqueIndex(db); err != nil {
 		return fmt.Errorf("feed item unique index migration: %w", err)
+	}
+
+	if err := migrations.RunForumDraftUniqueIndex(db); err != nil {
+		return fmt.Errorf("forum draft unique index migration: %w", err)
+	}
+
+	if err := migrations.RunRevisionUniqueIndexes(db); err != nil {
+		return fmt.Errorf("revision unique indexes migration: %w", err)
 	}
 
 	return nil
@@ -99,7 +119,7 @@ func preparePostgresExtensions(db *gorm.DB) error {
 }
 
 func migrateSchema(db *gorm.DB) error {
-	if err := db.AutoMigrate(
+	models := []any{
 		&model.User{},
 		&model.Channel{},
 		&model.Collection{},
@@ -113,6 +133,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.MusicEditDecision{},
 		&model.MusicEditChange{},
 		&model.BlogPostRating{},
+		&model.SiteSetting{},
 		&model.FeedSource{},
 		&model.Subscription{},
 		&model.SubscriptionGroup{},
@@ -124,10 +145,14 @@ func migrateSchema(db *gorm.DB) error {
 		&model.Notification{},
 		&model.DMConversation{},
 		&model.DMMessage{},
+		&model.Revision{},
+		&model.EditConflict{},
+		&model.ContentProtection{},
+		&model.Discussion{},
+		&model.DiscussionReadState{},
 		&model.ForumCategory{},
 		&model.ForumTopic{},
 		&model.ForumReply{},
-		&model.ForumDraft{},
 		&model.ForumLike{},
 		&model.ForumBookmark{},
 		&model.ForumReport{},
@@ -138,12 +163,21 @@ func migrateSchema(db *gorm.DB) error {
 		&model.DebateVote{},
 		&model.VoteHistory{},
 		&model.DebateConcludeVote{},
-	); err != nil {
+	}
+	if !db.Migrator().HasTable(&model.ForumDraft{}) {
+		models = append(models, &model.ForumDraft{})
+	}
+
+	if err := db.AutoMigrate(models...); err != nil {
 		return err
 	}
 
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {
 		return fmt.Errorf("notification/dm index migration: %w", err)
+	}
+
+	if err := migrations.RunDiscussionReadStateMigration(db); err != nil {
+		return fmt.Errorf("discussion read state migration: %w", err)
 	}
 
 	return nil

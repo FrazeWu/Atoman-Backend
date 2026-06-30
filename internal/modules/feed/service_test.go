@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"fmt"
 	"log"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
@@ -21,6 +24,8 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 	t.Helper()
 
 	db := testdb.Open(t)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Channel{},
@@ -403,6 +408,128 @@ func TestGetPublicFeedBySourceIDReturnsOnlyRequestedSource(t *testing.T) {
 	}
 }
 
+func TestGetExploreFeedPaginatesAfterGlobalSort(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	if err := db.Exec("DELETE FROM feed_items").Error; err != nil {
+		t.Fatalf("delete seed feed items: %v", err)
+	}
+	if err := db.Exec("DELETE FROM posts").Error; err != nil {
+		t.Fatalf("delete seed posts: %v", err)
+	}
+
+	var sourceA model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&sourceA).Error; err != nil {
+		t.Fatalf("find source A: %v", err)
+	}
+	sourceB := model.FeedSource{SourceType: "external_rss", RssURL: "https://second.example.com/feed.xml", Hash: "explore-page-source-b", Title: "Second Feed"}
+	if err := db.Create(&sourceB).Error; err != nil {
+		t.Fatalf("create source B: %v", err)
+	}
+
+	base := time.Date(2026, time.June, 1, 12, 0, 0, 0, time.UTC)
+	seedExploreFeedItem(t, db, sourceA.ID, "a-new", "A newest", base.Add(4*time.Minute), "https://example.com/a-new")
+	seedExploreFeedItem(t, db, sourceA.ID, "a-old", "A old", base.Add(1*time.Minute), "https://example.com/a-old")
+	seedExploreFeedItem(t, db, sourceB.ID, "b-new", "B newest", base.Add(3*time.Minute), "https://example.com/b-new")
+	seedExploreFeedItem(t, db, sourceB.ID, "b-mid", "B middle", base.Add(2*time.Minute), "https://example.com/b-mid")
+
+	items, total, err := service.GetExploreFeed(authctx.CurrentUser{}, FeedQuery{Page: 2, PageSize: 2, Sort: "recent"})
+	if err != nil {
+		t.Fatalf("get explore feed: %v", err)
+	}
+	if total != 4 {
+		t.Fatalf("expected total 4, got %d", total)
+	}
+	got := feedItemTitles(items)
+	want := []string{"B middle", "A old"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected global page 2 titles %#v, got %#v", want, got)
+	}
+}
+
+func TestGetExploreFeedAppliesDuplicateAndReadFilters(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	if err := db.Exec("DELETE FROM feed_item_reads").Error; err != nil {
+		t.Fatalf("delete seed reads: %v", err)
+	}
+	if err := db.Exec("DELETE FROM feed_items").Error; err != nil {
+		t.Fatalf("delete seed feed items: %v", err)
+	}
+	if err := db.Exec("DELETE FROM posts").Error; err != nil {
+		t.Fatalf("delete seed posts: %v", err)
+	}
+
+	var sourceA model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&sourceA).Error; err != nil {
+		t.Fatalf("find source A: %v", err)
+	}
+	sourceB := model.FeedSource{SourceType: "external_rss", RssURL: "https://mirror-filter.example.com/feed.xml", Hash: "explore-filter-source-b", Title: "Mirror Filter Feed"}
+	if err := db.Create(&sourceB).Error; err != nil {
+		t.Fatalf("create source B: %v", err)
+	}
+
+	now := time.Now().UTC()
+	readItem := seedExploreFeedItem(t, db, sourceA.ID, "read-guid", "Read item", now.Add(3*time.Minute), "https://example.com/read")
+	seedExploreFeedItem(t, db, sourceA.ID, "canonical-guid", "Canonical item", now.Add(2*time.Minute), "https://example.com/duplicate")
+	seedExploreFeedItem(t, db, sourceB.ID, "duplicate-guid", "Duplicate item", now.Add(time.Minute), "https://example.com/duplicate")
+	unreadItem := seedExploreFeedItem(t, db, sourceA.ID, "unread-guid", "Unread item", now, "https://example.com/unread")
+	if err := db.Create(&model.FeedItemRead{UserID: user.ID, FeedItemID: readItem.ID, ReadAt: now}).Error; err != nil {
+		t.Fatalf("mark read item: %v", err)
+	}
+
+	readOnly := true
+	readItems, readTotal, err := service.GetExploreFeed(user, FeedQuery{Page: 1, PageSize: 20, Sort: "recent", IsRead: &readOnly})
+	if err != nil {
+		t.Fatalf("get read explore feed: %v", err)
+	}
+	if readTotal != 1 || len(readItems) != 1 || readItems[0].FeedItem == nil || readItems[0].FeedItem.ID != readItem.ID {
+		t.Fatalf("expected only read item %s, got total=%d items=%#v", readItem.ID, readTotal, readItems)
+	}
+
+	unreadOnly := false
+	filtered, total, err := service.GetExploreFeed(user, FeedQuery{Page: 1, PageSize: 20, Sort: "recent", IsRead: &unreadOnly, HideDuplicates: true})
+	if err != nil {
+		t.Fatalf("get unread deduped explore feed: %v", err)
+	}
+	got := feedItemTitles(filtered)
+	want := []string{"Canonical item", "Unread item"}
+	if total != int64(len(want)) || !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected unread deduped titles %#v with total %d, got titles=%#v total=%d", want, len(want), got, total)
+	}
+	for _, item := range filtered {
+		if item.FeedItem != nil && item.FeedItem.ID == unreadItem.ID && item.IsRead {
+			t.Fatalf("expected unread item to be marked unread")
+		}
+	}
+}
+
+func seedExploreFeedItem(t *testing.T, db *gorm.DB, sourceID uuid.UUID, guid string, title string, publishedAt time.Time, link string) model.FeedItem {
+	t.Helper()
+	item := model.FeedItem{
+		FeedSourceID: sourceID,
+		GUID:         guid,
+		Title:        title,
+		Link:         link,
+		PublishedAt:  publishedAt,
+		FetchedAt:    publishedAt,
+	}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatalf("create explore feed item %q: %v", title, err)
+	}
+	return item
+}
+
+func feedItemTitles(items []TimelineItemDTO) []string {
+	titles := make([]string, 0, len(items))
+	for _, item := range items {
+		if item.FeedItem != nil {
+			titles = append(titles, item.FeedItem.Title)
+		}
+	}
+	return titles
+}
+
 func TestParseExploreSourceTimestamp(t *testing.T) {
 	raw := "2026-06-19 02:31:53.123456789+08:00"
 	parsed, err := parseExploreSourceTimestamp(raw)
@@ -580,6 +707,180 @@ func TestListExploreSourcesFiltersByCategory(t *testing.T) {
 		}
 		if row.ID == blogSource.ID {
 			t.Fatalf("blog source leaked into news category rows: %#v", rows)
+		}
+	}
+}
+
+func TestListExploreSourcesInfersCategoryForLegacyBlogDefaultSources(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	forumSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://v2ex.com/index.xml",
+		Hash:         "legacy-default-forum-source-hash",
+		Title:        "V2EX",
+		Category:     "blog",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&forumSource).Error; err != nil {
+		t.Fatalf("create legacy forum source: %v", err)
+	}
+	blogSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://daily-blog.example.com/feed.xml",
+		Hash:         "legacy-default-blog-source-hash",
+		Title:        "Daily Blog",
+		Category:     "blog",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&blogSource).Error; err != nil {
+		t.Fatalf("create legacy blog source: %v", err)
+	}
+
+	publishedAt := time.Now().UTC()
+	for _, source := range []model.FeedSource{forumSource, blogSource} {
+		item := model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         "legacy-category-item-" + source.ID.String(),
+			Title:        source.Title + " Item",
+			Link:         "https://example.com/legacy-category-item",
+			PublishedAt:  publishedAt,
+			FetchedAt:    publishedAt,
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create legacy category feed item: %v", err)
+		}
+	}
+
+	rows, err := service.repo.ListExploreSources(20, 0, "forum")
+	if err != nil {
+		t.Fatalf("list forum explore sources: %v", err)
+	}
+
+	if len(rows) != 1 {
+		t.Fatalf("expected one inferred forum row, got %#v", rows)
+	}
+	if rows[0].ID != forumSource.ID || rows[0].Category != "forum" {
+		t.Fatalf("expected legacy default blog source to be inferred as forum, got %#v", rows[0])
+	}
+}
+
+func TestListExploreSourcesBlogFilterExcludesLegacyInferredSocialSources(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	socialSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://x.com/example/rss",
+		Hash:         "legacy-default-social-source-hash",
+		Title:        "Example Social Feed",
+		Category:     "",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&socialSource).Error; err != nil {
+		t.Fatalf("create social source: %v", err)
+	}
+
+	blogSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://daily-blog.example.com/feed.xml",
+		Hash:         "legacy-default-plain-blog-source-hash",
+		Title:        "Daily Blog",
+		Category:     "",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&blogSource).Error; err != nil {
+		t.Fatalf("create blog source: %v", err)
+	}
+
+	publishedAt := time.Now().UTC()
+	for _, source := range []model.FeedSource{socialSource, blogSource} {
+		item := model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         "legacy-blog-filter-item-" + source.ID.String(),
+			Title:        source.Title + " Item",
+			Link:         "https://example.com/legacy-blog-filter-item",
+			PublishedAt:  publishedAt,
+			FetchedAt:    publishedAt,
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create feed item: %v", err)
+		}
+	}
+
+	rows, err := service.repo.ListExploreSources(20, 0, "blog")
+	if err != nil {
+		t.Fatalf("list blog explore sources: %v", err)
+	}
+
+	for _, row := range rows {
+		if row.ID == socialSource.ID {
+			t.Fatalf("legacy inferred social source leaked into blog category rows: %#v", rows)
+		}
+	}
+
+	foundBlogSource := false
+	for _, row := range rows {
+		if row.ID == blogSource.ID {
+			foundBlogSource = true
+			break
+		}
+	}
+	if !foundBlogSource {
+		t.Fatalf("expected plain blog source to remain in blog rows, got %#v", rows)
+	}
+}
+
+func TestListExploreSourcesNewsFilterIgnoresPollutedStoredCategory(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	pollutedNewsSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://stats.gov.cn/sj/zxfb/rss.xml",
+		Hash:         "polluted-news-source-hash",
+		Title:        "数据发布",
+		Category:     "social",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&pollutedNewsSource).Error; err != nil {
+		t.Fatalf("create polluted news source: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := db.Create(&model.FeedItem{
+		FeedSourceID: pollutedNewsSource.ID,
+		GUID:         "polluted-news-item",
+		Title:        "统计公报",
+		Link:         "https://stats.gov.cn/item",
+		PublishedAt:  now,
+		FetchedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("create polluted news item: %v", err)
+	}
+
+	newsRows, err := service.repo.ListExploreSources(20, 0, "news")
+	if err != nil {
+		t.Fatalf("list news explore sources: %v", err)
+	}
+	foundInNews := false
+	for _, row := range newsRows {
+		if row.ID == pollutedNewsSource.ID {
+			foundInNews = true
+			if row.Category != "news" {
+				t.Fatalf("expected polluted news source to be inferred as news, got %#v", row)
+			}
+		}
+	}
+	if !foundInNews {
+		t.Fatalf("expected polluted news source in news rows, got %#v", newsRows)
+	}
+
+	socialRows, err := service.repo.ListExploreSources(20, 0, "social")
+	if err != nil {
+		t.Fatalf("list social explore sources: %v", err)
+	}
+	for _, row := range socialRows {
+		if row.ID == pollutedNewsSource.ID {
+			t.Fatalf("polluted stored category leaked news source into social rows: %#v", socialRows)
 		}
 	}
 }
@@ -884,6 +1185,274 @@ func TestGetExploreFeedUsesPageAndReturnsTotal(t *testing.T) {
 	}
 	if page1[0].PublishedAt.Equal(page2[0].PublishedAt) && page1[0].Type == page2[0].Type {
 		t.Fatalf("expected page 2 to differ from page 1, got %#v and %#v", page1, page2)
+	}
+}
+
+func TestGetExploreFeedGloballyPagesAcrossSources(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	secondarySource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://secondary.example.com/feed.xml",
+		Hash:         "secondary-rss-hash",
+		Title:        "Secondary Feed",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&secondarySource).Error; err != nil {
+		t.Fatalf("create secondary source: %v", err)
+	}
+
+	now := time.Now().UTC()
+	latestFeed := model.FeedItem{
+		FeedSourceID: secondarySource.ID,
+		GUID:         "explore-page-feed-1",
+		Title:        "Explore page feed 1",
+		Link:         "https://secondary.example.com/items/1",
+		PublishedAt:  now.Add(3 * time.Hour),
+		FetchedAt:    now,
+	}
+	if err := db.Create(&latestFeed).Error; err != nil {
+		t.Fatalf("create latest feed item: %v", err)
+	}
+
+	middlePost := model.Post{
+		UserID:  user.ID,
+		Title:   "Explore page post",
+		Content: "body",
+		Status:  "published",
+	}
+	if err := db.Create(&middlePost).Error; err != nil {
+		t.Fatalf("create middle post: %v", err)
+	}
+	if err := db.Model(&middlePost).Update("created_at", now.Add(2*time.Hour)).Error; err != nil {
+		t.Fatalf("set middle post created_at: %v", err)
+	}
+
+	olderFeed := model.FeedItem{
+		FeedSourceID: secondarySource.ID,
+		GUID:         "explore-page-feed-2",
+		Title:        "Explore page feed 2",
+		Link:         "https://secondary.example.com/items/2",
+		PublishedAt:  now.Add(1 * time.Hour),
+		FetchedAt:    now,
+	}
+	if err := db.Create(&olderFeed).Error; err != nil {
+		t.Fatalf("create older feed item: %v", err)
+	}
+
+	page1, total1, err := service.GetExploreFeed(user, FeedQuery{Page: 1, PageSize: 1, Sort: "popular"})
+	if err != nil {
+		t.Fatalf("page 1 explore: %v", err)
+	}
+	page2, total2, err := service.GetExploreFeed(user, FeedQuery{Page: 2, PageSize: 1, Sort: "popular"})
+	if err != nil {
+		t.Fatalf("page 2 explore: %v", err)
+	}
+
+	if total1 != total2 {
+		t.Fatalf("expected stable totals across pages, got %d and %d", total1, total2)
+	}
+	if len(page1) != 1 || len(page2) != 1 {
+		t.Fatalf("expected one item per page, got %#v and %#v", page1, page2)
+	}
+	if page1[0].Type != "feed_item" || page1[0].FeedItem == nil || page1[0].FeedItem.ID != latestFeed.ID {
+		t.Fatalf("expected page 1 to return newest feed item, got %#v", page1[0])
+	}
+	if page2[0].Type != "post" || page2[0].Post == nil || page2[0].Post.ID != middlePost.ID {
+		t.Fatalf("expected page 2 to return the middle post, got %#v", page2[0])
+	}
+}
+
+func TestGetExploreFeedReturnsFilteredTotal(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	matchingPost := model.Post{UserID: user.ID, Title: "Needle match", Content: "body", Status: "published"}
+	if err := db.Create(&matchingPost).Error; err != nil {
+		t.Fatalf("create matching post: %v", err)
+	}
+	otherPost := model.Post{UserID: user.ID, Title: "Something else", Content: "body", Status: "published"}
+	if err := db.Create(&otherPost).Error; err != nil {
+		t.Fatalf("create other post: %v", err)
+	}
+
+	items, total, err := service.GetExploreFeed(user, FeedQuery{Page: 1, PageSize: 20, Sort: "popular", Search: "needle"})
+	if err != nil {
+		t.Fatalf("filtered explore feed: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected filtered total 1, got %d with items %#v", total, items)
+	}
+	if len(items) != 1 || items[0].Post == nil || items[0].Post.ID != matchingPost.ID {
+		t.Fatalf("expected only matching post, got %#v", items)
+	}
+}
+
+func TestGetExploreFeedRecentSortOrdersNewestFirst(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	secondarySource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://recent.example.com/feed.xml",
+		Hash:         "recent-rss-hash",
+		Title:        "Recent Feed",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&secondarySource).Error; err != nil {
+		t.Fatalf("create recent source: %v", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	feedTimes := []time.Time{
+		now.Add(5 * time.Hour),
+		now.Add(4 * time.Hour),
+		now.Add(3 * time.Hour),
+		now.Add(2 * time.Hour),
+		now.Add(1 * time.Hour),
+	}
+	for i, publishedAt := range feedTimes {
+		item := model.FeedItem{
+			FeedSourceID: secondarySource.ID,
+			GUID:         fmt.Sprintf("recent-guid-%d", i),
+			Title:        fmt.Sprintf("Recent Item %d", i),
+			Link:         fmt.Sprintf("https://recent.example.com/items/%d", i),
+			PublishedAt:  publishedAt,
+			FetchedAt:    now,
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create recent feed item %d: %v", i, err)
+		}
+	}
+
+	items, _, err := service.GetExploreFeed(user, FeedQuery{Page: 1, PageSize: 5, Sort: "recent"})
+	if err != nil {
+		t.Fatalf("recent explore feed: %v", err)
+	}
+	if len(items) < 5 {
+		t.Fatalf("expected at least 5 items, got %#v", items)
+	}
+	for i := 1; i < 5; i++ {
+		if items[i-1].PublishedAt.Before(items[i].PublishedAt) {
+			t.Fatalf("expected recent sort descending, got %#v", items[:5])
+		}
+	}
+}
+
+func TestGetExploreFeedDefaultsUnknownSortToRecent(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	secondarySource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://sort.example.com/feed.xml",
+		Hash:         "sort-rss-hash",
+		Title:        "Sort Feed",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&secondarySource).Error; err != nil {
+		t.Fatalf("create sort source: %v", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	older := model.FeedItem{
+		FeedSourceID: secondarySource.ID,
+		GUID:         "sort-guid-older",
+		Title:        "Older Sort Item",
+		Link:         "https://sort.example.com/items/older",
+		PublishedAt:  now.Add(-2 * time.Hour),
+		FetchedAt:    now,
+	}
+	newer := model.FeedItem{
+		FeedSourceID: secondarySource.ID,
+		GUID:         "sort-guid-newer",
+		Title:        "Newer Sort Item",
+		Link:         "https://sort.example.com/items/newer",
+		PublishedAt:  now.Add(-time.Hour),
+		FetchedAt:    now,
+	}
+	if err := db.Create(&older).Error; err != nil {
+		t.Fatalf("create older sort item: %v", err)
+	}
+	if err := db.Create(&newer).Error; err != nil {
+		t.Fatalf("create newer sort item: %v", err)
+	}
+
+	items, _, err := service.GetExploreFeed(user, FeedQuery{
+		Page:     1,
+		PageSize: 2,
+		Sort:     "not-a-real-sort",
+		Search:   "Sort Item",
+	})
+	if err != nil {
+		t.Fatalf("unknown sort explore feed: %v", err)
+	}
+	if len(items) < 2 {
+		t.Fatalf("expected at least two items, got %#v", items)
+	}
+	if items[0].Type != "feed_item" || items[0].FeedItem == nil || items[0].FeedItem.ID != newer.ID {
+		t.Fatalf("expected unknown sort to behave like recent, got first item %#v", items[0])
+	}
+}
+
+func TestGetExploreFeedStableOrderForEqualTimestamps(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	secondarySource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://stable.example.com/feed.xml",
+		Hash:         "stable-rss-hash",
+		Title:        "Stable Feed",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&secondarySource).Error; err != nil {
+		t.Fatalf("create stable source: %v", err)
+	}
+
+	publishedAt := time.Now().UTC().Truncate(time.Second)
+	first := model.FeedItem{
+		FeedSourceID: secondarySource.ID,
+		GUID:         "stable-guid-1",
+		Title:        "Stable Item 1",
+		Link:         "https://stable.example.com/items/1",
+		PublishedAt:  publishedAt,
+		FetchedAt:    publishedAt,
+	}
+	second := model.FeedItem{
+		FeedSourceID: secondarySource.ID,
+		GUID:         "stable-guid-2",
+		Title:        "Stable Item 2",
+		Link:         "https://stable.example.com/items/2",
+		PublishedAt:  publishedAt,
+		FetchedAt:    publishedAt,
+	}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("create first stable item: %v", err)
+	}
+	if err := db.Create(&second).Error; err != nil {
+		t.Fatalf("create second stable item: %v", err)
+	}
+
+	items, _, err := service.GetExploreFeed(user, FeedQuery{
+		Page:     1,
+		PageSize: 2,
+		Sort:     "recent",
+		Search:   "Stable Item",
+	})
+	if err != nil {
+		t.Fatalf("stable recent explore feed: %v", err)
+	}
+	if len(items) < 2 {
+		t.Fatalf("expected at least two items, got %#v", items)
+	}
+	if items[0].PublishedAt != items[1].PublishedAt {
+		t.Fatalf("expected equal timestamps for tie case, got %#v", items[:2])
+	}
+	if items[0].Type != "feed_item" || items[1].Type != "feed_item" {
+		t.Fatalf("expected feed items in tie case, got %#v", items[:2])
+	}
+	if items[0].FeedItem == nil || items[1].FeedItem == nil {
+		t.Fatalf("expected feed item payloads in tie case, got %#v", items[:2])
+	}
+	if items[0].FeedItem.ID != second.ID || items[1].FeedItem.ID != first.ID {
+		t.Fatalf("expected deterministic descending id tie-breaker, got %#v", items[:2])
 	}
 }
 

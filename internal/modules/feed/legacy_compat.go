@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"atoman/internal/model"
 	"atoman/internal/service"
@@ -61,8 +62,22 @@ func getOrCreateDefaultSubscriptionGroup(db *gorm.DB, userID uuid.UUID) (*model.
 				UserID: userID,
 				Name:   defaultSubscriptionGroupName,
 			}
-			if err := tx.Create(&canonical).Error; err != nil {
-				return err
+			result := tx.Clauses(clause.OnConflict{
+				Columns: []clause.Column{{Name: "user_id"}, {Name: "name"}},
+				TargetWhere: clause.Where{Exprs: []clause.Expression{
+					clause.Eq{Column: clause.Column{Name: "deleted_at"}, Value: nil},
+				}},
+				DoNothing: true,
+			}).Create(&canonical)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected == 0 {
+				if err := tx.Where("user_id = ? AND name = ?", userID, defaultSubscriptionGroupName).
+					Order("created_at ASC").First(&canonical).Error; err != nil {
+					return err
+				}
+				return nil
 			}
 		case 1:
 			canonical = groups[0]
@@ -601,8 +616,19 @@ func CreateSubscription(db *gorm.DB) gin.HandlerFunc {
 			SubscriptionGroupID: subscriptionGroupID,
 		}
 
-		if err := db.Create(&subscription).Error; err != nil {
+		result := db.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "user_id"}, {Name: "feed_source_id"}},
+			TargetWhere: clause.Where{Exprs: []clause.Expression{
+				clause.Eq{Column: clause.Column{Name: "deleted_at"}, Value: nil},
+			}},
+			DoNothing: true,
+		}).Create(&subscription)
+		if result.Error != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create subscription"})
+			return
+		}
+		if result.RowsAffected == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Already subscribed to this source"})
 			return
 		}
 
@@ -2518,6 +2544,12 @@ func GetStarredItems(db *gorm.DB) gin.HandlerFunc {
 			starQuery = starQuery.Where("group_id = ?", groupID)
 		}
 
+		var total int64
+		if err := starQuery.Model(&model.FeedItemStar{}).Count(&total).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count starred items"})
+			return
+		}
+
 		var stars []model.FeedItemStar
 		if err := starQuery.Order("starred_at DESC").Offset(offset).Limit(limit).Find(&stars).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch starred items"})
@@ -2575,7 +2607,7 @@ func GetStarredItems(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"items": result,
 			"page":  page,
-			"total": len(result),
+			"total": total,
 		})
 	}
 }
@@ -3341,10 +3373,10 @@ func CheckCollectionSubscription(db *gorm.DB) gin.HandlerFunc {
 
 // GetExploreFeed godoc
 // @Summary 探索订阅条目
-// @Description 分页返回推荐条目，支持按随机 (random) 或热门 (popular) 排序。
+// @Description 分页返回推荐条目，支持按最近 (recent)、随机 (random) 或热门 (popular) 排序。
 // @Tags feed
 // @Produce json
-// @Param sort query string false "排序方式" Enums(random,popular)
+// @Param sort query string false "排序方式" Enums(recent,random,popular)
 // @Param page query int false "页码"
 // @Param limit query int false "每页数量"
 // @Success 200 {object} TimelineResponse
@@ -3354,7 +3386,7 @@ func CheckCollectionSubscription(db *gorm.DB) gin.HandlerFunc {
 // @Router /api/v1/feed/explore [get]
 func GetExploreFeed(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		sort := c.DefaultQuery("sort", "random")
+		sort := strings.TrimSpace(strings.ToLower(c.DefaultQuery("sort", "recent")))
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 		if limit > 100 {
@@ -3365,13 +3397,14 @@ func GetExploreFeed(db *gorm.DB) gin.HandlerFunc {
 		var items []model.FeedItem
 		query := db.Preload("FeedSource")
 
-		if sort == "popular" {
-			// Join with stars count to determine popularity
+		switch sort {
+		case "popular":
 			query = query.Select("feed_items.*, (SELECT COUNT(*) FROM feed_item_stars WHERE feed_item_stars.feed_item_id = feed_items.id) as star_count").
-				Order("star_count DESC, published_at DESC")
-		} else {
-			// Random
+				Order("star_count DESC, published_at DESC, feed_items.id DESC")
+		case "random":
 			query = query.Order("RANDOM()")
+		default:
+			query = query.Order("published_at DESC, feed_items.id DESC")
 		}
 
 		if err := query.Offset(offset).Limit(limit).Find(&items).Error; err != nil {

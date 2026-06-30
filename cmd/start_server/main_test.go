@@ -1,13 +1,70 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
 )
+
+func TestCORSRejectsUnknownOriginWithCredentialsOutsideProduction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ENV", "development")
+	t.Setenv("ALLOWED_ORIGINS", "")
+
+	router := gin.New()
+	router.Use(corsMiddleware(configuredAllowedOrigins()))
+	router.GET("/ping", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	req.Header.Set("Origin", "https://evil.example")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("expected unknown origin to be rejected, got ACAO %q", got)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "" {
+		t.Fatalf("expected credentials header to be absent for unknown origin, got %q", got)
+	}
+}
+
+func TestCORSAllowsExplicitDevelopmentOriginsWithCredentials(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ENV", "development")
+	t.Setenv("ALLOWED_ORIGINS", "https://studio.example")
+
+	router := gin.New()
+	router.Use(corsMiddleware(configuredAllowedOrigins()))
+	router.GET("/ping", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+
+	for _, origin := range []string{"http://localhost:5173", "https://studio.example"} {
+		t.Run(origin, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+			req.Header.Set("Origin", origin)
+			rec := httptest.NewRecorder()
+
+			router.ServeHTTP(rec, req)
+
+			if got := rec.Header().Get("Access-Control-Allow-Origin"); got != origin {
+				t.Fatalf("ACAO = %q, want %q", got, origin)
+			}
+			if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+				t.Fatalf("credentials = %q, want true", got)
+			}
+		})
+	}
+}
 
 func TestBootstrapOwnerFromEnvCreatesOwnerWhenConfigured(t *testing.T) {
 	db := testdb.Open(t)

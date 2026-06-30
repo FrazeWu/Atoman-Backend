@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 
@@ -441,8 +442,10 @@ func TestSyncAdminFeedSourceRejectsInternalSource(t *testing.T) {
 func newAdminFeedFullTextTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := testdb.Open(t)
+	middleware.SetAuthDB(db)
 	testdb.Migrate(t, db,
 		&model.User{},
+		&model.SiteSetting{},
 		&model.FeedSource{},
 		&model.FeedItem{},
 		&model.Subscription{},
@@ -451,6 +454,97 @@ func newAdminFeedFullTextTestDB(t *testing.T) *gorm.DB {
 		&model.ReadingListItem{},
 	)
 	return db
+}
+
+func adminFeedFullTextAuthHeader(t *testing.T, user model.User) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id":  user.UUID.String(),
+		"username": user.Username,
+		"role":     user.Role,
+	})
+	signed, err := token.SignedString([]byte("test-secret"))
+	if err != nil {
+		t.Fatalf("sign token: %v", err)
+	}
+	return "Bearer " + signed
+}
+
+func TestAdminFeedFullTextSettingsRoutesReadAndPersist(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newAdminFeedFullTextTestDB(t)
+	adminUser := model.User{
+		Username: "fulltext_admin_" + uuid.NewString()[:8],
+		Email:    uuid.NewString() + "@example.com",
+		Password: "secret",
+		Role:     "admin",
+		IsActive: true,
+	}
+	if err := db.Create(&adminUser).Error; err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+
+	r := gin.New()
+	SetupAdminRoutes(r, db, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/fulltext/settings", nil)
+	req.Header.Set("Authorization", adminFeedFullTextAuthHeader(t, adminUser))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var initial struct {
+		AutoSyncEnabled        bool `json:"auto_sync_enabled"`
+		AutoSyncIntervalMinute int  `json:"auto_sync_interval_minutes"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &initial); err != nil {
+		t.Fatalf("decode initial settings: %v", err)
+	}
+
+	body := bytes.NewBufferString(`{"auto_sync_enabled":false,"auto_sync_interval_minutes":45}`)
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/admin/feed/fulltext/settings", body)
+	req.Header.Set("Authorization", adminFeedFullTextAuthHeader(t, adminUser))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var updated struct {
+		AutoSyncEnabled        bool `json:"auto_sync_enabled"`
+		AutoSyncIntervalMinute int  `json:"auto_sync_interval_minutes"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated settings: %v", err)
+	}
+	if updated.AutoSyncEnabled || updated.AutoSyncIntervalMinute != 45 {
+		t.Fatalf("unexpected updated settings: %+v", updated)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/fulltext/settings", nil)
+	req.Header.Set("Authorization", adminFeedFullTextAuthHeader(t, adminUser))
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET after PUT status=%d body=%s", w.Code, w.Body.String())
+	}
+	var persisted struct {
+		AutoSyncEnabled        bool `json:"auto_sync_enabled"`
+		AutoSyncIntervalMinute int  `json:"auto_sync_interval_minutes"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &persisted); err != nil {
+		t.Fatalf("decode persisted settings: %v", err)
+	}
+	if persisted != updated {
+		t.Fatalf("expected persisted settings %+v got %+v", updated, persisted)
+	}
 }
 
 func TestGetAdminFeedFullTextHealth(t *testing.T) {

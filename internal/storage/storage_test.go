@@ -1,6 +1,9 @@
 package storage
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"atoman/internal/model"
@@ -90,5 +93,29 @@ func TestS3ObjectKeyFromURL(t *testing.T) {
 
 	if key, ok := s3ObjectKeyFromURL("/uploads/music/audio/song.mp3"); ok || key != "" {
 		t.Fatalf("expected local upload URL to be skipped, got ok=%v key=%q", ok, key)
+	}
+}
+
+func TestSaveFileLocallyRejectsFilenameWithPathSeparator(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working dir: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(originalDir); err != nil {
+			t.Fatalf("restore working dir: %v", err)
+		}
+	})
+
+	if _, _, err := SaveFileLocally(bytes.NewBufferString("audio"), "../evil.mp3", "Artist", "Album"); err == nil {
+		t.Fatal("expected filename with path separator to be rejected")
+	}
+
+	if _, err := os.Stat(filepath.Join(tmpDir, "uploads", "music", "artist", "evil.mp3")); !os.IsNotExist(err) {
+		t.Fatalf("expected traversal target not to exist, stat err=%v", err)
 	}
 }

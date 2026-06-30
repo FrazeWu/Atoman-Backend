@@ -6,12 +6,32 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
+	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
+
+var (
+	authDBMu sync.RWMutex
+	authDB   *gorm.DB
+)
+
+func SetAuthDB(db *gorm.DB) {
+	authDBMu.Lock()
+	defer authDBMu.Unlock()
+	authDB = db
+}
+
+func currentAuthDB() *gorm.DB {
+	authDBMu.RLock()
+	defer authDBMu.RUnlock()
+	return authDB
+}
 
 func jwtSecret() []byte {
 	return []byte(os.Getenv("JWT_SECRET"))
@@ -73,12 +93,21 @@ func setAuthContext(c *gin.Context, claims jwt.MapClaims) bool {
 		return false
 	}
 
-	role, _ := claims["role"].(string)
+	db := currentAuthDB()
+	if db == nil {
+		return false
+	}
+
+	var user model.User
+	if err := db.Where("uuid = ? AND is_active = ?", userID, true).First(&user).Error; err != nil {
+		return false
+	}
+	username := user.Username
+	role := user.Role
 	if role == "" {
 		role = "user"
 	}
 
-	username, _ := claims["username"].(string)
 	authctx.SetCurrentUser(c, authctx.CurrentUser{ID: userID, Username: username, Role: role})
 	return true
 }

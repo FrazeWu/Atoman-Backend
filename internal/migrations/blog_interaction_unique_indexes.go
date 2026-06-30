@@ -67,7 +67,7 @@ WHERE l.ctid = duplicates.ctid;
 `).Error; err != nil {
 				return fmt.Errorf("deduplicate likes: %w", err)
 			}
-	}
+		}
 
 		if db.Migrator().HasTable("bookmarks") {
 			if err := db.Exec(`

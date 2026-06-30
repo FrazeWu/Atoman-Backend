@@ -2,11 +2,13 @@ package service
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"html"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
@@ -14,7 +16,10 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"atoman/internal/model"
 )
@@ -132,6 +137,38 @@ var firstImageSrcRe = regexp.MustCompile(`(?is)<img[^>]+src=["']([^"' >]+)["']`)
 var feedSummaryHTMLTagRe = regexp.MustCompile(`(?is)<[^>]+>`)
 var feedSummaryWhitespaceRe = regexp.MustCompile(`\s+`)
 var feedSummaryPunctuationSpaceRe = regexp.MustCompile(`\s+([.,;:!?])`)
+var rssLogURLRe = regexp.MustCompile(`https?://[^\s"'<>]+`)
+
+func sanitizeRSSLogURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "[invalid-url]"
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func sanitizeRSSLogError(err error) error {
+	if err == nil {
+		return nil
+	}
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		copyErr := *urlErr
+		copyErr.URL = sanitizeRSSLogURL(copyErr.URL)
+		if copyErr.Err != nil {
+			copyErr.Err = errors.New(sanitizeRSSLogText(copyErr.Err.Error()))
+		}
+		return &copyErr
+	}
+	return errors.New(sanitizeRSSLogText(err.Error()))
+}
+
+func sanitizeRSSLogText(text string) string {
+	return rssLogURLRe.ReplaceAllStringFunc(text, sanitizeRSSLogURL)
+}
 
 func selectFeedContent(item ExtRSSItem) string {
 	if content := strings.TrimSpace(item.Content); content != "" {
@@ -256,17 +293,17 @@ func normalizeRSSItem(item ExtRSSItem, sourceTitle string, channelImageURL strin
 	imageURL := selectItemImageURL(item.ITunesImage.Href, firstNonEmpty(item.MediaContent.URL, item.MediaThumbnail.URL), channelImageURL, contentHTML)
 
 	return normalizedFeedItem{
-		Title:         strings.TrimSpace(item.Title),
-		Link:          strings.TrimSpace(item.Link),
-		Identifier:    identifier,
-		Author:        author,
-		PublishedAt:   publishedAt,
-		ContentHTML:   contentHTML,
-		SummaryText:   summaryText,
-		ImageURL:      imageURL,
-		EnclosureURL:  strings.TrimSpace(item.Enclosure.URL),
-		EnclosureType: strings.TrimSpace(item.Enclosure.Type),
-		Duration:      strings.TrimSpace(item.ITunesDur),
+		Title:             strings.TrimSpace(item.Title),
+		Link:              strings.TrimSpace(item.Link),
+		Identifier:        identifier,
+		Author:            author,
+		PublishedAt:       publishedAt,
+		ContentHTML:       contentHTML,
+		SummaryText:       summaryText,
+		ImageURL:          imageURL,
+		EnclosureURL:      strings.TrimSpace(item.Enclosure.URL),
+		EnclosureType:     strings.TrimSpace(item.Enclosure.Type),
+		Duration:          strings.TrimSpace(item.ITunesDur),
 		LooksLikeFullText: inferFeedContentQuality(contentHTML),
 	}
 }
@@ -297,14 +334,14 @@ func normalizeAtomEntry(entry ExtAtomEntry, sourceTitle string, feedImageURL str
 	}
 
 	return normalizedFeedItem{
-		Title:       strings.TrimSpace(entry.Title),
-		Link:        link,
-		Identifier:  identifier,
-		Author:      author,
-		PublishedAt: publishedAt,
-		ContentHTML: contentHTML,
-		SummaryText: summaryText,
-		ImageURL:    selectItemImageURL("", "", feedImageURL, firstNonEmpty(contentHTML, summaryText)),
+		Title:             strings.TrimSpace(entry.Title),
+		Link:              link,
+		Identifier:        identifier,
+		Author:            author,
+		PublishedAt:       publishedAt,
+		ContentHTML:       contentHTML,
+		SummaryText:       summaryText,
+		ImageURL:          selectItemImageURL("", "", feedImageURL, firstNonEmpty(contentHTML, summaryText)),
 		LooksLikeFullText: inferFeedContentQuality(contentHTML),
 	}
 }
@@ -376,18 +413,56 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		return nil
 	}
 
-	var count int64
-	if err := db.Model(&model.FeedItem{}).
-		Where("feed_source_id = ? AND guid = ?", src.ID, normalized.Identifier).
-		Count(&count).Error; err != nil {
-		return err
-	}
-	if count > 0 {
+	newFeedItem := buildModelFeedItem(src, normalized, fetchedAt)
+	result := db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "feed_source_id"},
+			{Name: "guid"},
+		},
+		DoNothing: true,
+	}).Create(&newFeedItem)
+	if result.Error == nil {
 		return nil
 	}
+	if isFeedItemDuplicateKeyError(result.Error) {
+		return nil
+	}
+	return result.Error
+}
 
-	newFeedItem := buildModelFeedItem(src, normalized, fetchedAt)
-	return db.Create(&newFeedItem).Error
+func isFeedItemDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		constraint := strings.ToLower(pgErr.ConstraintName)
+		detail := strings.ToLower(pgErr.Detail)
+		return constraint == "idx_feed_items_source_guid" ||
+			constraint == "idx_feed_items_source_link" ||
+			(strings.Contains(detail, "feed_source_id") &&
+				(strings.Contains(detail, "guid") || strings.Contains(detail, "link")))
+	}
+
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && string(pqErr.Code) == "23505" {
+		constraint := strings.ToLower(pqErr.Constraint)
+		detail := strings.ToLower(pqErr.Detail)
+		return constraint == "idx_feed_items_source_guid" ||
+			constraint == "idx_feed_items_source_link" ||
+			(strings.Contains(detail, "feed_source_id") &&
+				(strings.Contains(detail, "guid") || strings.Contains(detail, "link")))
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "idx_feed_items_source_guid") ||
+		strings.Contains(message, "idx_feed_items_source_link") ||
+		(strings.Contains(message, "unique constraint failed") && strings.Contains(message, "feed_items.feed_source_id")) ||
+		(strings.Contains(message, "duplicate key") && strings.Contains(message, "feed_items"))
 }
 
 func persistParsedFeedItems(db *gorm.DB, src model.FeedSource, items []ExtRSSItem, sourceTitle string, sourceCoverURL string, fetchedAt time.Time) error {
@@ -461,7 +536,7 @@ func syncAllRSSFeeds(db *gorm.DB) {
 		total++
 		// 跳过相对路径或非 http(s) URL（内部 RSS 端点误存为 external_rss 时的兜底保护）
 		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
-			log.Printf("RSS sync skipping non-absolute URL: %s", url)
+			log.Printf("RSS sync skipping non-absolute URL: %s", sanitizeRSSLogURL(url))
 			skipped++
 			continue
 		}
@@ -469,7 +544,7 @@ func syncAllRSSFeeds(db *gorm.DB) {
 		// 2. Fetch and parse the feed
 		items, sourceTitle, sourceCoverURL, err := FetchAndParseRSS(url)
 		if err != nil {
-			log.Printf("Failed to fetch RSS %s: %v", url, err)
+			log.Printf("Failed to fetch RSS %s: %v", sanitizeRSSLogURL(url), sanitizeRSSLogError(err))
 			failed++
 			continue
 		}
@@ -477,7 +552,7 @@ func syncAllRSSFeeds(db *gorm.DB) {
 		// 3. Find all FeedSources (users subscribed) to this URL
 		var sources []model.FeedSource
 		if err := db.Where("source_type = ? AND rss_url = ?", "external_rss", url).Find(&sources).Error; err != nil {
-			log.Printf("failed to fetch feed sources for %s: %v", url, err)
+			log.Printf("failed to fetch feed sources for %s: %v", sanitizeRSSLogURL(url), err)
 			failed++
 			continue
 		}
@@ -487,12 +562,12 @@ func syncAllRSSFeeds(db *gorm.DB) {
 
 		for _, src := range sources {
 			if err := persistParsedFeedItems(db, src, items, sourceTitle, sourceCoverURL, now); err != nil {
-				log.Printf("failed to persist feed items for %s: %v", src.RssURL, err)
+				log.Printf("failed to persist feed items for %s: %v", sanitizeRSSLogURL(src.RssURL), err)
 				urlFailed = true
 				continue
 			}
 			if err := applyFetchedSourceUpdates(db, &src, sourceTitle, sourceCoverURL, now); err != nil {
-				log.Printf("failed to update source metadata for %s: %v", src.RssURL, err)
+				log.Printf("failed to update source metadata for %s: %v", sanitizeRSSLogURL(src.RssURL), err)
 				urlFailed = true
 			}
 		}
@@ -509,30 +584,34 @@ func SyncSingleRSS(db *gorm.DB, src model.FeedSource) {
 	if src.SourceType != "external_rss" || src.RssURL == "" {
 		return
 	}
-	if !strings.HasPrefix(src.RssURL, "http://") && !strings.HasPrefix(src.RssURL, "https://") {
-		log.Printf("SyncSingleRSS skipping non-absolute URL: %s", src.RssURL)
+	if err := ValidateFullTextTargetURL(src.RssURL); err != nil {
+		log.Printf("SyncSingleRSS skipping invalid URL: %s", sanitizeRSSLogURL(src.RssURL))
 		return
 	}
 
 	items, sourceTitle, sourceCoverURL, err := FetchAndParseRSS(src.RssURL)
 	if err != nil {
-		log.Printf("Immediate RSS sync failed for %s: %v", src.RssURL, err)
+		log.Printf("Immediate RSS sync failed for %s: %v", sanitizeRSSLogURL(src.RssURL), sanitizeRSSLogError(err))
 		return
 	}
 
 	now := time.Now()
 
 	if err := persistParsedFeedItems(db, src, items, sourceTitle, sourceCoverURL, now); err != nil {
-		log.Printf("failed to persist feed items for %s: %v", src.RssURL, err)
+		log.Printf("failed to persist feed items for %s: %v", sanitizeRSSLogURL(src.RssURL), err)
 		return
 	}
 	if err := applyFetchedSourceUpdates(db, &src, sourceTitle, sourceCoverURL, now); err != nil {
-		log.Printf("failed to update source metadata for %s: %v", src.RssURL, err)
+		log.Printf("failed to update source metadata for %s: %v", sanitizeRSSLogURL(src.RssURL), err)
 	}
 }
 
 func FetchAndParseRSS(feedURL string) ([]ExtRSSItem, string, string, error) {
-	client := rssFetchHTTPClient
+	if err := ValidateFullTextTargetURL(feedURL); err != nil {
+		return nil, "", "", err
+	}
+
+	client := rssClientWithRedirectValidation(rssFetchHTTPClient)
 	req, err := http.NewRequest("GET", feedURL, nil)
 	if err != nil {
 		return nil, "", "", err
@@ -595,6 +674,24 @@ func FetchAndParseRSS(feedURL string) ([]ExtRSSItem, string, string, error) {
 	}
 
 	return nil, "", "", fmt.Errorf("failed to parse feed as RSS or Atom")
+}
+
+func rssClientWithRedirectValidation(base *http.Client) *http.Client {
+	if base == nil {
+		base = http.DefaultClient
+	}
+	wrapped := *base
+	previousCheckRedirect := base.CheckRedirect
+	wrapped.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if err := ValidateFullTextTargetURL(req.URL.String()); err != nil {
+			return err
+		}
+		if previousCheckRedirect != nil {
+			return previousCheckRedirect(req, via)
+		}
+		return nil
+	}
+	return &wrapped
 }
 
 func parseRSSDate(dateStr string) time.Time {

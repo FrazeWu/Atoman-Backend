@@ -1,11 +1,16 @@
 package service
 
 import (
+	"errors"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"atoman/internal/model"
 )
@@ -16,6 +21,8 @@ var notificationPriority = map[string]int{
 	"forum_solved":  1,
 	"forum_like":    0,
 }
+
+var errNotificationConflictRetryExceeded = errors.New("notification conflict retry exceeded")
 
 type NotificationService struct {
 	db *gorm.DB
@@ -35,7 +42,7 @@ func (s *NotificationService) CreateNotification(recipientID uuid.UUID, actorID 
 	}
 
 	var existing model.Notification
-	err := s.db.Where("recipient_id = ? AND source_type = ? AND source_id = ?", recipientID, sourceType, sourceID).First(&existing).Error
+	err := s.db.Where("recipient_id = ? AND source_type = ? AND source_id = ? AND type = ?", recipientID, sourceType, sourceID, notifType).First(&existing).Error
 	if err == nil {
 		existingPriority := notificationPriority[existing.Type]
 		newPriority := notificationPriority[notifType]
@@ -70,36 +77,129 @@ func (s *NotificationService) CreateNotification(recipientID uuid.UUID, actorID 
 }
 
 func (s *NotificationService) upsertLikeNotification(recipientID uuid.UUID, actorID *uuid.UUID, sourceType string, sourceID uuid.UUID, meta model.NotificationMeta) (*model.Notification, error) {
-	var existing model.Notification
-	err := s.db.Where("recipient_id = ? AND source_type = ? AND source_id = ? AND type = ?", recipientID, sourceType, sourceID, "forum_like").First(&existing).Error
-
 	actorUsername, _ := meta["actor_username"].(string)
-	if err == nil {
-		existing.Meta = mergeLikeMeta(existing.Meta, meta, actorUsername)
-		existing.ActorID = actorID
-		existing.ReadAt = nil
-		if saveErr := s.db.Save(&existing).Error; saveErr != nil {
-			return nil, saveErr
+	var notification *model.Notification
+
+	for attempt := 0; attempt < 3; attempt++ {
+		shouldRetry := false
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			var existing model.Notification
+			query := tx.Where("recipient_id = ? AND source_type = ? AND source_id = ? AND type = ?", recipientID, sourceType, sourceID, "forum_like")
+			if supportsRowLock(tx) {
+				query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			err := query.First(&existing).Error
+			if err == nil {
+				existing.Meta = mergeLikeMeta(existing.Meta, meta, actorUsername)
+				existing.ActorID = actorID
+				existing.ReadAt = nil
+
+				result := tx.Model(&model.Notification{}).
+					Where("id = ? AND updated_at = ?", existing.ID, existing.UpdatedAt).
+					Updates(map[string]interface{}{
+						"actor_id": actorID,
+						"meta":     existing.Meta,
+						"read_at":  nil,
+					})
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected == 0 {
+					shouldRetry = true
+					return nil
+				}
+				notification = &existing
+				return nil
+			}
+			if err != nil && err != gorm.ErrRecordNotFound {
+				return err
+			}
+
+			mergedMeta := mergeLikeMeta(model.NotificationMeta{}, meta, actorUsername)
+			created := &model.Notification{
+				RecipientID: recipientID,
+				ActorID:     actorID,
+				Type:        "forum_like",
+				SourceType:  sourceType,
+				SourceID:    sourceID,
+				Meta:        mergedMeta,
+			}
+			if err := tx.Create(created).Error; err != nil {
+				if isNotificationDuplicateError(err) {
+					shouldRetry = true
+					return nil
+				}
+				return err
+			}
+			notification = created
+			return nil
+		})
+		if err != nil {
+			if isNotificationRetryableLockError(err) {
+				time.Sleep(time.Duration(attempt+1) * time.Millisecond)
+				continue
+			}
+			return nil, err
 		}
-		return &existing, nil
+		if !shouldRetry {
+			return notification, nil
+		}
+		time.Sleep(time.Duration(attempt+1) * time.Millisecond)
 	}
-	if err != nil && err != gorm.ErrRecordNotFound {
-		return nil, err
+	return nil, errNotificationConflictRetryExceeded
+}
+
+func isNotificationRetryableLockError(err error) bool {
+	if err == nil {
+		return false
 	}
 
-	meta = mergeLikeMeta(model.NotificationMeta{}, meta, actorUsername)
-	notification := &model.Notification{
-		RecipientID: recipientID,
-		ActorID:     actorID,
-		Type:        "forum_like",
-		SourceType:  sourceType,
-		SourceID:    sourceID,
-		Meta:        meta,
+	var sqliteErr interface {
+		error
+		Code() int
 	}
-	if err := s.db.Create(notification).Error; err != nil {
-		return nil, err
+	if errors.As(err, &sqliteErr) {
+		switch sqliteErr.Code() {
+		case 5, 6, 261, 262:
+			return true
+		}
 	}
-	return notification, nil
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "database table is locked") ||
+		strings.Contains(message, "database is locked") ||
+		strings.Contains(message, "database is deadlocked")
+}
+
+func isNotificationDuplicateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+
+	var sqliteErr interface {
+		error
+		Code() int
+	}
+	if errors.As(err, &sqliteErr) && sqliteErr.Code() == 2067 {
+		message := strings.ToLower(sqliteErr.Error())
+		return strings.Contains(message, "notifications.recipient_id") ||
+			strings.Contains(message, "uq_notification_dedup")
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return strings.Contains(strings.ToLower(pgErr.ConstraintName), "notification")
+	}
+
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && string(pqErr.Code) == "23505" {
+		return strings.Contains(strings.ToLower(pqErr.Constraint), "notification")
+	}
+
+	return false
 }
 
 func (s *NotificationService) MarkRead(notifID, recipientID uuid.UUID) error {

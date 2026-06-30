@@ -136,8 +136,8 @@ func (ActivityLog) TableName() string { return "activity_logs" }
 // ForumDraft persists in-progress topic or reply drafts
 type ForumDraft struct {
 	Base
-	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
-	ContextKey string    `json:"context_key" gorm:"not null"` // "new_topic" | "reply:{topic_uuid}"
+	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_forum_drafts_user_context,priority:1"`
+	ContextKey string    `json:"context_key" gorm:"not null;uniqueIndex:idx_forum_drafts_user_context,priority:2"` // "new_topic" | "reply:{topic_uuid}"
 	Title      string    `json:"title"`
 	Content    string    `json:"content" gorm:"type:text"`
 	Tags       string    `json:"tags"` // comma-separated tag list

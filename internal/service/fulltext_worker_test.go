@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
@@ -303,7 +302,7 @@ func TestProcessFullTextItemMarksTooManyRedirects(t *testing.T) {
 
 	originalResolver := resolveFullTextHostname
 	resolveFullTextHostname = func(host string) ([]net.IP, error) {
-		if host == "example.com" {
+		if host == "example.com" || host == "feeds.example.com" {
 			return []net.IP{net.ParseIP("93.184.216.34")}, nil
 		}
 		return nil, errors.New("unexpected host: " + host)
@@ -343,6 +342,25 @@ func TestProcessFullTextItemMarksTooManyRedirects(t *testing.T) {
 	}
 	if got.FullTextErrorCode != FullTextErrorTooManyRedirects {
 		t.Fatalf("error_code=%s", got.FullTextErrorCode)
+	}
+}
+
+func TestFullTextHTTPClientRejectsBlockedRedirectTarget(t *testing.T) {
+	req, err := http.NewRequest(http.MethodGet, "http://127.0.0.1/private", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	via, err := http.NewRequest(http.MethodGet, "https://example.com/post", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = fullTextHTTPClient.CheckRedirect(req, []*http.Request{via})
+	if err == nil {
+		t.Fatal("expected blocked redirect target to fail SSRF validation")
+	}
+	if !strings.Contains(err.Error(), FullTextErrorSSRFBlocked) {
+		t.Fatalf("expected ssrf blocked error, got %v", err)
 	}
 }
 
@@ -467,7 +485,7 @@ func TestClaimNextFullTextItemSkipsPodcastEnclosures(t *testing.T) {
 func TestSyncSingleRSSSetsInitialFullTextStatus(t *testing.T) {
 	originalResolver := resolveFullTextHostname
 	resolveFullTextHostname = func(host string) ([]net.IP, error) {
-		if host == "example.com" {
+		if host == "example.com" || host == "feeds.example.com" || host == "cdn.example.com" {
 			return []net.IP{net.ParseIP("93.184.216.34")}, nil
 		}
 		return nil, errors.New("unexpected host: " + host)
@@ -582,7 +600,7 @@ func TestSyncSingleRSSFailureDoesNotMutateSourceState(t *testing.T) {
 func TestSyncSingleRSSDisablesPodcastFullTextStatus(t *testing.T) {
 	originalResolver := resolveFullTextHostname
 	resolveFullTextHostname = func(host string) ([]net.IP, error) {
-		if host == "example.com" {
+		if host == "example.com" || host == "feeds.example.com" {
 			return []net.IP{net.ParseIP("93.184.216.34")}, nil
 		}
 		return nil, errors.New("unexpected host: " + host)
@@ -591,19 +609,28 @@ func TestSyncSingleRSSDisablesPodcastFullTextStatus(t *testing.T) {
 		resolveFullTextHostname = originalResolver
 	}()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/rss+xml")
-		_, _ = w.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel><title>Podcast Feed</title><item><title>Episode</title><link>https://example.com/episode</link><guid>episode-1</guid><description>Audio summary</description><enclosure url="https://cdn.example.com/episode.mp3" type="audio/mpeg" /></item></channel></rss>`))
-	}))
-	defer server.Close()
+	originalClient := rssFetchHTTPClient
+	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.String() != "https://feeds.example.com/podcast.xml" {
+			return nil, errors.New("unexpected feed url: " + req.URL.String())
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
+			Body: io.NopCloser(strings.NewReader(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Podcast Feed</title><item><title>Episode</title><link>https://example.com/episode</link><guid>episode-1</guid><description>Audio summary</description><enclosure url="https://cdn.example.com/episode.mp3" type="audio/mpeg" /></item></channel></rss>`)),
+		}, nil
+	})}
+	defer func() {
+		rssFetchHTTPClient = originalClient
+	}()
 
 	db, err := openFullTextWorkerTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	source := model.FeedSource{SourceType: "external_rss", Hash: "worker-source-podcast-rss", RssURL: server.URL, FullTextEnabled: true}
+	source := model.FeedSource{SourceType: "external_rss", Hash: "worker-source-podcast-rss", RssURL: "https://feeds.example.com/podcast.xml", FullTextEnabled: true}
 	if err := db.Create(&source).Error; err != nil {
 		t.Fatal(err)
 	}

@@ -1,12 +1,16 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
@@ -75,6 +79,48 @@ type UserProfileInput struct {
 type UserSettingsInput struct {
 	PrivateProfile *bool   `json:"private_profile"`
 	DMPermission   *string `json:"dm_permission"`
+}
+
+func isUserSettingsDuplicateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return true
+	}
+
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && string(pqErr.Code) == "23505" {
+		return true
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique constraint failed") &&
+		strings.Contains(message, "user_settings")
+}
+
+func loadOrCreateUserSettings(db *gorm.DB, userID uuid.UUID) (model.UserSettings, error) {
+	var settings model.UserSettings
+	if err := db.Where("user_id = ?", userID).First(&settings).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.UserSettings{}, err
+		}
+
+		if err := db.Create(&model.UserSettings{UserID: userID}).Error; err != nil && !isUserSettingsDuplicateError(err) {
+			return model.UserSettings{}, err
+		}
+
+		if err := db.Where("user_id = ?", userID).First(&settings).Error; err != nil {
+			return model.UserSettings{}, err
+		}
+	}
+
+	return settings, nil
 }
 
 // ExplorePostResponse represents a post in the explore feed
@@ -323,11 +369,10 @@ func GetUserSettings(db *gorm.DB) gin.HandlerFunc {
 		userIDVal, _ := c.Get("user_id")
 		userID := userIDVal.(uuid.UUID)
 
-		var settings model.UserSettings
-		if err := db.Where("user_id = ?", userID).First(&settings).Error; err != nil {
-			// If settings don't exist, create default
-			settings = model.UserSettings{UserID: userID}
-			db.Create(&settings)
+		settings, err := loadOrCreateUserSettings(db, userID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch settings"})
+			return
 		}
 
 		c.JSON(http.StatusOK, gin.H{"data": settings, "message": "ok"})
@@ -359,10 +404,10 @@ func UpdateUserSettings(db *gorm.DB) gin.HandlerFunc {
 		userIDVal, _ := c.Get("user_id")
 		userID := userIDVal.(uuid.UUID)
 
-		var settings model.UserSettings
-		if err := db.Where("user_id = ?", userID).First(&settings).Error; err != nil {
-			settings = model.UserSettings{UserID: userID}
-			db.Create(&settings)
+		settings, err := loadOrCreateUserSettings(db, userID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update settings"})
+			return
 		}
 
 		updates := map[string]interface{}{}
@@ -382,6 +427,12 @@ func UpdateUserSettings(db *gorm.DB) gin.HandlerFunc {
 
 		if len(updates) > 0 {
 			if err := db.Model(&settings).Updates(updates).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update settings"})
+				return
+			}
+
+			settings, err = loadOrCreateUserSettings(db, userID)
+			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update settings"})
 				return
 			}
@@ -587,7 +638,7 @@ func SearchUsers(db *gorm.DB) gin.HandlerFunc {
 				c.JSON(http.StatusOK, gin.H{"data": []UserResult{}})
 				return
 			}
-			query = query.Joins(`JOIN follows ON follows.follower_id = "Users".uuid AND follows.following_id = ?`, userID)
+			query = query.Joins(`JOIN follows ON follows.follower_id = ? AND follows.following_id = "Users".uuid`, userID)
 		}
 
 		if q != "" {
@@ -646,7 +697,7 @@ func ListUsersForRoleManagement(db *gorm.DB) gin.HandlerFunc {
 			DisplayName string    `json:"display_name"`
 			AvatarURL   string    `json:"avatar_url"`
 			Role        string    `json:"role"`
-			CreatedAt   string    `json:"created_at"`
+			CreatedAt   time.Time `json:"created_at"`
 		}
 		if err := query.Scan(&users).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to search users"})

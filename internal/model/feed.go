@@ -184,10 +184,10 @@ func (Comment) TableName() string { return "comments" }
 
 type Like struct {
 	Base
-	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
+	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_likes_user_target,priority:1,where:deleted_at IS NULL"`
 	User       *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	TargetType string    `json:"target_type" gorm:"not null"` // post / comment
-	TargetID   uuid.UUID `json:"target_id" gorm:"type:uuid;not null"`
+	TargetType string    `json:"target_type" gorm:"not null;uniqueIndex:idx_likes_user_target,priority:2,where:deleted_at IS NULL"` // post / comment
+	TargetID   uuid.UUID `json:"target_id" gorm:"type:uuid;not null;uniqueIndex:idx_likes_user_target,priority:3,where:deleted_at IS NULL"`
 }
 
 func (Like) TableName() string { return "likes" }
@@ -203,9 +203,9 @@ func (BookmarkFolder) TableName() string { return "bookmark_folders" }
 
 type Bookmark struct {
 	Base
-	UserID           uuid.UUID       `json:"user_id" gorm:"type:uuid;not null;index"`
+	UserID           uuid.UUID       `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_bookmarks_user_post,priority:1,where:deleted_at IS NULL"`
 	User             *User           `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	PostID           uuid.UUID       `json:"post_id" gorm:"type:uuid;not null;index"`
+	PostID           uuid.UUID       `json:"post_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_bookmarks_user_post,priority:2,where:deleted_at IS NULL"`
 	Post             *Post           `json:"post,omitempty" gorm:"foreignKey:PostID"`
 	BookmarkFolderID *uuid.UUID      `json:"bookmark_folder_id" gorm:"type:uuid;index"`
 	BookmarkFolder   *BookmarkFolder `json:"bookmark_folder,omitempty" gorm:"foreignKey:BookmarkFolderID"`
@@ -258,11 +258,11 @@ func (Subscription) TableName() string { return "subscriptions" }
 
 type FeedItem struct {
 	Base
-	FeedSourceID          uuid.UUID   `json:"feed_source_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_feed_items_source_guid,priority:1;index:idx_feed_items_source_status,priority:1;index:idx_feed_items_source_published,priority:1"`
+	FeedSourceID          uuid.UUID   `json:"feed_source_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_feed_items_source_guid,priority:1;uniqueIndex:idx_feed_items_source_link,priority:1,where:link <> '';index:idx_feed_items_source_status,priority:1;index:idx_feed_items_source_published,priority:1"`
 	FeedSource            *FeedSource `json:"feed_source,omitempty" gorm:"foreignKey:FeedSourceID"`
 	GUID                  string      `json:"guid" gorm:"not null;uniqueIndex:idx_feed_items_source_guid,priority:2"`
 	Title                 string      `json:"title"`
-	Link                  string      `json:"link" gorm:"type:text"`
+	Link                  string      `json:"link" gorm:"type:text;uniqueIndex:idx_feed_items_source_link,priority:2,where:link <> ''"`
 	Summary               string      `json:"summary" gorm:"type:text"`
 	Author                string      `json:"author"`
 	PublishedAt           time.Time   `json:"published_at" gorm:"index:idx_feed_items_source_published,priority:2,sort:desc"`
@@ -327,8 +327,8 @@ func (ReadingListItem) TableName() string { return "reading_list_items" }
 
 type SubscriptionGroup struct {
 	Base
-	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
-	Name   string    `json:"name" gorm:"not null"`
+	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null;uniqueIndex:idx_subscription_groups_user_name,priority:1,where:deleted_at IS NULL"`
+	Name   string    `json:"name" gorm:"not null;uniqueIndex:idx_subscription_groups_user_name,priority:2,where:deleted_at IS NULL"`
 }
 
 func (SubscriptionGroup) TableName() string { return "subscription_groups" }

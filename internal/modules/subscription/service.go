@@ -74,11 +74,12 @@ func (s *Service) CreateSubscription(user authctx.CurrentUser, req CreateSubscri
 			Title:               title,
 			SubscriptionGroupID: &group.ID,
 		}
-		if err := repo.CreateSubscription(&created); err != nil {
-			if _, lookupErr := repo.FindSubscriptionByUserAndSource(user.ID, source.ID); lookupErr == nil {
-				return apperr.Conflict("subscription.already_exists", "Already subscribed to this source")
-			}
+		inserted, err := repo.CreateSubscriptionIfNotExists(&created)
+		if err != nil {
 			return err
+		}
+		if !inserted {
+			return apperr.Conflict("subscription.already_exists", "Already subscribed to this source")
 		}
 		return nil
 	})
@@ -132,8 +133,19 @@ func ensureDefaultGroup(repo *Repo, userID uuid.UUID) (model.SubscriptionGroup, 
 	}
 	if len(groups) == 0 {
 		group := model.SubscriptionGroup{UserID: userID, Name: defaultSubscriptionGroupName}
-		if err := repo.CreateGroup(&group); err != nil {
+		created, err := repo.CreateGroupIfNotExists(&group)
+		if err != nil {
 			return model.SubscriptionGroup{}, err
+		}
+		if !created {
+			groups, err = repo.FindDefaultGroup(userID, defaultSubscriptionGroupName)
+			if err != nil {
+				return model.SubscriptionGroup{}, err
+			}
+			if len(groups) == 0 {
+				return model.SubscriptionGroup{}, gorm.ErrRecordNotFound
+			}
+			return groups[0], nil
 		}
 		return group, nil
 	}

@@ -220,19 +220,13 @@ func (s *Service) DeleteReply(user authctx.CurrentUser, replyID uuid.UUID) error
 	if err := requireTopicOwner(user, reply.UserID); err != nil {
 		return err
 	}
-	if err := s.repo.DeleteReply(replyID); err != nil {
-		return err
-	}
-	count, err := s.repo.CountReplies(reply.TopicID)
-	if err != nil {
-		return err
-	}
-	topic, err := s.GetTopic(reply.TopicID)
-	if err != nil {
-		return err
-	}
-	topic.ReplyCount = int(count)
-	return s.repo.SaveTopic(&topic)
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		repo := NewRepo(tx)
+		if err := repo.DeleteReply(replyID); err != nil {
+			return err
+		}
+		return s.recalculateTopicReplyState(tx, reply.TopicID)
+	})
 }
 
 func (s *Service) ListDrafts(user authctx.CurrentUser) ([]model.ForumDraft, error) {
@@ -278,4 +272,45 @@ func requireTopicOwner(user authctx.CurrentUser, ownerID uuid.UUID) error {
 		return apperr.Forbidden("forum.forbidden", "You do not have permission to modify this resource")
 	}
 	return nil
+}
+
+func (s *Service) recalculateTopicReplyState(tx *gorm.DB, topicID uuid.UUID) error {
+	var replyCount int64
+	if err := tx.Model(&model.ForumReply{}).Where("topic_id = ?", topicID).Count(&replyCount).Error; err != nil {
+		return err
+	}
+
+	updates := map[string]any{
+		"reply_count": int(replyCount),
+	}
+
+	if replyCount == 0 {
+		updates["last_reply_at"] = nil
+		updates["is_solved"] = false
+		updates["solved_reply_id"] = nil
+		return tx.Model(&model.ForumTopic{}).Where("id = ?", topicID).Updates(updates).Error
+	}
+
+	var latestReply model.ForumReply
+	if err := tx.Select("id", "created_at").Where("topic_id = ?", topicID).Order("created_at DESC, id DESC").First(&latestReply).Error; err != nil {
+		return err
+	}
+	lastReplyAt := latestReply.CreatedAt
+	updates["last_reply_at"] = &lastReplyAt
+
+	var solvedReply model.ForumReply
+	if err := tx.Select("id").Where("topic_id = ? AND is_solved = ?", topicID, true).Order("created_at DESC, id DESC").First(&solvedReply).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			updates["is_solved"] = false
+			updates["solved_reply_id"] = nil
+		} else {
+			return err
+		}
+	} else {
+		solvedReplyID := solvedReply.ID
+		updates["is_solved"] = true
+		updates["solved_reply_id"] = &solvedReplyID
+	}
+
+	return tx.Model(&model.ForumTopic{}).Where("id = ?", topicID).Updates(updates).Error
 }

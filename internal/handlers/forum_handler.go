@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 
 	"atoman/internal/collab"
@@ -20,6 +23,29 @@ type forumHandler struct {
 	db       *gorm.DB
 	notifSvc *service.NotificationService
 	userHub  *collab.UserHub
+}
+
+func isForumLikeDuplicateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return true
+	}
+
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && string(pqErr.Code) == "23505" {
+		return true
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique constraint failed") &&
+		strings.Contains(message, "forum_likes")
 }
 
 func SetupForumRoutes(router *gin.Engine, db *gorm.DB, notifSvc *service.NotificationService, userHub *collab.UserHub) {
@@ -437,19 +463,54 @@ func (h *forumHandler) ToggleForumTopicLike() gin.HandlerFunc {
 		var actor model.User
 		db.Select("uuid", "username", "display_name").First(&actor, "uuid = ?", uid)
 
-		var like model.ForumLike
-		if db.Where("user_id = ? AND target_type = ? AND target_id = ?", uid, "topic", id).First(&like).Error == nil {
-			db.Delete(&like)
-			db.Model(&model.ForumTopic{}).Where("id = ?", id).UpdateColumn("like_count", gorm.Expr("like_count - 1"))
-			c.JSON(http.StatusOK, gin.H{"liked": false})
-		} else {
-			db.Create(&model.ForumLike{UserID: uid, TargetType: "topic", TargetID: id})
-			db.Model(&model.ForumTopic{}).Where("id = ?", id).UpdateColumn("like_count", gorm.Expr("like_count + 1"))
-			if h.notifSvc != nil {
-				_ = h.notifSvc.NotifyForumLike(topic.UserID, uid, getDisplayName(&actor), "forum_topic", topic.ID, topic.ID, topic.Title, WsPushNotif(h.userHub))
+		liked := false
+		created := false
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			var like model.ForumLike
+			if err := tx.Where("user_id = ? AND target_type = ? AND target_id = ?", uid, "topic", id).First(&like).Error; err == nil {
+				result := tx.Delete(&like)
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected > 0 {
+					if err := tx.Model(&model.ForumTopic{}).Where("id = ?", id).UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error; err != nil {
+						return err
+					}
+				}
+				return nil
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
 			}
-			c.JSON(http.StatusOK, gin.H{"liked": true})
+
+			like = model.ForumLike{UserID: uid, TargetType: "topic", TargetID: id}
+			result := tx.Create(&like)
+			if result.Error != nil {
+				if isForumLikeDuplicateError(result.Error) {
+					var existing model.ForumLike
+					if err := tx.Where("user_id = ? AND target_type = ? AND target_id = ?", uid, "topic", id).First(&existing).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+						return err
+					}
+					liked = true
+					return nil
+				}
+				return result.Error
+			}
+			if result.RowsAffected > 0 {
+				if err := tx.Model(&model.ForumTopic{}).Where("id = ?", id).UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error; err != nil {
+					return err
+				}
+			}
+			liked = true
+			created = true
+			return nil
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to toggle like"})
+			return
 		}
+		if created && h.notifSvc != nil {
+			_ = h.notifSvc.NotifyForumLike(topic.UserID, uid, getDisplayName(&actor), "forum_topic", topic.ID, topic.ID, topic.Title, WsPushNotif(h.userHub))
+		}
+		c.JSON(http.StatusOK, gin.H{"liked": liked})
 	}
 }
 
@@ -474,14 +535,45 @@ func ToggleForumTopicBookmark(db *gorm.DB) gin.HandlerFunc {
 		userID, _ := c.Get("user_id")
 		uid, _ := userID.(uuid.UUID)
 
-		var bookmark model.ForumBookmark
-		if db.Where("user_id = ? AND topic_id = ?", uid, id).First(&bookmark).Error == nil {
-			db.Delete(&bookmark)
-			c.JSON(http.StatusOK, gin.H{"bookmarked": false})
-		} else {
-			db.Create(&model.ForumBookmark{UserID: uid, TopicID: id})
-			c.JSON(http.StatusOK, gin.H{"bookmarked": true})
+		var topic model.ForumTopic
+		if err := db.Select("id").First(&topic, "id = ?", id).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Topic not found"})
+			return
 		}
+
+		bookmarked := false
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			var bookmark model.ForumBookmark
+			if err := tx.Where("user_id = ? AND topic_id = ?", uid, id).First(&bookmark).Error; err == nil {
+				result := tx.Delete(&bookmark)
+				if result.Error != nil {
+					return result.Error
+				}
+				return nil
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+
+			result := tx.Create(&model.ForumBookmark{UserID: uid, TopicID: id})
+			if result.Error != nil {
+				if isForumLikeDuplicateError(result.Error) {
+					var existing model.ForumBookmark
+					if err := tx.Where("user_id = ? AND topic_id = ?", uid, id).First(&existing).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+						return err
+					}
+					bookmarked = true
+					return nil
+				}
+				return result.Error
+			}
+			bookmarked = true
+			return nil
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to toggle bookmark"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"bookmarked": bookmarked})
 	}
 }
 
@@ -833,25 +925,65 @@ func (h *forumHandler) ToggleForumReplyLike() gin.HandlerFunc {
 		userID, _ := c.Get("user_id")
 		uid, _ := userID.(uuid.UUID)
 
-		var like model.ForumLike
-		if db.Where("user_id = ? AND target_type = ? AND target_id = ?", uid, "reply", id).First(&like).Error == nil {
-			db.Delete(&like)
-			db.Model(&model.ForumReply{}).Where("id = ?", id).UpdateColumn("like_count", gorm.Expr("like_count - 1"))
-			c.JSON(http.StatusOK, gin.H{"liked": false})
-		} else {
-			db.Create(&model.ForumLike{UserID: uid, TargetType: "reply", TargetID: id})
-			db.Model(&model.ForumReply{}).Where("id = ?", id).UpdateColumn("like_count", gorm.Expr("like_count + 1"))
-			var replyOwner model.ForumReply
-			if db.Preload("User").First(&replyOwner, "id = ?", id).Error == nil {
-				if replyOwner.UserID != uid {
-					service.LogActivity(db, replyOwner.UserID, "receive_like", "reply", id)
-					if h.notifSvc != nil {
-						var actor model.User
-						db.Select("uuid", "username", "display_name").First(&actor, "uuid = ?", uid)
-						var topic model.ForumTopic
-						if db.Select("id", "title").First(&topic, "id = ?", replyOwner.TopicID).Error == nil {
-							_ = h.notifSvc.NotifyForumLike(replyOwner.UserID, uid, getDisplayName(&actor), "forum_reply", replyOwner.ID, topic.ID, topic.Title, WsPushNotif(h.userHub))
-						}
+		liked := false
+		created := false
+		var replyOwner model.ForumReply
+		if err := db.Preload("User").First(&replyOwner, "id = ?", id).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Reply not found"})
+			return
+		}
+
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			var like model.ForumLike
+			if err := tx.Where("user_id = ? AND target_type = ? AND target_id = ?", uid, "reply", id).First(&like).Error; err == nil {
+				result := tx.Delete(&like)
+				if result.Error != nil {
+					return result.Error
+				}
+				if result.RowsAffected > 0 {
+					if err := tx.Model(&model.ForumReply{}).Where("id = ?", id).UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error; err != nil {
+						return err
+					}
+				}
+				return nil
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+
+			like = model.ForumLike{UserID: uid, TargetType: "reply", TargetID: id}
+			result := tx.Create(&like)
+			if result.Error != nil {
+				if isForumLikeDuplicateError(result.Error) {
+					var existing model.ForumLike
+					if err := tx.Where("user_id = ? AND target_type = ? AND target_id = ?", uid, "reply", id).First(&existing).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+						return err
+					}
+					liked = true
+					return nil
+				}
+				return result.Error
+			}
+			if result.RowsAffected > 0 {
+				if err := tx.Model(&model.ForumReply{}).Where("id = ?", id).UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error; err != nil {
+					return err
+				}
+			}
+			liked = true
+			created = true
+			return nil
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to toggle like"})
+			return
+		}
+		if created {
+			if replyOwner.UserID != uid {
+				service.LogActivity(db, replyOwner.UserID, "receive_like", "reply", id)
+				if h.notifSvc != nil {
+					var actor model.User
+					db.Select("uuid", "username", "display_name").First(&actor, "uuid = ?", uid)
+					var topic model.ForumTopic
+					if db.Select("id", "title").First(&topic, "id = ?", replyOwner.TopicID).Error == nil {
+						_ = h.notifSvc.NotifyForumLike(replyOwner.UserID, uid, getDisplayName(&actor), "forum_reply", replyOwner.ID, topic.ID, topic.Title, WsPushNotif(h.userHub))
 					}
 				}
 			}
@@ -875,8 +1007,8 @@ func (h *forumHandler) ToggleForumReplyLike() gin.HandlerFunc {
 					db.Model(&model.ForumReply{}).Where("id = ?", id).Update("is_solved", true)
 				}
 			}
-			c.JSON(http.StatusOK, gin.H{"liked": true})
 		}
+		c.JSON(http.StatusOK, gin.H{"liked": liked})
 	}
 }
 
@@ -1438,30 +1570,49 @@ func ReviewCategoryRequest(db *gorm.DB) gin.HandlerFunc {
 
 		adminID := c.MustGet("userID").(uuid.UUID)
 		var cr model.CategoryRequest
-		if err := db.First(&cr, "id = ?", id).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
-			return
-		}
-
-		cr.Status = req.Action + "d" // "approved" | "rejected"
-		cr.ReviewedBy = &adminID
-		cr.ReviewNote = req.ReviewNote
-		db.Save(&cr)
-
-		if req.Action == "approve" {
-			color := req.Color
-			if color == "" {
-				color = "#6366f1"
+		var cat model.ForumCategory
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.First(&cr, "id = ?", id).Error; err != nil {
+				return err
 			}
-			cat := model.ForumCategory{
-				Name:        cr.Name,
-				Description: cr.Description,
-				Color:       color,
+
+			cr.Status = req.Action + "d" // "approved" | "rejected"
+			cr.ReviewedBy = &adminID
+			cr.ReviewNote = req.ReviewNote
+
+			if req.Action == "approve" {
+				color := req.Color
+				if color == "" {
+					color = "#6366f1"
+				}
+				cat = model.ForumCategory{
+					Name:        cr.Name,
+					Description: cr.Description,
+					Color:       color,
+				}
+				if err := tx.Create(&cat).Error; err != nil {
+					return err
+				}
 			}
-			if err := db.Create(&cat).Error; err != nil {
+
+			if err := tx.Save(&cr).Error; err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
+				return
+			}
+			if req.Action == "approve" {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "approved but failed to create category"})
 				return
 			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to review category request"})
+			return
+		}
+
+		if req.Action == "approve" {
 			c.JSON(http.StatusOK, gin.H{"data": cr, "category": cat})
 			return
 		}

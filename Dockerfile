@@ -15,8 +15,6 @@ RUN mkdir -p /app/log /app/uploads /run/nginx \
     && chown -R appuser:appgroup /app /run/nginx /var/lib/nginx /var/log/nginx
 COPY --from=builder /app/main .
 COPY nginx/conf.d/00-real-ip.conf /etc/nginx/http.d/00-real-ip.conf
-COPY deploy/nginx/backend-gateway.conf /etc/nginx/http.d/default.conf
-COPY deploy/docker/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+COPY nginx/api.atoman.org.conf /etc/nginx/http.d/default.conf
 EXPOSE 80 443
-CMD ["/entrypoint.sh"]
+CMD ["sh", "-c", "./main & exec nginx -g 'daemon off;'"]

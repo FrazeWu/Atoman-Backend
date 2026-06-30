@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -338,6 +339,12 @@ func handlersSlugify(value string) string {
 }
 
 func loadEnvironment() string {
+	if envFile := strings.TrimSpace(os.Getenv("ENV_FILE")); envFile != "" {
+		if err := godotenv.Load(envFile); err == nil {
+			return "Loaded " + envFile
+		}
+		return "ENV_FILE set but not loaded: " + envFile
+	}
 	if err := godotenv.Load(".env.dev"); err == nil {
 		return "Loaded .env.dev"
 	} else if err := godotenv.Load(".env"); err == nil {
@@ -364,6 +371,49 @@ func initializeStorageClient() *s3.S3 {
 
 	log.Println("S3 storage initialized")
 	return s3Client
+}
+
+func configuredAllowedOrigins() []string {
+	allowedOrigins := []string{
+		"http://localhost:5173",
+		"http://localhost:3000",
+		"http://127.0.0.1:5173",
+		"http://127.0.0.1:3000",
+	}
+	for _, origin := range strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",") {
+		origin = strings.TrimSpace(origin)
+		if origin != "" {
+			allowedOrigins = append(allowedOrigins, origin)
+		}
+	}
+	return allowedOrigins
+}
+
+func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		origin := c.Request.Header.Get("Origin")
+		isAllowed := false
+		for _, allowed := range allowedOrigins {
+			if origin == allowed {
+				isAllowed = true
+				break
+			}
+		}
+
+		if isAllowed {
+			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+		}
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Request-ID")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	}
 }
 
 func main() {
@@ -404,7 +454,7 @@ func main() {
 		fatalLogger.Fatal("DATABASE_URL environment variable is required")
 	}
 
-	log.Printf("Connecting to %s database: %s", dbType, dbURL)
+	log.Printf("Connecting to %s", databaseLogTarget(dbType, dbURL))
 
 	var dialector gorm.Dialector
 	switch dbType {
@@ -591,50 +641,7 @@ ON CONFLICT (key) DO NOTHING`)
 	r.Use(gin.Recovery())
 	docs.SwaggerInfo.BasePath = "/api/v1"
 
-	// Configure allowed origins based on environment
-	allowedOrigins := []string{
-		"http://localhost:5173",
-		"http://localhost:3000",
-		"http://127.0.0.1:5173",
-		"http://127.0.0.1:3000",
-	}
-	if env := os.Getenv("ENV"); env == "production" {
-		// Add production domains from environment variable
-		if prodOrigins := os.Getenv("ALLOWED_ORIGINS"); prodOrigins != "" {
-			allowedOrigins = append(allowedOrigins, strings.Split(prodOrigins, ",")...)
-		}
-	}
-
-	r.Use(func(c *gin.Context) {
-		origin := c.Request.Header.Get("Origin")
-		isAllowed := false
-		for _, allowed := range allowedOrigins {
-			if origin == allowed {
-				isAllowed = true
-				break
-			}
-		}
-
-		if isAllowed {
-			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
-		} else {
-			// For development, allow all origins (but log a warning)
-			if os.Getenv("ENV") != "production" {
-				c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
-			}
-		}
-
-		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Request-ID")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
-	})
+	r.Use(corsMiddleware(configuredAllowedOrigins()))
 
 	// Add global Optional Auth and Casbin Middleware
 	r.Use(middleware.OptionalAuthMiddleware())
@@ -664,4 +671,52 @@ ON CONFLICT (key) DO NOTHING`)
 	if err := r.Run(":" + port); err != nil {
 		fatalLogger.Fatal("Failed to start server: ", err)
 	}
+}
+
+func databaseLogTarget(dbType string, rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if strings.Contains(rawURL, "=") && !strings.Contains(rawURL, "://") {
+		return databaseLogTargetFromDSN(dbType, rawURL)
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return strings.TrimSpace(dbType) + " database"
+	}
+
+	parts := []string{strings.TrimSpace(dbType) + " database"}
+	if host := parsed.Host; host != "" {
+		parts = append(parts, "host="+host)
+	}
+	if dbName := strings.TrimPrefix(parsed.EscapedPath(), "/"); dbName != "" {
+		if decoded, err := url.PathUnescape(dbName); err == nil {
+			dbName = decoded
+		}
+		parts = append(parts, "dbname="+dbName)
+	}
+	return strings.Join(parts, " ")
+}
+
+func databaseLogTargetFromDSN(dbType string, dsn string) string {
+	values := map[string]string{}
+	for _, field := range strings.Fields(dsn) {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok {
+			continue
+		}
+		values[key] = strings.Trim(value, "'\"")
+	}
+
+	parts := []string{strings.TrimSpace(dbType) + " database"}
+	host := values["host"]
+	if port := values["port"]; host != "" && port != "" {
+		host += ":" + port
+	}
+	if host != "" {
+		parts = append(parts, "host="+host)
+	}
+	if dbName := values["dbname"]; dbName != "" {
+		parts = append(parts, "dbname="+dbName)
+	}
+	return strings.Join(parts, " ")
 }

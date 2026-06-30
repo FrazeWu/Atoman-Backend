@@ -47,11 +47,14 @@ func RunForumMigrations(db *gorm.DB) error {
 	}
 
 	// AutoMigrate new tables that use standard GORM-safe types
-	if err := db.AutoMigrate(
+	forumModels := []any{
 		&model.ForumBookmark{},
-		&model.ForumDraft{},
 		&model.ActivityLog{},
-	); err != nil {
+	}
+	if !db.Migrator().HasTable(&model.ForumDraft{}) {
+		forumModels = append(forumModels, &model.ForumDraft{})
+	}
+	if err := db.AutoMigrate(forumModels...); err != nil {
 		return fmt.Errorf("forum AutoMigrate failed: %w", err)
 	}
 

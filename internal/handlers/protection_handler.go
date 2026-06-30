@@ -2,11 +2,15 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
@@ -288,18 +292,23 @@ func setProtectionHandler(db *gorm.DB, contentType string) gin.HandlerFunc {
 				ExpiresAt:       expiresAt,
 			}
 			if err := db.Create(&protection).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set protection"})
-				return
+				if !isContentProtectionDuplicateKeyError(err) {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set protection"})
+					return
+				}
+				if err := db.Where("content_type = ? AND content_id = ?", contentType, contentID).
+					First(&protection).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to set protection"})
+					return
+				}
+				if err := updateProtection(db, &protection, input, adminUUID, expiresAt); err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update protection"})
+					return
+				}
 			}
 		} else if err == nil {
 			// Update existing protection
-			updates := map[string]interface{}{
-				"protection_level": input.ProtectionLevel,
-				"protected_by":     adminUUID,
-				"reason":           input.Reason,
-				"expires_at":       expiresAt,
-			}
-			if err := db.Model(&protection).Updates(updates).Error; err != nil {
+			if err := updateProtection(db, &protection, input, adminUUID, expiresAt); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update protection"})
 				return
 			}
@@ -315,6 +324,40 @@ func setProtectionHandler(db *gorm.DB, contentType string) gin.HandlerFunc {
 			"data":    protection,
 		})
 	}
+}
+
+func updateProtection(db *gorm.DB, protection *model.ContentProtection, input SetProtectionInput, adminUUID uuid.UUID, expiresAt *time.Time) error {
+	return db.Model(protection).Updates(map[string]interface{}{
+		"protection_level": input.ProtectionLevel,
+		"protected_by":     adminUUID,
+		"reason":           input.Reason,
+		"expires_at":       expiresAt,
+	}).Error
+}
+
+func isContentProtectionDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return strings.EqualFold(pgErr.ConstraintName, "idx_content_protections_live_content")
+	}
+
+	var pqErr *pq.Error
+	if errors.As(err, &pqErr) && string(pqErr.Code) == "23505" {
+		return strings.EqualFold(pqErr.Constraint, "idx_content_protections_live_content")
+	}
+
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "idx_content_protections_live_content") ||
+		(strings.Contains(message, "unique constraint failed") &&
+			strings.Contains(message, "content_protections.content_type") &&
+			strings.Contains(message, "content_protections.content_id"))
 }
 
 // RemoveAlbumProtectionHandler removes protection from an album

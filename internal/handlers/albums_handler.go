@@ -166,14 +166,19 @@ func CreateAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		if err == nil {
 			defer coverFile.Close()
 
+			if status, message := validateUploadedImageFile(coverFile, coverHeader); status != http.StatusOK {
+				c.JSON(status, gin.H{"error": message})
+				return
+			}
+
 			safeArtist := storage.SanitizeName(artistNames[0])
 			safeAlbum := storage.SanitizeName(input.Title)
 			coverKey := "music/" + safeArtist + "/" + safeAlbum + "/cover_" + coverHeader.Filename
 
 			if os.Getenv("STORAGE_TYPE") == "s3" {
-					if !requireS3(c, s3Client) {
-						return
-					}
+				if !requireS3(c, s3Client) {
+					return
+				}
 
 				_, err = s3Client.PutObject(&s3.PutObjectInput{
 					Bucket: aws.String(os.Getenv("S3_BUCKET")),
@@ -347,6 +352,11 @@ func UpdateAlbumHandler(db *gorm.DB, s3Client *s3.S3, revisionService *service.R
 		if err == nil {
 			defer coverFile.Close()
 
+			if status, message := validateUploadedImageFile(coverFile, coverHeader); status != http.StatusOK {
+				c.JSON(status, gin.H{"error": message})
+				return
+			}
+
 			safeArtist := "Unknown Artist"
 			if len(album.Artists) > 0 && album.Artists[0].Name != "" {
 				safeArtist = strings.ReplaceAll(album.Artists[0].Name, "/", "-")
@@ -357,9 +367,9 @@ func UpdateAlbumHandler(db *gorm.DB, s3Client *s3.S3, revisionService *service.R
 			}
 
 			if os.Getenv("STORAGE_TYPE") == "s3" {
-					if !requireS3(c, s3Client) {
-						return
-					}
+				if !requireS3(c, s3Client) {
+					return
+				}
 
 				coverKey := "music/" + safeArtist + "/" + safeAlbum + "/cover_" + coverHeader.Filename
 

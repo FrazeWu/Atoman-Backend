@@ -3,6 +3,7 @@ package forum_moderation
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -353,14 +354,27 @@ func (s *Service) setTopicHidden(user authctx.CurrentUser, topicID uuid.UUID, hi
 	}); err != nil {
 		return model.ForumTopic{}, err
 	}
-	if hidden {
-		if err := s.db.Delete(&topic).Error; err != nil {
-			return model.ForumTopic{}, err
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if hidden {
+			deletedAt := time.Now().UTC()
+			if err := tx.Model(&model.ForumReply{}).Where("topic_id = ?", topicID).Update("deleted_at", deletedAt).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.ForumTopic{}).Where("id = ?", topicID).Update("deleted_at", deletedAt).Error; err != nil {
+				return err
+			}
+		} else {
+			deletedAt := topic.DeletedAt.Time
+			if err := tx.Unscoped().Model(&model.ForumTopic{}).Where("id = ?", topicID).Update("deleted_at", nil).Error; err != nil {
+				return err
+			}
+			if err := tx.Unscoped().Model(&model.ForumReply{}).Where("topic_id = ? AND deleted_at = ?", topicID, deletedAt).Update("deleted_at", nil).Error; err != nil {
+				return err
+			}
 		}
-	} else {
-		if err := s.db.Unscoped().Model(&model.ForumTopic{}).Where("id = ?", topicID).Update("deleted_at", nil).Error; err != nil {
-			return model.ForumTopic{}, err
-		}
+		return s.recalculateTopicReplyState(tx, topicID)
+	}); err != nil {
+		return model.ForumTopic{}, err
 	}
 	if err := s.db.Unscoped().First(&topic, "id = ?", topicID).Error; err != nil {
 		return model.ForumTopic{}, err
@@ -389,19 +403,64 @@ func (s *Service) setReplyHidden(user authctx.CurrentUser, replyID uuid.UUID, hi
 	}); err != nil {
 		return model.ForumReply{}, err
 	}
-	if hidden {
-		if err := s.db.Delete(&reply).Error; err != nil {
-			return model.ForumReply{}, err
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if hidden {
+			if err := tx.Delete(&reply).Error; err != nil {
+				return err
+			}
+		} else {
+			if err := tx.Unscoped().Model(&model.ForumReply{}).Where("id = ?", replyID).Update("deleted_at", nil).Error; err != nil {
+				return err
+			}
 		}
-	} else {
-		if err := s.db.Unscoped().Model(&model.ForumReply{}).Where("id = ?", replyID).Update("deleted_at", nil).Error; err != nil {
-			return model.ForumReply{}, err
-		}
+		return s.recalculateTopicReplyState(tx, reply.TopicID)
+	}); err != nil {
+		return model.ForumReply{}, err
 	}
 	if err := s.db.Unscoped().Preload("Topic").First(&reply, "id = ?", replyID).Error; err != nil {
 		return model.ForumReply{}, err
 	}
 	return reply, nil
+}
+
+func (s *Service) recalculateTopicReplyState(tx *gorm.DB, topicID uuid.UUID) error {
+	var replyCount int64
+	if err := tx.Model(&model.ForumReply{}).Where("topic_id = ?", topicID).Count(&replyCount).Error; err != nil {
+		return err
+	}
+
+	updates := map[string]any{
+		"reply_count": int(replyCount),
+	}
+
+	if replyCount == 0 {
+		updates["last_reply_at"] = nil
+		updates["is_solved"] = false
+		updates["solved_reply_id"] = nil
+	} else {
+		var latestReply model.ForumReply
+		if err := tx.Select("id", "created_at").Where("topic_id = ?", topicID).Order("created_at DESC, id DESC").First(&latestReply).Error; err != nil {
+			return err
+		}
+		lastReplyAt := latestReply.CreatedAt
+		updates["last_reply_at"] = &lastReplyAt
+
+		var solvedReply model.ForumReply
+		if err := tx.Select("id").Where("topic_id = ? AND is_solved = ?", topicID, true).Order("created_at DESC, id DESC").First(&solvedReply).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				updates["is_solved"] = false
+				updates["solved_reply_id"] = nil
+			} else {
+				return err
+			}
+		} else {
+			solvedReplyID := solvedReply.ID
+			updates["is_solved"] = true
+			updates["solved_reply_id"] = &solvedReplyID
+		}
+	}
+
+	return tx.Unscoped().Model(&model.ForumTopic{}).Where("id = ?", topicID).Updates(updates).Error
 }
 
 func (s *Service) requireAdminOrOwner(user authctx.CurrentUser) error {

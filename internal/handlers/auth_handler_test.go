@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +83,36 @@ func decodeAuthError(t *testing.T, body string) authErrorBody {
 		t.Fatalf("decode response %q: %v", body, err)
 	}
 	return payload
+}
+
+func captureAuthHandlerStderr(t *testing.T, fn func()) string {
+	t.Helper()
+
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stderr: %v", err)
+	}
+
+	os.Stderr = w
+	defer func() {
+		os.Stderr = oldStderr
+	}()
+
+	outputCh := make(chan string, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		outputCh <- buf.String()
+	}()
+
+	fn()
+
+	if err := w.Close(); err != nil {
+		t.Fatalf("close stderr pipe: %v", err)
+	}
+
+	return <-outputCh
 }
 
 func assertClearedAuthCookie(t *testing.T, w *httptest.ResponseRecorder) {
@@ -223,6 +256,36 @@ func TestSessionHandlerClearsCookieWhenTokenUserDoesNotExist(t *testing.T) {
 	assertClearedAuthCookie(t, w)
 }
 
+func TestSessionHandlerClearsCookieWhenTokenUserIsInactive(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newAuthTestDB(t)
+	inactive := model.User{Username: "inactive", Email: "inactive@example.com", Password: "hash", Role: "user", IsActive: false}
+	if err := db.Create(&inactive).Error; err != nil {
+		t.Fatalf("create inactive user: %v", err)
+	}
+	if err := db.Model(&inactive).Update("is_active", false).Error; err != nil {
+		t.Fatalf("deactivate user: %v", err)
+	}
+	r := gin.New()
+	r.GET("/session", SessionHandler(db))
+
+	req := httptest.NewRequest(http.MethodGet, "/session", nil)
+	req.AddCookie(&http.Cookie{Name: authTokenCookieName, Value: signedAuthTokenForTest(t, inactive.UUID)})
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+	payload := decodeAuthError(t, w.Body.String())
+	if payload.Code != "auth.user_not_found" || payload.Error != "账号不存在或已被移除，请重新登录" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+	assertClearedAuthCookie(t, w)
+}
+
 func TestLoginHandlerReturnsAccountNotFoundCode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("JWT_SECRET", "test-secret")
@@ -242,6 +305,73 @@ func TestLoginHandlerReturnsAccountNotFoundCode(t *testing.T) {
 	payload := decodeAuthError(t, w.Body.String())
 	if payload.Code != "auth.account_not_found" || payload.Error != "账号不存在" {
 		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestLoginHandlerRejectsInactiveUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newAuthTestDB(t)
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Create(&model.User{Username: "inactive", Email: "inactive@example.com", Password: string(hash), Role: "user", IsActive: false}).Error; err != nil {
+		t.Fatalf("create inactive user: %v", err)
+	}
+	if err := db.Model(&model.User{}).Where("email = ?", "inactive@example.com").Update("is_active", false).Error; err != nil {
+		t.Fatalf("deactivate user: %v", err)
+	}
+	r := gin.New()
+	r.POST("/login", LoginHandler(db))
+
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"inactive@example.com","password":"correct-password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+	payload := decodeAuthError(t, w.Body.String())
+	if payload.Code != "auth.account_not_found" || payload.Error != "账号不存在" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
+func TestSendVerificationHandlerDoesNotLogVerificationCode(t *testing.T) {
+	gin.SetMode(gin.DebugMode)
+	t.Setenv("GIN_MODE", gin.DebugMode)
+	t.Setenv("TURNSTILE_SECRET_KEY", "")
+	t.Setenv("RESEND_API_KEY", "")
+	db := newAuthTestDB(t)
+	email := "debug-leak@example.com"
+
+	r := gin.New()
+	r.POST("/send-verification", SendVerificationHandler(service.NewEmailServiceWithoutRedis(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/send-verification", strings.NewReader(`{"email":"`+email+`","turnstile_token":""}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	stderr := captureAuthHandlerStderr(t, func() {
+		r.ServeHTTP(w, req)
+	})
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var stored model.EmailVerificationCode
+	if err := db.Where("email = ?", email).First(&stored).Error; err != nil {
+		t.Fatalf("load verification code: %v", err)
+	}
+	if stored.Code == "" {
+		t.Fatal("expected verification code to be stored")
+	}
+	if strings.Contains(stderr, stored.Code) {
+		t.Fatalf("expected stderr not to contain verification code %q, got %q", stored.Code, stderr)
 	}
 }
 

@@ -169,7 +169,7 @@ func GetTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		var event model.TimelineEvent
-		if err := db.Preload("User").First(&event, "id = ?", id).Error; err != nil {
+		if err := db.Preload("User").First(&event, "id = ? AND is_public = ?", id, true).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
 			return
 		}
@@ -438,7 +438,7 @@ func GetTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 		var person model.TimelinePerson
 
-		if err := db.Preload("User").First(&person, "id = ?", id).Error; err != nil {
+		if err := db.Preload("User").First(&person, "id = ? AND is_public = ?", id, true).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Person not found"})
 			return
 		}
@@ -466,7 +466,7 @@ func GetPersonLocations(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 
 		var person model.TimelinePerson
-		if err := db.First(&person, "id = ?", id).Error; err != nil {
+		if err := db.First(&person, "id = ? AND is_public = ?", id, true).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Person not found"})
 			return
 		}

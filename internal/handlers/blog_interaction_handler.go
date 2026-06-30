@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
+	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/service"
 )
@@ -348,10 +349,16 @@ func ToggleLike(db *gorm.DB, isLike bool) gin.HandlerFunc {
 				TargetID:   input.TargetID,
 			}
 
-			// Use FirstOrCreate to prevent duplicate likes
+			// Use FirstOrCreate and tolerate duplicate-key races from concurrent requests.
 			if err := db.Where(model.Like{UserID: userID, TargetType: input.TargetType, TargetID: input.TargetID}).FirstOrCreate(&like).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to like"})
-				return
+				if !migrations.IsBlogInteractionDuplicateKeyError(err) {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to like"})
+					return
+				}
+				if err := db.Where(model.Like{UserID: userID, TargetType: input.TargetType, TargetID: input.TargetID}).First(&like).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to like"})
+					return
+				}
 			}
 
 		} else {
@@ -478,8 +485,14 @@ func CreateBookmark(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if err := db.Where(model.Bookmark{UserID: userID, PostID: input.PostID}).FirstOrCreate(&bookmark).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create bookmark"})
-			return
+			if !migrations.IsBlogInteractionDuplicateKeyError(err) {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create bookmark"})
+				return
+			}
+			if err := db.Where(model.Bookmark{UserID: userID, PostID: input.PostID}).First(&bookmark).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create bookmark"})
+				return
+			}
 		}
 
 		c.JSON(http.StatusCreated, gin.H{"data": bookmark, "message": "ok"})

@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"atoman/internal/model"
 )
@@ -36,86 +37,108 @@ func (s *RevisionService) CreateRevision(
 	baseRevisionNumber int,
 	autoApprove bool,
 ) (*model.Revision, []model.EditConflict, error) {
-	// Get base revision
-	var baseRevision model.Revision
-	if err := s.db.Where("content_id = ? AND content_type = ? AND version_number = ?",
-		contentID, contentType, baseRevisionNumber).
-		First(&baseRevision).Error; err != nil {
-		return nil, nil, fmt.Errorf("base revision not found: %w", err)
-	}
-
-	// Get current revision
-	var currentRevision model.Revision
-	if err := s.db.Where("content_id = ? AND content_type = ? AND is_current = ?",
-		contentID, contentType, true).
-		Order("version_number DESC").
-		First(&currentRevision).Error; err != nil {
-		return nil, nil, fmt.Errorf("current revision not found: %w", err)
-	}
-
-	// Detect conflicts if base != current
+	var newRevision model.Revision
 	var conflicts []model.EditConflict
-	if baseRevision.VersionNumber != currentRevision.VersionNumber {
-		conflicts = s.DetectConflicts(&baseRevision, changes, &currentRevision)
-	}
 
-	// If conflicts exist, return them without creating revision
-	if len(conflicts) > 0 {
-		// Save conflicts to database
-		for i := range conflicts {
-			conflicts[i].ContentType = contentType
-			conflicts[i].ContentID = contentID
-			conflicts[i].BaseRevisionID = baseRevision.ID
-			conflicts[i].ConflictRevisionID = currentRevision.ID
-			s.db.Create(&conflicts[i])
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// Get base revision
+		var baseRevision model.Revision
+		if err := tx.Where("content_id = ? AND content_type = ? AND version_number = ?",
+			contentID, contentType, baseRevisionNumber).
+			First(&baseRevision).Error; err != nil {
+			return fmt.Errorf("base revision not found: %w", err)
 		}
-		return nil, conflicts, nil
-	}
 
-	// Apply changes to current content
-	var currentContent map[string]interface{}
-	if err := json.Unmarshal(currentRevision.ContentSnapshot, &currentContent); err != nil {
-		return nil, nil, fmt.Errorf("failed to parse current content: %w", err)
-	}
+		// Get current revision
+		var currentRevision model.Revision
+		currentQuery := tx.Where("content_id = ? AND content_type = ? AND is_current = ?",
+			contentID, contentType, true).
+			Order("version_number DESC")
+		if supportsRowLock(tx) {
+			currentQuery = currentQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := currentQuery.First(&currentRevision).Error; err != nil {
+			return fmt.Errorf("current revision not found: %w", err)
+		}
 
-	for key, value := range changes {
-		currentContent[key] = value
-	}
+		// Detect conflicts if base != current
+		if baseRevision.VersionNumber != currentRevision.VersionNumber {
+			conflicts = s.DetectConflicts(&baseRevision, changes, &currentRevision)
+		}
 
-	// Serialize updated content
-	snapshot, err := json.Marshal(currentContent)
+		// If conflicts exist, return them without creating revision
+		if len(conflicts) > 0 {
+			// Save conflicts to database
+			for i := range conflicts {
+				conflicts[i].ContentType = contentType
+				conflicts[i].ContentID = contentID
+				conflicts[i].BaseRevisionID = baseRevision.ID
+				conflicts[i].ConflictRevisionID = currentRevision.ID
+				if err := tx.Create(&conflicts[i]).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+
+		// Apply changes to current content
+		var currentContent map[string]interface{}
+		if err := json.Unmarshal(currentRevision.ContentSnapshot, &currentContent); err != nil {
+			return fmt.Errorf("failed to parse current content: %w", err)
+		}
+
+		for key, value := range changes {
+			currentContent[key] = value
+		}
+
+		// Serialize updated content
+		snapshot, err := json.Marshal(currentContent)
+		if err != nil {
+			return fmt.Errorf("failed to serialize content: %w", err)
+		}
+
+		// Determine status
+		status := "pending"
+		if autoApprove {
+			status = "approved"
+		}
+
+		// Create new revision
+		newRevision = model.Revision{
+			ContentType:        contentType,
+			ContentID:          contentID,
+			VersionNumber:      currentRevision.VersionNumber + 1,
+			PreviousRevisionID: &currentRevision.ID,
+			ContentSnapshot:    snapshot,
+			EditorID:           editorID,
+			EditSummary:        editSummary,
+			EditType:           "edit",
+			Status:             status,
+			IsCurrent:          autoApprove,
+			CreatedAt:          time.Now(),
+		}
+
+		// If auto-approved, make room for the partial unique current index first.
+		if autoApprove {
+			if err := tx.Model(&model.Revision{}).
+				Where("content_id = ? AND content_type = ? AND is_current = ?",
+					contentID, contentType, true).
+				Update("is_current", false).Error; err != nil {
+				return err
+			}
+		}
+
+		if err := tx.Create(&newRevision).Error; err != nil {
+			return fmt.Errorf("failed to create revision: %w", err)
+		}
+
+		return nil
+	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to serialize content: %w", err)
+		return nil, nil, err
 	}
-
-	// Determine status
-	status := "pending"
-	if autoApprove {
-		status = "approved"
-	}
-
-	// Create new revision
-	newRevision := model.Revision{
-		ContentType:        contentType,
-		ContentID:          contentID,
-		VersionNumber:      currentRevision.VersionNumber + 1,
-		PreviousRevisionID: &currentRevision.ID,
-		ContentSnapshot:    snapshot,
-		EditorID:           editorID,
-		EditSummary:        editSummary,
-		EditType:           "edit",
-		Status:             status,
-		IsCurrent:          autoApprove,
-		CreatedAt:          time.Now(),
-	}
-
-	if err := s.db.Create(&newRevision).Error; err != nil {
-		return nil, nil, fmt.Errorf("failed to create revision: %w", err)
-	}
-
-	// If auto-approved, mark previous as not current
-	if autoApprove {
-		s.db.Model(&currentRevision).Update("is_current", false)
+	if len(conflicts) > 0 {
+		return nil, conflicts, nil
 	}
 
 	return &newRevision, nil, nil
@@ -191,6 +214,14 @@ func (s *RevisionService) ApproveRevision(
 	now := time.Now()
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Mark previous current revision as not current
+		if err := tx.Model(&model.Revision{}).
+			Where("content_id = ? AND content_type = ? AND is_current = ? AND id != ?",
+				revision.ContentID, revision.ContentType, true, revisionID).
+			Update("is_current", false).Error; err != nil {
+			return err
+		}
+
 		// Update revision
 		if err := tx.Model(&revision).Updates(map[string]interface{}{
 			"status":       "approved",
@@ -199,14 +230,6 @@ func (s *RevisionService) ApproveRevision(
 			"review_notes": reviewNotes,
 			"is_current":   true,
 		}).Error; err != nil {
-			return err
-		}
-
-		// Mark previous current revision as not current
-		if err := tx.Model(&model.Revision{}).
-			Where("content_id = ? AND content_type = ? AND is_current = ? AND id != ?",
-				revision.ContentID, revision.ContentType, true, revisionID).
-			Update("is_current", false).Error; err != nil {
 			return err
 		}
 
@@ -252,45 +275,55 @@ func (s *RevisionService) RevertToRevision(
 	editorID uuid.UUID,
 	editSummary string,
 ) (*model.Revision, error) {
-	// Get target revision
-	var targetRevision model.Revision
-	if err := s.db.Where("content_id = ? AND content_type = ? AND version_number = ?",
-		contentID, contentType, targetVersionNumber).
-		First(&targetRevision).Error; err != nil {
-		return nil, fmt.Errorf("target revision not found: %w", err)
-	}
-
-	// Get current revision
-	var currentRevision model.Revision
-	if err := s.db.Where("content_id = ? AND content_type = ? AND is_current = ?",
-		contentID, contentType, true).
-		Order("version_number DESC").
-		First(&currentRevision).Error; err != nil {
-		return nil, fmt.Errorf("current revision not found: %w", err)
-	}
-
-	// Create revert revision
-	revertRevision := model.Revision{
-		ContentType:        contentType,
-		ContentID:          contentID,
-		VersionNumber:      currentRevision.VersionNumber + 1,
-		PreviousRevisionID: &currentRevision.ID,
-		ContentSnapshot:    targetRevision.ContentSnapshot, // Use target's content
-		EditorID:           editorID,
-		EditSummary:        fmt.Sprintf("Reverted to version %d: %s", targetVersionNumber, editSummary),
-		EditType:           "revert",
-		Status:             "approved", // Auto-approve reverts
-		IsCurrent:          true,
-		CreatedAt:          time.Now(),
-	}
+	var revertRevision model.Revision
 
 	return &revertRevision, s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&revertRevision).Error; err != nil {
-			return err
+		// Get target revision
+		var targetRevision model.Revision
+		if err := tx.Where("content_id = ? AND content_type = ? AND version_number = ?",
+			contentID, contentType, targetVersionNumber).
+			First(&targetRevision).Error; err != nil {
+			return fmt.Errorf("target revision not found: %w", err)
+		}
+
+		// Get current revision
+		var currentRevision model.Revision
+		currentQuery := tx.Where("content_id = ? AND content_type = ? AND is_current = ?",
+			contentID, contentType, true).
+			Order("version_number DESC")
+		if supportsRowLock(tx) {
+			currentQuery = currentQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := currentQuery.First(&currentRevision).Error; err != nil {
+			return fmt.Errorf("current revision not found: %w", err)
+		}
+
+		// Create revert revision
+		revertRevision = model.Revision{
+			ContentType:        contentType,
+			ContentID:          contentID,
+			VersionNumber:      currentRevision.VersionNumber + 1,
+			PreviousRevisionID: &currentRevision.ID,
+			ContentSnapshot:    targetRevision.ContentSnapshot, // Use target's content
+			EditorID:           editorID,
+			EditSummary:        fmt.Sprintf("Reverted to version %d: %s", targetVersionNumber, editSummary),
+			EditType:           "revert",
+			Status:             "approved", // Auto-approve reverts
+			IsCurrent:          true,
+			CreatedAt:          time.Now(),
 		}
 
 		// Mark previous as not current
-		tx.Model(&currentRevision).Update("is_current", false)
+		if err := tx.Model(&model.Revision{}).
+			Where("content_id = ? AND content_type = ? AND is_current = ?",
+				contentID, contentType, true).
+			Update("is_current", false).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Create(&revertRevision).Error; err != nil {
+			return err
+		}
 
 		// Apply to actual content
 		return s.applyRevisionToContent(tx, &revertRevision)
@@ -401,78 +434,93 @@ func (s *RevisionService) CreateAlbumSnapshot(
 	editSummary string,
 	db *gorm.DB,
 ) error {
-	var album model.Album
-	if err := db.Preload("Artists").Preload("Songs").First(&album, "id = ?", albumID).Error; err != nil {
-		return fmt.Errorf("album not found: %w", err)
-	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		var album model.Album
+		if err := tx.Preload("Artists").Preload("Songs").First(&album, "id = ?", albumID).Error; err != nil {
+			return fmt.Errorf("album not found: %w", err)
+		}
 
-	type songSnap struct {
-		ID          string `json:"id"`
-		Title       string `json:"title"`
-		TrackNumber int    `json:"track_number"`
-		Lyrics      string `json:"lyrics"`
-		AudioURL    string `json:"audio_url"`
-	}
-	type albumSnap struct {
-		Album struct {
+		type songSnap struct {
 			ID          string `json:"id"`
 			Title       string `json:"title"`
-			AlbumType   string `json:"album_type"`
-			EntryStatus string `json:"entry_status"`
-		} `json:"album"`
-		Songs []songSnap `json:"songs"`
-	}
+			TrackNumber int    `json:"track_number"`
+			Lyrics      string `json:"lyrics"`
+			AudioURL    string `json:"audio_url"`
+		}
+		type albumSnap struct {
+			Album struct {
+				ID          string `json:"id"`
+				Title       string `json:"title"`
+				AlbumType   string `json:"album_type"`
+				EntryStatus string `json:"entry_status"`
+			} `json:"album"`
+			Songs []songSnap `json:"songs"`
+		}
 
-	snap := albumSnap{}
-	snap.Album.ID = album.ID.String()
-	snap.Album.Title = album.Title
-	snap.Album.AlbumType = album.AlbumType
-	snap.Album.EntryStatus = album.EntryStatus
+		snap := albumSnap{}
+		snap.Album.ID = album.ID.String()
+		snap.Album.Title = album.Title
+		snap.Album.AlbumType = album.AlbumType
+		snap.Album.EntryStatus = album.EntryStatus
 
-	for _, song := range album.Songs {
-		snap.Songs = append(snap.Songs, songSnap{
-			ID:          song.ID.String(),
-			Title:       song.Title,
-			TrackNumber: song.TrackNumber,
-			Lyrics:      song.Lyrics,
-			AudioURL:    song.AudioURL,
-		})
-	}
+		for _, song := range album.Songs {
+			snap.Songs = append(snap.Songs, songSnap{
+				ID:          song.ID.String(),
+				Title:       song.Title,
+				TrackNumber: song.TrackNumber,
+				Lyrics:      song.Lyrics,
+				AudioURL:    song.AudioURL,
+			})
+		}
 
-	snapshot, err := json.Marshal(snap)
-	if err != nil {
-		return fmt.Errorf("failed to serialize snapshot: %w", err)
-	}
+		snapshot, err := json.Marshal(snap)
+		if err != nil {
+			return fmt.Errorf("failed to serialize snapshot: %w", err)
+		}
 
-	// Get current version number
-	var latestRevision model.Revision
-	versionNumber := 1
-	if err := db.Where("content_id = ? AND content_type = ?", albumID, "album").
-		Order("version_number DESC").
-		First(&latestRevision).Error; err == nil {
-		versionNumber = latestRevision.VersionNumber + 1
-		// Mark old current as not-current
-		db.Model(&latestRevision).Update("is_current", false)
-	}
+		// Get current version number
+		var latestRevision model.Revision
+		versionNumber := 1
+		currentQuery := tx.Where("content_id = ? AND content_type = ? AND is_current = ?", albumID, "album", true).
+			Order("version_number DESC")
+		if supportsRowLock(tx) {
+			currentQuery = currentQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := currentQuery.First(&latestRevision).Error; err == nil {
+			versionNumber = latestRevision.VersionNumber + 1
+			// Mark old current as not-current
+			if err := tx.Model(&model.Revision{}).
+				Where("content_id = ? AND content_type = ? AND is_current = ?", albumID, "album", true).
+				Update("is_current", false).Error; err != nil {
+				return err
+			}
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
 
-	prevID := &latestRevision.ID
-	if versionNumber == 1 {
-		prevID = nil
-	}
+		prevID := &latestRevision.ID
+		if versionNumber == 1 {
+			prevID = nil
+		}
 
-	newRevision := model.Revision{
-		ContentType:        "album",
-		ContentID:          albumID,
-		VersionNumber:      versionNumber,
-		PreviousRevisionID: prevID,
-		ContentSnapshot:    snapshot,
-		EditorID:           editorID,
-		EditSummary:        editSummary,
-		EditType:           "edit",
-		Status:             "approved",
-		IsCurrent:          true,
-		CreatedAt:          time.Now(),
-	}
+		newRevision := model.Revision{
+			ContentType:        "album",
+			ContentID:          albumID,
+			VersionNumber:      versionNumber,
+			PreviousRevisionID: prevID,
+			ContentSnapshot:    snapshot,
+			EditorID:           editorID,
+			EditSummary:        editSummary,
+			EditType:           "edit",
+			Status:             "approved",
+			IsCurrent:          true,
+			CreatedAt:          time.Now(),
+		}
 
-	return db.Create(&newRevision).Error
+		return tx.Create(&newRevision).Error
+	})
+}
+
+func supportsRowLock(db *gorm.DB) bool {
+	return db.Dialector.Name() == "postgres"
 }

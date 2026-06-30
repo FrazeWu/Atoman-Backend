@@ -128,6 +128,41 @@ func TestLoadEnvironmentBeforeLoggingAllowsEnvFileLogDir(t *testing.T) {
 	assertFileContains(t, filepath.Join(logDir, "app.log"), "env log dir")
 }
 
+func TestLoadEnvironmentUsesExplicitEnvFile(t *testing.T) {
+	workDir := t.TempDir()
+	envFile := filepath.Join(workDir, ".env.prod")
+	logDir := filepath.Join(workDir, "prod-log")
+	if err := os.WriteFile(envFile, []byte("LOG_DIR="+logDir+"\n"), 0o644); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldDir); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+
+	t.Setenv("ENV_FILE", envFile)
+	if err := os.Unsetenv("LOG_DIR"); err != nil {
+		t.Fatalf("unset LOG_DIR: %v", err)
+	}
+
+	envMessage := loadEnvironment()
+	if envMessage != "Loaded "+envFile {
+		t.Fatalf("expected explicit env file message, got %q", envMessage)
+	}
+	if got := os.Getenv("LOG_DIR"); got != logDir {
+		t.Fatalf("expected LOG_DIR from explicit env file, got %q", got)
+	}
+}
+
 func TestSetupLoggingUsesResolveLogDirWhenDirIsEmpty(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("LOG_DIR", dir)
@@ -176,6 +211,66 @@ func TestSetupLoggingFailsWhenLogPathIsAFile(t *testing.T) {
 	}
 	if !errors.Is(err, errCreateLogDir) {
 		t.Fatalf("expected errCreateLogDir, got %v", err)
+	}
+}
+
+func TestDatabaseLogTargetRedactsCredentialsAndQuery(t *testing.T) {
+	rawURL := "postgres://user:secret@db.example.com:5432/atoman?sslmode=require&password=leak"
+
+	got := databaseLogTarget("postgres", rawURL)
+
+	for _, leaked := range []string{"user", "secret", "sslmode", "password", "require", "leak", rawURL} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("databaseLogTarget leaked %q in %q", leaked, got)
+		}
+	}
+	if !strings.Contains(got, "postgres") {
+		t.Fatalf("databaseLogTarget() = %q, want database type", got)
+	}
+	if !strings.Contains(got, "host=db.example.com:5432") {
+		t.Fatalf("databaseLogTarget() = %q, want host", got)
+	}
+	if !strings.Contains(got, "dbname=atoman") {
+		t.Fatalf("databaseLogTarget() = %q, want dbname", got)
+	}
+}
+
+func TestDatabaseConnectionLogRedactsURLSecrets(t *testing.T) {
+	rawURL := "postgres://dbuser:dbsecret@db.example.com:5432/atoman?sslmode=require&password=leak"
+
+	line := "Connecting to " + databaseLogTarget("postgres", rawURL)
+
+	for _, leaked := range []string{"dbuser", "dbsecret", "sslmode", "password", "require", "leak", rawURL} {
+		if strings.Contains(line, leaked) {
+			t.Fatalf("database connection log leaked %q in %q", leaked, line)
+		}
+	}
+	if !strings.Contains(line, "Connecting to postgres database") {
+		t.Fatalf("database connection log = %q, want database type", line)
+	}
+	if !strings.Contains(line, "host=db.example.com:5432") {
+		t.Fatalf("database connection log = %q, want host", line)
+	}
+	if !strings.Contains(line, "dbname=atoman") {
+		t.Fatalf("database connection log = %q, want dbname", line)
+	}
+}
+
+func TestDatabaseLogTargetRedactsKeywordDSN(t *testing.T) {
+	rawURL := "host=localhost port=5432 user=atoman password=secret dbname=studio sslmode=disable"
+
+	got := databaseLogTarget("postgres", rawURL)
+
+	for _, leaked := range []string{"user", "atoman", "password", "secret", "sslmode", "disable", rawURL} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("databaseLogTarget leaked %q in %q", leaked, got)
+		}
+	}
+	if !strings.Contains(got, "host=localhost:5432") {
+		t.Fatalf("databaseLogTarget() = %q, want host with port", got)
+	}
+	if !strings.Contains(got, "dbname=studio") {
+		t.Fatalf("databaseLogTarget() = %q, want dbname", got)
 	}
 }
 

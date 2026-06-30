@@ -266,12 +266,21 @@ func CreateChannel(db *gorm.DB) gin.HandlerFunc {
 			CoverURL:    input.CoverURL,
 		}
 
-		if err := db.Create(&channel).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create channel"})
-			return
-		}
-
-		if _, err := ensureDefaultCollection(db, channel.ID); err != nil {
+		createChannelFailed := false
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&channel).Error; err != nil {
+				createChannelFailed = true
+				return err
+			}
+			if _, err := ensureDefaultCollection(tx, channel.ID); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			if createChannelFailed {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create channel"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create default collection"})
 			return
 		}
@@ -480,41 +489,39 @@ func DeleteChannel(db *gorm.DB) gin.HandlerFunc {
 				sourceCollectionIDs = append(sourceCollectionIDs, collection.ID)
 			}
 
-			if input.MoveContent && targetChannel != nil && len(sourceCollectionIDs) > 0 {
-				defaultCollection, err := ensureDefaultCollection(tx, targetChannel.ID)
-				if err != nil {
-					return err
-				}
-
-				var postCollections []model.PostCollection
-				if err := tx.Where("collection_id IN ?", sourceCollectionIDs).Find(&postCollections).Error; err != nil {
-					return err
-				}
-
-				seenPosts := make(map[uuid.UUID]bool)
-				for _, relation := range postCollections {
-					if seenPosts[relation.PostID] {
-						continue
-					}
-					seenPosts[relation.PostID] = true
-
-					if err := tx.Model(&model.Post{}).Where("id = ?", relation.PostID).Update("channel_id", targetChannel.ID).Error; err != nil {
-						return err
-					}
-
-					postCollection := model.PostCollection{
-						PostID:       relation.PostID,
-						CollectionID: defaultCollection.ID,
-					}
-
-					if err := tx.Where("post_id = ? AND collection_id = ?", relation.PostID, defaultCollection.ID).
-						FirstOrCreate(&postCollection).Error; err != nil {
-						return err
-					}
-				}
-			} else if input.MoveContent && targetChannel != nil {
+			if input.MoveContent && targetChannel != nil {
 				if err := tx.Model(&model.Post{}).Where("channel_id = ?", channel.ID).Update("channel_id", targetChannel.ID).Error; err != nil {
 					return err
+				}
+
+				if len(sourceCollectionIDs) > 0 {
+					defaultCollection, err := ensureDefaultCollection(tx, targetChannel.ID)
+					if err != nil {
+						return err
+					}
+
+					var postCollections []model.PostCollection
+					if err := tx.Where("collection_id IN ?", sourceCollectionIDs).Find(&postCollections).Error; err != nil {
+						return err
+					}
+
+					seenPosts := make(map[uuid.UUID]bool)
+					for _, relation := range postCollections {
+						if seenPosts[relation.PostID] {
+							continue
+						}
+						seenPosts[relation.PostID] = true
+
+						postCollection := model.PostCollection{
+							PostID:       relation.PostID,
+							CollectionID: defaultCollection.ID,
+						}
+
+						if err := tx.Where("post_id = ? AND collection_id = ?", relation.PostID, defaultCollection.ID).
+							FirstOrCreate(&postCollection).Error; err != nil {
+							return err
+						}
+					}
 				}
 			} else {
 				if err := tx.Model(&model.Post{}).Where("channel_id = ?", channel.ID).Update("channel_id", nil).Error; err != nil {

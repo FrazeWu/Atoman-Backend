@@ -94,21 +94,19 @@ func (s *EmailService) SendVerificationCode(email string) (string, error) {
 
 // VerifyCode verifies the code for the given email
 func (s *EmailService) VerifyCode(email, code string) (bool, error) {
-	// Find unused, non-expired verification code (use UTC for consistent comparison)
-	var verificationCode model.EmailVerificationCode
-	err := s.db.Where("email = ? AND code = ? AND used = ? AND expires_at > ?", email, code, false, time.Now().UTC()).
-		First(&verificationCode).Error
-
-	if err == gorm.ErrRecordNotFound {
-		return false, nil // Code not found, expired, or already used
+	// Atomically consume an unused, non-expired verification code.
+	// The conditional update closes the race where two requests could both
+	// read the same row before either one marks it as used.
+	now := time.Now().UTC()
+	result := s.db.Model(&model.EmailVerificationCode{}).
+		Where("email = ? AND code = ? AND used = ? AND expires_at > ?", email, code, false, now).
+		Update("used", true)
+	if result.Error != nil {
+		return false, result.Error
 	}
-	if err != nil {
-		return false, err
+	if result.RowsAffected == 0 {
+		return false, nil
 	}
-
-	// Mark code as used
-	verificationCode.Used = true
-	s.db.Save(&verificationCode)
 
 	return true, nil
 }
@@ -116,8 +114,7 @@ func (s *EmailService) VerifyCode(email, code string) (bool, error) {
 // sendEmail sends an email using Resend API
 func (s *EmailService) sendEmail(to, subject, body string) error {
 	if s.resendAPIKey == "" {
-		// Development mode: just log the code
-		log.Printf("[DEV MODE] Email to %s - Subject: %s", to, subject)
+		log.Printf("[DEV MODE] Verification email skipped; recipient=%s", maskEmailForLog(to))
 		return nil
 	}
 
@@ -163,6 +160,20 @@ func (s *EmailService) sendEmail(to, subject, body string) error {
 	}
 
 	return nil
+}
+
+func maskEmailForLog(email string) string {
+	at := -1
+	for i, ch := range email {
+		if ch == '@' {
+			at = i
+			break
+		}
+	}
+	if at <= 0 || at == len(email)-1 {
+		return "[redacted]"
+	}
+	return email[:1] + "***" + email[at:]
 }
 
 // buildVerificationEmail builds the HTML email content

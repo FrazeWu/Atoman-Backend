@@ -27,13 +27,23 @@ func (r *Repo) GetEdit(id uuid.UUID) (model.MusicEdit, error) {
 
 func (r *Repo) SaveEdit(edit *model.MusicEdit) error { return r.db.Save(edit).Error }
 
+func (r *Repo) ClaimOpenEdit(id uuid.UUID, status string) (bool, error) {
+	result := r.db.Model(&model.MusicEdit{}).
+		Where("id = ? AND status = ?", id, "open").
+		Update("status", status)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 type ListEditsQuery struct {
-	Status     string
-	EntityType string
-	Type       string
+	Status      string
+	EntityType  string
+	Type        string
 	SubmittedBy *uuid.UUID
-	Page       int
-	PageSize   int
+	Page        int
+	PageSize    int
 }
 
 func (r *Repo) ListEdits(query ListEditsQuery) ([]model.MusicEdit, int64, error) {

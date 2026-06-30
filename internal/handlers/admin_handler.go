@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"log"
@@ -44,6 +45,8 @@ func SetupAdminRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 
 		feedFullText := admin.Group("/feed/fulltext")
 		{
+			feedFullText.GET("/settings", GetAdminFeedFullTextSettings(db))
+			feedFullText.PUT("/settings", UpdateAdminFeedFullTextSettings(db))
 			feedFullText.GET("/health", GetAdminFeedFullTextHealth(db))
 			feedFullText.GET("/sources", GetAdminFeedFullTextSources(db))
 			feedFullText.POST("/sources", CreateAdminFeedSource(db))
@@ -117,6 +120,18 @@ type adminFeedFullTextItemRow struct {
 
 type adminFeedFullTextSourceSettingsInput struct {
 	FullTextEnabled *bool `json:"full_text_enabled"`
+}
+
+const adminFeedFullTextSettingsKey = "feed.fulltext.settings"
+
+type adminFeedFullTextSettings struct {
+	AutoSyncEnabled        bool `json:"auto_sync_enabled"`
+	AutoSyncIntervalMinute int  `json:"auto_sync_interval_minutes"`
+}
+
+type adminFeedFullTextSettingsInput struct {
+	AutoSyncEnabled        *bool `json:"auto_sync_enabled"`
+	AutoSyncIntervalMinute *int  `json:"auto_sync_interval_minutes"`
 }
 
 type adminFeedSourceListRow struct {
@@ -218,6 +233,86 @@ func adminFeedFullTextHealthStatus(enabled bool, pendingCount, retryCount, faile
 		return "degraded"
 	default:
 		return "healthy"
+	}
+}
+
+func defaultAdminFeedFullTextSettings() adminFeedFullTextSettings {
+	return adminFeedFullTextSettings{
+		AutoSyncEnabled:        service.FullTextWorkerEnabledDefault,
+		AutoSyncIntervalMinute: 2,
+	}
+}
+
+func loadAdminFeedFullTextSettings(db *gorm.DB) (adminFeedFullTextSettings, error) {
+	settings := defaultAdminFeedFullTextSettings()
+
+	var stored model.SiteSetting
+	if err := db.First(&stored, "key = ?", adminFeedFullTextSettingsKey).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return settings, nil
+		}
+		return settings, err
+	}
+
+	var input adminFeedFullTextSettingsInput
+	if err := json.Unmarshal([]byte(stored.Value), &input); err != nil {
+		return settings, err
+	}
+	if input.AutoSyncEnabled != nil {
+		settings.AutoSyncEnabled = *input.AutoSyncEnabled
+	}
+	if input.AutoSyncIntervalMinute != nil {
+		settings.AutoSyncIntervalMinute = *input.AutoSyncIntervalMinute
+	}
+	return settings, nil
+}
+
+func saveAdminFeedFullTextSettings(db *gorm.DB, settings adminFeedFullTextSettings) error {
+	value, err := json.Marshal(settings)
+	if err != nil {
+		return err
+	}
+
+	setting := model.SiteSetting{
+		Key:         adminFeedFullTextSettingsKey,
+		Value:       string(value),
+		Description: "Feed full text global settings",
+	}
+	return db.Save(&setting).Error
+}
+
+func GetAdminFeedFullTextSettings(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		settings, err := loadAdminFeedFullTextSettings(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "settings_load_failed"})
+			return
+		}
+		c.JSON(http.StatusOK, settings)
+	}
+}
+
+func UpdateAdminFeedFullTextSettings(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input adminFeedFullTextSettingsInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_settings_payload"})
+			return
+		}
+		if input.AutoSyncEnabled == nil || input.AutoSyncIntervalMinute == nil || *input.AutoSyncIntervalMinute <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_settings_payload"})
+			return
+		}
+
+		settings := adminFeedFullTextSettings{
+			AutoSyncEnabled:        *input.AutoSyncEnabled,
+			AutoSyncIntervalMinute: *input.AutoSyncIntervalMinute,
+		}
+		if err := saveAdminFeedFullTextSettings(db, settings); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "settings_save_failed"})
+			return
+		}
+		c.JSON(http.StatusOK, settings)
 	}
 }
 
@@ -851,6 +946,10 @@ func UpdateSiteAccessHandler(db *gorm.DB) gin.HandlerFunc {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_site_access_payload"})
 				return
 			}
+			if errors.Is(err, service.ErrSiteAccessConflict) {
+				c.JSON(http.StatusConflict, gin.H{"error": "site_access_conflict"})
+				return
+			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "settings_save_failed"})
 			return
 		}
@@ -876,6 +975,10 @@ func UpdateLegacySiteAccessHandler(db *gorm.DB) gin.HandlerFunc {
 		if err := svc.SaveLegacyPayload(body); err != nil {
 			if errors.Is(err, service.ErrInvalidSiteAccessPayload) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_site_access_payload"})
+				return
+			}
+			if errors.Is(err, service.ErrSiteAccessConflict) {
+				c.JSON(http.StatusConflict, gin.H{"error": "site_access_conflict"})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "settings_save_failed"})

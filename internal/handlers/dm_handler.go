@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"atoman/internal/collab"
 	"atoman/internal/middleware"
@@ -25,6 +27,15 @@ type dmHandler struct {
 	db      *gorm.DB
 	userHub *collab.UserHub
 	s3      *s3.S3
+}
+
+type dmPermissionError struct {
+	code    string
+	message string
+}
+
+func (e *dmPermissionError) Error() string {
+	return e.code
 }
 
 type dmConversationItem struct {
@@ -207,43 +218,51 @@ func (h *dmHandler) sendMessage(c *gin.Context) {
 		return
 	}
 
-	if errCode, message := h.checkDMPermission(senderID, other.UUID); errCode != "" {
-		c.JSON(http.StatusForbidden, gin.H{"error": errCode, "message": message})
-		return
-	}
-
-	conversation, err := h.getOrCreateConversation(senderID, other.UUID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get conversation"})
-		return
-	}
-
-	message := model.DMMessage{
-		ConversationID: conversation.ID,
-		SenderID:       senderID,
-		Content:        input.Content,
-		ImageURL:       input.ImageURL,
-	}
-	if err := h.db.Create(&message).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send message"})
-		return
-	}
-
 	preview := input.Content
 	if preview == "" {
 		preview = "[图片]"
 	}
-	now := time.Now()
-	h.db.Model(&conversation).Updates(map[string]interface{}{
-		"last_message_at":      now,
-		"last_message_preview": truncateDMPreview(preview, 100),
+
+	var message model.DMMessage
+	var conversationID uuid.UUID
+	err := h.db.Transaction(func(tx *gorm.DB) error {
+		conversation, err := h.sendConversationForRecipient(tx, senderID, other.UUID)
+		if err != nil {
+			return err
+		}
+		conversationID = conversation.ID
+
+		message = model.DMMessage{
+			ConversationID: conversation.ID,
+			SenderID:       senderID,
+			Content:        input.Content,
+			ImageURL:       input.ImageURL,
+		}
+		if err := tx.Create(&message).Error; err != nil {
+			return err
+		}
+
+		return tx.Model(&model.DMConversation{}).
+			Where("id = ? AND (last_message_at IS NULL OR last_message_at <= ?)", conversation.ID, message.CreatedAt).
+			Updates(map[string]interface{}{
+				"last_message_at":      message.CreatedAt,
+				"last_message_preview": truncateDMPreview(preview, 100),
+			}).Error
 	})
-	message.CreatedAt = now
+	if err != nil {
+		var permissionErr *dmPermissionError
+		if errors.As(err, &permissionErr) {
+			c.JSON(http.StatusForbidden, gin.H{"error": permissionErr.code, "message": permissionErr.message})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to send message"})
+		return
+	}
 
 	var sender model.User
 	h.db.Select("uuid", "username").First(&sender, "uuid = ?", senderID)
 	payload := dmPushPayload{
-		ConversationID: conversation.ID.String(),
+		ConversationID: conversationID.String(),
 		MessageID:      message.ID.String(),
 		SenderID:       senderID.String(),
 		SenderUsername: sender.Username,
@@ -370,6 +389,10 @@ func (h *dmHandler) uploadImage(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Only JPEG, PNG, GIF, and WebP images are allowed"})
 		return
 	}
+	if !uploadContentMatchesDeclared(file, contentType) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Image content does not match declared type"})
+		return
+	}
 
 	const maxSize = 10 * 1024 * 1024
 	if header.Size > maxSize {
@@ -405,7 +428,6 @@ func (h *dmHandler) uploadImage(c *gin.Context) {
 		Key:         aws.String(s3Key),
 		Body:        file,
 		ContentType: aws.String(contentType),
-		ACL:         aws.String("public-read"),
 	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload image to storage"})
 		return
@@ -464,9 +486,9 @@ func (h *dmHandler) findConversation(userA, userB uuid.UUID) (*model.DMConversat
 	return &conversation, nil
 }
 
-func (h *dmHandler) checkDMPermission(senderID, recipientID uuid.UUID) (string, string) {
+func (h *dmHandler) sendConversationForRecipient(tx *gorm.DB, senderID, recipientID uuid.UUID) (*model.DMConversation, error) {
 	var settings model.UserSettings
-	if err := h.db.Where("user_id = ?", recipientID).First(&settings).Error; err != nil {
+	if err := tx.Where("user_id = ?", recipientID).First(&settings).Error; err != nil {
 		settings = model.UserSettings{UserID: recipientID, DMPermission: "anyone"}
 	}
 	permission := settings.DMPermission
@@ -476,39 +498,74 @@ func (h *dmHandler) checkDMPermission(senderID, recipientID uuid.UUID) (string, 
 
 	switch permission {
 	case "anyone":
-		return "", ""
+		return h.getOrCreateConversationTx(tx, senderID, recipientID, true)
 	case "following_only":
 		var count int64
-		h.db.Model(&model.Follow{}).
+		tx.Model(&model.Follow{}).
 			Where("follower_id = ? AND following_id = ?", recipientID, senderID).
 			Count(&count)
 		if count == 0 {
-			return "dm_permission_denied", "仅对方关注的用户可发送私信"
+			return nil, &dmPermissionError{code: "dm_permission_denied", message: "仅对方关注的用户可发送私信"}
 		}
-		return "", ""
+		return h.getOrCreateConversationTx(tx, senderID, recipientID, true)
 	case "one_before_reply":
-		conversation, err := h.findConversation(senderID, recipientID)
-		if err == gorm.ErrRecordNotFound {
-			return "", ""
-		}
+		conversation, err := h.getOrCreateConversationTx(tx, senderID, recipientID, true)
 		if err != nil {
-			return "dm_permission_denied", "私信权限检查失败"
+			return nil, err
 		}
 
 		var senderCount int64
-		h.db.Model(&model.DMMessage{}).Where("conversation_id = ? AND sender_id = ?", conversation.ID, senderID).Count(&senderCount)
+		tx.Model(&model.DMMessage{}).Where("conversation_id = ? AND sender_id = ?", conversation.ID, senderID).Count(&senderCount)
 		if senderCount == 0 {
-			return "", ""
+			return conversation, nil
 		}
 		var recipientReplyCount int64
-		h.db.Model(&model.DMMessage{}).Where("conversation_id = ? AND sender_id = ?", conversation.ID, recipientID).Count(&recipientReplyCount)
+		tx.Model(&model.DMMessage{}).Where("conversation_id = ? AND sender_id = ?", conversation.ID, recipientID).Count(&recipientReplyCount)
 		if recipientReplyCount == 0 {
-			return "dm_waiting_reply", "对方设置了回复前仅可发送一条消息"
+			return nil, &dmPermissionError{code: "dm_waiting_reply", message: "对方设置了回复前仅可发送一条消息"}
 		}
-		return "", ""
+		return conversation, nil
 	default:
-		return "", ""
+		return h.getOrCreateConversationTx(tx, senderID, recipientID, true)
 	}
+}
+
+func (h *dmHandler) getOrCreateConversationTx(tx *gorm.DB, userA, userB uuid.UUID, forUpdate bool) (*model.DMConversation, error) {
+	participantA, participantB := normalizeConversationParticipants(userA, userB)
+	query := tx.Model(&model.DMConversation{})
+	if forUpdate && tx.Dialector.Name() != "sqlite" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+
+	var conversation model.DMConversation
+	err := query.Where("participant_a = ? AND participant_b = ?", participantA, participantB).First(&conversation).Error
+	if err == nil {
+		return &conversation, nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	conversation = model.DMConversation{ParticipantA: participantA, ParticipantB: participantB}
+	result := tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "participant_a"}, {Name: "participant_b"}},
+		DoNothing: true,
+	}).Create(&conversation)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected > 0 {
+		return &conversation, nil
+	}
+
+	query = tx.Model(&model.DMConversation{})
+	if forUpdate && tx.Dialector.Name() != "sqlite" {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.Where("participant_a = ? AND participant_b = ?", participantA, participantB).First(&conversation).Error; err != nil {
+		return nil, err
+	}
+	return &conversation, nil
 }
 
 func mustGetUserUUID(c *gin.Context) uuid.UUID {

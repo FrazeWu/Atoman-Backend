@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"mime/multipart"
 	"net/http"
@@ -27,7 +28,7 @@ type SongCorrectionInput struct {
 }
 
 type AlbumCorrectionFormInput struct {
-	AlbumID              uuid.UUID             `form:"album_id" binding:"required"`
+	AlbumID              string                `form:"album_id" binding:"required"`
 	CorrectedTitle       string                `form:"corrected_title"`
 	CorrectedReleaseDate string                `form:"corrected_release_date"`
 	Reason               string                `form:"reason"`
@@ -153,8 +154,14 @@ func CreateAlbumCorrectionHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc 
 			return
 		}
 
+		albumID, err := uuid.Parse(input.AlbumID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid album ID"})
+			return
+		}
+
 		var originalAlbum model.Album
-		if err := db.Preload("Artists").First(&originalAlbum, "id = ?", input.AlbumID).Error; err != nil {
+		if err := db.Preload("Artists").First(&originalAlbum, "id = ?", albumID).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Original album not found"})
 			return
 		}
@@ -182,7 +189,7 @@ func CreateAlbumCorrectionHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc 
 		}
 
 		correction := model.AlbumCorrection{
-			AlbumID:          input.AlbumID,
+			AlbumID:          albumID,
 			UserID:           &uid,
 			Status:           status,
 			Reason:           input.Reason,
@@ -200,21 +207,28 @@ func CreateAlbumCorrectionHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc 
 			correction.CorrectedTitle = input.CorrectedTitle
 		}
 
-		if input.CorrectedReleaseDate != "" {
-			parsedDate, err := time.Parse("2006-01-02", input.CorrectedReleaseDate)
-			if err == nil {
-				correction.CorrectedReleaseDate = &parsedDate
-			}
+		parsedDate, err := parseAlbumCorrectionReleaseDate(input.CorrectedReleaseDate)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if parsedDate != nil {
+			correction.CorrectedReleaseDate = parsedDate
 		}
 
 		if input.Cover != nil {
-			log.Printf("Uploading new cover for album %v", input.AlbumID)
+			log.Printf("Uploading new cover for album %v", albumID)
 			src, err := input.Cover.Open()
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open cover file"})
 				return
 			}
 			defer src.Close()
+
+			if status, message := validateUploadedImageFile(src, input.Cover); status != http.StatusOK {
+				c.JSON(status, gin.H{"error": message})
+				return
+			}
 
 			safeAlbum := strings.ReplaceAll(originalAlbum.Title, "/", "-")
 			coverKey := "album_covers/pending/" + safeAlbum + "/" + input.Cover.Filename
@@ -251,6 +265,17 @@ func CreateAlbumCorrectionHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc 
 			"status":  status,
 		})
 	}
+}
+
+func parseAlbumCorrectionReleaseDate(raw string) (*time.Time, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	parsedDate, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return nil, fmt.Errorf("corrected_release_date must be YYYY-MM-DD")
+	}
+	return &parsedDate, nil
 }
 
 // CreateArtistCorrectionHandler submits a proposed change for a confirmed artist entry.

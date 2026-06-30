@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
@@ -19,6 +20,7 @@ func MigrateToRevisionSystem(db *gorm.DB) error {
 		&model.EditConflict{},
 		&model.ContentProtection{},
 		&model.Discussion{},
+		&model.DiscussionReadState{},
 	); err != nil {
 		log.Printf("Failed to create new tables: %v", err)
 		return err
@@ -33,26 +35,32 @@ func MigrateToRevisionSystem(db *gorm.DB) error {
 		}
 	}()
 
+	systemUserID, err := ensureRevisionMigrationSystemUser(tx)
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
 	// Migrate Albums
-	if err := migrateAlbums(tx); err != nil {
+	if err := migrateAlbums(tx, systemUserID); err != nil {
 		tx.Rollback()
 		return err
 	}
 
 	// Migrate Songs
-	if err := migrateSongs(tx); err != nil {
+	if err := migrateSongs(tx, systemUserID); err != nil {
 		tx.Rollback()
 		return err
 	}
 
 	// Migrate AlbumCorrections
-	if err := migrateAlbumCorrections(tx); err != nil {
+	if err := migrateAlbumCorrections(tx, systemUserID); err != nil {
 		tx.Rollback()
 		return err
 	}
 
 	// Migrate SongCorrections
-	if err := migrateSongCorrections(tx); err != nil {
+	if err := migrateSongCorrections(tx, systemUserID); err != nil {
 		tx.Rollback()
 		return err
 	}
@@ -66,7 +74,23 @@ func MigrateToRevisionSystem(db *gorm.DB) error {
 	return nil
 }
 
-func migrateAlbums(tx *gorm.DB) error {
+func ensureRevisionMigrationSystemUser(tx *gorm.DB) (uuid.UUID, error) {
+	user := model.User{
+		Username:    "system-migration",
+		Email:       "system-migration@atoman.local",
+		Password:    "migration-only",
+		Role:        "admin",
+		DisplayName: "System Migration",
+		IsActive:    true,
+	}
+	if err := tx.Where("username = ?", user.Username).FirstOrCreate(&user).Error; err != nil {
+		log.Printf("Failed to ensure revision migration system user: %v", err)
+		return uuid.Nil, err
+	}
+	return user.UUID, nil
+}
+
+func migrateAlbums(tx *gorm.DB, systemUserID uuid.UUID) error {
 	log.Println("Migrating albums...")
 
 	var albums []model.Album
@@ -85,9 +109,7 @@ func migrateAlbums(tx *gorm.DB) error {
 		// Determine editor (use uploader or system UUID)
 		editorID := album.UploadedBy
 		if editorID == nil {
-			// Use system UUID for legacy data
-			systemUUID := album.ID // Fallback to album ID
-			editorID = &systemUUID
+			editorID = &systemUserID
 		}
 
 		// Create initial revision
@@ -116,7 +138,7 @@ func migrateAlbums(tx *gorm.DB) error {
 	return nil
 }
 
-func migrateSongs(tx *gorm.DB) error {
+func migrateSongs(tx *gorm.DB, systemUserID uuid.UUID) error {
 	log.Println("Migrating songs...")
 
 	var songs []model.Song
@@ -133,8 +155,7 @@ func migrateSongs(tx *gorm.DB) error {
 
 		editorID := song.UploadedBy
 		if editorID == nil {
-			systemUUID := song.ID
-			editorID = &systemUUID
+			editorID = &systemUserID
 		}
 
 		initialRevision := model.Revision{
@@ -160,7 +181,7 @@ func migrateSongs(tx *gorm.DB) error {
 	return nil
 }
 
-func migrateAlbumCorrections(tx *gorm.DB) error {
+func migrateAlbumCorrections(tx *gorm.DB, systemUserID uuid.UUID) error {
 	log.Println("Migrating album corrections...")
 
 	var corrections []model.AlbumCorrection
@@ -208,8 +229,7 @@ func migrateAlbumCorrections(tx *gorm.DB) error {
 
 		editorID := correction.UserID
 		if editorID == nil {
-			systemUUID := album.ID
-			editorID = &systemUUID
+			editorID = &systemUserID
 		}
 
 		// Create correction revision
@@ -246,7 +266,7 @@ func migrateAlbumCorrections(tx *gorm.DB) error {
 	return nil
 }
 
-func migrateSongCorrections(tx *gorm.DB) error {
+func migrateSongCorrections(tx *gorm.DB, systemUserID uuid.UUID) error {
 	log.Println("Migrating song corrections...")
 
 	var corrections []model.SongCorrection
@@ -277,7 +297,7 @@ func migrateSongCorrections(tx *gorm.DB) error {
 			modifiedSong.Title = correction.CorrectedValue
 		case "lyrics":
 			modifiedSong.Lyrics = correction.CorrectedValue
-		// Add other fields as needed
+			// Add other fields as needed
 		}
 
 		snapshot, err := json.Marshal(modifiedSong)
@@ -288,8 +308,7 @@ func migrateSongCorrections(tx *gorm.DB) error {
 
 		editorID := correction.UserID
 		if editorID == nil {
-			systemUUID := song.ID
-			editorID = &systemUUID
+			editorID = &systemUserID
 		}
 
 		correctionRevision := model.Revision{
@@ -332,6 +351,7 @@ func RollbackRevisionSystem(db *gorm.DB) error {
 		&model.Revision{},
 		&model.EditConflict{},
 		&model.ContentProtection{},
+		&model.DiscussionReadState{},
 		&model.Discussion{},
 	)
 }

@@ -255,6 +255,7 @@ type RecommendationChannelRow struct {
 
 func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) {
 	rows := make([]RecommendationChannelRow, 0)
+	latestPublishedExpr := recommendationChannelLatestPublishedExpr(r.db.Dialector.Name())
 	err := r.db.Table("channels").
 		Select(`
 			channels.id AS channel_id,
@@ -265,7 +266,7 @@ func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) 
 			COUNT(posts.id) AS published_count,
 			SUM(CASE WHEN posts.created_at >= ? THEN 1 ELSE 0 END) AS recent_post_count,
 			COALESCE(AVG(posts.rating_average_score), 0) AS average_rating,
-			MAX(unixepoch(posts.created_at)) AS latest_published_at_unix
+			`+latestPublishedExpr+` AS latest_published_at_unix
 		`, time.Now().Add(-7*24*time.Hour)).
 		Joins("JOIN posts ON posts.channel_id = channels.id").
 		Where("posts.status = ?", "published").
@@ -273,6 +274,15 @@ func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) 
 		Order("MAX(posts.created_at) DESC").
 		Scan(&rows).Error
 	return rows, err
+}
+
+func recommendationChannelLatestPublishedExpr(dialect string) string {
+	switch dialect {
+	case "postgres":
+		return "CAST(EXTRACT(EPOCH FROM MAX(posts.created_at)) AS bigint)"
+	default:
+		return "MAX(unixepoch(posts.created_at))"
+	}
 }
 
 func (r *Repo) ListExploreFeedItems(sort string, limit int, offset int) ([]model.FeedItem, error) {

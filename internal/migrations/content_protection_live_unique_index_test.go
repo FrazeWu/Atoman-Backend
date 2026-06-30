@@ -2,7 +2,6 @@ package migrations
 
 import (
 	"testing"
-	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
@@ -13,6 +12,10 @@ import (
 func TestRunContentProtectionLiveUniqueIndexAllowsRecreateAfterSoftDelete(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.ContentProtection{})
+
+	if err := RunContentProtectionLiveUniqueIndex(db); err != nil {
+		t.Fatalf("run content protection unique index migration: %v", err)
+	}
 
 	contentID := uuid.New()
 	initial := model.ContentProtection{
@@ -35,17 +38,6 @@ func TestRunContentProtectionLiveUniqueIndexAllowsRecreateAfterSoftDelete(t *tes
 		ProtectionLevel: "semi",
 		ProtectedBy:     uuid.New(),
 	}
-	if err := db.Create(&recreated).Error; err == nil {
-		t.Fatal("expected recreate before migration to fail due to unique index")
-	}
-
-	if err := RunContentProtectionLiveUniqueIndex(db); err != nil {
-		t.Fatalf("run content protection unique index migration: %v", err)
-	}
-
-	recreated.ID = uuid.Nil
-	recreated.CreatedAt = time.Time{}
-	recreated.UpdatedAt = time.Time{}
 	if err := db.Create(&recreated).Error; err != nil {
 		t.Fatalf("recreate protection after migration: %v", err)
 	}
@@ -71,4 +63,47 @@ func TestRunContentProtectionLiveUniqueIndexAllowsRecreateAfterSoftDelete(t *tes
 	if rows[1].ProtectionLevel != "semi" {
 		t.Fatalf("expected latest protection level semi, got %q", rows[1].ProtectionLevel)
 	}
+}
+
+func TestRunContentProtectionLiveUniqueIndexDeduplicatesLiveRows(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.ContentProtection{})
+
+	if err := db.Exec(`DROP INDEX IF EXISTS idx_content_protections_live_content`).Error; err != nil {
+		t.Fatalf("drop model index: %v", err)
+	}
+
+	contentID := uuid.New()
+	if err := db.Create(&model.ContentProtection{
+		ContentType:     "album",
+		ContentID:       contentID,
+		ProtectionLevel: "full",
+		ProtectedBy:     uuid.New(),
+	}).Error; err != nil {
+		t.Fatalf("create first protection: %v", err)
+	}
+	if err := db.Create(&model.ContentProtection{
+		ContentType:     "album",
+		ContentID:       contentID,
+		ProtectionLevel: "semi",
+		ProtectedBy:     uuid.New(),
+	}).Error; err != nil {
+		t.Fatalf("create duplicate protection: %v", err)
+	}
+
+	if err := RunContentProtectionLiveUniqueIndex(db); err != nil {
+		t.Fatalf("run content protection unique index migration: %v", err)
+	}
+
+	var liveCount int64
+	if err := db.Model(&model.ContentProtection{}).
+		Where("content_type = ? AND content_id = ?", "album", contentID).
+		Count(&liveCount).Error; err != nil {
+		t.Fatalf("count live protections: %v", err)
+	}
+	if liveCount != 1 {
+		t.Fatalf("expected 1 live protection after dedupe, got %d", liveCount)
+	}
+
+	assertIndexExists(t, db, "content_protections", "idx_content_protections_live_content")
 }

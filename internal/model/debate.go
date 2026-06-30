@@ -75,9 +75,9 @@ func (Argument) TableName() string { return "arguments" }
 // DebateVote represents a real-name vote on an argument
 type DebateVote struct {
 	Base
-	ArgumentID uuid.UUID `json:"argument_id" gorm:"type:uuid;not null;index"`
+	ArgumentID uuid.UUID `json:"argument_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_vote_argument_user,priority:1"`
 	Argument   *Argument `json:"argument,omitempty" gorm:"foreignKey:ArgumentID"`
-	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
+	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_vote_argument_user,priority:2"`
 	User       *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
 	VoteType   int       `json:"vote_type" gorm:"not null"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -101,8 +101,8 @@ func (VoteHistory) TableName() string { return "vote_histories" }
 // DebateConcludeVote tracks users who voted to conclude a debate
 type DebateConcludeVote struct {
 	Base
-	DebateID  uuid.UUID `json:"debate_id" gorm:"type:uuid;not null;index"`
-	UserID    uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
+	DebateID  uuid.UUID `json:"debate_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_conclude_vote_debate_user,priority:1"`
+	UserID    uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_conclude_vote_debate_user,priority:2"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }

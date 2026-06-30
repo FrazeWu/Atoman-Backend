@@ -8,12 +8,14 @@ import (
 	"testing"
 	"time"
 
+	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 func signedSubscriptionTokenForTest(t *testing.T, user model.User) string {
@@ -35,13 +37,15 @@ func TestCreateSubscriptionRouteAcceptsBearerAuth(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 	)
-	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
+	user := model.User{Username: "alice_" + uuid.NewString()[:8], Email: uuid.NewString() + "@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -82,7 +86,7 @@ func TestCreateSubscriptionRouteCanUseExistingAuthContext(t *testing.T) {
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 	)
-	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
+	user := model.User{Username: "alice_" + uuid.NewString()[:8], Email: uuid.NewString() + "@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}

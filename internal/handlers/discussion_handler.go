@@ -77,10 +77,7 @@ func GetAlbumDiscussionUnreadCountHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var count int64
-		if err := db.Where("content_type = ? AND content_id = ? AND status != ? AND read_at IS NULL",
-			"album", albumID, "deleted").
-			Model(&model.Discussion{}).
-			Count(&count).Error; err != nil {
+		if err := countUnreadDiscussions(db, "album", albumID, currentDiscussionUserID(c), &count); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count unread discussions"})
 			return
 		}
@@ -113,10 +110,7 @@ func GetSongDiscussionUnreadCountHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var count int64
-		if err := db.Where("content_type = ? AND content_id = ? AND status != ? AND read_at IS NULL",
-			"song", songID, "deleted").
-			Model(&model.Discussion{}).
-			Count(&count).Error; err != nil {
+		if err := countUnreadDiscussions(db, "song", songID, currentDiscussionUserID(c), &count); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count unread discussions"})
 			return
 		}
@@ -127,6 +121,34 @@ func GetSongDiscussionUnreadCountHandler(db *gorm.DB) gin.HandlerFunc {
 			},
 		})
 	}
+}
+
+func currentDiscussionUserID(c *gin.Context) *uuid.UUID {
+	if user, ok := authctx.Current(c); ok && user.ID != uuid.Nil {
+		return &user.ID
+	}
+	if value, ok := c.Get("user_id"); ok {
+		if id, ok := value.(uuid.UUID); ok && id != uuid.Nil {
+			return &id
+		}
+	}
+	return nil
+}
+
+func countUnreadDiscussions(db *gorm.DB, contentType string, contentID uuid.UUID, userID *uuid.UUID, count *int64) error {
+	query := db.Model(&model.Discussion{}).
+		Where("content_type = ? AND content_id = ? AND status != ?", contentType, contentID, "deleted")
+
+	if userID != nil {
+		query = query.Where(
+			"NOT EXISTS (SELECT 1 FROM discussion_read_states WHERE discussion_read_states.discussion_id = discussions.id AND discussion_read_states.user_id = ?)",
+			*userID,
+		)
+	} else {
+		query = query.Where("read_at IS NULL")
+	}
+
+	return query.Count(count).Error
 }
 
 // GetAlbumDiscussionsHandler godoc

@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repo struct{ db *gorm.DB }
@@ -18,6 +19,17 @@ func (r *Repo) FindDefaultGroup(userID uuid.UUID, name string) ([]model.Subscrip
 }
 
 func (r *Repo) CreateGroup(group *model.SubscriptionGroup) error { return r.db.Create(group).Error }
+
+func (r *Repo) CreateGroupIfNotExists(group *model.SubscriptionGroup) (bool, error) {
+	result := r.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "name"}},
+		TargetWhere: clause.Where{Exprs: []clause.Expression{
+			clause.Eq{Column: clause.Column{Name: "deleted_at"}, Value: nil},
+		}},
+		DoNothing: true,
+	}).Create(group)
+	return result.RowsAffected > 0, result.Error
+}
 
 func (r *Repo) ReassignSubscriptionsToGroup(userID uuid.UUID, fromIDs []uuid.UUID, toID uuid.UUID) error {
 	return r.db.Model(&model.Subscription{}).
@@ -45,4 +57,15 @@ func (r *Repo) FindSubscriptionByUserAndSource(userID uuid.UUID, feedSourceID uu
 
 func (r *Repo) CreateSubscription(subscription *model.Subscription) error {
 	return r.db.Create(subscription).Error
+}
+
+func (r *Repo) CreateSubscriptionIfNotExists(subscription *model.Subscription) (bool, error) {
+	result := r.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "feed_source_id"}},
+		TargetWhere: clause.Where{Exprs: []clause.Expression{
+			clause.Eq{Column: clause.Column{Name: "deleted_at"}, Value: nil},
+		}},
+		DoNothing: true,
+	}).Create(subscription)
+	return result.RowsAffected > 0, result.Error
 }

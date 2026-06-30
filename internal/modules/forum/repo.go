@@ -85,18 +85,13 @@ func (r *Repo) CountReplies(topicID uuid.UUID) (int64, error) {
 }
 
 func (r *Repo) UpsertDraft(draft *model.ForumDraft) error {
-	var existing model.ForumDraft
-	err := r.db.Where("user_id = ? AND context_key = ?", draft.UserID, draft.ContextKey).First(&existing).Error
-	if err == nil {
-		existing.Title = draft.Title
-		existing.Content = draft.Content
-		existing.Tags = draft.Tags
-		return r.db.Save(&existing).Error
-	}
-	if err != gorm.ErrRecordNotFound {
-		return err
-	}
-	return r.db.Create(draft).Error
+	return r.db.Clauses(clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "user_id"},
+			{Name: "context_key"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{"title", "content", "tags", "updated_at"}),
+	}).Create(draft).Error
 }
 
 func (r *Repo) ListDrafts(userID uuid.UUID) ([]model.ForumDraft, error) {

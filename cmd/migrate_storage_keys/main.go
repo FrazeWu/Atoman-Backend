@@ -86,7 +86,6 @@ func copyObject(s3Client *s3.S3, bucket, oldKey, newKey string) error {
 		Bucket:     aws.String(bucket),
 		CopySource: aws.String(bucket + "/" + escapedOldKey),
 		Key:        aws.String(newKey),
-		ACL:        aws.String("public-read"),
 	})
 	return err
 }

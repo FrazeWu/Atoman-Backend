@@ -45,13 +45,25 @@ func (s *OwnerBootstrapService) EnsureOwner(input OwnerBootstrapInput) (model.Us
 	created := false
 
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		var user model.User
-		findErr := tx.Where("username = ? OR email = ?", username, email).First(&user).Error
-		if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
-			return findErr
+		usernameUser, usernameFound, err := findOwnerBootstrapUserBy(tx, "username", username)
+		if err != nil {
+			return err
+		}
+		emailUser, emailFound, err := findOwnerBootstrapUserBy(tx, "email", email)
+		if err != nil {
+			return err
 		}
 
-		if errors.Is(findErr, gorm.ErrRecordNotFound) {
+		var user model.User
+		switch {
+		case usernameFound && emailFound:
+			if usernameUser.UUID != emailUser.UUID {
+				return errors.New("owner username and email belong to different users")
+			}
+			user = usernameUser
+		case usernameFound || emailFound:
+			return errors.New("owner username and email must match the same user")
+		default:
 			user = model.User{
 				Username: username,
 				Email:    email,
@@ -63,7 +75,9 @@ func (s *OwnerBootstrapService) EnsureOwner(input OwnerBootstrapInput) (model.Us
 				return err
 			}
 			created = true
-		} else {
+		}
+
+		if !created {
 			updates := map[string]any{
 				"username":  username,
 				"email":     email,
@@ -101,4 +115,16 @@ func (s *OwnerBootstrapService) EnsureOwner(input OwnerBootstrapInput) (model.Us
 	}
 
 	return ensured, created, nil
+}
+
+func findOwnerBootstrapUserBy(tx *gorm.DB, field string, value string) (model.User, bool, error) {
+	var user model.User
+	err := tx.Where(field+" = ?", value).First(&user).Error
+	if err == nil {
+		return user, true, nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.User{}, false, nil
+	}
+	return model.User{}, false, err
 }

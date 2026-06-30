@@ -3,15 +3,39 @@ package service
 import (
 	"errors"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"atoman/internal/model"
+	"gorm.io/gorm"
 )
 
+func allowRSSFetchTestHosts(t *testing.T, hosts ...string) {
+	t.Helper()
+	allowed := make(map[string]struct{}, len(hosts))
+	for _, host := range hosts {
+		allowed[host] = struct{}{}
+	}
+
+	originalResolver := resolveFullTextHostname
+	resolveFullTextHostname = func(host string) ([]net.IP, error) {
+		if _, ok := allowed[host]; ok {
+			return []net.IP{net.ParseIP("93.184.216.34")}, nil
+		}
+		return nil, errors.New("unexpected host: " + host)
+	}
+	t.Cleanup(func() {
+		resolveFullTextHostname = originalResolver
+	})
+}
+
 func TestFetchAndParseRSSParsesPodcastImages(t *testing.T) {
+	allowRSSFetchTestHosts(t, "feeds.example.com")
+
 	originalClient := rssFetchHTTPClient
 	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.String() != "https://feeds.example.com/podcast.xml" {
@@ -61,7 +85,59 @@ func TestFetchAndParseRSSParsesPodcastImages(t *testing.T) {
 	}
 }
 
+func TestFetchAndParseRSSBlocksPrivateNetworkURLBeforeRequest(t *testing.T) {
+	called := false
+	originalClient := rssFetchHTTPClient
+	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		called = true
+		return nil, errors.New("unexpected request")
+	})}
+	defer func() {
+		rssFetchHTTPClient = originalClient
+	}()
+
+	_, _, _, err := FetchAndParseRSS("http://127.0.0.1/feed.xml")
+	if err == nil {
+		t.Fatal("expected private network URL to be blocked")
+	}
+	if called {
+		t.Fatal("expected private network URL to be rejected before HTTP fetch")
+	}
+}
+
+func TestFetchAndParseRSSBlocksPrivateNetworkRedirectTarget(t *testing.T) {
+	allowRSSFetchTestHosts(t, "allowed.example")
+
+	redirectedToPrivate := false
+	originalClient := rssFetchHTTPClient
+	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Hostname() == "127.0.0.1" {
+			redirectedToPrivate = true
+			return nil, errors.New("unexpected private redirect request")
+		}
+		return &http.Response{
+			StatusCode: http.StatusFound,
+			Header:     http.Header{"Location": []string{"http://127.0.0.1/private.xml"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+			Request:    req,
+		}, nil
+	})}
+	defer func() {
+		rssFetchHTTPClient = originalClient
+	}()
+
+	_, _, _, err := FetchAndParseRSS("https://allowed.example/feed.xml")
+	if err == nil {
+		t.Fatal("expected private redirect target to be blocked")
+	}
+	if redirectedToPrivate {
+		t.Fatal("expected private redirect target to be rejected before redirected HTTP fetch")
+	}
+}
+
 func TestFetchAndParseRSSPrefersContentEncodedAndCreator(t *testing.T) {
+	allowRSSFetchTestHosts(t, "example.com")
+
 	originalClient := rssFetchHTTPClient
 	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -110,6 +186,8 @@ func TestFetchAndParseRSSPrefersContentEncodedAndCreator(t *testing.T) {
 }
 
 func TestFetchAndParseRSSPrefersAtomAlternateLinkAndContent(t *testing.T) {
+	allowRSSFetchTestHosts(t, "example.com")
+
 	originalClient := rssFetchHTTPClient
 	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -151,6 +229,31 @@ func TestFetchAndParseRSSPrefersAtomAlternateLinkAndContent(t *testing.T) {
 	}
 	if items[0].Author != "Bob" {
 		t.Fatalf("author=%q", items[0].Author)
+	}
+}
+
+func TestSanitizeRSSLogURLRemovesSensitiveParts(t *testing.T) {
+	got := sanitizeRSSLogURL("https://alice:secret@feeds.example.com/private/rss.xml?token=abc#frag")
+	if got != "https://feeds.example.com/private/rss.xml" {
+		t.Fatalf("sanitized url=%q", got)
+	}
+
+	if got := sanitizeRSSLogURL("not a url with token=abc"); got != "[invalid-url]" {
+		t.Fatalf("invalid url placeholder=%q", got)
+	}
+
+	err := sanitizeRSSLogError(&url.Error{Op: "Get", URL: "https://alice:secret@feeds.example.com/private/rss.xml?token=abc#frag", Err: errors.New("boom")})
+	if strings.Contains(err.Error(), "alice") || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "token=abc") || strings.Contains(err.Error(), "#frag") {
+		t.Fatalf("sanitized error leaked sensitive URL parts: %v", err)
+	}
+
+	err = sanitizeRSSLogError(&url.Error{
+		Op:  "Get",
+		URL: "https://alice:secret@feeds.example.com/private/rss.xml?token=abc#frag",
+		Err: errors.New(`request failed for https://alice:secret@feeds.example.com/private/rss.xml?token=abc#frag`),
+	})
+	if strings.Contains(err.Error(), "alice") || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "token=abc") || strings.Contains(err.Error(), "#frag") {
+		t.Fatalf("sanitized nested error leaked sensitive URL parts: %v", err)
 	}
 }
 
@@ -378,6 +481,121 @@ func TestPersistNormalizedFeedItemUsesSharedPersistencePath(t *testing.T) {
 	}
 	if items[0].GUID != "post-1" {
 		t.Fatalf("guid=%q", items[0].GUID)
+	}
+}
+
+func TestPersistNormalizedFeedItemDeduplicatesSameLinkWithDifferentGUID(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "shared-persistence-link-dedupe-source",
+		RssURL:     "https://example.com/feed.xml",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
+	first := normalizedFeedItem{
+		Title:       "Entry One",
+		Link:        "https://example.com/posts/1",
+		Identifier:  "post-1",
+		Author:      "Alice",
+		PublishedAt: now,
+		ContentHTML: "<p>Hello world.</p>",
+	}
+	second := first
+	second.Identifier = "post-1-updated-guid"
+
+	if err := persistNormalizedFeedItem(db, source, first, now); err != nil {
+		t.Fatalf("persistNormalizedFeedItem first call returned error: %v", err)
+	}
+	if err := persistNormalizedFeedItem(db, source, second, now); err != nil {
+		t.Fatalf("persistNormalizedFeedItem second call returned error: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.FeedItem{}).
+		Where("feed_source_id = ? AND link = ?", source.ID, first.Link).
+		Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("count=%d", count)
+	}
+}
+
+func TestPersistNormalizedFeedItemIgnoresDuplicateKeyRace(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "shared-persistence-race-source",
+		RssURL:     "https://example.com/feed.xml",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_feed_items_source_guid
+		ON feed_items (feed_source_id, guid)`).Error; err != nil {
+		t.Fatalf("create unique index: %v", err)
+	}
+
+	now := time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
+	normalized := normalizedFeedItem{
+		Title:       "Entry One",
+		Link:        "https://example.com/posts/1",
+		Identifier:  "post-1",
+		Author:      "Alice",
+		PublishedAt: now,
+		ContentHTML: "<p>Hello world.</p><p>Second line.</p>",
+	}
+
+	injected := false
+	callbackName := "test:inject_feed_item_duplicate"
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if injected {
+			return
+		}
+		item, ok := tx.Statement.Dest.(*model.FeedItem)
+		if !ok || item.GUID != normalized.Identifier || item.FeedSourceID != source.ID {
+			return
+		}
+
+		injected = true
+		duplicate := *item
+		if err := tx.Session(&gorm.Session{NewDB: true, SkipHooks: true}).Create(&duplicate).Error; err != nil {
+			t.Fatalf("inject duplicate feed item: %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("register create callback: %v", err)
+	}
+	defer func() {
+		if err := db.Callback().Create().Remove(callbackName); err != nil {
+			t.Fatalf("remove create callback: %v", err)
+		}
+	}()
+
+	if err := persistNormalizedFeedItem(db, source, normalized, now); err != nil {
+		t.Fatalf("persistNormalizedFeedItem returned error: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.FeedItem{}).
+		Where("feed_source_id = ? AND guid = ?", source.ID, normalized.Identifier).
+		Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("count=%d", count)
 	}
 }
 
