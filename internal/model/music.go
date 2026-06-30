@@ -8,19 +8,22 @@ import (
 
 type Artist struct {
 	Base
-	Name        string        `json:"name" gorm:"unique;not null"`
-	Bio         string        `json:"bio" gorm:"type:text"`
-	ImageURL    string        `json:"image_url"`
-	Nationality string        `json:"nationality"`
-	BirthDate   *time.Time    `json:"birth_date,omitempty" gorm:"type:date"`
-	BirthYear   int           `json:"birth_year"`
-	DeathYear   int           `json:"death_year"`
-	Members     string        `json:"members" gorm:"type:text"`
-	EntryStatus string        `json:"entry_status" gorm:"default:'open'"`
-	RedirectTo  *uuid.UUID    `json:"redirect_to,omitempty" gorm:"type:uuid"`
-	Albums      []Album       `json:"albums,omitempty" gorm:"many2many:album_artists;"`
-	Songs       []Song        `json:"songs,omitempty" gorm:"many2many:song_artists;"`
-	Aliases     []ArtistAlias `json:"aliases,omitempty" gorm:"foreignKey:ArtistID"`
+	Name           string        `json:"name" gorm:"unique;not null"`
+	LegalName      string        `json:"legal_name"`
+	StageNamesJSON string        `json:"stage_names_json" gorm:"type:text"`
+	Bio            string        `json:"bio" gorm:"type:text"`
+	ImageURL       string        `json:"image_url"`
+	Nationality    string        `json:"nationality"`
+	BirthPlace     string        `json:"birth_place"`
+	BirthDate      *time.Time    `json:"birth_date,omitempty" gorm:"type:date"`
+	BirthYear      int           `json:"birth_year"`
+	DeathYear      int           `json:"death_year"`
+	Members        string        `json:"members" gorm:"type:text"`
+	EntryStatus    string        `json:"entry_status" gorm:"default:'open'"`
+	RedirectTo     *uuid.UUID    `json:"redirect_to,omitempty" gorm:"type:uuid"`
+	Albums         []Album       `json:"albums,omitempty" gorm:"many2many:album_artists;"`
+	Songs          []Song        `json:"songs,omitempty" gorm:"many2many:song_artists;"`
+	Aliases        []ArtistAlias `json:"aliases,omitempty" gorm:"foreignKey:ArtistID"`
 }
 
 func (Artist) TableName() string {
@@ -31,6 +34,7 @@ type Album struct {
 	Base
 	Title       string     `json:"title" gorm:"not null"`
 	Year        int        `json:"year"`
+	ReleaseYear int        `json:"release_year"`
 	ReleaseDate time.Time  `json:"release_date" gorm:"type:date"`
 	CoverURL    string     `json:"cover_url"`
 	CoverSource string     `json:"cover_source" gorm:"default:'local'"`

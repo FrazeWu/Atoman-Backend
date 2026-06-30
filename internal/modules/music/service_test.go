@@ -1,6 +1,7 @@
 package music
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -22,6 +23,7 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.Artist{},
 		&model.Album{},
 		&model.Song{},
+		&model.AlbumImportSession{},
 		&model.MusicEdit{},
 		&model.MusicEditVote{},
 		&model.MusicEditDecision{},
@@ -237,8 +239,14 @@ func TestSubmitEditAutoAppliesCreateArtistForMainWikiFlow(t *testing.T) {
 		Type:       "create_artist",
 		EntityType: "artist",
 		Payload: map[string]any{
-			"name": "Instant Artist",
-			"bio":  "created immediately",
+			"name":       "Instant Artist",
+			"bio":        "created immediately",
+			"legal_name": "Instant Legal Name",
+			"stage_names": []map[string]any{
+				{"name": "Instant Artist", "is_primary": true, "start_date_text": "2020"},
+				{"name": "IA", "is_primary": false, "end_date_text": "2021"},
+			},
+			"birth_place": "Shanghai",
 		},
 		Reason: "new artist",
 	})
@@ -254,6 +262,16 @@ func TestSubmitEditAutoAppliesCreateArtistForMainWikiFlow(t *testing.T) {
 	if err := db.Where("name = ?", "Instant Artist").First(&artist).Error; err != nil {
 		t.Fatalf("expected artist persisted immediately: %v", err)
 	}
+	var stageNames []ArtistStageNamePayload
+	if err := json.Unmarshal([]byte(artist.StageNamesJSON), &stageNames); err != nil {
+		t.Fatalf("unmarshal stage names json: %v", err)
+	}
+	if artist.LegalName != "Instant Legal Name" || artist.BirthPlace != "Shanghai" {
+		t.Fatalf("expected extended artist fields, got %#v", artist)
+	}
+	if len(stageNames) != 2 || !stageNames[0].IsPrimary || stageNames[0].Name != "Instant Artist" || stageNames[1].Name != "IA" || stageNames[1].EndDateText != "2021" {
+		t.Fatalf("expected structured stage names, got %#v", stageNames)
+	}
 }
 
 func TestSubmitEditAutoAppliesCreateAlbumForMainWikiFlow(t *testing.T) {
@@ -268,9 +286,13 @@ func TestSubmitEditAutoAppliesCreateAlbumForMainWikiFlow(t *testing.T) {
 		Type:       "create_album",
 		EntityType: "album",
 		Payload: map[string]any{
-			"title":      "Instant Album",
-			"artist_ids": []string{artist.ID.String()},
-			"album_type": "album",
+			"title":        "Instant Album",
+			"artist_ids":   []string{artist.ID.String()},
+			"album_type":   "album",
+			"release_year": 2024,
+			"tracks": []map[string]any{
+				{"title": "Intro", "track_number": 1},
+			},
 		},
 		Reason: "new album",
 	})
@@ -288,6 +310,9 @@ func TestSubmitEditAutoAppliesCreateAlbumForMainWikiFlow(t *testing.T) {
 	}
 	if len(album.Artists) != 1 || album.Artists[0].ID != artist.ID {
 		t.Fatalf("expected linked artist, got %#v", album.Artists)
+	}
+	if album.ReleaseYear != 2024 {
+		t.Fatalf("expected release year persisted, got %#v", album)
 	}
 }
 

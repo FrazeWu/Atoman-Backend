@@ -105,6 +105,14 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("revision unique indexes migration: %w", err)
 	}
 
+	if err := migrations.RunMusicAlbumImportsMigration(db); err != nil {
+		return fmt.Errorf("music album imports migration: %w", err)
+	}
+
+	if err := migrations.RunMusicArtistExtendedFieldsMigration(db); err != nil {
+		return fmt.Errorf("music artist extended fields migration: %w", err)
+	}
+
 	return nil
 }
 

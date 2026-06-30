@@ -13,22 +13,27 @@ import (
 )
 
 type artistEditFields struct {
-	Name        string `json:"name"`
-	Bio         string `json:"bio"`
-	ImageURL    string `json:"image_url"`
-	Nationality string `json:"nationality"`
-	BirthDate   string `json:"birth_date"`
-	BirthYear   int    `json:"birth_year"`
-	DeathYear   int    `json:"death_year"`
+	Name        string                   `json:"name"`
+	LegalName   string                   `json:"legal_name"`
+	StageNames  []ArtistStageNamePayload `json:"stage_names"`
+	Bio         string                   `json:"bio"`
+	ImageURL    string                   `json:"image_url"`
+	Nationality string                   `json:"nationality"`
+	BirthPlace  string                   `json:"birth_place"`
+	BirthDate   string                   `json:"birth_date"`
+	BirthYear   int                      `json:"birth_year"`
+	DeathYear   int                      `json:"death_year"`
 }
 
 type albumEditFields struct {
-	Title       string   `json:"title"`
-	ArtistIDs   []string `json:"artist_ids"`
-	ReleaseDate string   `json:"release_date"`
-	CoverURL    string   `json:"cover_url"`
-	CoverKey    string   `json:"cover_key"`
-	AlbumType   string   `json:"album_type"`
+	Title       string                    `json:"title"`
+	ArtistIDs   []string                  `json:"artist_ids"`
+	ReleaseDate string                    `json:"release_date"`
+	ReleaseYear int                       `json:"release_year"`
+	CoverURL    string                    `json:"cover_url"`
+	CoverKey    string                    `json:"cover_key"`
+	AlbumType   string                    `json:"album_type"`
+	Tracks      []AlbumImportTrackPayload `json:"tracks"`
 }
 
 func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
@@ -51,14 +56,17 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		}
 
 		artist := model.Artist{
-			Name:        payload.Name,
-			Bio:         payload.Bio,
-			ImageURL:    payload.ImageURL,
-			Nationality: payload.Nationality,
-			BirthDate:   birthDate,
-			BirthYear:   birthYear,
-			DeathYear:   payload.DeathYear,
-			EntryStatus: "open",
+			Name:           payload.Name,
+			LegalName:      payload.LegalName,
+			StageNamesJSON: mustMarshalStageNames(payload.StageNames),
+			Bio:            payload.Bio,
+			ImageURL:       payload.ImageURL,
+			Nationality:    payload.Nationality,
+			BirthPlace:     payload.BirthPlace,
+			BirthDate:      birthDate,
+			BirthYear:      birthYear,
+			DeathYear:      payload.DeathYear,
+			EntryStatus:    "open",
 		}
 		if err := tx.Create(&artist).Error; err != nil {
 			return err
@@ -80,11 +88,20 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		if changes.Bio != "" {
 			updates["bio"] = changes.Bio
 		}
+		if changes.LegalName != "" {
+			updates["legal_name"] = changes.LegalName
+		}
+		if len(changes.StageNames) > 0 {
+			updates["stage_names_json"] = mustMarshalStageNames(changes.StageNames)
+		}
 		if changes.ImageURL != "" {
 			updates["image_url"] = changes.ImageURL
 		}
 		if changes.Nationality != "" {
 			updates["nationality"] = changes.Nationality
+		}
+		if changes.BirthPlace != "" {
+			updates["birth_place"] = changes.BirthPlace
 		}
 		if changes.BirthDate != "" {
 			birthDate, err := parseOptionalReleaseDate(changes.BirthDate)
@@ -155,11 +172,16 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 			Status:      "open",
 			EntryStatus: "open",
 			AlbumType:   albumType,
+			ReleaseYear: payload.ReleaseYear,
 			UploadedBy:  &edit.SubmittedBy,
+		}
+		if payload.ReleaseYear > 0 {
+			album.Year = payload.ReleaseYear
 		}
 		if releaseDate != nil {
 			album.ReleaseDate = *releaseDate
 			album.Year = releaseDate.Year()
+			album.ReleaseYear = releaseDate.Year()
 		}
 		if err := tx.Create(&album).Error; err != nil {
 			return err
@@ -196,7 +218,12 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 			if releaseDate != nil {
 				updates["release_date"] = *releaseDate
 				updates["year"] = releaseDate.Year()
+				updates["release_year"] = releaseDate.Year()
 			}
+		}
+		if changes.ReleaseYear != 0 {
+			updates["release_year"] = changes.ReleaseYear
+			updates["year"] = changes.ReleaseYear
 		}
 		if changes.CoverURL != "" {
 			updates["cover_url"] = changes.CoverURL

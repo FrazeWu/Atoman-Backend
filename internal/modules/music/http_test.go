@@ -3,6 +3,7 @@ package music
 import (
 	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -27,6 +28,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.Artist{},
 		&model.Album{},
 		&model.Song{},
+		&model.AlbumImportSession{},
 		&model.MusicEdit{},
 		&model.MusicEditVote{},
 		&model.MusicEditDecision{},
@@ -291,6 +293,133 @@ func TestRegisterRoutesListAlbumsSearchesArtistNames(t *testing.T) {
 	if len(resp.Data) != 1 || resp.Meta.Total != 1 || resp.Data[0].Title != "Title Does Not Match" {
 		t.Fatalf("unexpected artist-name search response: data=%#v meta=%#v", resp.Data, resp.Meta)
 	}
+}
+
+func TestRegisterRoutesCreateAlbumImportSessionSupportsArchiveUpload(t *testing.T) {
+	service, _, user := newMusicHTTPTestService(t)
+	r := newMusicHTTPRouter(service, &user)
+
+	createBody, _ := json.Marshal(CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+	})
+	createRecorder := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(createRecorder, createReq)
+
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create session 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	var createResp struct {
+		Data AlbumImportDTO `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	body, contentType := newAlbumImportUploadRequestBody(t, "Untrue.zip", map[string]string{
+		"01 - Untitled.mp3": "",
+		"02 - Archangel.mp3": "",
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+createResp.Data.ImportID+"/upload", body)
+	req.Header.Set("Content-Type", contentType)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data AlbumImportDTO `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.Status != AlbumImportStatusReady {
+		t.Fatalf("expected ready session, got %#v", resp.Data)
+	}
+	if resp.Data.ArchiveName != "Untrue.zip" {
+		t.Fatalf("expected archive name persisted, got %#v", resp.Data.ArchiveName)
+	}
+}
+
+func TestRegisterRoutesCommitAlbumImportSessionUsesRequestPayload(t *testing.T) {
+	service, _, user := newMusicHTTPTestService(t)
+	r := newMusicHTTPRouter(service, &user)
+
+	createBody, _ := json.Marshal(CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusReady,
+	})
+	createRecorder := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(createRecorder, createReq)
+
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create session 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	var createResp struct {
+		Data AlbumImportDTO `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	commitBody, _ := json.Marshal(CommitAlbumImportSessionInput{
+		Artist: AlbumImportArtistPayload{
+			Name:      "HTTP Artist",
+			LegalName: "HTTP Legal Artist",
+			StageNames: []ArtistStageNamePayload{
+				{Name: "HTTP Artist", IsPrimary: true},
+			},
+			BirthPlace: "Shanghai",
+		},
+		Album: AlbumImportAlbumPayload{
+			Title:       "HTTP Album",
+			ReleaseYear: 2026,
+			Tracks: []AlbumImportTrackPayload{
+				{Title: "Track One", TrackNumber: 1},
+			},
+		},
+	})
+
+	commitRecorder := httptest.NewRecorder()
+	commitReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/music/imports/albums/"+createResp.Data.ImportID+"/commit",
+		bytes.NewReader(commitBody),
+	)
+	commitReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(commitRecorder, commitReq)
+
+	if commitRecorder.Code != http.StatusOK {
+		t.Fatalf("expected commit 200, got %d: %s", commitRecorder.Code, commitRecorder.Body.String())
+	}
+}
+
+func newAlbumImportUploadRequestBody(t *testing.T, archiveName string, files map[string]string) (*bytes.Buffer, string) {
+	t.Helper()
+
+	archive := newImportTestZipArchive(t, files)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("archive", archiveName)
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := part.Write(archive); err != nil {
+		t.Fatalf("write form file: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	return &body, writer.FormDataContentType()
 }
 
 func TestRegisterRoutesListAlbumsSearchesArtistNamesWithHotSort(t *testing.T) {
