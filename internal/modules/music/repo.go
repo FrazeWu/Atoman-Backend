@@ -2,6 +2,7 @@ package music
 
 import (
 	"errors"
+	"strings"
 
 	"atoman/internal/model"
 
@@ -25,3 +26,37 @@ func (r *Repo) GetEdit(id uuid.UUID) (model.MusicEdit, error) {
 }
 
 func (r *Repo) SaveEdit(edit *model.MusicEdit) error { return r.db.Save(edit).Error }
+
+type ListEditsQuery struct {
+	Status     string
+	EntityType string
+	Type       string
+	SubmittedBy *uuid.UUID
+	Page       int
+	PageSize   int
+}
+
+func (r *Repo) ListEdits(query ListEditsQuery) ([]model.MusicEdit, int64, error) {
+	db := r.db.Model(&model.MusicEdit{})
+	if status := strings.TrimSpace(query.Status); status != "" {
+		db = db.Where("status = ?", status)
+	}
+	if entityType := strings.TrimSpace(query.EntityType); entityType != "" {
+		db = db.Where("entity_type = ?", entityType)
+	}
+	if editType := strings.TrimSpace(query.Type); editType != "" {
+		db = db.Where("type = ?", editType)
+	}
+	if query.SubmittedBy != nil && *query.SubmittedBy != uuid.Nil {
+		db = db.Where("submitted_by = ?", *query.SubmittedBy)
+	}
+
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var edits []model.MusicEdit
+	err := db.Order("created_at DESC").Limit(query.PageSize).Offset((query.Page - 1) * query.PageSize).Find(&edits).Error
+	return edits, total, err
+}

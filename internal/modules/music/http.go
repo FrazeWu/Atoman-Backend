@@ -27,6 +27,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/albums", h.listAlbums)
 	group.GET("/albums/:albumId", h.getAlbum)
 	group.POST("/edits", h.submitEdit)
+	group.GET("/edits", h.listEdits)
 	group.GET("/edits/:editId", h.getEdit)
 	group.POST("/edits/:editId/votes", h.voteEdit)
 	group.POST("/edits/:editId/approve", h.approveEdit)
@@ -147,6 +148,33 @@ func (h *Handler) getAlbum(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, album)
+}
+
+func (h *Handler) listEdits(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	if !authctx.RoleAtLeast(user.Role, authctx.RoleModerator) {
+		httpx.Error(c, apperr.Forbidden("music.edit_forbidden", "Moderator role required"))
+		return
+	}
+
+	page, pageSize := httpx.PageParams(c)
+	edits, total, err := h.service.repo.ListEdits(ListEditsQuery{
+		Status:     c.Query("status"),
+		EntityType: c.Query("entity_type"),
+		Type:       c.Query("type"),
+		Page:       page,
+		PageSize:   pageSize,
+	})
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	httpx.List(c, edits, page, pageSize, total)
 }
 
 func albumSortOrders(sort string) []string {

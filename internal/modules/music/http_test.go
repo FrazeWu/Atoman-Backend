@@ -134,6 +134,64 @@ func TestRegisterRoutesListsArtistsThroughMusicV1(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesListsMusicEditsForModerator(t *testing.T) {
+	service, db, _ := newMusicHTTPTestService(t)
+	moderator := authctx.CurrentUser{ID: uuid.New(), Username: "mod", Role: authctx.RoleModerator}
+	if err := db.Create(&model.User{
+		UUID:     moderator.ID,
+		Username: moderator.Username,
+		Email:    "mod@example.com",
+		Password: "hash",
+		Role:     moderator.Role,
+		IsActive: true,
+	}).Error; err != nil {
+		t.Fatalf("create moderator: %v", err)
+	}
+	edit := model.MusicEdit{
+		Type:        "create_artist",
+		EntityType:  "artist",
+		SubmittedBy: moderator.ID,
+		Status:      "open",
+		Reason:      "seed review queue",
+		PayloadJSON: "{}",
+		ChangesJSON: "{}",
+		SourcesJSON: "[]",
+		Votable:     true,
+	}
+	if err := db.Create(&edit).Error; err != nil {
+		t.Fatalf("create music edit: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &moderator)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/edits?status=open&page_size=10", nil)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []model.MusicEdit `json:"data"`
+		Meta struct {
+			Page     int   `json:"page"`
+			PageSize int   `json:"page_size"`
+			Total    int64 `json:"total"`
+			HasMore  bool  `json:"has_more"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].ID != edit.ID {
+		t.Fatalf("unexpected edits response: %#v", resp.Data)
+	}
+	if resp.Meta.Total != 1 || resp.Meta.Page != 1 || resp.Meta.PageSize != 10 || resp.Meta.HasMore {
+		t.Fatalf("unexpected meta: %#v", resp.Meta)
+	}
+}
+
 func TestRegisterRoutesListAlbumsSortsByHotScore(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Discovery Artist", EntryStatus: "open"}
