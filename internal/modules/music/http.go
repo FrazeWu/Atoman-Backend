@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -26,6 +27,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/artists/:artistId", h.getArtist)
 	group.GET("/albums", h.listAlbums)
 	group.GET("/albums/:albumId", h.getAlbum)
+	group.GET("/recommend/albums", h.getRecommendedAlbums)
 	group.POST("/edits", h.submitEdit)
 	group.GET("/edits", h.listEdits)
 	group.GET("/edits/:editId", h.getEdit)
@@ -150,6 +152,21 @@ func (h *Handler) getAlbum(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, album)
 }
 
+func (h *Handler) getRecommendedAlbums(c *gin.Context) {
+	mode, err := parseMusicRecommendationMode(c.Query("mode"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	items, total, err := h.service.RecommendAlbumsByMode(mode, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, items, page, pageSize, total)
+}
+
 func (h *Handler) listEdits(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -189,6 +206,19 @@ func albumSortOrders(sort string) []string {
 		return []string{"\"Albums\".release_date ASC", "\"Albums\".title ASC"}
 	default:
 		return []string{"\"Albums\".release_date ASC", "\"Albums\".title ASC"}
+	}
+}
+
+func parseMusicRecommendationMode(raw string) (recommendation.Mode, error) {
+	switch recommendation.Mode(strings.TrimSpace(strings.ToLower(raw))) {
+	case recommendation.ModeHot:
+		return recommendation.ModeHot, nil
+	case recommendation.ModeFeatured:
+		return recommendation.ModeFeatured, nil
+	case recommendation.ModeDiscover:
+		return recommendation.ModeDiscover, nil
+	default:
+		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover")
 	}
 }
 

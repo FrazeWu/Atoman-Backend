@@ -3,8 +3,13 @@ package music
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
+	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/feed"
+	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/audit"
 	"atoman/internal/platform/authctx"
@@ -19,6 +24,112 @@ type Service struct {
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
+
+func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, pageSize int) ([]feed.RecommendationItemDTO, int64, error) {
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+
+	var albums []model.Album
+	if err := s.db.Model(&model.Album{}).
+		Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed").
+		Order("\"Albums\".created_at DESC").
+		Find(&albums).Error; err != nil {
+		return nil, 0, err
+	}
+
+	candidates := make([]recommendation.Candidate, 0, len(albums))
+	albumByID := make(map[string]model.Album, len(albums))
+	for _, album := range albums {
+		candidates = append(candidates, recommendation.Candidate{
+			Module:          "music",
+			EntityType:      recommendation.EntityAlbum,
+			EntityID:        album.ID.String(),
+			SourceKey:       album.ID.String(),
+			QualityScore:    clampMusicRecommendation(album.HotScore / 10),
+			TrendScore:      clampMusicRecommendation(album.HotScore / 10),
+			FreshnessScore:  normalizeMusicAlbumFreshness(album.CreatedAt, 30*24*time.Hour),
+			AuthorityScore:  0.5,
+			ExposureScore:   0,
+			EditorialScore:  0,
+			PublishedAtUnix: album.CreatedAt.Unix(),
+		})
+		albumByID[album.ID.String()] = album
+	}
+
+	ranked := recommendation.RankCandidates(mode, candidates, 0)
+	items := make([]feed.RecommendationItemDTO, 0, len(ranked))
+	for _, item := range ranked {
+		album, ok := albumByID[item.EntityID]
+		if !ok {
+			continue
+		}
+		items = append(items, feed.RecommendationItemDTO{
+			ID:         album.ID.String(),
+			Title:      album.Title,
+			Summary:    "",
+			ImageURL:   album.CoverURL,
+			TargetPath: "/music/album/" + album.ID.String(),
+			ScoreLabel: fmt.Sprintf("%s %.0f", musicRecommendationLabel(mode), math.Round(item.FinalScore*100)),
+		})
+	}
+
+	total := int64(len(items))
+	start := (page - 1) * pageSize
+	if start > len(items) {
+		start = len(items)
+	}
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end], total, nil
+}
+
+func normalizeMusicRecommendationPage(page int, pageSize int) (int, int) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return page, pageSize
+}
+
+func normalizeMusicAlbumFreshness(createdAt time.Time, horizon time.Duration) float64 {
+	if createdAt.IsZero() || horizon <= 0 {
+		return 0
+	}
+	age := time.Since(createdAt)
+	if age <= 0 {
+		return 1
+	}
+	return clampMusicRecommendation(1 - float64(age)/float64(horizon))
+}
+
+func clampMusicRecommendation(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func musicRecommendationLabel(mode recommendation.Mode) string {
+	switch mode {
+	case recommendation.ModeHot:
+		return "热度"
+	case recommendation.ModeFeatured:
+		return "精选"
+	case recommendation.ModeDiscover:
+		return "探索"
+	default:
+		return "推荐"
+	}
+}
 
 func (s *Service) SubmitEdit(user authctx.CurrentUser, req SubmitEditRequest) (model.MusicEdit, error) {
 	if user.ID == uuid.Nil {

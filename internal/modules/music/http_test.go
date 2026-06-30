@@ -334,6 +334,73 @@ func TestRegisterRoutesListAlbumsSearchesArtistNamesWithHotSort(t *testing.T) {
 	}
 }
 
+func TestMusicRecommendationModeValidation(t *testing.T) {
+	service, _, user := newMusicHTTPTestService(t)
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/recommend/albums?mode=bad", nil)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestMusicRecommendationAlbumsReturnsData(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	album := model.Album{
+		Title:       "Recommend Me",
+		EntryStatus: "open",
+		Status:      "open",
+		HotScore:    8.5,
+	}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/recommend/albums?mode=hot", nil)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Title      string `json:"title"`
+			Summary    string `json:"summary"`
+			ImageURL   string `json:"image_url"`
+			TargetPath string `json:"target_path"`
+			ScoreLabel string `json:"score_label"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) == 0 {
+		t.Fatalf("expected recommendation data, got %s", w.Body.String())
+	}
+	first := resp.Data[0]
+	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" {
+		t.Fatalf("expected lightweight recommendation dto fields, got %#v", first)
+	}
+	if first.TargetPath != "/music/album/"+album.ID.String() {
+		t.Fatalf("expected target path %s, got %s", "/music/album/"+album.ID.String(), first.TargetPath)
+	}
+	if resp.Meta.Total == 0 {
+		t.Fatalf("expected total > 0, got %#v", resp.Meta)
+	}
+}
+
 func TestAlbumSortOrdersSupportsRandomMode(t *testing.T) {
 	got := albumSortOrders("random")
 

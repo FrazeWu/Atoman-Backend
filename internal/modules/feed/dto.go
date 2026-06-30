@@ -31,3 +31,12 @@ type TimelineItemDTO struct {
 type ToggleStateDTO struct {
 	Active bool `json:"active"`
 }
+
+type RecommendationItemDTO struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	Summary    string `json:"summary"`
+	ImageURL   string `json:"image_url"`
+	TargetPath string `json:"target_path"`
+	ScoreLabel string `json:"score_label"`
+}

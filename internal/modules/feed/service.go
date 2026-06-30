@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	legacyfeed "atoman/internal/service"
@@ -21,6 +22,14 @@ type Service struct {
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
+
+func (s *Service) RecommendArticlesByMode(mode recommendation.Mode, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+	return s.RecommendArticles(mode, page, pageSize)
+}
+
+func (s *Service) RecommendChannelsByMode(mode recommendation.Mode, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+	return s.RecommendChannels(mode, page, pageSize)
+}
 
 func (s *Service) GetPublicFeedBySourceID(feedSourceID uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {
 	page := normalizedPage(query.Page)
@@ -298,12 +307,12 @@ func (s *Service) getPublicFeedWithDuplicateFilter(query FeedQuery, page int, li
 func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]TimelineItemDTO, int64, error) {
 	page := normalizedPage(query.Page)
 	limit := normalizedPageSize(query.PageSize)
-	offset := (page - 1) * limit
-	posts, err := s.repo.ListExplorePosts(limit, offset)
+	sortMode := normalizeExploreSort(strings.TrimSpace(query.Sort))
+	posts, err := s.repo.ListExplorePostsAll()
 	if err != nil {
 		return nil, 0, err
 	}
-	feedItems, err := s.repo.ListExploreFeedItems(strings.TrimSpace(query.Sort), limit, offset)
+	feedItems, err := s.repo.ListExploreFeedItemsAll(sortMode)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -325,18 +334,9 @@ func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]T
 	}
 
 	sortTimeline(items)
-	if len(items) > limit {
-		items = items[:limit]
-	}
-	postTotal, err := s.repo.CountExplorePosts()
-	if err != nil {
-		return nil, 0, err
-	}
-	feedTotal, err := s.repo.CountExploreFeedItems()
-	if err != nil {
-		return nil, 0, err
-	}
-	return items, postTotal + feedTotal, nil
+	items = filterTimeline(items, query)
+	paged, total := paginateTimeline(items, page, limit)
+	return paged, total, nil
 }
 
 func (s *Service) MarkRead(user authctx.CurrentUser, ids []uuid.UUID) error {
@@ -534,8 +534,35 @@ func timelineSearchValues(item TimelineItemDTO) []string {
 
 func sortTimeline(items []TimelineItemDTO) {
 	sort.Slice(items, func(i, j int) bool {
-		return items[i].PublishedAt.After(items[j].PublishedAt)
+		if !items[i].PublishedAt.Equal(items[j].PublishedAt) {
+			return items[i].PublishedAt.After(items[j].PublishedAt)
+		}
+		if items[i].Type != items[j].Type {
+			return timelineTypeRank(items[i].Type) < timelineTypeRank(items[j].Type)
+		}
+		return timelineItemID(items[i]) > timelineItemID(items[j])
 	})
+}
+
+func timelineTypeRank(itemType string) int {
+	switch itemType {
+	case "post":
+		return 0
+	case "feed_item":
+		return 1
+	default:
+		return 2
+	}
+}
+
+func timelineItemID(item TimelineItemDTO) string {
+	if item.Post != nil {
+		return item.Post.ID.String()
+	}
+	if item.FeedItem != nil {
+		return item.FeedItem.ID.String()
+	}
+	return ""
 }
 
 func paginateTimeline(items []TimelineItemDTO, page int, pageSize int) ([]TimelineItemDTO, int64) {

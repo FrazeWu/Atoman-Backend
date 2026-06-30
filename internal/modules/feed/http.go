@@ -23,6 +23,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/timeline", middleware.OptionalAuthMiddleware(), h.getSubscribedFeed)
 	group.GET("/explore", middleware.OptionalAuthMiddleware(), h.getExploreFeed)
 	group.GET("/explore/sources", GetExploreSources(service.db))
+	group.GET("/recommend/articles", h.getRecommendedArticles)
+	group.GET("/recommend/channels", h.getRecommendedChannels)
 
 	group.GET("/rss/:username", GetUserRSS(service.db))
 	group.GET("/items/:id", GetFeedItem(service.db))
@@ -76,13 +78,18 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 
 func (h *Handler) getSubscribedFeed(c *gin.Context) {
 	user, _ := authctx.Current(c)
+	query, err := queryFromContext(c)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	if raw := c.Query("feed_source_id"); raw != "" {
 		feedSourceID, err := uuid.Parse(raw)
 		if err != nil {
 			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "feed source id must be a valid uuid"))
 			return
 		}
-		items, total, err := h.service.GetPublicFeedBySourceID(feedSourceID, queryFromContext(c))
+		items, total, err := h.service.GetPublicFeedBySourceID(feedSourceID, query)
 		if err != nil {
 			httpx.Error(c, err)
 			return
@@ -90,7 +97,7 @@ func (h *Handler) getSubscribedFeed(c *gin.Context) {
 		httpx.List(c, items, normalizedPageFromQuery(c), normalizedPageSizeFromQuery(c), total)
 		return
 	}
-	items, total, err := h.service.GetSubscribedFeed(user, queryFromContext(c))
+	items, total, err := h.service.GetSubscribedFeed(user, query)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -100,12 +107,47 @@ func (h *Handler) getSubscribedFeed(c *gin.Context) {
 
 func (h *Handler) getExploreFeed(c *gin.Context) {
 	user, _ := authctx.Current(c)
-	items, total, err := h.service.GetExploreFeed(user, queryFromContext(c))
+	query, err := queryFromContext(c)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	items, total, err := h.service.GetExploreFeed(user, query)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
 	httpx.List(c, items, normalizedPageFromQuery(c), normalizedPageSizeFromQuery(c), total)
+}
+
+func (h *Handler) getRecommendedArticles(c *gin.Context) {
+	mode, err := parseRecommendationMode(c.Query("mode"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	items, total, err := h.service.RecommendArticlesByMode(mode, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, items, page, pageSize, total)
+}
+
+func (h *Handler) getRecommendedChannels(c *gin.Context) {
+	mode, err := parseRecommendationMode(c.Query("mode"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	items, total, err := h.service.RecommendChannelsByMode(mode, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, items, page, pageSize, total)
 }
 
 func (h *Handler) markRead(c *gin.Context) {
@@ -201,7 +243,12 @@ func (h *Handler) listReadingList(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	items, total, err := h.service.ListReadingList(user, queryFromContext(c))
+	query, err := queryFromContext(c)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	items, total, err := h.service.ListReadingList(user, query)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -261,7 +308,7 @@ func (h *Handler) removeReadingListItem(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"removed": true})
 }
 
-func queryFromContext(c *gin.Context) FeedQuery {
+func queryFromContext(c *gin.Context) (FeedQuery, error) {
 	query := FeedQuery{
 		Page:           normalizedPageFromQuery(c),
 		PageSize:       normalizedPageSizeFromQuery(c),
@@ -271,14 +318,18 @@ func queryFromContext(c *gin.Context) FeedQuery {
 		Search:         strings.TrimSpace(c.Query("q")),
 	}
 	if raw := c.Query("source_id"); raw != "" {
-		if id, err := uuid.Parse(raw); err == nil {
-			query.SourceID = id
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return FeedQuery{}, apperr.BadRequest("validation.invalid_request", "source_id must be a valid uuid")
 		}
+		query.SourceID = id
 	}
 	if raw := c.Query("group_id"); raw != "" {
-		if id, err := uuid.Parse(raw); err == nil {
-			query.GroupID = id
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return FeedQuery{}, apperr.BadRequest("validation.invalid_request", "group_id must be a valid uuid")
 		}
+		query.GroupID = id
 	}
 	if raw := c.Query("is_read"); raw != "" {
 		value := raw == "true"
@@ -287,7 +338,7 @@ func queryFromContext(c *gin.Context) FeedQuery {
 		value := false
 		query.IsRead = &value
 	}
-	return query
+	return query, nil
 }
 
 func normalizedPageFromQuery(c *gin.Context) int {

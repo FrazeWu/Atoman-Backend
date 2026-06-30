@@ -210,9 +210,18 @@ func (r *Repo) ListExplorePosts(limit int, offset int) ([]model.Post, error) {
 	var posts []model.Post
 	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
 		Where("status = ?", "published").
-		Order("created_at DESC").
+		Order("created_at DESC, id DESC").
 		Offset(offset).
 		Limit(limit).
+		Find(&posts).Error
+	return posts, err
+}
+
+func (r *Repo) ListExplorePostsAll() ([]model.Post, error) {
+	var posts []model.Post
+	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
+		Where("status = ?", "published").
+		Order("created_at DESC, id DESC").
 		Find(&posts).Error
 	return posts, err
 }
@@ -223,6 +232,49 @@ func (r *Repo) CountExplorePosts() (int64, error) {
 	return count, err
 }
 
+func (r *Repo) ListRecommendationPosts() ([]model.Post, error) {
+	var posts []model.Post
+	err := r.db.Preload("Channel").
+		Where("status = ?", "published").
+		Order("created_at ASC, id ASC").
+		Find(&posts).Error
+	return posts, err
+}
+
+type RecommendationChannelRow struct {
+	ChannelID        uuid.UUID
+	Slug             string
+	Name             string
+	Description      string
+	CoverURL         string
+	PublishedCount   int64
+	RecentPostCount  int64
+	AverageRating    float64
+	LatestPublishedAt sql.NullString
+}
+
+func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) {
+	rows := make([]RecommendationChannelRow, 0)
+	err := r.db.Table("channels").
+		Select(`
+			channels.id AS channel_id,
+			channels.slug AS slug,
+			channels.name AS name,
+			channels.description AS description,
+			channels.cover_url AS cover_url,
+			COUNT(posts.id) AS published_count,
+			SUM(CASE WHEN posts.created_at >= ? THEN 1 ELSE 0 END) AS recent_post_count,
+			COALESCE(AVG(posts.rating_average_score), 0) AS average_rating,
+			MAX(posts.created_at) AS latest_published_at
+		`, time.Now().Add(-7*24*time.Hour)).
+		Joins("JOIN posts ON posts.channel_id = channels.id").
+		Where("posts.status = ?", "published").
+		Group("channels.id").
+		Order("MAX(posts.created_at) DESC").
+		Scan(&rows).Error
+	return rows, err
+}
+
 func (r *Repo) ListExploreFeedItems(sort string, limit int, offset int) ([]model.FeedItem, error) {
 	var items []model.FeedItem
 	db := r.db.Preload("FeedSource").
@@ -230,13 +282,42 @@ func (r *Repo) ListExploreFeedItems(sort string, limit int, offset int) ([]model
 		Where("feed_sources.hidden = ?", false).
 		Offset(offset).
 		Limit(limit)
-	if sort == "popular" {
-		db = db.Select("feed_items.*, (SELECT COUNT(*) FROM feed_item_stars WHERE feed_item_stars.feed_item_id = feed_items.id) as star_count").Order("star_count DESC, published_at DESC")
-	} else {
-		db = db.Order("RANDOM()")
-	}
+	db = applyExploreFeedSort(db, sort)
 	err := db.Find(&items).Error
 	return items, err
+}
+
+func (r *Repo) ListExploreFeedItemsAll(sort string) ([]model.FeedItem, error) {
+	var items []model.FeedItem
+	db := r.db.Preload("FeedSource").
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_sources.hidden = ?", false)
+	db = applyExploreFeedSort(db, sort)
+	err := db.Find(&items).Error
+	return items, err
+}
+
+func applyExploreFeedSort(db *gorm.DB, sort string) *gorm.DB {
+	switch normalizeExploreSort(sort) {
+	case "popular":
+		return db.Select("feed_items.*, (SELECT COUNT(*) FROM feed_item_stars WHERE feed_item_stars.feed_item_id = feed_items.id) as star_count").
+			Order("star_count DESC, published_at DESC, feed_items.id DESC")
+	case "random":
+		return db.Order("RANDOM()")
+	default:
+		return db.Order("published_at DESC, feed_items.id DESC")
+	}
+}
+
+func normalizeExploreSort(sort string) string {
+	switch strings.TrimSpace(strings.ToLower(sort)) {
+	case "popular":
+		return "popular"
+	case "random":
+		return "random"
+	default:
+		return "recent"
+	}
 }
 
 func (r *Repo) CountExploreFeedItems() (int64, error) {
@@ -274,17 +355,12 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string) ([]Exp
 		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
 		Where("feed_sources.source_type = ?", "external_rss").
 		Where("feed_sources.hidden = ?", false)
-	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
-		db = applyExploreSourceCategoryFilter(db, normalizedCategory)
-	}
 	err := db.
 		Group("feed_sources.id").
 		Having("COUNT(DISTINCT feed_items.id) > 0").
 		Order("subscription_count DESC").
 		Order("last_published_at DESC NULLS LAST").
 		Order("feed_sources.created_at DESC").
-		Offset(offset).
-		Limit(limit).
 		Scan(&rawRows).Error
 	if err != nil {
 		return nil, err
@@ -297,7 +373,7 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string) ([]Exp
 			ID:                raw.ID,
 			Title:             raw.Title,
 			RSSURL:            raw.RSSURL,
-			Category:          normalizeFeedSourceCategory(raw.Category),
+			Category:          raw.Category,
 			SubscriptionCount: raw.SubscriptionCount,
 			RecentItemCount:   raw.RecentItemCount,
 		}
@@ -316,7 +392,18 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string) ([]Exp
 		return nil, err
 	}
 
-	return rows, nil
+	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
+		rows = filterExploreSourceRowsByCategory(rows, normalizedCategory)
+	}
+	if offset >= len(rows) {
+		return []ExploreSourceRow{}, nil
+	}
+	end := offset + limit
+	if end > len(rows) {
+		end = len(rows)
+	}
+
+	return rows[offset:end], nil
 }
 
 func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs []uuid.UUID) error {
@@ -354,27 +441,18 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 	}
 
 	for i := range rows {
-		if rows[i].Category == "" {
-			rows[i].Category = inferFeedSourceCategory(rows[i])
-		}
+		rows[i].Category = inferFeedSourceCategory(rows[i])
 	}
 
 	return nil
 }
 
 func (r *Repo) CountExploreSources(category string) (int64, error) {
-	var count int64
-	db := r.db.Table("feed_sources").
-		Joins("JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
-		Where("feed_sources.source_type = ?", "external_rss").
-		Where("feed_sources.hidden = ?", false)
-	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
-		db = applyExploreSourceCategoryFilter(db, normalizedCategory)
+	rows, err := r.ListExploreSources(100000, 0, category)
+	if err != nil {
+		return 0, err
 	}
-	err := db.
-		Distinct("feed_sources.id").
-		Count(&count).Error
-	return count, err
+	return int64(len(rows)), nil
 }
 
 func normalizeFeedSourceCategory(category string) string {
@@ -393,34 +471,11 @@ func defaultFeedSourceCategory(category string) string {
 	return "blog"
 }
 
-func applyExploreSourceCategoryFilter(db *gorm.DB, category string) *gorm.DB {
-	if category == "blog" {
-		return db.Where(`
-			COALESCE(NULLIF(feed_sources.category, ''), '') = 'blog'
-			OR (
-				COALESCE(NULLIF(feed_sources.category, ''), '') = ''
-				AND NOT (` + exploreSourceInferredCategorySQL("news") + `)
-				AND NOT (` + exploreSourceInferredCategorySQL("social") + `)
-				AND NOT (` + exploreSourceInferredCategorySQL("video") + `)
-				AND NOT (` + exploreSourceInferredCategorySQL("forum") + `)
-				AND NOT (` + exploreSourceInferredCategorySQL("podcast") + `)
-			)
-		`)
-	}
-	return db.Where(`
-		COALESCE(NULLIF(feed_sources.category, ''), '') = ?
-		OR (
-			COALESCE(NULLIF(feed_sources.category, ''), '') = ''
-			AND (`+exploreSourceInferredCategorySQL(category)+`)
-		)
-	`, category)
-}
-
 func exploreSourceInferredCategorySQL(category string) string {
 	textValue := "LOWER(COALESCE(feed_sources.title, '') || ' ' || COALESCE(feed_sources.rss_url, ''))"
 	switch category {
 	case "news":
-		return textValue + " LIKE '%news%' OR " + textValue + " LIKE '%新闻%' OR " + textValue + " LIKE '%36kr%' OR " + textValue + " LIKE '%36氪%' OR " + textValue + " LIKE '%ftchinese%' OR " + textValue + " LIKE '%nytimes%' OR " + textValue + " LIKE '%media%'"
+		return textValue + " LIKE '%news%' OR " + textValue + " LIKE '%新闻%' OR " + textValue + " LIKE '%36kr%' OR " + textValue + " LIKE '%36氪%' OR " + textValue + " LIKE '%ftchinese%' OR " + textValue + " LIKE '%nytimes%' OR " + textValue + " LIKE '%media%' OR " + textValue + " LIKE '%gov.cn%' OR " + textValue + " LIKE '%stats.gov%' OR " + textValue + " LIKE '%统计%' OR " + textValue + " LIKE '%数据发布%'"
 	case "social":
 		return textValue + " LIKE '%x.com%' OR " + textValue + " LIKE '%twitter%' OR " + textValue + " LIKE '%zhihu%' OR " + textValue + " LIKE '%jike%' OR " + textValue + " LIKE '%reddit%' OR " + textValue + " LIKE '%社交%'"
 	case "video":
@@ -451,16 +506,26 @@ func inferFeedSourceCategory(row ExploreSourceRow) string {
 	if strings.Contains(value, "youtube") || strings.Contains(value, "bilibili") || strings.Contains(value, "video") || strings.Contains(value, "视频") {
 		return "video"
 	}
+	if strings.Contains(value, "news") || strings.Contains(value, "新闻") || strings.Contains(value, "36kr") || strings.Contains(value, "36氪") || strings.Contains(value, "ftchinese") || strings.Contains(value, "nytimes") || strings.Contains(value, "media") || strings.Contains(value, "gov.cn") || strings.Contains(value, "stats.gov") || strings.Contains(value, "统计") || strings.Contains(value, "数据发布") {
+		return "news"
+	}
 	if strings.Contains(value, "forum") || strings.Contains(value, "bbs") || strings.Contains(value, "discourse") || strings.Contains(value, "v2ex") || strings.Contains(value, "nodeseek") || strings.Contains(value, "linux.do") || strings.Contains(value, "论坛") {
 		return "forum"
 	}
 	if strings.Contains(value, "x.com") || strings.Contains(value, "twitter") || strings.Contains(value, "zhihu") || strings.Contains(value, "jike") || strings.Contains(value, "reddit") || strings.Contains(value, "社交") {
 		return "social"
 	}
-	if strings.Contains(value, "news") || strings.Contains(value, "新闻") || strings.Contains(value, "36kr") || strings.Contains(value, "36氪") || strings.Contains(value, "ftchinese") || strings.Contains(value, "nytimes") || strings.Contains(value, "media") {
-		return "news"
-	}
 	return "blog"
+}
+
+func filterExploreSourceRowsByCategory(rows []ExploreSourceRow, category string) []ExploreSourceRow {
+	filtered := make([]ExploreSourceRow, 0, len(rows))
+	for _, row := range rows {
+		if row.Category == category {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
 }
 
 func parseExploreSourceTimestamp(raw string) (time.Time, error) {

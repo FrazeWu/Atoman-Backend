@@ -378,6 +378,28 @@ func TestGetSubscribedFeedHandlerParsesUnreadOnlyFilter(t *testing.T) {
 	}
 }
 
+func TestGetSubscribedFeedHandlerRejectsInvalidSourceAndGroupIDs(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, _, _ := newFeedTestService(t)
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	for _, rawURL := range []string{
+		"/api/v1/feed/timeline?source_id=not-a-uuid",
+		"/api/v1/feed/timeline?group_id=not-a-uuid",
+	} {
+		req := httptest.NewRequest(http.MethodGet, rawURL, nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for %s, got %d with body %s", rawURL, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 func TestGetSubscribedFeedHandlerParsesSearchQuery(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
@@ -410,6 +432,129 @@ func TestGetSubscribedFeedHandlerParsesSearchQuery(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected Feed item result for q, got %#v", payload.Data)
+}
+
+func TestFeedRecommendationModeValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, _, _ := newFeedTestService(t)
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	for _, rawURL := range []string{
+		"/api/v1/feed/recommend/articles?mode=invalid",
+		"/api/v1/feed/recommend/channels?mode=nope",
+	} {
+		req := httptest.NewRequest(http.MethodGet, rawURL, nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for %s, got %d with body %s", rawURL, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestFeedRecommendationArticlesReturnsData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	var post model.Post
+	if err := db.Preload("Channel").Where("title = ?", "Post item").First(&post).Error; err != nil {
+		t.Fatalf("find post: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/articles?mode=hot", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected article recommendation to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Title      string `json:"title"`
+			Summary    string `json:"summary"`
+			ImageURL   string `json:"image_url"`
+			TargetPath string `json:"target_path"`
+			ScoreLabel string `json:"score_label"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected article recommendations, got body %s", rr.Body.String())
+	}
+	first := payload.Data[0]
+	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" {
+		t.Fatalf("expected lightweight article dto fields, got body %s", rr.Body.String())
+	}
+	if first.TargetPath != "/posts/post/"+post.ID.String() {
+		t.Fatalf("expected article target path %s, got %s", "/posts/post/"+post.ID.String(), first.TargetPath)
+	}
+	if payload.Meta.Total == 0 {
+		t.Fatalf("expected article recommendation meta total, got body %s", rr.Body.String())
+	}
+}
+
+func TestFeedRecommendationChannelsReturnsData(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	var channel model.Channel
+	if err := db.Where("slug = ?", "alice-channel").First(&channel).Error; err != nil {
+		t.Fatalf("find channel: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=featured", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected channel recommendation to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Title      string `json:"title"`
+			Summary    string `json:"summary"`
+			ImageURL   string `json:"image_url"`
+			TargetPath string `json:"target_path"`
+			ScoreLabel string `json:"score_label"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected channel recommendations, got body %s", rr.Body.String())
+	}
+	first := payload.Data[0]
+	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" {
+		t.Fatalf("expected lightweight channel dto fields, got body %s", rr.Body.String())
+	}
+	if first.TargetPath != "/channels/"+channel.Slug {
+		t.Fatalf("expected channel target path %s, got %s", "/channels/"+channel.Slug, first.TargetPath)
+	}
+	if payload.Meta.Total == 0 {
+		t.Fatalf("expected channel recommendation meta total, got body %s", rr.Body.String())
+	}
 }
 
 func TestMarkUnreadHandlerDeletesReadRecord(t *testing.T) {
