@@ -250,7 +250,7 @@ type RecommendationChannelRow struct {
 	PublishedCount   int64
 	RecentPostCount  int64
 	AverageRating    float64
-	LatestPublishedAt sql.NullString
+	LatestPublishedAtUnix sql.NullInt64
 }
 
 func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) {
@@ -265,7 +265,7 @@ func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) 
 			COUNT(posts.id) AS published_count,
 			SUM(CASE WHEN posts.created_at >= ? THEN 1 ELSE 0 END) AS recent_post_count,
 			COALESCE(AVG(posts.rating_average_score), 0) AS average_rating,
-			MAX(posts.created_at) AS latest_published_at
+			MAX(unixepoch(posts.created_at)) AS latest_published_at_unix
 		`, time.Now().Add(-7*24*time.Hour)).
 		Joins("JOIN posts ON posts.channel_id = channels.id").
 		Where("posts.status = ?", "published").

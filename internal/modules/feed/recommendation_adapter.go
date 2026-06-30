@@ -80,11 +80,8 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, page int, pageSize
 	rowByID := make(map[string]RecommendationChannelRow, len(rows))
 	for _, row := range rows {
 		publishedAt := time.Now()
-		if row.LatestPublishedAt.Valid {
-			parsed, parseErr := parseExploreSourceTimestamp(row.LatestPublishedAt.String)
-			if parseErr == nil {
-				publishedAt = parsed
-			}
+		if row.LatestPublishedAtUnix.Valid {
+			publishedAt = time.Unix(row.LatestPublishedAtUnix.Int64, 0)
 		}
 		candidate := recommendation.Candidate{
 			Module:          "feed",
