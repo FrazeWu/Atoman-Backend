@@ -445,6 +445,11 @@ func main() {
 			fatalLogger.Fatal("Failed to run blog collection post order migration: ", err)
 		}
 		log.Println("Migration step completed: blog collection post order")
+		log.Println("Migration step: content protection live unique index")
+		if err := migrations.RunContentProtectionLiveUniqueIndex(db); err != nil {
+			fatalLogger.Fatal("Failed to run content protection live unique index migration: ", err)
+		}
+		log.Println("Migration step completed: content protection live unique index")
 		log.Println("Migration step: auto migrate models")
 		if err := db.AutoMigrate(
 			&model.User{},
@@ -527,6 +532,11 @@ func main() {
 			fatalLogger.Fatal("Failed to run migrations: ", err)
 		}
 		log.Println("Migration step completed: auto migrate models")
+		log.Println("Migration step: blog interaction unique indexes")
+		if err := migrations.RunBlogInteractionUniqueIndexes(db); err != nil {
+			fatalLogger.Fatal("Failed to run blog interaction unique indexes migration: ", err)
+		}
+		log.Println("Migration step completed: blog interaction unique indexes")
 		log.Println("Database migrations completed")
 
 		log.Println("Migration step: notification/dm indexes")

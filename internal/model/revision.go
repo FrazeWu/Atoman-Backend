@@ -78,8 +78,8 @@ func (EditConflict) TableName() string {
 // ContentProtection represents protection settings for Albums/Songs
 type ContentProtection struct {
 	Base
-	ContentType string    `json:"content_type" gorm:"not null;index"` // 'album' / 'song'
-	ContentID   uuid.UUID `json:"content_id" gorm:"type:uuid;not null;uniqueIndex"`
+	ContentType string    `json:"content_type" gorm:"not null;uniqueIndex:idx_content_protections_live_content,priority:1,where:deleted_at IS NULL"` // 'album' / 'song'
+	ContentID   uuid.UUID `json:"content_id" gorm:"type:uuid;not null;uniqueIndex:idx_content_protections_live_content,priority:2,where:deleted_at IS NULL"`
 
 	ProtectionLevel string `json:"protection_level" gorm:"default:'none'"` // 'none' / 'semi' / 'full'
 	// none: anyone can edit

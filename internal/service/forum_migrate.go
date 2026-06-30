@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 
+	"atoman/internal/migrations"
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
@@ -52,6 +53,10 @@ func RunForumMigrations(db *gorm.DB) error {
 		&model.ActivityLog{},
 	); err != nil {
 		return fmt.Errorf("forum AutoMigrate failed: %w", err)
+	}
+
+	if err := migrations.RunForumDraftUniqueIndex(db); err != nil {
+		return fmt.Errorf("forum draft unique index migration failed: %w", err)
 	}
 
 	// Backfill path and floor_number for existing replies (idempotent)

@@ -69,6 +69,22 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	if err := migrations.RunBlogInteractionUniqueIndexes(db); err != nil {
+		return fmt.Errorf("blog interaction unique indexes migration: %w", err)
+	}
+
+	if err := migrations.RunContentProtectionLiveUniqueIndex(db); err != nil {
+		return fmt.Errorf("content protection live unique index migration: %w", err)
+	}
+
+	if err := migrations.RunSubscriptionUniqueIndex(db); err != nil {
+		return fmt.Errorf("subscription unique index migration: %w", err)
+	}
+
+	if err := migrations.RunFeedItemUniqueIndex(db); err != nil {
+		return fmt.Errorf("feed item unique index migration: %w", err)
+	}
+
 	return nil
 }
 

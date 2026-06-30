@@ -242,9 +242,9 @@ func (FeedSource) TableName() string { return "feed_sources" }
 // Subscription 存储用户与订阅源的多对多关系
 type Subscription struct {
 	Base
-	UserID              uuid.UUID          `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_subscriptions_user_source,priority:1"`
+	UserID              uuid.UUID          `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_subscriptions_user_source,priority:1,where:deleted_at IS NULL"`
 	User                *User              `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	FeedSourceID        uuid.UUID          `json:"feed_source_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_subscriptions_user_source,priority:2"`
+	FeedSourceID        uuid.UUID          `json:"feed_source_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_subscriptions_user_source,priority:2,where:deleted_at IS NULL"`
 	FeedSource          *FeedSource        `json:"feed_source,omitempty" gorm:"foreignKey:FeedSourceID"`
 	Title               string             `json:"title"`
 	SubscriptionGroupID *uuid.UUID         `json:"subscription_group_id" gorm:"type:uuid;index"`
@@ -258,9 +258,9 @@ func (Subscription) TableName() string { return "subscriptions" }
 
 type FeedItem struct {
 	Base
-	FeedSourceID          uuid.UUID   `json:"feed_source_id" gorm:"type:uuid;not null;index;index:idx_feed_items_source_status,priority:1;index:idx_feed_items_source_published,priority:1"`
+	FeedSourceID          uuid.UUID   `json:"feed_source_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_feed_items_source_guid,priority:1;index:idx_feed_items_source_status,priority:1;index:idx_feed_items_source_published,priority:1"`
 	FeedSource            *FeedSource `json:"feed_source,omitempty" gorm:"foreignKey:FeedSourceID"`
-	GUID                  string      `json:"guid" gorm:"not null"`
+	GUID                  string      `json:"guid" gorm:"not null;uniqueIndex:idx_feed_items_source_guid,priority:2"`
 	Title                 string      `json:"title"`
 	Link                  string      `json:"link" gorm:"type:text"`
 	Summary               string      `json:"summary" gorm:"type:text"`
