@@ -18,7 +18,7 @@ Go backend service for API, authentication, data models, migrations, storage, an
 ```bash
 go build ./...
 go run cmd/migrate/main.go
-ENV_FILE=.env.dev go run ./cmd/start_server
+go run ./cmd/start_server --mode dev
 go run cmd/create_admin/main.go
 ```
 
@@ -30,12 +30,18 @@ Backend keeps three environment files:
 - `.env.dev`: local development values
 - `.env.prod`: production values
 
-Use the startup command with an explicit env file:
+Use the startup command with an explicit mode:
 
 ```bash
-ENV_FILE=.env.dev go run ./cmd/start_server
-ENV_FILE=.env.prod go run ./cmd/start_server
+go run ./cmd/start_server --mode dev
+go run ./cmd/start_server --mode prod
 ```
+
+Mode mapping:
+
+- `dev` -> `.env.dev`
+- `prod` -> `.env.prod`
+- default mode is `dev`
 
 Local development uses:
 
@@ -67,7 +73,7 @@ Build the server binary:
 go build -o start_server ./cmd/start_server
 ```
 
-Production runtime reads environment variables from `.env.prod` through `systemd` or shell environment injection.
+Production runtime can start with `--mode prod`, or read environment variables from `.env.prod` through `systemd`.
 
 ## systemd Deployment
 
@@ -89,7 +95,7 @@ EnvironmentFile=/home/fa/Atoman-Backend/.env.prod
 Environment=ENV=production
 Environment=GIN_MODE=release
 Environment=PORT=8080
-ExecStart=/home/fa/Atoman-Backend/start_server
+ExecStart=/home/fa/Atoman-Backend/start_server --mode prod
 Restart=always
 RestartSec=5
 StandardOutput=journal

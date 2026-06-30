@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
 	"log"
 	"net/url"
@@ -338,16 +339,23 @@ func handlersSlugify(value string) string {
 	return mapped
 }
 
-func loadEnvironment() string {
-	if envFile := strings.TrimSpace(os.Getenv("ENV_FILE")); envFile != "" {
-		if err := godotenv.Load(envFile); err == nil {
-			return "Loaded " + envFile
-		}
-		return "ENV_FILE set but not loaded: " + envFile
+func resolveEnvFile(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "dev":
+		return ".env.dev"
+	case "prod":
+		return ".env.prod"
+	default:
+		return ".env.dev"
 	}
-	if err := godotenv.Load(".env.dev"); err == nil {
-		return "Loaded .env.dev"
-	} else if err := godotenv.Load(".env"); err == nil {
+}
+
+func loadEnvironment(mode string) string {
+	envFile := resolveEnvFile(mode)
+	if err := godotenv.Load(envFile); err == nil {
+		return "Loaded " + envFile
+	}
+	if err := godotenv.Load(".env"); err == nil {
 		return "Loaded .env"
 	}
 	return "No .env file found, using system environment variables"
@@ -417,7 +425,10 @@ func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 }
 
 func main() {
-	envMessage := loadEnvironment()
+	mode := flag.String("mode", "dev", "startup mode: dev or prod")
+	flag.Parse()
+
+	envMessage := loadEnvironment(*mode)
 
 	logs, err := setupLogging(loggingConfig{})
 	if err != nil {

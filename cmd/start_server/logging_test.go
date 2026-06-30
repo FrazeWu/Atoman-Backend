@@ -111,7 +111,7 @@ func TestLoadEnvironmentBeforeLoggingAllowsEnvFileLogDir(t *testing.T) {
 		}
 	})
 
-	envMessage := loadEnvironment()
+	envMessage := loadEnvironment("dev")
 	logs, err := setupLogging(loggingConfig{Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{}})
 	if err != nil {
 		t.Fatalf("setup logging: %v", err)
@@ -130,9 +130,8 @@ func TestLoadEnvironmentBeforeLoggingAllowsEnvFileLogDir(t *testing.T) {
 
 func TestLoadEnvironmentUsesExplicitEnvFile(t *testing.T) {
 	workDir := t.TempDir()
-	envFile := filepath.Join(workDir, ".env.prod")
 	logDir := filepath.Join(workDir, "prod-log")
-	if err := os.WriteFile(envFile, []byte("LOG_DIR="+logDir+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(workDir, ".env.prod"), []byte("LOG_DIR="+logDir+"\n"), 0o644); err != nil {
 		t.Fatalf("write env file: %v", err)
 	}
 
@@ -149,17 +148,49 @@ func TestLoadEnvironmentUsesExplicitEnvFile(t *testing.T) {
 		t.Fatalf("change working directory: %v", err)
 	}
 
-	t.Setenv("ENV_FILE", envFile)
 	if err := os.Unsetenv("LOG_DIR"); err != nil {
 		t.Fatalf("unset LOG_DIR: %v", err)
 	}
 
-	envMessage := loadEnvironment()
-	if envMessage != "Loaded "+envFile {
-		t.Fatalf("expected explicit env file message, got %q", envMessage)
+	envMessage := loadEnvironment("prod")
+	if envMessage != "Loaded .env.prod" {
+		t.Fatalf("expected prod env file message, got %q", envMessage)
 	}
 	if got := os.Getenv("LOG_DIR"); got != logDir {
-		t.Fatalf("expected LOG_DIR from explicit env file, got %q", got)
+		t.Fatalf("expected LOG_DIR from prod env file, got %q", got)
+	}
+}
+
+func TestLoadEnvironmentDefaultsUnknownModeToDev(t *testing.T) {
+	workDir := t.TempDir()
+	logDir := filepath.Join(workDir, "dev-log")
+	if err := os.WriteFile(filepath.Join(workDir, ".env.dev"), []byte("LOG_DIR="+logDir+"\n"), 0o644); err != nil {
+		t.Fatalf("write env file: %v", err)
+	}
+
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldDir); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+	if err := os.Chdir(workDir); err != nil {
+		t.Fatalf("change working directory: %v", err)
+	}
+
+	if err := os.Unsetenv("LOG_DIR"); err != nil {
+		t.Fatalf("unset LOG_DIR: %v", err)
+	}
+
+	envMessage := loadEnvironment("staging")
+	if envMessage != "Loaded .env.dev" {
+		t.Fatalf("expected fallback dev env file message, got %q", envMessage)
+	}
+	if got := os.Getenv("LOG_DIR"); got != logDir {
+		t.Fatalf("expected LOG_DIR from fallback dev env file, got %q", got)
 	}
 }
 

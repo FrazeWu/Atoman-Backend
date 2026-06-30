@@ -258,11 +258,11 @@ func (Subscription) TableName() string { return "subscriptions" }
 
 type FeedItem struct {
 	Base
-	FeedSourceID          uuid.UUID   `json:"feed_source_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_feed_items_source_guid,priority:1;uniqueIndex:idx_feed_items_source_link,priority:1,where:link <> '';index:idx_feed_items_source_status,priority:1;index:idx_feed_items_source_published,priority:1"`
+	FeedSourceID          uuid.UUID   `json:"feed_source_id" gorm:"type:uuid;not null;index;index:idx_feed_items_source_status,priority:1;index:idx_feed_items_source_published,priority:1"`
 	FeedSource            *FeedSource `json:"feed_source,omitempty" gorm:"foreignKey:FeedSourceID"`
-	GUID                  string      `json:"guid" gorm:"not null;uniqueIndex:idx_feed_items_source_guid,priority:2"`
+	GUID                  string      `json:"guid" gorm:"not null"`
 	Title                 string      `json:"title"`
-	Link                  string      `json:"link" gorm:"type:text;uniqueIndex:idx_feed_items_source_link,priority:2,where:link <> ''"`
+	Link                  string      `json:"link" gorm:"type:text"`
 	Summary               string      `json:"summary" gorm:"type:text"`
 	Author                string      `json:"author"`
 	PublishedAt           time.Time   `json:"published_at" gorm:"index:idx_feed_items_source_published,priority:2,sort:desc"`
