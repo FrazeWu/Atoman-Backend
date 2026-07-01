@@ -434,6 +434,51 @@ func TestGetSubscribedFeedHandlerParsesSearchQuery(t *testing.T) {
 	t.Fatalf("expected Feed item result for q, got %#v", payload.Data)
 }
 
+func TestGetSubscribedFeedHandlerSearchMatchesFeedItemContentHTML(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+
+	var feedItem model.FeedItem
+	if err := db.Where("title = ?", "Feed item").First(&feedItem).Error; err != nil {
+		t.Fatalf("find feed item: %v", err)
+	}
+	if err := db.Model(&feedItem).Updates(map[string]any{
+		"full_text_html": "<p>longform body phrase for search</p>",
+		"summary":        "short summary only",
+	}).Error; err != nil {
+		t.Fatalf("update feed item body: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?q=longform+body+phrase", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []TimelineItemDTO `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected search results for full_text_html, got body %s", rr.Body.String())
+	}
+	for _, item := range payload.Data {
+		if item.Type == "feed_item" && item.FeedItem != nil && item.FeedItem.ID == feedItem.ID {
+			return
+		}
+	}
+	t.Fatalf("expected full_text_html search to return feed item %s, got %#v", feedItem.ID, payload.Data)
+}
+
 func TestFeedRecommendationModeValidation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, _, _ := newFeedTestService(t)
@@ -480,6 +525,7 @@ func TestFeedRecommendationArticlesReturnsData(t *testing.T) {
 			ID         string `json:"id"`
 			Title      string `json:"title"`
 			Summary    string `json:"summary"`
+			ContentType string `json:"content_type"`
 			ImageURL   string `json:"image_url"`
 			TargetPath string `json:"target_path"`
 			ScoreLabel string `json:"score_label"`
@@ -495,11 +541,63 @@ func TestFeedRecommendationArticlesReturnsData(t *testing.T) {
 		t.Fatalf("expected article recommendations, got body %s", rr.Body.String())
 	}
 	first := payload.Data[0]
-	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" {
+	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType == "" {
 		t.Fatalf("expected lightweight article dto fields, got body %s", rr.Body.String())
 	}
-	if first.TargetPath != "/posts/post/"+post.ID.String() {
-		t.Fatalf("expected article target path %s, got %s", "/posts/post/"+post.ID.String(), first.TargetPath)
+	foundInternalPost := false
+	for _, item := range payload.Data {
+		if item.TargetPath == "/posts/post/"+post.ID.String() {
+			foundInternalPost = true
+			break
+		}
+	}
+	if !foundInternalPost {
+		t.Fatalf("expected article target path %s somewhere in result, got body %s", "/posts/post/"+post.ID.String(), rr.Body.String())
+	}
+	if payload.Meta.Total == 0 {
+		t.Fatalf("expected article recommendation meta total, got body %s", rr.Body.String())
+	}
+}
+
+func TestFeedRecommendationArticlesIncludesExternalFeedItems(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	if err := db.Exec("DELETE FROM posts").Error; err != nil {
+		t.Fatalf("delete posts: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/articles?mode=hot", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected article recommendation to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Title      string `json:"title"`
+			ContentType string `json:"content_type"`
+			TargetPath string `json:"target_path"`
+			ScoreLabel string `json:"score_label"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected external feed items to appear in article recommendations, got body %s", rr.Body.String())
+	}
+	if payload.Data[0].ID == "" || payload.Data[0].Title == "" || payload.Data[0].TargetPath == "" || payload.Data[0].ScoreLabel == "" || payload.Data[0].ContentType == "" {
+		t.Fatalf("expected lightweight recommendation dto fields, got body %s", rr.Body.String())
 	}
 	if payload.Meta.Total == 0 {
 		t.Fatalf("expected article recommendation meta total, got body %s", rr.Body.String())
@@ -531,6 +629,7 @@ func TestFeedRecommendationChannelsReturnsData(t *testing.T) {
 			ID         string `json:"id"`
 			Title      string `json:"title"`
 			Summary    string `json:"summary"`
+			ContentType string `json:"content_type"`
 			ImageURL   string `json:"image_url"`
 			TargetPath string `json:"target_path"`
 			ScoreLabel string `json:"score_label"`
@@ -546,11 +645,63 @@ func TestFeedRecommendationChannelsReturnsData(t *testing.T) {
 		t.Fatalf("expected channel recommendations, got body %s", rr.Body.String())
 	}
 	first := payload.Data[0]
-	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" {
+	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType == "" {
 		t.Fatalf("expected lightweight channel dto fields, got body %s", rr.Body.String())
 	}
-	if first.TargetPath != "/channels/"+channel.Slug {
-		t.Fatalf("expected channel target path %s, got %s", "/channels/"+channel.Slug, first.TargetPath)
+	foundInternalChannel := false
+	for _, item := range payload.Data {
+		if item.TargetPath == "/channels/"+channel.Slug {
+			foundInternalChannel = true
+			break
+		}
+	}
+	if !foundInternalChannel {
+		t.Fatalf("expected channel target path %s somewhere in result, got body %s", "/channels/"+channel.Slug, rr.Body.String())
+	}
+	if payload.Meta.Total == 0 {
+		t.Fatalf("expected channel recommendation meta total, got body %s", rr.Body.String())
+	}
+}
+
+func TestFeedRecommendationChannelsIncludesExternalSources(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	if err := db.Exec("DELETE FROM posts").Error; err != nil {
+		t.Fatalf("delete posts: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=hot", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected channel recommendation to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Title      string `json:"title"`
+			ContentType string `json:"content_type"`
+			TargetPath string `json:"target_path"`
+			ScoreLabel string `json:"score_label"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected external sources to appear in channel recommendations, got body %s", rr.Body.String())
+	}
+	if payload.Data[0].ID == "" || payload.Data[0].Title == "" || payload.Data[0].TargetPath == "" || payload.Data[0].ScoreLabel == "" || payload.Data[0].ContentType == "" {
+		t.Fatalf("expected lightweight recommendation dto fields, got body %s", rr.Body.String())
 	}
 	if payload.Meta.Total == 0 {
 		t.Fatalf("expected channel recommendation meta total, got body %s", rr.Body.String())

@@ -524,7 +524,7 @@ func timelineSearchValues(item TimelineItemDTO) []string {
 		}
 	}
 	if item.FeedItem != nil {
-		values = append(values, item.FeedItem.Title, item.FeedItem.Summary)
+		values = append(values, item.FeedItem.Title, item.FeedItem.Summary, item.FeedItem.FullTextHTML)
 		if item.FeedItem.FeedSource != nil {
 			values = append(values, item.FeedItem.FeedSource.Title, item.FeedItem.FeedSource.RssURL)
 		}
