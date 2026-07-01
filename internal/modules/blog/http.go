@@ -107,6 +107,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 // @Param user_id query string false "用户 UUID"
 // @Param channel_id query string false "频道 UUID"
 // @Param collection_id query string false "合集 UUID"
+// @Param q query string false "搜索标题或摘要"
 // @Param limit query int false "返回数量上限"
 // @Success 200 {array} model.Post
 // @Failure 500 {object} handlers.ErrorResponse
@@ -127,6 +128,10 @@ func (h *Handler) listPosts(c *gin.Context) {
 		query = query.Order("pc.position ASC")
 	} else {
 		query = query.Order("pinned DESC, created_at DESC")
+	}
+	if q := strings.TrimSpace(c.Query("q")); q != "" {
+		searchLike := "%" + q + "%"
+		query = query.Where("(title ILIKE ? OR summary ILIKE ? OR content ILIKE ?)", searchLike, searchLike, searchLike)
 	}
 	if limit > 0 {
 		query = query.Limit(limit)
