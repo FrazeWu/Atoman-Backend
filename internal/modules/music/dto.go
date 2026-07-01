@@ -26,3 +26,31 @@ type VoteRequest struct {
 type DecisionRequest struct {
 	Reason string `json:"reason"`
 }
+
+type CreateArtistBookmarkRequest struct {
+	ArtistID uuid.UUID `json:"artist_id"`
+}
+
+type CreateAlbumBookmarkRequest struct {
+	AlbumID uuid.UUID `json:"album_id"`
+}
+
+type CreateSongBookmarkRequest struct {
+	SongID uuid.UUID `json:"song_id"`
+}
+
+type CreatePlaylistRequest struct {
+	Name string `json:"name"`
+}
+
+type AddPlaylistSongRequest struct {
+	SongID uuid.UUID `json:"song_id"`
+}
+
+type PlaylistSummaryResponse struct {
+	ID          uuid.UUID `json:"id"`
+	UserID      uuid.UUID `json:"user_id"`
+	Name        string    `json:"name"`
+	Description string    `json:"description,omitempty"`
+	SongCount   int64     `json:"song_count"`
+}

@@ -16,7 +16,6 @@ import (
 	"atoman/internal/modules/music"
 	"atoman/internal/modules/notification"
 	"atoman/internal/modules/portal"
-	"atoman/internal/modules/subscription"
 	"atoman/internal/service"
 
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -34,7 +33,6 @@ func RegisterV1Routes(
 ) {
 	group := r.Group("/api/v1")
 	blog.RegisterRoutes(group.Group("/blog"), blog.NewService(db))
-	subscription.RegisterRoutes(group, subscription.NewService(db))
 	feed.RegisterRoutes(group.Group("/feed"), feed.NewService(db))
 	notification.RegisterRoutes(group, notification.NewService(db))
 	forum.RegisterRoutes(group.Group("/forum"), forum.NewService(db))
@@ -42,7 +40,7 @@ func RegisterV1Routes(
 	forum_moderation.RegisterRoutes(group.Group("/forum/moderation"), forum_moderation.NewService(db))
 	debate.RegisterRoutes(group, debate.NewService(db))
 	debate_voting.RegisterRoutes(group, debate_voting.NewService(db))
-	music.RegisterRoutes(group.Group("/music"), music.NewService(db))
+	music.RegisterRoutes(group.Group("/music"), music.NewServiceWithS3(db, s3Client))
 	portal.RegisterRoutes(group.Group("/portal"), portal.NewService(db))
 
 	handlers.SetupAuthRoutes(r, db, emailService)

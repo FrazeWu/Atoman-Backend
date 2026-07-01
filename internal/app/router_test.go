@@ -16,6 +16,7 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -491,11 +492,19 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/subscriptions", bytes.NewBufferString(`{"target_type":"external_rss","rss_url":"https://example.com/feed.xml"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected /api/v1/subscriptions to be unmounted, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/subscription-groups", bytes.NewBufferString(`{"name":"Tech"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected subscription-groups route to be mounted, got 404: %s", w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected /api/v1/subscription-groups to be unmounted, got %d: %s", w.Code, w.Body.String())
 	}
 
 	w = httptest.NewRecorder()
@@ -554,6 +563,36 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate/arguments/"+uuid.NewString()+"/vote", bytes.NewBufferString(`{"vote_type":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy debate vote route to be unmounted, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics/"+uuid.NewString()+"/conclude-vote", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy debate conclude vote route to be unmounted, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate-arguments/"+uuid.NewString()+"/vote", bytes.NewBufferString(`{"vote_type":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound && !bytes.Contains(w.Body.Bytes(), []byte("debate.argument_not_found")) {
+		t.Fatalf("expected module debate argument vote route to be mounted, got router 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/debates/"+uuid.NewString()+"/conclusion-vote", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound && !bytes.Contains(w.Body.Bytes(), []byte("debate.not_found")) {
+		t.Fatalf("expected module debate conclusion vote route to be mounted, got router 404: %s", w.Body.String())
 	}
 }
 

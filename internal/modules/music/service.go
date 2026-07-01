@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -14,16 +15,22 @@ import (
 	"atoman/internal/platform/audit"
 	"atoman/internal/platform/authctx"
 
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type Service struct {
-	db   *gorm.DB
+	db  *gorm.DB
 	repo *Repo
+	s3  *s3.S3
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
+
+func NewServiceWithS3(db *gorm.DB, s3Client *s3.S3) *Service {
+	return &Service{db: db, repo: NewRepo(db), s3: s3Client}
+}
 
 func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, pageSize int) ([]feed.RecommendationItemDTO, int64, error) {
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
@@ -359,4 +366,148 @@ func marshalObject(value map[string]any, fallback map[string]any) ([]byte, error
 		value = fallback
 	}
 	return json.Marshal(value)
+}
+
+func (s *Service) ListArtistBookmarks(user authctx.CurrentUser, page int, pageSize int) ([]model.ArtistBookmark, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	return s.repo.ListArtistBookmarks(user.ID, page, pageSize)
+}
+
+func (s *Service) BookmarkArtist(user authctx.CurrentUser, artistID uuid.UUID) (model.ArtistBookmark, error) {
+	if user.ID == uuid.Nil {
+		return model.ArtistBookmark{}, apperr.Unauthorized("Login required")
+	}
+	if artistID == uuid.Nil {
+		return model.ArtistBookmark{}, apperr.BadRequest("validation.invalid_request", "artist_id is required")
+	}
+	return s.repo.UpsertArtistBookmark(user.ID, artistID)
+}
+
+func (s *Service) DeleteArtistBookmark(user authctx.CurrentUser, artistID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.repo.DeleteArtistBookmark(user.ID, artistID)
+}
+
+func (s *Service) ListAlbumBookmarks(user authctx.CurrentUser, page int, pageSize int) ([]model.AlbumBookmark, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	return s.repo.ListAlbumBookmarks(user.ID, page, pageSize)
+}
+
+func (s *Service) BookmarkAlbum(user authctx.CurrentUser, albumID uuid.UUID) (model.AlbumBookmark, error) {
+	if user.ID == uuid.Nil {
+		return model.AlbumBookmark{}, apperr.Unauthorized("Login required")
+	}
+	if albumID == uuid.Nil {
+		return model.AlbumBookmark{}, apperr.BadRequest("validation.invalid_request", "album_id is required")
+	}
+	return s.repo.UpsertAlbumBookmark(user.ID, albumID)
+}
+
+func (s *Service) DeleteAlbumBookmark(user authctx.CurrentUser, albumID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.repo.DeleteAlbumBookmark(user.ID, albumID)
+}
+
+func (s *Service) ListSongBookmarks(user authctx.CurrentUser, page int, pageSize int) ([]model.SongBookmark, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	return s.repo.ListSongBookmarks(user.ID, page, pageSize)
+}
+
+func (s *Service) BookmarkSong(user authctx.CurrentUser, songID uuid.UUID) (model.SongBookmark, error) {
+	if user.ID == uuid.Nil {
+		return model.SongBookmark{}, apperr.Unauthorized("Login required")
+	}
+	if songID == uuid.Nil {
+		return model.SongBookmark{}, apperr.BadRequest("validation.invalid_request", "song_id is required")
+	}
+	return s.repo.UpsertSongBookmark(user.ID, songID)
+}
+
+func (s *Service) DeleteSongBookmark(user authctx.CurrentUser, songID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.repo.DeleteSongBookmark(user.ID, songID)
+}
+
+func (s *Service) CreatePlaylist(user authctx.CurrentUser, name string) (model.Playlist, error) {
+	if user.ID == uuid.Nil {
+		return model.Playlist{}, apperr.Unauthorized("Login required")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return model.Playlist{}, apperr.BadRequest("validation.invalid_request", "name is required")
+	}
+	return s.repo.CreatePlaylist(user.ID, name)
+}
+
+func (s *Service) ListPlaylists(user authctx.CurrentUser, page int, pageSize int) ([]model.Playlist, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	return s.repo.ListPlaylists(user.ID, page, pageSize)
+}
+
+func (s *Service) DeletePlaylist(user authctx.CurrentUser, playlistID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.repo.DeletePlaylist(user.ID, playlistID)
+}
+
+func (s *Service) AddPlaylistSong(user authctx.CurrentUser, playlistID uuid.UUID, songID uuid.UUID) (model.PlaylistSong, error) {
+	if user.ID == uuid.Nil {
+		return model.PlaylistSong{}, apperr.Unauthorized("Login required")
+	}
+	if songID == uuid.Nil {
+		return model.PlaylistSong{}, apperr.BadRequest("validation.invalid_request", "song_id is required")
+	}
+	if _, err := s.repo.GetPlaylistForUser(user.ID, playlistID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.PlaylistSong{}, apperr.NotFound("music.playlist_not_found", "Playlist not found")
+		}
+		return model.PlaylistSong{}, err
+	}
+	return s.repo.UpsertPlaylistSong(playlistID, songID)
+}
+
+func (s *Service) ListPlaylistSongs(user authctx.CurrentUser, playlistID uuid.UUID, page int, pageSize int) ([]model.PlaylistSong, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	if _, err := s.repo.GetPlaylistForUser(user.ID, playlistID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, 0, apperr.NotFound("music.playlist_not_found", "Playlist not found")
+		}
+		return nil, 0, err
+	}
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	return s.repo.ListPlaylistSongs(playlistID, page, pageSize)
+}
+
+func (s *Service) DeletePlaylistSong(user authctx.CurrentUser, playlistID uuid.UUID, songID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	if _, err := s.repo.GetPlaylistForUser(user.ID, playlistID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.NotFound("music.playlist_not_found", "Playlist not found")
+		}
+		return err
+	}
+	return s.repo.DeletePlaylistSong(playlistID, songID)
 }

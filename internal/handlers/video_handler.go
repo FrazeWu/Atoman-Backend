@@ -32,6 +32,12 @@ func SetupVideoRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		v.POST("", middleware.AuthMiddleware(), CreateVideo(db))
 		v.PUT("/:id", middleware.AuthMiddleware(), UpdateVideo(db))
 		v.DELETE("/:id", middleware.AuthMiddleware(), DeleteVideo(db))
+		v.GET("/bookmarks", middleware.AuthMiddleware(), GetVideoBookmarks(db))
+		v.POST("/bookmarks", middleware.AuthMiddleware(), CreateVideoBookmark(db))
+		v.DELETE("/bookmarks/:id", middleware.AuthMiddleware(), DeleteVideoBookmark(db))
+		v.GET("/channel-bookmarks", middleware.AuthMiddleware(), GetChannelBookmarks(db))
+		v.POST("/channel-bookmarks", middleware.AuthMiddleware(), CreateChannelBookmark(db))
+		v.DELETE("/channel-bookmarks/:id", middleware.AuthMiddleware(), DeleteChannelBookmark(db))
 		// File upload endpoints
 		v.POST("/upload-video", middleware.AuthMiddleware(), UploadVideoFile(s3Client))
 		v.POST("/upload-cover", middleware.AuthMiddleware(), UploadVideoCover(s3Client))
@@ -615,6 +621,126 @@ func DeleteVideo(db *gorm.DB) gin.HandlerFunc {
 
 		db.Delete(&video)
 		c.JSON(http.StatusOK, gin.H{"message": "deleted"})
+	}
+}
+
+type videoBookmarkInput struct {
+	VideoID uuid.UUID `json:"video_id" binding:"required"`
+}
+
+type channelBookmarkInput struct {
+	ChannelID uuid.UUID `json:"channel_id" binding:"required"`
+}
+
+func GetVideoBookmarks(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("userID").(uuid.UUID)
+		var bookmarks []model.VideoBookmark
+		if err := db.Preload("Video").Where("user_id = ?", userID).Order("created_at DESC").Find(&bookmarks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch video bookmarks"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": bookmarks, "message": "ok"})
+	}
+}
+
+func CreateVideoBookmark(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("userID").(uuid.UUID)
+		var input videoBookmarkInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		var video model.Video
+		if err := db.First(&video, "id = ?", input.VideoID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+
+		bookmark := model.VideoBookmark{UserID: userID, VideoID: input.VideoID}
+		if err := db.Where(model.VideoBookmark{UserID: userID, VideoID: input.VideoID}).FirstOrCreate(&bookmark).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create video bookmark"})
+			return
+		}
+		if err := db.Preload("Video").First(&bookmark, "id = ?", bookmark.ID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create video bookmark"})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{"data": bookmark, "message": "ok"})
+	}
+}
+
+func DeleteVideoBookmark(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("userID").(uuid.UUID)
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid bookmark id"})
+			return
+		}
+		if err := db.Where("id = ? AND user_id = ?", id, userID).Delete(&model.VideoBookmark{}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete video bookmark"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	}
+}
+
+func GetChannelBookmarks(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("userID").(uuid.UUID)
+		var bookmarks []model.ChannelBookmark
+		if err := db.Preload("Channel").Where("user_id = ? AND kind = ?", userID, "video_channel").Order("created_at DESC").Find(&bookmarks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch channel bookmarks"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": bookmarks, "message": "ok"})
+	}
+}
+
+func CreateChannelBookmark(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("userID").(uuid.UUID)
+		var input channelBookmarkInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		var channel model.Channel
+		if err := db.First(&channel, "id = ?", input.ChannelID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+			return
+		}
+
+		bookmark := model.ChannelBookmark{UserID: userID, ChannelID: input.ChannelID, Kind: "video_channel"}
+		if err := db.Where(model.ChannelBookmark{UserID: userID, ChannelID: input.ChannelID, Kind: "video_channel"}).FirstOrCreate(&bookmark).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create channel bookmark"})
+			return
+		}
+		if err := db.Preload("Channel").First(&bookmark, "id = ?", bookmark.ID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create channel bookmark"})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{"data": bookmark, "message": "ok"})
+	}
+}
+
+func DeleteChannelBookmark(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("userID").(uuid.UUID)
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid bookmark id"})
+			return
+		}
+		if err := db.Where("id = ? AND user_id = ?", id, userID).Delete(&model.ChannelBookmark{}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete channel bookmark"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
 	}
 }
 

@@ -22,3 +22,13 @@ type PodcastEpisode struct {
 }
 
 func (PodcastEpisode) TableName() string { return "podcast_episodes" }
+
+type PodcastEpisodeBookmark struct {
+	Base
+	UserID    uuid.UUID       `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_podcast_episode_bookmarks_user_episode,priority:1,where:deleted_at IS NULL"`
+	User      *User           `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	EpisodeID uuid.UUID       `json:"episode_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_podcast_episode_bookmarks_user_episode,priority:2,where:deleted_at IS NULL"`
+	Episode   *PodcastEpisode `json:"episode,omitempty" gorm:"foreignKey:EpisodeID"`
+}
+
+func (PodcastEpisodeBookmark) TableName() string { return "podcast_episode_bookmarks" }

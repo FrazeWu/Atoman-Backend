@@ -219,6 +219,36 @@ type BookmarkListResponse struct {
 	Message string           `json:"message" example:"ok"`
 }
 
+type VideoBookmarkResponse struct {
+	Data    model.VideoBookmark `json:"data"`
+	Message string              `json:"message" example:"ok"`
+}
+
+type VideoBookmarkListResponse struct {
+	Data    []model.VideoBookmark `json:"data"`
+	Message string                `json:"message" example:"ok"`
+}
+
+type PodcastEpisodeBookmarkResponse struct {
+	Data    model.PodcastEpisodeBookmark `json:"data"`
+	Message string                       `json:"message" example:"ok"`
+}
+
+type PodcastEpisodeBookmarkListResponse struct {
+	Data    []model.PodcastEpisodeBookmark `json:"data"`
+	Message string                         `json:"message" example:"ok"`
+}
+
+type ChannelBookmarkResponse struct {
+	Data    model.ChannelBookmark `json:"data"`
+	Message string                `json:"message" example:"ok"`
+}
+
+type ChannelBookmarkListResponse struct {
+	Data    []model.ChannelBookmark `json:"data"`
+	Message string                  `json:"message" example:"ok"`
+}
+
 type BookmarkFolderResponse struct {
 	Data    model.BookmarkFolder `json:"data"`
 	Message string               `json:"message" example:"ok"`

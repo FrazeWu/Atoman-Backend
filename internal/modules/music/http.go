@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 
 	"atoman/internal/model"
@@ -16,6 +17,51 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+func resolveMusicMediaURL(rawURL string) string {
+	trimmed := strings.TrimSpace(rawURL)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		return trimmed
+	}
+	if strings.HasPrefix(trimmed, "/uploads/") {
+		base := strings.TrimRight(os.Getenv("PUBLIC_UPLOADS_BASE_URL"), "/")
+		if base == "" {
+			return trimmed
+		}
+		if strings.HasSuffix(base, "/uploads") {
+			return base + strings.TrimPrefix(trimmed, "/uploads")
+		}
+		return base + trimmed
+	}
+	if strings.HasPrefix(trimmed, "uploads/") {
+		base := strings.TrimRight(os.Getenv("PUBLIC_UPLOADS_BASE_URL"), "/")
+		if base == "" {
+			return "/" + trimmed
+		}
+		if strings.HasSuffix(base, "/uploads") {
+			return base + "/" + strings.TrimPrefix(trimmed, "uploads/")
+		}
+		return base + "/" + strings.TrimLeft(trimmed, "/")
+	}
+	if os.Getenv("STORAGE_TYPE") == "s3" {
+		s3Prefix := strings.TrimRight(os.Getenv("S3_URL_PREFIX"), "/")
+		if s3Prefix != "" {
+			return s3Prefix + "/" + strings.TrimLeft(trimmed, "/")
+		}
+	}
+	return trimmed
+}
+
+func resolveAlbumMediaURLs(album *model.Album) {
+	album.CoverURL = resolveMusicMediaURL(album.CoverURL)
+	for i := range album.Songs {
+		album.Songs[i].AudioURL = resolveMusicMediaURL(album.Songs[i].AudioURL)
+		album.Songs[i].CoverURL = resolveMusicMediaURL(album.Songs[i].CoverURL)
+	}
+}
 
 type Handler struct {
 	service *Service
@@ -31,6 +77,21 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/artists/:artistId", h.getArtist)
 	group.GET("/albums", h.listAlbums)
 	group.GET("/albums/:albumId", h.getAlbum)
+	group.GET("/bookmarks/artists", h.listArtistBookmarks)
+	group.POST("/bookmarks/artists", h.createArtistBookmark)
+	group.DELETE("/bookmarks/artists/:artistId", h.deleteArtistBookmark)
+	group.GET("/bookmarks/albums", h.listAlbumBookmarks)
+	group.POST("/bookmarks/albums", h.createAlbumBookmark)
+	group.DELETE("/bookmarks/albums/:albumId", h.deleteAlbumBookmark)
+	group.GET("/bookmarks/songs", h.listSongBookmarks)
+	group.POST("/bookmarks/songs", h.createSongBookmark)
+	group.DELETE("/bookmarks/songs/:songId", h.deleteSongBookmark)
+	group.GET("/playlists", h.listPlaylists)
+	group.POST("/playlists", h.createPlaylist)
+	group.DELETE("/playlists/:id", h.deletePlaylist)
+	group.GET("/playlists/:id/songs", h.listPlaylistSongs)
+	group.POST("/playlists/:id/songs", h.addPlaylistSong)
+	group.DELETE("/playlists/:id/songs/:songId", h.deletePlaylistSong)
 	group.GET("/recommend/albums", h.getRecommendedAlbums)
 	group.POST("/edits", h.submitEdit)
 	group.GET("/edits", h.listEdits)
@@ -133,6 +194,9 @@ func (h *Handler) listAlbums(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	for i := range albums {
+		resolveAlbumMediaURLs(&albums[i])
+	}
 
 	httpx.List(c, albums, page, pageSize, total)
 }
@@ -153,6 +217,7 @@ func (h *Handler) getAlbum(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	resolveAlbumMediaURLs(&album)
 	httpx.OK(c, http.StatusOK, album)
 }
 
@@ -169,6 +234,305 @@ func (h *Handler) getRecommendedAlbums(c *gin.Context) {
 		return
 	}
 	httpx.List(c, items, page, pageSize, total)
+}
+
+func currentMusicUser(c *gin.Context) (authctx.CurrentUser, bool) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		return authctx.CurrentUser{}, false
+	}
+	return user, true
+}
+
+func (h *Handler) listArtistBookmarks(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	bookmarks, total, err := h.service.ListArtistBookmarks(user, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, bookmarks, page, pageSize, total)
+}
+
+func (h *Handler) createArtistBookmark(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req CreateArtistBookmarkRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	bookmark, err := h.service.BookmarkArtist(user, req.ArtistID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, bookmark)
+}
+
+func (h *Handler) deleteArtistBookmark(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	artistID, err := parseMusicID(c.Param("artistId"), "artistId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.DeleteArtistBookmark(user, artistID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
+}
+
+func (h *Handler) listAlbumBookmarks(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	bookmarks, total, err := h.service.ListAlbumBookmarks(user, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, bookmarks, page, pageSize, total)
+}
+
+func (h *Handler) createAlbumBookmark(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req CreateAlbumBookmarkRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	bookmark, err := h.service.BookmarkAlbum(user, req.AlbumID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, bookmark)
+}
+
+func (h *Handler) deleteAlbumBookmark(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	albumID, err := parseMusicID(c.Param("albumId"), "albumId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.DeleteAlbumBookmark(user, albumID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
+}
+
+func (h *Handler) listSongBookmarks(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	bookmarks, total, err := h.service.ListSongBookmarks(user, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, bookmarks, page, pageSize, total)
+}
+
+func (h *Handler) createSongBookmark(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req CreateSongBookmarkRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	bookmark, err := h.service.BookmarkSong(user, req.SongID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, bookmark)
+}
+
+func (h *Handler) deleteSongBookmark(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	songID, err := parseMusicID(c.Param("songId"), "songId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.DeleteSongBookmark(user, songID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
+}
+
+func (h *Handler) listPlaylists(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	playlists, total, err := h.service.ListPlaylists(user, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	rows := make([]PlaylistSummaryResponse, 0, len(playlists))
+	for _, playlist := range playlists {
+		rows = append(rows, PlaylistSummaryResponse{
+			ID:          playlist.ID,
+			UserID:      playlist.UserID,
+			Name:        playlist.Name,
+			Description: playlist.Description,
+			SongCount:   0,
+		})
+	}
+	httpx.List(c, rows, page, pageSize, total)
+}
+
+func (h *Handler) createPlaylist(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req CreatePlaylistRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	playlist, err := h.service.CreatePlaylist(user, req.Name)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, PlaylistSummaryResponse{
+		ID:          playlist.ID,
+		UserID:      playlist.UserID,
+		Name:        playlist.Name,
+		Description: playlist.Description,
+		SongCount:   0,
+	})
+}
+
+func (h *Handler) deletePlaylist(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	playlistID, err := parseMusicID(c.Param("id"), "id")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.DeletePlaylist(user, playlistID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
+}
+
+func (h *Handler) listPlaylistSongs(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	playlistID, err := parseMusicID(c.Param("id"), "id")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	songs, total, err := h.service.ListPlaylistSongs(user, playlistID, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, songs, page, pageSize, total)
+}
+
+func (h *Handler) addPlaylistSong(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	playlistID, err := parseMusicID(c.Param("id"), "id")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var req AddPlaylistSongRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	playlistSong, err := h.service.AddPlaylistSong(user, playlistID, req.SongID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, playlistSong)
+}
+
+func (h *Handler) deletePlaylistSong(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	playlistID, err := parseMusicID(c.Param("id"), "id")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	songID, err := parseMusicID(c.Param("songId"), "songId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.DeletePlaylistSong(user, playlistID, songID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
 }
 
 func (h *Handler) listEdits(c *gin.Context) {

@@ -214,3 +214,58 @@ type LyricAnnotation struct {
 func (LyricAnnotation) TableName() string {
 	return "lyric_annotations"
 }
+
+type ArtistBookmark struct {
+	Base
+	UserID   uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_artist_bookmarks_user_artist,priority:1,where:deleted_at IS NULL"`
+	ArtistID uuid.UUID `json:"artist_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_artist_bookmarks_user_artist,priority:2,where:deleted_at IS NULL"`
+	Artist   *Artist   `json:"artist,omitempty" gorm:"foreignKey:ArtistID"`
+}
+
+func (ArtistBookmark) TableName() string {
+	return "music_artist_bookmarks"
+}
+
+type AlbumBookmark struct {
+	Base
+	UserID  uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_album_bookmarks_user_album,priority:1,where:deleted_at IS NULL"`
+	AlbumID uuid.UUID `json:"album_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_album_bookmarks_user_album,priority:2,where:deleted_at IS NULL"`
+	Album   *Album    `json:"album,omitempty" gorm:"foreignKey:AlbumID"`
+}
+
+func (AlbumBookmark) TableName() string {
+	return "music_album_bookmarks"
+}
+
+type SongBookmark struct {
+	Base
+	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_song_bookmarks_user_song,priority:1,where:deleted_at IS NULL"`
+	SongID uuid.UUID `json:"song_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_song_bookmarks_user_song,priority:2,where:deleted_at IS NULL"`
+	Song   *Song     `json:"song,omitempty" gorm:"foreignKey:SongID"`
+}
+
+func (SongBookmark) TableName() string {
+	return "music_song_bookmarks"
+}
+
+type Playlist struct {
+	Base
+	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
+	Name        string    `json:"name" gorm:"not null"`
+	Description string    `json:"description" gorm:"type:text"`
+}
+
+func (Playlist) TableName() string {
+	return "music_playlists"
+}
+
+type PlaylistSong struct {
+	Base
+	PlaylistID uuid.UUID `json:"playlist_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_playlist_songs_playlist_song,priority:1,where:deleted_at IS NULL"`
+	SongID     uuid.UUID `json:"song_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_playlist_songs_playlist_song,priority:2,where:deleted_at IS NULL"`
+	Song       *Song     `json:"song,omitempty" gorm:"foreignKey:SongID"`
+}
+
+func (PlaylistSong) TableName() string {
+	return "music_playlist_songs"
+}

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -21,6 +22,7 @@ import (
 func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, model.Channel) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
 
 	db := testdb.Open(t)
 	middleware.SetAuthDB(db)
@@ -31,6 +33,8 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		&model.Post{},
 		&model.PostCollection{},
 		&model.PodcastEpisode{},
+		&model.PodcastEpisodeBookmark{},
+		&model.ChannelBookmark{},
 	)
 
 	user := model.User{Username: "podcast-user", Email: "podcast-user@example.com", Password: "hash", Role: "user", IsActive: true}
@@ -277,6 +281,196 @@ func TestUploadPodcastAudioAllowsRealWAVHeader(t *testing.T) {
 	}
 	if s3Path == "" {
 		t.Fatal("expected valid podcast audio to be uploaded to S3")
+	}
+}
+
+func TestCreatePodcastEpisodeBookmarkIsIdempotentWithRepeatedRequests(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
+
+	body, err := json.Marshal(map[string]any{"episode_id": episode.ID})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/bookmarks", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", podcastAuthHeader(t, user))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("request %d status=%d body=%s", i+1, w.Code, w.Body.String())
+		}
+	}
+
+	var count int64
+	if err := db.Model(&model.PodcastEpisodeBookmark{}).Where("user_id = ? AND episode_id = ?", user.UUID, episode.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count bookmarks: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 podcast episode bookmark row, got %d", count)
+	}
+}
+
+func TestListAndDeletePodcastEpisodeBookmarks(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	otherUser := model.User{Username: "podcast-other-user", Email: "podcast-other@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&otherUser).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+
+	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
+	otherEpisode := createPodcastEpisodeForPostStatus(t, db, otherUser, channel, "published")
+	bookmark := model.PodcastEpisodeBookmark{UserID: user.UUID, EpisodeID: episode.ID}
+	otherBookmark := model.PodcastEpisodeBookmark{UserID: otherUser.UUID, EpisodeID: otherEpisode.ID}
+	if err := db.Create(&bookmark).Error; err != nil {
+		t.Fatalf("create bookmark: %v", err)
+	}
+	if err := db.Create(&otherBookmark).Error; err != nil {
+		t.Fatalf("create other bookmark: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/bookmarks", nil)
+	listReq.Header.Set("Authorization", podcastAuthHeader(t, user))
+	listW := httptest.NewRecorder()
+	r.ServeHTTP(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listW.Code, listW.Body.String())
+	}
+	if !strings.Contains(listW.Body.String(), bookmark.ID.String()) {
+		t.Fatalf("expected response to contain bookmark %s: %s", bookmark.ID, listW.Body.String())
+	}
+	if strings.Contains(listW.Body.String(), otherBookmark.ID.String()) {
+		t.Fatalf("expected response to exclude other bookmark %s: %s", otherBookmark.ID, listW.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/podcast/bookmarks/"+bookmark.ID.String(), nil)
+	deleteReq.Header.Set("Authorization", podcastAuthHeader(t, user))
+	deleteW := httptest.NewRecorder()
+	r.ServeHTTP(deleteW, deleteReq)
+	if deleteW.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", deleteW.Code, deleteW.Body.String())
+	}
+
+	var count int64
+	if err := db.Model(&model.PodcastEpisodeBookmark{}).Where("id = ?", bookmark.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count remaining bookmark: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected bookmark to be deleted, got count=%d", count)
+	}
+}
+
+func TestCreatePodcastShowBookmarkIsIdempotentWithRepeatedRequests(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+
+	body, err := json.Marshal(map[string]any{"channel_id": channel.ID})
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/show-bookmarks", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", podcastAuthHeader(t, user))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusCreated {
+			t.Fatalf("request %d status=%d body=%s", i+1, w.Code, w.Body.String())
+		}
+	}
+
+	var count int64
+	if err := db.Model(&model.ChannelBookmark{}).Where("user_id = ? AND channel_id = ?", user.UUID, channel.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count show bookmarks: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 show bookmark row, got %d", count)
+	}
+}
+
+func TestListAndDeletePodcastShowBookmarks(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	otherChannel := model.Channel{Name: "Other Show", Slug: "other-show"}
+	if err := db.Create(&otherChannel).Error; err != nil {
+		t.Fatalf("create other channel: %v", err)
+	}
+	otherUser := model.User{Username: "show-other-user", Email: "show-other@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&otherUser).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+
+	bookmark := model.ChannelBookmark{UserID: user.UUID, ChannelID: channel.ID, Kind: "podcast_show"}
+	otherBookmark := model.ChannelBookmark{UserID: otherUser.UUID, ChannelID: otherChannel.ID}
+	if err := db.Create(&bookmark).Error; err != nil {
+		t.Fatalf("create bookmark: %v", err)
+	}
+	if err := db.Create(&otherBookmark).Error; err != nil {
+		t.Fatalf("create other bookmark: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/show-bookmarks", nil)
+	listReq.Header.Set("Authorization", podcastAuthHeader(t, user))
+	listW := httptest.NewRecorder()
+	r.ServeHTTP(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listW.Code, listW.Body.String())
+	}
+	if !strings.Contains(listW.Body.String(), bookmark.ID.String()) {
+		t.Fatalf("expected response to contain bookmark %s: %s", bookmark.ID, listW.Body.String())
+	}
+	if strings.Contains(listW.Body.String(), otherBookmark.ID.String()) {
+		t.Fatalf("expected response to exclude other bookmark %s: %s", otherBookmark.ID, listW.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/podcast/show-bookmarks/"+bookmark.ID.String(), nil)
+	deleteReq.Header.Set("Authorization", podcastAuthHeader(t, user))
+	deleteW := httptest.NewRecorder()
+	r.ServeHTTP(deleteW, deleteReq)
+	if deleteW.Code != http.StatusOK {
+		t.Fatalf("delete status=%d body=%s", deleteW.Code, deleteW.Body.String())
+	}
+
+	var count int64
+	if err := db.Model(&model.ChannelBookmark{}).Where("id = ?", bookmark.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count remaining show bookmark: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected show bookmark to be deleted, got count=%d", count)
+	}
+}
+
+func TestPodcastShowBookmarksExcludeVideoChannelBookmarks(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	videoChannel := model.Channel{Name: "Video Channel", Slug: "video-channel"}
+	if err := db.Create(&videoChannel).Error; err != nil {
+		t.Fatalf("create video channel: %v", err)
+	}
+
+	showBookmark := model.ChannelBookmark{UserID: user.UUID, ChannelID: channel.ID, Kind: "podcast_show"}
+	videoBookmark := model.ChannelBookmark{UserID: user.UUID, ChannelID: videoChannel.ID, Kind: "video_channel"}
+	if err := db.Create(&showBookmark).Error; err != nil {
+		t.Fatalf("create show bookmark: %v", err)
+	}
+	if err := db.Create(&videoBookmark).Error; err != nil {
+		t.Fatalf("create video bookmark: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/show-bookmarks", nil)
+	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), showBookmark.ID.String()) {
+		t.Fatalf("expected response to contain show bookmark %s: %s", showBookmark.ID, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), videoBookmark.ID.String()) {
+		t.Fatalf("expected response to exclude video bookmark %s: %s", videoBookmark.ID, w.Body.String())
 	}
 }
 

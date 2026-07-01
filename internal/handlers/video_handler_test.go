@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"encoding/json"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,8 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.Channel{},
 		&model.Collection{},
 		&model.Video{},
+		&model.VideoBookmark{},
+		&model.ChannelBookmark{},
 		&model.VideoProcessingJob{},
 		&model.VideoTag{},
 		&model.VideoCollection{},
@@ -95,6 +98,145 @@ func seedVideoCollection(t *testing.T, db *gorm.DB, channelID uuid.UUID, name st
 	}
 	require.NoError(t, db.Create(&collection).Error)
 	return collection
+}
+
+func TestCreateVideoBookmarkIsIdempotentWithRepeatedRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	video := seedVideo(t, db, user.UUID)
+
+	r := gin.New()
+	r.POST("/api/v1/videos/bookmarks", withVideoAuth(user.UUID, CreateVideoBookmark(db)))
+
+	body, err := json.Marshal(map[string]any{"video_id": video.ID})
+	require.NoError(t, err)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/bookmarks", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
+	}
+
+	var count int64
+	require.NoError(t, db.Model(&model.VideoBookmark{}).Where("user_id = ? AND video_id = ?", user.UUID, video.ID).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+}
+
+func TestListAndDeleteVideoBookmarks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	otherUser := seedVideoUser(t, db)
+	video := seedVideo(t, db, user.UUID)
+	otherVideo := seedVideo(t, db, otherUser.UUID)
+	bookmark := model.VideoBookmark{UserID: user.UUID, VideoID: video.ID}
+	otherBookmark := model.VideoBookmark{UserID: otherUser.UUID, VideoID: otherVideo.ID}
+	require.NoError(t, db.Create(&bookmark).Error)
+	require.NoError(t, db.Create(&otherBookmark).Error)
+
+	r := gin.New()
+	r.GET("/api/v1/videos/bookmarks", withVideoAuth(user.UUID, GetVideoBookmarks(db)))
+	r.DELETE("/api/v1/videos/bookmarks/:id", withVideoAuth(user.UUID, DeleteVideoBookmark(db)))
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/videos/bookmarks", nil)
+	listW := httptest.NewRecorder()
+	r.ServeHTTP(listW, listReq)
+	require.Equal(t, http.StatusOK, listW.Code, "body=%s", listW.Body.String())
+	require.Contains(t, listW.Body.String(), bookmark.ID.String())
+	require.NotContains(t, listW.Body.String(), otherBookmark.ID.String())
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/videos/bookmarks/"+bookmark.ID.String(), nil)
+	deleteW := httptest.NewRecorder()
+	r.ServeHTTP(deleteW, deleteReq)
+	require.Equal(t, http.StatusOK, deleteW.Code, "body=%s", deleteW.Body.String())
+
+	var count int64
+	require.NoError(t, db.Model(&model.VideoBookmark{}).Where("id = ?", bookmark.ID).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestCreateChannelBookmarkIsIdempotentWithRepeatedRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, user.UUID, "Bookmarks Channel")
+
+	r := gin.New()
+	r.POST("/api/v1/videos/channel-bookmarks", withVideoAuth(user.UUID, CreateChannelBookmark(db)))
+
+	body, err := json.Marshal(map[string]any{"channel_id": channel.ID})
+	require.NoError(t, err)
+
+	for i := 0; i < 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/channel-bookmarks", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusCreated, w.Code, "body=%s", w.Body.String())
+	}
+
+	var count int64
+	require.NoError(t, db.Model(&model.ChannelBookmark{}).Where("user_id = ? AND channel_id = ?", user.UUID, channel.ID).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+}
+
+func TestListAndDeleteChannelBookmarks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	otherUser := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, user.UUID, "Bookmarked Channel")
+	otherChannel := seedVideoChannel(t, db, otherUser.UUID, "Other Channel")
+	bookmark := model.ChannelBookmark{UserID: user.UUID, ChannelID: channel.ID, Kind: "video_channel"}
+	otherBookmark := model.ChannelBookmark{UserID: otherUser.UUID, ChannelID: otherChannel.ID}
+	require.NoError(t, db.Create(&bookmark).Error)
+	require.NoError(t, db.Create(&otherBookmark).Error)
+
+	r := gin.New()
+	r.GET("/api/v1/videos/channel-bookmarks", withVideoAuth(user.UUID, GetChannelBookmarks(db)))
+	r.DELETE("/api/v1/videos/channel-bookmarks/:id", withVideoAuth(user.UUID, DeleteChannelBookmark(db)))
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/videos/channel-bookmarks", nil)
+	listW := httptest.NewRecorder()
+	r.ServeHTTP(listW, listReq)
+	require.Equal(t, http.StatusOK, listW.Code, "body=%s", listW.Body.String())
+	require.Contains(t, listW.Body.String(), bookmark.ID.String())
+	require.NotContains(t, listW.Body.String(), otherBookmark.ID.String())
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/videos/channel-bookmarks/"+bookmark.ID.String(), nil)
+	deleteW := httptest.NewRecorder()
+	r.ServeHTTP(deleteW, deleteReq)
+	require.Equal(t, http.StatusOK, deleteW.Code, "body=%s", deleteW.Body.String())
+
+	var count int64
+	require.NoError(t, db.Model(&model.ChannelBookmark{}).Where("id = ?", bookmark.ID).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestVideoChannelBookmarksExcludePodcastShowBookmarks(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	videoChannel := seedVideoChannel(t, db, user.UUID, "Video Channel")
+	podcastShow := seedVideoChannel(t, db, user.UUID, "Podcast Show")
+
+	videoBookmark := model.ChannelBookmark{UserID: user.UUID, ChannelID: videoChannel.ID, Kind: "video_channel"}
+	podcastBookmark := model.ChannelBookmark{UserID: user.UUID, ChannelID: podcastShow.ID, Kind: "podcast_show"}
+	require.NoError(t, db.Create(&videoBookmark).Error)
+	require.NoError(t, db.Create(&podcastBookmark).Error)
+
+	r := gin.New()
+	r.GET("/api/v1/videos/channel-bookmarks", withVideoAuth(user.UUID, GetChannelBookmarks(db)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/videos/channel-bookmarks", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+	require.Contains(t, w.Body.String(), videoBookmark.ID.String())
+	require.NotContains(t, w.Body.String(), podcastBookmark.ID.String())
 }
 
 func videoMultipartBody(t *testing.T, field, filename, contentType string, content []byte) (*bytes.Buffer, string) {

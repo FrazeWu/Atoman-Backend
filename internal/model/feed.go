@@ -211,6 +211,17 @@ type Bookmark struct {
 	BookmarkFolder   *BookmarkFolder `json:"bookmark_folder,omitempty" gorm:"foreignKey:BookmarkFolderID"`
 }
 
+type ChannelBookmark struct {
+	Base
+	UserID    uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_channel_bookmarks_user_channel_kind,priority:1,where:deleted_at IS NULL"`
+	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	ChannelID uuid.UUID `json:"channel_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_channel_bookmarks_user_channel_kind,priority:2,where:deleted_at IS NULL"`
+	Channel   *Channel  `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
+	Kind      string    `json:"kind" gorm:"not null;default:'video_channel';index;uniqueIndex:idx_channel_bookmarks_user_channel_kind,priority:3,where:deleted_at IS NULL"`
+}
+
+func (ChannelBookmark) TableName() string { return "channel_bookmarks" }
+
 // FeedSource 存储全局唯一的订阅源元数据
 type FeedSource struct {
 	Base

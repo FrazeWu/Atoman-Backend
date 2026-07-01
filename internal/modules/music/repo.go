@@ -70,3 +70,113 @@ func (r *Repo) ListEdits(query ListEditsQuery) ([]model.MusicEdit, int64, error)
 	err := db.Order("created_at DESC").Limit(query.PageSize).Offset((query.Page - 1) * query.PageSize).Find(&edits).Error
 	return edits, total, err
 }
+
+func (r *Repo) UpsertArtistBookmark(userID uuid.UUID, artistID uuid.UUID) (model.ArtistBookmark, error) {
+	bookmark := model.ArtistBookmark{UserID: userID, ArtistID: artistID}
+	err := r.db.Where("user_id = ? AND artist_id = ?", userID, artistID).FirstOrCreate(&bookmark).Error
+	return bookmark, err
+}
+
+func (r *Repo) ListArtistBookmarks(userID uuid.UUID, page int, pageSize int) ([]model.ArtistBookmark, int64, error) {
+	var total int64
+	db := r.db.Model(&model.ArtistBookmark{}).Where("user_id = ?", userID)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var bookmarks []model.ArtistBookmark
+	err := db.Preload("Artist").Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
+	return bookmarks, total, err
+}
+
+func (r *Repo) DeleteArtistBookmark(userID uuid.UUID, artistID uuid.UUID) error {
+	return r.db.Where("user_id = ? AND artist_id = ?", userID, artistID).Delete(&model.ArtistBookmark{}).Error
+}
+
+func (r *Repo) UpsertAlbumBookmark(userID uuid.UUID, albumID uuid.UUID) (model.AlbumBookmark, error) {
+	bookmark := model.AlbumBookmark{UserID: userID, AlbumID: albumID}
+	err := r.db.Where("user_id = ? AND album_id = ?", userID, albumID).FirstOrCreate(&bookmark).Error
+	return bookmark, err
+}
+
+func (r *Repo) ListAlbumBookmarks(userID uuid.UUID, page int, pageSize int) ([]model.AlbumBookmark, int64, error) {
+	var total int64
+	db := r.db.Model(&model.AlbumBookmark{}).Where("user_id = ?", userID)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var bookmarks []model.AlbumBookmark
+	err := db.Preload("Album.Artists").Preload("Album.Songs").Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
+	return bookmarks, total, err
+}
+
+func (r *Repo) DeleteAlbumBookmark(userID uuid.UUID, albumID uuid.UUID) error {
+	return r.db.Where("user_id = ? AND album_id = ?", userID, albumID).Delete(&model.AlbumBookmark{}).Error
+}
+
+func (r *Repo) UpsertSongBookmark(userID uuid.UUID, songID uuid.UUID) (model.SongBookmark, error) {
+	bookmark := model.SongBookmark{UserID: userID, SongID: songID}
+	err := r.db.Where("user_id = ? AND song_id = ?", userID, songID).FirstOrCreate(&bookmark).Error
+	return bookmark, err
+}
+
+func (r *Repo) ListSongBookmarks(userID uuid.UUID, page int, pageSize int) ([]model.SongBookmark, int64, error) {
+	var total int64
+	db := r.db.Model(&model.SongBookmark{}).Where("user_id = ?", userID)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var bookmarks []model.SongBookmark
+	err := db.Preload("Song.Artists").Preload("Song.Album").Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
+	return bookmarks, total, err
+}
+
+func (r *Repo) DeleteSongBookmark(userID uuid.UUID, songID uuid.UUID) error {
+	return r.db.Where("user_id = ? AND song_id = ?", userID, songID).Delete(&model.SongBookmark{}).Error
+}
+
+func (r *Repo) CreatePlaylist(userID uuid.UUID, name string) (model.Playlist, error) {
+	playlist := model.Playlist{UserID: userID, Name: name}
+	return playlist, r.db.Create(&playlist).Error
+}
+
+func (r *Repo) ListPlaylists(userID uuid.UUID, page int, pageSize int) ([]model.Playlist, int64, error) {
+	var total int64
+	db := r.db.Model(&model.Playlist{}).Where("user_id = ?", userID)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var playlists []model.Playlist
+	err := db.Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&playlists).Error
+	return playlists, total, err
+}
+
+func (r *Repo) DeletePlaylist(userID uuid.UUID, playlistID uuid.UUID) error {
+	return r.db.Where("user_id = ? AND id = ?", userID, playlistID).Delete(&model.Playlist{}).Error
+}
+
+func (r *Repo) GetPlaylistForUser(userID uuid.UUID, playlistID uuid.UUID) (model.Playlist, error) {
+	var playlist model.Playlist
+	err := r.db.First(&playlist, "user_id = ? AND id = ?", userID, playlistID).Error
+	return playlist, err
+}
+
+func (r *Repo) UpsertPlaylistSong(playlistID uuid.UUID, songID uuid.UUID) (model.PlaylistSong, error) {
+	playlistSong := model.PlaylistSong{PlaylistID: playlistID, SongID: songID}
+	err := r.db.Where("playlist_id = ? AND song_id = ?", playlistID, songID).FirstOrCreate(&playlistSong).Error
+	return playlistSong, err
+}
+
+func (r *Repo) ListPlaylistSongs(playlistID uuid.UUID, page int, pageSize int) ([]model.PlaylistSong, int64, error) {
+	var total int64
+	db := r.db.Model(&model.PlaylistSong{}).Where("playlist_id = ?", playlistID)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var songs []model.PlaylistSong
+	err := db.Preload("Song.Artists").Preload("Song.Album").Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&songs).Error
+	return songs, total, err
+}
+
+func (r *Repo) DeletePlaylistSong(playlistID uuid.UUID, songID uuid.UUID) error {
+	return r.db.Where("playlist_id = ? AND song_id = ?", playlistID, songID).Delete(&model.PlaylistSong{}).Error
+}

@@ -26,6 +26,12 @@ func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		p.GET("/episodes", GetPodcastEpisodes(db))
 		p.GET("/shows/:channelSlug/episodes", GetShowEpisodes(db))
 		p.GET("/episodes/:id", GetPodcastEpisode(db))
+		p.GET("/bookmarks", middleware.AuthMiddleware(), GetPodcastEpisodeBookmarks(db))
+		p.POST("/bookmarks", middleware.AuthMiddleware(), CreatePodcastEpisodeBookmark(db))
+		p.DELETE("/bookmarks/:id", middleware.AuthMiddleware(), DeletePodcastEpisodeBookmark(db))
+		p.GET("/show-bookmarks", middleware.AuthMiddleware(), GetPodcastShowBookmarks(db))
+		p.POST("/show-bookmarks", middleware.AuthMiddleware(), CreatePodcastShowBookmark(db))
+		p.DELETE("/show-bookmarks/:id", middleware.AuthMiddleware(), DeletePodcastShowBookmark(db))
 		p.POST("/episodes", middleware.AuthMiddleware(), CreatePodcastEpisode(db))
 		p.PUT("/episodes/:id", middleware.AuthMiddleware(), UpdatePodcastEpisode(db))
 		p.DELETE("/episodes/:id", middleware.AuthMiddleware(), DeletePodcastEpisode(db))
@@ -670,6 +676,132 @@ func UploadPodcastCover(s3Client *s3.S3) gin.HandlerFunc {
 		}
 		coverURL := strings.TrimRight(os.Getenv("S3_URL_PREFIX"), "/") + "/" + s3Key
 		c.JSON(http.StatusOK, gin.H{"url": coverURL})
+	}
+}
+
+type podcastEpisodeBookmarkInput struct {
+	EpisodeID uuid.UUID `json:"episode_id" binding:"required"`
+}
+
+type podcastShowBookmarkInput struct {
+	ChannelID uuid.UUID `json:"channel_id" binding:"required"`
+}
+
+func GetPodcastEpisodeBookmarks(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+		var bookmarks []model.PodcastEpisodeBookmark
+		if err := db.Preload("Episode").Preload("Episode.Post").Preload("Episode.Channel").Where("user_id = ?", userID).Order("created_at DESC").Find(&bookmarks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch podcast bookmarks"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": bookmarks, "message": "ok"})
+	}
+}
+
+func CreatePodcastEpisodeBookmark(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+		var input podcastEpisodeBookmarkInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		var episode model.PodcastEpisode
+		if err := db.First(&episode, "id = ?", input.EpisodeID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
+			return
+		}
+
+		bookmark := model.PodcastEpisodeBookmark{UserID: userID, EpisodeID: input.EpisodeID}
+		if err := db.Where(model.PodcastEpisodeBookmark{UserID: userID, EpisodeID: input.EpisodeID}).FirstOrCreate(&bookmark).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create podcast bookmark"})
+			return
+		}
+		if err := db.Preload("Episode").Preload("Episode.Post").Preload("Episode.Channel").First(&bookmark, "id = ?", bookmark.ID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create podcast bookmark"})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{"data": bookmark, "message": "ok"})
+	}
+}
+
+func DeletePodcastEpisodeBookmark(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid bookmark id"})
+			return
+		}
+		if err := db.Where("id = ? AND user_id = ?", id, userID).Delete(&model.PodcastEpisodeBookmark{}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete podcast bookmark"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	}
+}
+
+func GetPodcastShowBookmarks(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+		var bookmarks []model.ChannelBookmark
+		if err := db.Preload("Channel").Where("user_id = ? AND kind = ?", userID, "podcast_show").Order("created_at DESC").Find(&bookmarks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch podcast show bookmarks"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": bookmarks, "message": "ok"})
+	}
+}
+
+func CreatePodcastShowBookmark(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+		var input podcastShowBookmarkInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		var channel model.Channel
+		if err := db.First(&channel, "id = ?", input.ChannelID).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "show not found"})
+			return
+		}
+
+		bookmark := model.ChannelBookmark{UserID: userID, ChannelID: input.ChannelID, Kind: "podcast_show"}
+		if err := db.Where(model.ChannelBookmark{UserID: userID, ChannelID: input.ChannelID, Kind: "podcast_show"}).FirstOrCreate(&bookmark).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create podcast show bookmark"})
+			return
+		}
+		if err := db.Preload("Channel").First(&bookmark, "id = ?", bookmark.ID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create podcast show bookmark"})
+			return
+		}
+		c.JSON(http.StatusCreated, gin.H{"data": bookmark, "message": "ok"})
+	}
+}
+
+func DeletePodcastShowBookmark(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userIDVal, _ := c.Get("user_id")
+		userID := userIDVal.(uuid.UUID)
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid bookmark id"})
+			return
+		}
+		if err := db.Where("id = ? AND user_id = ?", id, userID).Delete(&model.ChannelBookmark{}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete podcast show bookmark"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
 	}
 }
 

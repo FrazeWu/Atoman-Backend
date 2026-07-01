@@ -72,3 +72,13 @@ type VideoTagRelation struct {
 }
 
 func (VideoTagRelation) TableName() string { return "video_tag_relations" }
+
+type VideoBookmark struct {
+	Base
+	UserID  uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_video_bookmarks_user_video,priority:1,where:deleted_at IS NULL"`
+	User    *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	VideoID uuid.UUID `json:"video_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_video_bookmarks_user_video,priority:2,where:deleted_at IS NULL"`
+	Video   *Video    `json:"video,omitempty" gorm:"foreignKey:VideoID"`
+}
+
+func (VideoBookmark) TableName() string { return "video_bookmarks" }

@@ -28,6 +28,11 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.Artist{},
 		&model.Album{},
 		&model.Song{},
+		&model.ArtistBookmark{},
+		&model.AlbumBookmark{},
+		&model.SongBookmark{},
+		&model.Playlist{},
+		&model.PlaylistSong{},
 		&model.AlbumImportSession{},
 		&model.MusicEdit{},
 		&model.MusicEditVote{},
@@ -463,6 +468,129 @@ func TestRegisterRoutesListAlbumsSearchesArtistNamesWithHotSort(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesAlbumResponsesResolveMediaURLs(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	t.Setenv("PUBLIC_UPLOADS_BASE_URL", "https://cdn.atoman.test")
+	t.Setenv("STORAGE_TYPE", "")
+
+	artist := model.Artist{Name: "Resolved Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+
+	album := model.Album{
+		Title:       "Resolved Album",
+		EntryStatus: "open",
+		Status:      "open",
+		CoverURL:    "uploads/music/covers/albums/resolved/cover.jpg",
+	}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append artist: %v", err)
+	}
+
+	song := model.Song{
+		Title:       "Resolved Song",
+		Status:      "open",
+		AlbumID:     &album.ID,
+		AudioURL:    "uploads/music/audio/albums/resolved/song.mp3",
+		CoverURL:    "uploads/music/covers/albums/resolved/song-cover.jpg",
+		TrackNumber: 1,
+	}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	r := newMusicHTTPRouter(service, &user)
+
+	listRecorder := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/albums", nil)
+	r.ServeHTTP(listRecorder, listReq)
+
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+
+	var listResp struct {
+		Data []struct {
+			ID       string `json:"id"`
+			CoverURL string `json:"cover_url"`
+			Songs    []struct {
+				AudioURL string `json:"audio_url"`
+				CoverURL string `json:"cover_url"`
+			} `json:"songs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listResp.Data) != 1 {
+		t.Fatalf("expected 1 album in list response, got %#v", listResp.Data)
+	}
+	if listResp.Data[0].CoverURL != "https://cdn.atoman.test/uploads/music/covers/albums/resolved/cover.jpg" {
+		t.Fatalf("expected resolved list cover_url, got %q", listResp.Data[0].CoverURL)
+	}
+	if len(listResp.Data[0].Songs) != 1 {
+		t.Fatalf("expected 1 song in list response, got %#v", listResp.Data[0].Songs)
+	}
+	if listResp.Data[0].Songs[0].AudioURL != "https://cdn.atoman.test/uploads/music/audio/albums/resolved/song.mp3" {
+		t.Fatalf("expected resolved list song audio_url, got %q", listResp.Data[0].Songs[0].AudioURL)
+	}
+	if listResp.Data[0].Songs[0].CoverURL != "https://cdn.atoman.test/uploads/music/covers/albums/resolved/song-cover.jpg" {
+		t.Fatalf("expected resolved list song cover_url, got %q", listResp.Data[0].Songs[0].CoverURL)
+	}
+
+	detailRecorder := httptest.NewRecorder()
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), nil)
+	r.ServeHTTP(detailRecorder, detailReq)
+
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("expected detail 200, got %d: %s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+
+	var detailResp struct {
+		Data struct {
+			CoverURL string `json:"cover_url"`
+			Songs    []struct {
+				AudioURL string `json:"audio_url"`
+				CoverURL string `json:"cover_url"`
+			} `json:"songs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(detailRecorder.Body.Bytes(), &detailResp); err != nil {
+		t.Fatalf("decode detail response: %v", err)
+	}
+	if detailResp.Data.CoverURL != "https://cdn.atoman.test/uploads/music/covers/albums/resolved/cover.jpg" {
+		t.Fatalf("expected resolved detail cover_url, got %q", detailResp.Data.CoverURL)
+	}
+	if len(detailResp.Data.Songs) != 1 {
+		t.Fatalf("expected 1 song in detail response, got %#v", detailResp.Data.Songs)
+	}
+	if detailResp.Data.Songs[0].AudioURL != "https://cdn.atoman.test/uploads/music/audio/albums/resolved/song.mp3" {
+		t.Fatalf("expected resolved detail song audio_url, got %q", detailResp.Data.Songs[0].AudioURL)
+	}
+	if detailResp.Data.Songs[0].CoverURL != "https://cdn.atoman.test/uploads/music/covers/albums/resolved/song-cover.jpg" {
+		t.Fatalf("expected resolved detail song cover_url, got %q", detailResp.Data.Songs[0].CoverURL)
+	}
+}
+
+func TestResolveMusicMediaURLAvoidsDuplicatingUploadsPrefix(t *testing.T) {
+	t.Setenv("PUBLIC_UPLOADS_BASE_URL", "http://localhost:8080/uploads")
+	t.Setenv("STORAGE_TYPE", "")
+
+	gotWithLeadingSlash := resolveMusicMediaURL("/uploads/music/placeholder.jpg")
+	if gotWithLeadingSlash != "http://localhost:8080/uploads/music/placeholder.jpg" {
+		t.Fatalf("expected no duplicated uploads prefix, got %q", gotWithLeadingSlash)
+	}
+
+	gotWithoutLeadingSlash := resolveMusicMediaURL("uploads/music/placeholder.jpg")
+	if gotWithoutLeadingSlash != "http://localhost:8080/uploads/music/placeholder.jpg" {
+		t.Fatalf("expected no duplicated uploads prefix, got %q", gotWithoutLeadingSlash)
+	}
+}
+
 func TestMusicRecommendationModeValidation(t *testing.T) {
 	service, _, user := newMusicHTTPTestService(t)
 	r := newMusicHTTPRouter(service, &user)
@@ -625,5 +753,346 @@ func TestRegisterRoutesGetEditRequiresSubmitterOrModerator(t *testing.T) {
 	rModerator.ServeHTTP(wModerator, httptest.NewRequest(http.MethodGet, "/api/v1/music/edits/"+edit.ID.String(), nil))
 	if wModerator.Code != http.StatusOK {
 		t.Fatalf("expected moderator 200, got %d: %s", wModerator.Code, wModerator.Body.String())
+	}
+}
+
+func TestRegisterRoutesArtistBookmarksAreIdempotent(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Bookmarked Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	postBody := `{"artist_id":"` + artist.ID.String() + `"}`
+	firstPost := httptest.NewRecorder()
+	firstReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/bookmarks/artists", bytes.NewBufferString(postBody))
+	firstReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(firstPost, firstReq)
+
+	if firstPost.Code != http.StatusCreated {
+		t.Fatalf("expected first post 201, got %d: %s", firstPost.Code, firstPost.Body.String())
+	}
+
+	secondPost := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/bookmarks/artists", bytes.NewBufferString(postBody))
+	secondReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(secondPost, secondReq)
+
+	if secondPost.Code != http.StatusCreated {
+		t.Fatalf("expected second post 201, got %d: %s", secondPost.Code, secondPost.Body.String())
+	}
+
+	listRecorder := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/artists", nil)
+	r.ServeHTTP(listRecorder, listReq)
+
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+
+	var listResp struct {
+		Data []struct {
+			ID       string `json:"id"`
+			ArtistID string `json:"artist_id"`
+			UserID   string `json:"user_id"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listResp.Data) != 1 || listResp.Meta.Total != 1 {
+		t.Fatalf("expected one artist bookmark, got %#v %#v", listResp.Data, listResp.Meta)
+	}
+	if listResp.Data[0].ArtistID != artist.ID.String() || listResp.Data[0].UserID != user.ID.String() {
+		t.Fatalf("unexpected artist bookmark payload: %#v", listResp.Data[0])
+	}
+}
+
+func TestRegisterRoutesAlbumBookmarksDeleteIsIdempotent(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	album := model.Album{Title: "Bookmarked Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	postBody := `{"album_id":"` + album.ID.String() + `"}`
+	postRecorder := httptest.NewRecorder()
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/bookmarks/albums", bytes.NewBufferString(postBody))
+	postReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(postRecorder, postReq)
+
+	if postRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected post 201, got %d: %s", postRecorder.Code, postRecorder.Body.String())
+	}
+
+	firstDelete := httptest.NewRecorder()
+	firstDeleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/music/bookmarks/albums/"+album.ID.String(), nil)
+	r.ServeHTTP(firstDelete, firstDeleteReq)
+
+	if firstDelete.Code != http.StatusOK {
+		t.Fatalf("expected first delete 200, got %d: %s", firstDelete.Code, firstDelete.Body.String())
+	}
+
+	secondDelete := httptest.NewRecorder()
+	secondDeleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/music/bookmarks/albums/"+album.ID.String(), nil)
+	r.ServeHTTP(secondDelete, secondDeleteReq)
+
+	if secondDelete.Code != http.StatusOK {
+		t.Fatalf("expected second delete 200, got %d: %s", secondDelete.Code, secondDelete.Body.String())
+	}
+
+	listRecorder := httptest.NewRecorder()
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/albums", nil)
+	r.ServeHTTP(listRecorder, listReq)
+
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+
+	var listResp struct {
+		Data []any `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listResp.Data) != 0 || listResp.Meta.Total != 0 {
+		t.Fatalf("expected empty album bookmarks after delete, got %#v %#v", listResp.Data, listResp.Meta)
+	}
+}
+
+func TestRegisterRoutesSongBookmarksRequireCurrentUser(t *testing.T) {
+	service, db, _ := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Bookmarked Song", AudioURL: "/audio/song.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	r := newMusicHTTPRouter(service, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/bookmarks/songs", bytes.NewBufferString(`{"song_id":"`+song.ID.String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRegisterRoutesSongBookmarksListIncludesSongDetails(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Song Bookmark Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	album := model.Album{Title: "Song Bookmark Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append album artist: %v", err)
+	}
+	song := model.Song{Title: "cellophane", AudioURL: "/audio/song.mp3", Status: "open", AlbumID: &album.ID}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := db.Model(&song).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append song artist: %v", err)
+	}
+	if _, err := service.BookmarkSong(user, song.ID); err != nil {
+		t.Fatalf("bookmark song: %v", err)
+	}
+
+	r := newMusicHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/songs", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []struct {
+			ID   string `json:"id"`
+			Song struct {
+				ID      string `json:"id"`
+				Title   string `json:"title"`
+				Album   struct{ Title string `json:"title"` } `json:"album"`
+				Artists []struct{ Name string `json:"name"` } `json:"artists"`
+			} `json:"song"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 1 {
+		t.Fatalf("expected 1 song bookmark, got %#v", resp.Data)
+	}
+	if resp.Data[0].Song.Title != "cellophane" {
+		t.Fatalf("expected song title in bookmark payload, got %#v", resp.Data[0].Song)
+	}
+	if resp.Data[0].Song.Album.Title != "Song Bookmark Album" {
+		t.Fatalf("expected album title in bookmark payload, got %#v", resp.Data[0].Song.Album)
+	}
+	if len(resp.Data[0].Song.Artists) != 1 || resp.Data[0].Song.Artists[0].Name != "Song Bookmark Artist" {
+		t.Fatalf("expected song artists in bookmark payload, got %#v", resp.Data[0].Song.Artists)
+	}
+}
+
+func TestRegisterRoutesPlaylistsArePrivateAndSongsAreDeduplicated(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	otherModel := model.User{Username: "playlist-other", Email: "playlist-other@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&otherModel).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	otherUser := authctx.CurrentUser{ID: otherModel.UUID, Username: otherModel.Username, Role: authctx.RoleUser}
+	song := model.Song{Title: "Playlist Song", AudioURL: "/audio/playlist-song.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	userRouter := newMusicHTTPRouter(service, &user)
+	createRecorder := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/playlists", bytes.NewBufferString(`{"name":"My Playlist"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	userRouter.ServeHTTP(createRecorder, createReq)
+
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create playlist 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	var createResp struct {
+		Data struct {
+			ID     string `json:"id"`
+			Name   string `json:"name"`
+			UserID string `json:"user_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create playlist response: %v", err)
+	}
+	if createResp.Data.Name != "My Playlist" || createResp.Data.UserID != user.ID.String() || createResp.Data.ID == "" {
+		t.Fatalf("unexpected playlist payload: %#v", createResp.Data)
+	}
+
+	addSongBody := `{"song_id":"` + song.ID.String() + `"}`
+	firstAdd := httptest.NewRecorder()
+	firstAddReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/playlists/"+createResp.Data.ID+"/songs", bytes.NewBufferString(addSongBody))
+	firstAddReq.Header.Set("Content-Type", "application/json")
+	userRouter.ServeHTTP(firstAdd, firstAddReq)
+	if firstAdd.Code != http.StatusCreated {
+		t.Fatalf("expected first add song 201, got %d: %s", firstAdd.Code, firstAdd.Body.String())
+	}
+
+	secondAdd := httptest.NewRecorder()
+	secondAddReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/playlists/"+createResp.Data.ID+"/songs", bytes.NewBufferString(addSongBody))
+	secondAddReq.Header.Set("Content-Type", "application/json")
+	userRouter.ServeHTTP(secondAdd, secondAddReq)
+	if secondAdd.Code != http.StatusCreated {
+		t.Fatalf("expected second add song 201, got %d: %s", secondAdd.Code, secondAdd.Body.String())
+	}
+
+	songsRecorder := httptest.NewRecorder()
+	songsReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/"+createResp.Data.ID+"/songs", nil)
+	userRouter.ServeHTTP(songsRecorder, songsReq)
+	if songsRecorder.Code != http.StatusOK {
+		t.Fatalf("expected list songs 200, got %d: %s", songsRecorder.Code, songsRecorder.Body.String())
+	}
+
+	var songsResp struct {
+		Data []struct {
+			ID         string `json:"id"`
+			PlaylistID string `json:"playlist_id"`
+			SongID     string `json:"song_id"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(songsRecorder.Body.Bytes(), &songsResp); err != nil {
+		t.Fatalf("decode playlist songs response: %v", err)
+	}
+	if len(songsResp.Data) != 1 || songsResp.Meta.Total != 1 {
+		t.Fatalf("expected one playlist song, got %#v %#v", songsResp.Data, songsResp.Meta)
+	}
+	if songsResp.Data[0].SongID != song.ID.String() || songsResp.Data[0].PlaylistID != createResp.Data.ID {
+		t.Fatalf("unexpected playlist song payload: %#v", songsResp.Data[0])
+	}
+
+	otherRouter := newMusicHTTPRouter(service, &otherUser)
+	otherList := httptest.NewRecorder()
+	otherListReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists", nil)
+	otherRouter.ServeHTTP(otherList, otherListReq)
+	if otherList.Code != http.StatusOK {
+		t.Fatalf("expected other user playlist list 200, got %d: %s", otherList.Code, otherList.Body.String())
+	}
+
+	var otherListResp struct {
+		Data []any `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(otherList.Body.Bytes(), &otherListResp); err != nil {
+		t.Fatalf("decode other user playlist list: %v", err)
+	}
+	if len(otherListResp.Data) != 0 || otherListResp.Meta.Total != 0 {
+		t.Fatalf("expected private playlists to be hidden, got %#v %#v", otherListResp.Data, otherListResp.Meta)
+	}
+}
+
+func TestRegisterRoutesDeletePlaylistSongIsIdempotent(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Delete Playlist Song", AudioURL: "/audio/delete-playlist-song.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	createRecorder := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/playlists", bytes.NewBufferString(`{"name":"Delete Songs"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(createRecorder, createReq)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create playlist 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	var createResp struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create playlist response: %v", err)
+	}
+
+	addRecorder := httptest.NewRecorder()
+	addReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/playlists/"+createResp.Data.ID+"/songs", bytes.NewBufferString(`{"song_id":"`+song.ID.String()+`"}`))
+	addReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(addRecorder, addReq)
+	if addRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected add song 201, got %d: %s", addRecorder.Code, addRecorder.Body.String())
+	}
+
+	firstDelete := httptest.NewRecorder()
+	firstDeleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/music/playlists/"+createResp.Data.ID+"/songs/"+song.ID.String(), nil)
+	r.ServeHTTP(firstDelete, firstDeleteReq)
+	if firstDelete.Code != http.StatusOK {
+		t.Fatalf("expected first delete 200, got %d: %s", firstDelete.Code, firstDelete.Body.String())
+	}
+
+	secondDelete := httptest.NewRecorder()
+	secondDeleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/music/playlists/"+createResp.Data.ID+"/songs/"+song.ID.String(), nil)
+	r.ServeHTTP(secondDelete, secondDeleteReq)
+	if secondDelete.Code != http.StatusOK {
+		t.Fatalf("expected second delete 200, got %d: %s", secondDelete.Code, secondDelete.Body.String())
 	}
 }
