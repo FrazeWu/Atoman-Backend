@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"atoman/internal/feedclass"
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"database/sql"
@@ -30,6 +31,7 @@ type ExploreSourceRow struct {
 type ExploreSourceRecentItem struct {
 	ID            uuid.UUID `json:"id"`
 	Title         string    `json:"title"`
+	Link          string    `json:"link"`
 	PublishedAt   time.Time `json:"published_at"`
 	EnclosureType string    `json:"enclosure_type"`
 }
@@ -444,6 +446,7 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 		rows[rowIndex].RecentItems = append(rows[rowIndex].RecentItems, ExploreSourceRecentItem{
 			ID:            item.ID,
 			Title:         item.Title,
+			Link:          item.Link,
 			PublishedAt:   item.PublishedAt,
 			EnclosureType: item.EnclosureType,
 		})
@@ -500,32 +503,19 @@ func exploreSourceInferredCategorySQL(category string) string {
 }
 
 func inferFeedSourceCategory(row ExploreSourceRow) string {
-	value := strings.ToLower(row.Title + " " + row.RSSURL)
+	recentItems := make([]feedclass.RecentItem, 0, len(row.RecentItems))
 	for _, item := range row.RecentItems {
-		enclosureType := strings.ToLower(item.EnclosureType)
-		if strings.HasPrefix(enclosureType, "audio/") {
-			return "podcast"
-		}
-		if strings.HasPrefix(enclosureType, "video/") {
-			return "video"
-		}
+		recentItems = append(recentItems, feedclass.RecentItem{
+			Title:         item.Title,
+			Link:          item.Link,
+			EnclosureType: item.EnclosureType,
+		})
 	}
-	if strings.Contains(value, "xiaoyuzhou") || strings.Contains(value, "podcast") || strings.Contains(value, "播客") {
-		return "podcast"
-	}
-	if strings.Contains(value, "youtube") || strings.Contains(value, "bilibili") || strings.Contains(value, "video") || strings.Contains(value, "视频") {
-		return "video"
-	}
-	if strings.Contains(value, "news") || strings.Contains(value, "新闻") || strings.Contains(value, "36kr") || strings.Contains(value, "36氪") || strings.Contains(value, "ftchinese") || strings.Contains(value, "nytimes") || strings.Contains(value, "media") || strings.Contains(value, "gov.cn") || strings.Contains(value, "stats.gov") || strings.Contains(value, "统计") || strings.Contains(value, "数据发布") {
-		return "news"
-	}
-	if strings.Contains(value, "forum") || strings.Contains(value, "bbs") || strings.Contains(value, "discourse") || strings.Contains(value, "v2ex") || strings.Contains(value, "nodeseek") || strings.Contains(value, "linux.do") || strings.Contains(value, "论坛") {
-		return "forum"
-	}
-	if strings.Contains(value, "x.com") || strings.Contains(value, "twitter") || strings.Contains(value, "zhihu") || strings.Contains(value, "jike") || strings.Contains(value, "reddit") || strings.Contains(value, "社交") {
-		return "social"
-	}
-	return "blog"
+	return feedclass.Classify(feedclass.Source{
+		Title:       row.Title,
+		RSSURL:      row.RSSURL,
+		RecentItems: recentItems,
+	})
 }
 
 func filterExploreSourceRowsByCategory(rows []ExploreSourceRow, category string) []ExploreSourceRow {

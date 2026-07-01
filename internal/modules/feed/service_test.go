@@ -830,6 +830,80 @@ func TestListExploreSourcesBlogFilterExcludesLegacyInferredSocialSources(t *test
 	}
 }
 
+func TestListExploreSourcesSocialFilterCoversKnownSocialHosts(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	sources := []model.FeedSource{
+		{
+			SourceType:   "external_rss",
+			RssURL:       "https://rsshub.app/twitter/user/openai",
+			Hash:         "social-twitter-source-hash",
+			Title:        "OpenAI on Twitter",
+			Category:     "",
+			HealthStatus: "healthy",
+		},
+		{
+			SourceType:   "external_rss",
+			RssURL:       "https://rsshub.app/jike/user/123456",
+			Hash:         "social-jike-source-hash",
+			Title:        "即刻用户动态",
+			Category:     "",
+			HealthStatus: "healthy",
+		},
+		{
+			SourceType:   "external_rss",
+			RssURL:       "https://www.zhihu.com/rss",
+			Hash:         "social-zhihu-source-hash",
+			Title:        "知乎回答",
+			Category:     "",
+			HealthStatus: "healthy",
+		},
+		{
+			SourceType:   "external_rss",
+			RssURL:       "https://www.reddit.com/r/programming/.rss",
+			Hash:         "social-reddit-source-hash",
+			Title:        "Reddit Programming",
+			Category:     "",
+			HealthStatus: "healthy",
+		},
+	}
+
+	now := time.Now().UTC()
+	for index, source := range sources {
+		if err := db.Create(&source).Error; err != nil {
+			t.Fatalf("create social source %d: %v", index, err)
+		}
+		if err := db.Create(&model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         fmt.Sprintf("social-item-%d", index),
+			Title:        source.Title + " Item",
+			Link:         fmt.Sprintf("https://example.com/social-item-%d", index),
+			PublishedAt:  now,
+			FetchedAt:    now,
+		}).Error; err != nil {
+			t.Fatalf("create social feed item %d: %v", index, err)
+		}
+	}
+
+	rows, err := service.repo.ListExploreSources(50, 0, "social")
+	if err != nil {
+		t.Fatalf("list social explore sources: %v", err)
+	}
+
+	found := make(map[string]bool, len(sources))
+	for _, row := range rows {
+		if row.Category != "social" {
+			t.Fatalf("expected only social rows, got %#v", rows)
+		}
+		found[row.Title] = true
+	}
+	for _, source := range sources {
+		if !found[source.Title] {
+			t.Fatalf("expected source %q in social rows, got %#v", source.Title, rows)
+		}
+	}
+}
+
 func TestListExploreSourcesNewsFilterIgnoresPollutedStoredCategory(t *testing.T) {
 	service, db, _ := newFeedTestService(t)
 
