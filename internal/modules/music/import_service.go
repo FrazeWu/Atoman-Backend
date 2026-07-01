@@ -328,6 +328,13 @@ func deriveAlbumImportPayload(archiveName string, body []byte) (map[string]any, 
 }
 
 func deriveTrackFromArchiveEntry(name string) (string, int, bool) {
+	// Filter out system metadata directories like __MACOSX and hidden directories/files starting with .
+	segments := strings.Split(filepath.ToSlash(name), "/")
+	for _, segment := range segments {
+		if strings.HasPrefix(segment, ".") || segment == "__MACOSX" {
+			return "", 0, false
+		}
+	}
 	base := filepath.Base(name)
 	ext := strings.ToLower(filepath.Ext(base))
 	switch ext {
@@ -338,7 +345,7 @@ func deriveTrackFromArchiveEntry(name string) (string, int, bool) {
 
 	title := strings.TrimSuffix(base, filepath.Ext(base))
 	trackNumber := 0
-	parts := strings.SplitN(title, " - ", 2)
+	var parts = strings.SplitN(title, " - ", 2)
 	if len(parts) == 2 {
 		if value, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
 			trackNumber = value

@@ -33,7 +33,16 @@ type albumEditFields struct {
 	CoverURL    string                    `json:"cover_url"`
 	CoverKey    string                    `json:"cover_key"`
 	AlbumType   string                    `json:"album_type"`
-	Tracks      []AlbumImportTrackPayload `json:"tracks"`
+	Tracks      []albumTrackEditPayload   `json:"tracks"`
+}
+
+type albumTrackEditPayload struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	TrackNumber int    `json:"track_number"`
+	Lyrics      string `json:"lyrics"`
+	AudioURL    string `json:"audio_url"`
+	Removed     bool   `json:"removed"`
 }
 
 func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
@@ -249,6 +258,11 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 				return err
 			}
 		}
+		if len(changes.Tracks) > 0 {
+			if err := syncAlbumTracks(tx, &album, &edit.SubmittedBy, changes.Tracks); err != nil {
+				return err
+			}
+		}
 		return nil
 	case "delete_album":
 		if edit.EntityID == nil {
@@ -265,6 +279,74 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 	default:
 		return apperr.Unprocessable("music.edit_invalid_type", fmt.Sprintf("unsupported edit type %s", edit.Type))
 	}
+}
+
+func syncAlbumTracks(tx *gorm.DB, album *model.Album, submittedBy *uuid.UUID, tracks []albumTrackEditPayload) error {
+	for _, track := range tracks {
+		trackID := track.ID
+		if trackID != "" {
+			id, err := uuid.Parse(trackID)
+			if err != nil {
+				return apperr.BadRequest("validation.invalid_request", "track id must be a valid UUID")
+			}
+
+			var song model.Song
+			if err := tx.First(&song, "id = ? AND album_id = ?", id, album.ID).Error; err != nil {
+				if err == gorm.ErrRecordNotFound {
+					return apperr.NotFound("music.song_not_found", "Song not found")
+				}
+				return err
+			}
+
+			if track.Removed {
+				if err := tx.Model(&song).Update("status", "closed").Error; err != nil {
+					return err
+				}
+				continue
+			}
+
+			updates := map[string]any{}
+			if track.Title != "" {
+				updates["title"] = track.Title
+			}
+			if track.TrackNumber != 0 {
+				updates["track_number"] = track.TrackNumber
+			}
+			updates["lyrics"] = track.Lyrics
+			if track.AudioURL != "" {
+				updates["audio_url"] = track.AudioURL
+				updates["audio_source"] = coverSourceFromURL(track.AudioURL)
+			}
+			updates["status"] = "open"
+			if len(updates) > 0 {
+				if err := tx.Model(&song).Updates(updates).Error; err != nil {
+					return err
+				}
+			}
+			continue
+		}
+
+		if track.Removed || track.Title == "" || track.AudioURL == "" {
+			continue
+		}
+
+		song := model.Song{
+			Title:       track.Title,
+			TrackNumber: track.TrackNumber,
+			Lyrics:      track.Lyrics,
+			AudioURL:    track.AudioURL,
+			AudioSource: coverSourceFromURL(track.AudioURL),
+			Status:      "open",
+			AlbumID:     &album.ID,
+			UploadedBy:  submittedBy,
+		}
+		song.ReleaseDate = album.ReleaseDate
+		if err := tx.Create(&song).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func parseArtistIDs(raw []string) ([]uuid.UUID, error) {

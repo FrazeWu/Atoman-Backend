@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,6 +17,29 @@ import (
 // RevisionService handles revision-related operations
 type RevisionService struct {
 	db *gorm.DB
+}
+
+type albumRevisionSnapshot struct {
+	Album albumRevisionAlbum `json:"album"`
+	Songs []albumRevisionSong `json:"songs"`
+}
+
+type albumRevisionAlbum struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	ReleaseDate string `json:"release_date"`
+	AlbumType   string `json:"album_type"`
+	EntryStatus string `json:"entry_status"`
+	CoverURL    string `json:"cover_url"`
+}
+
+type albumRevisionSong struct {
+	ID          string `json:"id,omitempty"`
+	Title       string `json:"title"`
+	TrackNumber int    `json:"track_number"`
+	Lyrics      string `json:"lyrics"`
+	AudioURL    string `json:"audio_url"`
+	Status      string `json:"status"`
 }
 
 func NewRevisionService(db *gorm.DB) *RevisionService {
@@ -339,9 +363,7 @@ func (s *RevisionService) applyRevisionToContent(tx *gorm.DB, revision *model.Re
 
 	switch revision.ContentType {
 	case "album":
-		return tx.Model(&model.Album{}).
-			Where("id = ?", revision.ContentID).
-			Updates(content).Error
+		return s.applyAlbumRevisionSnapshot(tx, revision.ContentID, revision.ContentSnapshot)
 
 	case "song":
 		return tx.Model(&model.Song{}).
@@ -356,6 +378,135 @@ func (s *RevisionService) applyRevisionToContent(tx *gorm.DB, revision *model.Re
 	default:
 		return fmt.Errorf("unsupported content type: %s", revision.ContentType)
 	}
+}
+
+func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID uuid.UUID, raw []byte) error {
+	var snapshot albumRevisionSnapshot
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return fmt.Errorf("failed to parse album snapshot: %w", err)
+	}
+
+	var album model.Album
+	if err := tx.First(&album, "id = ?", albumID).Error; err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(snapshot.Album.Title) != "" {
+		album.Title = strings.TrimSpace(snapshot.Album.Title)
+	}
+	if strings.TrimSpace(snapshot.Album.AlbumType) != "" {
+		album.AlbumType = strings.TrimSpace(snapshot.Album.AlbumType)
+	}
+	if strings.TrimSpace(snapshot.Album.EntryStatus) != "" {
+		album.EntryStatus = strings.TrimSpace(snapshot.Album.EntryStatus)
+	}
+	album.CoverURL = strings.TrimSpace(snapshot.Album.CoverURL)
+	if snapshot.Album.ReleaseDate != "" {
+		releaseDate, err := time.Parse("2006-01-02", snapshot.Album.ReleaseDate)
+		if err != nil {
+			return fmt.Errorf("failed to parse album release date: %w", err)
+		}
+		album.ReleaseDate = releaseDate
+		album.Year = releaseDate.Year()
+	}
+
+	if err := tx.Save(&album).Error; err != nil {
+		return err
+	}
+
+	var existingSongs []model.Song
+	if err := tx.Where("album_id = ?", albumID).Find(&existingSongs).Error; err != nil {
+		return err
+	}
+
+	existingByID := make(map[string]*model.Song, len(existingSongs))
+	for i := range existingSongs {
+		existingByID[existingSongs[i].ID.String()] = &existingSongs[i]
+	}
+
+	seen := make(map[string]bool, len(snapshot.Songs))
+	for _, songSnap := range snapshot.Songs {
+		songID := strings.TrimSpace(songSnap.ID)
+		if songID != "" {
+			seen[songID] = true
+		}
+
+		title := strings.TrimSpace(songSnap.Title)
+		if title == "" {
+			continue
+		}
+		audioURL := strings.TrimSpace(songSnap.AudioURL)
+		status := strings.TrimSpace(songSnap.Status)
+		if status == "" {
+			status = "open"
+		}
+
+		if songID != "" {
+			if existingSong, ok := existingByID[songID]; ok {
+				existingSong.Title = title
+				existingSong.TrackNumber = songSnap.TrackNumber
+				existingSong.Lyrics = songSnap.Lyrics
+				existingSong.AudioURL = audioURL
+				existingSong.Status = status
+				existingSong.AlbumID = &albumID
+				existingSong.ReleaseDate = album.ReleaseDate
+				if err := tx.Save(existingSong).Error; err != nil {
+					return err
+				}
+				continue
+			}
+
+			parsedID, err := uuid.Parse(songID)
+			if err != nil {
+				return fmt.Errorf("invalid song id in snapshot: %w", err)
+			}
+			newSong := model.Song{
+				Base:        model.Base{ID: parsedID},
+				Title:       title,
+				TrackNumber: songSnap.TrackNumber,
+				Lyrics:      songSnap.Lyrics,
+				AudioURL:    audioURL,
+				AudioSource: "s3",
+				Status:      status,
+				AlbumID:     &albumID,
+				ReleaseDate: album.ReleaseDate,
+				UploadedBy:  album.UploadedBy,
+			}
+			if err := tx.Create(&newSong).Error; err != nil {
+				return err
+			}
+			continue
+		}
+
+		newSong := model.Song{
+			Title:       title,
+			TrackNumber: songSnap.TrackNumber,
+			Lyrics:      songSnap.Lyrics,
+			AudioURL:    audioURL,
+			AudioSource: "s3",
+			Status:      status,
+			AlbumID:     &albumID,
+			ReleaseDate: album.ReleaseDate,
+			UploadedBy:  album.UploadedBy,
+		}
+		if err := tx.Create(&newSong).Error; err != nil {
+			return err
+		}
+		seen[newSong.ID.String()] = true
+	}
+
+	for _, existingSong := range existingSongs {
+		if seen[existingSong.ID.String()] {
+			continue
+		}
+		if err := tx.Model(&model.Song{}).
+			Where("id = ?", existingSong.ID).
+			Update("status", "closed").Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // GetRevisions returns revision history for a content
@@ -428,7 +579,7 @@ func (s *RevisionService) GetRevisionDiff(
 
 // CreateAlbumSnapshot captures the current album state (with songs) as a new revision.
 // This is the lightweight "append-only history" helper used after direct wiki edits.
-func (s *RevisionService) CreateAlbumSnapshot(
+	func (s *RevisionService) CreateAlbumSnapshot(
 	albumID uuid.UUID,
 	editorID uuid.UUID,
 	editSummary string,
@@ -440,36 +591,24 @@ func (s *RevisionService) CreateAlbumSnapshot(
 			return fmt.Errorf("album not found: %w", err)
 		}
 
-		type songSnap struct {
-			ID          string `json:"id"`
-			Title       string `json:"title"`
-			TrackNumber int    `json:"track_number"`
-			Lyrics      string `json:"lyrics"`
-			AudioURL    string `json:"audio_url"`
-		}
-		type albumSnap struct {
-			Album struct {
-				ID          string `json:"id"`
-				Title       string `json:"title"`
-				AlbumType   string `json:"album_type"`
-				EntryStatus string `json:"entry_status"`
-			} `json:"album"`
-			Songs []songSnap `json:"songs"`
-		}
-
-		snap := albumSnap{}
+		snap := albumRevisionSnapshot{}
 		snap.Album.ID = album.ID.String()
 		snap.Album.Title = album.Title
 		snap.Album.AlbumType = album.AlbumType
 		snap.Album.EntryStatus = album.EntryStatus
+		snap.Album.CoverURL = album.CoverURL
+		if !album.ReleaseDate.IsZero() {
+			snap.Album.ReleaseDate = album.ReleaseDate.Format("2006-01-02")
+		}
 
 		for _, song := range album.Songs {
-			snap.Songs = append(snap.Songs, songSnap{
+			snap.Songs = append(snap.Songs, albumRevisionSong{
 				ID:          song.ID.String(),
 				Title:       song.Title,
 				TrackNumber: song.TrackNumber,
 				Lyrics:      song.Lyrics,
 				AudioURL:    song.AudioURL,
+				Status:      song.Status,
 			})
 		}
 

@@ -360,3 +360,107 @@ func TestSubmitEditAutoAppliesUpdateAlbumForMainWikiFlow(t *testing.T) {
 		t.Fatalf("unexpected album fields: %#v", updatedAlbum)
 	}
 }
+
+func TestSubmitEditAutoAppliesUpdateAlbumTracksForMainWikiFlow(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+
+	artist := model.Artist{Name: "Track Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	album := model.Album{Title: "Track Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append artist: %v", err)
+	}
+
+	existingSong := model.Song{
+		Title:       "Keep Me",
+		TrackNumber: 1,
+		Lyrics:      "old lyrics",
+		AudioURL:    "https://cdn.example.com/old.mp3",
+		AudioSource: "s3",
+		Status:      "open",
+		AlbumID:     &album.ID,
+	}
+	if err := db.Create(&existingSong).Error; err != nil {
+		t.Fatalf("create existing song: %v", err)
+	}
+
+	removedSong := model.Song{
+		Title:       "Remove Me",
+		TrackNumber: 2,
+		AudioURL:    "https://cdn.example.com/remove.mp3",
+		AudioSource: "s3",
+		Status:      "open",
+		AlbumID:     &album.ID,
+	}
+	if err := db.Create(&removedSong).Error; err != nil {
+		t.Fatalf("create removed song: %v", err)
+	}
+
+	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
+		Type:       "update_album",
+		EntityType: "album",
+		EntityID:   &album.ID,
+		Changes: map[string]any{
+			"title": "Track Album Revised",
+			"tracks": []map[string]any{
+				{
+					"id":           existingSong.ID.String(),
+					"title":        "Keep Me Better",
+					"track_number": 3,
+					"lyrics":       "new lyrics",
+					"audio_url":    "https://cdn.example.com/new.mp3",
+				},
+				{
+					"title":        "Brand New Song",
+					"track_number": 4,
+					"lyrics":       "brand new lyrics",
+					"audio_url":    "https://cdn.example.com/brand-new.mp3",
+				},
+				{
+					"id":      removedSong.ID.String(),
+					"removed": true,
+				},
+			},
+		},
+		Reason: "update album tracks",
+	})
+	if err != nil {
+		t.Fatalf("submit edit: %v", err)
+	}
+
+	if edit.Status != "applied" || !edit.AutoApplied {
+		t.Fatalf("expected auto-applied update album edit, got %#v", edit)
+	}
+
+	var updatedSong model.Song
+	if err := db.First(&updatedSong, "id = ?", existingSong.ID).Error; err != nil {
+		t.Fatalf("reload existing song: %v", err)
+	}
+	if updatedSong.Title != "Keep Me Better" || updatedSong.TrackNumber != 3 || updatedSong.AudioURL != "https://cdn.example.com/new.mp3" || updatedSong.Lyrics != "new lyrics" {
+		t.Fatalf("expected existing song updated, got %#v", updatedSong)
+	}
+
+	var createdSongs []model.Song
+	if err := db.Where("album_id = ? AND title = ?", album.ID, "Brand New Song").Find(&createdSongs).Error; err != nil {
+		t.Fatalf("load created songs: %v", err)
+	}
+	if len(createdSongs) != 1 {
+		t.Fatalf("expected one created song, got %d", len(createdSongs))
+	}
+	if createdSongs[0].TrackNumber != 4 || createdSongs[0].AudioURL != "https://cdn.example.com/brand-new.mp3" {
+		t.Fatalf("expected created song fields, got %#v", createdSongs[0])
+	}
+
+	var closedSong model.Song
+	if err := db.First(&closedSong, "id = ?", removedSong.ID).Error; err != nil {
+		t.Fatalf("reload removed song: %v", err)
+	}
+	if closedSong.Status != "closed" {
+		t.Fatalf("expected removed song closed, got %#v", closedSong)
+	}
+}
