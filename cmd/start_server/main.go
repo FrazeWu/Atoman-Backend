@@ -511,6 +511,11 @@ func main() {
 			fatalLogger.Fatal("Failed to run content protection live unique index migration: ", err)
 		}
 		log.Println("Migration step completed: content protection live unique index")
+		log.Println("Migration step: music bookmarks and playlists")
+		if err := migrations.RunMusicBookmarksPlaylistsMigration(db); err != nil {
+			fatalLogger.Fatal("Failed to run music bookmarks and playlists migration: ", err)
+		}
+		log.Println("Migration step completed: music bookmarks and playlists")
 		log.Println("Migration step: auto migrate models")
 		if err := db.AutoMigrate(
 			&model.User{},
@@ -576,6 +581,11 @@ func main() {
 			&model.MusicEditVote{},
 			&model.MusicEditDecision{},
 			&model.MusicEditChange{},
+			&model.ArtistBookmark{},
+			&model.AlbumBookmark{},
+			&model.SongBookmark{},
+			&model.Playlist{},
+			&model.PlaylistSong{},
 			// Podcast
 			&model.PodcastEpisode{},
 			// Video module
@@ -605,7 +615,11 @@ func main() {
 			log.Printf("WARN: notification/dm index migration failed: %v", err)
 		}
 		log.Println("Migration step completed: notification/dm indexes")
-
+		log.Println("Migration step: music bookmarks playlists")
+		if err := migrations.RunMusicBookmarksPlaylistsMigration(db); err != nil {
+			fatalLogger.Fatal("Failed to run music bookmarks playlists migration: ", err)
+		}
+		log.Println("Migration step completed: music bookmarks playlists")
 		// Seed default site settings (idempotent)
 		db.Exec(`INSERT INTO site_settings (key, value, description, updated_at)
 VALUES ('forum.solved_auto_threshold', '10', '回复点赞数达到该值时自动标记为解决方案', NOW())
