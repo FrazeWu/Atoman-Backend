@@ -39,6 +39,439 @@ type Service struct {
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
 
+func (s *Service) ListChannels(userID *uuid.UUID) ([]model.Channel, error) {
+	return s.repo.ListChannels(userID)
+}
+
+func (s *Service) GetChannel(id uuid.UUID) (model.Channel, error) {
+	if id == uuid.Nil {
+		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "channel_id is required")
+	}
+	channel, err := s.repo.GetChannel(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Channel{}, apperr.NotFound("blog.channel_not_found", "Channel not found")
+	}
+	return channel, err
+}
+
+func (s *Service) GetChannelBySlug(slug string) (model.Channel, error) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "slug is required")
+	}
+	channel, err := s.repo.GetChannelBySlug(slug)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Channel{}, apperr.NotFound("blog.channel_not_found", "Channel not found")
+	}
+	return channel, err
+}
+
+func (s *Service) ListCollectionsByChannel(channelID uuid.UUID) ([]model.Collection, error) {
+	if _, err := s.GetChannel(channelID); err != nil {
+		return nil, err
+	}
+	return s.repo.ListCollectionsByChannel(channelID)
+}
+
+func (s *Service) ListCollectionsByChannelSlug(slug string) (model.Channel, []model.Collection, error) {
+	channel, err := s.GetChannelBySlug(slug)
+	if err != nil {
+		return model.Channel{}, nil, err
+	}
+	collections, err := s.repo.ListCollectionsByChannel(channel.ID)
+	return channel, collections, err
+}
+
+func (s *Service) GetCollection(id uuid.UUID) (model.Collection, error) {
+	if id == uuid.Nil {
+		return model.Collection{}, apperr.BadRequest("validation.invalid_request", "collection_id is required")
+	}
+	collection, err := s.repo.GetCollection(id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Collection{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
+	}
+	return collection, err
+}
+
+func (s *Service) ListUserCollections(userID uuid.UUID) ([]model.Collection, error) {
+	if userID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	return s.repo.ListUserCollections(userID)
+}
+
+func (s *Service) CreateChannel(user authctx.CurrentUser, name string, slug string, description string, coverURL string) (model.Channel, error) {
+	if user.ID == uuid.Nil {
+		return model.Channel{}, apperr.Unauthorized("Login required")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "name is required")
+	}
+	if slug = strings.TrimSpace(slug); slug == "" {
+		var err error
+		slug, err = s.uniqueChannelSlug(name)
+		if err != nil {
+			return model.Channel{}, err
+		}
+	}
+	channel := model.Channel{
+		UserID:      &user.ID,
+		Name:        name,
+		Slug:        slug,
+		Description: strings.TrimSpace(description),
+		CoverURL:    strings.TrimSpace(coverURL),
+	}
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&channel).Error; err != nil {
+			return err
+		}
+		return s.ensureDefaultCollectionForChannelDB(tx, channel.ID)
+	}); err != nil {
+		return model.Channel{}, err
+	}
+	return s.repo.GetChannel(channel.ID)
+}
+
+func (s *Service) UpdateChannel(user authctx.CurrentUser, channelID uuid.UUID, name string, slug string, description string, coverURL string) (model.Channel, error) {
+	channel, err := s.GetChannel(channelID)
+	if err != nil {
+		return model.Channel{}, err
+	}
+	if channel.UserID == nil || *channel.UserID != user.ID {
+		return model.Channel{}, apperr.Forbidden("blog.channel_forbidden", "You do not have permission to modify this channel")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "name is required")
+	}
+	channel.Name = name
+	if strings.TrimSpace(slug) != "" {
+		channel.Slug = strings.TrimSpace(slug)
+	}
+	channel.Description = strings.TrimSpace(description)
+	channel.CoverURL = strings.TrimSpace(coverURL)
+	if err := s.repo.SaveChannel(&channel); err != nil {
+		return model.Channel{}, err
+	}
+	return s.repo.GetChannel(channel.ID)
+}
+
+func (s *Service) DeleteChannel(user authctx.CurrentUser, channelID uuid.UUID) error {
+	channel, err := s.GetChannel(channelID)
+	if err != nil {
+		return err
+	}
+	if channel.UserID == nil || *channel.UserID != user.ID {
+		return apperr.Forbidden("blog.channel_forbidden", "You do not have permission to delete this channel")
+	}
+	return s.repo.DeleteChannel(channel.ID)
+}
+
+func (s *Service) CreateCollection(user authctx.CurrentUser, channelID uuid.UUID, name string, description string, coverURL string) (model.Collection, error) {
+	channel, err := s.GetChannel(channelID)
+	if err != nil {
+		return model.Collection{}, err
+	}
+	if channel.UserID == nil || *channel.UserID != user.ID {
+		return model.Collection{}, apperr.Forbidden("blog.channel_forbidden", "You do not have permission to add collections to this channel")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return model.Collection{}, apperr.BadRequest("validation.invalid_request", "name is required")
+	}
+	collection := model.Collection{
+		ChannelID:   channelID,
+		Name:        name,
+		Description: strings.TrimSpace(description),
+		CoverURL:    strings.TrimSpace(coverURL),
+	}
+	if err := s.repo.CreateCollection(&collection); err != nil {
+		return model.Collection{}, err
+	}
+	return s.repo.GetCollection(collection.ID)
+}
+
+func (s *Service) UpdateCollection(user authctx.CurrentUser, collectionID uuid.UUID, name string, description string, coverURL string) (model.Collection, error) {
+	collection, err := s.GetCollection(collectionID)
+	if err != nil {
+		return model.Collection{}, err
+	}
+	channel, err := s.GetChannel(collection.ChannelID)
+	if err != nil {
+		return model.Collection{}, err
+	}
+	if channel.UserID == nil || *channel.UserID != user.ID {
+		return model.Collection{}, apperr.Forbidden("blog.collection_forbidden", "You do not have permission to modify this collection")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return model.Collection{}, apperr.BadRequest("validation.invalid_request", "name is required")
+	}
+	collection.Name = name
+	collection.Description = strings.TrimSpace(description)
+	collection.CoverURL = strings.TrimSpace(coverURL)
+	if err := s.repo.SaveCollection(&collection); err != nil {
+		return model.Collection{}, err
+	}
+	return s.repo.GetCollection(collection.ID)
+}
+
+func (s *Service) DeleteCollection(user authctx.CurrentUser, collectionID uuid.UUID) error {
+	collection, err := s.GetCollection(collectionID)
+	if err != nil {
+		return err
+	}
+	channel, err := s.GetChannel(collection.ChannelID)
+	if err != nil {
+		return err
+	}
+	if channel.UserID == nil || *channel.UserID != user.ID {
+		return apperr.Forbidden("blog.collection_forbidden", "You do not have permission to delete this collection")
+	}
+	return s.repo.DeleteCollection(collection.ID)
+}
+
+func (s *Service) CountPostLikes(postID uuid.UUID) (int64, error) {
+	if postID == uuid.Nil {
+		return 0, apperr.BadRequest("validation.invalid_request", "post_id is required")
+	}
+	return s.repo.CountPostLikes(postID)
+}
+
+func (s *Service) ListBookmarks(user authctx.CurrentUser, folderID *uuid.UUID) ([]model.Bookmark, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	return s.repo.ListBookmarks(user.ID, folderID)
+}
+
+func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, folderID *uuid.UUID) (model.Bookmark, error) {
+	if user.ID == uuid.Nil {
+		return model.Bookmark{}, apperr.Unauthorized("Login required")
+	}
+	post, err := s.repo.GetPost(postID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Bookmark{}, apperr.NotFound("blog.post_not_found", "Post not found")
+		}
+		return model.Bookmark{}, err
+	}
+	if post.Status == "draft" {
+		if post.UserID != user.ID {
+			return model.Bookmark{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+		}
+	} else {
+		allowed, err := canViewPublishedPost(s.db, &user.ID, post)
+		if err != nil {
+			return model.Bookmark{}, err
+		}
+		if !allowed {
+			return model.Bookmark{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+		}
+	}
+	if folderID != nil && *folderID != uuid.Nil {
+		var folder model.BookmarkFolder
+		if err := s.db.Where("id = ? AND user_id = ?", *folderID, user.ID).First(&folder).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return model.Bookmark{}, apperr.NotFound("blog.bookmark_folder_not_found", "Bookmark folder not found")
+			}
+			return model.Bookmark{}, err
+		}
+	}
+	bookmark := model.Bookmark{UserID: user.ID, PostID: postID, BookmarkFolderID: folderID}
+	if err := s.db.Where(model.Bookmark{UserID: user.ID, PostID: postID}).FirstOrCreate(&bookmark).Error; err != nil {
+		return model.Bookmark{}, err
+	}
+	return bookmark, nil
+}
+
+func (s *Service) DeleteBookmark(user authctx.CurrentUser, bookmarkID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.repo.DeleteBookmark(bookmarkID, user.ID)
+}
+
+func (s *Service) ListBookmarkFolders(user authctx.CurrentUser) ([]model.BookmarkFolder, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	return s.repo.ListBookmarkFolders(user.ID)
+}
+
+func (s *Service) CreateBookmarkFolder(user authctx.CurrentUser, name string) (model.BookmarkFolder, error) {
+	if user.ID == uuid.Nil {
+		return model.BookmarkFolder{}, apperr.Unauthorized("Login required")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return model.BookmarkFolder{}, apperr.BadRequest("validation.invalid_request", "name is required")
+	}
+	folder := model.BookmarkFolder{UserID: user.ID, Name: name}
+	if err := s.repo.CreateBookmarkFolder(&folder); err != nil {
+		return model.BookmarkFolder{}, err
+	}
+	return folder, nil
+}
+
+func (s *Service) DeleteBookmarkFolder(user authctx.CurrentUser, folderID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.repo.DeleteBookmarkFolder(folderID, user.ID)
+}
+
+func (s *Service) ListComments(postID uuid.UUID, viewerID *uuid.UUID) ([]model.Comment, error) {
+	post, err := s.repo.GetPost(postID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperr.NotFound("blog.post_not_found", "Post not found")
+		}
+		return nil, err
+	}
+	if post.Status == "draft" {
+		if viewerID == nil || post.UserID != *viewerID {
+			return nil, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+		}
+	} else {
+		allowed, err := canViewPublishedPost(s.db, viewerID, post)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
+			return nil, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+		}
+	}
+
+	var comments []model.Comment
+	if err := s.db.Preload("User").Where("target_type = ? AND target_id = ? AND status = ?", "post", postID, "visible").Order("created_at ASC").Find(&comments).Error; err != nil {
+		return nil, err
+	}
+	return comments, nil
+}
+
+func (s *Service) CreateComment(user *authctx.CurrentUser, postID uuid.UUID, guestName string, content string, timestampSec *int) (model.Comment, error) {
+	post, err := s.repo.GetPost(postID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Comment{}, apperr.NotFound("blog.post_not_found", "Post not found")
+		}
+		return model.Comment{}, err
+	}
+	if !post.AllowComments {
+		return model.Comment{}, apperr.Forbidden("blog.comments_disabled", "Comments are disabled for this post")
+	}
+
+	var viewerID *uuid.UUID
+	if user != nil && user.ID != uuid.Nil {
+		viewerID = &user.ID
+	}
+	if post.Status == "draft" {
+		if viewerID == nil || post.UserID != *viewerID {
+			return model.Comment{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+		}
+	} else {
+		allowed, err := canViewPublishedPost(s.db, viewerID, post)
+		if err != nil {
+			return model.Comment{}, err
+		}
+		if !allowed {
+			return model.Comment{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+		}
+	}
+
+	comment := model.Comment{
+		TargetType:   "post",
+		TargetID:     post.ID,
+		UserID:       model.NullableUserUUID{},
+		GuestName:    strings.TrimSpace(guestName),
+		Content:      strings.TrimSpace(content),
+		TimestampSec: timestampSec,
+		Status:       "visible",
+	}
+	if user != nil && user.ID != uuid.Nil {
+		comment.UserID = model.NewNullableUserUUID(user.ID)
+	}
+	if err := s.db.Create(&comment).Error; err != nil {
+		return model.Comment{}, err
+	}
+	return comment, nil
+}
+
+func (s *Service) DeleteComment(user authctx.CurrentUser, commentID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	var comment model.Comment
+	if err := s.db.First(&comment, "id = ?", commentID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.NotFound("blog.comment_not_found", "Comment not found")
+		}
+		return err
+	}
+	isPostOwner := false
+	if comment.TargetType == "post" {
+		var post model.Post
+		if err := s.db.Select("user_id").Where("id = ?", comment.TargetID).First(&post).Error; err == nil {
+			isPostOwner = post.UserID == user.ID
+		}
+	}
+	if !comment.UserID.Valid {
+		if !isPostOwner {
+			return apperr.Forbidden("blog.comment_forbidden", "You don't have permission to delete this comment")
+		}
+	} else if comment.UserID.UUID != user.ID && !isPostOwner {
+		return apperr.Forbidden("blog.comment_forbidden", "You don't have permission to delete this comment")
+	}
+	return s.db.Delete(&comment).Error
+}
+
+func (s *Service) ToggleLike(user authctx.CurrentUser, targetType string, targetID uuid.UUID, isLike bool) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	switch targetType {
+	case "post":
+		post, err := s.repo.GetPost(targetID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("blog.post_not_found", "Post not found")
+			}
+			return err
+		}
+		if post.Status == "draft" {
+			if post.UserID != user.ID {
+				return apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+			}
+		} else {
+			allowed, err := canViewPublishedPost(s.db, &user.ID, post)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+			}
+		}
+	case "comment":
+		var comment model.Comment
+		if err := s.db.First(&comment, targetID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("blog.comment_not_found", "Comment not found")
+			}
+			return err
+		}
+	default:
+		return apperr.BadRequest("validation.invalid_request", "target_type is invalid")
+	}
+
+	if isLike {
+		like := model.Like{UserID: user.ID, TargetType: targetType, TargetID: targetID}
+		return s.db.Where(model.Like{UserID: user.ID, TargetType: targetType, TargetID: targetID}).FirstOrCreate(&like).Error
+	}
+	return s.db.Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, targetType, targetID).Delete(&model.Like{}).Error
+}
+
 func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName string) (model.Channel, error) {
 	if userID == uuid.Nil {
 		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "user_id is required")

@@ -19,11 +19,13 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.GET("/categories", h.listCategories)
 	group.GET("/categories/:categoryID", h.getCategory)
+	group.GET("/search", h.searchTopics)
 	group.GET("/topics", h.listTopics)
 	group.GET("/topics/:topicID", h.getTopic)
 	group.POST("/topics", h.createTopic)
 	group.PUT("/topics/:topicID", h.updateTopic)
 	group.DELETE("/topics/:topicID", h.deleteTopic)
+	group.POST("/category-requests", h.createCategoryRequest)
 	group.GET("/topics/:topicID/replies", h.listReplies)
 	group.POST("/replies", h.createReply)
 	group.PUT("/replies/:replyID", h.updateReply)
@@ -74,6 +76,20 @@ func (h *Handler) listTopics(c *gin.Context) {
 	httpx.List(c, topics, query.Page, query.PageSize, total)
 }
 
+func (h *Handler) searchTopics(c *gin.Context) {
+	query := ListTopicsQuery{
+		Search:   c.Query("q"),
+		Page:     page(c),
+		PageSize: pageSize(c),
+	}
+	topics, total, err := h.service.ListTopics(query)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, topics, query.Page, query.PageSize, total)
+}
+
 func (h *Handler) getTopic(c *gin.Context) {
 	topicID, err := uuid.Parse(c.Param("topicID"))
 	if err != nil {
@@ -105,6 +121,25 @@ func (h *Handler) createTopic(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusCreated, topic)
+}
+
+func (h *Handler) createCategoryRequest(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req CreateCategoryRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	request, err := h.service.CreateCategoryRequest(user, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, request)
 }
 
 func (h *Handler) updateTopic(c *gin.Context) {

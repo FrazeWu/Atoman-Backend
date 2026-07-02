@@ -18,12 +18,20 @@ type Handler struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
+	group.POST("/topics/:topicID/close", h.lockTopic)
+	group.POST("/topics/:topicID/feature", h.pinTopic)
+	group.DELETE("/topics/:topicID/feature", h.unpinTopic)
+	group.POST("/report", h.createReport)
+	group.GET("/category-requests", h.listCategoryRequests)
+	group.POST("/category-requests/:requestID/review", h.reviewCategoryRequestLegacy)
 	group.POST("/topics/:topicID/lock", h.lockTopic)
 	group.POST("/topics/:topicID/unlock", h.unlockTopic)
 	group.POST("/topics/:topicID/pin", h.pinTopic)
 	group.POST("/topics/:topicID/unpin", h.unpinTopic)
 	group.POST("/topics/:topicID/hide", h.hideTopic)
 	group.POST("/topics/:topicID/restore", h.restoreTopic)
+	group.POST("/replies/:replyID/solve", h.solveReply)
+	group.DELETE("/replies/:replyID/solve", h.unsolveReply)
 	group.POST("/replies/:replyID/hide", h.hideReply)
 	group.POST("/replies/:replyID/restore", h.restoreReply)
 	group.GET("/reports", h.listReports)
@@ -68,6 +76,14 @@ func (h *Handler) restoreReply(c *gin.Context) {
 	h.handleReplyAction(c, h.service.RestoreReply)
 }
 
+func (h *Handler) solveReply(c *gin.Context) {
+	h.handleReplyAction(c, h.service.SolveReply)
+}
+
+func (h *Handler) unsolveReply(c *gin.Context) {
+	h.handleReplyAction(c, h.service.UnsolveReply)
+}
+
 func (h *Handler) listReports(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -85,6 +101,74 @@ func (h *Handler) listReports(c *gin.Context) {
 		return
 	}
 	httpx.List(c, reports, page, pageSize, total)
+}
+
+func (h *Handler) createReport(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var raw struct {
+		TargetType string `json:"target_type"`
+		TargetID   string `json:"target_id"`
+		Reason     string `json:"reason"`
+		Note       string `json:"note"`
+	}
+	if err := c.ShouldBindJSON(&raw); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	targetID, err := parseUUIDParam(raw.TargetID, "target_id")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	report, err := h.service.CreateReport(user, CreateReportRequest{
+		TargetType: raw.TargetType,
+		TargetID:   targetID,
+		Reason:     raw.Reason,
+		Note:       raw.Note,
+	})
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, report)
+}
+
+func (h *Handler) listCategoryRequests(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	requests, err := h.service.ListCategoryRequests(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, requests)
+}
+
+func (h *Handler) reviewCategoryRequestLegacy(c *gin.Context) {
+	var req struct {
+		Action     string `json:"action"`
+		ReviewNote string `json:"review_note"`
+		Color      string `json:"color"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	switch req.Action {
+	case "approve":
+		h.approveCategoryRequest(c)
+	case "reject":
+		h.rejectCategoryRequest(c)
+	default:
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "action must be approve or reject"))
+	}
 }
 
 func (h *Handler) resolveReport(c *gin.Context) {

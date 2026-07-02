@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -26,6 +27,28 @@ type Handler struct {
 
 type setRatingRequest struct {
 	Score int `json:"score"`
+}
+
+type channelInput struct {
+	Name        string `json:"name" binding:"required"`
+	Slug        string `json:"slug"`
+	Description string `json:"description"`
+	CoverURL    string `json:"cover_url"`
+}
+
+type collectionInput struct {
+	Name        string `json:"name" binding:"required"`
+	Description string `json:"description"`
+	CoverURL    string `json:"cover_url"`
+}
+
+type bookmarkInput struct {
+	PostID           uuid.UUID  `json:"post_id" binding:"required"`
+	BookmarkFolderID *uuid.UUID `json:"bookmark_folder_id"`
+}
+
+type bookmarkFolderInput struct {
+	Name string `json:"name" binding:"required"`
 }
 
 type postInput struct {
@@ -80,6 +103,33 @@ type blogDraftResponse struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
+	group.GET("/channels", h.listChannels)
+	group.GET("/channels/:id", h.getChannel)
+	group.GET("/channels/:id/collections", h.getChannelCollections)
+	group.GET("/channels/slug/:slug", h.getChannelBySlug)
+	group.GET("/channels/slug/:slug/collections", h.getChannelCollectionsBySlug)
+	group.GET("/channels/slug/:slug/rss/article", h.getChannelArticleRSS)
+	group.GET("/collections", h.listUserCollections)
+	group.GET("/collections/:id", h.getCollection)
+	group.POST("/channels/ensure-default", h.ensureDefaultChannel)
+	group.POST("/channels", h.createChannel)
+	group.PUT("/channels/:id", h.updateChannel)
+	group.DELETE("/channels/:id", h.deleteChannel)
+	group.POST("/channels/:id/collections", h.createCollection)
+	group.PUT("/collections/:id", h.updateCollection)
+	group.DELETE("/collections/:id", h.deleteCollection)
+	group.GET("/posts/:id/likes/count", h.getPostLikesCount)
+	group.GET("/posts/:id/comments", h.listComments)
+	group.POST("/posts/:id/comments", h.createComment)
+	group.DELETE("/comments/:id", h.deleteComment)
+	group.POST("/likes", h.createLike)
+	group.DELETE("/likes", h.deleteLike)
+	group.GET("/bookmarks", h.listBookmarks)
+	group.POST("/bookmarks", h.createBookmark)
+	group.DELETE("/bookmarks/:id", h.deleteBookmark)
+	group.GET("/bookmark-folders", h.listBookmarkFolders)
+	group.POST("/bookmark-folders", h.createBookmarkFolder)
+	group.DELETE("/bookmark-folders/:id", h.deleteBookmarkFolder)
 	group.GET("/posts", h.listPosts)
 	group.GET("/posts/drafts", h.getDrafts)
 	group.GET("/posts/:id", h.getPost)
@@ -97,6 +147,530 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.PUT("/drafts", h.putBlogDraft)
 	group.DELETE("/drafts", h.deleteBlogDraft)
 	group.PUT("/posts/:id/rating", h.setRating)
+}
+
+func (h *Handler) listChannels(c *gin.Context) {
+	var userID *uuid.UUID
+	if raw := strings.TrimSpace(c.Query("user_id")); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "user_id must be a valid uuid"))
+			return
+		}
+		userID = &parsed
+	}
+	channels, err := h.service.ListChannels(userID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, channels)
+}
+
+func (h *Handler) getChannel(c *gin.Context) {
+	channelID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	channel, err := h.service.GetChannel(channelID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, channel)
+}
+
+func (h *Handler) getChannelCollections(c *gin.Context) {
+	channelID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	collections, err := h.service.ListCollectionsByChannel(channelID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, collections)
+}
+
+func (h *Handler) getChannelBySlug(c *gin.Context) {
+	channel, err := h.service.GetChannelBySlug(c.Param("slug"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, channel)
+}
+
+func (h *Handler) getChannelCollectionsBySlug(c *gin.Context) {
+	_, collections, err := h.service.ListCollectionsByChannelSlug(c.Param("slug"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, collections)
+}
+
+func (h *Handler) getCollection(c *gin.Context) {
+	collectionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	collection, err := h.service.GetCollection(collectionID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, collection)
+}
+
+func (h *Handler) getChannelArticleRSS(c *gin.Context) {
+	channel, err := h.service.GetChannelBySlug(c.Param("slug"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	var posts []model.Post
+	if err := h.service.db.Where("channel_id = ? AND status = ?", channel.ID, "published").
+		Preload("User").
+		Order("created_at DESC").
+		Limit(50).
+		Find(&posts).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	scheme := c.Request.Header.Get("X-Forwarded-Proto")
+	if scheme == "" {
+		scheme = "https"
+	}
+	siteURL := fmt.Sprintf("%s://%s", scheme, c.Request.Host)
+
+	c.Header("Content-Type", "application/rss+xml; charset=utf-8")
+	c.String(http.StatusOK, buildArticleRSS(channel, posts, siteURL))
+}
+
+func (h *Handler) listUserCollections(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	collections, err := h.service.ListUserCollections(user.ID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, collections)
+}
+
+func (h *Handler) ensureDefaultChannel(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	channel, err := h.service.CreateDefaultChannelForUser(user.ID, user.Username)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, channel)
+}
+
+func (h *Handler) createChannel(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req channelInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	channel, err := h.service.CreateChannel(user, req.Name, req.Slug, req.Description, req.CoverURL)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, channel)
+}
+
+func (h *Handler) updateChannel(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	channelID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	var req channelInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	channel, err := h.service.UpdateChannel(user, channelID, req.Name, req.Slug, req.Description, req.CoverURL)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, channel)
+}
+
+func (h *Handler) deleteChannel(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	channelID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	if err := h.service.DeleteChannel(user, channelID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "Channel deleted"})
+}
+
+func (h *Handler) createCollection(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	channelID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	var req collectionInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	collection, err := h.service.CreateCollection(user, channelID, req.Name, req.Description, req.CoverURL)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, collection)
+}
+
+func (h *Handler) updateCollection(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	collectionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	var req collectionInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	collection, err := h.service.UpdateCollection(user, collectionID, req.Name, req.Description, req.CoverURL)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, collection)
+}
+
+func (h *Handler) deleteCollection(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	collectionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	if err := h.service.DeleteCollection(user, collectionID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "Collection deleted"})
+}
+
+func (h *Handler) getPostLikesCount(c *gin.Context) {
+	postID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	count, err := h.service.CountPostLikes(postID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"count": count})
+}
+
+func (h *Handler) listComments(c *gin.Context) {
+	postID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	var viewerID *uuid.UUID
+	if user, ok := authctx.Current(c); ok && user.ID != uuid.Nil {
+		viewerID = &user.ID
+	}
+	comments, err := h.service.ListComments(postID, viewerID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, comments)
+}
+
+func (h *Handler) createComment(c *gin.Context) {
+	postID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	var req struct {
+		GuestName    string `json:"guest_name"`
+		Content      string `json:"content"`
+		TimestampSec *int   `json:"timestamp_sec"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	var current *authctx.CurrentUser
+	if user, ok := authctx.Current(c); ok {
+		current = &user
+	}
+	comment, err := h.service.CreateComment(current, postID, req.GuestName, req.Content, req.TimestampSec)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, comment)
+}
+
+func (h *Handler) deleteComment(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	commentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	if err := h.service.DeleteComment(user, commentID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
+}
+
+func (h *Handler) createLike(c *gin.Context) {
+	h.toggleLike(c, true)
+}
+
+func (h *Handler) deleteLike(c *gin.Context) {
+	h.toggleLike(c, false)
+}
+
+func (h *Handler) toggleLike(c *gin.Context, isLike bool) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req struct {
+		TargetType string `json:"target_type"`
+		TargetID   string `json:"target_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	targetID, err := uuid.Parse(req.TargetID)
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "target_id must be a valid uuid"))
+		return
+	}
+	if err := h.service.ToggleLike(user, req.TargetType, targetID, isLike); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
+}
+
+func (h *Handler) listBookmarks(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var folderID *uuid.UUID
+	if raw := strings.TrimSpace(c.Query("folder_id")); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "folder_id must be a valid uuid"))
+			return
+		}
+		folderID = &parsed
+	}
+	bookmarks, err := h.service.ListBookmarks(user, folderID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, bookmarks)
+}
+
+func (h *Handler) createBookmark(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req bookmarkInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	bookmark, err := h.service.CreateBookmark(user, req.PostID, req.BookmarkFolderID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, bookmark)
+}
+
+func (h *Handler) deleteBookmark(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	bookmarkID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	if err := h.service.DeleteBookmark(user, bookmarkID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
+}
+
+func (h *Handler) listBookmarkFolders(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	folders, err := h.service.ListBookmarkFolders(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, folders)
+}
+
+func (h *Handler) createBookmarkFolder(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req bookmarkFolderInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	folder, err := h.service.CreateBookmarkFolder(user, req.Name)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, folder)
+}
+
+func (h *Handler) deleteBookmarkFolder(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	folderID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+		return
+	}
+	if err := h.service.DeleteBookmarkFolder(user, folderID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
+}
+
+func buildArticleRSS(ch model.Channel, posts []model.Post, siteURL string) string {
+	var items strings.Builder
+	for _, p := range posts {
+		pubDate := p.CreatedAt.Format(time.RFC1123Z)
+		summary := p.Summary
+		if summary == "" && len(p.Content) > 280 {
+			summary = p.Content[:280] + "…"
+		} else if summary == "" {
+			summary = p.Content
+		}
+		authorName := ""
+		if p.User != nil {
+			authorName = p.User.DisplayName
+			if authorName == "" {
+				authorName = p.User.Username
+			}
+		}
+		items.WriteString(fmt.Sprintf(`
+    <item>
+      <title><![CDATA[%s]]></title>
+      <link>%s/post/%s</link>
+      <guid isPermaLink="true">%s/post/%s</guid>
+      <pubDate>%s</pubDate>
+      <description><![CDATA[%s]]></description>
+      <author>%s</author>
+    </item>`, p.Title, siteURL, p.ID, siteURL, p.ID, pubDate, summary, authorName))
+	}
+
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title><![CDATA[%s]]></title>
+    <link>%s/channel/%s</link>
+    <description><![CDATA[%s]]></description>
+    <language>zh-cn</language>
+    <lastBuildDate>%s</lastBuildDate>
+    %s
+  </channel>
+</rss>`, ch.Name, siteURL, ch.Slug, ch.Description,
+		time.Now().Format(time.RFC1123Z), items.String())
 }
 
 // listPosts godoc

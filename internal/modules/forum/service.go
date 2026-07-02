@@ -264,6 +264,27 @@ func (s *Service) DeleteDraft(user authctx.CurrentUser, draftID uuid.UUID) error
 	return s.repo.DeleteDraft(user.ID, draftID)
 }
 
+func (s *Service) CreateCategoryRequest(user authctx.CurrentUser, req CreateCategoryRequestRequest) (model.CategoryRequest, error) {
+	if user.ID == uuid.Nil {
+		return model.CategoryRequest{}, apperr.Unauthorized("Login required")
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return model.CategoryRequest{}, apperr.BadRequest("validation.invalid_request", "name is required")
+	}
+	request := model.CategoryRequest{
+		UserID:      user.ID,
+		Name:        name,
+		Description: strings.TrimSpace(req.Description),
+		Reason:      strings.TrimSpace(req.Reason),
+		Status:      "pending",
+	}
+	if err := s.db.Create(&request).Error; err != nil {
+		return model.CategoryRequest{}, err
+	}
+	return request, nil
+}
+
 func requireTopicOwner(user authctx.CurrentUser, ownerID uuid.UUID) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")

@@ -81,6 +81,10 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("blog interaction unique indexes migration: %w", err)
 	}
 
+	if err := migrations.RunBlogDefaultUniqueIndexes(db); err != nil {
+		return fmt.Errorf("blog default unique indexes migration: %w", err)
+	}
+
 	if err := migrations.RunContentProtectionLiveUniqueIndex(db); err != nil {
 		return fmt.Errorf("content protection live unique index migration: %w", err)
 	}
@@ -113,6 +117,10 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("music artist extended fields migration: %w", err)
 	}
 
+	if err := migrations.RunMusicBookmarksPlaylistsMigration(db); err != nil {
+		return fmt.Errorf("music bookmarks playlists migration: %w", err)
+	}
+
 	return nil
 }
 
@@ -140,7 +148,15 @@ func migrateSchema(db *gorm.DB) error {
 		&model.MusicEditVote{},
 		&model.MusicEditDecision{},
 		&model.MusicEditChange{},
+		&model.ArtistBookmark{},
+		&model.AlbumBookmark{},
+		&model.SongBookmark{},
+		&model.Playlist{},
+		&model.PlaylistSong{},
 		&model.BlogPostRating{},
+		&model.Bookmark{},
+		&model.BookmarkFolder{},
+		&model.ChannelBookmark{},
 		&model.SiteSetting{},
 		&model.FeedSource{},
 		&model.Subscription{},
@@ -166,6 +182,14 @@ func migrateSchema(db *gorm.DB) error {
 		&model.ForumReport{},
 		&model.CategoryRequest{},
 		&model.ForumModeratorAssignment{},
+		&model.Video{},
+		&model.VideoBookmark{},
+		&model.VideoProcessingJob{},
+		&model.VideoTag{},
+		&model.VideoCollection{},
+		&model.VideoTagRelation{},
+		&model.PodcastEpisode{},
+		&model.PodcastEpisodeBookmark{},
 		&model.Debate{},
 		&model.Argument{},
 		&model.DebateVote{},

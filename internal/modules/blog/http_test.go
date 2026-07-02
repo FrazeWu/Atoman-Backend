@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -30,6 +31,10 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.PostCollection{},
 		&model.BlogPostRating{},
 		&model.BlogDraft{},
+		&model.Comment{},
+		&model.Like{},
+		&model.Bookmark{},
+		&model.BookmarkFolder{},
 		&model.AuditLog{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
@@ -69,6 +74,354 @@ func TestRegisterRoutesCreatePostRequiresCurrentUser(t *testing.T) {
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRegisterRoutesMountsChannelReadEndpointsAndEnsureDefault(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	secondary := model.Collection{ChannelID: channel.ID, Name: "Featured", Description: "featured"}
+	if err := db.Create(&secondary).Error; err != nil {
+		t.Fatalf("create secondary collection: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+
+	for _, path := range []string{
+		"/api/v1/blog/channels",
+		"/api/v1/blog/channels?user_id=" + user.ID.String(),
+		"/api/v1/blog/channels/" + channel.ID.String(),
+		"/api/v1/blog/channels/" + channel.ID.String() + "/collections",
+		"/api/v1/blog/channels/slug/" + channel.Slug,
+		"/api/v1/blog/channels/slug/" + channel.Slug + "/collections",
+		"/api/v1/blog/collections/" + secondary.ID.String(),
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusNotFound {
+			t.Fatalf("expected route %s to be mounted, got 404: %s", path, w.Body.String())
+		}
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/channels/ensure-default", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected ensure-default route to be mounted, got 404: %s", w.Body.String())
+	}
+}
+
+func TestRegisterRoutesMountsChannelAndCollectionMutationEndpoints(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	r := newBlogHTTPRouter(service, &user)
+
+	createChannelRaw := bytes.NewBufferString(`{"name":"Studio Channel","slug":"studio-channel","description":"desc"}`)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/channels", createChannelRaw)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected create channel route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	var createdChannel struct {
+		Data model.Channel `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &createdChannel); err != nil {
+		t.Fatalf("decode create channel response: %v", err)
+	}
+	if createdChannel.Data.ID == uuid.Nil {
+		t.Fatalf("expected created channel id, got %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/blog/channels/"+createdChannel.Data.ID.String(), bytes.NewBufferString(`{"name":"Studio Channel Updated","slug":"studio-channel-updated"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected update channel route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/blog/channels/"+createdChannel.Data.ID.String()+"/collections", bytes.NewBufferString(`{"name":"Issues","description":"desc"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected create collection route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	var createdCollection struct {
+		Data model.Collection `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &createdCollection); err != nil {
+		t.Fatalf("decode create collection response: %v", err)
+	}
+	if createdCollection.Data.ID == uuid.Nil {
+		t.Fatalf("expected created collection id, got %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/blog/collections", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected list user collections route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/api/v1/blog/collections/"+createdCollection.Data.ID.String(), bytes.NewBufferString(`{"name":"Issues Updated","description":"updated"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected update collection route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte("secret"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Model(&model.User{}).Where("uuid = ?", user.ID).Update("password", string(passwordHash)).Error; err != nil {
+		t.Fatalf("update password: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/blog/channels/"+createdChannel.Data.ID.String(), bytes.NewBufferString(`{"password":"secret"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected delete channel route to be mounted, got 404: %s", w.Body.String())
+	}
+}
+
+func TestRegisterRoutesMountsChannelArticleRSS(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Published", Content: "Body", Summary: "Summary", Status: "published", Visibility: "public"}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create published post: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/channels/slug/"+channel.Slug+"/rss/article", nil)
+	req.Host = "example.com"
+	r.ServeHTTP(w, req)
+
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected article rss route to be mounted, got 404: %s", w.Body.String())
+	}
+	if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "application/rss+xml") {
+		t.Fatalf("expected rss content-type, got %q", contentType)
+	}
+	if !strings.Contains(w.Body.String(), "<rss") {
+		t.Fatalf("expected rss body, got %s", w.Body.String())
+	}
+}
+
+func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Published", Content: "Body", Status: "published", Visibility: "public"}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String()+"/likes/count", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected likes count route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	folder := model.BookmarkFolder{UserID: user.ID, Name: "Favorites"}
+	if err := db.Create(&folder).Error; err != nil {
+		t.Fatalf("create bookmark folder: %v", err)
+	}
+	bookmark := model.Bookmark{UserID: user.ID, PostID: post.ID, BookmarkFolderID: &folder.ID}
+	if err := db.Create(&bookmark).Error; err != nil {
+		t.Fatalf("create bookmark: %v", err)
+	}
+
+	for _, path := range []string{
+		"/api/v1/blog/bookmarks",
+		"/api/v1/blog/bookmarks?folder_id=" + folder.ID.String(),
+		"/api/v1/blog/bookmark-folders",
+	} {
+		w = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, path, nil)
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusNotFound {
+			t.Fatalf("expected route %s to be mounted, got 404: %s", path, w.Body.String())
+		}
+	}
+}
+
+func TestRegisterRoutesMountsBookmarkAndFolderMutationEndpoints(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Published", Content: "Body", Status: "published", Visibility: "public"}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	post2 := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Published 2", Content: "Body", Status: "published", Visibility: "public"}
+	if err := db.Create(&post2).Error; err != nil {
+		t.Fatalf("create second post: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmark-folders", bytes.NewBufferString(`{"name":"Favorites"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected create folder route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	var folderResp struct {
+		Data model.BookmarkFolder `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &folderResp); err != nil {
+		t.Fatalf("decode folder response: %v", err)
+	}
+	if folderResp.Data.ID == uuid.Nil {
+		t.Fatalf("expected bookmark folder id, got %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"post_id":"`+post2.ID.String()+`","bookmark_folder_id":"`+folderResp.Data.ID.String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected create bookmark route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	var bookmarkResp struct {
+		Data model.Bookmark `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &bookmarkResp); err != nil {
+		t.Fatalf("decode bookmark response: %v", err)
+	}
+	if bookmarkResp.Data.ID == uuid.Nil {
+		t.Fatalf("expected bookmark id, got %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"post_id":"`+post.ID.String()+`","bookmark_folder_id":"`+folderResp.Data.ID.String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code >= http.StatusBadRequest {
+		t.Fatalf("expected second bookmark create to succeed or be idempotent, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var bookmarkForFolderResp struct {
+		Data model.Bookmark `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &bookmarkForFolderResp); err != nil {
+		t.Fatalf("decode second bookmark response: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/blog/bookmarks/"+bookmarkResp.Data.ID.String(), nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected delete bookmark route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/blog/bookmark-folders/"+folderResp.Data.ID.String(), nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected delete folder route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	var remainingBookmark model.Bookmark
+	if err := db.Unscoped().First(&remainingBookmark, "id = ?", bookmarkForFolderResp.Data.ID).Error; err != nil {
+		t.Fatalf("reload bookmark: %v", err)
+	}
+	if remainingBookmark.BookmarkFolderID != nil {
+		t.Fatalf("expected bookmark folder to be cleared after folder delete, got %#v", remainingBookmark.BookmarkFolderID)
+	}
+}
+
+func TestRegisterRoutesMountsCommentAndLikeMutationEndpoints(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Published", Content: "Body", Status: "published", Visibility: "public", AllowComments: true}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+
+	for _, path := range []string{
+		"/api/v1/blog/posts/" + post.ID.String() + "/comments",
+		"/api/v1/blog/posts/" + post.ID.String() + "/likes/count",
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusNotFound {
+			t.Fatalf("expected route %s to be mounted, got 404: %s", path, w.Body.String())
+		}
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/comments", bytes.NewBufferString(`{"content":"Nice post"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected create comment route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	var createdComment struct {
+		Data model.Comment `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &createdComment); err != nil {
+		t.Fatalf("decode comment response: %v", err)
+	}
+	if createdComment.Data.ID == uuid.Nil {
+		t.Fatalf("expected comment id, got %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/blog/likes", bytes.NewBufferString(`{"target_type":"post","target_id":"`+post.ID.String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected like route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/blog/likes", bytes.NewBufferString(`{"target_type":"post","target_id":"`+post.ID.String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected unlike route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/blog/comments/"+createdComment.Data.ID.String(), nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected delete comment route to be mounted, got 404: %s", w.Body.String())
 	}
 }
 

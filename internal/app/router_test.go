@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"atoman/internal/collab"
+	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
@@ -77,6 +78,56 @@ func TestRegisterV1RoutesMountsMusicSubmitEdit(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRegisterV1RoutesMusicBookmarksAcceptBearerAuthWithoutExplicitRouteMiddleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{},
+		&model.Artist{},
+		&model.ArtistBookmark{},
+	)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+
+	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	artist := model.Artist{Name: "Bookmarked Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	if err := db.Create(&model.ArtistBookmark{UserID: user.UUID, ArtistID: artist.ID}).Error; err != nil {
+		t.Fatalf("create artist bookmark: %v", err)
+	}
+
+	r := gin.New()
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/artists", nil)
+	req.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []struct {
+			ArtistID string `json:"artist_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].ArtistID != artist.ID.String() {
+		t.Fatalf("unexpected bookmark payload: %s", w.Body.String())
 	}
 }
 
@@ -522,10 +573,100 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/forum/search?q=hello", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum search route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
 	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/topics/"+topic.ID.String()+"/bookmark", nil)
 	r.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
 		t.Fatalf("expected forum engagement route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	reply := model.ForumReply{TopicID: topic.ID, UserID: user.UUID, Content: "Reply"}
+	if err := db.Create(&reply).Error; err != nil {
+		t.Fatalf("create forum reply: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/replies/"+reply.ID.String()+"/like", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum reply like route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/topics/"+topic.ID.String()+"/close", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum close route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/topics/"+topic.ID.String()+"/feature", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum feature route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/forum/topics/"+topic.ID.String()+"/feature", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum unfeature route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/replies/"+reply.ID.String()+"/solve", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum solve route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/forum/replies/"+reply.ID.String()+"/solve", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum unsolve route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/category-requests", bytes.NewBufferString(`{"name":"Suggestions","description":"desc","reason":"please"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum category request create route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/forum/category-requests", nil)
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum category request list route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	request := model.CategoryRequest{UserID: user.UUID, Name: "Pending", Description: "desc", Reason: "need", Status: "pending"}
+	if err := db.Create(&request).Error; err != nil {
+		t.Fatalf("create category request: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/category-requests/"+request.ID.String()+"/review", bytes.NewBufferString(`{"action":"reject"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum category request review route to be mounted, got 404: %s", w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/report", bytes.NewBufferString(`{"target_type":"topic","target_id":"`+topic.ID.String()+`","reason":"spam"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected forum report route to be mounted, got 404: %s", w.Body.String())
 	}
 }
 
@@ -563,6 +704,31 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created struct {
+		Data struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode debate create response: %v", err)
+	}
+	if created.Data.ID == "" {
+		t.Fatalf("expected created debate id, got body %s", w.Body.String())
+	}
+
+	for _, path := range []string{
+		"/api/v1/debate/topics",
+		"/api/v1/debate/topics/" + created.Data.ID,
+		"/api/v1/debate/topics/search?q=Router",
+	} {
+		w = httptest.NewRecorder()
+		req = httptest.NewRequest(http.MethodGet, path, nil)
+		r.ServeHTTP(w, req)
+		if w.Code == http.StatusNotFound {
+			t.Fatalf("expected debate route %s to be mounted, got 404: %s", path, w.Body.String())
+		}
 	}
 
 	w = httptest.NewRecorder()

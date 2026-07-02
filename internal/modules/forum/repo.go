@@ -2,6 +2,7 @@ package forum
 
 import (
 	"atoman/internal/model"
+	"strings"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -42,6 +43,9 @@ func (r *Repo) ListTopics(query ListTopicsQuery) ([]model.ForumTopic, int64, err
 	db := r.db.Model(&model.ForumTopic{})
 	if query.CategoryID != uuid.Nil {
 		db = db.Where("category_id = ?", query.CategoryID)
+	}
+	if search := strings.TrimSpace(query.Search); search != "" {
+		db = db.Where("(title LIKE ? OR content LIKE ?)", "%"+search+"%", "%"+search+"%")
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
