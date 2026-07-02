@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,7 +14,10 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/storage"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -50,6 +54,7 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 			dto.DerivedTracks = append(dto.DerivedTracks, AlbumImportDTOTrack{
 				Title:    stringValue(trackMap["title"]),
 				AudioKey: stringValue(trackMap["audio_key"]),
+				AudioURL: stringValue(trackMap["audio_url"]),
 				Origin:   stringValue(trackMap["origin"]),
 			})
 		}
@@ -119,7 +124,7 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 	if err != nil {
 		return model.AlbumImportSession{}, err
 	}
-	payloadPatch, err := deriveAlbumImportPayload(strings.TrimSpace(archiveName), body)
+	payloadPatch, err := s.deriveAlbumImportPayload(user, strings.TrimSpace(archiveName), body)
 	if err != nil {
 		return model.AlbumImportSession{}, err
 	}
@@ -198,28 +203,57 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			Artist: input.Artist,
 			Album:  input.Album,
 		}
-		if strings.TrimSpace(payload.Artist.Name) == "" {
-			return apperr.BadRequest("validation.invalid_request", "artist name is required")
-		}
 		if strings.TrimSpace(payload.Album.Title) == "" {
 			return apperr.BadRequest("validation.invalid_request", "album title is required")
 		}
-
-		artist := model.Artist{
-			Name:           strings.TrimSpace(payload.Artist.Name),
-			LegalName:      strings.TrimSpace(payload.Artist.LegalName),
-			StageNamesJSON: mustMarshalStageNames(payload.Artist.StageNames),
-			BirthPlace:     strings.TrimSpace(payload.Artist.BirthPlace),
-			EntryStatus:    "open",
+		var artist model.Artist
+		artistID := strings.TrimSpace(input.ArtistID)
+		if artistID != "" {
+			parsedArtistID, err := uuid.Parse(artistID)
+			if err != nil {
+				return apperr.BadRequest("validation.invalid_request", "artist_id must be a valid UUID")
+			}
+			if err := tx.First(&artist, "id = ?", parsedArtistID).Error; err != nil {
+				if err == gorm.ErrRecordNotFound {
+					return apperr.NotFound("music.artist_not_found", "Artist not found")
+				}
+				return err
+			}
+		} else {
+			if strings.TrimSpace(payload.Artist.Name) == "" {
+				return apperr.BadRequest("validation.invalid_request", "artist name is required")
+			}
+			artist = model.Artist{
+				Name:           strings.TrimSpace(payload.Artist.Name),
+				LegalName:      strings.TrimSpace(payload.Artist.LegalName),
+				StageNamesJSON: mustMarshalStageNames(payload.Artist.StageNames),
+				BirthPlace:     strings.TrimSpace(payload.Artist.BirthPlace),
+				EntryStatus:    "open",
+			}
+			if err := createAlbumImportArtist(tx, &artist); err != nil {
+				return err
+			}
 		}
-		if err := createAlbumImportArtist(tx, &artist); err != nil {
-			return err
+
+		var sessionPayload map[string]any
+		if strings.TrimSpace(session.PayloadJSON) != "" {
+			_ = json.Unmarshal([]byte(session.PayloadJSON), &sessionPayload)
+		}
+
+		coverURL := ""
+		if sessionPayload != nil {
+			if url, ok := sessionPayload["cover_url"].(string); ok && url != "" {
+				coverURL = url
+			} else if url, ok := sessionPayload["derived_cover"].(string); ok && url != "" {
+				coverURL = url
+			}
 		}
 
 		album := model.Album{
 			Title:       strings.TrimSpace(payload.Album.Title),
 			ReleaseYear: payload.Album.ReleaseYear,
 			Year:        payload.Album.ReleaseYear,
+			CoverURL:    coverURL,
 			Status:      "open",
 			EntryStatus: "open",
 			AlbumType:   "album",
@@ -230,6 +264,40 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 		if err := tx.Model(&album).Association("Artists").Append(&artist); err != nil {
 			return err
+		}
+
+		for _, track := range payload.Album.Tracks {
+			audioURL := ""
+			if sessionPayload != nil {
+				if rawTracks, ok := sessionPayload["derived_tracks"].([]any); ok {
+					for _, rawTrack := range rawTracks {
+						trackMap, ok := rawTrack.(map[string]any)
+						if !ok {
+							continue
+						}
+						if strings.TrimSpace(stringValue(trackMap["title"])) == strings.TrimSpace(track.Title) {
+							audioURL = stringValue(trackMap["audio_url"])
+							break
+						}
+					}
+				}
+			}
+
+			song := model.Song{
+				Title:       strings.TrimSpace(track.Title),
+				TrackNumber: track.TrackNumber,
+				AlbumID:     &album.ID,
+				Status:      "open",
+				AudioURL:    audioURL,
+				AudioSource: "local",
+				UploadedBy:  &user.ID,
+			}
+			if err := tx.Create(&song).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&song).Association("Artists").Append(&artist); err != nil {
+				return err
+			}
 		}
 
 		now := time.Now()
@@ -295,43 +363,169 @@ func mustMarshalStageNames(values []ArtistStageNamePayload) string {
 	return string(raw)
 }
 
-func deriveAlbumImportPayload(archiveName string, body []byte) (map[string]any, error) {
+func (s *Service) deriveAlbumImportPayload(user authctx.CurrentUser, archiveName string, body []byte) (map[string]any, error) {
 	reader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
 	if err != nil {
 		return nil, apperr.BadRequest("validation.invalid_request", "archive must be a valid zip file")
 	}
 
 	derivedTracks := make([]map[string]any, 0)
+	var coverURL string
+
 	for _, file := range reader.File {
 		if file.FileInfo().IsDir() {
 			continue
 		}
-		trackTitle, trackNumber, ok := deriveTrackFromArchiveEntry(file.Name)
-		if !ok {
+		// Filter out __MACOSX and hidden files/directories starting with .
+		segments := strings.Split(filepath.ToSlash(file.Name), "/")
+		ignored := false
+		for _, segment := range segments {
+			if (strings.HasPrefix(segment, ".") && segment != "." && segment != "..") || segment == "__MACOSX" {
+				ignored = true
+				break
+			}
+		}
+		if ignored {
 			continue
 		}
-		derivedTracks = append(derivedTracks, map[string]any{
-			"title":        trackTitle,
-			"track_number": trackNumber,
-			"audio_key":    "",
-			"origin":       file.Name,
-		})
+
+		base := filepath.Base(file.Name)
+		ext := strings.ToLower(filepath.Ext(base))
+
+		// Check if it's an audio track
+		if trackTitle, trackNumber, ok := deriveTrackFromArchiveEntry(file.Name); ok {
+			audioKey := ""
+			audioURL := ""
+			if rc, err := file.Open(); err == nil {
+				audioBytes, readErr := io.ReadAll(rc)
+				rc.Close()
+				if readErr == nil {
+					filename := uuid.NewString() + ext
+					uploadedURL, uploadedKey, uploadErr := s.storeImportedAudio(user, filename, ext, audioBytes)
+					if uploadErr == nil {
+						audioURL = uploadedURL
+						audioKey = uploadedKey
+					}
+				}
+			}
+			derivedTracks = append(derivedTracks, map[string]any{
+				"title":        trackTitle,
+				"track_number": trackNumber,
+				"audio_key":    audioKey,
+				"audio_url":    audioURL,
+				"origin":       file.Name,
+			})
+			continue
+		}
+
+		// Check if it's a cover image
+		if ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".webp" {
+			lowerBase := strings.ToLower(base)
+			// Prefer files with cover, folder, front in name, or fallback to any first image
+			if strings.Contains(lowerBase, "cover") || strings.Contains(lowerBase, "folder") || strings.Contains(lowerBase, "front") || coverURL == "" {
+				rc, err := file.Open()
+				if err != nil {
+					continue
+				}
+				imgBytes, err := io.ReadAll(rc)
+				rc.Close()
+				if err != nil {
+					continue
+				}
+
+				uploadedURL, err := s.storeImportedCover(user, uuid.NewString()+ext, ext, imgBytes)
+				if err != nil {
+					continue
+				}
+				coverURL = uploadedURL
+			}
+		}
 	}
 
 	return map[string]any{
 		"archive_name":        archiveName,
 		"derived_album_title": strings.TrimSpace(strings.TrimSuffix(archiveName, filepath.Ext(archiveName))),
 		"derived_tracks":      derivedTracks,
+		"derived_cover":       coverURL,
 		"upload_progress":     100,
 		"upload_speed":        0,
 	}, nil
 }
 
+func (s *Service) storeImportedAudio(user authctx.CurrentUser, filename string, ext string, content []byte) (string, string, error) {
+	if s.s3 != nil && strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_TYPE")), "s3") {
+		bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+		urlPrefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
+		if bucket != "" && urlPrefix != "" {
+			key := storage.BuildMusicUploadKey("audio", user.ID.String(), filename, time.Now())
+			contentType := "audio/mpeg"
+			switch strings.ToLower(ext) {
+			case ".flac":
+				contentType = "audio/flac"
+			case ".wav":
+				contentType = "audio/wav"
+			case ".m4a":
+				contentType = "audio/x-m4a"
+			case ".aac":
+				contentType = "audio/aac"
+			case ".ogg":
+				contentType = "audio/ogg"
+			}
+			if _, err := s.s3.PutObject(&s3.PutObjectInput{
+				Bucket:      aws.String(bucket),
+				Key:         aws.String(key),
+				Body:        bytes.NewReader(content),
+				ContentType: aws.String(contentType),
+				ACL:         aws.String("public-read"),
+			}); err == nil {
+				return urlPrefix + "/" + key, key, nil
+			}
+		}
+	}
+	return "", "", nil
+}
+
+func (s *Service) storeImportedCover(user authctx.CurrentUser, filename string, ext string, content []byte) (string, error) {
+	if s.s3 != nil && strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_TYPE")), "s3") {
+		bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+		urlPrefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
+		if bucket != "" && urlPrefix != "" {
+			key := storage.BuildMusicUploadKey("covers", user.ID.String(), filename, time.Now())
+			contentType := "image/jpeg"
+			switch strings.ToLower(ext) {
+			case ".png":
+				contentType = "image/png"
+			case ".webp":
+				contentType = "image/webp"
+			}
+			if _, err := s.s3.PutObject(&s3.PutObjectInput{
+				Bucket:      aws.String(bucket),
+				Key:         aws.String(key),
+				Body:        bytes.NewReader(content),
+				ContentType: aws.String(contentType),
+				ACL:         aws.String("public-read"),
+			}); err == nil {
+				return urlPrefix + "/" + key, nil
+			}
+		}
+	}
+
+	destDir := filepath.Join(".", "uploads", "music", "covers")
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return "", err
+	}
+	destPath := filepath.Join(destDir, filename)
+	if err := os.WriteFile(destPath, content, 0644); err != nil {
+		return "", err
+	}
+	return "/uploads/music/covers/" + filename, nil
+}
+
 func deriveTrackFromArchiveEntry(name string) (string, int, bool) {
-	// Filter out system metadata directories like __MACOSX and hidden directories/files starting with .
+	// Filter out system metadata directories like __MACOSX and hidden directories/files starting with . (excluding "." and "..")
 	segments := strings.Split(filepath.ToSlash(name), "/")
 	for _, segment := range segments {
-		if strings.HasPrefix(segment, ".") || segment == "__MACOSX" {
+		if (strings.HasPrefix(segment, ".") && segment != "." && segment != "..") || segment == "__MACOSX" {
 			return "", 0, false
 		}
 	}

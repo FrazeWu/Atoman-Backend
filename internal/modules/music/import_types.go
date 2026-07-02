@@ -36,6 +36,7 @@ type CreateAlbumImportSessionInput struct {
 }
 
 type CommitAlbumImportSessionInput struct {
+	ArtistID string                   `json:"artist_id"`
 	Artist AlbumImportArtistPayload `json:"artist"`
 	Album  AlbumImportAlbumPayload  `json:"album"`
 }
@@ -43,6 +44,7 @@ type CommitAlbumImportSessionInput struct {
 type AlbumImportDTOTrack struct {
 	Title    string `json:"title"`
 	AudioKey string `json:"audioKey"`
+	AudioURL string `json:"audioUrl"`
 	Origin   string `json:"origin"`
 }
 
