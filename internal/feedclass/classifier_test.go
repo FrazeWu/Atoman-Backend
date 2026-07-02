@@ -121,3 +121,35 @@ func TestClassifyKeepsXStatusSourcesAsSocial(t *testing.T) {
 		t.Fatalf("expected social, got %q", category)
 	}
 }
+
+func TestClassifyDoesNotTreatAnthropicBlogAsNews(t *testing.T) {
+	category := Classify(Source{
+		Title:  "Anthropic Blog",
+		RSSURL: "https://www.anthropic.com/news/rss.xml",
+		RecentItems: []RecentItem{
+			{Title: "Claude Code update", Link: "https://www.anthropic.com/engineering/claude-code"},
+			{Title: "Research note", Link: "https://www.anthropic.com/research/alignment"},
+			{Title: "Product post", Link: "https://www.anthropic.com/product/team-plan"},
+		},
+	})
+
+	if category != "blog" {
+		t.Fatalf("expected blog, got %q", category)
+	}
+}
+
+func TestClassifyDoesNotTreatElasticBlogAsNews(t *testing.T) {
+	category := Classify(Source{
+		Title:  "Elastic Blog",
+		RSSURL: "https://www.elastic.co/blog/feed",
+		RecentItems: []RecentItem{
+			{Title: "Elastic Stack 9", Link: "https://www.elastic.co/blog/elastic-stack-9"},
+			{Title: "Search Labs", Link: "https://www.elastic.co/search-labs/blog/vector-search"},
+			{Title: "Security release", Link: "https://www.elastic.co/blog/security-release"},
+		},
+	})
+
+	if category != "blog" {
+		t.Fatalf("expected blog, got %q", category)
+	}
+}

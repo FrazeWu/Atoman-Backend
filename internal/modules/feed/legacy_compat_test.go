@@ -1548,6 +1548,9 @@ func TestResolveSubscriptionInputDetectsGithubRepository(t *testing.T) {
 	if payload.Source.SiteURL != "https://github.com/DIYgod/RSSHub" {
 		t.Fatalf("expected github site url, got %q", payload.Source.SiteURL)
 	}
+	if payload.Source.Category != "blog" {
+		t.Fatalf("expected github repo category blog, got %q", payload.Source.Category)
+	}
 }
 
 func TestResolveSubscriptionInputInvalidURLReturnsStatusResponse(t *testing.T) {
@@ -1677,6 +1680,9 @@ func TestResolveSubscriptionInputReportsExistingSourceForAnotherUser(t *testing.
 	}
 	if *payload.Source.ID != source.ID {
 		t.Fatalf("expected source ID %s, got %s", source.ID, *payload.Source.ID)
+	}
+	if payload.Source.Category != "blog" {
+		t.Fatalf("expected existing source category blog, got %q", payload.Source.Category)
 	}
 }
 

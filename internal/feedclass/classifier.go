@@ -2,6 +2,7 @@ package feedclass
 
 import (
 	"net/url"
+	"sort"
 	"strings"
 )
 
@@ -12,92 +13,190 @@ type RecentItem struct {
 }
 
 type Source struct {
-	Title     string
-	RSSURL    string
+	Title       string
+	RSSURL      string
 	RecentItems []RecentItem
 }
 
+type normalizedSource struct {
+	sourceText   string
+	linkTexts    []string
+	linkHosts    []string
+	audioCount   int
+	videoCount   int
+	categoryHits map[string]int
+}
+
+type categoryRuleSet struct {
+	strongHosts []string
+	strongTerms []string
+	hosts       []string
+	terms       []string
+}
+
+type categoryScore struct {
+	name  string
+	score int
+}
+
+var categoryRuleSets = map[string]categoryRuleSet{
+	"podcast": {
+		strongHosts: []string{"xiaoyuzhoufm.com", "xiaoyuzhou.com", "justpod.fm", "typlog.io"},
+		strongTerms: []string{"podcast", "播客", "小宇宙", "justpod", "typlog"},
+		hosts:       []string{"podcasts.apple.com", "spotify.com"},
+		terms:       []string{"podcaster", "podcast feed"},
+	},
+	"video": {
+		strongHosts: []string{"youtube.com", "youtu.be", "bilibili.com", "b23.tv"},
+		strongTerms: []string{"youtube", "bilibili"},
+		hosts:       []string{"vimeo.com"},
+		terms:       []string{"video", "视频", "录像"},
+	},
+	"forum": {
+		strongHosts: []string{"v2ex.com", "linux.do", "nodeseek.com"},
+		strongTerms: []string{"论坛", "v2ex", "linux.do", "nodeseek"},
+		hosts:       []string{"discourse.org"},
+		terms:       []string{"forum", "bbs", "discourse"},
+	},
+	"social": {
+		strongHosts: []string{"x.com", "twitter.com", "reddit.com", "jike.info", "okjike.com", "zhihu.com", "weibo.com"},
+		strongTerms: []string{"即刻", "知乎", "微博", "twitter", "reddit"},
+		hosts:       []string{"weixin.sogou.com"},
+		terms:       []string{"社交", "动态", "status", "timeline"},
+	},
+	"news": {
+		strongHosts: []string{"36kr.com", "ftchinese.com", "nytimes.com", "cn.nytimes.com", "caixin.com", "jiemian.com", "huxiu.com", "gov.cn", "stats.gov.cn", "zaobao.com"},
+		strongTerms: []string{"新闻", "快讯", "日报", "早报", "36kr", "36氪", "ftchinese", "nytimes", "caixin", "界面", "虎嗅"},
+		hosts:       []string{"ithome.com", "engadget.com"},
+		terms:       []string{"news", "资讯", "头条", "发布", "统计", "数据发布"},
+	},
+}
+
 func Classify(source Source) string {
-	sourceText := strings.ToLower(strings.TrimSpace(source.Title + " " + source.RSSURL))
-	linkHosts := make([]string, 0, len(source.RecentItems))
-	linkTexts := make([]string, 0, len(source.RecentItems))
-	audioCount := 0
-	videoCount := 0
-	videoHostCount := 0
+	normalized := normalizeSource(source)
+	scores := scoreSourceCategories(normalized)
+	return decideCategory(scores)
+}
+
+func normalizeSource(source Source) normalizedSource {
+	result := normalizedSource{
+		sourceText:   strings.ToLower(strings.TrimSpace(source.Title + " " + source.RSSURL)),
+		linkTexts:    make([]string, 0, len(source.RecentItems)),
+		linkHosts:    make([]string, 0, len(source.RecentItems)),
+		categoryHits: map[string]int{},
+	}
 
 	for _, item := range source.RecentItems {
 		enclosureType := strings.ToLower(strings.TrimSpace(item.EnclosureType))
 		if strings.HasPrefix(enclosureType, "audio/") {
-			audioCount++
+			result.audioCount++
+			result.categoryHits["podcast"]++
 		}
 		if strings.HasPrefix(enclosureType, "video/") {
-			videoCount++
+			result.videoCount++
+			result.categoryHits["video"]++
 		}
 
 		host := normalizedURLHost(item.Link)
 		if host != "" {
-			linkHosts = append(linkHosts, host)
-			linkTexts = append(linkTexts, host+" "+strings.ToLower(strings.TrimSpace(item.Title))+" "+strings.ToLower(strings.TrimSpace(item.Link)))
-			if hostMatchesAny(host, "youtube.com", "youtu.be", "bilibili.com", "b23.tv", "vimeo.com") {
-				videoHostCount++
+			result.linkHosts = append(result.linkHosts, host)
+			result.linkTexts = append(result.linkTexts, host+" "+strings.ToLower(strings.TrimSpace(item.Title))+" "+strings.ToLower(strings.TrimSpace(item.Link)))
+			for category, ruleSet := range categoryRuleSets {
+				if hostMatchesAny(host, append(ruleSet.strongHosts, ruleSet.hosts...)...) {
+					result.categoryHits[category]++
+				}
 			}
 		}
 	}
 
-	if audioCount >= 2 {
-		return "podcast"
-	}
-	if videoCount >= 2 {
-		return "video"
+	return result
+}
+
+func scoreSourceCategories(source normalizedSource) map[string]int {
+	scores := map[string]int{
+		"blog":    0,
+		"news":    0,
+		"social":  0,
+		"video":   0,
+		"forum":   0,
+		"podcast": 0,
 	}
 
-	for _, text := range append([]string{sourceText}, linkTexts...) {
-		if containsAny(text, "xiaoyuzhou", "podcast", "播客", "justpod", "typlog.io") {
-			return "podcast"
-		}
+	if source.audioCount >= 2 {
+		scores["podcast"] += 8
+	}
+	if source.videoCount >= 2 {
+		scores["video"] += 8
 	}
 
-	for _, host := range linkHosts {
-		if hostMatchesAny(host, "x.com", "twitter.com", "zhihu.com", "jike.info", "okjike.com", "reddit.com", "weibo.com", "weixin.sogou.com") {
-			return "social"
+	for category, ruleSet := range categoryRuleSets {
+		if containsHostToken(source.sourceText, ruleSet.strongHosts...) {
+			scores[category] += 6
 		}
-	}
-	for _, text := range append([]string{sourceText}, linkTexts...) {
-		if containsAny(text, "twitter", "zhihu", "jike", "reddit", "weibo", "即刻", "知乎", "公众号") || tokenMatchesAny(text, "x.com") {
-			return "social"
+		if containsAny(source.sourceText, ruleSet.strongTerms...) {
+			scores[category] += 4
 		}
-	}
-
-	if videoHostCount >= 2 {
-		return "video"
-	}
-	if containsAny(sourceText, "youtube", "bilibili", "vimeo", "视频") {
-		return "video"
-	}
-
-	for _, host := range linkHosts {
-		if hostMatchesAny(host, "v2ex.com", "nodeseek.com", "linux.do") || containsAny(host, "discourse", "bbs") {
-			return "forum"
+		if containsAny(source.sourceText, ruleSet.terms...) {
+			scores[category] += 2
 		}
-	}
-	for _, text := range append([]string{sourceText}, linkTexts...) {
-		if containsAny(text, "forum", "bbs", "discourse", "v2ex", "nodeseek", "linux.do", "论坛") {
-			return "forum"
+		for _, text := range source.linkTexts {
+			if containsAny(text, ruleSet.strongTerms...) {
+				scores[category] += 2
+			}
+			if containsAny(text, ruleSet.terms...) {
+				scores[category]++
+			}
 		}
-	}
-
-	for _, host := range linkHosts {
-		if hostMatchesAny(host, "36kr.com", "ftchinese.com", "nytimes.com", "cn.nytimes.com", "gov.cn", "stats.gov.cn", "caixin.com", "jiemian.com", "huxiu.com", "zaobao.com", "engadget.com", "anthropic.com", "deeplearning.ai", "paper.people.com.cn", "elastic.co", "ithome.com", "japandesign.ne.jp") {
-			return "news"
-		}
-	}
-	for _, text := range append([]string{sourceText}, linkTexts...) {
-		if containsAny(text, "news", "新闻", "36kr", "36氪", "ftchinese", "nytimes", "gov.cn", "stats.gov", "统计", "数据发布", "caixin", "jiemian", "huxiu", "早报") {
-			return "news"
+		if source.categoryHits[category] >= 2 {
+			scores[category] += 4
+		} else if source.categoryHits[category] == 1 {
+			scores[category]++
 		}
 	}
 
-	return "blog"
+	if source.categoryHits["social"] >= 2 {
+		scores["social"] += 2
+	}
+	if source.categoryHits["social"] == 1 && containsAny(source.sourceText, "@") {
+		scores["social"] += 2
+	}
+
+	if source.audioCount == 1 && scores["social"] >= 4 {
+		scores["podcast"]--
+	}
+	if source.videoCount == 1 && scores["news"] >= 4 {
+		scores["video"]--
+	}
+	if source.categoryHits["video"] == 1 && source.videoCount == 0 {
+		scores["video"] -= 3
+	}
+
+	return scores
+}
+
+func decideCategory(scores map[string]int) string {
+	ranked := make([]categoryScore, 0, len(scores)-1)
+	for category, score := range scores {
+		if category == "blog" {
+			continue
+		}
+		ranked = append(ranked, categoryScore{name: category, score: score})
+	}
+
+	sort.Slice(ranked, func(i, j int) bool {
+		if ranked[i].score == ranked[j].score {
+			return ranked[i].name < ranked[j].name
+		}
+		return ranked[i].score > ranked[j].score
+	})
+
+	if len(ranked) == 0 || ranked[0].score < 4 {
+		return "blog"
+	}
+	if len(ranked) > 1 && ranked[0].score-ranked[1].score < 2 {
+		return "blog"
+	}
+	return ranked[0].name
 }
 
 func normalizedURLHost(raw string) string {
@@ -126,14 +225,12 @@ func hostMatchesAny(host string, domains ...string) bool {
 	return false
 }
 
-func tokenMatchesAny(value string, tokens ...string) bool {
-	for _, token := range tokens {
-		if value == token ||
-			strings.Contains(value, "://"+token+"/") ||
-			strings.Contains(value, "://"+token+"?") ||
-			strings.Contains(value, " "+token+" ") ||
-			strings.HasSuffix(value, " "+token) ||
-			strings.HasPrefix(value, token+" ") {
+func containsHostToken(value string, domains ...string) bool {
+	for _, domain := range domains {
+		if strings.Contains(value, "://"+domain+"/") ||
+			strings.Contains(value, "://"+domain+"?") ||
+			strings.Contains(value, "://www."+domain+"/") ||
+			strings.Contains(value, "://www."+domain+"?") {
 			return true
 		}
 	}
