@@ -31,13 +31,13 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	}
 
 	dto := AlbumImportDTO{
-		ImportID:       session.ID.String(),
-		Status:         session.Status,
-		ArchiveName:    stringValue(payload["archive_name"]),
-		UploadProgress: floatValue(payload["upload_progress"]),
-		UploadSpeed:    floatValue(payload["upload_speed"]),
-		CoverURL:       stringValue(payload["cover_url"]),
-		CoverKey:       stringValue(payload["cover_key"]),
+		ImportID:          session.ID.String(),
+		Status:            session.Status,
+		ArchiveName:       stringValue(payload["archive_name"]),
+		UploadProgress:    floatValue(payload["upload_progress"]),
+		UploadSpeed:       floatValue(payload["upload_speed"]),
+		CoverURL:          stringValue(payload["cover_url"]),
+		CoverKey:          stringValue(payload["cover_key"]),
 		DerivedAlbumTitle: stringValue(payload["derived_album_title"]),
 		DerivedCover:      stringValue(payload["derived_cover"]),
 		LastSyncedAt:      session.UpdatedAt.Format(time.RFC3339),
@@ -338,7 +338,13 @@ func normalizeAlbumImportStatus(status string) string {
 
 func isAlbumImportStatusAllowed(status string) bool {
 	switch status {
-	case AlbumImportStatusPendingUpload, AlbumImportStatusReady, AlbumImportStatusCommitted:
+	case AlbumImportStatusPendingUpload,
+		AlbumImportStatusUploading,
+		AlbumImportStatusUploaded,
+		AlbumImportStatusExtracting,
+		AlbumImportStatusReady,
+		AlbumImportStatusFailed,
+		AlbumImportStatusCommitted:
 		return true
 	default:
 		return false
