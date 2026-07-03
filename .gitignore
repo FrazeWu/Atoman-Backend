@@ -9,6 +9,9 @@
 /build/
 /coverage/
 /tmp/
+/.tmp/
+/uploads/
+/internal/modules/music/uploads/
 log/
 start_server
 output.txt
