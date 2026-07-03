@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -21,6 +22,121 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"gorm.io/gorm"
 )
+
+func TestStartAlbumImportMultipartRejectsOversizedArchive(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+		Payload: AlbumImportPayload{
+			Artist: AlbumImportArtistPayload{Name: "Burial"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	_, err = svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
+		FileName: "Untrue.zip",
+		FileSize: maxAlbumImportArchiveSize + 1,
+	})
+	if err == nil {
+		t.Fatal("expected oversized archive to fail")
+	}
+	var appErr *apperr.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("expected app error, got %v", err)
+	}
+	if appErr.Code != "validation.invalid_request" {
+		t.Fatalf("expected validation.invalid_request, got %#v", appErr)
+	}
+}
+
+func TestStartAlbumImportMultipartRestoresExistingUploadStateForSameFile(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{uploadID: "upload-1"}
+	svc.albumImportMultipart = store
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+		Payload: AlbumImportPayload{
+			Artist: AlbumImportArtistPayload{Name: "Burial"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	first, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
+		FileName:    "Untrue.zip",
+		FileSize:    64 * 1024 * 1024,
+		ContentType: "application/zip",
+	})
+	if err != nil {
+		t.Fatalf("start multipart: %v", err)
+	}
+	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 2, CompleteAlbumImportMultipartPartInput{
+		ETag: "etag-2",
+		Size: albumImportMultipartPartSize,
+	}); err != nil {
+		t.Fatalf("complete part: %v", err)
+	}
+
+	restored, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
+		FileName:    "Untrue.zip",
+		FileSize:    64 * 1024 * 1024,
+		ContentType: "application/zip",
+	})
+	if err != nil {
+		t.Fatalf("restore multipart: %v", err)
+	}
+	if store.createCalls != 1 {
+		t.Fatalf("expected CreateMultipartUpload once, got %d", store.createCalls)
+	}
+	if restored.ObjectKey != first.ObjectKey {
+		t.Fatalf("expected restored object key %q, got %q", first.ObjectKey, restored.ObjectKey)
+	}
+	if len(restored.CompletedParts) != 1 || restored.CompletedParts[0].PartNumber != 2 || restored.CompletedParts[0].ETag != "etag-2" {
+		t.Fatalf("expected completed part to be preserved, got %#v", restored.CompletedParts)
+	}
+}
+
+func TestCreateAlbumImportMultipartPartUploadReturnsSignedURL(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{uploadID: "upload-1", signedURL: "https://storage.test/upload-part-1"}
+	svc.albumImportMultipart = store
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+		Payload: AlbumImportPayload{
+			Artist: AlbumImportArtistPayload{Name: "Burial"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	started, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
+		FileName: "Untrue.zip",
+		FileSize: 64 * 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatalf("start multipart: %v", err)
+	}
+
+	upload, err := svc.CreateAlbumImportMultipartPartUpload(user, session.ID, 1, CreateAlbumImportMultipartPartInput{
+		PartSize: albumImportMultipartPartSize,
+	})
+	if err != nil {
+		t.Fatalf("create part upload: %v", err)
+	}
+	if upload.PartNumber != 1 || upload.UploadURL != store.signedURL {
+		t.Fatalf("unexpected part upload dto %#v", upload)
+	}
+	if store.presignKey != started.ObjectKey || store.presignUploadID != "upload-1" || store.presignPartNumber != 1 {
+		t.Fatalf("unexpected presign call key=%q uploadID=%q part=%d", store.presignKey, store.presignUploadID, store.presignPartNumber)
+	}
+}
 
 func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
@@ -231,9 +347,9 @@ func TestUploadAlbumImportArchiveTransitionsPendingUploadToReady(t *testing.T) {
 
 	archiveName := "Untrue (Deluxe).zip"
 	archiveBody := newImportTestZipArchive(t, map[string]string{
-		"01 - Untitled.mp3": "",
+		"01 - Untitled.mp3":   "",
 		"02 - Archangel.flac": "",
-		"booklet/cover.jpg":  "",
+		"booklet/cover.jpg":   "",
 	})
 
 	updated, err := svc.UploadAlbumImportArchive(user, session.ID, archiveName, bytes.NewReader(archiveBody))
@@ -333,7 +449,7 @@ func TestUploadAlbumImportArchiveStoresDerivedAudioInS3AndCommitPersistsSongURLs
 	}
 
 	archiveBody := newImportTestZipArchive(t, map[string]string{
-		"01 - Bound 2049.mp3": "audio-1",
+		"01 - Bound 2049.mp3":  "audio-1",
 		"02 - Jesus Walks.mp3": "audio-2",
 	})
 
@@ -502,4 +618,53 @@ func fakeMusicImportS3Client(t *testing.T, capturedPath *string, capturedContent
 		t.Fatalf("new s3 session: %v", err)
 	}
 	return s3.New(sess)
+}
+
+type fakeAlbumImportMultipartStore struct {
+	uploadID  string
+	signedURL string
+
+	createCalls int
+
+	createKey         string
+	createContentType string
+	presignKey        string
+	presignUploadID   string
+	presignPartNumber int
+}
+
+func (f *fakeAlbumImportMultipartStore) CreateMultipartUpload(key string, contentType string) (string, error) {
+	f.createCalls++
+	f.createKey = key
+	f.createContentType = contentType
+	if f.uploadID == "" {
+		return "upload-test", nil
+	}
+	return f.uploadID, nil
+}
+
+func (f *fakeAlbumImportMultipartStore) PresignUploadPart(key string, uploadID string, partNumber int, _ time.Duration) (string, error) {
+	f.presignKey = key
+	f.presignUploadID = uploadID
+	f.presignPartNumber = partNumber
+	if f.signedURL == "" {
+		return "https://storage.test/upload", nil
+	}
+	return f.signedURL, nil
+}
+
+func (f *fakeAlbumImportMultipartStore) CompleteMultipartUpload(_ string, _ string, _ []AlbumImportMultipartPartDTO) error {
+	return nil
+}
+
+func (f *fakeAlbumImportMultipartStore) AbortMultipartUpload(_ string, _ string) error {
+	return nil
+}
+
+func (f *fakeAlbumImportMultipartStore) OpenObject(_ string) (io.ReadCloser, error) {
+	return io.NopCloser(strings.NewReader("")), nil
+}
+
+func (f *fakeAlbumImportMultipartStore) DeleteObject(_ string) error {
+	return nil
 }

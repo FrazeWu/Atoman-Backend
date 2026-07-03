@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,11 @@ import (
 )
 
 var albumImportCreateAlbumHook func(*gorm.DB, *model.Album) error
+
+const (
+	maxAlbumImportArchiveSize    int64 = 2 * 1024 * 1024 * 1024
+	albumImportMultipartPartSize int64 = 16 * 1024 * 1024
+)
 
 func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	payload := map[string]any{}
@@ -166,6 +172,174 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 	})
 	if err != nil {
 		return model.AlbumImportSession{}, err
+	}
+	return out, nil
+}
+
+func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UUID, input StartAlbumImportMultipartInput) (AlbumImportMultipartDTO, error) {
+	if user.ID == uuid.Nil {
+		return AlbumImportMultipartDTO{}, apperr.Unauthorized("Login required")
+	}
+	if err := requireAlbumImportMultipartStore(s.albumImportMultipart); err != nil {
+		return AlbumImportMultipartDTO{}, err
+	}
+
+	fileName := strings.TrimSpace(input.FileName)
+	if fileName == "" || strings.ToLower(filepath.Ext(fileName)) != ".zip" {
+		return AlbumImportMultipartDTO{}, apperr.BadRequest("validation.invalid_request", "archive must be a zip file")
+	}
+	if input.FileSize <= 0 || input.FileSize > maxAlbumImportArchiveSize {
+		return AlbumImportMultipartDTO{}, apperr.BadRequest("validation.invalid_request", "archive file size is invalid")
+	}
+
+	var out AlbumImportMultipartDTO
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var session model.AlbumImportSession
+		if err := tx.First(&session, "id = ?", id).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return apperr.NotFound("music.import_not_found", "Import session not found")
+			}
+			return err
+		}
+		if !isAlbumImportMultipartStartStatus(session.Status) {
+			return apperr.Unprocessable("music.import_invalid_status", "Import session cannot start upload")
+		}
+
+		payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+		if err != nil {
+			return err
+		}
+		state := albumImportMultipartStateFromPayload(payload)
+		if state.FileName == fileName && state.FileSize == input.FileSize && state.UploadID != "" && state.ObjectKey != "" {
+			out = buildAlbumImportMultipartDTO(session.ID, state)
+			return nil
+		}
+
+		objectKey := storage.BuildMusicUploadKey("album-imports", user.ID.String(), uuid.NewString()+".zip", time.Now())
+		contentType := strings.TrimSpace(input.ContentType)
+		if contentType == "" {
+			contentType = "application/zip"
+		}
+		uploadID, err := s.albumImportMultipart.CreateMultipartUpload(objectKey, contentType)
+		if err != nil {
+			return err
+		}
+		state = albumImportMultipartState{
+			FileName:       fileName,
+			FileSize:       input.FileSize,
+			ObjectKey:      objectKey,
+			UploadID:       uploadID,
+			PartSize:       albumImportMultipartPartSize,
+			CompletedParts: []AlbumImportMultipartPartDTO{},
+		}
+		writeAlbumImportMultipartState(payload, state)
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		session.Status = AlbumImportStatusUploading
+		session.PayloadJSON = string(payloadJSON)
+		if err := tx.Save(&session).Error; err != nil {
+			return err
+		}
+		out = buildAlbumImportMultipartDTO(session.ID, state)
+		return nil
+	})
+	if err != nil {
+		return AlbumImportMultipartDTO{}, err
+	}
+	return out, nil
+}
+
+func (s *Service) CreateAlbumImportMultipartPartUpload(user authctx.CurrentUser, id uuid.UUID, partNumber int, input CreateAlbumImportMultipartPartInput) (AlbumImportMultipartPartUploadDTO, error) {
+	if user.ID == uuid.Nil {
+		return AlbumImportMultipartPartUploadDTO{}, apperr.Unauthorized("Login required")
+	}
+	if err := requireAlbumImportMultipartStore(s.albumImportMultipart); err != nil {
+		return AlbumImportMultipartPartUploadDTO{}, err
+	}
+	if partNumber <= 0 {
+		return AlbumImportMultipartPartUploadDTO{}, apperr.BadRequest("validation.invalid_request", "part number is invalid")
+	}
+
+	session, err := s.GetAlbumImportSession(id)
+	if err != nil {
+		return AlbumImportMultipartPartUploadDTO{}, err
+	}
+	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+	if err != nil {
+		return AlbumImportMultipartPartUploadDTO{}, err
+	}
+	state := albumImportMultipartStateFromPayload(payload)
+	if state.ObjectKey == "" || state.UploadID == "" {
+		return AlbumImportMultipartPartUploadDTO{}, apperr.BadRequest("validation.invalid_request", "multipart upload has not started")
+	}
+	_ = input
+	signedURL, err := s.albumImportMultipart.PresignUploadPart(state.ObjectKey, state.UploadID, partNumber, 15*time.Minute)
+	if err != nil {
+		return AlbumImportMultipartPartUploadDTO{}, err
+	}
+	return AlbumImportMultipartPartUploadDTO{PartNumber: partNumber, UploadURL: signedURL}, nil
+}
+
+func (s *Service) CompleteAlbumImportMultipartPart(user authctx.CurrentUser, id uuid.UUID, partNumber int, input CompleteAlbumImportMultipartPartInput) (AlbumImportMultipartDTO, error) {
+	if user.ID == uuid.Nil {
+		return AlbumImportMultipartDTO{}, apperr.Unauthorized("Login required")
+	}
+	if partNumber <= 0 {
+		return AlbumImportMultipartDTO{}, apperr.BadRequest("validation.invalid_request", "part number is invalid")
+	}
+	etag := strings.TrimSpace(input.ETag)
+	if etag == "" || input.Size <= 0 {
+		return AlbumImportMultipartDTO{}, apperr.BadRequest("validation.invalid_request", "completed part is invalid")
+	}
+
+	var out AlbumImportMultipartDTO
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var session model.AlbumImportSession
+		if err := tx.First(&session, "id = ?", id).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return apperr.NotFound("music.import_not_found", "Import session not found")
+			}
+			return err
+		}
+		payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+		if err != nil {
+			return err
+		}
+		state := albumImportMultipartStateFromPayload(payload)
+		if state.ObjectKey == "" || state.UploadID == "" {
+			return apperr.BadRequest("validation.invalid_request", "multipart upload has not started")
+		}
+		replaced := false
+		for i := range state.CompletedParts {
+			if state.CompletedParts[i].PartNumber == partNumber {
+				state.CompletedParts[i] = AlbumImportMultipartPartDTO{PartNumber: partNumber, ETag: etag, Size: input.Size}
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			state.CompletedParts = append(state.CompletedParts, AlbumImportMultipartPartDTO{PartNumber: partNumber, ETag: etag, Size: input.Size})
+		}
+		sort.Slice(state.CompletedParts, func(i, j int) bool {
+			return state.CompletedParts[i].PartNumber < state.CompletedParts[j].PartNumber
+		})
+		writeAlbumImportMultipartState(payload, state)
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		session.Status = AlbumImportStatusUploading
+		session.PayloadJSON = string(payloadJSON)
+		if err := tx.Save(&session).Error; err != nil {
+			return err
+		}
+		out = buildAlbumImportMultipartDTO(session.ID, state)
+		return nil
+	})
+	if err != nil {
+		return AlbumImportMultipartDTO{}, err
 	}
 	return out, nil
 }
@@ -342,6 +516,108 @@ func isAlbumImportStatusAllowed(status string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func isAlbumImportMultipartStartStatus(status string) bool {
+	switch status {
+	case AlbumImportStatusPendingUpload, AlbumImportStatusUploading, AlbumImportStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+type albumImportMultipartState struct {
+	FileName       string
+	FileSize       int64
+	ObjectKey      string
+	UploadID       string
+	PartSize       int64
+	CompletedParts []AlbumImportMultipartPartDTO
+}
+
+func readAlbumImportPayloadMap(payloadJSON string) (map[string]any, error) {
+	payload := map[string]any{}
+	if strings.TrimSpace(payloadJSON) == "" {
+		return payload, nil
+	}
+	if err := json.Unmarshal([]byte(payloadJSON), &payload); err != nil {
+		return nil, apperr.BadRequest("validation.invalid_request", "payload is not valid JSON")
+	}
+	return payload, nil
+}
+
+func albumImportMultipartStateFromPayload(payload map[string]any) albumImportMultipartState {
+	state := albumImportMultipartState{
+		FileName:       stringValue(payload["multipart_file_name"]),
+		FileSize:       int64Value(payload["multipart_file_size"]),
+		ObjectKey:      stringValue(payload["multipart_object_key"]),
+		UploadID:       stringValue(payload["multipart_upload_id"]),
+		PartSize:       int64Value(payload["multipart_part_size"]),
+		CompletedParts: []AlbumImportMultipartPartDTO{},
+	}
+	if state.PartSize <= 0 {
+		state.PartSize = albumImportMultipartPartSize
+	}
+	rawParts, ok := payload["multipart_completed_parts"].([]any)
+	if !ok {
+		return state
+	}
+	for _, rawPart := range rawParts {
+		partMap, ok := rawPart.(map[string]any)
+		if !ok {
+			continue
+		}
+		part := AlbumImportMultipartPartDTO{
+			PartNumber: int(int64Value(partMap["partNumber"])),
+			ETag:       stringValue(partMap["etag"]),
+			Size:       int64Value(partMap["size"]),
+		}
+		if part.PartNumber > 0 && part.ETag != "" && part.Size > 0 {
+			state.CompletedParts = append(state.CompletedParts, part)
+		}
+	}
+	sort.Slice(state.CompletedParts, func(i, j int) bool {
+		return state.CompletedParts[i].PartNumber < state.CompletedParts[j].PartNumber
+	})
+	return state
+}
+
+func writeAlbumImportMultipartState(payload map[string]any, state albumImportMultipartState) {
+	payload["archive_name"] = state.FileName
+	payload["multipart_file_name"] = state.FileName
+	payload["multipart_file_size"] = state.FileSize
+	payload["multipart_object_key"] = state.ObjectKey
+	payload["multipart_upload_id"] = state.UploadID
+	payload["multipart_part_size"] = state.PartSize
+	payload["multipart_completed_parts"] = state.CompletedParts
+}
+
+func buildAlbumImportMultipartDTO(importID uuid.UUID, state albumImportMultipartState) AlbumImportMultipartDTO {
+	parts := append([]AlbumImportMultipartPartDTO(nil), state.CompletedParts...)
+	return AlbumImportMultipartDTO{
+		ImportID:       importID.String(),
+		FileName:       state.FileName,
+		FileSize:       state.FileSize,
+		ObjectKey:      state.ObjectKey,
+		PartSize:       state.PartSize,
+		CompletedParts: parts,
+	}
+}
+
+func int64Value(value any) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	case float32:
+		return int64(typed)
+	default:
+		return 0
 	}
 }
 
