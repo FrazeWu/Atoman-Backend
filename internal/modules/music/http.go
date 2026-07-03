@@ -71,6 +71,10 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.POST("/imports/albums", h.createAlbumImportSession)
 	group.POST("/imports/albums/:sessionId/upload", h.uploadAlbumImportArchive)
+	group.POST("/imports/albums/:sessionId/multipart", h.startAlbumImportMultipart)
+	group.POST("/imports/albums/:sessionId/multipart/parts/:partNumber", h.createAlbumImportMultipartPartUpload)
+	group.POST("/imports/albums/:sessionId/multipart/parts/:partNumber/complete", h.completeAlbumImportMultipartPart)
+	group.POST("/imports/albums/:sessionId/multipart/complete", h.completeAlbumImportMultipart)
 	group.GET("/imports/albums/:sessionId", h.getAlbumImportSession)
 	group.POST("/imports/albums/:sessionId/commit", h.commitAlbumImportSession)
 	group.GET("/artists", h.listArtists)

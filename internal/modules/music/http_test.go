@@ -324,7 +324,7 @@ func TestRegisterRoutesCreateAlbumImportSessionSupportsArchiveUpload(t *testing.
 	}
 
 	body, contentType := newAlbumImportUploadRequestBody(t, "Untrue.zip", map[string]string{
-		"01 - Untitled.mp3": "",
+		"01 - Untitled.mp3":  "",
 		"02 - Archangel.mp3": "",
 	})
 
@@ -349,6 +349,66 @@ func TestRegisterRoutesCreateAlbumImportSessionSupportsArchiveUpload(t *testing.
 	}
 	if resp.Data.ArchiveName != "Untrue.zip" {
 		t.Fatalf("expected archive name persisted, got %#v", resp.Data.ArchiveName)
+	}
+}
+
+func TestRegisterRoutesStartsAlbumImportMultipart(t *testing.T) {
+	service, _, user := newMusicHTTPTestService(t)
+	store := &fakeAlbumImportMultipartStore{uploadID: "upload-http-1"}
+	service.albumImportMultipart = store
+	r := newMusicHTTPRouter(service, &user)
+
+	createBody, _ := json.Marshal(CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+	})
+	createRecorder := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(createRecorder, createReq)
+
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create session 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	var createResp struct {
+		Data AlbumImportDTO `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	startBody, _ := json.Marshal(StartAlbumImportMultipartInput{
+		FileName:    "Untrue.zip",
+		FileSize:    64 * 1024 * 1024,
+		ContentType: "application/zip",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+createResp.Data.ImportID+"/multipart", bytes.NewReader(startBody))
+	req.Header.Set("Content-Type", "application/json")
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data AlbumImportMultipartDTO `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.ImportID != createResp.Data.ImportID {
+		t.Fatalf("expected import id %s, got %#v", createResp.Data.ImportID, resp.Data)
+	}
+	if resp.Data.FileName != "Untrue.zip" || resp.Data.FileSize != 64*1024*1024 {
+		t.Fatalf("unexpected multipart response: %#v", resp.Data)
+	}
+	if resp.Data.ObjectKey == "" || resp.Data.PartSize <= 0 || len(resp.Data.CompletedParts) != 0 {
+		t.Fatalf("unexpected multipart state: %#v", resp.Data)
+	}
+	if store.createCalls != 1 || store.createContentType != "application/zip" {
+		t.Fatalf("expected multipart store create call, got %#v", store)
 	}
 }
 
@@ -923,10 +983,14 @@ func TestRegisterRoutesSongBookmarksListIncludesSongDetails(t *testing.T) {
 		Data []struct {
 			ID   string `json:"id"`
 			Song struct {
-				ID      string `json:"id"`
-				Title   string `json:"title"`
-				Album   struct{ Title string `json:"title"` } `json:"album"`
-				Artists []struct{ Name string `json:"name"` } `json:"artists"`
+				ID    string `json:"id"`
+				Title string `json:"title"`
+				Album struct {
+					Title string `json:"title"`
+				} `json:"album"`
+				Artists []struct {
+					Name string `json:"name"`
+				} `json:"artists"`
 			} `json:"song"`
 		} `json:"data"`
 	}
