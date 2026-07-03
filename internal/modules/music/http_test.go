@@ -26,6 +26,8 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Artist{},
+		&model.ArtistAlias{},
+		&model.ArtistMerge{},
 		&model.Album{},
 		&model.Song{},
 		&model.ArtistBookmark{},
@@ -141,6 +143,46 @@ func TestRegisterRoutesListsArtistsThroughMusicV1(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesArtistSearchMatchesAliasAndReturnsPrimaryArtist(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{
+		Name:        "Ye",
+		LegalName:   "Kanye Omari West",
+		EntryStatus: "open",
+	}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	if err := db.Create(&model.ArtistAlias{
+		ArtistID: artist.ID,
+		Alias:    "kanye",
+	}).Error; err != nil {
+		t.Fatalf("create alias: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/artists?q=kanye", nil)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []model.Artist `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) != 1 || resp.Data[0].Name != "Ye" {
+		t.Fatalf("expected alias search to return primary artist Ye, got %#v", resp.Data)
+	}
+	if len(resp.Data[0].Aliases) != 1 || resp.Data[0].Aliases[0].Alias != "kanye" {
+		t.Fatalf("expected aliases preloaded in artist response, got %#v", resp.Data[0].Aliases)
+	}
+}
+
 func TestRegisterRoutesListsMusicEditsForModerator(t *testing.T) {
 	service, db, _ := newMusicHTTPTestService(t)
 	moderator := authctx.CurrentUser{ID: uuid.New(), Username: "mod", Role: authctx.RoleModerator}
@@ -249,6 +291,111 @@ func TestRegisterRoutesListAlbumsSortsByHotScore(t *testing.T) {
 	}
 	if resp.Data[0].HotScore != 42.25 {
 		t.Fatalf("expected hot_score in response, got %#v", resp.Data[0])
+	}
+}
+
+func TestRegisterRoutesMusicStatsUseRealCounts(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Stats Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	album := model.Album{Title: "Stats Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append album artist: %v", err)
+	}
+
+	song1 := model.Song{Title: "Song A", AudioURL: "/audio/a.mp3", Status: "open", AlbumID: &album.ID, PlayCount: 7}
+	song2 := model.Song{Title: "Song B", AudioURL: "/audio/b.mp3", Status: "open", AlbumID: &album.ID, PlayCount: 5}
+	if err := db.Create(&song1).Error; err != nil {
+		t.Fatalf("create song1: %v", err)
+	}
+	if err := db.Create(&song2).Error; err != nil {
+		t.Fatalf("create song2: %v", err)
+	}
+	if err := db.Model(&song1).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append song1 artist: %v", err)
+	}
+	if err := db.Model(&song2).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append song2 artist: %v", err)
+	}
+
+	if err := db.Create(&model.ArtistBookmark{UserID: user.ID, ArtistID: artist.ID}).Error; err != nil {
+		t.Fatalf("create artist bookmark: %v", err)
+	}
+	if err := db.Create(&model.AlbumBookmark{UserID: user.ID, AlbumID: album.ID}).Error; err != nil {
+		t.Fatalf("create album bookmark: %v", err)
+	}
+
+	r := newMusicHTTPRouter(service, &user)
+
+	artistListW := httptest.NewRecorder()
+	artistListReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/artists", nil)
+	r.ServeHTTP(artistListW, artistListReq)
+	if artistListW.Code != http.StatusOK {
+		t.Fatalf("expected artist list 200, got %d: %s", artistListW.Code, artistListW.Body.String())
+	}
+	var artistListResp struct {
+		Data []struct {
+			ID            string `json:"id"`
+			PlayCount     int64  `json:"play_count"`
+			BookmarkCount int64  `json:"bookmark_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(artistListW.Body.Bytes(), &artistListResp); err != nil {
+		t.Fatalf("decode artist list response: %v", err)
+	}
+	if len(artistListResp.Data) != 1 || artistListResp.Data[0].PlayCount != 12 || artistListResp.Data[0].BookmarkCount != 1 {
+		t.Fatalf("unexpected artist stats response: %#v", artistListResp.Data)
+	}
+
+	albumDetailW := httptest.NewRecorder()
+	albumDetailReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), nil)
+	r.ServeHTTP(albumDetailW, albumDetailReq)
+	if albumDetailW.Code != http.StatusOK {
+		t.Fatalf("expected album detail 200, got %d: %s", albumDetailW.Code, albumDetailW.Body.String())
+	}
+	var albumDetailResp struct {
+		Data struct {
+			ID            string `json:"id"`
+			PlayCount     int64  `json:"play_count"`
+			BookmarkCount int64  `json:"bookmark_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(albumDetailW.Body.Bytes(), &albumDetailResp); err != nil {
+		t.Fatalf("decode album detail response: %v", err)
+	}
+	if albumDetailResp.Data.PlayCount != 12 || albumDetailResp.Data.BookmarkCount != 1 {
+		t.Fatalf("unexpected album stats response: %#v", albumDetailResp.Data)
+	}
+}
+
+func TestRegisterRoutesRecordSongPlayIncrementsCount(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Play Me", AudioURL: "/audio/play-me.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/plays", bytes.NewBufferString(`{"song_id":"`+song.ID.String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated model.Song
+	if err := db.First(&updated, "id = ?", song.ID).Error; err != nil {
+		t.Fatalf("reload song: %v", err)
+	}
+	if updated.PlayCount != 1 {
+		t.Fatalf("expected play_count=1, got %d", updated.PlayCount)
 	}
 }
 
@@ -883,6 +1030,13 @@ func TestMusicRecommendationAlbumsReturnsData(t *testing.T) {
 	if err := db.Create(&album).Error; err != nil {
 		t.Fatalf("create album: %v", err)
 	}
+	song := model.Song{Title: "Recommend Song", AudioURL: "/audio/recommend-song.mp3", Status: "open", AlbumID: &album.ID, PlayCount: 3}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := db.Create(&model.AlbumBookmark{UserID: user.ID, AlbumID: album.ID}).Error; err != nil {
+		t.Fatalf("create album bookmark: %v", err)
+	}
 	r := newMusicHTTPRouter(service, &user)
 
 	w := httptest.NewRecorder()
@@ -902,6 +1056,8 @@ func TestMusicRecommendationAlbumsReturnsData(t *testing.T) {
 			ImageURL   string `json:"image_url"`
 			TargetPath string `json:"target_path"`
 			ScoreLabel string `json:"score_label"`
+			PlayCount  int64  `json:"play_count"`
+			BookmarkCount int64 `json:"bookmark_count"`
 		} `json:"data"`
 		Meta struct {
 			Total int64 `json:"total"`
@@ -919,6 +1075,75 @@ func TestMusicRecommendationAlbumsReturnsData(t *testing.T) {
 	}
 	if first.TargetPath != "/music/album/"+album.ID.String() {
 		t.Fatalf("expected target path %s, got %s", "/music/album/"+album.ID.String(), first.TargetPath)
+	}
+	if first.PlayCount != 3 || first.BookmarkCount != 1 {
+		t.Fatalf("expected recommendation stats, got %#v", first)
+	}
+	if resp.Meta.Total == 0 {
+		t.Fatalf("expected total > 0, got %#v", resp.Meta)
+	}
+}
+
+func TestMusicRecommendationArtistsReturnsData(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{
+		Name:        "Recommend Artist",
+		EntryStatus: "open",
+	}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	song := model.Song{Title: "Recommend Artist Song", AudioURL: "/audio/recommend-artist-song.mp3", Status: "open", PlayCount: 4}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := db.Model(&song).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append song artist: %v", err)
+	}
+	if err := db.Create(&model.ArtistBookmark{UserID: user.ID, ArtistID: artist.ID}).Error; err != nil {
+		t.Fatalf("create artist bookmark: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/recommend/artists?mode=hot", nil)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Title      string `json:"title"`
+			Summary    string `json:"summary"`
+			ImageURL   string `json:"image_url"`
+			TargetPath string `json:"target_path"`
+			ScoreLabel string `json:"score_label"`
+			PlayCount  int64  `json:"play_count"`
+			BookmarkCount int64 `json:"bookmark_count"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) == 0 {
+		t.Fatalf("expected recommendation data, got %s", w.Body.String())
+	}
+	first := resp.Data[0]
+	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" {
+		t.Fatalf("expected lightweight recommendation dto fields, got %#v", first)
+	}
+	if first.TargetPath != "/music/artist/"+artist.ID.String() {
+		t.Fatalf("expected target path %s, got %s", "/music/artist/"+artist.ID.String(), first.TargetPath)
+	}
+	if first.PlayCount != 4 || first.BookmarkCount != 1 {
+		t.Fatalf("expected recommendation stats, got %#v", first)
 	}
 	if resp.Meta.Total == 0 {
 		t.Fatalf("expected total > 0, got %#v", resp.Meta)

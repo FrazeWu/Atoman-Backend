@@ -33,17 +33,28 @@ type ToggleStateDTO struct {
 }
 
 type RecommendationItemDTO struct {
-	ID         string `json:"id"`
-	Title      string `json:"title"`
-	Summary    string `json:"summary"`
-	ContentType string `json:"content_type"`
-	ImageURL   string `json:"image_url"`
-	TargetPath string `json:"target_path"`
-	ScoreLabel string `json:"score_label"`
+	ID                   string                     `json:"id"`
+	Title                string                     `json:"title"`
+	Summary              string                     `json:"summary"`
+	Description          string                     `json:"description"`
+	ContentType          string                     `json:"content_type"`
+	ImageURL             string                     `json:"image_url"`
+	TargetPath           string                     `json:"target_path"`
+	ScoreLabel           string                     `json:"score_label"`
+	BookmarkCount        int64                      `json:"bookmark_count"`
+	ReadCount            int64                      `json:"read_count"`
+	UpdateFrequencyLabel string                     `json:"update_frequency_label"`
+	LastPublishedAt      *time.Time                 `json:"last_published_at,omitempty"`
+	RecentItems          []RecommendationPreviewDTO `json:"recent_items,omitempty"`
 }
 
 type RecommendationThemeDTO struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
+}
+
+type RecommendationPreviewDTO struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }

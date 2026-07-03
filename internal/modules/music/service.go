@@ -43,10 +43,33 @@ func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, page
 
 	var albums []model.Album
 	if err := s.db.Model(&model.Album{}).
+		Preload("Songs").
 		Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed").
 		Order("\"Albums\".created_at DESC").
 		Find(&albums).Error; err != nil {
 		return nil, 0, err
+	}
+
+	albumIDs := make([]uuid.UUID, 0, len(albums))
+	for _, album := range albums {
+		albumIDs = append(albumIDs, album.ID)
+	}
+	albumBookmarkCounts := map[uuid.UUID]int64{}
+	if len(albumIDs) > 0 {
+		var bookmarkRows []struct {
+			AlbumID uuid.UUID
+			Count   int64
+		}
+		if err := s.db.Model(&model.AlbumBookmark{}).
+			Select("album_id, COUNT(*) AS count").
+			Where("album_id IN ?", albumIDs).
+			Group("album_id").
+			Scan(&bookmarkRows).Error; err != nil {
+			return nil, 0, err
+		}
+		for _, row := range bookmarkRows {
+			albumBookmarkCounts[row.AlbumID] = row.Count
+		}
 	}
 
 	candidates := make([]recommendation.Candidate, 0, len(albums))
@@ -82,6 +105,126 @@ func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, page
 			ImageURL:   album.CoverURL,
 			TargetPath: "/music/album/" + album.ID.String(),
 			ScoreLabel: fmt.Sprintf("%s %.0f", musicRecommendationLabel(mode), math.Round(item.FinalScore*100)),
+			PlayCount: func() int64 {
+				var total int64
+				for _, song := range album.Songs {
+					total += song.PlayCount
+				}
+				return total
+			}(),
+			BookmarkCount: albumBookmarkCounts[album.ID],
+		})
+	}
+
+	total := int64(len(items))
+	start := (page - 1) * pageSize
+	if start > len(items) {
+		start = len(items)
+	}
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end], total, nil
+}
+
+type artistWithHotScore struct {
+	model.Artist
+	MaxHotScore float64
+	AlbumCount  int64
+}
+
+func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pageSize int) ([]feed.RecommendationItemDTO, int64, error) {
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+
+	var dbArtists []artistWithHotScore
+	if err := s.db.Table("Artists").
+		Select("\"Artists\".*, COALESCE(MAX(a.hot_score), 0) as max_hot_score, COUNT(a.id) as album_count").
+		Joins("LEFT JOIN album_artists aa ON aa.artist_id = \"Artists\".id").
+		Joins("LEFT JOIN \"Albums\" a ON a.id = aa.album_id AND COALESCE(a.entry_status, '') <> 'closed' AND COALESCE(a.status, '') <> 'closed'").
+		Where("COALESCE(\"Artists\".entry_status, '') <> ?", "closed").
+		Group("\"Artists\".id").
+		Find(&dbArtists).Error; err != nil {
+		return nil, 0, err
+	}
+
+	artistIDs := make([]uuid.UUID, 0, len(dbArtists))
+	for _, art := range dbArtists {
+		artistIDs = append(artistIDs, art.ID)
+	}
+
+	artistBookmarkCounts := map[uuid.UUID]int64{}
+	if len(artistIDs) > 0 {
+		var bookmarkRows []struct {
+			ArtistID uuid.UUID
+			Count    int64
+		}
+		if err := s.db.Model(&model.ArtistBookmark{}).
+			Select("artist_id, COUNT(*) AS count").
+			Where("artist_id IN ?", artistIDs).
+			Group("artist_id").
+			Scan(&bookmarkRows).Error; err != nil {
+			return nil, 0, err
+		}
+		for _, row := range bookmarkRows {
+			artistBookmarkCounts[row.ArtistID] = row.Count
+		}
+	}
+
+	artistPlayCounts := map[uuid.UUID]int64{}
+	if len(artistIDs) > 0 {
+		var playRows []struct {
+			ArtistID  uuid.UUID
+			PlayCount int64
+		}
+		if err := s.db.Table("song_artists").
+			Select("song_artists.artist_id AS artist_id, COALESCE(SUM(\"Songs\".play_count), 0) AS play_count").
+			Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id").
+			Where("song_artists.artist_id IN ?", artistIDs).
+			Group("song_artists.artist_id").
+			Scan(&playRows).Error; err != nil {
+			return nil, 0, err
+		}
+		for _, row := range playRows {
+			artistPlayCounts[row.ArtistID] = row.PlayCount
+		}
+	}
+
+	candidates := make([]recommendation.Candidate, 0, len(dbArtists))
+	artistByID := make(map[string]artistWithHotScore, len(dbArtists))
+	for _, art := range dbArtists {
+		candidates = append(candidates, recommendation.Candidate{
+			Module:          "music",
+			EntityType:      recommendation.EntityArtist,
+			EntityID:        art.ID.String(),
+			SourceKey:       art.ID.String(),
+			QualityScore:    clampMusicRecommendation(art.MaxHotScore / 10),
+			TrendScore:      clampMusicRecommendation(art.MaxHotScore / 10),
+			FreshnessScore:  normalizeMusicAlbumFreshness(art.CreatedAt, 30*24*time.Hour),
+			AuthorityScore:  math.Min(1.0, 0.5+0.1*float64(art.AlbumCount)),
+			ExposureScore:   0,
+			EditorialScore:  0,
+			PublishedAtUnix: art.CreatedAt.Unix(),
+		})
+		artistByID[art.ID.String()] = art
+	}
+
+	ranked := recommendation.RankCandidates(mode, candidates, 0)
+	items := make([]feed.RecommendationItemDTO, 0, len(ranked))
+	for _, item := range ranked {
+		art, ok := artistByID[item.EntityID]
+		if !ok {
+			continue
+		}
+		items = append(items, feed.RecommendationItemDTO{
+			ID:         art.ID.String(),
+			Title:      art.Name,
+			Summary:    art.Bio,
+			ImageURL:   art.ImageURL,
+			TargetPath: "/music/artist/" + art.ID.String(),
+			ScoreLabel: fmt.Sprintf("%s %.0f", musicRecommendationLabel(mode), math.Round(item.FinalScore*100)),
+			PlayCount: artistPlayCounts[art.ID],
+			BookmarkCount: artistBookmarkCounts[art.ID],
 		})
 	}
 
@@ -142,6 +285,123 @@ func musicRecommendationLabel(mode recommendation.Mode) string {
 	default:
 		return "推荐"
 	}
+}
+
+func (s *Service) RecordSongPlay(songID uuid.UUID) error {
+	if songID == uuid.Nil {
+		return apperr.BadRequest("validation.invalid_request", "song_id is required")
+	}
+
+	result := s.db.Model(&model.Song{}).Where("id = ?", songID)
+	var count int64
+	if err := result.Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return apperr.NotFound("music.song_not_found", "Song not found")
+	}
+
+	return s.repo.IncrementSongPlayCount(songID)
+}
+
+func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUID, targetArtistID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	if sourceArtistID == uuid.Nil || targetArtistID == uuid.Nil || sourceArtistID == targetArtistID {
+		return apperr.BadRequest("validation.invalid_request", "source_artist_id and target_artist_id must be different valid UUIDs")
+	}
+
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var source model.Artist
+		if err := tx.Preload("Aliases").First(&source, "id = ?", sourceArtistID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("music.artist_not_found", "Source artist not found")
+			}
+			return err
+		}
+
+		var target model.Artist
+		if err := tx.Preload("Aliases").First(&target, "id = ?", targetArtistID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("music.artist_not_found", "Target artist not found")
+			}
+			return err
+		}
+
+		if source.EntryStatus == "closed" {
+			return apperr.Unprocessable("music.artist_not_open", "Source artist is not available")
+		}
+		if target.EntryStatus == "closed" {
+			return apperr.Unprocessable("music.artist_not_open", "Target artist is not available")
+		}
+
+		if err := tx.Exec(`
+			INSERT INTO album_artists (album_id, artist_id)
+			SELECT aa.album_id, ?
+			FROM album_artists aa
+			WHERE aa.artist_id = ?
+			  AND NOT EXISTS (
+				SELECT 1 FROM album_artists existing
+				WHERE existing.album_id = aa.album_id AND existing.artist_id = ?
+			  )
+		`, targetArtistID, sourceArtistID, targetArtistID).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("artist_id = ?", sourceArtistID).Delete(&model.AlbumArtist{}).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Exec(`
+			INSERT INTO song_artists (song_id, artist_id)
+			SELECT sa.song_id, ?
+			FROM song_artists sa
+			WHERE sa.artist_id = ?
+			  AND NOT EXISTS (
+				SELECT 1 FROM song_artists existing
+				WHERE existing.song_id = sa.song_id AND existing.artist_id = ?
+			  )
+		`, targetArtistID, sourceArtistID, targetArtistID).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("artist_id = ?", sourceArtistID).Delete(&model.SongArtist{}).Error; err != nil {
+			return err
+		}
+
+		var sourceAliases []model.ArtistAlias
+		if err := tx.Where("artist_id = ?", sourceArtistID).Find(&sourceAliases).Error; err != nil {
+			return err
+		}
+
+		for _, alias := range append([]string{source.Name}, func() []string {
+			names := make([]string, 0, len(sourceAliases))
+			for _, item := range sourceAliases {
+				names = append(names, item.Alias)
+			}
+			return names
+		}()...) {
+			alias = strings.TrimSpace(alias)
+			if alias == "" || strings.EqualFold(alias, target.Name) {
+				continue
+			}
+			if err := tx.Where("artist_id = ? AND LOWER(alias) = LOWER(?)", targetArtistID, alias).
+				FirstOrCreate(&model.ArtistAlias{ArtistID: targetArtistID, Alias: alias, IsMainName: false}).Error; err != nil {
+				return err
+			}
+		}
+
+		if err := tx.Model(&model.Artist{}).Where("id = ?", sourceArtistID).Update("entry_status", "closed").Error; err != nil {
+			return err
+		}
+
+		mergeRecord := model.ArtistMerge{
+			SourceArtistID: sourceArtistID,
+			TargetArtistID: targetArtistID,
+			MergedBy:       user.ID,
+			MergedAt:       time.Now(),
+		}
+		return tx.Create(&mergeRecord).Error
+	})
 }
 
 func (s *Service) SubmitEdit(user authctx.CurrentUser, req SubmitEditRequest) (model.MusicEdit, error) {
@@ -473,6 +733,20 @@ func (s *Service) DeletePlaylist(user authctx.CurrentUser, playlistID uuid.UUID)
 		return apperr.Unauthorized("Login required")
 	}
 	return s.repo.DeletePlaylist(user.ID, playlistID)
+}
+
+func (s *Service) GetPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.Playlist, error) {
+	if user.ID == uuid.Nil {
+		return model.Playlist{}, apperr.Unauthorized("Login required")
+	}
+	playlist, err := s.repo.GetPlaylistForUser(user.ID, playlistID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Playlist{}, apperr.NotFound("music.playlist_not_found", "Playlist not found")
+		}
+		return model.Playlist{}, err
+	}
+	return playlist, nil
 }
 
 func (s *Service) AddPlaylistSong(user authctx.CurrentUser, playlistID uuid.UUID, songID uuid.UUID) (model.PlaylistSong, error) {

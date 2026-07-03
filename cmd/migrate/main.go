@@ -121,6 +121,10 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("music bookmarks playlists migration: %w", err)
 	}
 
+	if err := migrations.RunMusicPlayCountsMigration(db); err != nil {
+		return fmt.Errorf("music play counts migration: %w", err)
+	}
+
 	return nil
 }
 

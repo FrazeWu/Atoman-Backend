@@ -63,6 +63,97 @@ func resolveAlbumMediaURLs(album *model.Album) {
 	}
 }
 
+func hydrateAlbumStats(db *gorm.DB, albums []model.Album) error {
+	if len(albums) == 0 {
+		return nil
+	}
+
+	albumIDs := make([]uuid.UUID, 0, len(albums))
+	albumIndex := make(map[uuid.UUID]int, len(albums))
+	for i := range albums {
+		albumIDs = append(albumIDs, albums[i].ID)
+		albumIndex[albums[i].ID] = i
+	}
+
+	var bookmarkRows []struct {
+		AlbumID uuid.UUID
+		Count   int64
+	}
+	if err := db.Model(&model.AlbumBookmark{}).
+		Select("album_id, COUNT(*) AS count").
+		Where("album_id IN ?", albumIDs).
+		Group("album_id").
+		Scan(&bookmarkRows).Error; err != nil {
+		return err
+	}
+
+	for _, row := range bookmarkRows {
+		if idx, ok := albumIndex[row.AlbumID]; ok {
+			albums[idx].BookmarkCount = row.Count
+		}
+	}
+
+	for i := range albums {
+		var playCount int64
+		for _, song := range albums[i].Songs {
+			playCount += song.PlayCount
+		}
+		albums[i].PlayCount = playCount
+	}
+
+	return nil
+}
+
+func hydrateArtistStats(db *gorm.DB, artists []model.Artist) error {
+	if len(artists) == 0 {
+		return nil
+	}
+
+	artistIDs := make([]uuid.UUID, 0, len(artists))
+	artistIndex := make(map[uuid.UUID]int, len(artists))
+	for i := range artists {
+		artistIDs = append(artistIDs, artists[i].ID)
+		artistIndex[artists[i].ID] = i
+	}
+
+	var bookmarkRows []struct {
+		ArtistID uuid.UUID
+		Count    int64
+	}
+	if err := db.Model(&model.ArtistBookmark{}).
+		Select("artist_id, COUNT(*) AS count").
+		Where("artist_id IN ?", artistIDs).
+		Group("artist_id").
+		Scan(&bookmarkRows).Error; err != nil {
+		return err
+	}
+	for _, row := range bookmarkRows {
+		if idx, ok := artistIndex[row.ArtistID]; ok {
+			artists[idx].BookmarkCount = row.Count
+		}
+	}
+
+	var playRows []struct {
+		ArtistID  uuid.UUID
+		PlayCount int64
+	}
+	if err := db.Table("song_artists").
+		Select("song_artists.artist_id AS artist_id, COALESCE(SUM(\"Songs\".play_count), 0) AS play_count").
+		Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id").
+		Where("song_artists.artist_id IN ?", artistIDs).
+		Group("song_artists.artist_id").
+		Scan(&playRows).Error; err != nil {
+		return err
+	}
+	for _, row := range playRows {
+		if idx, ok := artistIndex[row.ArtistID]; ok {
+			artists[idx].PlayCount = row.PlayCount
+		}
+	}
+
+	return nil
+}
+
 type Handler struct {
 	service *Service
 }
@@ -92,11 +183,14 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.DELETE("/bookmarks/songs/:songId", h.deleteSongBookmark)
 	group.GET("/playlists", h.listPlaylists)
 	group.POST("/playlists", h.createPlaylist)
+	group.GET("/playlists/:id", h.getPlaylist)
 	group.DELETE("/playlists/:id", h.deletePlaylist)
 	group.GET("/playlists/:id/songs", h.listPlaylistSongs)
 	group.POST("/playlists/:id/songs", h.addPlaylistSong)
 	group.DELETE("/playlists/:id/songs/:songId", h.deletePlaylistSong)
+	group.POST("/plays", h.recordSongPlay)
 	group.GET("/recommend/albums", h.getRecommendedAlbums)
+	group.GET("/recommend/artists", h.getRecommendedArtists)
 	group.POST("/edits", h.submitEdit)
 	group.GET("/edits", h.listEdits)
 	group.GET("/edits/:editId", h.getEdit)
@@ -110,10 +204,12 @@ func (h *Handler) listArtists(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
 	query := strings.TrimSpace(c.Query("q"))
 
-	db := h.service.db.Model(&model.Artist{}).Where("COALESCE(entry_status, '') <> ?", "closed")
+	db := h.service.db.Model(&model.Artist{}).Distinct("\"Artists\".*").Where("COALESCE(\"Artists\".entry_status, '') <> ?", "closed")
 	if query != "" {
 		like := "%" + strings.ToLower(query) + "%"
-		db = db.Where("LOWER(name) LIKE ?", like)
+		db = db.
+			Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
+			Where("LOWER(\"Artists\".name) LIKE ? OR LOWER(COALESCE(\"Artists\".legal_name, '')) LIKE ? OR LOWER(COALESCE(artist_aliases.alias, '')) LIKE ?", like, like, like)
 	}
 
 	var total int64
@@ -123,9 +219,17 @@ func (h *Handler) listArtists(c *gin.Context) {
 	}
 
 	var artists []model.Artist
-	if err := db.Order("name ASC").Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&artists).Error; err != nil {
+	if err := db.Preload("Aliases").Order("name ASC").Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&artists).Error; err != nil {
 		httpx.Error(c, err)
 		return
+	}
+	if err := hydrateArtistStats(h.service.db, artists); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	for i := range artists {
+		artists[i].ImageURL = resolveMusicMediaURL(artists[i].ImageURL)
 	}
 
 	httpx.List(c, artists, page, pageSize, total)
@@ -139,7 +243,7 @@ func (h *Handler) getArtist(c *gin.Context) {
 	}
 
 	var artist model.Artist
-	if err := h.service.db.Preload("Albums.Artists").First(&artist, "id = ?", artistID).Error; err != nil {
+	if err := h.service.db.Preload("Aliases").Preload("Albums.Artists").First(&artist, "id = ?", artistID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("music.artist_not_found", "Artist not found"))
 			return
@@ -147,6 +251,21 @@ func (h *Handler) getArtist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	artistRows := []model.Artist{artist}
+	if err := hydrateArtistStats(h.service.db, artistRows); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	artist = artistRows[0]
+
+	artist.ImageURL = resolveMusicMediaURL(artist.ImageURL)
+	for i := range artist.Albums {
+		artist.Albums[i].CoverURL = resolveMusicMediaURL(artist.Albums[i].CoverURL)
+		for j := range artist.Albums[i].Artists {
+			artist.Albums[i].Artists[j].ImageURL = resolveMusicMediaURL(artist.Albums[i].Artists[j].ImageURL)
+		}
+	}
+
 	httpx.OK(c, http.StatusOK, artist)
 }
 
@@ -198,6 +317,10 @@ func (h *Handler) listAlbums(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	if err := hydrateAlbumStats(h.service.db, albums); err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	for i := range albums {
 		resolveAlbumMediaURLs(&albums[i])
 	}
@@ -221,8 +344,27 @@ func (h *Handler) getAlbum(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	albumRows := []model.Album{album}
+	if err := hydrateAlbumStats(h.service.db, albumRows); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	album = albumRows[0]
 	resolveAlbumMediaURLs(&album)
 	httpx.OK(c, http.StatusOK, album)
+}
+
+func (h *Handler) recordSongPlay(c *gin.Context) {
+	var req RecordSongPlayRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.RecordSongPlay(req.SongID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"recorded": true})
 }
 
 func (h *Handler) getRecommendedAlbums(c *gin.Context) {
@@ -236,6 +378,27 @@ func (h *Handler) getRecommendedAlbums(c *gin.Context) {
 	if err != nil {
 		httpx.Error(c, err)
 		return
+	}
+	for i := range items {
+		items[i].ImageURL = resolveMusicMediaURL(items[i].ImageURL)
+	}
+	httpx.List(c, items, page, pageSize, total)
+}
+
+func (h *Handler) getRecommendedArtists(c *gin.Context) {
+	mode, err := parseMusicRecommendationMode(c.Query("mode"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	items, total, err := h.service.RecommendArtistsByMode(mode, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	for i := range items {
+		items[i].ImageURL = resolveMusicMediaURL(items[i].ImageURL)
 	}
 	httpx.List(c, items, page, pageSize, total)
 }
@@ -470,6 +633,31 @@ func (h *Handler) deletePlaylist(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
+}
+
+func (h *Handler) getPlaylist(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	playlistID, err := parseMusicID(c.Param("id"), "id")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	playlist, err := h.service.GetPlaylist(user, playlistID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, PlaylistSummaryResponse{
+		ID:          playlist.ID,
+		UserID:      playlist.UserID,
+		Name:        playlist.Name,
+		Description: playlist.Description,
+		SongCount:   0,
+	})
 }
 
 func (h *Handler) listPlaylistSongs(c *gin.Context) {

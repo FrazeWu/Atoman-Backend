@@ -24,6 +24,8 @@ type Artist struct {
 	Albums         []Album       `json:"albums,omitempty" gorm:"many2many:album_artists;"`
 	Songs          []Song        `json:"songs,omitempty" gorm:"many2many:song_artists;"`
 	Aliases        []ArtistAlias `json:"aliases,omitempty" gorm:"foreignKey:ArtistID"`
+	PlayCount      int64         `json:"play_count" gorm:"-"`
+	BookmarkCount  int64         `json:"bookmark_count" gorm:"-"`
 }
 
 func (Artist) TableName() string {
@@ -46,6 +48,8 @@ type Album struct {
 	User        *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
 	Artists     []Artist   `json:"artists,omitempty" gorm:"many2many:album_artists;"`
 	Songs       []Song     `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
+	PlayCount   int64      `json:"play_count"`
+	BookmarkCount int64    `json:"bookmark_count" gorm:"-"`
 }
 
 func (Album) TableName() string {
@@ -81,6 +85,7 @@ type Song struct {
 	Artists     []Artist   `json:"artists,omitempty" gorm:"many2many:song_artists;"`
 	UploadedBy  *uuid.UUID `json:"uploaded_by" gorm:"type:uuid"`
 	User        *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
+	PlayCount   int64      `json:"play_count" gorm:"default:0"`
 }
 
 func (Song) TableName() string {

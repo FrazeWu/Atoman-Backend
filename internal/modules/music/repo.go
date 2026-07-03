@@ -180,3 +180,10 @@ func (r *Repo) ListPlaylistSongs(playlistID uuid.UUID, page int, pageSize int) (
 func (r *Repo) DeletePlaylistSong(playlistID uuid.UUID, songID uuid.UUID) error {
 	return r.db.Where("playlist_id = ? AND song_id = ?", playlistID, songID).Delete(&model.PlaylistSong{}).Error
 }
+
+func (r *Repo) IncrementSongPlayCount(songID uuid.UUID) error {
+	return r.db.Model(&model.Song{}).
+		Where("id = ?", songID).
+		UpdateColumn("play_count", gorm.Expr("play_count + 1")).
+		Error
+}

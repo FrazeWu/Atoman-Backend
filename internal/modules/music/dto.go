@@ -47,6 +47,10 @@ type AddPlaylistSongRequest struct {
 	SongID uuid.UUID `json:"song_id"`
 }
 
+type RecordSongPlayRequest struct {
+	SongID uuid.UUID `json:"song_id"`
+}
+
 type PlaylistSummaryResponse struct {
 	ID          uuid.UUID `json:"id"`
 	UserID      uuid.UUID `json:"user_id"`
