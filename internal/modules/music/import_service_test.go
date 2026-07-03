@@ -342,6 +342,82 @@ func TestCompleteAlbumImportMultipartPartReplacesAndSortsParts(t *testing.T) {
 	}
 }
 
+func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDeletesObject(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+	archiveBody := newImportTestZipArchive(t, map[string]string{
+		"02 - Archangel.flac": "",
+		"01 - Untitled.mp3":   "",
+	})
+	store := &fakeAlbumImportMultipartStore{
+		uploadID:   "upload-1",
+		objectBody: archiveBody,
+	}
+	svc.albumImportMultipart = store
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+		Payload: AlbumImportPayload{
+			Artist: AlbumImportArtistPayload{Name: "Burial"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	started, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
+		FileName: "Untrue.zip",
+		FileSize: 64 * 1024 * 1024,
+	})
+	if err != nil {
+		t.Fatalf("start multipart: %v", err)
+	}
+	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 2, CompleteAlbumImportMultipartPartInput{
+		ETag: "etag-2",
+		Size: albumImportMultipartPartSize,
+	}); err != nil {
+		t.Fatalf("complete part 2: %v", err)
+	}
+	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 1, CompleteAlbumImportMultipartPartInput{
+		ETag: "etag-1",
+		Size: albumImportMultipartPartSize,
+	}); err != nil {
+		t.Fatalf("complete part 1: %v", err)
+	}
+
+	updated, err := svc.CompleteAlbumImportMultipart(user, session.ID)
+	if err != nil {
+		t.Fatalf("complete multipart: %v", err)
+	}
+	if updated.Status != AlbumImportStatusReady {
+		t.Fatalf("expected ready status, got %#v", updated)
+	}
+	if store.completeKey != started.ObjectKey || store.completeUploadID != "upload-1" {
+		t.Fatalf("unexpected complete call key=%q uploadID=%q", store.completeKey, store.completeUploadID)
+	}
+	if fmt.Sprint(store.completedPartNumbers) != "[1 2]" {
+		t.Fatalf("expected sorted completed parts [1 2], got %#v", store.completedPartNumbers)
+	}
+	if len(store.deletedKeys) != 1 || store.deletedKeys[0] != started.ObjectKey {
+		t.Fatalf("expected original archive deleted, got %#v", store.deletedKeys)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(updated.PayloadJSON), &payload); err != nil {
+		t.Fatalf("unmarshal payload json: %v", err)
+	}
+	if payload["archive_name"] != "Untrue.zip" {
+		t.Fatalf("expected archive_name preserved, got %#v", payload["archive_name"])
+	}
+	if stringValue(payload["multipart_upload_id"]) != "" {
+		t.Fatalf("expected multipart_upload_id removed, got %#v", payload["multipart_upload_id"])
+	}
+	derivedTracks, ok := payload["derived_tracks"].([]any)
+	if !ok || len(derivedTracks) != 2 {
+		t.Fatalf("expected 2 derived tracks, got %#v", payload["derived_tracks"])
+	}
+	assertDerivedTrackPresent(t, derivedTracks, "Untitled", 1)
+	assertDerivedTrackPresent(t, derivedTracks, "Archangel", 2)
+}
+
 func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 
@@ -825,16 +901,21 @@ func fakeMusicImportS3Client(t *testing.T, capturedPath *string, capturedContent
 }
 
 type fakeAlbumImportMultipartStore struct {
-	uploadID  string
-	signedURL string
+	uploadID   string
+	signedURL  string
+	objectBody []byte
 
 	createCalls int
 
-	createKey         string
-	createContentType string
-	presignKey        string
-	presignUploadID   string
-	presignPartNumber int
+	createKey            string
+	createContentType    string
+	presignKey           string
+	presignUploadID      string
+	presignPartNumber    int
+	completeKey          string
+	completeUploadID     string
+	completedPartNumbers []int
+	deletedKeys          []string
 }
 
 func (f *fakeAlbumImportMultipartStore) CreateMultipartUpload(key string, contentType string) (string, error) {
@@ -857,7 +938,13 @@ func (f *fakeAlbumImportMultipartStore) PresignUploadPart(key string, uploadID s
 	return f.signedURL, nil
 }
 
-func (f *fakeAlbumImportMultipartStore) CompleteMultipartUpload(_ string, _ string, _ []AlbumImportMultipartPartDTO) error {
+func (f *fakeAlbumImportMultipartStore) CompleteMultipartUpload(key string, uploadID string, parts []AlbumImportMultipartPartDTO) error {
+	f.completeKey = key
+	f.completeUploadID = uploadID
+	f.completedPartNumbers = nil
+	for _, part := range parts {
+		f.completedPartNumbers = append(f.completedPartNumbers, part.PartNumber)
+	}
 	return nil
 }
 
@@ -866,9 +953,10 @@ func (f *fakeAlbumImportMultipartStore) AbortMultipartUpload(_ string, _ string)
 }
 
 func (f *fakeAlbumImportMultipartStore) OpenObject(_ string) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("")), nil
+	return io.NopCloser(bytes.NewReader(f.objectBody)), nil
 }
 
-func (f *fakeAlbumImportMultipartStore) DeleteObject(_ string) error {
+func (f *fakeAlbumImportMultipartStore) DeleteObject(key string) error {
+	f.deletedKeys = append(f.deletedKeys, key)
 	return nil
 }

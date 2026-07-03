@@ -362,6 +362,139 @@ func (s *Service) CompleteAlbumImportMultipartPart(user authctx.CurrentUser, id 
 	return out, nil
 }
 
+func (s *Service) CompleteAlbumImportMultipart(user authctx.CurrentUser, id uuid.UUID) (model.AlbumImportSession, error) {
+	if user.ID == uuid.Nil {
+		return model.AlbumImportSession{}, apperr.Unauthorized("Login required")
+	}
+	if err := requireAlbumImportMultipartStore(s.albumImportMultipart); err != nil {
+		return model.AlbumImportSession{}, err
+	}
+
+	session, payload, state, err := s.loadCompletableAlbumImportMultipart(id)
+	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	parts := append([]AlbumImportMultipartPartDTO(nil), state.CompletedParts...)
+	sort.Slice(parts, func(i, j int) bool {
+		return parts[i].PartNumber < parts[j].PartNumber
+	})
+
+	objectCompleted := false
+	if err := s.albumImportMultipart.CompleteMultipartUpload(state.ObjectKey, state.UploadID, parts); err != nil {
+		_ = s.markAlbumImportFailed(id, "upload failed")
+		return model.AlbumImportSession{}, err
+	}
+	objectCompleted = true
+	if session, err = s.updateAlbumImportStatusAndPayload(id, AlbumImportStatusUploaded, payload); err != nil {
+		_ = s.markAlbumImportFailed(id, "upload failed")
+		_ = s.albumImportMultipart.DeleteObject(state.ObjectKey)
+		return model.AlbumImportSession{}, err
+	}
+	if session, err = s.updateAlbumImportStatusAndPayload(id, AlbumImportStatusExtracting, payload); err != nil {
+		_ = s.markAlbumImportFailed(id, "archive extraction failed")
+		_ = s.albumImportMultipart.DeleteObject(state.ObjectKey)
+		return model.AlbumImportSession{}, err
+	}
+
+	body, err := s.albumImportMultipart.OpenObject(state.ObjectKey)
+	if err != nil {
+		_ = s.markAlbumImportFailed(id, "archive extraction failed")
+		if objectCompleted {
+			_ = s.albumImportMultipart.DeleteObject(state.ObjectKey)
+		}
+		return model.AlbumImportSession{}, err
+	}
+	payloadPatch, deriveErr := s.deriveAlbumImportPayloadFromReader(user, state.FileName, body)
+	closeErr := body.Close()
+	if deriveErr != nil {
+		_ = s.markAlbumImportFailed(id, "archive extraction failed")
+		if objectCompleted {
+			_ = s.albumImportMultipart.DeleteObject(state.ObjectKey)
+		}
+		return model.AlbumImportSession{}, deriveErr
+	}
+	if closeErr != nil {
+		_ = s.markAlbumImportFailed(id, "archive extraction failed")
+		if objectCompleted {
+			_ = s.albumImportMultipart.DeleteObject(state.ObjectKey)
+		}
+		return model.AlbumImportSession{}, closeErr
+	}
+
+	for key, value := range payloadPatch {
+		payload[key] = value
+	}
+	delete(payload, "multipart_upload_id")
+	delete(payload, "error_message")
+	session, err = s.updateAlbumImportStatusAndPayload(id, AlbumImportStatusReady, payload)
+	if err != nil {
+		_ = s.markAlbumImportFailed(id, "archive extraction failed")
+		_ = s.albumImportMultipart.DeleteObject(state.ObjectKey)
+		return model.AlbumImportSession{}, err
+	}
+	if err := s.albumImportMultipart.DeleteObject(state.ObjectKey); err != nil {
+		_ = s.markAlbumImportFailed(id, "archive cleanup failed")
+		return model.AlbumImportSession{}, err
+	}
+	return session, nil
+}
+
+func (s *Service) loadCompletableAlbumImportMultipart(id uuid.UUID) (model.AlbumImportSession, map[string]any, albumImportMultipartState, error) {
+	session, err := s.GetAlbumImportSession(id)
+	if err != nil {
+		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, err
+	}
+	if session.Status != AlbumImportStatusUploading {
+		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, apperr.Unprocessable("music.import_invalid_status", "Import session is not uploading")
+	}
+	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+	if err != nil {
+		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, err
+	}
+	state := albumImportMultipartStateFromPayload(payload)
+	if state.ObjectKey == "" || state.UploadID == "" || state.FileName == "" || len(state.CompletedParts) == 0 {
+		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, apperr.Unprocessable("music.import_invalid_status", "Multipart upload is incomplete")
+	}
+	return session, payload, state, nil
+}
+
+func (s *Service) updateAlbumImportStatusAndPayload(id uuid.UUID, status string, payload map[string]any) (model.AlbumImportSession, error) {
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	var session model.AlbumImportSession
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&session, "id = ?", id).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return apperr.NotFound("music.import_not_found", "Import session not found")
+			}
+			return err
+		}
+		session.Status = status
+		session.PayloadJSON = string(payloadJSON)
+		return tx.Save(&session).Error
+	})
+	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	return session, nil
+}
+
+func (s *Service) markAlbumImportFailed(id uuid.UUID, message string) error {
+	session, err := s.GetAlbumImportSession(id)
+	if err != nil {
+		return err
+	}
+	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+	if err != nil {
+		return err
+	}
+	payload["error_message"] = strings.TrimSpace(message)
+	_, err = s.updateAlbumImportStatusAndPayload(id, AlbumImportStatusFailed, payload)
+	return err
+}
+
 func (s *Service) GetAlbumImportSession(id uuid.UUID) (model.AlbumImportSession, error) {
 	var session model.AlbumImportSession
 	if err := s.db.First(&session, "id = ?", id).Error; err != nil {
@@ -667,10 +800,33 @@ func mustMarshalStageNames(values []ArtistStageNamePayload) string {
 }
 
 func (s *Service) deriveAlbumImportPayload(user authctx.CurrentUser, archiveName string, body []byte) (map[string]any, error) {
-	reader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	return s.deriveAlbumImportPayloadFromReader(user, archiveName, bytes.NewReader(body))
+}
+
+func (s *Service) deriveAlbumImportPayloadFromReader(user authctx.CurrentUser, archiveName string, body io.Reader) (map[string]any, error) {
+	tmpFile, err := os.CreateTemp("", "atoman-album-import-*.zip")
+	if err != nil {
+		return nil, err
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := io.Copy(tmpFile, body); err != nil {
+		tmpFile.Close()
+		return nil, err
+	}
+	if err := tmpFile.Close(); err != nil {
+		return nil, err
+	}
+	return s.deriveAlbumImportPayloadFromZipFile(user, archiveName, tmpPath)
+}
+
+func (s *Service) deriveAlbumImportPayloadFromZipFile(user authctx.CurrentUser, archiveName string, zipPath string) (map[string]any, error) {
+	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return nil, apperr.BadRequest("validation.invalid_request", "archive must be a valid zip file")
 	}
+	defer reader.Close()
 
 	derivedTracks := make([]map[string]any, 0)
 	var coverURL string
