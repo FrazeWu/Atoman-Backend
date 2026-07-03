@@ -75,12 +75,13 @@ func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, page
 	candidates := make([]recommendation.Candidate, 0, len(albums))
 	albumByID := make(map[string]model.Album, len(albums))
 	for _, album := range albums {
+		qualityScore := normalizeMusicDiscoverQuality(album.HotScore)
 		candidates = append(candidates, recommendation.Candidate{
 			Module:          "music",
 			EntityType:      recommendation.EntityAlbum,
 			EntityID:        album.ID.String(),
 			SourceKey:       album.ID.String(),
-			QualityScore:    clampMusicRecommendation(album.HotScore / 10),
+			QualityScore:    qualityScore,
 			TrendScore:      clampMusicRecommendation(album.HotScore / 10),
 			FreshnessScore:  normalizeMusicAlbumFreshness(album.CreatedAt, 30*24*time.Hour),
 			AuthorityScore:  0.5,
@@ -193,12 +194,13 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 	candidates := make([]recommendation.Candidate, 0, len(dbArtists))
 	artistByID := make(map[string]artistWithHotScore, len(dbArtists))
 	for _, art := range dbArtists {
+		qualityScore := normalizeMusicDiscoverQuality(art.MaxHotScore)
 		candidates = append(candidates, recommendation.Candidate{
 			Module:          "music",
 			EntityType:      recommendation.EntityArtist,
 			EntityID:        art.ID.String(),
 			SourceKey:       art.ID.String(),
-			QualityScore:    clampMusicRecommendation(art.MaxHotScore / 10),
+			QualityScore:    qualityScore,
 			TrendScore:      clampMusicRecommendation(art.MaxHotScore / 10),
 			FreshnessScore:  normalizeMusicAlbumFreshness(art.CreatedAt, 30*24*time.Hour),
 			AuthorityScore:  math.Min(1.0, 0.5+0.1*float64(art.AlbumCount)),
@@ -321,6 +323,10 @@ func normalizeMusicAlbumFreshness(createdAt time.Time, horizon time.Duration) fl
 		return 1
 	}
 	return clampMusicRecommendation(1 - float64(age)/float64(horizon))
+}
+
+func normalizeMusicDiscoverQuality(hotScore float64) float64 {
+	return clampMusicRecommendation(0.3 + hotScore/10)
 }
 
 func clampMusicRecommendation(value float64) float64 {

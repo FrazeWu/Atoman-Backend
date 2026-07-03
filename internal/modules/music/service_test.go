@@ -25,6 +25,11 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.ArtistMerge{},
 		&model.Album{},
 		&model.Song{},
+		&model.ArtistBookmark{},
+		&model.AlbumBookmark{},
+		&model.SongBookmark{},
+		&model.Playlist{},
+		&model.PlaylistSong{},
 		&model.AlbumImportSession{},
 		&model.MusicEdit{},
 		&model.MusicEditVote{},
@@ -526,5 +531,49 @@ func TestSubmitEditAutoAppliesUpdateAlbumTracksForMainWikiFlow(t *testing.T) {
 	}
 	if closedSong.Status != "closed" {
 		t.Fatalf("expected removed song closed, got %#v", closedSong)
+	}
+}
+
+func TestRecommendAlbumsByModeDiscoverKeepsLowHotScoreAlbums(t *testing.T) {
+	svc, db, _ := newMusicTestService(t)
+
+	oldAlbum := model.Album{
+		Title:       "Low Heat Old Album",
+		EntryStatus: "open",
+		Status:      "open",
+		HotScore:    1,
+	}
+	freshAlbum := model.Album{
+		Title:       "Low Heat Fresh Album",
+		EntryStatus: "open",
+		Status:      "open",
+		HotScore:    1,
+	}
+
+	if err := db.Create(&oldAlbum).Error; err != nil {
+		t.Fatalf("create old album: %v", err)
+	}
+	if err := db.Create(&freshAlbum).Error; err != nil {
+		t.Fatalf("create fresh album: %v", err)
+	}
+	if err := db.Model(&oldAlbum).Update("created_at", "2026-01-01 00:00:00").Error; err != nil {
+		t.Fatalf("update old album created_at: %v", err)
+	}
+	if err := db.Model(&freshAlbum).Update("created_at", "2026-07-01 00:00:00").Error; err != nil {
+		t.Fatalf("update fresh album created_at: %v", err)
+	}
+
+	items, total, err := svc.RecommendAlbumsByMode("discover", 1, 20)
+	if err != nil {
+		t.Fatalf("recommend albums: %v", err)
+	}
+	if total != 2 {
+		t.Fatalf("expected 2 discover items, got %d", total)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 discover results, got %d", len(items))
+	}
+	if items[0].Title != "Low Heat Fresh Album" {
+		t.Fatalf("expected fresher low-heat album ranked first, got %#v", items)
 	}
 }
