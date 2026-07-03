@@ -370,7 +370,7 @@ func (s *Service) CompleteAlbumImportMultipart(user authctx.CurrentUser, id uuid
 		return model.AlbumImportSession{}, err
 	}
 
-	session, payload, state, err := s.loadCompletableAlbumImportMultipart(id)
+	session, payload, state, archiveName, err := s.loadCompletableAlbumImportMultipart(id)
 	if err != nil {
 		return model.AlbumImportSession{}, err
 	}
@@ -404,7 +404,7 @@ func (s *Service) CompleteAlbumImportMultipart(user authctx.CurrentUser, id uuid
 		}
 		return model.AlbumImportSession{}, err
 	}
-	payloadPatch, deriveErr := s.deriveAlbumImportPayloadFromReader(user, state.FileName, body)
+	payloadPatch, deriveErr := s.deriveAlbumImportPayloadFromReader(user, archiveName, body)
 	closeErr := body.Close()
 	if deriveErr != nil {
 		_ = s.markAlbumImportFailed(id, "archive extraction failed")
@@ -436,23 +436,27 @@ func (s *Service) CompleteAlbumImportMultipart(user authctx.CurrentUser, id uuid
 	return session, nil
 }
 
-func (s *Service) loadCompletableAlbumImportMultipart(id uuid.UUID) (model.AlbumImportSession, map[string]any, albumImportMultipartState, error) {
+func (s *Service) loadCompletableAlbumImportMultipart(id uuid.UUID) (model.AlbumImportSession, map[string]any, albumImportMultipartState, string, error) {
 	session, err := s.GetAlbumImportSession(id)
 	if err != nil {
-		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, err
+		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, "", err
 	}
 	if session.Status != AlbumImportStatusUploading {
-		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, apperr.Unprocessable("music.import_invalid_status", "Import session is not uploading")
+		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, "", apperr.Unprocessable("music.import_invalid_status", "Import session is not uploading")
 	}
 	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
 	if err != nil {
-		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, err
+		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, "", err
+	}
+	archiveName := strings.TrimSpace(stringValue(payload["archive_name"]))
+	if archiveName == "" {
+		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, "", apperr.Unprocessable("music.import_invalid_status", "Archive name is missing")
 	}
 	state := albumImportMultipartStateFromPayload(payload)
-	if state.ObjectKey == "" || state.UploadID == "" || state.FileName == "" || len(state.CompletedParts) == 0 {
-		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, apperr.Unprocessable("music.import_invalid_status", "Multipart upload is incomplete")
+	if state.ObjectKey == "" || state.UploadID == "" || len(state.CompletedParts) == 0 {
+		return model.AlbumImportSession{}, nil, albumImportMultipartState{}, "", apperr.Unprocessable("music.import_invalid_status", "Multipart upload is incomplete")
 	}
-	return session, payload, state, nil
+	return session, payload, state, archiveName, nil
 }
 
 func (s *Service) updateAlbumImportStatusAndPayload(id uuid.UUID, status string, payload map[string]any) (model.AlbumImportSession, error) {

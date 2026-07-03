@@ -481,6 +481,56 @@ func TestCompleteAlbumImportMultipartKeepsReadyWhenCleanupDeleteFails(t *testing
 	}
 }
 
+func TestCompleteAlbumImportMultipartRejectsMissingArchiveName(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{
+		uploadID:   "upload-1",
+		objectBody: newImportTestZipArchive(t, map[string]string{"01 - Untitled.mp3": ""}),
+	}
+
+	payload := map[string]any{
+		"multipart_file_name":  "Untrue.zip",
+		"multipart_file_size":  float64(64 * 1024 * 1024),
+		"multipart_object_key": "music/album-imports/test.zip",
+		"multipart_upload_id":  "upload-1",
+		"multipart_part_size":  float64(albumImportMultipartPartSize),
+		"multipart_completed_parts": []map[string]any{
+			{"partNumber": float64(1), "etag": "etag-1", "size": float64(albumImportMultipartPartSize)},
+		},
+	}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	session := model.AlbumImportSession{
+		Status:      AlbumImportStatusUploading,
+		PayloadJSON: string(payloadJSON),
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	_, err = svc.CompleteAlbumImportMultipart(user, session.ID)
+	if err == nil {
+		t.Fatal("expected complete multipart to reject missing archive_name")
+	}
+	var appErr *apperr.AppError
+	if !errors.As(err, &appErr) {
+		t.Fatalf("expected app error, got %v", err)
+	}
+	if appErr.Code != "music.import_invalid_status" && appErr.Code != "validation.invalid_request" {
+		t.Fatalf("expected import_invalid_status or validation.invalid_request, got %#v", appErr)
+	}
+
+	var stored model.AlbumImportSession
+	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("load stored session: %v", err)
+	}
+	if stored.Status == AlbumImportStatusReady {
+		t.Fatalf("expected session not to become ready, got %#v", stored)
+	}
+}
+
 func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 
