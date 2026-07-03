@@ -338,13 +338,7 @@ func normalizeAlbumImportStatus(status string) string {
 
 func isAlbumImportStatusAllowed(status string) bool {
 	switch status {
-	case AlbumImportStatusPendingUpload,
-		AlbumImportStatusUploading,
-		AlbumImportStatusUploaded,
-		AlbumImportStatusExtracting,
-		AlbumImportStatusReady,
-		AlbumImportStatusFailed,
-		AlbumImportStatusCommitted:
+	case AlbumImportStatusPendingUpload, AlbumImportStatusReady, AlbumImportStatusCommitted:
 		return true
 	default:
 		return false
