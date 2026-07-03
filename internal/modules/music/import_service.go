@@ -432,10 +432,7 @@ func (s *Service) CompleteAlbumImportMultipart(user authctx.CurrentUser, id uuid
 		_ = s.albumImportMultipart.DeleteObject(state.ObjectKey)
 		return model.AlbumImportSession{}, err
 	}
-	if err := s.albumImportMultipart.DeleteObject(state.ObjectKey); err != nil {
-		_ = s.markAlbumImportFailed(id, "archive cleanup failed")
-		return model.AlbumImportSession{}, err
-	}
+	_ = s.albumImportMultipart.DeleteObject(state.ObjectKey)
 	return session, nil
 }
 
