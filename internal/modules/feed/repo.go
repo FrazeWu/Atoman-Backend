@@ -278,6 +278,16 @@ func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) 
 	return rows, err
 }
 
+func (r *Repo) ListRecentPublishedPostsByChannelID(channelID uuid.UUID, limit int) ([]model.Post, error) {
+	var posts []model.Post
+	err := r.db.
+		Where("channel_id = ? AND status = ?", channelID, "published").
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&posts).Error
+	return posts, err
+}
+
 func recommendationChannelLatestPublishedExpr(dialect string) string {
 	switch dialect {
 	case "postgres":
@@ -475,6 +485,24 @@ func (r *Repo) CountExploreSources(category string) (int64, error) {
 		return 0, err
 	}
 	return int64(len(rows)), nil
+}
+
+func (r *Repo) CountSubscriptionsByFeedSourceID(feedSourceID uuid.UUID) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.Subscription{}).Where("feed_source_id = ?", feedSourceID).Count(&count).Error
+	return count, err
+}
+
+func (r *Repo) CountReadEvents(sourceType string, sourceID string) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.SourceReadEvent{}).
+		Where("source_type = ? AND source_id = ?", sourceType, sourceID).
+		Count(&count).Error
+	return count, err
+}
+
+func (r *Repo) CreateSourceReadEvent(event *model.SourceReadEvent) error {
+	return r.db.Create(event).Error
 }
 
 func normalizeFeedSourceCategory(category string) string {

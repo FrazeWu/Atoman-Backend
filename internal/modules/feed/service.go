@@ -462,6 +462,18 @@ func (s *Service) RemoveReadingListItem(user authctx.CurrentUser, feedItemID uui
 	return s.repo.DeleteReadingListItem(user.ID, feedItemID)
 }
 
+func (s *Service) RecordSourceReadEvent(sourceType string, sourceID string, eventType string) error {
+	if sourceType == "" || sourceID == "" || eventType == "" {
+		return apperr.BadRequest("validation.invalid_request", "source_type, source_id and event_type are required")
+	}
+	event := &model.SourceReadEvent{
+		SourceType: sourceType,
+		SourceID:   sourceID,
+		EventType:  eventType,
+	}
+	return s.repo.CreateSourceReadEvent(event)
+}
+
 func (s *Service) readMap(userID uuid.UUID, items []model.FeedItem) (map[uuid.UUID]bool, error) {
 	ids := make([]uuid.UUID, 0, len(items))
 	for _, item := range items {

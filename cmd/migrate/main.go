@@ -170,6 +170,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.FeedStarGroup{},
 		&model.FeedItemStar{},
 		&model.ReadingListItem{},
+		&model.SourceReadEvent{},
 		&model.Notification{},
 		&model.DMConversation{},
 		&model.DMMessage{},

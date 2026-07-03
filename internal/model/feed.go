@@ -336,6 +336,15 @@ type ReadingListItem struct {
 
 func (ReadingListItem) TableName() string { return "reading_list_items" }
 
+type SourceReadEvent struct {
+	Base
+	SourceType string `json:"source_type" gorm:"not null;index:idx_source_read_events_source,priority:1"`
+	SourceID   string `json:"source_id" gorm:"not null;index:idx_source_read_events_source,priority:2"`
+	EventType  string `json:"event_type" gorm:"not null;index"`
+}
+
+func (SourceReadEvent) TableName() string { return "source_read_events" }
+
 type SubscriptionGroup struct {
 	Base
 	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null;uniqueIndex:idx_subscription_groups_user_name,priority:1,where:deleted_at IS NULL"`

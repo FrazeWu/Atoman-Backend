@@ -131,6 +131,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/bookmark-folders", h.createBookmarkFolder)
 	group.DELETE("/bookmark-folders/:id", h.deleteBookmarkFolder)
 	group.GET("/posts", h.listPosts)
+	group.GET("/recommend/posts", h.listRecommendedPosts)
 	group.GET("/posts/drafts", h.getDrafts)
 	group.GET("/posts/:id", h.getPost)
 	group.POST("/posts", h.createPost)
@@ -729,6 +730,21 @@ func (h *Handler) listPosts(c *gin.Context) {
 	}
 
 	httpx.OK(c, http.StatusOK, visiblePosts)
+}
+
+func (h *Handler) listRecommendedPosts(c *gin.Context) {
+	mode, err := parseRecommendationMode(c.DefaultQuery("mode", "hot"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	items, total, err := h.service.RecommendPostsByMode(mode, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, items, page, pageSize, total)
 }
 
 // getPost godoc

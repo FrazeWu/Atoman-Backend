@@ -38,6 +38,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/timeline/mark-all-read", h.markAllRead)
 		protected.POST("/timeline/mark-all-unread", h.markAllUnread)
 		protected.POST("/timeline/star", h.toggleStar)
+		protected.POST("/events/read", h.recordReadEvent)
 		protected.GET("/reading-list", h.listReadingList)
 		protected.POST("/reading-list", h.toggleReadingList)
 		protected.DELETE("/reading-list/:id", h.removeReadingListItem)
@@ -265,6 +266,23 @@ func (h *Handler) listReadingList(c *gin.Context) {
 		return
 	}
 	httpx.List(c, items, normalizedPageFromQuery(c), normalizedPageSizeFromQuery(c), total)
+}
+
+func (h *Handler) recordReadEvent(c *gin.Context) {
+	var req struct {
+		SourceType string `json:"source_type"`
+		SourceID   string `json:"source_id"`
+		EventType  string `json:"event_type"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	if err := h.service.RecordSourceReadEvent(strings.TrimSpace(req.SourceType), strings.TrimSpace(req.SourceID), strings.TrimSpace(req.EventType)); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
 }
 
 func (h *Handler) toggleReadingList(c *gin.Context) {

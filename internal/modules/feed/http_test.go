@@ -3,6 +3,7 @@ package feed
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -274,6 +275,36 @@ func TestReadingListHandlerUsesUnifiedPagedResponse(t *testing.T) {
 	}
 	if payload.Meta.Total != 1 || len(payload.Data) != 1 {
 		t.Fatalf("expected one unified reading list item, got total=%d len=%d body=%s", payload.Meta.Total, len(payload.Data), rr.Body.String())
+	}
+}
+
+func TestRecordReadEventHandlerPersistsSourceReadEvent(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	body := []byte(`{"source_type":"external_rss","source_id":"source-1","event_type":"original_click"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/events/read", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected record read event to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var count int64
+	if err := db.Model(&model.SourceReadEvent{}).
+		Where("source_type = ? AND source_id = ? AND event_type = ?", "external_rss", "source-1", "original_click").
+		Count(&count).Error; err != nil {
+		t.Fatalf("count source read events: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected one source read event, got %d", count)
 	}
 }
 
@@ -782,6 +813,104 @@ func TestFeedRecommendationChannelsReturnsData(t *testing.T) {
 	}
 }
 
+func TestFeedRecommendationChannelsIncludePreviewAndStats(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+
+	var channel model.Channel
+	if err := db.Where("slug = ?", "alice-channel").First(&channel).Error; err != nil {
+		t.Fatalf("find channel: %v", err)
+	}
+	if err := db.Model(&channel).Update("description", "关注模型、工具、应用与研究动态").Error; err != nil {
+		t.Fatalf("update channel description: %v", err)
+	}
+
+	otherUser := model.User{Username: "bob", Email: "bob@example.com", Password: "hash", Role: authctx.RoleUser, DisplayName: "Bob", IsActive: true}
+	if err := db.Create(&otherUser).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	var channelSource model.FeedSource
+	if err := db.Where("source_type = ? AND source_id = ?", "internal_channel", channel.ID).First(&channelSource).Error; err != nil {
+		t.Fatalf("find channel source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: otherUser.UUID, FeedSourceID: channelSource.ID, Title: channel.Name}).Error; err != nil {
+		t.Fatalf("create second channel subscription: %v", err)
+	}
+
+	if err := db.Exec("INSERT INTO source_read_events (source_type, source_id, event_type, created_at) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
+		"internal_channel", channel.ID.String(), "detail_open", time.Now().Add(-2*time.Hour).UTC(),
+		"internal_channel", channel.ID.String(), "detail_open", time.Now().Add(-1*time.Hour).UTC(),
+	).Error; err != nil {
+		t.Fatalf("seed channel read events: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=featured", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected channel recommendation to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			TargetPath            string `json:"target_path"`
+			Description           string `json:"description"`
+			UpdateFrequencyLabel  string `json:"update_frequency_label"`
+			BookmarkCount         int64  `json:"bookmark_count"`
+			ReadCount             int64  `json:"read_count"`
+			RecentItems           []struct {
+				Title string `json:"title"`
+			} `json:"recent_items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected channel recommendations, got body %s", rr.Body.String())
+	}
+
+	var target *struct {
+		TargetPath           string `json:"target_path"`
+		Description          string `json:"description"`
+		UpdateFrequencyLabel string `json:"update_frequency_label"`
+		BookmarkCount        int64  `json:"bookmark_count"`
+		ReadCount            int64  `json:"read_count"`
+		RecentItems          []struct {
+			Title string `json:"title"`
+		} `json:"recent_items"`
+	}
+	for i := range payload.Data {
+		if payload.Data[i].TargetPath == "/channels/"+channel.Slug {
+			target = &payload.Data[i]
+			break
+		}
+	}
+	if target == nil {
+		t.Fatalf("expected internal channel recommendation, got body %s", rr.Body.String())
+	}
+	if target.Description == "" {
+		t.Fatalf("expected channel description, got body %s", rr.Body.String())
+	}
+	if target.UpdateFrequencyLabel == "" {
+		t.Fatalf("expected update frequency label, got body %s", rr.Body.String())
+	}
+	if target.BookmarkCount < 2 {
+		t.Fatalf("expected internal channel bookmark count >= 2, got body %s", rr.Body.String())
+	}
+	if target.ReadCount < 2 {
+		t.Fatalf("expected internal channel read count >= 2, got body %s", rr.Body.String())
+	}
+	if len(target.RecentItems) == 0 || target.RecentItems[0].Title == "" {
+		t.Fatalf("expected channel recent items, got body %s", rr.Body.String())
+	}
+}
+
 func TestFeedRecommendationChannelsFiltersByCategoryAndTheme(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, _ := newFeedTestService(t)
@@ -866,6 +995,108 @@ func TestFeedRecommendationChannelsFiltersByCategoryAndTheme(t *testing.T) {
 		if strings.Contains(item.Title, "Cinema Video") {
 			t.Fatalf("expected theme filter to exclude non-startup channel, got body %s", rr.Body.String())
 		}
+	}
+}
+
+func TestFeedRecommendationExternalChannelsIncludePreviewAndStats(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+	now := time.Now().UTC()
+	for i, title := range []string{"Newest feed title", "Second feed title", "Third feed title"} {
+		item := model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         fmt.Sprintf("preview-guid-%d", i),
+			Title:        title,
+			Link:         fmt.Sprintf("https://example.com/preview/%d", i),
+			PublishedAt:  now.Add(-time.Duration(i) * 24 * time.Hour),
+			FetchedAt:    now.Add(-time.Duration(i) * 24 * time.Hour),
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create preview item: %v", err)
+		}
+	}
+	secondUser := model.User{Username: "charlie", Email: "charlie@example.com", Password: "hash", Role: authctx.RoleUser, DisplayName: "Charlie", IsActive: true}
+	if err := db.Create(&secondUser).Error; err != nil {
+		t.Fatalf("create second user: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: secondUser.UUID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+		t.Fatalf("create second external subscription: %v", err)
+	}
+
+	if err := db.Exec("INSERT INTO source_read_events (source_type, source_id, event_type, created_at) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
+		"external_rss", source.ID.String(), "detail_open", now.Add(-3*time.Hour),
+		"external_rss", source.ID.String(), "original_click", now.Add(-2*time.Hour),
+		"external_rss", source.ID.String(), "original_click", now.Add(-1*time.Hour),
+	).Error; err != nil {
+		t.Fatalf("seed external source read events: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=hot", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected external channel recommendation to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			Title                string `json:"title"`
+			Description          string `json:"description"`
+			UpdateFrequencyLabel string `json:"update_frequency_label"`
+			BookmarkCount        int64  `json:"bookmark_count"`
+			ReadCount            int64  `json:"read_count"`
+			RecentItems          []struct {
+				Title string `json:"title"`
+			} `json:"recent_items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected channel recommendations, got body %s", rr.Body.String())
+	}
+
+	var target *struct {
+		Title                string `json:"title"`
+		Description          string `json:"description"`
+		UpdateFrequencyLabel string `json:"update_frequency_label"`
+		BookmarkCount        int64  `json:"bookmark_count"`
+		ReadCount            int64  `json:"read_count"`
+		RecentItems          []struct {
+			Title string `json:"title"`
+		} `json:"recent_items"`
+	}
+	for i := range payload.Data {
+		if payload.Data[i].Title == source.Title {
+			target = &payload.Data[i]
+			break
+		}
+	}
+	if target == nil {
+		t.Fatalf("expected external source recommendation, got body %s", rr.Body.String())
+	}
+	if target.BookmarkCount < 2 {
+		t.Fatalf("expected external source bookmark count >= 2, got body %s", rr.Body.String())
+	}
+	if target.ReadCount < 3 {
+		t.Fatalf("expected external source read count >= 3, got body %s", rr.Body.String())
+	}
+	if target.UpdateFrequencyLabel == "" {
+		t.Fatalf("expected external source update frequency label, got body %s", rr.Body.String())
+	}
+	if len(target.RecentItems) < 3 {
+		t.Fatalf("expected external source recent items, got body %s", rr.Body.String())
 	}
 }
 

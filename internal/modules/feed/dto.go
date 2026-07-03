@@ -41,6 +41,7 @@ type RecommendationItemDTO struct {
 	ImageURL             string                     `json:"image_url"`
 	TargetPath           string                     `json:"target_path"`
 	ScoreLabel           string                     `json:"score_label"`
+	PlayCount            int64                      `json:"play_count"`
 	BookmarkCount        int64                      `json:"bookmark_count"`
 	ReadCount            int64                      `json:"read_count"`
 	UpdateFrequencyLabel string                     `json:"update_frequency_label"`
