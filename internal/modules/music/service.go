@@ -240,6 +240,65 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 	return items[start:end], total, nil
 }
 
+func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pageSize int) ([]feed.RecommendationItemDTO, int64, error) {
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+
+	var artists []model.Artist
+	if err := s.db.Model(&model.Artist{}).
+		Where("COALESCE(entry_status, '') <> ?", "closed").
+		Order("created_at DESC").
+		Find(&artists).Error; err != nil {
+		return nil, 0, err
+	}
+
+	candidates := make([]recommendation.Candidate, 0, len(artists))
+	artistByID := make(map[string]model.Artist, len(artists))
+	for _, artist := range artists {
+		candidates = append(candidates, recommendation.Candidate{
+			Module:          "music",
+			EntityType:      recommendation.EntityAlbum,
+			EntityID:        artist.ID.String(),
+			SourceKey:       artist.ID.String(),
+			QualityScore:    0.5,
+			TrendScore:      0.5,
+			FreshnessScore:  normalizeMusicAlbumFreshness(artist.CreatedAt, 30*24*time.Hour),
+			AuthorityScore:  0.5,
+			ExposureScore:   0,
+			EditorialScore:  0,
+			PublishedAtUnix: artist.CreatedAt.Unix(),
+		})
+		artistByID[artist.ID.String()] = artist
+	}
+
+	ranked := recommendation.RankCandidates(mode, candidates, 0)
+	items := make([]feed.RecommendationItemDTO, 0, len(ranked))
+	for _, item := range ranked {
+		artist, ok := artistByID[item.EntityID]
+		if !ok {
+			continue
+		}
+		items = append(items, feed.RecommendationItemDTO{
+			ID:         artist.ID.String(),
+			Title:      artist.Name,
+			Summary:    artist.Bio,
+			ImageURL:   artist.ImageURL,
+			TargetPath: "/music/artist/" + artist.ID.String(),
+			ScoreLabel: fmt.Sprintf("%s %.0f", musicRecommendationLabel(mode), math.Round(item.FinalScore*100)),
+		})
+	}
+
+	total := int64(len(items))
+	start := (page - 1) * pageSize
+	if start > len(items) {
+		start = len(items)
+	}
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end], total, nil
+}
+
 func normalizeMusicRecommendationPage(page int, pageSize int) (int, int) {
 	if page < 1 {
 		page = 1
