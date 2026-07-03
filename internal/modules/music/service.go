@@ -21,15 +21,21 @@ import (
 )
 
 type Service struct {
-	db  *gorm.DB
-	repo *Repo
-	s3  *s3.S3
+	db                   *gorm.DB
+	repo                 *Repo
+	s3                   *s3.S3
+	albumImportMultipart albumImportMultipartStore
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
 
 func NewServiceWithS3(db *gorm.DB, s3Client *s3.S3) *Service {
-	return &Service{db: db, repo: NewRepo(db), s3: s3Client}
+	return &Service{
+		db:                   db,
+		repo:                 NewRepo(db),
+		s3:                   s3Client,
+		albumImportMultipart: newS3AlbumImportMultipartStore(s3Client),
+	}
 }
 
 func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, pageSize int) ([]feed.RecommendationItemDTO, int64, error) {
