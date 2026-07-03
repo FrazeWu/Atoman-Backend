@@ -145,6 +145,12 @@ type adminFeedSourceListRow struct {
 	RssURL        string     `json:"rss_url"`
 	SiteURL       string     `json:"site_url"`
 	CanonicalURL  string     `json:"canonical_url"`
+	BookmarkCount int64      `json:"bookmark_count"`
+	ReadCount     int64      `json:"read_count"`
+	RecentEvents  []struct {
+		EventType string    `json:"event_type"`
+		CreatedAt time.Time `json:"created_at"`
+	} `json:"recent_events"`
 }
 
 type adminFeedSourceUpdateInput struct {
@@ -326,6 +332,28 @@ func AdminListFeedSources(db *gorm.DB) gin.HandlerFunc {
 
 		items := make([]adminFeedSourceListRow, 0, len(sources))
 		for _, source := range sources {
+			var bookmarkCount int64
+			_ = db.Model(&model.Subscription{}).Where("feed_source_id = ?", source.ID).Count(&bookmarkCount).Error
+
+			var readCount int64
+			_ = db.Model(&model.SourceReadEvent{}).Where("source_id = ?", source.ID.String()).Count(&readCount).Error
+
+			var recentSourceEvents []model.SourceReadEvent
+			_ = db.Where("source_id = ?", source.ID.String()).Order("created_at DESC").Limit(5).Find(&recentSourceEvents).Error
+			recentEvents := make([]struct {
+				EventType string    `json:"event_type"`
+				CreatedAt time.Time `json:"created_at"`
+			}, 0, len(recentSourceEvents))
+			for _, event := range recentSourceEvents {
+				recentEvents = append(recentEvents, struct {
+					EventType string    `json:"event_type"`
+					CreatedAt time.Time `json:"created_at"`
+				}{
+					EventType: event.EventType,
+					CreatedAt: event.CreatedAt,
+				})
+			}
+
 			items = append(items, adminFeedSourceListRow{
 				ID:            source.ID,
 				Title:         source.Title,
@@ -337,6 +365,9 @@ func AdminListFeedSources(db *gorm.DB) gin.HandlerFunc {
 				RssURL:        source.RssURL,
 				SiteURL:       source.SiteURL,
 				CanonicalURL:  source.CanonicalURL,
+				BookmarkCount: bookmarkCount,
+				ReadCount:     readCount,
+				RecentEvents:  recentEvents,
 			})
 		}
 
@@ -921,6 +952,16 @@ func GetPublicSiteAccessHandler(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// GetSiteAccessHandler godoc
+// @Summary 获取站点模块访问设置
+// @Description 返回后台模块开关与结构化模块设置，包括 feed/blog/forum 的设置矩阵。
+// @Tags settings
+// @Produce json
+// @Success 200 {object} service.SiteAccessMatrix
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/settings/site-access [get]
 func GetSiteAccessHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		matrix, err := service.NewSiteAccessService(db).Load()
@@ -932,6 +973,20 @@ func GetSiteAccessHandler(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// UpdateSiteAccessHandler godoc
+// @Summary 更新站点模块访问设置
+// @Description 保存后台模块开关与结构化模块设置，包括 feed/blog/forum 的设置矩阵。
+// @Tags settings
+// @Accept json
+// @Produce json
+// @Param input body service.SiteAccessMatrixInput true "站点访问设置输入"
+// @Success 200 {object} service.SiteAccessMatrix
+// @Failure 400 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/settings/site-access [put]
 func UpdateSiteAccessHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var payload service.SiteAccessMatrixInput

@@ -21,6 +21,8 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Artist{},
+		&model.ArtistAlias{},
+		&model.ArtistMerge{},
 		&model.Album{},
 		&model.Song{},
 		&model.AlbumImportSession{},
@@ -271,6 +273,68 @@ func TestSubmitEditAutoAppliesCreateArtistForMainWikiFlow(t *testing.T) {
 	}
 	if len(stageNames) != 2 || !stageNames[0].IsPrimary || stageNames[0].Name != "Instant Artist" || stageNames[1].Name != "IA" || stageNames[1].EndDateText != "2021" {
 		t.Fatalf("expected structured stage names, got %#v", stageNames)
+	}
+}
+
+func TestMergeArtistsMovesAlbumRelationsAndAliasesToTarget(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	target := model.Artist{Name: "Ye", LegalName: "Kanye Omari West", EntryStatus: "open"}
+	source := model.Artist{Name: "kanye", EntryStatus: "open"}
+	album := model.Album{Title: "2049", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target artist: %v", err)
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source artist: %v", err)
+	}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	if err := db.Model(&album).Association("Artists").Append(&source); err != nil {
+		t.Fatalf("append source artist to album: %v", err)
+	}
+	if err := db.Create(&model.ArtistAlias{
+		ArtistID: source.ID,
+		Alias:    "Kanye West",
+	}).Error; err != nil {
+		t.Fatalf("create source alias: %v", err)
+	}
+
+	if err := svc.MergeArtists(user, source.ID, target.ID); err != nil {
+		t.Fatalf("merge artists: %v", err)
+	}
+
+	var refreshedSource model.Artist
+	if err := db.First(&refreshedSource, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("load source artist: %v", err)
+	}
+	if refreshedSource.EntryStatus != "closed" {
+		t.Fatalf("expected source artist closed after merge, got %#v", refreshedSource)
+	}
+
+	var refreshedAlbum model.Album
+	if err := db.Preload("Artists").First(&refreshedAlbum, "id = ?", album.ID).Error; err != nil {
+		t.Fatalf("load album: %v", err)
+	}
+	if len(refreshedAlbum.Artists) != 1 || refreshedAlbum.Artists[0].ID != target.ID {
+		t.Fatalf("expected album linked to target artist only, got %#v", refreshedAlbum.Artists)
+	}
+
+	var aliases []model.ArtistAlias
+	if err := db.Where("artist_id = ?", target.ID).Find(&aliases).Error; err != nil {
+		t.Fatalf("load target aliases: %v", err)
+	}
+	aliasSet := map[string]bool{}
+	for _, alias := range aliases {
+		aliasSet[alias.Alias] = true
+	}
+	if !aliasSet["kanye"] || !aliasSet["Kanye West"] {
+		t.Fatalf("expected merged aliases on target artist, got %#v", aliases)
+	}
+
+	var mergeRecord model.ArtistMerge
+	if err := db.First(&mergeRecord, "source_artist_id = ? AND target_artist_id = ?", source.ID, target.ID).Error; err != nil {
+		t.Fatalf("expected merge audit record, got %v", err)
 	}
 }
 

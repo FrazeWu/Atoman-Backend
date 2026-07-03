@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +18,9 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/modules/recommendation"
+	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/httpx"
 	"atoman/internal/storage"
 )
 
@@ -24,6 +28,7 @@ func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	p := router.Group("/api/v1/podcast")
 	{
 		p.GET("/episodes", GetPodcastEpisodes(db))
+		p.GET("/recommend/episodes", GetRecommendedPodcastEpisodes(db))
 		p.GET("/shows/:channelSlug/episodes", GetShowEpisodes(db))
 		p.GET("/episodes/:id", GetPodcastEpisode(db))
 		p.GET("/bookmarks", middleware.AuthMiddleware(), GetPodcastEpisodeBookmarks(db))
@@ -40,6 +45,179 @@ func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		p.POST("/upload-cover", middleware.AuthMiddleware(), UploadPodcastCover(s3Client))
 	}
 	router.GET("/api/v1/channels/:slug/rss/podcast", GetPodcastRSS(db))
+}
+
+type recommendationItemDTO struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Summary     string `json:"summary"`
+	ContentType string `json:"content_type"`
+	ImageURL    string `json:"image_url"`
+	TargetPath  string `json:"target_path"`
+	ScoreLabel  string `json:"score_label"`
+}
+
+func parseRecommendationMode(raw string) (recommendation.Mode, error) {
+	switch recommendation.Mode(strings.TrimSpace(strings.ToLower(raw))) {
+	case recommendation.ModeHot:
+		return recommendation.ModeHot, nil
+	case recommendation.ModeFeatured:
+		return recommendation.ModeFeatured, nil
+	case recommendation.ModeDiscover:
+		return recommendation.ModeDiscover, nil
+	default:
+		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover")
+	}
+}
+
+func GetRecommendedPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		mode, err := parseRecommendationMode(c.DefaultQuery("mode", "hot"))
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		page, pageSize := httpx.PageParams(c)
+
+		var episodes []model.PodcastEpisode
+		if err := db.Preload("Post.Collections").Preload("Channel").
+			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
+			Where("posts.visibility = ?", "public").
+			Order("podcast_episodes.created_at DESC").
+			Find(&episodes).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+
+		candidates := make([]recommendation.Candidate, 0, len(episodes))
+		episodeByID := make(map[string]model.PodcastEpisode, len(episodes))
+		for _, episode := range episodes {
+			candidates = append(candidates, recommendation.Candidate{
+				Module:          "podcast",
+				EntityType:      recommendation.EntityPodcast,
+				EntityID:        episode.ID.String(),
+				SourceKey:       episode.ChannelID.String(),
+				QualityScore:    normalizePodcastRecommendationQuality(episode),
+				TrendScore:      normalizePodcastRecommendationTrend(episode),
+				FreshnessScore:  normalizePodcastRecommendationFreshness(episode.CreatedAt, 14*24*time.Hour),
+				AuthorityScore:  0.6,
+				ExposureScore:   0,
+				EditorialScore:  0,
+				PublishedAtUnix: episode.CreatedAt.Unix(),
+			})
+			episodeByID[episode.ID.String()] = episode
+		}
+
+		ranked := recommendation.RankCandidates(mode, candidates, 0)
+		items := make([]recommendationItemDTO, 0, len(ranked))
+		for _, rankedItem := range ranked {
+			episode, ok := episodeByID[rankedItem.EntityID]
+			if !ok {
+				continue
+			}
+			title := "未命名单集"
+			summary := ""
+			if episode.Post != nil {
+				if strings.TrimSpace(episode.Post.Title) != "" {
+					title = episode.Post.Title
+				}
+				summary = episode.Post.Summary
+			}
+			items = append(items, recommendationItemDTO{
+				ID:          episode.ID.String(),
+				Title:       title,
+				Summary:     summary,
+				ContentType: "podcast",
+				ImageURL:    firstNonEmpty(episode.EpisodeCoverURL, channelCoverURL(episode.Channel)),
+				TargetPath:  "/podcasts/episode/" + episode.ID.String(),
+				ScoreLabel:  recommendationScoreLabel(mode, rankedItem.FinalScore),
+			})
+		}
+
+		total := int64(len(items))
+		start := (page - 1) * pageSize
+		if start > len(items) {
+			start = len(items)
+		}
+		end := start + pageSize
+		if end > len(items) {
+			end = len(items)
+		}
+		httpx.List(c, items[start:end], page, pageSize, total)
+	}
+}
+
+func normalizePodcastRecommendationQuality(episode model.PodcastEpisode) float64 {
+	score := 0.35
+	if episode.DurationSec > 0 {
+		score += 0.15
+	}
+	if strings.TrimSpace(episode.EpisodeCoverURL) != "" {
+		score += 0.15
+	}
+	if episode.Post != nil {
+		score += 0.20 * clampRecommendation(float64(episode.Post.RatingAverageScore)/100)
+		score += 0.15 * clampRecommendation(float64(episode.Post.RatingCount)/10)
+	}
+	return clampRecommendation(score)
+}
+
+func normalizePodcastRecommendationTrend(episode model.PodcastEpisode) float64 {
+	base := normalizePodcastRecommendationFreshness(episode.CreatedAt, 7*24*time.Hour)
+	if episode.Post != nil {
+		return clampRecommendation(0.6*base + 0.4*clampRecommendation(float64(episode.Post.RatingCount)/10))
+	}
+	return base
+}
+
+func normalizePodcastRecommendationFreshness(createdAt time.Time, horizon time.Duration) float64 {
+	if createdAt.IsZero() || horizon <= 0 {
+		return 0
+	}
+	age := time.Since(createdAt)
+	if age <= 0 {
+		return 1
+	}
+	return clampRecommendation(1 - float64(age)/float64(horizon))
+}
+
+func clampRecommendation(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func recommendationScoreLabel(mode recommendation.Mode, score float64) string {
+	prefix := "推荐"
+	switch mode {
+	case recommendation.ModeHot:
+		prefix = "热度"
+	case recommendation.ModeFeatured:
+		prefix = "精选"
+	case recommendation.ModeDiscover:
+		prefix = "探索"
+	}
+	return fmt.Sprintf("%s %.0f", prefix, math.Round(score*100))
+}
+
+func channelCoverURL(channel *model.Channel) string {
+	if channel == nil {
+		return ""
+	}
+	return channel.CoverURL
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // GetPodcastEpisodes lists all published episodes across all shows.

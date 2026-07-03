@@ -13,6 +13,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/testdb"
 )
@@ -27,7 +28,24 @@ func openFullTextWorkerTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{})
+	if err := migrations.RunFeedItemUniqueIndex(db); err != nil {
+		return nil, err
+	}
 	return db, nil
+}
+
+func TestOpenFullTextWorkerTestDBCreatesFeedItemUniqueIndexes(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !db.Migrator().HasIndex("feed_items", "idx_feed_items_source_guid") {
+		t.Fatal("expected idx_feed_items_source_guid to exist in full text worker test db")
+	}
+	if !db.Migrator().HasIndex("feed_items", "idx_feed_items_source_link") {
+		t.Fatal("expected idx_feed_items_source_link to exist in full text worker test db")
+	}
 }
 
 func TestMarkFullTextFailureSchedulesRetry(t *testing.T) {

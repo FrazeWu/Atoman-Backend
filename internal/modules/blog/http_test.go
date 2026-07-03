@@ -267,6 +267,62 @@ func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+
+	post := model.Post{
+		UserID:             user.ID,
+		ChannelID:          &channel.ID,
+		Title:              "推荐文章",
+		Content:            "这是一篇适合推荐的文章内容。",
+		Summary:            "推荐摘要",
+		Status:             "published",
+		Visibility:         "public",
+		RatingAverageScore: 86,
+		RatingCount:        12,
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/recommend/posts?mode=hot&page=1&page_size=20", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected recommendation route to be mounted, got 404: %s", w.Body.String())
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID         string `json:"id"`
+			Title      string `json:"title"`
+			Summary    string `json:"summary"`
+			ContentType string `json:"content_type"`
+			TargetPath string `json:"target_path"`
+			ScoreLabel string `json:"score_label"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected recommendation items, got %s", w.Body.String())
+	}
+	first := payload.Data[0]
+	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType != "blog" {
+		t.Fatalf("expected recommendation dto fields, got %#v", first)
+	}
+}
+
 func TestRegisterRoutesMountsBookmarkAndFolderMutationEndpoints(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")

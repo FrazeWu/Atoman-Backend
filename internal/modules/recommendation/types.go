@@ -17,6 +17,7 @@ const (
 	EntityPodcast EntityType = "podcast"
 	EntityVideo   EntityType = "video"
 	EntityAlbum   EntityType = "album"
+	EntityArtist  EntityType = "artist"
 )
 
 type Candidate struct {

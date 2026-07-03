@@ -10,11 +10,13 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	musicmodule "atoman/internal/modules/music"
 	"atoman/internal/service"
 )
 
@@ -248,6 +250,9 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 			if err := service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.Username); err != nil {
 				return err
 			}
+			if err := ensureSignupFavoritePlaylist(tx, user.UUID); err != nil {
+				return err
+			}
 			return nil
 		}); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create default channel"})
@@ -264,6 +269,18 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 
 		c.JSON(http.StatusCreated, userAuthResponse(user, tokenString))
 	}
+}
+
+func ensureSignupFavoritePlaylist(db *gorm.DB, userID uuid.UUID) error {
+	var existing model.Playlist
+	if err := db.Where("user_id = ? AND name = ?", userID, "最爱").First(&existing).Error; err == nil {
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+
+	_, err := musicmodule.NewRepo(db).CreatePlaylist(userID, "最爱")
+	return err
 }
 
 // LogoutHandler godoc

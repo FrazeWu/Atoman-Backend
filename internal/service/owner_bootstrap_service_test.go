@@ -23,6 +23,7 @@ func setupOwnerBootstrapTestDB(t *testing.T) *gorm.DB {
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 		&model.BookmarkFolder{},
+		&model.Playlist{},
 	)
 	return db
 }
@@ -70,6 +71,14 @@ func TestEnsureOwnerCreatesDefaultResources(t *testing.T) {
 	var folder model.BookmarkFolder
 	if err := db.Where("user_id = ? AND name = ?", owner.UUID, "默认收藏").First(&folder).Error; err != nil {
 		t.Fatalf("find default bookmark folder: %v", err)
+	}
+
+	var playlists []model.Playlist
+	if err := db.Where("user_id = ?", owner.UUID).Find(&playlists).Error; err != nil {
+		t.Fatalf("find playlists: %v", err)
+	}
+	if len(playlists) != 0 {
+		t.Fatalf("expected bootstrap service not to create playlists, got %d", len(playlists))
 	}
 }
 

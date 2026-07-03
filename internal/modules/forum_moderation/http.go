@@ -243,6 +243,18 @@ func (h *Handler) rejectCategoryRequest(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, reviewed)
 }
 
+// listModeratorAssignments godoc
+// @Summary 获取论坛版主分配列表
+// @Description 返回论坛版主分配、分类范围和权限位，仅管理员可访问。
+// @Tags forum-moderation
+// @Produce json
+// @Success 200 {array} model.ForumModeratorAssignment
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/forum/moderation/moderators [get]
 func (h *Handler) listModeratorAssignments(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -257,6 +269,21 @@ func (h *Handler) listModeratorAssignments(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, assignments)
 }
 
+// createModeratorAssignment godoc
+// @Summary 创建论坛版主分配
+// @Description 为指定 moderator/admin 用户创建论坛版主分配，仅管理员可访问。
+// @Tags forum-moderation
+// @Accept json
+// @Produce json
+// @Param input body ModeratorAssignmentInput true "版主分配输入"
+// @Success 201 {object} model.ForumModeratorAssignment
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/forum/moderation/moderators [post]
 func (h *Handler) createModeratorAssignment(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -276,6 +303,23 @@ func (h *Handler) createModeratorAssignment(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, assignment)
 }
 
+// updateModeratorAssignment godoc
+// @Summary 更新论坛版主分配
+// @Description 更新指定论坛版主分配的分类范围和权限位，仅管理员可访问。
+// @Tags forum-moderation
+// @Accept json
+// @Produce json
+// @Param assignmentID path string true "版主分配 UUID"
+// @Param input body ModeratorAssignmentInput true "版主分配输入"
+// @Success 200 {object} model.ForumModeratorAssignment
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/forum/moderation/moderators/{assignmentID} [put]
 func (h *Handler) updateModeratorAssignment(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -300,6 +344,20 @@ func (h *Handler) updateModeratorAssignment(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, assignment)
 }
 
+// deleteModeratorAssignment godoc
+// @Summary 删除论坛版主分配
+// @Description 删除指定论坛版主分配，仅管理员可访问。
+// @Tags forum-moderation
+// @Produce json
+// @Param assignmentID path string true "版主分配 UUID"
+// @Success 204 {string} string ""
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/forum/moderation/moderators/{assignmentID} [delete]
 func (h *Handler) deleteModeratorAssignment(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {

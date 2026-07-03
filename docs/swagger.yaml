@@ -16,6 +16,8 @@ definitions:
         type: string
       status:
         type: string
+      summary:
+        type: string
       title:
         type: string
       visibility:
@@ -31,6 +33,8 @@ definitions:
   feed.AutoSubscriptionAddRequest:
     properties:
       candidate_feed_url:
+        type: string
+      category:
         type: string
       group_id:
         type: string
@@ -85,6 +89,8 @@ definitions:
   feed.AutoSubscriptionSource:
     properties:
       canonical_url:
+        type: string
+      category:
         type: string
       id:
         type: string
@@ -449,6 +455,19 @@ definitions:
         example: 20
         type: integer
     type: object
+  forum_moderation.ModeratorAssignmentInput:
+    properties:
+      can_lock_topic:
+        type: boolean
+      can_pin_topic:
+        type: boolean
+      can_review_category_request:
+        type: boolean
+      category_id:
+        type: string
+      user_id:
+        type: string
+    type: object
   handlers.AnnotationGroup:
     properties:
       annotations:
@@ -596,58 +615,6 @@ definitions:
         format: uuid
         type: string
     type: object
-  handlers.BookmarkFolderInput:
-    properties:
-      name:
-        type: string
-    required:
-    - name
-    type: object
-  handlers.BookmarkFolderListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.BookmarkFolder'
-        type: array
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.BookmarkFolderResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.BookmarkFolder'
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.BookmarkInput:
-    properties:
-      bookmark_folder_id:
-        type: string
-      post_id:
-        type: string
-    required:
-    - post_id
-    type: object
-  handlers.BookmarkListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.Bookmark'
-        type: array
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.BookmarkResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.Bookmark'
-      message:
-        example: ok
-        type: string
-    type: object
   handlers.BoolStatusResponse:
     properties:
       bookmarked:
@@ -665,113 +632,6 @@ definitions:
       pinned:
         example: true
         type: boolean
-    type: object
-  handlers.CategoryRequestCreateInput:
-    properties:
-      description:
-        example: Discuss release engineering
-        type: string
-      name:
-        example: Production
-        type: string
-      reason:
-        example: There are enough related threads now
-        type: string
-    required:
-    - name
-    type: object
-  handlers.CategoryRequestListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.CategoryRequest'
-        type: array
-    type: object
-  handlers.CategoryRequestResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.CategoryRequest'
-    type: object
-  handlers.CategoryRequestReviewInput:
-    properties:
-      action:
-        example: approve
-        type: string
-      color:
-        example: '#6366f1'
-        type: string
-      review_note:
-        example: Makes sense for current traffic
-        type: string
-    required:
-    - action
-    type: object
-  handlers.CategoryRequestReviewResponse:
-    properties:
-      category:
-        $ref: '#/definitions/model.ForumCategory'
-      data:
-        $ref: '#/definitions/model.CategoryRequest'
-    type: object
-  handlers.ChannelInput:
-    properties:
-      cover_url:
-        type: string
-      description:
-        type: string
-      name:
-        type: string
-      slug:
-        type: string
-    required:
-    - name
-    type: object
-  handlers.ChannelListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.Channel'
-        type: array
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.ChannelResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.Channel'
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.CollectionInput:
-    properties:
-      cover_url:
-        type: string
-      description:
-        type: string
-      name:
-        type: string
-    required:
-    - name
-    type: object
-  handlers.CollectionListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.Collection'
-        type: array
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.CollectionResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.Collection'
-      message:
-        example: ok
-        type: string
     type: object
   handlers.CommentInput:
     properties:
@@ -830,39 +690,6 @@ definitions:
       count:
         example: 8
         type: integer
-    type: object
-  handlers.CreateArgumentInput:
-    properties:
-      argument_type:
-        $ref: '#/definitions/model.ArgumentType'
-      content:
-        type: string
-      parent_id:
-        type: string
-      source_excerpt:
-        type: string
-      source_title:
-        type: string
-      source_url:
-        type: string
-    required:
-    - argument_type
-    - content
-    type: object
-  handlers.CreateDebateInput:
-    properties:
-      content:
-        type: string
-      description:
-        type: string
-      tags:
-        items:
-          type: string
-        type: array
-      title:
-        type: string
-    required:
-    - title
     type: object
   handlers.CreateDiscussionInput:
     properties:
@@ -1021,98 +848,6 @@ definitions:
         example: https://cdn.example.com/dm.png
         type: string
     type: object
-  handlers.DebateArgumentListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.Argument'
-        type: array
-      user_votes:
-        additionalProperties:
-          type: integer
-        type: object
-    type: object
-  handlers.DebateArgumentResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.Argument'
-    type: object
-  handlers.DebateConcludeInput:
-    properties:
-      conclusion_summary:
-        example: 主要证据已形成共识。
-        type: string
-      conclusion_type:
-        example: "yes"
-        type: string
-    required:
-    - conclusion_type
-    type: object
-  handlers.DebateConcludeVoteResponse:
-    properties:
-      auto_concluded:
-        example: false
-        type: boolean
-      conclude_threshold:
-        example: 10
-        type: integer
-      conclude_vote_count:
-        example: 3
-        type: integer
-    type: object
-  handlers.DebateListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.Debate'
-        type: array
-      limit:
-        example: 20
-        type: integer
-      page:
-        example: 1
-        type: integer
-      total:
-        example: 20
-        type: integer
-    type: object
-  handlers.DebateReferenceInput:
-    properties:
-      debate_id:
-        type: string
-    required:
-    - debate_id
-    type: object
-  handlers.DebateResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.Debate'
-    type: object
-  handlers.DebateSearchResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.Debate'
-        type: array
-    type: object
-  handlers.DebateVoteListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.DebateVote'
-        type: array
-    type: object
-  handlers.DeleteChannelInput:
-    properties:
-      move_content:
-        type: boolean
-      password:
-        type: string
-      target_channel_id:
-        type: string
-    required:
-    - password
-    type: object
   handlers.DiscussionContentInput:
     properties:
       content:
@@ -1232,221 +967,11 @@ definitions:
       visibility:
         type: string
     type: object
-  handlers.FoldArgumentInput:
-    properties:
-      fold_note:
-        example: 证据不足，暂时折叠。
-        type: string
-    type: object
-  handlers.ForumCategoryInput:
-    properties:
-      color:
-        example: '#000000'
-        type: string
-      description:
-        example: General discussion
-        type: string
-      name:
-        example: General
-        type: string
-    required:
-    - name
-    type: object
-  handlers.ForumCategoryListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.ForumCategory'
-        type: array
-    type: object
-  handlers.ForumCategoryResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.ForumCategory'
-    type: object
-  handlers.ForumDraftInput:
-    properties:
-      content:
-        example: Draft content
-        type: string
-      context_key:
-        example: new_topic
-        type: string
-      tags:
-        example: tag1,tag2
-        type: string
-      title:
-        example: Draft title
-        type: string
-    required:
-    - context_key
-    type: object
-  handlers.ForumDraftResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.ForumDraft'
-    type: object
-  handlers.ForumReplyCreateInput:
-    properties:
-      content:
-        example: I think folder-based grouping works well.
-        type: string
-      parent_reply_id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
-        type: string
-    required:
-    - content
-    type: object
-  handlers.ForumReplyListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.ForumReply'
-        type: array
-    type: object
-  handlers.ForumReplyResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.ForumReply'
-    type: object
-  handlers.ForumReplyUpdateInput:
-    properties:
-      content:
-        example: Updated reply body
-        type: string
-    required:
-    - content
-    type: object
-  handlers.ForumReportInput:
-    properties:
-      note:
-        example: Repeated promotional links
-        type: string
-      reason:
-        example: spam
-        type: string
-      target_id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
-        type: string
-      target_type:
-        example: topic
-        type: string
-    required:
-    - reason
-    - target_id
-    - target_type
-    type: object
-  handlers.ForumSearchResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.ForumTopic'
-        type: array
-      limit:
-        example: 20
-        type: integer
-      page:
-        example: 1
-        type: integer
-      q:
-        example: music
-        type: string
-      total:
-        example: 12
-        type: integer
-    type: object
-  handlers.ForumTopicCreateInput:
-    properties:
-      category_id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
-        type: string
-      content:
-        example: Let's discuss best practices.
-        type: string
-      tags:
-        example:
-        - workflow
-        - metadata
-        items:
-          type: string
-        type: array
-      title:
-        example: How to organize music metadata?
-        type: string
-    required:
-    - category_id
-    - content
-    - title
-    type: object
-  handlers.ForumTopicListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.ForumTopic'
-        type: array
-      limit:
-        example: 20
-        type: integer
-      page:
-        example: 1
-        type: integer
-      total:
-        example: 42
-        type: integer
-    type: object
-  handlers.ForumTopicResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.ForumTopic'
-    type: object
-  handlers.ForumTopicUpdateInput:
-    properties:
-      content:
-        example: Updated content
-        type: string
-      tags:
-        example:
-        - workflow
-        - updated
-        items:
-          type: string
-        type: array
-      title:
-        example: Updated title
-        type: string
-    type: object
   handlers.ImageUploadResponse:
     properties:
       image_url:
         example: https://cdn.example.com/uploaded.png
         type: string
-    type: object
-  handlers.LikeCountData:
-    properties:
-      count:
-        example: 12
-        type: integer
-    type: object
-  handlers.LikeCountResponse:
-    properties:
-      data:
-        $ref: '#/definitions/handlers.LikeCountData'
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.LikeInput:
-    properties:
-      target_id:
-        type: string
-      target_type:
-        enum:
-        - post
-        - comment
-        type: string
-    required:
-    - target_id
-    - target_type
     type: object
   handlers.LoginInput:
     properties:
@@ -1497,19 +1022,6 @@ definitions:
         type: integer
       total:
         example: 42
-        type: integer
-    type: object
-  handlers.NotificationListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.Notification'
-        type: array
-      page:
-        example: 1
-        type: integer
-      total:
-        example: 15
         type: integer
     type: object
   handlers.OnboardingCompleteResponse:
@@ -1656,13 +1168,6 @@ definitions:
       website:
         example: https://atoman.org
         type: string
-    type: object
-  handlers.ReferenceInput:
-    properties:
-      reference_id:
-        type: string
-    required:
-    - reference_id
     type: object
   handlers.RegisterInput:
     properties:
@@ -1941,50 +1446,6 @@ definitions:
         example: https://cdn.example.com/uploads/file.png
         type: string
     type: object
-  handlers.UserCollectionItem:
-    properties:
-      channel_id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8b
-        format: uuid
-        type: string
-      channel_name:
-        example: Fafa Channel
-        type: string
-      cover_url:
-        example: https://cdn.example.com/cover.png
-        type: string
-      created_at:
-        example: "2026-05-25T11:00:00Z"
-        format: date-time
-        type: string
-      description:
-        example: Long-form writing
-        type: string
-      id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
-        format: uuid
-        type: string
-      is_default:
-        example: false
-        type: boolean
-      name:
-        example: Essays
-        type: string
-      updated_at:
-        example: "2026-05-25T11:00:00Z"
-        format: date-time
-        type: string
-    type: object
-  handlers.UserCollectionListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/handlers.UserCollectionItem'
-        type: array
-      message:
-        example: ok
-        type: string
-    type: object
   handlers.UserListResponse:
     properties:
       data:
@@ -2241,16 +1702,6 @@ definitions:
         example: followers
         type: string
     type: object
-  handlers.VoteInput:
-    properties:
-      vote_type:
-        enum:
-        - 1
-        - -1
-        type: integer
-    required:
-    - vote_type
-    type: object
   handlers.uploadAssetResponse:
     properties:
       content_type:
@@ -2284,6 +1735,8 @@ definitions:
         type: string
       release_date:
         type: string
+      release_year:
+        type: integer
       songs:
         items:
           $ref: '#/definitions/model.Song'
@@ -2352,74 +1805,6 @@ definitions:
       user_id:
         type: string
     type: object
-  model.Argument:
-    properties:
-      argument_type:
-        $ref: '#/definitions/model.ArgumentType'
-      conclusion:
-        type: string
-      content:
-        type: string
-      created_at:
-        type: string
-      debate:
-        $ref: '#/definitions/model.Debate'
-      debate_id:
-        type: string
-      fold_note:
-        description: admin note for why folded
-        type: string
-      id:
-        type: string
-      is_concluded:
-        type: boolean
-      is_folded:
-        description: Admin moderation
-        type: boolean
-      parent:
-        $ref: '#/definitions/model.Argument'
-      parent_id:
-        type: string
-      referenced_debates:
-        items:
-          $ref: '#/definitions/model.Debate'
-        type: array
-      references:
-        items:
-          $ref: '#/definitions/model.Argument'
-        type: array
-      source_excerpt:
-        type: string
-      source_title:
-        type: string
-      source_url:
-        description: Evidence source fields (only used when ArgumentType == "evidence")
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-      vote_count:
-        type: integer
-    type: object
-  model.ArgumentType:
-    enum:
-    - support
-    - oppose
-    - neutral
-    - evidence
-    - question
-    - counter
-    type: string
-    x-enum-varnames:
-    - ArgumentTypeSupport
-    - ArgumentTypeOppose
-    - ArgumentTypeNeutral
-    - ArgumentTypeEvidence
-    - ArgumentTypeQuestion
-    - ArgumentTypeCounter
   model.Artist:
     properties:
       albums:
@@ -2434,6 +1819,8 @@ definitions:
         type: string
       birth_date:
         type: string
+      birth_place:
+        type: string
       birth_year:
         type: integer
       created_at:
@@ -2445,6 +1832,8 @@ definitions:
       id:
         type: string
       image_url:
+        type: string
+      legal_name:
         type: string
       members:
         type: string
@@ -2458,6 +1847,8 @@ definitions:
         items:
           $ref: '#/definitions/model.Song'
         type: array
+      stage_names_json:
+        type: string
       updated_at:
         type: string
     type: object
@@ -2500,68 +1891,6 @@ definitions:
         type: string
       status:
         description: pending|approved|rejected
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-    type: object
-  model.Bookmark:
-    properties:
-      bookmark_folder:
-        $ref: '#/definitions/model.BookmarkFolder'
-      bookmark_folder_id:
-        type: string
-      created_at:
-        type: string
-      id:
-        type: string
-      post:
-        $ref: '#/definitions/model.Post'
-      post_id:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-    type: object
-  model.BookmarkFolder:
-    properties:
-      created_at:
-        type: string
-      id:
-        type: string
-      name:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-    type: object
-  model.CategoryRequest:
-    properties:
-      created_at:
-        type: string
-      description:
-        type: string
-      id:
-        type: string
-      name:
-        type: string
-      reason:
-        type: string
-      review_note:
-        type: string
-      reviewed_by:
-        type: string
-      status:
-        description: pending | approved | rejected
         type: string
       updated_at:
         type: string
@@ -2694,66 +2023,6 @@ definitions:
         type: string
       updated_at:
         type: string
-    type: object
-  model.Debate:
-    properties:
-      argument_count:
-        type: integer
-      conclude_threshold:
-        type: integer
-      conclude_vote_count:
-        type: integer
-      concluded_at:
-        type: string
-      conclusion_summary:
-        type: string
-      conclusion_type:
-        type: string
-      content:
-        type: string
-      created_at:
-        type: string
-      description:
-        type: string
-      id:
-        type: string
-      status:
-        type: string
-      tags:
-        items:
-          type: string
-        type: array
-      title:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-      view_count:
-        type: integer
-      vote_count:
-        type: integer
-    type: object
-  model.DebateVote:
-    properties:
-      argument:
-        $ref: '#/definitions/model.Argument'
-      argument_id:
-        type: string
-      created_at:
-        type: string
-      id:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-      vote_type:
-        type: integer
     type: object
   model.Discussion:
     properties:
@@ -2908,6 +2177,8 @@ definitions:
     properties:
       canonical_url:
         type: string
+      category:
+        type: string
       cover_url:
         type: string
       created_at:
@@ -2976,103 +2247,21 @@ definitions:
       updated_at:
         type: string
     type: object
-  model.ForumDraft:
+  model.ForumModeratorAssignment:
     properties:
-      content:
-        type: string
-      context_key:
-        description: '"new_topic" | "reply:{topic_uuid}"'
-        type: string
-      created_at:
-        type: string
-      id:
-        type: string
-      tags:
-        description: comma-separated tag list
-        type: string
-      title:
-        type: string
-      updated_at:
-        type: string
-      user_id:
-        type: string
-    type: object
-  model.ForumReply:
-    properties:
-      content:
-        description: raw Markdown
-        type: string
-      created_at:
-        type: string
-      depth:
-        type: integer
-      floor_number:
-        type: integer
-      id:
-        type: string
-      is_liked:
-        description: computed per-user
+      can_lock_topic:
         type: boolean
-      is_solved:
+      can_pin_topic:
         type: boolean
-      like_count:
-        type: integer
-      parent_reply_id:
-        type: string
-      path:
-        description: ltree path (Postgres) / text prefix (SQLite)
-        type: string
-      topic:
-        $ref: '#/definitions/model.ForumTopic'
-      topic_id:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-    type: object
-  model.ForumTopic:
-    properties:
+      can_review_category_request:
+        type: boolean
       category:
         $ref: '#/definitions/model.ForumCategory'
       category_id:
         type: string
-      closed:
-        type: boolean
-      content:
-        description: raw Markdown
-        type: string
       created_at:
         type: string
-      featured:
-        type: boolean
       id:
-        type: string
-      is_bookmarked:
-        description: computed per-user
-        type: boolean
-      is_liked:
-        description: computed per-user
-        type: boolean
-      is_solved:
-        type: boolean
-      last_reply_at:
-        type: string
-      like_count:
-        type: integer
-      pinned:
-        type: boolean
-      reply_count:
-        type: integer
-      solved_reply_id:
-        type: string
-      tags:
-        items:
-          type: string
-        type: array
-      title:
         type: string
       updated_at:
         type: string
@@ -3080,8 +2269,6 @@ definitions:
         $ref: '#/definitions/model.User'
       user_id:
         type: string
-      view_count:
-        type: integer
     type: object
   model.LyricAnnotation:
     properties:
@@ -3103,36 +2290,6 @@ definitions:
         $ref: '#/definitions/model.User'
       user_id:
         type: string
-    type: object
-  model.Notification:
-    properties:
-      actor:
-        $ref: '#/definitions/model.User'
-      actor_id:
-        type: string
-      created_at:
-        type: string
-      id:
-        type: string
-      meta:
-        $ref: '#/definitions/model.NotificationMeta'
-      read_at:
-        type: string
-      recipient:
-        $ref: '#/definitions/model.User'
-      recipient_id:
-        type: string
-      source_id:
-        type: string
-      source_type:
-        type: string
-      type:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  model.NotificationMeta:
-    additionalProperties: true
     type: object
   model.NullableUserUUID:
     properties:
@@ -3639,6 +2796,134 @@ definitions:
         type: string
       updated_at:
         type: string
+    type: object
+  service.SiteAccessBlogSettings:
+    properties:
+      comment_mode:
+        type: string
+    type: object
+  service.SiteAccessBlogSettingsInput:
+    properties:
+      comment_mode:
+        type: string
+    type: object
+  service.SiteAccessFeedSettings:
+    properties:
+      allow_add_source:
+        type: boolean
+      allow_manage_sources:
+        type: boolean
+      full_text_mode:
+        type: string
+    type: object
+  service.SiteAccessFeedSettingsInput:
+    properties:
+      allow_add_source:
+        type: boolean
+      allow_manage_sources:
+        type: boolean
+      full_text_mode:
+        type: string
+    type: object
+  service.SiteAccessForumModeratorPermissions:
+    properties:
+      lock_topic:
+        type: boolean
+      pin_topic:
+        type: boolean
+      review_category_request:
+        type: boolean
+    type: object
+  service.SiteAccessForumModeratorPermissionsInput:
+    properties:
+      lock_topic:
+        type: boolean
+      pin_topic:
+        type: boolean
+      review_category_request:
+        type: boolean
+    type: object
+  service.SiteAccessForumSettings:
+    properties:
+      allow_category_request:
+        type: boolean
+      moderator_permissions:
+        $ref: '#/definitions/service.SiteAccessForumModeratorPermissions'
+    type: object
+  service.SiteAccessForumSettingsInput:
+    properties:
+      allow_category_request:
+        type: boolean
+      moderator_permissions:
+        $ref: '#/definitions/service.SiteAccessForumModeratorPermissionsInput'
+    type: object
+  service.SiteAccessMatrix:
+    properties:
+      modules:
+        additionalProperties:
+          $ref: '#/definitions/service.SiteAccessModule'
+        type: object
+      revision:
+        type: integer
+      settings:
+        $ref: '#/definitions/service.SiteAccessSettings'
+      updated_at:
+        type: string
+      version:
+        type: integer
+    type: object
+  service.SiteAccessMatrixInput:
+    properties:
+      modules:
+        additionalProperties:
+          $ref: '#/definitions/service.SiteAccessModuleInput'
+        type: object
+      revision:
+        type: integer
+      settings:
+        $ref: '#/definitions/service.SiteAccessSettingsInput'
+      updated_at:
+        type: string
+      version:
+        type: integer
+    type: object
+  service.SiteAccessModule:
+    properties:
+      enabled:
+        type: boolean
+      features:
+        additionalProperties:
+          type: boolean
+        type: object
+    type: object
+  service.SiteAccessModuleInput:
+    properties:
+      enabled:
+        type: boolean
+      features:
+        additionalProperties:
+          type: boolean
+        type: object
+      visible:
+        type: boolean
+    type: object
+  service.SiteAccessSettings:
+    properties:
+      blog:
+        $ref: '#/definitions/service.SiteAccessBlogSettings'
+      feed:
+        $ref: '#/definitions/service.SiteAccessFeedSettings'
+      forum:
+        $ref: '#/definitions/service.SiteAccessForumSettings'
+    type: object
+  service.SiteAccessSettingsInput:
+    properties:
+      blog:
+        $ref: '#/definitions/service.SiteAccessBlogSettingsInput'
+      feed:
+        $ref: '#/definitions/service.SiteAccessFeedSettingsInput'
+      forum:
+        $ref: '#/definitions/service.SiteAccessForumSettingsInput'
     type: object
 info:
   contact: {}
@@ -4257,6 +3542,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       summary: 获取专辑列表
       tags:
       - music-albums
@@ -4312,6 +3601,10 @@ paths:
             $ref: '#/definitions/handlers.ConflictWithIDResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       security:
@@ -4371,6 +3664,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 获取专辑详情
@@ -4443,6 +3740,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       security:
@@ -5869,698 +5170,6 @@ paths:
       summary: 校验邮箱验证码
       tags:
       - auth
-  /api/v1/blog/bookmark-folders:
-    get:
-      description: 返回当前用户的书签文件夹列表。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.BookmarkFolderListResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取书签文件夹列表
-      tags:
-      - blog-interactions
-    post:
-      consumes:
-      - application/json
-      description: 为当前用户创建一个书签文件夹。
-      parameters:
-      - description: 书签文件夹输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.BookmarkFolderInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.BookmarkFolderResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建书签文件夹
-      tags:
-      - blog-interactions
-  /api/v1/blog/bookmark-folders/{id}:
-    delete:
-      description: 删除当前用户的书签文件夹，并把其中书签移到未分组状态。
-      parameters:
-      - description: 书签文件夹 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除书签文件夹
-      tags:
-      - blog-interactions
-  /api/v1/blog/bookmarks:
-    get:
-      description: 返回当前用户的书签列表，可按书签文件夹过滤。
-      parameters:
-      - description: 书签文件夹 UUID
-        in: query
-        name: folder_id
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.BookmarkListResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取我的书签列表
-      tags:
-      - blog-interactions
-    post:
-      consumes:
-      - application/json
-      description: 将文章加入当前用户的书签。
-      parameters:
-      - description: 书签输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.BookmarkInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.BookmarkResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建书签
-      tags:
-      - blog-interactions
-  /api/v1/blog/bookmarks/{id}:
-    delete:
-      description: 删除当前用户的指定书签。
-      parameters:
-      - description: 书签 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除书签
-      tags:
-      - blog-interactions
-  /api/v1/blog/channels:
-    get:
-      description: 返回频道列表，可按用户 UUID 过滤。
-      parameters:
-      - description: 用户 UUID
-        in: query
-        name: user_id
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ChannelListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取频道列表
-      tags:
-      - blog-channels
-    post:
-      consumes:
-      - application/json
-      description: 为当前登录用户创建一个频道，并自动生成默认合集。
-      parameters:
-      - description: 频道输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ChannelInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.ChannelResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建频道
-      tags:
-      - blog-channels
-  /api/v1/blog/channels/{id}:
-    delete:
-      consumes:
-      - application/json
-      description: 删除当前用户拥有的频道，可选择是否迁移内容到目标频道。
-      parameters:
-      - description: 频道 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 删除频道输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.DeleteChannelInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除频道
-      tags:
-      - blog-channels
-    get:
-      description: 按频道 UUID 返回频道详情。
-      parameters:
-      - description: 频道 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ChannelResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取频道详情
-      tags:
-      - blog-channels
-    put:
-      consumes:
-      - application/json
-      description: 更新当前用户拥有的频道信息。
-      parameters:
-      - description: 频道 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 频道输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ChannelInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ChannelResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 更新频道
-      tags:
-      - blog-channels
-  /api/v1/blog/channels/{id}/collections:
-    get:
-      description: 返回指定频道 UUID 下的所有合集。
-      parameters:
-      - description: 频道 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.CollectionListResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取频道下的合集列表
-      tags:
-      - blog-collections
-    post:
-      consumes:
-      - application/json
-      description: 在当前用户拥有的频道下创建一个合集。
-      parameters:
-      - description: 频道 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 合集输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CollectionInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.CollectionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建合集
-      tags:
-      - blog-collections
-  /api/v1/blog/channels/ensure-default:
-    post:
-      description: 为当前用户创建默认频道；若已存在则直接返回。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ChannelResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 确保默认频道存在
-      tags:
-      - blog-channels
-  /api/v1/blog/channels/slug/{slug}:
-    get:
-      description: 按频道 slug 返回频道详情。
-      parameters:
-      - description: 频道 slug
-        in: path
-        name: slug
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ChannelResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 按 slug 获取频道详情
-      tags:
-      - blog-channels
-  /api/v1/blog/channels/slug/{slug}/collections:
-    get:
-      description: 返回指定频道 slug 下的所有合集。
-      parameters:
-      - description: 频道 slug
-        in: path
-        name: slug
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.CollectionListResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 按频道 slug 获取合集列表
-      tags:
-      - blog-collections
-  /api/v1/blog/channels/slug/{slug}/rss/article:
-    get:
-      description: 输出指定频道已发布文章的 RSS 2.0 XML。
-      parameters:
-      - description: 频道 slug
-        in: path
-        name: slug
-        required: true
-        type: string
-      produces:
-      - text/xml
-      responses:
-        "200":
-          description: RSS XML
-          schema:
-            type: string
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取频道文章 RSS
-      tags:
-      - blog-channels
-  /api/v1/blog/collections:
-    get:
-      description: 返回当前登录用户名下所有频道的合集，并附带频道名称。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.UserCollectionListResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取我的合集列表
-      tags:
-      - blog-collections
-  /api/v1/blog/collections/{id}:
-    delete:
-      description: 删除当前用户可管理的合集。
-      parameters:
-      - description: 合集 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除合集
-      tags:
-      - blog-collections
-    get:
-      description: 按合集 UUID 返回合集详情。
-      parameters:
-      - description: 合集 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.CollectionResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取合集详情
-      tags:
-      - blog-collections
-    put:
-      consumes:
-      - application/json
-      description: 更新当前用户可管理的合集信息。
-      parameters:
-      - description: 合集 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 合集输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CollectionInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.CollectionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 更新合集
-      tags:
-      - blog-collections
-  /api/v1/blog/comments/{id}:
-    delete:
-      description: 删除当前用户拥有的评论，或删除自己文章下的评论。
-      parameters:
-      - description: 评论 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除评论
-      tags:
-      - blog-interactions
   /api/v1/blog/explore:
     get:
       description: 返回已发布文章的分页列表，并附带点赞数和评论数。
@@ -6589,79 +5198,6 @@ paths:
       summary: 获取博客探索流
       tags:
       - users
-  /api/v1/blog/likes:
-    delete:
-      consumes:
-      - application/json
-      description: 通过 POST 创建点赞，通过 DELETE 取消点赞；支持 post 和 comment。
-      parameters:
-      - description: 点赞输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.LikeInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 点赞或取消点赞
-      tags:
-      - blog-interactions
-    post:
-      consumes:
-      - application/json
-      description: 通过 POST 创建点赞，通过 DELETE 取消点赞；支持 post 和 comment。
-      parameters:
-      - description: 点赞输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.LikeInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 点赞或取消点赞
-      tags:
-      - blog-interactions
   /api/v1/blog/posts:
     get:
       description: 返回已发布文章，可按用户、频道或合集筛选。
@@ -6677,6 +5213,10 @@ paths:
       - description: 合集 UUID
         in: query
         name: collection_id
+        type: string
+      - description: 搜索标题或摘要
+        in: query
+        name: q
         type: string
       - description: 返回数量上限
         in: query
@@ -6850,102 +5390,6 @@ paths:
       summary: 将文章移出合集
       tags:
       - blog
-  /api/v1/blog/posts/{id}/comments:
-    get:
-      description: 返回指定文章的可见评论列表。
-      parameters:
-      - description: 文章 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.CommentListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取文章评论列表
-      tags:
-      - blog-interactions
-    post:
-      consumes:
-      - application/json
-      description: 为指定文章创建一条评论。
-      parameters:
-      - description: 文章 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 评论输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CommentInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.CommentResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 创建文章评论
-      tags:
-      - blog-interactions
-  /api/v1/blog/posts/{id}/likes/count:
-    get:
-      description: 返回指定文章的点赞总数。
-      parameters:
-      - description: 文章 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.LikeCountResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取文章点赞数
-      tags:
-      - blog-interactions
   /api/v1/blog/posts/drafts:
     get:
       description: 返回当前登录用户的文章草稿列表。
@@ -7000,6 +5444,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       security:
@@ -7100,6 +5548,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -7174,771 +5626,16 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
       summary: 提交歌曲纠错
       tags:
       - music-corrections
-  /api/v1/debate/arguments/{id}:
-    delete:
-      description: 论点作者或管理员可以删除论点，并清理关联投票与引用关系。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除论点
-      tags:
-      - debate
-    put:
-      consumes:
-      - application/json
-      description: 论点作者可以更新自己的论点内容与来源信息。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 论点输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CreateArgumentInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateArgumentResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 更新论点
-      tags:
-      - debate
-  /api/v1/debate/arguments/{id}/debate-reference:
-    post:
-      consumes:
-      - application/json
-      description: 为论点关联另一个辩题作为参考。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 辩题引用输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.DebateReferenceInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 添加辩题引用
-      tags:
-      - debate
-  /api/v1/debate/arguments/{id}/debate-reference/{debate_id}:
-    delete:
-      description: 删除论点与被引用辩题之间的关联。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 被引用辩题 UUID
-        in: path
-        name: debate_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 移除辩题引用
-      tags:
-      - debate
-  /api/v1/debate/arguments/{id}/fold:
-    delete:
-      description: 管理员恢复一条已折叠论点的显示状态。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 取消折叠论点
-      tags:
-      - debate
-    post:
-      consumes:
-      - application/json
-      description: 管理员折叠一条论点并可记录折叠原因。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 折叠备注
-        in: body
-        name: input
-        schema:
-          $ref: '#/definitions/handlers.FoldArgumentInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 折叠论点
-      tags:
-      - debate
-  /api/v1/debate/arguments/{id}/reference:
-    post:
-      consumes:
-      - application/json
-      description: 为论点关联另一个论点作为引用。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 引用输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ReferenceInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 添加论点引用
-      tags:
-      - debate
-  /api/v1/debate/arguments/{id}/reference/{ref_id}:
-    delete:
-      description: 删除论点与被引用论点之间的关联。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 被引用论点 UUID
-        in: path
-        name: ref_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 移除论点引用
-      tags:
-      - debate
-  /api/v1/debate/arguments/{id}/vote:
-    delete:
-      description: 删除当前用户对某条论点的投票。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 取消论点投票
-      tags:
-      - debate
-    post:
-      consumes:
-      - application/json
-      description: 对论点进行赞成或反对投票；再次提交相同票型会取消投票。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 投票输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.VoteInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateArgumentResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 为论点投票
-      tags:
-      - debate
-  /api/v1/debate/arguments/{id}/votes:
-    get:
-      description: 管理员查看某条论点的实名投票明细。
-      parameters:
-      - description: 论点 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateVoteListResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取论点投票明细
-      tags:
-      - debate
-  /api/v1/debate/topics:
-    get:
-      description: 分页返回辩题列表，支持按状态和标签筛选。
-      parameters:
-      - description: 页码
-        in: query
-        name: page
-        type: integer
-      - description: 每页数量
-        in: query
-        name: limit
-        type: integer
-      - description: 状态
-        in: query
-        name: status
-        type: string
-      - description: 标签
-        in: query
-        name: tag
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateListResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取辩题列表
-      tags:
-      - debate
-    post:
-      consumes:
-      - application/json
-      description: 创建一个新的辩题。
-      parameters:
-      - description: 辩题输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CreateDebateInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.DebateResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建辩题
-      tags:
-      - debate
-  /api/v1/debate/topics/{id}:
-    delete:
-      description: 辩题作者或管理员可以删除辩题及其论点。
-      parameters:
-      - description: 辩题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除辩题
-      tags:
-      - debate
-    get:
-      description: 返回单个辩题详情，并增加一次浏览计数。
-      parameters:
-      - description: 辩题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取辩题详情
-      tags:
-      - debate
-    put:
-      consumes:
-      - application/json
-      description: 辩题作者或管理员可以更新辩题内容。
-      parameters:
-      - description: 辩题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 辩题输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CreateDebateInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 更新辩题
-      tags:
-      - debate
-  /api/v1/debate/topics/{id}/arguments:
-    get:
-      description: 返回辩题下的论点列表，并在已登录时附带当前用户投票映射。
-      parameters:
-      - description: 辩题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateArgumentListResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取辩题论点列表
-      tags:
-      - debate
-    post:
-      consumes:
-      - application/json
-      description: 为指定辩题创建一条论点或引用型论点。
-      parameters:
-      - description: 辩题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 论点输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CreateArgumentInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.DebateArgumentResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建论点
-      tags:
-      - debate
-  /api/v1/debate/topics/{id}/conclude:
-    post:
-      consumes:
-      - application/json
-      description: 辩题作者或管理员给出结论并结束辩题。
-      parameters:
-      - description: 辩题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 结论输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.DebateConcludeInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 结束辩题
-      tags:
-      - debate
-  /api/v1/debate/topics/{id}/conclude-vote:
-    post:
-      description: 对开放中的辩题投票要求结束，达到阈值时自动结束。
-      parameters:
-      - description: 辩题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateConcludeVoteResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 投票结束辩题
-      tags:
-      - debate
-  /api/v1/debate/topics/{id}/reopen:
-    post:
-      description: 管理员重新开启已结束的辩题。
-      parameters:
-      - description: 辩题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 重新开启辩题
-      tags:
-      - debate
-  /api/v1/debate/topics/search:
-    get:
-      description: 按标题或描述搜索辩题。
-      parameters:
-      - description: 搜索词
-        in: query
-        name: q
-        type: string
-      - description: 返回数量
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateSearchResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 搜索辩题
-      tags:
-      - debate
   /api/v1/dm/conversations:
     get:
       description: 返回当前用户的私信会话列表和未读计数。
@@ -8119,6 +5816,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -8127,10 +5828,11 @@ paths:
       - dm
   /api/v1/feed/explore:
     get:
-      description: 分页返回推荐条目，支持按随机 (random) 或热门 (popular) 排序。
+      description: 分页返回推荐条目，支持按最近 (recent)、随机 (random) 或热门 (popular) 排序。
       parameters:
       - description: 排序方式
         enum:
+        - recent
         - random
         - popular
         in: query
@@ -9285,943 +6987,26 @@ paths:
       summary: 切换条目星标
       tags:
       - feed
-  /api/v1/forum/categories:
+  /api/v1/forum/moderation/moderators:
     get:
-      description: 返回全部论坛分类以及每个分类的话题数量。
+      description: 返回论坛版主分配、分类范围和权限位，仅管理员可访问。
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.ForumCategoryListResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取论坛分类列表
-      tags:
-      - forum
-    post:
-      consumes:
-      - application/json
-      description: 仅管理员可创建论坛分类。
-      parameters:
-      - description: 分类输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ForumCategoryInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.ForumCategoryResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建论坛分类
-      tags:
-      - forum
-  /api/v1/forum/category-requests:
-    get:
-      description: 仅管理员可查看待审的论坛分类申请列表。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.CategoryRequestListResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取待审分类申请
-      tags:
-      - forum
-    post:
-      consumes:
-      - application/json
-      description: 当前用户提交一个新的论坛分类创建申请。
-      parameters:
-      - description: 分类申请输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CategoryRequestCreateInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.CategoryRequestResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 提交分类申请
-      tags:
-      - forum
-  /api/v1/forum/category-requests/{id}/review:
-    post:
-      consumes:
-      - application/json
-      description: 仅管理员可批准或拒绝分类申请；批准时会创建分类。
-      parameters:
-      - description: 分类申请 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 审核输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CategoryRequestReviewInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.CategoryRequestReviewResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 审核分类申请
-      tags:
-      - forum
-  /api/v1/forum/drafts:
-    delete:
-      description: 按 context_key 删除当前用户的论坛草稿。
-      parameters:
-      - description: 草稿上下文 key
-        in: query
-        name: context_key
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除论坛草稿
-      tags:
-      - forum
-    get:
-      description: 按 context_key 获取当前用户的论坛草稿。
-      parameters:
-      - description: 草稿上下文 key
-        in: query
-        name: context_key
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ForumDraftResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取论坛草稿
-      tags:
-      - forum
-    put:
-      consumes:
-      - application/json
-      description: 创建或更新当前用户的论坛草稿。
-      parameters:
-      - description: 论坛草稿输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ForumDraftInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ForumDraftResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 保存论坛草稿
-      tags:
-      - forum
-  /api/v1/forum/replies/{id}:
-    delete:
-      description: 删除当前用户拥有的回复，管理员也可删除。
-      parameters:
-      - description: 回复 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除论坛回复
-      tags:
-      - forum
-    put:
-      consumes:
-      - application/json
-      description: 更新当前用户拥有的回复，管理员也可更新。
-      parameters:
-      - description: 回复 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 回复更新输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ForumReplyUpdateInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ForumReplyResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 更新论坛回复
-      tags:
-      - forum
-  /api/v1/forum/replies/{id}/like:
-    post:
-      description: 再次调用会在点赞与取消点赞之间切换。
-      parameters:
-      - description: 回复 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.BoolStatusResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 点赞或取消点赞回复
-      tags:
-      - forum
-  /api/v1/forum/replies/{id}/solve:
-    delete:
-      description: 取消指定回复的话题解决方案状态。
-      parameters:
-      - description: 回复 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 取消解决方案标记
-      tags:
-      - forum
-    post:
-      description: 将指定回复标记为话题解决方案。
-      parameters:
-      - description: 回复 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 标记解决方案
-      tags:
-      - forum
-  /api/v1/forum/report:
-    post:
-      consumes:
-      - application/json
-      description: 举报话题或回复；当话题举报数达到阈值时会自动关闭。
-      parameters:
-      - description: 举报输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ForumReportInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 举报论坛内容
-      tags:
-      - forum
-  /api/v1/forum/search:
-    get:
-      description: 按标题或正文搜索论坛话题。
-      parameters:
-      - description: 搜索关键字
-        in: query
-        name: q
-        type: string
-      - default: 1
-        description: 页码
-        in: query
-        name: page
-        type: integer
-      - default: 20
-        description: 每页数量
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ForumSearchResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 搜索论坛话题
-      tags:
-      - forum
-  /api/v1/forum/topics:
-    get:
-      description: 返回论坛话题分页列表，支持分类、标签、搜索和排序筛选。
-      parameters:
-      - default: 1
-        description: 页码
-        in: query
-        name: page
-        type: integer
-      - default: 20
-        description: 每页数量
-        in: query
-        name: limit
-        type: integer
-      - default: latest
-        description: 排序：latest/top/active/featured
-        in: query
-        name: sort
-        type: string
-      - description: 分类 UUID
-        in: query
-        name: category_id
-        type: string
-      - description: 标签
-        in: query
-        name: tag
-        type: string
-      - description: 搜索关键字
-        in: query
-        name: search
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ForumTopicListResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取论坛话题列表
-      tags:
-      - forum
-    post:
-      consumes:
-      - application/json
-      description: 创建一个新的论坛话题。
-      parameters:
-      - description: 话题输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ForumTopicCreateInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.ForumTopicResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建论坛话题
-      tags:
-      - forum
-  /api/v1/forum/topics/{id}:
-    delete:
-      description: 删除当前用户拥有的话题，管理员也可删除。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除论坛话题
-      tags:
-      - forum
-    get:
-      description: 返回指定话题详情，并在允许时更新浏览量与当前用户状态。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ForumTopicResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取论坛话题详情
-      tags:
-      - forum
-    put:
-      consumes:
-      - application/json
-      description: 更新当前用户拥有的话题，管理员也可更新。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 话题更新输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ForumTopicUpdateInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ForumTopicResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 更新论坛话题
-      tags:
-      - forum
-  /api/v1/forum/topics/{id}/bookmark:
-    post:
-      description: 再次调用会在收藏与取消收藏之间切换。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.BoolStatusResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 收藏或取消收藏论坛话题
-      tags:
-      - forum
-  /api/v1/forum/topics/{id}/close:
-    post:
-      description: 仅管理员可切换论坛话题的关闭状态。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.BoolStatusResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 切换话题关闭状态
-      tags:
-      - forum
-  /api/v1/forum/topics/{id}/feature:
-    delete:
-      description: 仅管理员可取消话题的精选状态。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 取消精选话题
-      tags:
-      - forum
-    post:
-      description: 仅管理员可将话题设为精选。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 设为精选话题
-      tags:
-      - forum
-  /api/v1/forum/topics/{id}/like:
-    post:
-      description: 再次调用会在点赞与取消点赞之间切换。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.BoolStatusResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 点赞或取消点赞论坛话题
-      tags:
-      - forum
-  /api/v1/forum/topics/{id}/pin:
-    post:
-      description: 仅管理员可切换论坛话题的置顶状态。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.BoolStatusResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 切换话题置顶状态
-      tags:
-      - forum
-  /api/v1/forum/topics/{id}/replies:
-    get:
-      description: 返回指定话题下的回复列表，支持按 oldest 或 best 排序。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - default: oldest
-        description: 排序：oldest/best
-        in: query
-        name: sort
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ForumReplyListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取话题回复列表
-      tags:
-      - forum
-    post:
-      consumes:
-      - application/json
-      description: 为指定话题创建回复，可引用一条已有回复。
-      parameters:
-      - description: 话题 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 回复输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ForumReplyCreateInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.ForumReplyResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建论坛回复
-      tags:
-      - forum
-  /api/v1/notifications:
-    get:
-      description: 返回当前用户的通知列表，可按类型筛选。
-      parameters:
-      - description: 通知类型
-        in: query
-        name: type
-        type: string
-      - default: 1
-        description: 页码
-        in: query
-        name: page
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.NotificationListResponse'
+            items:
+              $ref: '#/definitions/model.ForumModeratorAssignment'
+            type: array
         "401":
           description: Unauthorized
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -10229,25 +7014,27 @@ paths:
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 获取通知列表
+      summary: 获取论坛版主分配列表
       tags:
-      - notifications
-  /api/v1/notifications/{id}/read:
-    put:
-      description: 将指定通知标记为已读。
+      - forum-moderation
+    post:
+      consumes:
+      - application/json
+      description: 为指定 moderator/admin 用户创建论坛版主分配，仅管理员可访问。
       parameters:
-      - description: 通知 UUID
-        in: path
-        name: id
+      - description: 版主分配输入
+        in: body
+        name: input
         required: true
-        type: string
+        schema:
+          $ref: '#/definitions/forum_moderation.ModeratorAssignmentInput'
       produces:
       - application/json
       responses:
-        "200":
-          description: OK
+        "201":
+          description: Created
           schema:
-            $ref: '#/definitions/handlers.BoolStatusResponse'
+            $ref: '#/definitions/model.ForumModeratorAssignment'
         "400":
           description: Bad Request
           schema:
@@ -10256,6 +7043,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -10263,26 +7054,35 @@ paths:
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 标记单条通知已读
+      summary: 创建论坛版主分配
       tags:
-      - notifications
-  /api/v1/notifications/read-all:
-    put:
-      description: 将当前用户的通知全部标记为已读，可按类型过滤。
+      - forum-moderation
+  /api/v1/forum/moderation/moderators/{assignmentID}:
+    delete:
+      description: 删除指定论坛版主分配，仅管理员可访问。
       parameters:
-      - description: 通知类型
-        in: query
-        name: type
+      - description: 版主分配 UUID
+        in: path
+        name: assignmentID
+        required: true
         type: string
       produces:
       - application/json
       responses:
-        "200":
-          description: OK
+        "204":
+          description: No Content
           schema:
-            $ref: '#/definitions/handlers.BoolStatusResponse'
+            type: string
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
@@ -10292,21 +7092,46 @@ paths:
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 标记所有通知已读
+      summary: 删除论坛版主分配
       tags:
-      - notifications
-  /api/v1/notifications/unread-count:
-    get:
-      description: 返回当前用户的未读通知数量。
+      - forum-moderation
+    put:
+      consumes:
+      - application/json
+      description: 更新指定论坛版主分配的分类范围和权限位，仅管理员可访问。
+      parameters:
+      - description: 版主分配 UUID
+        in: path
+        name: assignmentID
+        required: true
+        type: string
+      - description: 版主分配输入
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/forum_moderation.ModeratorAssignmentInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.CountResponse'
+            $ref: '#/definitions/model.ForumModeratorAssignment'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
         "401":
           description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
@@ -10316,9 +7141,9 @@ paths:
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 获取未读通知数
+      summary: 更新论坛版主分配
       tags:
-      - notifications
+      - forum-moderation
   /api/v1/podcast/episodes:
     get:
       description: 返回所有已发布的播客单集。
@@ -10536,6 +7361,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -10568,12 +7397,72 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
       summary: 上传播客封面
       tags:
       - podcast
+  /api/v1/settings/site-access:
+    get:
+      description: 返回后台模块开关与结构化模块设置，包括 feed/blog/forum 的设置矩阵。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.SiteAccessMatrix'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取站点模块访问设置
+      tags:
+      - settings
+    put:
+      consumes:
+      - application/json
+      description: 保存后台模块开关与结构化模块设置，包括 feed/blog/forum 的设置矩阵。
+      parameters:
+      - description: 站点访问设置输入
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/service.SiteAccessMatrixInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/service.SiteAccessMatrix'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 更新站点模块访问设置
+      tags:
+      - settings
   /api/v1/songs:
     get:
       description: 返回所有未关闭的歌曲公开列表。
@@ -10588,6 +7477,10 @@ paths:
             type: array
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 获取歌曲列表
@@ -10657,6 +7550,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       security:
@@ -10780,6 +7677,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       security:
@@ -12008,6 +8909,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -12448,6 +9353,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -12573,6 +9482,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 获取视频评论
@@ -12727,6 +9640,10 @@ paths:
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -12757,6 +9674,10 @@ paths:
             $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       security:

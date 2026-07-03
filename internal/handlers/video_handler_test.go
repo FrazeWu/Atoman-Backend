@@ -239,6 +239,55 @@ func TestVideoChannelBookmarksExcludePodcastShowBookmarks(t *testing.T) {
 	require.NotContains(t, w.Body.String(), podcastBookmark.ID.String())
 }
 
+func TestSetupVideoRoutesMountsRecommendationItemsEndpoint(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+
+	video := model.Video{
+		UserID:       user.UUID,
+		Title:        "推荐视频",
+		Description:  "这是一个适合推荐的视频。",
+		StorageType:  "local",
+		VideoURL:     "https://example.com/recommend.mp4",
+		ThumbnailURL: "https://example.com/recommend.jpg",
+		Status:       "published",
+		Visibility:   "public",
+		ViewCount:    120,
+	}
+	require.NoError(t, db.Create(&video).Error)
+
+	r := gin.New()
+	SetupVideoRoutes(r, db, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/videos/recommend/items?mode=hot&page=1&page_size=20", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected recommendation route to be mounted, got 404: %s", w.Body.String())
+	}
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+	var payload struct {
+		Data []struct {
+			ID          string `json:"id"`
+			Title       string `json:"title"`
+			Summary     string `json:"summary"`
+			ContentType string `json:"content_type"`
+			TargetPath  string `json:"target_path"`
+			ScoreLabel  string `json:"score_label"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.NotEmpty(t, payload.Data, "body=%s", w.Body.String())
+
+	first := payload.Data[0]
+	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType != "video" {
+		t.Fatalf("expected recommendation dto fields, got %#v", first)
+	}
+}
+
 func videoMultipartBody(t *testing.T, field, filename, contentType string, content []byte) (*bytes.Buffer, string) {
 	t.Helper()
 	body := &bytes.Buffer{}

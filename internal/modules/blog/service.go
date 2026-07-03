@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/audit"
 	"atoman/internal/platform/authctx"
@@ -38,6 +40,154 @@ type Service struct {
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
+
+func parseRecommendationMode(raw string) (recommendation.Mode, error) {
+	switch recommendation.Mode(strings.TrimSpace(strings.ToLower(raw))) {
+	case recommendation.ModeHot:
+		return recommendation.ModeHot, nil
+	case recommendation.ModeFeatured:
+		return recommendation.ModeFeatured, nil
+	case recommendation.ModeDiscover:
+		return recommendation.ModeDiscover, nil
+	default:
+		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover")
+	}
+}
+
+func (s *Service) RecommendPostsByMode(mode recommendation.Mode, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
+	var posts []model.Post
+	if err := s.db.
+		Preload("User").
+		Preload("Channel").
+		Where("status = ? AND visibility = ?", "published", "public").
+		Order("pinned DESC, created_at DESC").
+		Find(&posts).Error; err != nil {
+		return nil, 0, err
+	}
+
+	candidates := make([]recommendation.Candidate, 0, len(posts))
+	postByID := make(map[string]model.Post, len(posts))
+	for _, post := range posts {
+		candidates = append(candidates, recommendation.Candidate{
+			Module:          "blog",
+			EntityType:      recommendation.EntityBlog,
+			EntityID:        post.ID.String(),
+			SourceKey:       blogRecommendationSourceKey(post),
+			QualityScore:    normalizeBlogRecommendationQuality(post),
+			TrendScore:      normalizeBlogRecommendationTrend(post),
+			FreshnessScore:  normalizeBlogRecommendationFreshness(post.CreatedAt, 14*24*time.Hour),
+			AuthorityScore:  normalizeBlogRecommendationAuthority(post),
+			ExposureScore:   0,
+			EditorialScore:  0,
+			PublishedAtUnix: post.CreatedAt.Unix(),
+		})
+		postByID[post.ID.String()] = post
+	}
+
+	ranked := recommendation.RankCandidates(mode, candidates, 0)
+	items := make([]RecommendationItemDTO, 0, len(ranked))
+	for _, rankedItem := range ranked {
+		post, ok := postByID[rankedItem.EntityID]
+		if !ok {
+			continue
+		}
+		items = append(items, RecommendationItemDTO{
+			ID:          post.ID.String(),
+			Title:       post.Title,
+			Summary:     post.Summary,
+			ContentType: "blog",
+			ImageURL:    post.CoverURL,
+			TargetPath:  "/post/" + post.ID.String(),
+			ScoreLabel:  blogRecommendationLabel(mode, rankedItem.FinalScore),
+		})
+	}
+
+	total := int64(len(items))
+	start := (page - 1) * pageSize
+	if start > len(items) {
+		start = len(items)
+	}
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return items[start:end], total, nil
+}
+
+func blogRecommendationSourceKey(post model.Post) string {
+	if post.ChannelID != nil {
+		return post.ChannelID.String()
+	}
+	return post.UserID.String()
+}
+
+func normalizeBlogRecommendationQuality(post model.Post) float64 {
+	ratingComponent := clampBlogRecommendation(float64(post.RatingAverageScore) / 100)
+	countComponent := clampBlogRecommendation(float64(post.RatingCount) / 10)
+	summaryComponent := 0.0
+	if strings.TrimSpace(post.Summary) != "" {
+		summaryComponent = 0.15
+	}
+	return clampBlogRecommendation(0.55*ratingComponent + 0.30*countComponent + summaryComponent)
+}
+
+func normalizeBlogRecommendationTrend(post model.Post) float64 {
+	return clampBlogRecommendation(0.6*normalizeBlogRecommendationFreshness(post.CreatedAt, 7*24*time.Hour) + 0.4*clampBlogRecommendation(float64(post.RatingCount)/10))
+}
+
+func normalizeBlogRecommendationFreshness(createdAt time.Time, horizon time.Duration) float64 {
+	if createdAt.IsZero() || horizon <= 0 {
+		return 0
+	}
+	age := time.Since(createdAt)
+	if age <= 0 {
+		return 1
+	}
+	return clampBlogRecommendation(1 - float64(age)/float64(horizon))
+}
+
+func normalizeBlogRecommendationAuthority(post model.Post) float64 {
+	if post.Pinned {
+		return 0.8
+	}
+	if post.ChannelID != nil {
+		return 0.6
+	}
+	return 0.4
+}
+
+func clampBlogRecommendation(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
+	}
+	return value
+}
+
+func blogRecommendationLabel(mode recommendation.Mode, score float64) string {
+	prefix := "推荐"
+	switch mode {
+	case recommendation.ModeHot:
+		prefix = "热度"
+	case recommendation.ModeFeatured:
+		prefix = "精选"
+	case recommendation.ModeDiscover:
+		prefix = "探索"
+	}
+	return fmt.Sprintf("%s %.0f", prefix, math.Round(score*100))
+}
 
 func (s *Service) ListChannels(userID *uuid.UUID) ([]model.Channel, error) {
 	return s.repo.ListChannels(userID)

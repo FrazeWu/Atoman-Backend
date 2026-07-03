@@ -284,6 +284,70 @@ func TestUploadPodcastAudioAllowsRealWAVHeader(t *testing.T) {
 	}
 }
 
+func TestSetupPodcastRoutesMountsRecommendationEpisodesEndpoint(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+
+	post := model.Post{
+		UserID:             user.UUID,
+		ChannelID:          &channel.ID,
+		Title:              "推荐播客",
+		Content:            "这是适合推荐的播客 shownotes。",
+		Summary:            "推荐摘要",
+		Status:             "published",
+		Visibility:         "public",
+		RatingAverageScore: 82,
+		RatingCount:        8,
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+
+	episode := model.PodcastEpisode{
+		PostID:          post.ID,
+		ChannelID:       channel.ID,
+		AudioURL:        "https://cdn.example.com/recommend.mp3",
+		EpisodeCoverURL: "https://cdn.example.com/recommend.jpg",
+		DurationSec:     1800,
+		SeasonNumber:    1,
+		EpisodeNumber:   1,
+	}
+	if err := db.Create(&episode).Error; err != nil {
+		t.Fatalf("create episode: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/recommend/episodes?mode=hot&page=1&page_size=20", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code == http.StatusNotFound {
+		t.Fatalf("expected recommendation route to be mounted, got 404: %s", w.Body.String())
+	}
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID          string `json:"id"`
+			Title       string `json:"title"`
+			Summary     string `json:"summary"`
+			ContentType string `json:"content_type"`
+			TargetPath  string `json:"target_path"`
+			ScoreLabel  string `json:"score_label"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected recommendation items, got %s", w.Body.String())
+	}
+	first := payload.Data[0]
+	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType != "podcast" {
+		t.Fatalf("expected recommendation dto fields, got %#v", first)
+	}
+}
+
 func TestCreatePodcastEpisodeBookmarkIsIdempotentWithRepeatedRequests(t *testing.T) {
 	r, db, user, channel := newPodcastHandlerTestDB(t)
 	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")

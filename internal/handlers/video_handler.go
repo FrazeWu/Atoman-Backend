@@ -18,6 +18,8 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/modules/recommendation"
+	"atoman/internal/platform/httpx"
 	"atoman/internal/service"
 	"atoman/internal/storage"
 )
@@ -26,6 +28,7 @@ func SetupVideoRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	v := router.Group("/api/v1/videos")
 	{
 		v.GET("", GetVideos(db))
+		v.GET("/recommend/items", GetRecommendedVideoItems(db))
 		v.GET("/:id", GetVideo(db))
 		v.GET("/:id/recommended", GetRecommendedVideos(db))
 		v.POST("/:id/view", IncrementVideoView(db))
@@ -48,6 +51,115 @@ func SetupVideoRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	}
 	// Per-channel Video RSS feed
 	router.GET("/api/v1/channels/slug/:slug/rss/video", GetVideoRSS(db))
+}
+
+func GetRecommendedVideoItems(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		mode, err := parseRecommendationMode(c.DefaultQuery("mode", "hot"))
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		page, pageSize := httpx.PageParams(c)
+
+		var videos []model.Video
+		if err := db.Preload("Channel").Preload("Tags").
+			Where("status = ? AND visibility = ?", "published", "public").
+			Order("created_at DESC").
+			Find(&videos).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+
+		candidates := make([]recommendation.Candidate, 0, len(videos))
+		videoByID := make(map[string]model.Video, len(videos))
+		for _, video := range videos {
+			candidates = append(candidates, recommendation.Candidate{
+				Module:          "video",
+				EntityType:      recommendation.EntityVideo,
+				EntityID:        video.ID.String(),
+				SourceKey:       videoRecommendationSourceKey(video),
+				QualityScore:    normalizeVideoRecommendationQuality(video),
+				TrendScore:      normalizeVideoRecommendationTrend(video),
+				FreshnessScore:  normalizeVideoRecommendationFreshness(video.CreatedAt, 14*24*time.Hour),
+				AuthorityScore:  normalizeVideoRecommendationAuthority(video),
+				ExposureScore:   0,
+				EditorialScore:  0,
+				PublishedAtUnix: video.CreatedAt.Unix(),
+			})
+			videoByID[video.ID.String()] = video
+		}
+
+		ranked := recommendation.RankCandidates(mode, candidates, 0)
+		items := make([]recommendationItemDTO, 0, len(ranked))
+		for _, rankedItem := range ranked {
+			video, ok := videoByID[rankedItem.EntityID]
+			if !ok {
+				continue
+			}
+			items = append(items, recommendationItemDTO{
+				ID:          video.ID.String(),
+				Title:       video.Title,
+				Summary:     video.Description,
+				ContentType: "video",
+				ImageURL:    video.ThumbnailURL,
+				TargetPath:  "/videos/watch/" + video.ID.String(),
+				ScoreLabel:  recommendationScoreLabel(mode, rankedItem.FinalScore),
+			})
+		}
+
+		total := int64(len(items))
+		start := (page - 1) * pageSize
+		if start > len(items) {
+			start = len(items)
+		}
+		end := start + pageSize
+		if end > len(items) {
+			end = len(items)
+		}
+		httpx.List(c, items[start:end], page, pageSize, total)
+	}
+}
+
+func videoRecommendationSourceKey(video model.Video) string {
+	if video.ChannelID != nil {
+		return video.ChannelID.String()
+	}
+	return video.UserID.String()
+}
+
+func normalizeVideoRecommendationQuality(video model.Video) float64 {
+	score := 0.35
+	if strings.TrimSpace(video.ThumbnailURL) != "" {
+		score += 0.15
+	}
+	if strings.TrimSpace(video.Description) != "" {
+		score += 0.15
+	}
+	score += 0.35 * clampRecommendation(float64(video.ViewCount)/1000)
+	return clampRecommendation(score)
+}
+
+func normalizeVideoRecommendationTrend(video model.Video) float64 {
+	return clampRecommendation(0.6*normalizeVideoRecommendationFreshness(video.CreatedAt, 7*24*time.Hour) + 0.4*clampRecommendation(float64(video.ViewCount)/500))
+}
+
+func normalizeVideoRecommendationFreshness(createdAt time.Time, horizon time.Duration) float64 {
+	if createdAt.IsZero() || horizon <= 0 {
+		return 0
+	}
+	age := time.Since(createdAt)
+	if age <= 0 {
+		return 1
+	}
+	return clampRecommendation(1 - float64(age)/float64(horizon))
+}
+
+func normalizeVideoRecommendationAuthority(video model.Video) float64 {
+	if video.ChannelID != nil {
+		return 0.6
+	}
+	return 0.4
 }
 
 func boundedListLimit(raw string, fallback int, max int) int {

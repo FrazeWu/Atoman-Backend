@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1073,4 +1075,45 @@ func (f *fakeAlbumImportMultipartStore) OpenObject(_ string) (io.ReadCloser, err
 func (f *fakeAlbumImportMultipartStore) DeleteObject(key string) error {
 	f.deletedKeys = append(f.deletedKeys, key)
 	return f.deleteErr
+}
+
+func TestUploadAlbumImportArchiveWithRealHeyMamaZip(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+		Payload: AlbumImportPayload{
+			Artist: AlbumImportArtistPayload{Name: "Kanye West"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	archivePath := filepath.Clean(os.ExpandEnv("$HOME/Downloads/12-hey-mama-uploadable.zip"))
+	file, err := os.Open(archivePath)
+	if err != nil {
+		t.Fatalf("open real zip: %v", err)
+	}
+	defer file.Close()
+
+	updated, err := svc.UploadAlbumImportArchive(user, session.ID, filepath.Base(archivePath), file)
+	if err != nil {
+		t.Fatalf("upload real zip: %v", err)
+	}
+	if updated.Status != AlbumImportStatusReady {
+		t.Fatalf("expected ready status, got %#v", updated.Status)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(updated.PayloadJSON), &payload); err != nil {
+		t.Fatalf("unmarshal payload json: %v", err)
+	}
+	derivedTracks, ok := payload["derived_tracks"].([]any)
+	if !ok {
+		t.Fatalf("expected derived_tracks array, got %#v", payload["derived_tracks"])
+	}
+	if len(derivedTracks) == 0 {
+		t.Fatalf("expected derived tracks from real zip, got none")
+	}
 }

@@ -387,6 +387,100 @@ func TestAdminListFeedSourcesReturnsSourceRows(t *testing.T) {
 	}
 }
 
+func TestAdminListFeedSourcesIncludesStatsAndRecentEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAdminFeedFullTextTestDB(t)
+	adminUser := model.User{
+		Username: "feedstats_admin_" + uuid.NewString()[:8],
+		Email:    uuid.NewString() + "@example.com",
+		Password: "secret",
+		Role:     "admin",
+		IsActive: true,
+	}
+	if err := db.Create(&adminUser).Error; err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+
+	source := model.FeedSource{
+		SourceType:   "external_rss",
+		Provider:     "rss",
+		RssURL:       "https://example.com/feed.xml",
+		Hash:         "stats-feed-source-" + uuid.NewString(),
+		Title:        "Stats Feed Source",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create feed source: %v", err)
+	}
+	userA := model.User{Username: "stats_user_a_" + uuid.NewString()[:8], Email: uuid.NewString() + "@example.com", Password: "secret", Role: "user", IsActive: true}
+	userB := model.User{Username: "stats_user_b_" + uuid.NewString()[:8], Email: uuid.NewString() + "@example.com", Password: "secret", Role: "user", IsActive: true}
+	if err := db.Create(&userA).Error; err != nil {
+		t.Fatalf("create userA: %v", err)
+	}
+	if err := db.Create(&userB).Error; err != nil {
+		t.Fatalf("create userB: %v", err)
+	}
+	for _, sub := range []model.Subscription{
+		{UserID: userA.UUID, FeedSourceID: source.ID, Title: source.Title},
+		{UserID: userB.UUID, FeedSourceID: source.ID, Title: source.Title},
+	} {
+		if err := db.Create(&sub).Error; err != nil {
+			t.Fatalf("create subscription: %v", err)
+		}
+	}
+	for _, event := range []model.SourceReadEvent{
+		{SourceType: "external_rss", SourceID: source.ID.String(), EventType: "detail_open"},
+		{SourceType: "external_rss", SourceID: source.ID.String(), EventType: "original_click"},
+	} {
+		if err := db.Create(&event).Error; err != nil {
+			t.Fatalf("create source read event: %v", err)
+		}
+	}
+
+	router := gin.New()
+	admin := router.Group("/api/v1/admin")
+	admin.Use(func(c *gin.Context) {
+		c.Set("user_id", adminUser.UUID)
+		c.Set("role", "admin")
+		middleware.AdminMiddleware(db)(c)
+	})
+	admin.GET("/feed/sources", AdminListFeedSources(db))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/feed/sources", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Items []struct {
+			Title         string `json:"title"`
+			BookmarkCount int64  `json:"bookmark_count"`
+			ReadCount     int64  `json:"read_count"`
+			RecentEvents  []struct {
+				EventType string `json:"event_type"`
+			} `json:"recent_events"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if len(payload.Items) != 1 {
+		t.Fatalf("expected 1 source row, got %d", len(payload.Items))
+	}
+	if payload.Items[0].BookmarkCount != 2 {
+		t.Fatalf("expected bookmark_count 2, got %d", payload.Items[0].BookmarkCount)
+	}
+	if payload.Items[0].ReadCount != 2 {
+		t.Fatalf("expected read_count 2, got %d", payload.Items[0].ReadCount)
+	}
+	if len(payload.Items[0].RecentEvents) != 2 {
+		t.Fatalf("expected 2 recent events, got %#v", payload.Items[0].RecentEvents)
+	}
+}
+
 func TestUpdateAdminFeedSourceRejectsInternalSource(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newAdminFeedFullTextTestDB(t)
@@ -452,6 +546,7 @@ func newAdminFeedFullTextTestDB(t *testing.T) *gorm.DB {
 		&model.FeedItemRead{},
 		&model.FeedItemStar{},
 		&model.ReadingListItem{},
+		&model.SourceReadEvent{},
 	)
 	return db
 }

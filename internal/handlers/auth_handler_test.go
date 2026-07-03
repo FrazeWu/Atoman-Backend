@@ -34,7 +34,19 @@ func newAuthTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.UserSettings{}, &model.EmailVerificationCode{}, &model.Channel{}); err != nil {
+	if err := db.AutoMigrate(
+		&model.User{},
+		&model.UserSettings{},
+		&model.EmailVerificationCode{},
+		&model.Channel{},
+		&model.Collection{},
+		&model.FeedSource{},
+		&model.SubscriptionGroup{},
+		&model.Subscription{},
+		&model.BookmarkFolder{},
+		&model.Playlist{},
+		&model.PlaylistSong{},
+	); err != nil {
 		t.Fatalf("migrate db: %v", err)
 	}
 	return db
@@ -460,6 +472,102 @@ func TestRegisterHandlerRejectsUsernameMatchingChannelSlug(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "already in use") {
 		t.Fatalf("expected already in use error, got %s", w.Body.String())
+	}
+}
+
+func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ENV", "development")
+	t.Setenv("GIN_MODE", gin.DebugMode)
+	t.Setenv("TURNSTILE_SECRET_KEY", "")
+	t.Setenv("JWT_SECRET", "test-secret")
+
+	db := newAuthTestDB(t)
+	email := "bootstrap-user@example.com"
+	seedAuthVerificationCode(t, db, email)
+
+	r := gin.New()
+	r.POST("/register", RegisterHandler(db, service.NewEmailServiceWithoutRedis(db)))
+
+	body := `{"username":"bootstrap","email":"` + email + `","password":"secret123","password_confirm":"secret123","verification_code":"123456"}`
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var user model.User
+	if err := db.Where("email = ?", email).First(&user).Error; err != nil {
+		t.Fatalf("find created user: %v", err)
+	}
+
+	var channels []model.Channel
+	if err := db.Where("user_id = ? AND is_default = ?", user.UUID, true).Find(&channels).Error; err != nil {
+		t.Fatalf("find default channels: %v", err)
+	}
+	if len(channels) != 1 {
+		t.Fatalf("expected one default channel, got %d", len(channels))
+	}
+
+	var collections []model.Collection
+	if err := db.Where("channel_id = ? AND is_default = ?", channels[0].ID, true).Find(&collections).Error; err != nil {
+		t.Fatalf("find default collections: %v", err)
+	}
+	if len(collections) != 1 {
+		t.Fatalf("expected one default collection, got %d", len(collections))
+	}
+
+	var groups []model.SubscriptionGroup
+	if err := db.Where("user_id = ? AND name = ?", user.UUID, "默认分组").Find(&groups).Error; err != nil {
+		t.Fatalf("find default subscription groups: %v", err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("expected one default subscription group, got %d", len(groups))
+	}
+
+	var subscriptions []model.Subscription
+	if err := db.Preload("FeedSource").Where("user_id = ?", user.UUID).Find(&subscriptions).Error; err != nil {
+		t.Fatalf("find subscriptions: %v", err)
+	}
+	if len(subscriptions) != 1 {
+		t.Fatalf("expected one auto subscription, got %d", len(subscriptions))
+	}
+	if subscriptions[0].FeedSource == nil {
+		t.Fatalf("expected feed source to be preloaded")
+	}
+	if subscriptions[0].FeedSource.SourceType != "internal_user" {
+		t.Fatalf("expected internal_user subscription, got %s", subscriptions[0].FeedSource.SourceType)
+	}
+	if subscriptions[0].FeedSource.SourceID == nil || *subscriptions[0].FeedSource.SourceID != user.UUID {
+		t.Fatalf("expected subscription source id to match user uuid")
+	}
+
+	var folders []model.BookmarkFolder
+	if err := db.Where("user_id = ? AND name = ?", user.UUID, "默认收藏").Find(&folders).Error; err != nil {
+		t.Fatalf("find bookmark folders: %v", err)
+	}
+	if len(folders) != 1 {
+		t.Fatalf("expected one default bookmark folder, got %d", len(folders))
+	}
+
+	var playlists []model.Playlist
+	if err := db.Where("user_id = ? AND name = ?", user.UUID, "最爱").Find(&playlists).Error; err != nil {
+		t.Fatalf("find favorite playlists: %v", err)
+	}
+	if len(playlists) != 1 {
+		t.Fatalf("expected one default favorite playlist, got %d", len(playlists))
+	}
+
+	var playlistSongs int64
+	if err := db.Model(&model.PlaylistSong{}).Where("playlist_id = ?", playlists[0].ID).Count(&playlistSongs).Error; err != nil {
+		t.Fatalf("count playlist songs: %v", err)
+	}
+	if playlistSongs != 0 {
+		t.Fatalf("expected empty favorite playlist, got %d songs", playlistSongs)
 	}
 }
 
