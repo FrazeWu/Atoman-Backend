@@ -170,7 +170,7 @@ func albumImportMultipartRouteParams(c *gin.Context) (uuid.UUID, int, bool) {
 		return uuid.Nil, 0, false
 	}
 	partNumber, err := strconv.Atoi(c.Param("partNumber"))
-	if err != nil {
+	if err != nil || partNumber <= 0 {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "part number is invalid"))
 		return uuid.Nil, 0, false
 	}

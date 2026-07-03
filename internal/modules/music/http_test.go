@@ -412,6 +412,213 @@ func TestRegisterRoutesStartsAlbumImportMultipart(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesCreatesAlbumImportMultipartPartUpload(t *testing.T) {
+	service, _, user := newMusicHTTPTestService(t)
+	store := &fakeAlbumImportMultipartStore{
+		uploadID:  "upload-http-1",
+		signedURL: "https://storage.test/upload-part-2",
+	}
+	service.albumImportMultipart = store
+	r := newMusicHTTPRouter(service, &user)
+	multipartState := startAlbumImportMultipartThroughHTTP(t, r)
+
+	body, _ := json.Marshal(CreateAlbumImportMultipartPartInput{
+		PartSize: albumImportMultipartPartSize,
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+multipartState.ImportID+"/multipart/parts/2", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data AlbumImportMultipartPartUploadDTO `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.PartNumber != 2 || resp.Data.UploadURL != "https://storage.test/upload-part-2" {
+		t.Fatalf("unexpected part upload response: %#v", resp.Data)
+	}
+	if store.presignKey != multipartState.ObjectKey || store.presignUploadID != "upload-http-1" || store.presignPartNumber != 2 {
+		t.Fatalf("unexpected presign call: %#v", store)
+	}
+}
+
+func TestRegisterRoutesCompletesAlbumImportMultipartPart(t *testing.T) {
+	service, _, user := newMusicHTTPTestService(t)
+	service.albumImportMultipart = &fakeAlbumImportMultipartStore{uploadID: "upload-http-1"}
+	r := newMusicHTTPRouter(service, &user)
+	multipartState := startAlbumImportMultipartThroughHTTP(t, r)
+
+	body, _ := json.Marshal(CompleteAlbumImportMultipartPartInput{
+		ETag: "etag-1",
+		Size: albumImportMultipartPartSize,
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+multipartState.ImportID+"/multipart/parts/1/complete", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data AlbumImportMultipartDTO `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data.CompletedParts) != 1 {
+		t.Fatalf("expected one completed part, got %#v", resp.Data.CompletedParts)
+	}
+	part := resp.Data.CompletedParts[0]
+	if part.PartNumber != 1 || part.ETag != "etag-1" || part.Size != albumImportMultipartPartSize {
+		t.Fatalf("unexpected completed part: %#v", part)
+	}
+}
+
+func TestRegisterRoutesCompletesAlbumImportMultipart(t *testing.T) {
+	service, _, user := newMusicHTTPTestService(t)
+	store := &fakeAlbumImportMultipartStore{
+		uploadID: "upload-http-1",
+		objectBody: newImportTestZipArchive(t, map[string]string{
+			"01 - Untitled.mp3": "",
+		}),
+	}
+	service.albumImportMultipart = store
+	r := newMusicHTTPRouter(service, &user)
+	multipartState := startAlbumImportMultipartThroughHTTP(t, r)
+
+	partBody, _ := json.Marshal(CompleteAlbumImportMultipartPartInput{
+		ETag: "etag-1",
+		Size: albumImportMultipartPartSize,
+	})
+	partRecorder := httptest.NewRecorder()
+	partReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+multipartState.ImportID+"/multipart/parts/1/complete", bytes.NewReader(partBody))
+	partReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(partRecorder, partReq)
+	if partRecorder.Code != http.StatusOK {
+		t.Fatalf("expected part complete 200, got %d: %s", partRecorder.Code, partRecorder.Body.String())
+	}
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+multipartState.ImportID+"/multipart/complete", nil)
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data AlbumImportDTO `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.ImportID != multipartState.ImportID || resp.Data.Status != AlbumImportStatusReady {
+		t.Fatalf("unexpected final complete response: %#v", resp.Data)
+	}
+	if resp.Data.ArchiveName != "Untrue.zip" || len(resp.Data.DerivedTracks) != 1 {
+		t.Fatalf("expected derived ready import response, got %#v", resp.Data)
+	}
+	if store.completeKey != multipartState.ObjectKey || len(store.deletedKeys) != 1 {
+		t.Fatalf("expected completed object cleanup, got %#v", store)
+	}
+}
+
+func TestRegisterRoutesAlbumImportMultipartRejectsInvalidPartNumber(t *testing.T) {
+	for _, partNumber := range []string{"0", "-1"} {
+		t.Run(partNumber, func(t *testing.T) {
+			service, _, user := newMusicHTTPTestService(t)
+			r := newMusicHTTPRouter(service, &user)
+			createBody, _ := json.Marshal(CreateAlbumImportSessionInput{
+				Status: AlbumImportStatusPendingUpload,
+			})
+			createRecorder := httptest.NewRecorder()
+			createReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums", bytes.NewReader(createBody))
+			createReq.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(createRecorder, createReq)
+			if createRecorder.Code != http.StatusCreated {
+				t.Fatalf("expected create session 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+			}
+
+			var createResp struct {
+				Data AlbumImportDTO `json:"data"`
+			}
+			if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResp); err != nil {
+				t.Fatalf("decode create response: %v", err)
+			}
+
+			body, _ := json.Marshal(CreateAlbumImportMultipartPartInput{
+				PartSize: albumImportMultipartPartSize,
+			})
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+createResp.Data.ImportID+"/multipart/parts/"+partNumber, bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+
+			r.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), "validation.invalid_request") {
+				t.Fatalf("expected validation.invalid_request, got %s", w.Body.String())
+			}
+		})
+	}
+}
+
+func startAlbumImportMultipartThroughHTTP(t *testing.T, r *gin.Engine) AlbumImportMultipartDTO {
+	t.Helper()
+
+	createBody, _ := json.Marshal(CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+	})
+	createRecorder := httptest.NewRecorder()
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums", bytes.NewReader(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(createRecorder, createReq)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected create session 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+
+	var createResp struct {
+		Data AlbumImportDTO `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("decode create response: %v", err)
+	}
+
+	startBody, _ := json.Marshal(StartAlbumImportMultipartInput{
+		FileName:    "Untrue.zip",
+		FileSize:    64 * 1024 * 1024,
+		ContentType: "application/zip",
+	})
+	startRecorder := httptest.NewRecorder()
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+createResp.Data.ImportID+"/multipart", bytes.NewReader(startBody))
+	startReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(startRecorder, startReq)
+	if startRecorder.Code != http.StatusOK {
+		t.Fatalf("expected start multipart 200, got %d: %s", startRecorder.Code, startRecorder.Body.String())
+	}
+
+	var startResp struct {
+		Data AlbumImportMultipartDTO `json:"data"`
+	}
+	if err := json.Unmarshal(startRecorder.Body.Bytes(), &startResp); err != nil {
+		t.Fatalf("decode start response: %v", err)
+	}
+	return startResp.Data
+}
+
 func TestRegisterRoutesCommitAlbumImportSessionUsesRequestPayload(t *testing.T) {
 	service, _, user := newMusicHTTPTestService(t)
 	r := newMusicHTTPRouter(service, &user)
