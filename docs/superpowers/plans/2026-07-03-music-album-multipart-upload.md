@@ -1160,7 +1160,7 @@ Run:
 
 ```bash
 cd /Users/fafa/projects/Atoman/Atoman-Frontend
-bun test tests/unit/api/musicV1.spec.ts --runInBand
+bun run test:unit -- tests/unit/api/musicV1.spec.ts
 ```
 
 Expected: FAIL because new functions are missing.
@@ -1333,7 +1333,7 @@ Run:
 
 ```bash
 cd /Users/fafa/projects/Atoman/Atoman-Frontend
-bun test tests/unit/api/musicV1.spec.ts --runInBand
+bun run test:unit -- tests/unit/api/musicV1.spec.ts
 ```
 
 Expected: PASS.
@@ -1380,7 +1380,7 @@ Run:
 
 ```bash
 cd /Users/fafa/projects/Atoman/Atoman-Frontend
-bun test tests/unit/components/music/MusicCreationAlbumImportStep.spec.ts --runInBand
+bun run test:unit -- tests/unit/components/music/MusicCreationAlbumImportStep.spec.ts
 ```
 
 Expected: FAIL because the component still calls whole-file upload and does not prevalidate size.
@@ -1435,7 +1435,7 @@ Run:
 
 ```bash
 cd /Users/fafa/projects/Atoman/Atoman-Frontend
-bun test tests/unit/components/music/MusicCreationAlbumImportStep.spec.ts --runInBand
+bun run test:unit -- tests/unit/components/music/MusicCreationAlbumImportStep.spec.ts
 ```
 
 Expected: PASS.
@@ -1475,7 +1475,7 @@ Run:
 ```bash
 cd /Users/fafa/projects/Atoman/Atoman-Frontend
 bun run type-check
-bun test tests/unit/api/musicV1.spec.ts tests/unit/components/music/MusicCreationAlbumImportStep.spec.ts --runInBand
+bun run test:unit -- tests/unit/api/musicV1.spec.ts tests/unit/components/music/MusicCreationAlbumImportStep.spec.ts
 ```
 
 Expected: all commands pass.
