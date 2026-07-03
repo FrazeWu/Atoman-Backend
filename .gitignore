@@ -16,6 +16,7 @@ nvim.log
 .claude/
 .codegraph/
 .gstack/
+.worktrees/
 nginx/ssl/*
 !nginx/ssl/README.md
 local-scripts/
