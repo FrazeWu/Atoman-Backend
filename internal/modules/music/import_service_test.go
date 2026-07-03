@@ -102,6 +102,73 @@ func TestStartAlbumImportMultipartRestoresExistingUploadStateForSameFile(t *test
 	}
 }
 
+func TestStartAlbumImportMultipartRestoresFailedSessionToUploading(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{uploadID: "upload-1"}
+	svc.albumImportMultipart = store
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+		Payload: AlbumImportPayload{
+			Artist: AlbumImportArtistPayload{Name: "Burial"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if _, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
+		FileName: "Untrue.zip",
+		FileSize: 64 * 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("start multipart: %v", err)
+	}
+
+	var failed model.AlbumImportSession
+	if err := db.First(&failed, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("load started session: %v", err)
+	}
+	payload, err := readAlbumImportPayloadMap(failed.PayloadJSON)
+	if err != nil {
+		t.Fatalf("read payload: %v", err)
+	}
+	payload["error_message"] = "network failed"
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Updates(map[string]any{
+		"status":       AlbumImportStatusFailed,
+		"payload_json": string(payloadJSON),
+	}).Error; err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+
+	if _, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
+		FileName: "Untrue.zip",
+		FileSize: 64 * 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("restore failed multipart: %v", err)
+	}
+	if store.createCalls != 1 {
+		t.Fatalf("expected restore to reuse existing upload, got create calls %d", store.createCalls)
+	}
+
+	var restored model.AlbumImportSession
+	if err := db.First(&restored, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("load restored session: %v", err)
+	}
+	if restored.Status != AlbumImportStatusUploading {
+		t.Fatalf("expected failed session restored to uploading, got %#v", restored)
+	}
+	restoredPayload, err := readAlbumImportPayloadMap(restored.PayloadJSON)
+	if err != nil {
+		t.Fatalf("read restored payload: %v", err)
+	}
+	if stringValue(restoredPayload["error_message"]) != "" {
+		t.Fatalf("expected error_message cleared, got %#v", restoredPayload["error_message"])
+	}
+}
+
 func TestCreateAlbumImportMultipartPartUploadReturnsSignedURL(t *testing.T) {
 	svc, _, user := newMusicTestService(t)
 	store := &fakeAlbumImportMultipartStore{uploadID: "upload-1", signedURL: "https://storage.test/upload-part-1"}
@@ -135,6 +202,143 @@ func TestCreateAlbumImportMultipartPartUploadReturnsSignedURL(t *testing.T) {
 	}
 	if store.presignKey != started.ObjectKey || store.presignUploadID != "upload-1" || store.presignPartNumber != 1 {
 		t.Fatalf("unexpected presign call key=%q uploadID=%q part=%d", store.presignKey, store.presignUploadID, store.presignPartNumber)
+	}
+}
+
+func TestCreateAlbumImportMultipartPartUploadRejectsFinishedStatuses(t *testing.T) {
+	for _, status := range []string{AlbumImportStatusReady, AlbumImportStatusCommitted} {
+		t.Run(status, func(t *testing.T) {
+			svc, db, user := newMusicTestService(t)
+			svc.albumImportMultipart = &fakeAlbumImportMultipartStore{uploadID: "upload-1"}
+
+			session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+				Status: AlbumImportStatusPendingUpload,
+				Payload: AlbumImportPayload{
+					Artist: AlbumImportArtistPayload{Name: "Burial"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("create session: %v", err)
+			}
+			if _, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
+				FileName: "Untrue.zip",
+				FileSize: 64 * 1024 * 1024,
+			}); err != nil {
+				t.Fatalf("start multipart: %v", err)
+			}
+			if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Update("status", status).Error; err != nil {
+				t.Fatalf("set status: %v", err)
+			}
+
+			_, err = svc.CreateAlbumImportMultipartPartUpload(user, session.ID, 1, CreateAlbumImportMultipartPartInput{
+				PartSize: albumImportMultipartPartSize,
+			})
+			if err == nil {
+				t.Fatal("expected part upload to fail for finished status")
+			}
+
+			var stored model.AlbumImportSession
+			if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+				t.Fatalf("load session: %v", err)
+			}
+			if stored.Status != status {
+				t.Fatalf("expected status to remain %q, got %#v", status, stored)
+			}
+		})
+	}
+}
+
+func TestCompleteAlbumImportMultipartPartRejectsFinishedStatuses(t *testing.T) {
+	for _, status := range []string{AlbumImportStatusReady, AlbumImportStatusCommitted} {
+		t.Run(status, func(t *testing.T) {
+			svc, db, user := newMusicTestService(t)
+			svc.albumImportMultipart = &fakeAlbumImportMultipartStore{uploadID: "upload-1"}
+
+			session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+				Status: AlbumImportStatusPendingUpload,
+				Payload: AlbumImportPayload{
+					Artist: AlbumImportArtistPayload{Name: "Burial"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("create session: %v", err)
+			}
+			if _, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
+				FileName: "Untrue.zip",
+				FileSize: 64 * 1024 * 1024,
+			}); err != nil {
+				t.Fatalf("start multipart: %v", err)
+			}
+			if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Update("status", status).Error; err != nil {
+				t.Fatalf("set status: %v", err)
+			}
+
+			_, err = svc.CompleteAlbumImportMultipartPart(user, session.ID, 1, CompleteAlbumImportMultipartPartInput{
+				ETag: "etag-1",
+				Size: albumImportMultipartPartSize,
+			})
+			if err == nil {
+				t.Fatal("expected complete part to fail for finished status")
+			}
+
+			var stored model.AlbumImportSession
+			if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+				t.Fatalf("load session: %v", err)
+			}
+			if stored.Status != status {
+				t.Fatalf("expected status to remain %q, got %#v", status, stored)
+			}
+		})
+	}
+}
+
+func TestCompleteAlbumImportMultipartPartReplacesAndSortsParts(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{uploadID: "upload-1"}
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+		Payload: AlbumImportPayload{
+			Artist: AlbumImportArtistPayload{Name: "Burial"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if _, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
+		FileName: "Untrue.zip",
+		FileSize: 64 * 1024 * 1024,
+	}); err != nil {
+		t.Fatalf("start multipart: %v", err)
+	}
+	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 2, CompleteAlbumImportMultipartPartInput{
+		ETag: "etag-2-old",
+		Size: albumImportMultipartPartSize,
+	}); err != nil {
+		t.Fatalf("complete part 2: %v", err)
+	}
+	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 1, CompleteAlbumImportMultipartPartInput{
+		ETag: "etag-1",
+		Size: albumImportMultipartPartSize,
+	}); err != nil {
+		t.Fatalf("complete part 1: %v", err)
+	}
+	updated, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 2, CompleteAlbumImportMultipartPartInput{
+		ETag: "etag-2-new",
+		Size: albumImportMultipartPartSize + 1,
+	})
+	if err != nil {
+		t.Fatalf("replace part 2: %v", err)
+	}
+
+	if len(updated.CompletedParts) != 2 {
+		t.Fatalf("expected 2 completed parts, got %#v", updated.CompletedParts)
+	}
+	if updated.CompletedParts[0].PartNumber != 1 || updated.CompletedParts[0].ETag != "etag-1" {
+		t.Fatalf("expected part 1 first, got %#v", updated.CompletedParts)
+	}
+	if updated.CompletedParts[1].PartNumber != 2 || updated.CompletedParts[1].ETag != "etag-2-new" || updated.CompletedParts[1].Size != albumImportMultipartPartSize+1 {
+		t.Fatalf("expected part 2 replaced, got %#v", updated.CompletedParts)
 	}
 }
 

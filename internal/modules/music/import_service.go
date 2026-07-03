@@ -211,6 +211,18 @@ func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UU
 		}
 		state := albumImportMultipartStateFromPayload(payload)
 		if state.FileName == fileName && state.FileSize == input.FileSize && state.UploadID != "" && state.ObjectKey != "" {
+			if session.Status == AlbumImportStatusFailed {
+				delete(payload, "error_message")
+				payloadJSON, err := json.Marshal(payload)
+				if err != nil {
+					return err
+				}
+				session.Status = AlbumImportStatusUploading
+				session.PayloadJSON = string(payloadJSON)
+				if err := tx.Save(&session).Error; err != nil {
+					return err
+				}
+			}
 			out = buildAlbumImportMultipartDTO(session.ID, state)
 			return nil
 		}
@@ -266,6 +278,9 @@ func (s *Service) CreateAlbumImportMultipartPartUpload(user authctx.CurrentUser,
 	if err != nil {
 		return AlbumImportMultipartPartUploadDTO{}, err
 	}
+	if !isAlbumImportMultipartPartUploadStatus(session.Status) {
+		return AlbumImportMultipartPartUploadDTO{}, apperr.Unprocessable("music.import_invalid_status", "Import session is not uploading")
+	}
 	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
 	if err != nil {
 		return AlbumImportMultipartPartUploadDTO{}, err
@@ -302,6 +317,9 @@ func (s *Service) CompleteAlbumImportMultipartPart(user authctx.CurrentUser, id 
 				return apperr.NotFound("music.import_not_found", "Import session not found")
 			}
 			return err
+		}
+		if session.Status != AlbumImportStatusUploading {
+			return apperr.Unprocessable("music.import_invalid_status", "Import session is not uploading")
 		}
 		payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
 		if err != nil {
@@ -522,6 +540,15 @@ func isAlbumImportStatusAllowed(status string) bool {
 func isAlbumImportMultipartStartStatus(status string) bool {
 	switch status {
 	case AlbumImportStatusPendingUpload, AlbumImportStatusUploading, AlbumImportStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+func isAlbumImportMultipartPartUploadStatus(status string) bool {
+	switch status {
+	case AlbumImportStatusPendingUpload, AlbumImportStatusUploading:
 		return true
 	default:
 		return false
