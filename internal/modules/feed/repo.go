@@ -454,7 +454,16 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 	}
 
 	for i := range rows {
-		rows[i].Category = inferFeedSourceCategory(rows[i])
+		inferredCategory := inferFeedSourceCategory(rows[i])
+		if inferredCategory != "blog" {
+			rows[i].Category = inferredCategory
+			continue
+		}
+		if normalized := normalizeFeedSourceCategory(rows[i].Category); normalized != "" {
+			rows[i].Category = normalized
+			continue
+		}
+		rows[i].Category = inferredCategory
 	}
 
 	return nil

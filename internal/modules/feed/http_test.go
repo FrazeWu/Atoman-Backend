@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -500,6 +501,39 @@ func TestFeedRecommendationModeValidation(t *testing.T) {
 	}
 }
 
+func TestFeedRecommendationThemesReturnsCategoryThemes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, _, _ := newFeedTestService(t)
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/themes?category=blog", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected themes endpoint to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID          string `json:"id"`
+			Label       string `json:"label"`
+			Description string `json:"description"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected blog themes, got body %s", rr.Body.String())
+	}
+	if payload.Data[0].ID == "" || payload.Data[0].Label == "" || payload.Data[0].Description == "" {
+		t.Fatalf("expected theme dto fields, got body %s", rr.Body.String())
+	}
+}
+
 func TestFeedRecommendationArticlesReturnsData(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, _ := newFeedTestService(t)
@@ -556,6 +590,91 @@ func TestFeedRecommendationArticlesReturnsData(t *testing.T) {
 	}
 	if payload.Meta.Total == 0 {
 		t.Fatalf("expected article recommendation meta total, got body %s", rr.Body.String())
+	}
+}
+
+func TestFeedRecommendationArticlesFiltersByCategoryAndTheme(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	aiSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://ai.example.com/feed.xml",
+		Hash:         "recommend-ai-source-hash",
+		Title:        "AI Weekly",
+		Category:     "blog",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&aiSource).Error; err != nil {
+		t.Fatalf("create ai source: %v", err)
+	}
+	newsSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://news.example.com/feed.xml",
+		Hash:         "recommend-news-source-hash",
+		Title:        "World News",
+		Category:     "news",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&newsSource).Error; err != nil {
+		t.Fatalf("create news source: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, item := range []model.FeedItem{
+		{
+			FeedSourceID: aiSource.ID,
+			GUID:         "recommend-ai-item",
+			Title:        "AI model release",
+			Summary:      "Large model tools and agents",
+			Link:         "https://ai.example.com/model-release",
+			PublishedAt:  now,
+			FetchedAt:    now,
+		},
+		{
+			FeedSourceID: newsSource.ID,
+			GUID:         "recommend-news-item",
+			Title:        "Global market update",
+			Summary:      "Macroeconomic headline",
+			Link:         "https://news.example.com/market-update",
+			PublishedAt:  now.Add(-time.Minute),
+			FetchedAt:    now.Add(-time.Minute),
+		},
+	} {
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create feed item: %v", err)
+		}
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/articles?mode=hot&category=blog&theme=ai", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected article recommendation filter to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			Title       string `json:"title"`
+			ContentType string `json:"content_type"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected filtered article recommendations, got body %s", rr.Body.String())
+	}
+	for _, item := range payload.Data {
+		if item.ContentType != "blog" {
+			t.Fatalf("expected only blog article recommendations, got body %s", rr.Body.String())
+		}
+		if strings.Contains(item.Title, "Global market update") {
+			t.Fatalf("expected theme filter to exclude non-ai article, got body %s", rr.Body.String())
+		}
 	}
 }
 
@@ -660,6 +779,93 @@ func TestFeedRecommendationChannelsReturnsData(t *testing.T) {
 	}
 	if payload.Meta.Total == 0 {
 		t.Fatalf("expected channel recommendation meta total, got body %s", rr.Body.String())
+	}
+}
+
+func TestFeedRecommendationChannelsFiltersByCategoryAndTheme(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	podcastSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://podcast.example.com/feed.xml",
+		Hash:         "recommend-podcast-source-hash",
+		Title:        "Startup Podcast",
+		Category:     "podcast",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&podcastSource).Error; err != nil {
+		t.Fatalf("create podcast source: %v", err)
+	}
+	videoSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://video.example.com/feed.xml",
+		Hash:         "recommend-video-source-hash",
+		Title:        "Cinema Video",
+		Category:     "video",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&videoSource).Error; err != nil {
+		t.Fatalf("create video source: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, item := range []model.FeedItem{
+		{
+			FeedSourceID:   podcastSource.ID,
+			GUID:           "recommend-podcast-item",
+			Title:          "Founder interview",
+			Summary:        "Startup operators talk funding",
+			Link:           "https://podcast.example.com/founder-interview",
+			PublishedAt:    now,
+			FetchedAt:      now,
+			EnclosureType:  "audio/mpeg",
+		},
+		{
+			FeedSourceID:  videoSource.ID,
+			GUID:          "recommend-video-item",
+			Title:         "Movie trailer",
+			Summary:       "Cinema release preview",
+			Link:          "https://video.example.com/movie-trailer",
+			PublishedAt:   now.Add(-time.Minute),
+			FetchedAt:     now.Add(-time.Minute),
+			EnclosureType: "video/mp4",
+		},
+	} {
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create feed item: %v", err)
+		}
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=hot&category=podcast&theme=startup", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected channel recommendation filter to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			Title       string `json:"title"`
+			ContentType string `json:"content_type"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 {
+		t.Fatalf("expected filtered channel recommendations, got body %s", rr.Body.String())
+	}
+	for _, item := range payload.Data {
+		if item.ContentType != "podcast" {
+			t.Fatalf("expected only podcast channel recommendations, got body %s", rr.Body.String())
+		}
+		if strings.Contains(item.Title, "Cinema Video") {
+			t.Fatalf("expected theme filter to exclude non-startup channel, got body %s", rr.Body.String())
+		}
 	}
 }
 

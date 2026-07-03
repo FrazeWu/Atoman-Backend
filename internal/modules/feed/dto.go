@@ -41,3 +41,9 @@ type RecommendationItemDTO struct {
 	TargetPath string `json:"target_path"`
 	ScoreLabel string `json:"score_label"`
 }
+
+type RecommendationThemeDTO struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Description string `json:"description"`
+}

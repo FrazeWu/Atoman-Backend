@@ -23,12 +23,16 @@ type Service struct {
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
 
-func (s *Service) RecommendArticlesByMode(mode recommendation.Mode, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	return s.RecommendArticles(mode, page, pageSize)
+func (s *Service) ListRecommendationThemes(category string) []RecommendationThemeDTO {
+	return listRecommendationThemes(category)
 }
 
-func (s *Service) RecommendChannelsByMode(mode recommendation.Mode, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	return s.RecommendChannels(mode, page, pageSize)
+func (s *Service) RecommendArticlesByMode(mode recommendation.Mode, category string, theme string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+	return s.RecommendArticles(mode, category, theme, page, pageSize)
+}
+
+func (s *Service) RecommendChannelsByMode(mode recommendation.Mode, category string, theme string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+	return s.RecommendChannels(mode, category, theme, page, pageSize)
 }
 
 func (s *Service) GetPublicFeedBySourceID(feedSourceID uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {

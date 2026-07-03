@@ -23,6 +23,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/timeline", middleware.OptionalAuthMiddleware(), h.getSubscribedFeed)
 	group.GET("/explore", middleware.OptionalAuthMiddleware(), h.getExploreFeed)
 	group.GET("/explore/sources", GetExploreSources(service.db))
+	group.GET("/recommend/themes", h.getRecommendationThemes)
 	group.GET("/recommend/articles", h.getRecommendedArticles)
 	group.GET("/recommend/channels", h.getRecommendedChannels)
 
@@ -126,8 +127,10 @@ func (h *Handler) getRecommendedArticles(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	category := c.Query("category")
+	theme := c.Query("theme")
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.RecommendArticlesByMode(mode, page, pageSize)
+	items, total, err := h.service.RecommendArticlesByMode(mode, category, theme, page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -141,13 +144,21 @@ func (h *Handler) getRecommendedChannels(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	category := c.Query("category")
+	theme := c.Query("theme")
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.RecommendChannelsByMode(mode, page, pageSize)
+	items, total, err := h.service.RecommendChannelsByMode(mode, category, theme, page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
 	httpx.List(c, items, page, pageSize, total)
+}
+
+func (h *Handler) getRecommendationThemes(c *gin.Context) {
+	category := c.Query("category")
+	themes := h.service.ListRecommendationThemes(category)
+	httpx.List(c, themes, 1, len(themes), int64(len(themes)))
 }
 
 func (h *Handler) markRead(c *gin.Context) {

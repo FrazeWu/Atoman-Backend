@@ -24,7 +24,7 @@ func parseRecommendationMode(raw string) (recommendation.Mode, error) {
 	}
 }
 
-func (s *Service) RecommendArticles(mode recommendation.Mode, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+func (s *Service) RecommendArticles(mode recommendation.Mode, category string, theme string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
 	posts, err := s.repo.ListRecommendationPosts()
 	if err != nil {
 		return nil, 0, err
@@ -103,10 +103,11 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, page int, pageSize
 		})
 	}
 
+	items = filterRecommendationItems(items, category, theme)
 	return paginateRecommendationItems(items, page, pageSize)
 }
 
-func (s *Service) RecommendChannels(mode recommendation.Mode, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+func (s *Service) RecommendChannels(mode recommendation.Mode, category string, theme string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
 	rows, err := s.repo.ListRecommendationChannels()
 	if err != nil {
 		return nil, 0, err
@@ -197,6 +198,7 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, page int, pageSize
 		})
 	}
 
+	items = filterRecommendationItems(items, category, theme)
 	return paginateRecommendationItems(items, page, pageSize)
 }
 
@@ -370,4 +372,51 @@ func clamp01(value float64) float64 {
 		return 1
 	}
 	return value
+}
+
+func filterRecommendationItems(items []RecommendationItemDTO, category string, theme string) []RecommendationItemDTO {
+	normalizedCategory := normalizeSourceCategory(category)
+	if normalizedCategory == "" {
+		normalizedCategory = "blog"
+	}
+
+	filtered := make([]RecommendationItemDTO, 0, len(items))
+	for _, item := range items {
+		if normalizeSourceCategory(item.ContentType) != normalizedCategory {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+
+	normalizedTheme := strings.TrimSpace(strings.ToLower(theme))
+	if normalizedTheme == "" || normalizedTheme == "all" {
+		return filtered
+	}
+
+	definition, ok := findRecommendationTheme(normalizedCategory, normalizedTheme)
+	if !ok {
+		return []RecommendationItemDTO{}
+	}
+
+	themeFiltered := make([]RecommendationItemDTO, 0, len(filtered))
+	for _, item := range filtered {
+		if recommendationItemMatchesTheme(item, definition) {
+			themeFiltered = append(themeFiltered, item)
+		}
+	}
+	return themeFiltered
+}
+
+func recommendationItemMatchesTheme(item RecommendationItemDTO, definition recommendationThemeDefinition) bool {
+	haystack := strings.ToLower(strings.Join([]string{
+		item.Title,
+		item.Summary,
+		item.ContentType,
+	}, " "))
+	for _, keyword := range definition.Keywords {
+		if strings.Contains(haystack, strings.ToLower(keyword)) {
+			return true
+		}
+	}
+	return false
 }
