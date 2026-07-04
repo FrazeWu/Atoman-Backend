@@ -1050,14 +1050,14 @@ func TestMusicRecommendationAlbumsReturnsData(t *testing.T) {
 
 	var resp struct {
 		Data []struct {
-			ID         string `json:"id"`
-			Title      string `json:"title"`
-			Summary    string `json:"summary"`
-			ImageURL   string `json:"image_url"`
-			TargetPath string `json:"target_path"`
-			ScoreLabel string `json:"score_label"`
-			PlayCount  int64  `json:"play_count"`
-			BookmarkCount int64 `json:"bookmark_count"`
+			ID            string `json:"id"`
+			Title         string `json:"title"`
+			Summary       string `json:"summary"`
+			ImageURL      string `json:"image_url"`
+			TargetPath    string `json:"target_path"`
+			ScoreLabel    string `json:"score_label"`
+			PlayCount     int64  `json:"play_count"`
+			BookmarkCount int64  `json:"bookmark_count"`
 		} `json:"data"`
 		Meta struct {
 			Total int64 `json:"total"`
@@ -1116,14 +1116,14 @@ func TestMusicRecommendationArtistsReturnsData(t *testing.T) {
 
 	var resp struct {
 		Data []struct {
-			ID         string `json:"id"`
-			Title      string `json:"title"`
-			Summary    string `json:"summary"`
-			ImageURL   string `json:"image_url"`
-			TargetPath string `json:"target_path"`
-			ScoreLabel string `json:"score_label"`
-			PlayCount  int64  `json:"play_count"`
-			BookmarkCount int64 `json:"bookmark_count"`
+			ID            string `json:"id"`
+			Title         string `json:"title"`
+			Summary       string `json:"summary"`
+			ImageURL      string `json:"image_url"`
+			TargetPath    string `json:"target_path"`
+			ScoreLabel    string `json:"score_label"`
+			PlayCount     int64  `json:"play_count"`
+			BookmarkCount int64  `json:"bookmark_count"`
 		} `json:"data"`
 		Meta struct {
 			Total int64 `json:"total"`
@@ -1642,5 +1642,236 @@ func TestRegisterRoutesDeletePlaylistSongIsIdempotent(t *testing.T) {
 	r.ServeHTTP(secondDelete, secondDeleteReq)
 	if secondDelete.Code != http.StatusOK {
 		t.Fatalf("expected second delete 200, got %d: %s", secondDelete.Code, secondDelete.Body.String())
+	}
+}
+
+func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
+	service, db, _ := newMusicHTTPTestService(t)
+
+	artist := model.Artist{
+		Name:        "Discover Artist",
+		ImageURL:    "/uploads/discover-artist.jpg",
+		Bio:         "artist bio",
+		EntryStatus: "open",
+	}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+
+	album := model.Album{
+		Title:       "Discover Album",
+		CoverURL:    "/uploads/discover-album.jpg",
+		EntryStatus: "open",
+		Status:      "open",
+		HotScore:    8.5,
+	}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append album artist: %v", err)
+	}
+
+	song := model.Song{
+		Title:    "Discover Song",
+		AudioURL: "/audio/discover-song.mp3",
+		Status:   "open",
+		AlbumID:  &album.ID,
+	}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := db.Model(&song).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("append song artist: %v", err)
+	}
+
+	playlist := model.Playlist{
+		UserID:      uuid.New(),
+		Name:        "Discover Playlist",
+		Description: "playlist desc",
+		CoverURL:    "/uploads/discover-playlist.jpg",
+		IsPublic:    true,
+	}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	if err := db.Create(&model.PlaylistSong{PlaylistID: playlist.ID, SongID: song.ID}).Error; err != nil {
+		t.Fatalf("create playlist song: %v", err)
+	}
+
+	r := newMusicHTTPRouter(service, nil)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/discover?page_size=10", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []struct {
+			Type        string `json:"type"`
+			ID          string `json:"id"`
+			Title       string `json:"title"`
+			Summary     string `json:"summary"`
+			ImageURL    string `json:"image_url"`
+			TargetPath  string `json:"target_path"`
+			SongCount   int64  `json:"song_count"`
+			OwnerUserID string `json:"owner_user_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode discover response: %v", err)
+	}
+	if len(resp.Data) < 3 {
+		t.Fatalf("expected at least 3 discover items, got %#v", resp.Data)
+	}
+
+	seenTypes := map[string]bool{}
+	for _, item := range resp.Data {
+		seenTypes[item.Type] = true
+	}
+	if !seenTypes["album"] || !seenTypes["artist"] || !seenTypes["playlist"] {
+		t.Fatalf("expected mixed discover item types, got %#v", resp.Data)
+	}
+}
+
+func TestRegisterRoutesPublicPlaylistsReturnsDiscoverablePlaylists(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+
+	newer := model.Playlist{
+		UserID:      user.ID,
+		Name:        "Newest Public Playlist",
+		Description: "newer",
+		CoverURL:    "/uploads/public-new.jpg",
+		IsPublic:    true,
+	}
+	older := model.Playlist{
+		UserID:      user.ID,
+		Name:        "Older Public Playlist",
+		Description: "older",
+		CoverURL:    "/uploads/public-old.jpg",
+		IsPublic:    true,
+	}
+	private := model.Playlist{
+		UserID:      user.ID,
+		Name:        "Private Playlist",
+		Description: "hidden",
+		CoverURL:    "/uploads/private.jpg",
+		IsPublic:    false,
+	}
+	if err := db.Create(&older).Error; err != nil {
+		t.Fatalf("create older playlist: %v", err)
+	}
+	if err := db.Create(&newer).Error; err != nil {
+		t.Fatalf("create newer playlist: %v", err)
+	}
+	if err := db.Create(&private).Error; err != nil {
+		t.Fatalf("create private playlist: %v", err)
+	}
+
+	r := newMusicHTTPRouter(service, nil)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/public?page_size=10", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []struct {
+			ID        string `json:"id"`
+			Name      string `json:"name"`
+			CoverURL  string `json:"cover_url"`
+			IsPublic  bool   `json:"is_public"`
+			UserID    string `json:"user_id"`
+			SongCount int64  `json:"song_count"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode public playlists response: %v", err)
+	}
+	if resp.Meta.Total != 2 || len(resp.Data) != 2 {
+		t.Fatalf("expected 2 public playlists, got %#v %#v", resp.Data, resp.Meta)
+	}
+	if resp.Data[0].Name != "Newest Public Playlist" || resp.Data[1].Name != "Older Public Playlist" {
+		t.Fatalf("expected public playlists ordered by created_at desc, got %#v", resp.Data)
+	}
+	if !resp.Data[0].IsPublic || !resp.Data[1].IsPublic {
+		t.Fatalf("expected public playlists only, got %#v", resp.Data)
+	}
+}
+
+func TestRegisterRoutesDiscoverHidesPrivatePlaylistsFromAnonymousUsers(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+
+	publicPlaylist := model.Playlist{
+		UserID:      user.ID,
+		Name:        "Visible Public Playlist",
+		Description: "public",
+		CoverURL:    "/uploads/visible-public.jpg",
+		IsPublic:    true,
+	}
+	privatePlaylist := model.Playlist{
+		UserID:      user.ID,
+		Name:        "Hidden Private Playlist",
+		Description: "private",
+		CoverURL:    "/uploads/hidden-private.jpg",
+		IsPublic:    false,
+	}
+	if err := db.Create(&publicPlaylist).Error; err != nil {
+		t.Fatalf("create public playlist: %v", err)
+	}
+	if err := db.Create(&privatePlaylist).Error; err != nil {
+		t.Fatalf("create private playlist: %v", err)
+	}
+
+	r := newMusicHTTPRouter(service, nil)
+
+	discoverW := httptest.NewRecorder()
+	discoverReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/discover?page_size=20", nil)
+	r.ServeHTTP(discoverW, discoverReq)
+	if discoverW.Code != http.StatusOK {
+		t.Fatalf("expected discover 200, got %d: %s", discoverW.Code, discoverW.Body.String())
+	}
+
+	var discoverResp struct {
+		Data []struct {
+			Type  string `json:"type"`
+			Title string `json:"title"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(discoverW.Body.Bytes(), &discoverResp); err != nil {
+		t.Fatalf("decode discover response: %v", err)
+	}
+	for _, item := range discoverResp.Data {
+		if item.Type == "playlist" && item.Title == "Hidden Private Playlist" {
+			t.Fatalf("private playlist should not appear in discover response: %#v", discoverResp.Data)
+		}
+	}
+
+	publicW := httptest.NewRecorder()
+	publicReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/public?page_size=20", nil)
+	r.ServeHTTP(publicW, publicReq)
+	if publicW.Code != http.StatusOK {
+		t.Fatalf("expected public playlists 200, got %d: %s", publicW.Code, publicW.Body.String())
+	}
+
+	var publicResp struct {
+		Data []struct {
+			Name string `json:"name"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(publicW.Body.Bytes(), &publicResp); err != nil {
+		t.Fatalf("decode public playlist response: %v", err)
+	}
+	for _, item := range publicResp.Data {
+		if item.Name == "Hidden Private Playlist" {
+			t.Fatalf("private playlist should not appear in public playlist response: %#v", publicResp.Data)
+		}
 	}
 }

@@ -219,13 +219,13 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 			continue
 		}
 		items = append(items, feed.RecommendationItemDTO{
-			ID:         art.ID.String(),
-			Title:      art.Name,
-			Summary:    art.Bio,
-			ImageURL:   art.ImageURL,
-			TargetPath: "/music/artist/" + art.ID.String(),
-			ScoreLabel: fmt.Sprintf("%s %.0f", musicRecommendationLabel(mode), math.Round(item.FinalScore*100)),
-			PlayCount: artistPlayCounts[art.ID],
+			ID:            art.ID.String(),
+			Title:         art.Name,
+			Summary:       art.Bio,
+			ImageURL:      art.ImageURL,
+			TargetPath:    "/music/artist/" + art.ID.String(),
+			ScoreLabel:    fmt.Sprintf("%s %.0f", musicRecommendationLabel(mode), math.Round(item.FinalScore*100)),
+			PlayCount:     artistPlayCounts[art.ID],
 			BookmarkCount: artistBookmarkCounts[art.ID],
 		})
 	}
@@ -855,4 +855,112 @@ func (s *Service) DeletePlaylistSong(user authctx.CurrentUser, playlistID uuid.U
 		return err
 	}
 	return s.repo.DeletePlaylistSong(playlistID, songID)
+}
+
+func (s *Service) ListPublicPlaylists(page int, pageSize int) ([]model.Playlist, map[uuid.UUID]int64, int64, error) {
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+
+	playlists, total, err := s.repo.ListPublicPlaylists(page, pageSize)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	playlistIDs := make([]uuid.UUID, 0, len(playlists))
+	for _, playlist := range playlists {
+		playlistIDs = append(playlistIDs, playlist.ID)
+	}
+	songCounts, err := s.repo.CountPlaylistSongs(playlistIDs)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
+	return playlists, songCounts, total, nil
+}
+
+func (s *Service) Discover(page int, pageSize int) ([]DiscoverItemResponse, int64, error) {
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	seedSize := page * pageSize
+
+	albumItems, albumTotal, err := s.RecommendAlbumsByMode(recommendation.ModeDiscover, 1, seedSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	artistItems, artistTotal, err := s.RecommendArtistsByMode(recommendation.ModeDiscover, 1, seedSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	playlists, playlistTotal, err := s.repo.ListRecentPublicPlaylists(seedSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	playlistIDs := make([]uuid.UUID, 0, len(playlists))
+	for _, playlist := range playlists {
+		playlistIDs = append(playlistIDs, playlist.ID)
+	}
+	playlistSongCounts, err := s.repo.CountPlaylistSongs(playlistIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	playlistItems := make([]DiscoverItemResponse, 0, len(playlists))
+	for _, playlist := range playlists {
+		playlistItems = append(playlistItems, DiscoverItemResponse{
+			Type:        "playlist",
+			ID:          playlist.ID.String(),
+			Title:       playlist.Name,
+			Summary:     playlist.Description,
+			ImageURL:    playlist.CoverURL,
+			TargetPath:  "/music/playlist/" + playlist.ID.String(),
+			SongCount:   playlistSongCounts[playlist.ID],
+			OwnerUserID: playlist.UserID.String(),
+		})
+	}
+
+	albumDiscoverItems := make([]DiscoverItemResponse, 0, len(albumItems))
+	for _, item := range albumItems {
+		albumDiscoverItems = append(albumDiscoverItems, DiscoverItemResponse{
+			Type:       "album",
+			ID:         item.ID,
+			Title:      item.Title,
+			Summary:    item.Summary,
+			ImageURL:   item.ImageURL,
+			TargetPath: item.TargetPath,
+		})
+	}
+
+	artistDiscoverItems := make([]DiscoverItemResponse, 0, len(artistItems))
+	for _, item := range artistItems {
+		artistDiscoverItems = append(artistDiscoverItems, DiscoverItemResponse{
+			Type:       "artist",
+			ID:         item.ID,
+			Title:      item.Title,
+			Summary:    item.Summary,
+			ImageURL:   item.ImageURL,
+			TargetPath: item.TargetPath,
+		})
+	}
+
+	mixed := make([]DiscoverItemResponse, 0, len(albumDiscoverItems)+len(artistDiscoverItems)+len(playlistItems))
+	for i := 0; i < seedSize; i++ {
+		if i < len(albumDiscoverItems) {
+			mixed = append(mixed, albumDiscoverItems[i])
+		}
+		if i < len(artistDiscoverItems) {
+			mixed = append(mixed, artistDiscoverItems[i])
+		}
+		if i < len(playlistItems) {
+			mixed = append(mixed, playlistItems[i])
+		}
+	}
+
+	start := (page - 1) * pageSize
+	if start > len(mixed) {
+		start = len(mixed)
+	}
+	end := start + pageSize
+	if end > len(mixed) {
+		end = len(mixed)
+	}
+
+	return mixed[start:end], albumTotal + artistTotal + playlistTotal, nil
 }

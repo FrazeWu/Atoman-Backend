@@ -34,22 +34,22 @@ func (Artist) TableName() string {
 
 type Album struct {
 	Base
-	Title       string     `json:"title" gorm:"not null"`
-	Year        int        `json:"year"`
-	ReleaseYear int        `json:"release_year"`
-	ReleaseDate time.Time  `json:"release_date" gorm:"type:date"`
-	CoverURL    string     `json:"cover_url"`
-	CoverSource string     `json:"cover_source" gorm:"default:'local'"`
-	Status      string     `json:"status" gorm:"default:'open'"`
-	AlbumType   string     `json:"album_type" gorm:"default:'album'"`
-	HotScore    float64    `json:"hot_score" gorm:"default:0;index"`
-	EntryStatus string     `json:"entry_status" gorm:"default:'open'"`
-	UploadedBy  *uuid.UUID `json:"uploaded_by" gorm:"type:uuid"`
-	User        *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
-	Artists     []Artist   `json:"artists,omitempty" gorm:"many2many:album_artists;"`
-	Songs       []Song     `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
-	PlayCount   int64      `json:"play_count"`
-	BookmarkCount int64    `json:"bookmark_count" gorm:"-"`
+	Title         string     `json:"title" gorm:"not null"`
+	Year          int        `json:"year"`
+	ReleaseYear   int        `json:"release_year"`
+	ReleaseDate   time.Time  `json:"release_date" gorm:"type:date"`
+	CoverURL      string     `json:"cover_url"`
+	CoverSource   string     `json:"cover_source" gorm:"default:'local'"`
+	Status        string     `json:"status" gorm:"default:'open'"`
+	AlbumType     string     `json:"album_type" gorm:"default:'album'"`
+	HotScore      float64    `json:"hot_score" gorm:"default:0;index"`
+	EntryStatus   string     `json:"entry_status" gorm:"default:'open'"`
+	UploadedBy    *uuid.UUID `json:"uploaded_by" gorm:"type:uuid"`
+	User          *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
+	Artists       []Artist   `json:"artists,omitempty" gorm:"many2many:album_artists;"`
+	Songs         []Song     `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
+	PlayCount     int64      `json:"play_count"`
+	BookmarkCount int64      `json:"bookmark_count" gorm:"-"`
 }
 
 func (Album) TableName() string {
@@ -258,6 +258,8 @@ type Playlist struct {
 	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
 	Name        string    `json:"name" gorm:"not null"`
 	Description string    `json:"description" gorm:"type:text"`
+	CoverURL    string    `json:"cover_url"`
+	IsPublic    bool      `json:"is_public" gorm:"default:false;index"`
 }
 
 func (Playlist) TableName() string {

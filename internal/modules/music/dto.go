@@ -56,5 +56,18 @@ type PlaylistSummaryResponse struct {
 	UserID      uuid.UUID `json:"user_id"`
 	Name        string    `json:"name"`
 	Description string    `json:"description,omitempty"`
+	CoverURL    string    `json:"cover_url,omitempty"`
+	IsPublic    bool      `json:"is_public"`
 	SongCount   int64     `json:"song_count"`
+}
+
+type DiscoverItemResponse struct {
+	Type        string `json:"type"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Summary     string `json:"summary,omitempty"`
+	ImageURL    string `json:"image_url,omitempty"`
+	TargetPath  string `json:"target_path"`
+	SongCount   int64  `json:"song_count,omitempty"`
+	OwnerUserID string `json:"owner_user_id,omitempty"`
 }

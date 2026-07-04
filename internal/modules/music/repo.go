@@ -150,6 +150,57 @@ func (r *Repo) ListPlaylists(userID uuid.UUID, page int, pageSize int) ([]model.
 	return playlists, total, err
 }
 
+func (r *Repo) ListPublicPlaylists(page int, pageSize int) ([]model.Playlist, int64, error) {
+	var total int64
+	db := r.db.Model(&model.Playlist{}).Where("is_public = ?", true)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var playlists []model.Playlist
+	err := db.Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&playlists).Error
+	return playlists, total, err
+}
+
+func (r *Repo) ListRecentPublicPlaylists(limit int) ([]model.Playlist, int64, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	var total int64
+	base := r.db.Model(&model.Playlist{}).Where("is_public = ?", true)
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var playlists []model.Playlist
+	err := base.
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&playlists).Error
+	return playlists, total, err
+}
+
+func (r *Repo) CountPlaylistSongs(playlistIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
+	counts := make(map[uuid.UUID]int64, len(playlistIDs))
+	if len(playlistIDs) == 0 {
+		return counts, nil
+	}
+
+	var rows []struct {
+		PlaylistID uuid.UUID
+		Count      int64
+	}
+	if err := r.db.Model(&model.PlaylistSong{}).
+		Select("playlist_id, COUNT(*) AS count").
+		Where("playlist_id IN ?", playlistIDs).
+		Group("playlist_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		counts[row.PlaylistID] = row.Count
+	}
+	return counts, nil
+}
+
 func (r *Repo) DeletePlaylist(userID uuid.UUID, playlistID uuid.UUID) error {
 	return r.db.Where("user_id = ? AND id = ?", userID, playlistID).Delete(&model.Playlist{}).Error
 }

@@ -181,7 +181,9 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/bookmarks/songs", h.listSongBookmarks)
 	group.POST("/bookmarks/songs", h.createSongBookmark)
 	group.DELETE("/bookmarks/songs/:songId", h.deleteSongBookmark)
+	group.GET("/discover", h.discover)
 	group.GET("/playlists", h.listPlaylists)
+	group.GET("/playlists/public", h.listPublicPlaylists)
 	group.POST("/playlists", h.createPlaylist)
 	group.GET("/playlists/:id", h.getPlaylist)
 	group.DELETE("/playlists/:id", h.deletePlaylist)
@@ -586,10 +588,48 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 			UserID:      playlist.UserID,
 			Name:        playlist.Name,
 			Description: playlist.Description,
+			CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
+			IsPublic:    playlist.IsPublic,
 			SongCount:   0,
 		})
 	}
 	httpx.List(c, rows, page, pageSize, total)
+}
+
+func (h *Handler) listPublicPlaylists(c *gin.Context) {
+	page, pageSize := httpx.PageParams(c)
+	playlists, songCounts, total, err := h.service.ListPublicPlaylists(page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	rows := make([]PlaylistSummaryResponse, 0, len(playlists))
+	for _, playlist := range playlists {
+		rows = append(rows, PlaylistSummaryResponse{
+			ID:          playlist.ID,
+			UserID:      playlist.UserID,
+			Name:        playlist.Name,
+			Description: playlist.Description,
+			CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
+			IsPublic:    playlist.IsPublic,
+			SongCount:   songCounts[playlist.ID],
+		})
+	}
+	httpx.List(c, rows, page, pageSize, total)
+}
+
+func (h *Handler) discover(c *gin.Context) {
+	page, pageSize := httpx.PageParams(c)
+	items, total, err := h.service.Discover(page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	for i := range items {
+		items[i].ImageURL = resolveMusicMediaURL(items[i].ImageURL)
+	}
+	httpx.List(c, items, page, pageSize, total)
 }
 
 func (h *Handler) createPlaylist(c *gin.Context) {
@@ -613,6 +653,8 @@ func (h *Handler) createPlaylist(c *gin.Context) {
 		UserID:      playlist.UserID,
 		Name:        playlist.Name,
 		Description: playlist.Description,
+		CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
+		IsPublic:    playlist.IsPublic,
 		SongCount:   0,
 	})
 }
@@ -656,6 +698,8 @@ func (h *Handler) getPlaylist(c *gin.Context) {
 		UserID:      playlist.UserID,
 		Name:        playlist.Name,
 		Description: playlist.Description,
+		CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
+		IsPublic:    playlist.IsPublic,
 		SongCount:   0,
 	})
 }
