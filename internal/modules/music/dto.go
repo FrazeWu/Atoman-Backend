@@ -40,7 +40,10 @@ type CreateSongBookmarkRequest struct {
 }
 
 type CreatePlaylistRequest struct {
-	Name string `json:"name"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	CoverURL    string `json:"cover_url"`
+	IsPublic    bool   `json:"is_public"`
 }
 
 type AddPlaylistSongRequest struct {

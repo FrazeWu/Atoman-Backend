@@ -774,15 +774,23 @@ func (s *Service) DeleteSongBookmark(user authctx.CurrentUser, songID uuid.UUID)
 	return s.repo.DeleteSongBookmark(user.ID, songID)
 }
 
-func (s *Service) CreatePlaylist(user authctx.CurrentUser, name string) (model.Playlist, error) {
+func (s *Service) CreatePlaylist(user authctx.CurrentUser, req CreatePlaylistRequest) (model.Playlist, error) {
 	if user.ID == uuid.Nil {
 		return model.Playlist{}, apperr.Unauthorized("Login required")
 	}
-	name = strings.TrimSpace(name)
+	name := strings.TrimSpace(req.Name)
 	if name == "" {
 		return model.Playlist{}, apperr.BadRequest("validation.invalid_request", "name is required")
 	}
-	return s.repo.CreatePlaylist(user.ID, name)
+
+	playlist := model.Playlist{
+		UserID:      user.ID,
+		Name:        name,
+		Description: strings.TrimSpace(req.Description),
+		CoverURL:    strings.TrimSpace(req.CoverURL),
+		IsPublic:    req.IsPublic,
+	}
+	return s.repo.CreatePlaylist(playlist)
 }
 
 func (s *Service) ListPlaylists(user authctx.CurrentUser, page int, pageSize int) ([]model.Playlist, int64, error) {
@@ -801,15 +809,15 @@ func (s *Service) DeletePlaylist(user authctx.CurrentUser, playlistID uuid.UUID)
 }
 
 func (s *Service) GetPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.Playlist, error) {
-	if user.ID == uuid.Nil {
-		return model.Playlist{}, apperr.Unauthorized("Login required")
-	}
-	playlist, err := s.repo.GetPlaylistForUser(user.ID, playlistID)
+	playlist, err := s.repo.GetPlaylistByID(playlistID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.Playlist{}, apperr.NotFound("music.playlist_not_found", "Playlist not found")
 		}
 		return model.Playlist{}, err
+	}
+	if playlist.UserID != user.ID && !playlist.IsPublic {
+		return model.Playlist{}, apperr.NotFound("music.playlist_not_found", "Playlist not found")
 	}
 	return playlist, nil
 }
@@ -831,14 +839,15 @@ func (s *Service) AddPlaylistSong(user authctx.CurrentUser, playlistID uuid.UUID
 }
 
 func (s *Service) ListPlaylistSongs(user authctx.CurrentUser, playlistID uuid.UUID, page int, pageSize int) ([]model.PlaylistSong, int64, error) {
-	if user.ID == uuid.Nil {
-		return nil, 0, apperr.Unauthorized("Login required")
-	}
-	if _, err := s.repo.GetPlaylistForUser(user.ID, playlistID); err != nil {
+	playlist, err := s.repo.GetPlaylistByID(playlistID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, 0, apperr.NotFound("music.playlist_not_found", "Playlist not found")
 		}
 		return nil, 0, err
+	}
+	if playlist.UserID != user.ID && !playlist.IsPublic {
+		return nil, 0, apperr.NotFound("music.playlist_not_found", "Playlist not found")
 	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
 	return s.repo.ListPlaylistSongs(playlistID, page, pageSize)

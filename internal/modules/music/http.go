@@ -596,6 +596,7 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 	httpx.List(c, rows, page, pageSize, total)
 }
 
+// @Summary 获取公开歌单列表
 func (h *Handler) listPublicPlaylists(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
 	playlists, songCounts, total, err := h.service.ListPublicPlaylists(page, pageSize)
@@ -619,6 +620,7 @@ func (h *Handler) listPublicPlaylists(c *gin.Context) {
 	httpx.List(c, rows, page, pageSize, total)
 }
 
+// @Summary 获取音乐发现流
 func (h *Handler) discover(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
 	items, total, err := h.service.Discover(page, pageSize)
@@ -632,6 +634,7 @@ func (h *Handler) discover(c *gin.Context) {
 	httpx.List(c, items, page, pageSize, total)
 }
 
+// @Summary 创建歌单
 func (h *Handler) createPlaylist(c *gin.Context) {
 	user, ok := currentMusicUser(c)
 	if !ok {
@@ -643,7 +646,7 @@ func (h *Handler) createPlaylist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	playlist, err := h.service.CreatePlaylist(user, req.Name)
+	playlist, err := h.service.CreatePlaylist(user, req)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -677,12 +680,9 @@ func (h *Handler) deletePlaylist(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
 }
 
+// @Summary 获取歌单详情
 func (h *Handler) getPlaylist(c *gin.Context) {
-	user, ok := currentMusicUser(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
+	user, _ := currentMusicUser(c)
 	playlistID, err := parseMusicID(c.Param("id"), "id")
 	if err != nil {
 		httpx.Error(c, err)
@@ -704,12 +704,9 @@ func (h *Handler) getPlaylist(c *gin.Context) {
 	})
 }
 
+// @Summary 获取歌单歌曲列表
 func (h *Handler) listPlaylistSongs(c *gin.Context) {
-	user, ok := currentMusicUser(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
+	user, _ := currentMusicUser(c)
 	playlistID, err := parseMusicID(c.Param("id"), "id")
 	if err != nil {
 		httpx.Error(c, err)

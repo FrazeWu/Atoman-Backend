@@ -134,8 +134,7 @@ func (r *Repo) DeleteSongBookmark(userID uuid.UUID, songID uuid.UUID) error {
 	return r.db.Where("user_id = ? AND song_id = ?", userID, songID).Delete(&model.SongBookmark{}).Error
 }
 
-func (r *Repo) CreatePlaylist(userID uuid.UUID, name string) (model.Playlist, error) {
-	playlist := model.Playlist{UserID: userID, Name: name}
+func (r *Repo) CreatePlaylist(playlist model.Playlist) (model.Playlist, error) {
 	return playlist, r.db.Create(&playlist).Error
 }
 
@@ -208,6 +207,12 @@ func (r *Repo) DeletePlaylist(userID uuid.UUID, playlistID uuid.UUID) error {
 func (r *Repo) GetPlaylistForUser(userID uuid.UUID, playlistID uuid.UUID) (model.Playlist, error) {
 	var playlist model.Playlist
 	err := r.db.First(&playlist, "user_id = ? AND id = ?", userID, playlistID).Error
+	return playlist, err
+}
+
+func (r *Repo) GetPlaylistByID(playlistID uuid.UUID) (model.Playlist, error) {
+	var playlist model.Playlist
+	err := r.db.First(&playlist, "id = ?", playlistID).Error
 	return playlist, err
 }
 

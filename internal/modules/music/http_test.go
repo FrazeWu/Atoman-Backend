@@ -1645,8 +1645,42 @@ func TestRegisterRoutesDeletePlaylistSongIsIdempotent(t *testing.T) {
 	}
 }
 
+func createMusicPlaylistViaAPI(t *testing.T, router *gin.Engine, body string) struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	CoverURL    string `json:"cover_url"`
+	IsPublic    bool   `json:"is_public"`
+	UserID      string `json:"user_id"`
+} {
+	t.Helper()
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/playlists", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected create playlist 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			CoverURL    string `json:"cover_url"`
+			IsPublic    bool   `json:"is_public"`
+			UserID      string `json:"user_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode create playlist response: %v", err)
+	}
+	return resp.Data
+}
+
 func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
-	service, db, _ := newMusicHTTPTestService(t)
+	service, db, user := newMusicHTTPTestService(t)
 
 	artist := model.Artist{
 		Name:        "Discover Artist",
@@ -1685,17 +1719,13 @@ func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
 		t.Fatalf("append song artist: %v", err)
 	}
 
-	playlist := model.Playlist{
-		UserID:      uuid.New(),
-		Name:        "Discover Playlist",
-		Description: "playlist desc",
-		CoverURL:    "/uploads/discover-playlist.jpg",
-		IsPublic:    true,
+	userRouter := newMusicHTTPRouter(service, &user)
+	playlist := createMusicPlaylistViaAPI(t, userRouter, `{"name":"Discover Playlist","description":"playlist desc","cover_url":"/uploads/discover-playlist.jpg","is_public":true}`)
+	playlistID, err := uuid.Parse(playlist.ID)
+	if err != nil {
+		t.Fatalf("parse playlist id: %v", err)
 	}
-	if err := db.Create(&playlist).Error; err != nil {
-		t.Fatalf("create playlist: %v", err)
-	}
-	if err := db.Create(&model.PlaylistSong{PlaylistID: playlist.ID, SongID: song.ID}).Error; err != nil {
+	if err := db.Create(&model.PlaylistSong{PlaylistID: playlistID, SongID: song.ID}).Error; err != nil {
 		t.Fatalf("create playlist song: %v", err)
 	}
 
@@ -1726,49 +1756,24 @@ func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
 	if len(resp.Data) < 3 {
 		t.Fatalf("expected at least 3 discover items, got %#v", resp.Data)
 	}
-
-	seenTypes := map[string]bool{}
-	for _, item := range resp.Data {
-		seenTypes[item.Type] = true
+	wantTypes := []string{"album", "artist", "playlist"}
+	for i, want := range wantTypes {
+		if resp.Data[i].Type != want {
+			t.Fatalf("expected discover type order %v, got %#v", wantTypes, resp.Data[:3])
+		}
 	}
-	if !seenTypes["album"] || !seenTypes["artist"] || !seenTypes["playlist"] {
-		t.Fatalf("expected mixed discover item types, got %#v", resp.Data)
+	if resp.Data[2].ID != playlistID.String() || resp.Data[2].SongCount != 1 || resp.Data[2].OwnerUserID != user.ID.String() {
+		t.Fatalf("unexpected playlist discover item: %#v", resp.Data[2])
 	}
 }
 
 func TestRegisterRoutesPublicPlaylistsReturnsDiscoverablePlaylists(t *testing.T) {
-	service, db, user := newMusicHTTPTestService(t)
+	service, _, user := newMusicHTTPTestService(t)
+	userRouter := newMusicHTTPRouter(service, &user)
 
-	newer := model.Playlist{
-		UserID:      user.ID,
-		Name:        "Newest Public Playlist",
-		Description: "newer",
-		CoverURL:    "/uploads/public-new.jpg",
-		IsPublic:    true,
-	}
-	older := model.Playlist{
-		UserID:      user.ID,
-		Name:        "Older Public Playlist",
-		Description: "older",
-		CoverURL:    "/uploads/public-old.jpg",
-		IsPublic:    true,
-	}
-	private := model.Playlist{
-		UserID:      user.ID,
-		Name:        "Private Playlist",
-		Description: "hidden",
-		CoverURL:    "/uploads/private.jpg",
-		IsPublic:    false,
-	}
-	if err := db.Create(&older).Error; err != nil {
-		t.Fatalf("create older playlist: %v", err)
-	}
-	if err := db.Create(&newer).Error; err != nil {
-		t.Fatalf("create newer playlist: %v", err)
-	}
-	if err := db.Create(&private).Error; err != nil {
-		t.Fatalf("create private playlist: %v", err)
-	}
+	older := createMusicPlaylistViaAPI(t, userRouter, `{"name":"Older Public Playlist","description":"older","cover_url":"/uploads/public-old.jpg","is_public":true}`)
+	newer := createMusicPlaylistViaAPI(t, userRouter, `{"name":"Newest Public Playlist","description":"newer","cover_url":"/uploads/public-new.jpg","is_public":true}`)
+	_ = createMusicPlaylistViaAPI(t, userRouter, `{"name":"Private Playlist","description":"hidden","cover_url":"/uploads/private.jpg","is_public":false}`)
 
 	r := newMusicHTTPRouter(service, nil)
 	w := httptest.NewRecorder()
@@ -1798,37 +1803,20 @@ func TestRegisterRoutesPublicPlaylistsReturnsDiscoverablePlaylists(t *testing.T)
 	if resp.Meta.Total != 2 || len(resp.Data) != 2 {
 		t.Fatalf("expected 2 public playlists, got %#v %#v", resp.Data, resp.Meta)
 	}
-	if resp.Data[0].Name != "Newest Public Playlist" || resp.Data[1].Name != "Older Public Playlist" {
+	if resp.Data[0].ID != newer.ID || resp.Data[1].ID != older.ID {
 		t.Fatalf("expected public playlists ordered by created_at desc, got %#v", resp.Data)
 	}
-	if !resp.Data[0].IsPublic || !resp.Data[1].IsPublic {
+	if !resp.Data[0].IsPublic || !resp.Data[1].IsPublic || resp.Data[0].CoverURL == "" {
 		t.Fatalf("expected public playlists only, got %#v", resp.Data)
 	}
 }
 
 func TestRegisterRoutesDiscoverHidesPrivatePlaylistsFromAnonymousUsers(t *testing.T) {
-	service, db, user := newMusicHTTPTestService(t)
+	service, _, user := newMusicHTTPTestService(t)
+	userRouter := newMusicHTTPRouter(service, &user)
 
-	publicPlaylist := model.Playlist{
-		UserID:      user.ID,
-		Name:        "Visible Public Playlist",
-		Description: "public",
-		CoverURL:    "/uploads/visible-public.jpg",
-		IsPublic:    true,
-	}
-	privatePlaylist := model.Playlist{
-		UserID:      user.ID,
-		Name:        "Hidden Private Playlist",
-		Description: "private",
-		CoverURL:    "/uploads/hidden-private.jpg",
-		IsPublic:    false,
-	}
-	if err := db.Create(&publicPlaylist).Error; err != nil {
-		t.Fatalf("create public playlist: %v", err)
-	}
-	if err := db.Create(&privatePlaylist).Error; err != nil {
-		t.Fatalf("create private playlist: %v", err)
-	}
+	publicPlaylist := createMusicPlaylistViaAPI(t, userRouter, `{"name":"Visible Public Playlist","description":"public","cover_url":"/uploads/visible-public.jpg","is_public":true}`)
+	_ = createMusicPlaylistViaAPI(t, userRouter, `{"name":"Hidden Private Playlist","description":"private","cover_url":"/uploads/hidden-private.jpg","is_public":false}`)
 
 	r := newMusicHTTPRouter(service, nil)
 
@@ -1873,5 +1861,79 @@ func TestRegisterRoutesDiscoverHidesPrivatePlaylistsFromAnonymousUsers(t *testin
 		if item.Name == "Hidden Private Playlist" {
 			t.Fatalf("private playlist should not appear in public playlist response: %#v", publicResp.Data)
 		}
+	}
+	foundPublic := false
+	for _, item := range publicResp.Data {
+		if item.Name == publicPlaylist.Name {
+			foundPublic = true
+		}
+	}
+	if !foundPublic {
+		t.Fatalf("expected public playlist in public response: %#v", publicResp.Data)
+	}
+}
+
+func TestRegisterRoutesAnonymousCanReadPublicPlaylistDetailAndSongs(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	userRouter := newMusicHTTPRouter(service, &user)
+
+	song := model.Song{Title: "Public Playlist Song", AudioURL: "/audio/public-playlist-song.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	playlist := createMusicPlaylistViaAPI(t, userRouter, `{"name":"Readable Public Playlist","description":"public desc","cover_url":"/uploads/readable-public.jpg","is_public":true}`)
+
+	addW := httptest.NewRecorder()
+	addReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/playlists/"+playlist.ID+"/songs", bytes.NewBufferString(`{"song_id":"`+song.ID.String()+`"}`))
+	addReq.Header.Set("Content-Type", "application/json")
+	userRouter.ServeHTTP(addW, addReq)
+	if addW.Code != http.StatusCreated {
+		t.Fatalf("expected add song 201, got %d: %s", addW.Code, addW.Body.String())
+	}
+
+	anonRouter := newMusicHTTPRouter(service, nil)
+
+	detailW := httptest.NewRecorder()
+	detailReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/"+playlist.ID, nil)
+	anonRouter.ServeHTTP(detailW, detailReq)
+	if detailW.Code != http.StatusOK {
+		t.Fatalf("expected anonymous detail 200, got %d: %s", detailW.Code, detailW.Body.String())
+	}
+	var detailResp struct {
+		Data struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			CoverURL    string `json:"cover_url"`
+			IsPublic    bool   `json:"is_public"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(detailW.Body.Bytes(), &detailResp); err != nil {
+		t.Fatalf("decode detail response: %v", err)
+	}
+	if detailResp.Data.ID != playlist.ID || !detailResp.Data.IsPublic || detailResp.Data.CoverURL == "" {
+		t.Fatalf("unexpected public playlist detail: %#v", detailResp.Data)
+	}
+
+	songsW := httptest.NewRecorder()
+	songsReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/"+playlist.ID+"/songs", nil)
+	anonRouter.ServeHTTP(songsW, songsReq)
+	if songsW.Code != http.StatusOK {
+		t.Fatalf("expected anonymous songs 200, got %d: %s", songsW.Code, songsW.Body.String())
+	}
+	var songsResp struct {
+		Data []struct {
+			SongID string `json:"song_id"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(songsW.Body.Bytes(), &songsResp); err != nil {
+		t.Fatalf("decode songs response: %v", err)
+	}
+	if songsResp.Meta.Total != 1 || len(songsResp.Data) != 1 || songsResp.Data[0].SongID != song.ID.String() {
+		t.Fatalf("unexpected public playlist songs response: %#v %#v", songsResp.Data, songsResp.Meta)
 	}
 }

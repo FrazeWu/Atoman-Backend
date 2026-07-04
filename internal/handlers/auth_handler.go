@@ -289,7 +289,10 @@ func ensureSignupFavoritePlaylist(db *gorm.DB, userID uuid.UUID) error {
 		return err
 	}
 
-	_, err := musicmodule.NewRepo(db).CreatePlaylist(userID, "最爱")
+	_, err := musicmodule.NewRepo(db).CreatePlaylist(model.Playlist{
+		UserID: userID,
+		Name:   "最爱",
+	})
 	return err
 }
 
