@@ -596,7 +596,14 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 	httpx.List(c, rows, page, pageSize, total)
 }
 
+// listPublicPlaylists godoc
 // @Summary 获取公开歌单列表
+// @Description 返回可被发现的公开歌单，匿名用户可访问。
+// @Tags music-playlists
+// @Produce json
+// @Success 200 {object} PlaylistSummaryListResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/music/playlists/public [get]
 func (h *Handler) listPublicPlaylists(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
 	playlists, songCounts, total, err := h.service.ListPublicPlaylists(page, pageSize)
@@ -620,7 +627,14 @@ func (h *Handler) listPublicPlaylists(c *gin.Context) {
 	httpx.List(c, rows, page, pageSize, total)
 }
 
+// discover godoc
 // @Summary 获取音乐发现流
+// @Description 返回混合发现流，按专辑、艺人、公开歌单的简单规则混排。
+// @Tags music-discovery
+// @Produce json
+// @Success 200 {object} DiscoverListResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/music/discover [get]
 func (h *Handler) discover(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
 	items, total, err := h.service.Discover(page, pageSize)
@@ -634,7 +648,20 @@ func (h *Handler) discover(c *gin.Context) {
 	httpx.List(c, items, page, pageSize, total)
 }
 
+// createPlaylist godoc
 // @Summary 创建歌单
+// @Description 创建歌单，可同时设置简介、封面和是否公开。
+// @Tags music-playlists
+// @Accept json
+// @Produce json
+// @Param input body CreatePlaylistRequest true "歌单创建请求"
+// @Success 201 {object} PlaylistSummaryResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/music/playlists [post]
 func (h *Handler) createPlaylist(c *gin.Context) {
 	user, ok := currentMusicUser(c)
 	if !ok {
@@ -680,7 +707,17 @@ func (h *Handler) deletePlaylist(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
 }
 
+// getPlaylist godoc
 // @Summary 获取歌单详情
+// @Description 返回歌单详情。公开歌单支持匿名访问，私有歌单仅所有者可访问。
+// @Tags music-playlists
+// @Produce json
+// @Param id path string true "歌单 ID"
+// @Success 200 {object} PlaylistSummaryResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/music/playlists/{id} [get]
 func (h *Handler) getPlaylist(c *gin.Context) {
 	user, _ := currentMusicUser(c)
 	playlistID, err := parseMusicID(c.Param("id"), "id")
@@ -704,7 +741,17 @@ func (h *Handler) getPlaylist(c *gin.Context) {
 	})
 }
 
+// listPlaylistSongs godoc
 // @Summary 获取歌单歌曲列表
+// @Description 返回歌单中的歌曲列表。公开歌单支持匿名访问，私有歌单仅所有者可访问。
+// @Tags music-playlists
+// @Produce json
+// @Param id path string true "歌单 ID"
+// @Success 200 {object} PlaylistSongsListResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/music/playlists/{id}/songs [get]
 func (h *Handler) listPlaylistSongs(c *gin.Context) {
 	user, _ := currentMusicUser(c)
 	playlistID, err := parseMusicID(c.Param("id"), "id")

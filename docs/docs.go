@@ -6734,6 +6734,212 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/discover": {
+            "get": {
+                "description": "返回混合发现流，按专辑、艺人、公开歌单的简单规则混排。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-discovery"
+                ],
+                "summary": "获取音乐发现流",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.DiscoverListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/playlists": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "创建歌单，可同时设置简介、封面和是否公开。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-playlists"
+                ],
+                "summary": "创建歌单",
+                "parameters": [
+                    {
+                        "description": "歌单创建请求",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.CreatePlaylistRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/music.PlaylistSummaryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/playlists/public": {
+            "get": {
+                "description": "返回可被发现的公开歌单，匿名用户可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-playlists"
+                ],
+                "summary": "获取公开歌单列表",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.PlaylistSummaryListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/playlists/{id}": {
+            "get": {
+                "description": "返回歌单详情。公开歌单支持匿名访问，私有歌单仅所有者可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-playlists"
+                ],
+                "summary": "获取歌单详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌单 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.PlaylistSummaryResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/playlists/{id}/songs": {
+            "get": {
+                "description": "返回歌单中的歌曲列表。公开歌单支持匿名访问，私有歌单仅所有者可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-playlists"
+                ],
+                "summary": "获取歌单歌曲列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌单 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.PlaylistSongsListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/podcast/episodes": {
             "get": {
                 "description": "返回所有已发布的播客单集。",
@@ -13253,6 +13459,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/model.Artist"
                     }
                 },
+                "bookmark_count": {
+                    "type": "integer"
+                },
                 "cover_source": {
                     "type": "string"
                 },
@@ -13270,6 +13479,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "play_count": {
+                    "type": "integer"
                 },
                 "release_date": {
                     "type": "string"
@@ -13407,6 +13619,9 @@ const docTemplate = `{
                 "birth_year": {
                     "type": "integer"
                 },
+                "bookmark_count": {
+                    "type": "integer"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -13433,6 +13648,9 @@ const docTemplate = `{
                 },
                 "nationality": {
                     "type": "string"
+                },
+                "play_count": {
+                    "type": "integer"
                 },
                 "redirect_to": {
                     "type": "string"
@@ -14391,6 +14609,9 @@ const docTemplate = `{
                 "lyrics": {
                     "type": "string"
                 },
+                "play_count": {
+                    "type": "integer"
+                },
                 "release_date": {
                     "type": "string"
                 },
@@ -14854,6 +15075,177 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.CreatePlaylistRequest": {
+            "type": "object",
+            "properties": {
+                "cover_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "is_public": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.DiscoverItemResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "owner_user_id": {
+                    "type": "string"
+                },
+                "song_count": {
+                    "type": "integer"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "target_path": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.DiscoverListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.DiscoverItemResponse"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/music.PaginationMetaResponse"
+                }
+            }
+        },
+        "music.PaginationMetaResponse": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "music.PlaylistSongDetail": {
+            "type": "object",
+            "properties": {
+                "audio_url": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "entry_status": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "track_number": {
+                    "type": "integer"
+                }
+            }
+        },
+        "music.PlaylistSongResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "playlist_id": {
+                    "type": "string"
+                },
+                "song": {
+                    "$ref": "#/definitions/music.PlaylistSongDetail"
+                },
+                "song_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.PlaylistSongsListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.PlaylistSongResponse"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/music.PaginationMetaResponse"
+                }
+            }
+        },
+        "music.PlaylistSummaryListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.PlaylistSummaryResponse"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/music.PaginationMetaResponse"
+                }
+            }
+        },
+        "music.PlaylistSummaryResponse": {
+            "type": "object",
+            "properties": {
+                "cover_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_public": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "song_count": {
+                    "type": "integer"
+                },
+                "user_id": {
                     "type": "string"
                 }
             }

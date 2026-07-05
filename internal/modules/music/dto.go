@@ -74,3 +74,41 @@ type DiscoverItemResponse struct {
 	SongCount   int64  `json:"song_count,omitempty"`
 	OwnerUserID string `json:"owner_user_id,omitempty"`
 }
+
+type PaginationMetaResponse struct {
+	Page     int   `json:"page"`
+	PageSize int   `json:"page_size"`
+	Total    int64 `json:"total"`
+	HasMore  bool  `json:"has_more"`
+}
+
+type PlaylistSummaryListResponse struct {
+	Data []PlaylistSummaryResponse `json:"data"`
+	Meta PaginationMetaResponse   `json:"meta"`
+}
+
+type DiscoverListResponse struct {
+	Data []DiscoverItemResponse `json:"data"`
+	Meta PaginationMetaResponse `json:"meta"`
+}
+
+type PlaylistSongsListResponse struct {
+	Data []PlaylistSongResponse `json:"data"`
+	Meta PaginationMetaResponse `json:"meta"`
+}
+
+type PlaylistSongResponse struct {
+	ID         uuid.UUID           `json:"id"`
+	PlaylistID uuid.UUID           `json:"playlist_id"`
+	SongID     uuid.UUID           `json:"song_id"`
+	Song       *PlaylistSongDetail `json:"song,omitempty"`
+}
+
+type PlaylistSongDetail struct {
+	ID          uuid.UUID `json:"id"`
+	Title       string    `json:"title"`
+	TrackNumber int       `json:"track_number"`
+	AudioURL    string    `json:"audio_url"`
+	CoverURL    string    `json:"cover_url"`
+	EntryStatus string    `json:"entry_status"`
+}
