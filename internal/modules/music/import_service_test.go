@@ -550,6 +550,7 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 			},
 			Album: AlbumImportAlbumPayload{
 				Title:       "LP1",
+				ReleaseDate: "2014-08-06",
 				ReleaseYear: 2014,
 				Tracks: []AlbumImportTrackPayload{
 					{Title: "Preface", TrackNumber: 1},
@@ -574,6 +575,7 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 		},
 		Album: AlbumImportAlbumPayload{
 			Title:       "LP1",
+			ReleaseDate: "2014-08-06",
 			ReleaseYear: 2014,
 			Tracks: []AlbumImportTrackPayload{
 				{Title: "Preface", TrackNumber: 1},
@@ -612,6 +614,12 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	}
 	if album.ReleaseYear != 2014 {
 		t.Fatalf("expected release year persisted, got %#v", album)
+	}
+	if got := album.ReleaseDate.Format("2006-01-02"); got != "2014-08-06" {
+		t.Fatalf("expected release date persisted, got %q", got)
+	}
+	if album.Year != 2014 {
+		t.Fatalf("expected year persisted, got %#v", album)
 	}
 	if len(album.Artists) != 1 || album.Artists[0].ID != artist.ID {
 		t.Fatalf("expected album linked to artist, got %#v", album.Artists)

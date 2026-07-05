@@ -21,6 +21,7 @@ type AlbumImportArtistPayload struct {
 
 type AlbumImportAlbumPayload struct {
 	Title       string                    `json:"title"`
+	ReleaseDate string                    `json:"release_date"`
 	ReleaseYear int                       `json:"release_year"`
 	Tracks      []AlbumImportTrackPayload `json:"tracks"`
 }

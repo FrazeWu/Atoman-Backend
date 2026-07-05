@@ -585,6 +585,19 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			AlbumType:   "album",
 			UploadedBy:  &user.ID,
 		}
+		if strings.TrimSpace(payload.Album.ReleaseDate) != "" {
+			releaseDate, err := parseOptionalReleaseDate(payload.Album.ReleaseDate)
+			if err != nil {
+				return err
+			}
+			if releaseDate != nil {
+				album.ReleaseDate = *releaseDate
+				if album.ReleaseYear == 0 {
+					album.ReleaseYear = releaseDate.Year()
+				}
+				album.Year = album.ReleaseYear
+			}
+		}
 		if err := createAlbumImportAlbum(tx, &album); err != nil {
 			return err
 		}
