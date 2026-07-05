@@ -947,12 +947,14 @@ func (s *Service) Discover(page int, pageSize int) ([]DiscoverItemResponse, int6
 	albumDiscoverItems := make([]DiscoverItemResponse, 0, len(albumItems))
 	for _, item := range albumItems {
 		resp := DiscoverItemResponse{
-			Type:       "album",
-			ID:         item.ID,
-			Title:      item.Title,
-			Summary:    item.Summary,
-			ImageURL:   item.ImageURL,
-			TargetPath: item.TargetPath,
+			Type:          "album",
+			ID:            item.ID,
+			Title:         item.Title,
+			Summary:       item.Summary,
+			ImageURL:      item.ImageURL,
+			TargetPath:    item.TargetPath,
+			PlayCount:     item.PlayCount,
+			BookmarkCount: item.BookmarkCount,
 		}
 		if album, ok := albumMetaByID[item.ID]; ok {
 			resp.CoverURL = album.CoverURL
@@ -990,14 +992,16 @@ func (s *Service) Discover(page int, pageSize int) ([]DiscoverItemResponse, int6
 	artistDiscoverItems := make([]DiscoverItemResponse, 0, len(artistItems))
 	for _, item := range artistItems {
 		artistDiscoverItems = append(artistDiscoverItems, DiscoverItemResponse{
-			Type:       "artist",
-			ID:         item.ID,
-			Title:      item.Title,
-			Summary:    item.Summary,
-			ImageURL:   item.ImageURL,
-			TargetPath: item.TargetPath,
-			Name:       item.Title,
-			Bio:        item.Summary,
+			Type:          "artist",
+			ID:            item.ID,
+			Title:         item.Title,
+			Summary:       item.Summary,
+			ImageURL:      item.ImageURL,
+			TargetPath:    item.TargetPath,
+			PlayCount:     item.PlayCount,
+			BookmarkCount: item.BookmarkCount,
+			Name:          item.Title,
+			Bio:           item.Summary,
 		})
 	}
 

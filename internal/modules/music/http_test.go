@@ -1707,16 +1707,23 @@ func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
 	}
 
 	song := model.Song{
-		Title:    "Discover Song",
-		AudioURL: "/audio/discover-song.mp3",
-		Status:   "open",
-		AlbumID:  &album.ID,
+		Title:     "Discover Song",
+		AudioURL:  "/audio/discover-song.mp3",
+		Status:    "open",
+		AlbumID:   &album.ID,
+		PlayCount: 3,
 	}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
 	if err := db.Model(&song).Association("Artists").Append(&artist); err != nil {
 		t.Fatalf("append song artist: %v", err)
+	}
+	if err := db.Create(&model.AlbumBookmark{UserID: user.ID, AlbumID: album.ID}).Error; err != nil {
+		t.Fatalf("create album bookmark: %v", err)
+	}
+	if err := db.Create(&model.ArtistBookmark{UserID: user.ID, ArtistID: artist.ID}).Error; err != nil {
+		t.Fatalf("create artist bookmark: %v", err)
 	}
 
 	userRouter := newMusicHTTPRouter(service, &user)
@@ -1746,6 +1753,8 @@ func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
 			Summary     string `json:"summary"`
 			ImageURL    string `json:"image_url"`
 			TargetPath  string `json:"target_path"`
+			PlayCount   int64  `json:"play_count"`
+			BookmarkCount int64 `json:"bookmark_count"`
 			SongCount   int64  `json:"song_count"`
 			OwnerUserID string `json:"owner_user_id"`
 		} `json:"data"`
@@ -1761,6 +1770,12 @@ func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
 		if resp.Data[i].Type != want {
 			t.Fatalf("expected discover type order %v, got %#v", wantTypes, resp.Data[:3])
 		}
+	}
+	if resp.Data[0].PlayCount != 3 || resp.Data[0].BookmarkCount != 1 {
+		t.Fatalf("expected album discover item stats to be present, got %#v", resp.Data[0])
+	}
+	if resp.Data[1].PlayCount != 3 || resp.Data[1].BookmarkCount != 1 {
+		t.Fatalf("expected artist discover item stats to be present, got %#v", resp.Data[1])
 	}
 	if resp.Data[2].ID != playlistID.String() || resp.Data[2].SongCount != 1 || resp.Data[2].OwnerUserID != user.ID.String() {
 		t.Fatalf("unexpected playlist discover item: %#v", resp.Data[2])

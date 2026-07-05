@@ -71,6 +71,8 @@ type DiscoverItemResponse struct {
 	Summary     string `json:"summary,omitempty"`
 	ImageURL    string `json:"image_url,omitempty"`
 	TargetPath  string `json:"target_path"`
+	PlayCount   int64  `json:"play_count,omitempty"`
+	BookmarkCount int64 `json:"bookmark_count,omitempty"`
 	SongCount   int64  `json:"song_count,omitempty"`
 	OwnerUserID string `json:"owner_user_id,omitempty"`
 	Name        string `json:"name,omitempty"`
