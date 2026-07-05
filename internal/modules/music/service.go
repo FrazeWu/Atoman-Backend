@@ -919,22 +919,72 @@ func (s *Service) Discover(page int, pageSize int) ([]DiscoverItemResponse, int6
 			Title:       playlist.Name,
 			Summary:     playlist.Description,
 			ImageURL:    playlist.CoverURL,
+			CoverURL:    playlist.CoverURL,
+			Description: playlist.Description,
 			TargetPath:  "/music/playlist/" + playlist.ID.String(),
 			SongCount:   playlistSongCounts[playlist.ID],
 			OwnerUserID: playlist.UserID.String(),
 		})
 	}
 
+	albumIDs := make([]uuid.UUID, 0, len(albumItems))
+	for _, item := range albumItems {
+		if parsed, err := uuid.Parse(item.ID); err == nil {
+			albumIDs = append(albumIDs, parsed)
+		}
+	}
+	albumMetaByID := make(map[string]model.Album, len(albumIDs))
+	if len(albumIDs) > 0 {
+		var discoverAlbums []model.Album
+		if err := s.db.Preload("Artists").Where("id IN ?", albumIDs).Find(&discoverAlbums).Error; err != nil {
+			return nil, 0, err
+		}
+		for _, album := range discoverAlbums {
+			albumMetaByID[album.ID.String()] = album
+		}
+	}
+
 	albumDiscoverItems := make([]DiscoverItemResponse, 0, len(albumItems))
 	for _, item := range albumItems {
-		albumDiscoverItems = append(albumDiscoverItems, DiscoverItemResponse{
+		resp := DiscoverItemResponse{
 			Type:       "album",
 			ID:         item.ID,
 			Title:      item.Title,
 			Summary:    item.Summary,
 			ImageURL:   item.ImageURL,
 			TargetPath: item.TargetPath,
-		})
+		}
+		if album, ok := albumMetaByID[item.ID]; ok {
+			resp.CoverURL = album.CoverURL
+			switch {
+			case album.Year > 0:
+				resp.Year = album.Year
+			case album.ReleaseYear > 0:
+				resp.Year = album.ReleaseYear
+			}
+			if !album.ReleaseDate.IsZero() {
+				resp.ReleaseDate = album.ReleaseDate.Format("2006-01-02")
+				if resp.Year == 0 {
+					resp.Year = album.ReleaseDate.Year()
+				}
+			}
+			if len(album.Artists) > 0 {
+				resp.Artists = make([]struct {
+					ID   string `json:"id"`
+					Name string `json:"name"`
+				}, 0, len(album.Artists))
+				for _, artist := range album.Artists {
+					resp.Artists = append(resp.Artists, struct {
+						ID   string `json:"id"`
+						Name string `json:"name"`
+					}{
+						ID:   artist.ID.String(),
+						Name: artist.Name,
+					})
+				}
+			}
+		}
+		albumDiscoverItems = append(albumDiscoverItems, resp)
 	}
 
 	artistDiscoverItems := make([]DiscoverItemResponse, 0, len(artistItems))
@@ -946,6 +996,8 @@ func (s *Service) Discover(page int, pageSize int) ([]DiscoverItemResponse, int6
 			Summary:    item.Summary,
 			ImageURL:   item.ImageURL,
 			TargetPath: item.TargetPath,
+			Name:       item.Title,
+			Bio:        item.Summary,
 		})
 	}
 

@@ -73,6 +73,17 @@ type DiscoverItemResponse struct {
 	TargetPath  string `json:"target_path"`
 	SongCount   int64  `json:"song_count,omitempty"`
 	OwnerUserID string `json:"owner_user_id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	LegalName   string `json:"legal_name,omitempty"`
+	Bio         string `json:"bio,omitempty"`
+	CoverURL    string `json:"cover_url,omitempty"`
+	Description string `json:"description,omitempty"`
+	ReleaseDate string `json:"release_date,omitempty"`
+	Year        int    `json:"year,omitempty"`
+	Artists     []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"artists,omitempty"`
 }
 
 type PaginationMetaResponse struct {
