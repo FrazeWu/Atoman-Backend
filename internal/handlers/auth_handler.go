@@ -191,6 +191,7 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 		}
 
 		input.Username = strings.ToLower(strings.TrimSpace(input.Username))
+		input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 		if err := service.NewSiteNamespaceService(db).ValidateUsernameAvailable(c.Request.Context(), input.Username); err != nil {
 			if errors.Is(err, service.ErrSiteHandleReserved) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "Site handle is reserved"})
@@ -204,7 +205,15 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 			return
 		}
 
-		// Verify email verification code first
+		// Check if user exists
+		var existingUser model.User
+		if err := db.Where("LOWER(username) = ? OR LOWER(email) = ?", input.Username, input.Email).First(&existingUser).Error; err == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "User already exists"})
+			return
+		}
+
+		// Verify email verification code after availability checks so duplicate
+		// submissions do not consume a valid code.
 		valid, err := emailService.VerifyCode(input.Email, input.VerificationCode)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify email code"})
@@ -212,13 +221,6 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 		}
 		if !valid {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired verification code"})
-			return
-		}
-
-		// Check if user exists
-		var existingUser model.User
-		if err := db.Where("username = ? OR email = ?", input.Username, input.Email).First(&existingUser).Error; err == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "User already exists"})
 			return
 		}
 
@@ -348,8 +350,10 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		normalizedLogin := strings.ToLower(strings.TrimSpace(input.Username))
+
 		var user model.User
-		if err := db.Where("(username = ? OR email = ?) AND is_active = ?", input.Username, input.Username, true).First(&user).Error; err != nil {
+		if err := db.Where("(LOWER(username) = ? OR LOWER(email) = ?) AND is_active = ?", normalizedLogin, normalizedLogin, true).First(&user).Error; err != nil {
 			authError(c, http.StatusUnauthorized, authAccountNotFound, "账号不存在")
 			return
 		}

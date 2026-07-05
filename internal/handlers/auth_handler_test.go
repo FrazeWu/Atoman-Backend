@@ -340,6 +340,34 @@ func TestLoginHandlerRejectsInactiveUser(t *testing.T) {
 	}
 }
 
+func TestLoginHandlerAcceptsEmailCaseInsensitively(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newAuthTestDB(t)
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	if err := db.Create(&model.User{Username: "alice", Email: "alice@example.com", Password: string(hash), Role: "user", IsActive: true}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	r := gin.New()
+	r.POST("/login", LoginHandler(db))
+
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"Alice@Example.com","password":"correct-password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"username":"alice"`) {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
 func TestSendVerificationHandlerDoesNotLogVerificationCode(t *testing.T) {
 	gin.SetMode(gin.DebugMode)
 	t.Setenv("GIN_MODE", gin.DebugMode)
