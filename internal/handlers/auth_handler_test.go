@@ -441,6 +441,55 @@ func TestRegisterHandlerRejectsReservedUsername(t *testing.T) {
 	}
 }
 
+func TestCheckEmailHandlerReportsRegisteredEmail(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAuthTestDB(t)
+	if err := db.Create(&model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	r := gin.New()
+	r.POST("/check-email", CheckEmailHandler(db))
+
+	req := httptest.NewRequest(http.MethodPost, "/check-email", strings.NewReader(`{"email":"alice@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"available":false`) || !strings.Contains(w.Body.String(), `"reason":"registered"`) {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestCheckUsernameHandlerReportsTakenUsername(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAuthTestDB(t)
+	owner := model.User{Username: "owner", Email: "owner@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	channel := model.Channel{Name: "Design", Slug: "design", UserID: &owner.UUID}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	r := gin.New()
+	r.POST("/check-username", CheckUsernameHandler(db))
+
+	req := httptest.NewRequest(http.MethodPost, "/check-username", strings.NewReader(`{"username":"design"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"available":false`) || !strings.Contains(w.Body.String(), `"reason":"taken"`) {
+		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
 func TestRegisterHandlerRejectsUsernameMatchingChannelSlug(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("ENV", "development")

@@ -400,13 +400,7 @@ func configuredAllowedOrigins() []string {
 func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
-		isAllowed := false
-		for _, allowed := range allowedOrigins {
-			if origin == allowed {
-				isAllowed = true
-				break
-			}
-		}
+		isAllowed := originAllowed(origin, allowedOrigins)
 
 		if isAllowed {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
@@ -422,6 +416,24 @@ func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func originAllowed(origin string, allowedOrigins []string) bool {
+	for _, allowed := range allowedOrigins {
+		if origin == allowed {
+			return true
+		}
+		if strings.HasPrefix(allowed, "*.") {
+			suffix := strings.TrimPrefix(allowed, "*.")
+			if strings.HasPrefix(origin, "https://") && strings.HasSuffix(strings.TrimPrefix(origin, "https://"), suffix) {
+				return true
+			}
+			if strings.HasPrefix(origin, "http://") && strings.HasSuffix(strings.TrimPrefix(origin, "http://"), suffix) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func main() {

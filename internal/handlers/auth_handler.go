@@ -152,6 +152,14 @@ type VerifyEmailInput struct {
 	Code  string `json:"code" binding:"required,len=6"`
 }
 
+type CheckEmailInput struct {
+	Email string `json:"email" binding:"required,email"`
+}
+
+type CheckUsernameInput struct {
+	Username string `json:"username" binding:"required"`
+}
+
 // SetupAuthRoutes configures authentication routes
 func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.EmailService) {
 	middleware.SetAuthDB(db)
@@ -162,6 +170,8 @@ func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.Emai
 		auth.POST("/login", LoginHandler(db))
 		auth.POST("/logout", LogoutHandler())
 		auth.GET("/session", SessionHandler(db))
+		auth.POST("/check-email", CheckEmailHandler(db))
+		auth.POST("/check-username", CheckUsernameHandler(db))
 		auth.POST("/send-verification", SendVerificationHandler(emailService))
 		auth.POST("/verify-email", VerifyEmailHandler(emailService))
 	}
@@ -392,6 +402,60 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 		setAuthTokenCookie(c, tokenString)
 
 		c.JSON(http.StatusOK, userAuthResponse(user, tokenString))
+	}
+}
+
+func CheckEmailHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input CheckEmailInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		email := strings.ToLower(strings.TrimSpace(input.Email))
+		var count int64
+		if err := db.Model(&model.User{}).Where("LOWER(email) = ?", email).Count(&count).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check email"})
+			return
+		}
+
+		if count > 0 {
+			c.JSON(http.StatusOK, gin.H{"available": false, "reason": "registered"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"available": true})
+	}
+}
+
+func CheckUsernameHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input CheckUsernameInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		username := strings.TrimSpace(input.Username)
+		if err := service.NewSiteNamespaceService(db).ValidateUsernameAvailable(c.Request.Context(), username); err != nil {
+			if errors.Is(err, service.ErrSiteHandleReserved) {
+				c.JSON(http.StatusOK, gin.H{"available": false, "reason": "reserved"})
+				return
+			}
+			if errors.Is(err, service.ErrSiteHandleTaken) {
+				c.JSON(http.StatusOK, gin.H{"available": false, "reason": "taken"})
+				return
+			}
+			if errors.Is(err, service.ErrSiteHandleInvalid) {
+				c.JSON(http.StatusOK, gin.H{"available": false, "reason": "invalid"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check username"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"available": true})
 	}
 }
 
