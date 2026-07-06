@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -543,6 +544,26 @@ func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 			status = "draft"
 		}
 
+		if input.ChannelID != nil {
+			var channel model.Channel
+			if err := db.First(&channel, "id = ?", *input.ChannelID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if !ownsChannel(channel.UserID, userID) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+				return
+			}
+			if model.NormalizeChannelContentType(channel.ContentType) != model.ChannelContentTypeVideo {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "channel content type mismatch"})
+				return
+			}
+		}
+
 		video := model.Video{
 			UserID:       userID,
 			ChannelID:    input.ChannelID,
@@ -635,6 +656,26 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+
+		if input.ChannelID != nil {
+			var channel model.Channel
+			if err := db.First(&channel, "id = ?", *input.ChannelID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
+					return
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			if !ownsChannel(channel.UserID, userID) {
+				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+				return
+			}
+			if model.NormalizeChannelContentType(channel.ContentType) != model.ChannelContentTypeVideo {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "channel content type mismatch"})
+				return
+			}
 		}
 
 		updates := map[string]interface{}{}
@@ -747,8 +788,18 @@ type channelBookmarkInput struct {
 func GetVideoBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
+		sort := strings.TrimSpace(c.DefaultQuery("sort", "latest"))
 		var bookmarks []model.VideoBookmark
-		if err := db.Preload("Video").Where("user_id = ?", userID).Order("created_at DESC").Find(&bookmarks).Error; err != nil {
+		query := db.Preload("Video").Where("video_bookmarks.user_id = ?", userID)
+		if sort == "popular" {
+			query = query.
+				Joins("JOIN videos ON videos.id = video_bookmarks.video_id").
+				Order("videos.view_count DESC").
+				Order("video_bookmarks.created_at DESC")
+		} else {
+			query = query.Order("video_bookmarks.created_at DESC")
+		}
+		if err := query.Find(&bookmarks).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch video bookmarks"})
 			return
 		}
@@ -803,8 +854,15 @@ func DeleteVideoBookmark(db *gorm.DB) gin.HandlerFunc {
 func GetChannelBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
+		sort := strings.TrimSpace(c.DefaultQuery("sort", "latest"))
 		var bookmarks []model.ChannelBookmark
-		if err := db.Preload("Channel").Where("user_id = ? AND kind = ?", userID, "video_channel").Order("created_at DESC").Find(&bookmarks).Error; err != nil {
+		query := db.Preload("Channel").Where("user_id = ? AND kind = ?", userID, "video_channel")
+		if sort == "popular" {
+			query = query.Order("channel_bookmarks.created_at DESC")
+		} else {
+			query = query.Order("channel_bookmarks.created_at DESC")
+		}
+		if err := query.Find(&bookmarks).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch channel bookmarks"})
 			return
 		}

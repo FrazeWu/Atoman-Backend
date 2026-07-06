@@ -145,6 +145,74 @@ func TestRegisterRoutesListsArtistsThroughMusicV1(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesCreatesArtistThroughMusicV1(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/artists", bytes.NewBufferString(`{"name":"New Music Artist","bio":"artist bio","image_url":"/uploads/artist.jpg","nationality":"JP","birth_year":1990}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data model.Artist `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.ID == uuid.Nil || resp.Data.Name != "New Music Artist" || resp.Data.Bio != "artist bio" || resp.Data.Nationality != "JP" || resp.Data.BirthYear != 1990 || resp.Data.EntryStatus != "open" {
+		t.Fatalf("unexpected artist response: %#v", resp.Data)
+	}
+
+	var persisted model.Artist
+	if err := db.First(&persisted, "id = ?", resp.Data.ID).Error; err != nil {
+		t.Fatalf("load persisted artist: %v", err)
+	}
+	if persisted.Name != "New Music Artist" {
+		t.Fatalf("unexpected persisted artist: %#v", persisted)
+	}
+}
+
+func TestRegisterRoutesUpdatesArtistThroughMusicV1(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Before Artist", Bio: "before", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/music/artists/"+artist.ID.String(), bytes.NewBufferString(`{"name":"After Artist","bio":"after","image_url":"/uploads/after.jpg","nationality":"KR","birth_year":1991,"death_year":2026}`))
+	req.Header.Set("Content-Type", "application/json")
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data model.Artist `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.Name != "After Artist" || resp.Data.Bio != "after" || resp.Data.ImageURL == "" || resp.Data.Nationality != "KR" || resp.Data.BirthYear != 1991 || resp.Data.DeathYear != 2026 {
+		t.Fatalf("unexpected artist response: %#v", resp.Data)
+	}
+
+	var persisted model.Artist
+	if err := db.First(&persisted, "id = ?", artist.ID).Error; err != nil {
+		t.Fatalf("load persisted artist: %v", err)
+	}
+	if persisted.Name != "After Artist" || persisted.Bio != "after" {
+		t.Fatalf("unexpected persisted artist: %#v", persisted)
+	}
+}
+
 func TestRegisterRoutesArtistSearchMatchesAliasAndReturnsPrimaryArtist(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{
@@ -1649,6 +1717,62 @@ func TestRegisterRoutesSongBookmarksListIncludesSongDetails(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesArtistBookmarksSupportPopularSort(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	hotArtist := model.Artist{Name: "Hot Artist", EntryStatus: "open"}
+	coldArtist := model.Artist{Name: "Cold Artist", EntryStatus: "open"}
+	if err := db.Create(&hotArtist).Error; err != nil {
+		t.Fatalf("create hot artist: %v", err)
+	}
+	if err := db.Create(&coldArtist).Error; err != nil {
+		t.Fatalf("create cold artist: %v", err)
+	}
+	hotSong := model.Song{Title: "Hot Song", AudioURL: "/audio/hot.mp3", Status: "open", PlayCount: 100}
+	coldSong := model.Song{Title: "Cold Song", AudioURL: "/audio/cold.mp3", Status: "open", PlayCount: 1}
+	if err := db.Create(&hotSong).Error; err != nil {
+		t.Fatalf("create hot song: %v", err)
+	}
+	if err := db.Create(&coldSong).Error; err != nil {
+		t.Fatalf("create cold song: %v", err)
+	}
+	if err := db.Model(&hotSong).Association("Artists").Append(&hotArtist); err != nil {
+		t.Fatalf("append hot artist: %v", err)
+	}
+	if err := db.Model(&coldSong).Association("Artists").Append(&coldArtist); err != nil {
+		t.Fatalf("append cold artist: %v", err)
+	}
+	if _, err := service.BookmarkArtist(user, coldArtist.ID); err != nil {
+		t.Fatalf("bookmark cold artist: %v", err)
+	}
+	if _, err := service.BookmarkArtist(user, hotArtist.ID); err != nil {
+		t.Fatalf("bookmark hot artist: %v", err)
+	}
+
+	r := newMusicHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/artists?sort=popular", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []struct {
+			ArtistID string `json:"artist_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) < 2 {
+		t.Fatalf("expected 2 bookmarks, got %s", w.Body.String())
+	}
+	if resp.Data[0].ArtistID != hotArtist.ID.String() {
+		t.Fatalf("expected hot artist first, got %#v", resp.Data)
+	}
+}
+
 func TestRegisterRoutesPlaylistsArePrivateAndSongsAreDeduplicated(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	otherModel := model.User{Username: "playlist-other", Email: "playlist-other@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
@@ -1748,6 +1872,60 @@ func TestRegisterRoutesPlaylistsArePrivateAndSongsAreDeduplicated(t *testing.T) 
 	}
 	if len(otherListResp.Data) != 0 || otherListResp.Meta.Total != 0 {
 		t.Fatalf("expected private playlists to be hidden, got %#v %#v", otherListResp.Data, otherListResp.Meta)
+	}
+}
+
+func TestRegisterRoutesUpdatesOwnPlaylistThroughMusicV1(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	otherModel := model.User{Username: "playlist-patch-other", Email: "playlist-patch-other@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&otherModel).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	otherUser := authctx.CurrentUser{ID: otherModel.UUID, Username: otherModel.Username, Role: authctx.RoleUser}
+
+	userRouter := newMusicHTTPRouter(service, &user)
+	playlist := createMusicPlaylistViaAPI(t, userRouter, `{"name":"Original Playlist","description":"old","cover_url":"/uploads/old.jpg","is_public":false}`)
+
+	ownerPatch := httptest.NewRecorder()
+	ownerPatchReq := httptest.NewRequest(http.MethodPatch, "/api/v1/music/playlists/"+playlist.ID, bytes.NewBufferString(`{"name":"Updated Playlist","description":"new","cover_url":"/uploads/new.jpg","is_public":true}`))
+	ownerPatchReq.Header.Set("Content-Type", "application/json")
+	userRouter.ServeHTTP(ownerPatch, ownerPatchReq)
+	if ownerPatch.Code != http.StatusOK {
+		t.Fatalf("expected owner patch 200, got %d: %s", ownerPatch.Code, ownerPatch.Body.String())
+	}
+
+	var ownerResp struct {
+		Data struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			CoverURL    string `json:"cover_url"`
+			IsPublic    bool   `json:"is_public"`
+			UserID      string `json:"user_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(ownerPatch.Body.Bytes(), &ownerResp); err != nil {
+		t.Fatalf("decode owner patch response: %v", err)
+	}
+	if ownerResp.Data.Name != "Updated Playlist" || ownerResp.Data.Description != "new" || ownerResp.Data.CoverURL == "" || !ownerResp.Data.IsPublic || ownerResp.Data.UserID != user.ID.String() {
+		t.Fatalf("unexpected playlist response: %#v", ownerResp.Data)
+	}
+
+	otherRouter := newMusicHTTPRouter(service, &otherUser)
+	otherPatch := httptest.NewRecorder()
+	otherPatchReq := httptest.NewRequest(http.MethodPatch, "/api/v1/music/playlists/"+playlist.ID, bytes.NewBufferString(`{"name":"Taken Playlist"}`))
+	otherPatchReq.Header.Set("Content-Type", "application/json")
+	otherRouter.ServeHTTP(otherPatch, otherPatchReq)
+	if otherPatch.Code != http.StatusNotFound {
+		t.Fatalf("expected other user patch 404, got %d: %s", otherPatch.Code, otherPatch.Body.String())
+	}
+
+	var persisted model.Playlist
+	if err := db.First(&persisted, "id = ?", playlist.ID).Error; err != nil {
+		t.Fatalf("load persisted playlist: %v", err)
+	}
+	if persisted.Name != "Updated Playlist" {
+		t.Fatalf("other user changed playlist: %#v", persisted)
 	}
 }
 

@@ -39,6 +39,7 @@ func newAuthTestDB(t *testing.T) *gorm.DB {
 		&model.UserSettings{},
 		&model.EmailVerificationCode{},
 		&model.Channel{},
+		&model.UserDefaultChannel{},
 		&model.Collection{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},

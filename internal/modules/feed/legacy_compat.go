@@ -2063,6 +2063,7 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"message":  "OPML import completed",
 			"imported": imported,
+			"reused":   0,
 			"failed":   failed,
 		})
 	}
@@ -3064,30 +3065,14 @@ func SubscribeChannel(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// Verify channel exists
-		var channel model.Channel
-		if err := db.First(&channel, "id = ?", channelID).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
+		feedSource, title, found, err := resolveChannelSubscriptionFeedSource(db, channelID, true)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve subscription source"})
 			return
 		}
-
-		// Find or create FeedSource for this channel
-		var feedSource model.FeedSource
-		hashStr := fmt.Sprintf("internal_channel:%s", channelIDStr)
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashStr)))
-
-		if err := db.Where("hash = ?", hash).First(&feedSource).Error; err != nil {
-			// Create new FeedSource
-			feedSource = model.FeedSource{
-				SourceType: "internal_channel",
-				SourceID:   &channelID,
-				Title:      channel.Name,
-				Hash:       hash,
-			}
-			if err := db.Create(&feedSource).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create feed source"})
-				return
-			}
+		if !found {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
+			return
 		}
 
 		// Check if already subscribed
@@ -3101,7 +3086,7 @@ func SubscribeChannel(db *gorm.DB) gin.HandlerFunc {
 		subscription := model.Subscription{
 			UserID:       userID,
 			FeedSourceID: feedSource.ID,
-			Title:        channel.Name,
+			Title:        title,
 		}
 		if err := db.Create(&subscription).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create subscription"})
@@ -3110,6 +3095,46 @@ func SubscribeChannel(db *gorm.DB) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{"message": "Subscribed successfully", "subscription": subscription})
 	}
+}
+
+func resolveChannelSubscriptionFeedSource(db *gorm.DB, id uuid.UUID, createForChannel bool) (model.FeedSource, string, bool, error) {
+	var channel model.Channel
+	channelErr := db.First(&channel, "id = ?", id).Error
+	if channelErr == nil {
+		hashStr := fmt.Sprintf("internal_channel:%s", id.String())
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashStr)))
+		var feedSource model.FeedSource
+		if err := db.Where("hash = ?", hash).First(&feedSource).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return model.FeedSource{}, "", false, err
+			}
+			if !createForChannel {
+				return model.FeedSource{}, "", false, nil
+			}
+			feedSource = model.FeedSource{
+				SourceType: "internal_channel",
+				SourceID:   &id,
+				Title:      channel.Name,
+				Hash:       hash,
+			}
+			if err := db.Create(&feedSource).Error; err != nil {
+				return model.FeedSource{}, "", false, err
+			}
+		}
+		return feedSource, channel.Name, true, nil
+	}
+	if !errors.Is(channelErr, gorm.ErrRecordNotFound) {
+		return model.FeedSource{}, "", false, channelErr
+	}
+
+	var feedSource model.FeedSource
+	if err := db.First(&feedSource, "id = ?", id).Error; err == nil {
+		return feedSource, feedSource.Title, true, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.FeedSource{}, "", false, err
+	}
+
+	return model.FeedSource{}, "", false, nil
 }
 
 // UnsubscribeChannel unsubscribes the current user from a channel
@@ -3132,18 +3157,18 @@ func UnsubscribeChannel(db *gorm.DB) gin.HandlerFunc {
 		userID := userIDVal.(uuid.UUID)
 
 		channelIDStr := c.Param("channel_id")
-		_, err := uuid.Parse(channelIDStr)
+		channelID, err := uuid.Parse(channelIDStr)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
 			return
 		}
 
-		// Find FeedSource for this channel
-		var feedSource model.FeedSource
-		hashStr := fmt.Sprintf("internal_channel:%s", channelIDStr)
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashStr)))
-
-		if err := db.Where("hash = ?", hash).First(&feedSource).Error; err != nil {
+		feedSource, _, found, err := resolveChannelSubscriptionFeedSource(db, channelID, false)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve subscription source"})
+			return
+		}
+		if !found {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Subscription not found"})
 			return
 		}
@@ -3297,18 +3322,18 @@ func CheckChannelSubscription(db *gorm.DB) gin.HandlerFunc {
 		userID := userIDVal.(uuid.UUID)
 
 		channelIDStr := c.Param("channel_id")
-		_, err := uuid.Parse(channelIDStr)
+		channelID, err := uuid.Parse(channelIDStr)
 		if err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid channel ID"})
 			return
 		}
 
-		// Find FeedSource for this channel
-		var feedSource model.FeedSource
-		hashStr := fmt.Sprintf("internal_channel:%s", channelIDStr)
-		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashStr)))
-
-		if err := db.Where("hash = ?", hash).First(&feedSource).Error; err != nil {
+		feedSource, _, found, err := resolveChannelSubscriptionFeedSource(db, channelID, false)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve subscription source"})
+			return
+		}
+		if !found {
 			c.JSON(http.StatusOK, gin.H{"subscribed": false})
 			return
 		}

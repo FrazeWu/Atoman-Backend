@@ -361,6 +361,10 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
+		if model.NormalizeChannelContentType(channel.ContentType) != model.ChannelContentTypePodcast {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "channel content type mismatch"})
+			return
+		}
 
 		status := input.Status
 		if status == "" {
@@ -869,8 +873,20 @@ func GetPodcastEpisodeBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
 		userID := userIDVal.(uuid.UUID)
+		sort := strings.TrimSpace(c.DefaultQuery("sort", "latest"))
 		var bookmarks []model.PodcastEpisodeBookmark
-		if err := db.Preload("Episode").Preload("Episode.Post").Preload("Episode.Channel").Where("user_id = ?", userID).Order("created_at DESC").Find(&bookmarks).Error; err != nil {
+		query := db.Preload("Episode").Preload("Episode.Post").Preload("Episode.Channel").Where("podcast_episode_bookmarks.user_id = ?", userID)
+		if sort == "popular" {
+			query = query.
+				Joins("JOIN podcast_episodes ON podcast_episodes.id = podcast_episode_bookmarks.episode_id").
+				Joins("JOIN posts ON posts.id = podcast_episodes.post_id").
+				Order("COALESCE(posts.rating_average_score, 0) DESC").
+				Order("COALESCE(posts.rating_count, 0) DESC").
+				Order("podcast_episode_bookmarks.created_at DESC")
+		} else {
+			query = query.Order("podcast_episode_bookmarks.created_at DESC")
+		}
+		if err := query.Find(&bookmarks).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch podcast bookmarks"})
 			return
 		}
@@ -928,8 +944,15 @@ func GetPodcastShowBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
 		userID := userIDVal.(uuid.UUID)
+		sort := strings.TrimSpace(c.DefaultQuery("sort", "latest"))
 		var bookmarks []model.ChannelBookmark
-		if err := db.Preload("Channel").Where("user_id = ? AND kind = ?", userID, "podcast_show").Order("created_at DESC").Find(&bookmarks).Error; err != nil {
+		query := db.Preload("Channel").Where("user_id = ? AND kind = ?", userID, "podcast_show")
+		if sort == "popular" {
+			query = query.Order("channel_bookmarks.created_at DESC")
+		} else {
+			query = query.Order("channel_bookmarks.created_at DESC")
+		}
+		if err := query.Find(&bookmarks).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch podcast show bookmarks"})
 			return
 		}

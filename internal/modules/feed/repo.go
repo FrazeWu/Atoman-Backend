@@ -244,14 +244,14 @@ func (r *Repo) ListRecommendationPosts() ([]model.Post, error) {
 }
 
 type RecommendationChannelRow struct {
-	ChannelID        uuid.UUID
-	Slug             string
-	Name             string
-	Description      string
-	CoverURL         string
-	PublishedCount   int64
-	RecentPostCount  int64
-	AverageRating    float64
+	ChannelID             uuid.UUID
+	Slug                  string
+	Name                  string
+	Description           string
+	CoverURL              string
+	PublishedCount        int64
+	RecentPostCount       int64
+	AverageRating         float64
 	LatestPublishedAtUnix sql.NullInt64
 }
 
@@ -271,7 +271,7 @@ func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) 
 			`+latestPublishedExpr+` AS latest_published_at_unix
 		`, time.Now().Add(-7*24*time.Hour)).
 		Joins("JOIN posts ON posts.channel_id = channels.id").
-		Where("posts.status = ?", "published").
+		Where("channels.deleted_at IS NULL AND posts.deleted_at IS NULL AND posts.status = ?", "published").
 		Group("channels.id").
 		Order("MAX(posts.created_at) DESC").
 		Scan(&rows).Error

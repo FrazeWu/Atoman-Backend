@@ -170,7 +170,9 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/imports/albums/:sessionId", h.getAlbumImportSession)
 	group.POST("/imports/albums/:sessionId/commit", h.commitAlbumImportSession)
 	group.GET("/artists", h.listArtists)
+	group.POST("/artists", h.createArtist)
 	group.GET("/artists/:artistId", h.getArtist)
+	group.PATCH("/artists/:artistId", h.updateArtist)
 	group.GET("/albums", h.listAlbums)
 	group.GET("/albums/:albumId", h.getAlbum)
 	group.GET("/bookmarks/artists", h.listArtistBookmarks)
@@ -187,6 +189,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/playlists/public", h.listPublicPlaylists)
 	group.POST("/playlists", h.createPlaylist)
 	group.GET("/playlists/:id", h.getPlaylist)
+	group.PATCH("/playlists/:id", h.updatePlaylist)
 	group.DELETE("/playlists/:id", h.deletePlaylist)
 	group.GET("/playlists/:id/songs", h.listPlaylistSongs)
 	group.POST("/playlists/:id/songs", h.addPlaylistSong)
@@ -238,6 +241,26 @@ func (h *Handler) listArtists(c *gin.Context) {
 	httpx.List(c, artists, page, pageSize, total)
 }
 
+func (h *Handler) createArtist(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req CreateArtistRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	artist, err := h.service.CreateArtist(user, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	artist.ImageURL = resolveMusicMediaURL(artist.ImageURL)
+	httpx.OK(c, http.StatusCreated, artist)
+}
+
 func (h *Handler) getArtist(c *gin.Context) {
 	artistID, err := parseMusicID(c.Param("artistId"), "artistId")
 	if err != nil {
@@ -279,6 +302,31 @@ func (h *Handler) getArtist(c *gin.Context) {
 	}
 
 	httpx.OK(c, http.StatusOK, buildArtistDetailResponse(artist))
+}
+
+func (h *Handler) updateArtist(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	artistID, err := parseMusicID(c.Param("artistId"), "artistId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var req UpdateArtistRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	artist, err := h.service.UpdateArtist(user, artistID, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	artist.ImageURL = resolveMusicMediaURL(artist.ImageURL)
+	httpx.OK(c, http.StatusOK, artist)
 }
 
 func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
@@ -491,7 +539,8 @@ func (h *Handler) listArtistBookmarks(c *gin.Context) {
 		return
 	}
 	page, pageSize := httpx.PageParams(c)
-	bookmarks, total, err := h.service.ListArtistBookmarks(user, page, pageSize)
+	sort := c.DefaultQuery("sort", "latest")
+	bookmarks, total, err := h.service.ListArtistBookmarks(user, page, pageSize, sort)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -543,7 +592,8 @@ func (h *Handler) listAlbumBookmarks(c *gin.Context) {
 		return
 	}
 	page, pageSize := httpx.PageParams(c)
-	bookmarks, total, err := h.service.ListAlbumBookmarks(user, page, pageSize)
+	sort := c.DefaultQuery("sort", "latest")
+	bookmarks, total, err := h.service.ListAlbumBookmarks(user, page, pageSize, sort)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -595,7 +645,8 @@ func (h *Handler) listSongBookmarks(c *gin.Context) {
 		return
 	}
 	page, pageSize := httpx.PageParams(c)
-	bookmarks, total, err := h.service.ListSongBookmarks(user, page, pageSize)
+	sort := c.DefaultQuery("sort", "latest")
+	bookmarks, total, err := h.service.ListSongBookmarks(user, page, pageSize, sort)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -647,7 +698,17 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 		return
 	}
 	page, pageSize := httpx.PageParams(c)
-	playlists, total, err := h.service.ListPlaylists(user, page, pageSize)
+	sort := c.DefaultQuery("sort", "latest")
+	playlists, total, err := h.service.ListPlaylists(user, page, pageSize, sort)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	playlistIDs := make([]uuid.UUID, 0, len(playlists))
+	for _, playlist := range playlists {
+		playlistIDs = append(playlistIDs, playlist.ID)
+	}
+	songCounts, err := h.service.repo.CountPlaylistSongs(playlistIDs)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -661,7 +722,7 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 			Description: playlist.Description,
 			CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
 			IsPublic:    playlist.IsPublic,
-			SongCount:   0,
+			SongCount:   songCounts[playlist.ID],
 		})
 	}
 	httpx.List(c, rows, page, pageSize, total)
@@ -719,6 +780,18 @@ func (h *Handler) discover(c *gin.Context) {
 	httpx.List(c, items, page, pageSize, total)
 }
 
+func buildPlaylistSummaryResponse(playlist model.Playlist, songCount int64) PlaylistSummaryResponse {
+	return PlaylistSummaryResponse{
+		ID:          playlist.ID,
+		UserID:      playlist.UserID,
+		Name:        playlist.Name,
+		Description: playlist.Description,
+		CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
+		IsPublic:    playlist.IsPublic,
+		SongCount:   songCount,
+	}
+}
+
 // createPlaylist godoc
 // @Summary 创建歌单
 // @Description 创建歌单，可同时设置简介、封面和是否公开。
@@ -749,15 +822,7 @@ func (h *Handler) createPlaylist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusCreated, PlaylistSummaryResponse{
-		ID:          playlist.ID,
-		UserID:      playlist.UserID,
-		Name:        playlist.Name,
-		Description: playlist.Description,
-		CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
-		IsPublic:    playlist.IsPublic,
-		SongCount:   0,
-	})
+	httpx.OK(c, http.StatusCreated, buildPlaylistSummaryResponse(playlist, 0))
 }
 
 func (h *Handler) deletePlaylist(c *gin.Context) {
@@ -801,15 +866,31 @@ func (h *Handler) getPlaylist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, PlaylistSummaryResponse{
-		ID:          playlist.ID,
-		UserID:      playlist.UserID,
-		Name:        playlist.Name,
-		Description: playlist.Description,
-		CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
-		IsPublic:    playlist.IsPublic,
-		SongCount:   0,
-	})
+	httpx.OK(c, http.StatusOK, buildPlaylistSummaryResponse(playlist, 0))
+}
+
+func (h *Handler) updatePlaylist(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	playlistID, err := parseMusicID(c.Param("id"), "id")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var req UpdatePlaylistRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	playlist, err := h.service.UpdatePlaylist(user, playlistID, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, buildPlaylistSummaryResponse(playlist, 0))
 }
 
 // listPlaylistSongs godoc

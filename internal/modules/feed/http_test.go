@@ -587,13 +587,13 @@ func TestFeedRecommendationArticlesReturnsData(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			ID         string `json:"id"`
-			Title      string `json:"title"`
-			Summary    string `json:"summary"`
+			ID          string `json:"id"`
+			Title       string `json:"title"`
+			Summary     string `json:"summary"`
 			ContentType string `json:"content_type"`
-			ImageURL   string `json:"image_url"`
-			TargetPath string `json:"target_path"`
-			ScoreLabel string `json:"score_label"`
+			ImageURL    string `json:"image_url"`
+			TargetPath  string `json:"target_path"`
+			ScoreLabel  string `json:"score_label"`
 		} `json:"data"`
 		Meta struct {
 			Total int64 `json:"total"`
@@ -730,11 +730,11 @@ func TestFeedRecommendationArticlesIncludesExternalFeedItems(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			ID         string `json:"id"`
-			Title      string `json:"title"`
+			ID          string `json:"id"`
+			Title       string `json:"title"`
 			ContentType string `json:"content_type"`
-			TargetPath string `json:"target_path"`
-			ScoreLabel string `json:"score_label"`
+			TargetPath  string `json:"target_path"`
+			ScoreLabel  string `json:"score_label"`
 		} `json:"data"`
 		Meta struct {
 			Total int64 `json:"total"`
@@ -756,11 +756,37 @@ func TestFeedRecommendationArticlesIncludesExternalFeedItems(t *testing.T) {
 
 func TestFeedRecommendationChannelsReturnsData(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	service, db, _ := newFeedTestService(t)
+	service, db, user := newFeedTestService(t)
 
 	var channel model.Channel
 	if err := db.Where("slug = ?", "alice-channel").First(&channel).Error; err != nil {
 		t.Fatalf("find channel: %v", err)
+	}
+	if err := db.Where("source_type = ? AND source_id = ?", "internal_channel", channel.ID).Delete(&model.FeedSource{}).Error; err != nil {
+		t.Fatalf("delete channel feed source: %v", err)
+	}
+	deletedChannel := model.Channel{
+		UserID:      &user.ID,
+		Name:        "Deleted Channel",
+		Slug:        "deleted-channel",
+		ContentType: model.ChannelContentTypeBlog,
+	}
+	if err := db.Create(&deletedChannel).Error; err != nil {
+		t.Fatalf("create deleted channel: %v", err)
+	}
+	deletedPost := model.Post{
+		UserID:     user.ID,
+		ChannelID:  &deletedChannel.ID,
+		Title:      "Deleted channel post",
+		Content:    "deleted channel content",
+		Status:     "published",
+		Visibility: "public",
+	}
+	if err := db.Create(&deletedPost).Error; err != nil {
+		t.Fatalf("create deleted channel post: %v", err)
+	}
+	if err := db.Delete(&deletedChannel).Error; err != nil {
+		t.Fatalf("soft delete channel: %v", err)
 	}
 
 	router := gin.New()
@@ -776,13 +802,13 @@ func TestFeedRecommendationChannelsReturnsData(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			ID         string `json:"id"`
-			Title      string `json:"title"`
-			Summary    string `json:"summary"`
+			ID          string `json:"id"`
+			Title       string `json:"title"`
+			Summary     string `json:"summary"`
 			ContentType string `json:"content_type"`
-			ImageURL   string `json:"image_url"`
-			TargetPath string `json:"target_path"`
-			ScoreLabel string `json:"score_label"`
+			ImageURL    string `json:"image_url"`
+			TargetPath  string `json:"target_path"`
+			ScoreLabel  string `json:"score_label"`
 		} `json:"data"`
 		Meta struct {
 			Total int64 `json:"total"`
@@ -802,11 +828,17 @@ func TestFeedRecommendationChannelsReturnsData(t *testing.T) {
 	for _, item := range payload.Data {
 		if item.TargetPath == "/channels/"+channel.Slug {
 			foundInternalChannel = true
-			break
+		}
+		if item.TargetPath == "/channels/"+deletedChannel.Slug {
+			t.Fatalf("soft-deleted channel appeared in recommendations: %s", rr.Body.String())
 		}
 	}
 	if !foundInternalChannel {
 		t.Fatalf("expected channel target path %s somewhere in result, got body %s", "/channels/"+channel.Slug, rr.Body.String())
+	}
+	var recreatedSource model.FeedSource
+	if err := db.Where("source_type = ? AND source_id = ?", "internal_channel", channel.ID).First(&recreatedSource).Error; err != nil {
+		t.Fatalf("expected recommendation to recreate missing channel feed source: %v", err)
 	}
 	if payload.Meta.Total == 0 {
 		t.Fatalf("expected channel recommendation meta total, got body %s", rr.Body.String())
@@ -858,12 +890,12 @@ func TestFeedRecommendationChannelsIncludePreviewAndStats(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			TargetPath            string `json:"target_path"`
-			Description           string `json:"description"`
-			UpdateFrequencyLabel  string `json:"update_frequency_label"`
-			BookmarkCount         int64  `json:"bookmark_count"`
-			ReadCount             int64  `json:"read_count"`
-			RecentItems           []struct {
+			TargetPath           string `json:"target_path"`
+			Description          string `json:"description"`
+			UpdateFrequencyLabel string `json:"update_frequency_label"`
+			BookmarkCount        int64  `json:"bookmark_count"`
+			ReadCount            int64  `json:"read_count"`
+			RecentItems          []struct {
 				Title string `json:"title"`
 			} `json:"recent_items"`
 		} `json:"data"`
@@ -940,14 +972,14 @@ func TestFeedRecommendationChannelsFiltersByCategoryAndTheme(t *testing.T) {
 	now := time.Now().UTC()
 	for _, item := range []model.FeedItem{
 		{
-			FeedSourceID:   podcastSource.ID,
-			GUID:           "recommend-podcast-item",
-			Title:          "Founder interview",
-			Summary:        "Startup operators talk funding",
-			Link:           "https://podcast.example.com/founder-interview",
-			PublishedAt:    now,
-			FetchedAt:      now,
-			EnclosureType:  "audio/mpeg",
+			FeedSourceID:  podcastSource.ID,
+			GUID:          "recommend-podcast-item",
+			Title:         "Founder interview",
+			Summary:       "Startup operators talk funding",
+			Link:          "https://podcast.example.com/founder-interview",
+			PublishedAt:   now,
+			FetchedAt:     now,
+			EnclosureType: "audio/mpeg",
 		},
 		{
 			FeedSourceID:  videoSource.ID,
@@ -1121,11 +1153,11 @@ func TestFeedRecommendationChannelsIncludesExternalSources(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			ID         string `json:"id"`
-			Title      string `json:"title"`
+			ID          string `json:"id"`
+			Title       string `json:"title"`
 			ContentType string `json:"content_type"`
-			TargetPath string `json:"target_path"`
-			ScoreLabel string `json:"score_label"`
+			TargetPath  string `json:"target_path"`
+			ScoreLabel  string `json:"score_label"`
 		} `json:"data"`
 		Meta struct {
 			Total int64 `json:"total"`

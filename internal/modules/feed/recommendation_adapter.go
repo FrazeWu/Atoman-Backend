@@ -1,6 +1,8 @@
 package feed
 
 import (
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	"atoman/internal/platform/apperr"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func parseRecommendationMode(raw string) (recommendation.Mode, error) {
@@ -80,13 +83,13 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 		post, ok := postByID[item.EntityID]
 		if ok {
 			items = append(items, RecommendationItemDTO{
-				ID:         post.ID.String(),
-				Title:      post.Title,
-				Summary:    post.Summary,
+				ID:          post.ID.String(),
+				Title:       post.Title,
+				Summary:     post.Summary,
 				ContentType: "blog",
-				ImageURL:   post.CoverURL,
-				TargetPath: "/posts/post/" + post.ID.String(),
-				ScoreLabel: recommendationScoreLabel(mode, item.FinalScore),
+				ImageURL:    post.CoverURL,
+				TargetPath:  "/posts/post/" + post.ID.String(),
+				ScoreLabel:  recommendationScoreLabel(mode, item.FinalScore),
 			})
 			continue
 		}
@@ -95,13 +98,13 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 			continue
 		}
 		items = append(items, RecommendationItemDTO{
-			ID:         feedItem.ID.String(),
-			Title:      feedItem.Title,
-			Summary:    feedItem.Summary,
+			ID:          feedItem.ID.String(),
+			Title:       feedItem.Title,
+			Summary:     feedItem.Summary,
 			ContentType: inferFeedItemRecommendationType(feedItem),
-			ImageURL:   feedItem.ImageURL,
-			TargetPath: "/feed/item/" + feedItem.ID.String(),
-			ScoreLabel: recommendationScoreLabel(mode, item.FinalScore),
+			ImageURL:    feedItem.ImageURL,
+			TargetPath:  "/feed/item/" + feedItem.ID.String(),
+			ScoreLabel:  recommendationScoreLabel(mode, item.FinalScore),
 		})
 	}
 
@@ -495,7 +498,23 @@ func describeUpdateFrequency(publishedTimes []time.Time) string {
 func (s *Service) findInternalChannelFeedSourceID(channelID uuid.UUID) (uuid.UUID, error) {
 	var source model.FeedSource
 	if err := s.db.Where("source_type = ? AND source_id = ?", "internal_channel", channelID).First(&source).Error; err != nil {
-		return uuid.Nil, err
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return uuid.Nil, err
+		}
+		var channel model.Channel
+		if err := s.db.First(&channel, "id = ?", channelID).Error; err != nil {
+			return uuid.Nil, err
+		}
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("internal_channel:%s", channelID.String()))))
+		source = model.FeedSource{
+			SourceType: "internal_channel",
+			SourceID:   &channelID,
+			Title:      channel.Name,
+			Hash:       hash,
+		}
+		if err := s.db.Where("hash = ?", hash).FirstOrCreate(&source).Error; err != nil {
+			return uuid.Nil, err
+		}
 	}
 	return source.ID, nil
 }

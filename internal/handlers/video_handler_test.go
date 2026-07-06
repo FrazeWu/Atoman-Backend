@@ -25,6 +25,7 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.User{},
 		&model.Channel{},
 		&model.Collection{},
+		&model.UserDefaultChannel{},
 		&model.Video{},
 		&model.VideoBookmark{},
 		&model.ChannelBookmark{},
@@ -82,9 +83,10 @@ func withVideoAuth(userID uuid.UUID, h gin.HandlerFunc) gin.HandlerFunc {
 func seedVideoChannel(t *testing.T, db *gorm.DB, userID uuid.UUID, name string) model.Channel {
 	t.Helper()
 	channel := model.Channel{
-		UserID: &userID,
-		Name:   name,
-		Slug:   strings.ToLower(strings.ReplaceAll(name, " ", "-")) + "-" + uuid.NewString()[:8],
+		UserID:      &userID,
+		Name:        name,
+		Slug:        strings.ToLower(strings.ReplaceAll(name, " ", "-")) + "-" + uuid.NewString()[:8],
+		ContentType: "video",
 	}
 	require.NoError(t, db.Create(&channel).Error)
 	return channel
@@ -156,6 +158,35 @@ func TestListAndDeleteVideoBookmarks(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&model.VideoBookmark{}).Where("id = ?", bookmark.ID).Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func TestVideoBookmarksSupportPopularSort(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	hotVideo := seedVideo(t, db, user.UUID)
+	coldVideo := seedVideo(t, db, user.UUID)
+	require.NoError(t, db.Model(&hotVideo).Update("view_count", 100).Error)
+	require.NoError(t, db.Model(&coldVideo).Update("view_count", 10).Error)
+	require.NoError(t, db.Create(&model.VideoBookmark{UserID: user.UUID, VideoID: coldVideo.ID}).Error)
+	require.NoError(t, db.Create(&model.VideoBookmark{UserID: user.UUID, VideoID: hotVideo.ID}).Error)
+
+	r := gin.New()
+	r.GET("/api/v1/videos/bookmarks", withVideoAuth(user.UUID, GetVideoBookmarks(db)))
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/videos/bookmarks?sort=popular", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+
+	var resp struct {
+		Data []struct {
+			VideoID string `json:"video_id"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.Data, 2)
+	require.Equal(t, hotVideo.ID.String(), resp.Data[0].VideoID)
 }
 
 func TestCreateChannelBookmarkIsIdempotentWithRepeatedRequests(t *testing.T) {
@@ -434,6 +465,96 @@ func TestUpdateVideoRollsBackWhenCollectionAssignmentFails(t *testing.T) {
 	var tagCount int64
 	require.NoError(t, db.Model(&model.VideoTag{}).Where("name = ?", "updated-tag").Count(&tagCount).Error)
 	require.Zero(t, tagCount)
+}
+
+func TestCreateVideoRequiresOwnedVideoChannel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	otherUser := seedVideoUser(t, db)
+	ownedVideoChannel := seedVideoChannel(t, db, user.UUID, "Owned Video Channel")
+	otherUsersVideoChannel := seedVideoChannel(t, db, otherUser.UUID, "Other Users Video Channel")
+	mismatchedChannel := model.Channel{
+		UserID:      &user.UUID,
+		Name:        "Users Blog Channel",
+		Slug:        "users-blog-channel-" + uuid.NewString()[:8],
+		ContentType: "blog",
+	}
+	require.NoError(t, db.Create(&mismatchedChannel).Error)
+
+	r := gin.New()
+	r.POST("/api/v1/videos", withVideoAuth(user.UUID, CreateVideo(db)))
+
+	cases := []struct {
+		name      string
+		channelID string
+		want      int
+	}{
+		{name: "owned video channel succeeds", channelID: ownedVideoChannel.ID.String(), want: http.StatusCreated},
+		{name: "other users channel is forbidden", channelID: otherUsersVideoChannel.ID.String(), want: http.StatusForbidden},
+		{name: "content type mismatch is rejected", channelID: mismatchedChannel.ID.String(), want: http.StatusBadRequest},
+		{name: "missing channel is not found", channelID: uuid.NewString(), want: http.StatusNotFound},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.NewReader(`{
+				"channel_id":"` + tc.channelID + `",
+				"title":"channel-bound video",
+				"storage_type":"local",
+				"video_url":"https://example.com/test.mp4"
+			}`)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/videos", body)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, tc.want, w.Code, "body=%s", w.Body.String())
+		})
+	}
+}
+
+func TestUpdateVideoRejectsChannelOwnershipAndTypeMismatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	otherUser := seedVideoUser(t, db)
+	video := seedVideo(t, db, user.UUID)
+	currentChannel := seedVideoChannel(t, db, user.UUID, "Current Video Channel")
+	otherUsersVideoChannel := seedVideoChannel(t, db, otherUser.UUID, "Other Update Video Channel")
+	mismatchedChannel := model.Channel{
+		UserID:      &user.UUID,
+		Name:        "User Podcast Channel",
+		Slug:        "user-podcast-channel-" + uuid.NewString()[:8],
+		ContentType: "podcast",
+	}
+	require.NoError(t, db.Create(&mismatchedChannel).Error)
+	require.NoError(t, db.Model(&video).Update("channel_id", currentChannel.ID).Error)
+
+	r := gin.New()
+	r.PUT("/api/v1/videos/:id", withVideoAuth(user.UUID, UpdateVideo(db)))
+
+	cases := []struct {
+		name      string
+		channelID string
+		want      int
+	}{
+		{name: "other users channel is forbidden", channelID: otherUsersVideoChannel.ID.String(), want: http.StatusForbidden},
+		{name: "content type mismatch is rejected", channelID: mismatchedChannel.ID.String(), want: http.StatusBadRequest},
+		{name: "missing channel is not found", channelID: uuid.NewString(), want: http.StatusNotFound},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := strings.NewReader(`{"channel_id":"` + tc.channelID + `"}`)
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/videos/"+video.ID.String(), body)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			require.Equal(t, tc.want, w.Code, "body=%s", w.Body.String())
+		})
+	}
 }
 
 func TestGetVideoReturnsPublishedPublicVideo(t *testing.T) {

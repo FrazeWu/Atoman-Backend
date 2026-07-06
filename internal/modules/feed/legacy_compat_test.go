@@ -783,6 +783,85 @@ func TestImportOPMLStillCreatesUserSubscriptions(t *testing.T) {
 	if count := countSubscriptionsForUser(t, db, user.UUID); count != 1 {
 		t.Fatalf("expected 1 subscription after legacy OPML import, got %d", count)
 	}
+	var payload struct {
+		Message  string `json:"message"`
+		Imported int    `json:"imported"`
+		Reused   int    `json:"reused"`
+		Failed   int    `json:"failed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode OPML import response: %v", err)
+	}
+	if payload.Imported != 1 || payload.Reused != 0 || payload.Failed != 0 {
+		t.Fatalf("unexpected OPML import response: %#v", payload)
+	}
+}
+
+func TestSubscribeChannelAcceptsExternalFeedSourceID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	if err := db.AutoMigrate(&model.Channel{}); err != nil {
+		t.Fatalf("migrate channels: %v", err)
+	}
+	user := seedFeedTestUser(t, db)
+	source := model.FeedSource{
+		SourceType:   "external_rss",
+		Title:        "Recommended RSS",
+		RssURL:       "https://example.com/recommended.xml",
+		CanonicalURL: "https://example.com/recommended.xml",
+		Hash:         buildFeedSourceHash("external_rss", nil, "https://example.com/recommended.xml"),
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create feed source: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/subscribe/channel/:channel_id", withFeedAuth(user.UUID, SubscribeChannel(db)))
+	feed.GET("/subscribe/channel/:channel_id/status", withFeedAuth(user.UUID, CheckChannelSubscription(db)))
+	feed.DELETE("/subscribe/channel/:channel_id", withFeedAuth(user.UUID, UnsubscribeChannel(db)))
+
+	statusBefore := httptest.NewRecorder()
+	router.ServeHTTP(statusBefore, httptest.NewRequest(http.MethodGet, "/api/v1/feed/subscribe/channel/"+source.ID.String()+"/status", nil))
+	if statusBefore.Code != http.StatusOK || !strings.Contains(statusBefore.Body.String(), `"subscribed":false`) {
+		t.Fatalf("expected unsubscribed status for source id, got %d %s", statusBefore.Code, statusBefore.Body.String())
+	}
+
+	subscribe := httptest.NewRecorder()
+	router.ServeHTTP(subscribe, httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscribe/channel/"+source.ID.String(), nil))
+	if subscribe.Code != http.StatusOK {
+		t.Fatalf("expected subscribe source status %d, got %d with body %s", http.StatusOK, subscribe.Code, subscribe.Body.String())
+	}
+
+	var activeCount int64
+	if err := db.Model(&model.Subscription{}).
+		Where("user_id = ? AND feed_source_id = ?", user.UUID, source.ID).
+		Count(&activeCount).Error; err != nil {
+		t.Fatalf("count subscriptions: %v", err)
+	}
+	if activeCount != 1 {
+		t.Fatalf("expected source subscription, got %d", activeCount)
+	}
+
+	statusAfter := httptest.NewRecorder()
+	router.ServeHTTP(statusAfter, httptest.NewRequest(http.MethodGet, "/api/v1/feed/subscribe/channel/"+source.ID.String()+"/status", nil))
+	if statusAfter.Code != http.StatusOK || !strings.Contains(statusAfter.Body.String(), `"subscribed":true`) {
+		t.Fatalf("expected subscribed status for source id, got %d %s", statusAfter.Code, statusAfter.Body.String())
+	}
+
+	unsubscribe := httptest.NewRecorder()
+	router.ServeHTTP(unsubscribe, httptest.NewRequest(http.MethodDelete, "/api/v1/feed/subscribe/channel/"+source.ID.String(), nil))
+	if unsubscribe.Code != http.StatusOK {
+		t.Fatalf("expected unsubscribe source status %d, got %d with body %s", http.StatusOK, unsubscribe.Code, unsubscribe.Body.String())
+	}
+	if err := db.Model(&model.Subscription{}).
+		Where("user_id = ? AND feed_source_id = ?", user.UUID, source.ID).
+		Count(&activeCount).Error; err != nil {
+		t.Fatalf("count subscriptions after unsubscribe: %v", err)
+	}
+	if activeCount != 0 {
+		t.Fatalf("expected source subscription removed, got %d", activeCount)
+	}
 }
 
 func TestGetFeedItemSummaryFallbackWhenFullTextStatusNotSuccess(t *testing.T) {

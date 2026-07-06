@@ -26,6 +26,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Channel{},
+		&model.UserDefaultChannel{},
 		&model.Collection{},
 		&model.Post{},
 		&model.PostCollection{},
@@ -303,12 +304,12 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			ID         string `json:"id"`
-			Title      string `json:"title"`
-			Summary    string `json:"summary"`
+			ID          string `json:"id"`
+			Title       string `json:"title"`
+			Summary     string `json:"summary"`
 			ContentType string `json:"content_type"`
-			TargetPath string `json:"target_path"`
-			ScoreLabel string `json:"score_label"`
+			TargetPath  string `json:"target_path"`
+			ScoreLabel  string `json:"score_label"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
@@ -414,6 +415,55 @@ func TestRegisterRoutesMountsBookmarkAndFolderMutationEndpoints(t *testing.T) {
 	}
 }
 
+func TestBlogBookmarksSupportPopularSort(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	hotPost := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Hot", Content: "Body", Status: "published", Visibility: "public"}
+	coldPost := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Cold", Content: "Body", Status: "published", Visibility: "public"}
+	if err := db.Create(&hotPost).Error; err != nil {
+		t.Fatalf("create hot post: %v", err)
+	}
+	if err := db.Create(&coldPost).Error; err != nil {
+		t.Fatalf("create cold post: %v", err)
+	}
+	if err := db.Create(&model.Bookmark{UserID: user.ID, PostID: coldPost.ID}).Error; err != nil {
+		t.Fatalf("create cold bookmark: %v", err)
+	}
+	if err := db.Create(&model.Bookmark{UserID: user.ID, PostID: hotPost.ID}).Error; err != nil {
+		t.Fatalf("create hot bookmark: %v", err)
+	}
+	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: hotPost.ID}).Error; err != nil {
+		t.Fatalf("create like: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/bookmarks?sort=popular", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []struct {
+			PostID string `json:"post_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) < 2 {
+		t.Fatalf("expected 2 bookmarks, got %s", w.Body.String())
+	}
+	if resp.Data[0].PostID != hotPost.ID.String() {
+		t.Fatalf("expected hot post first, got %#v", resp.Data)
+	}
+}
+
 func TestRegisterRoutesMountsCommentAndLikeMutationEndpoints(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
@@ -502,6 +552,27 @@ func TestCreateDefaultChannelForUserSkipsReservedAndUserHandles(t *testing.T) {
 	}
 	if userChannel.Slug == "design" {
 		t.Fatalf("expected username-colliding slug to be skipped")
+	}
+}
+
+func TestCreateDefaultChannelForUserPersistsBlogDefaultSelection(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+
+	if channel.ContentType != "blog" {
+		t.Fatalf("expected blog content type, got %q", channel.ContentType)
+	}
+
+	var selection model.UserDefaultChannel
+	if err := db.Where("user_id = ? AND content_type = ?", user.ID, "blog").First(&selection).Error; err != nil {
+		t.Fatalf("load default selection: %v", err)
+	}
+	if selection.ChannelID != channel.ID {
+		t.Fatalf("expected selected channel %s, got %s", channel.ID, selection.ChannelID)
 	}
 }
 
@@ -733,6 +804,50 @@ func TestRegisterRoutesGetPostRejectsPrivatePostForNonOwner(t *testing.T) {
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRegisterRoutesGetPostReturnsViewerLikeState(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Published", Content: "Body", Status: "published", Visibility: "public"}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
+		t.Fatalf("create like: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response struct {
+		Data struct {
+			ID         uuid.UUID `json:"id"`
+			Liked      bool      `json:"liked"`
+			LikesCount int64     `json:"likes_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode get post response: %v", err)
+	}
+	if response.Data.ID != post.ID {
+		t.Fatalf("expected post id %s, got %s", post.ID, response.Data.ID)
+	}
+	if !response.Data.Liked {
+		t.Fatalf("expected liked=true, got false: %s", w.Body.String())
+	}
+	if response.Data.LikesCount != 1 {
+		t.Fatalf("expected likes_count=1, got %d: %s", response.Data.LikesCount, w.Body.String())
 	}
 }
 

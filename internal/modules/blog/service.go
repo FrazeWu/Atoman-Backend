@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var slugInvalidChars = regexp.MustCompile(`[^a-z0-9一-龥]+`)
@@ -271,6 +272,7 @@ func (s *Service) CreateChannel(user authctx.CurrentUser, name string, slug stri
 		Slug:        slug,
 		Description: strings.TrimSpace(description),
 		CoverURL:    strings.TrimSpace(coverURL),
+		ContentType: model.ChannelContentTypeBlog,
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&channel).Error; err != nil {
@@ -389,11 +391,11 @@ func (s *Service) CountPostLikes(postID uuid.UUID) (int64, error) {
 	return s.repo.CountPostLikes(postID)
 }
 
-func (s *Service) ListBookmarks(user authctx.CurrentUser, folderID *uuid.UUID) ([]model.Bookmark, error) {
+func (s *Service) ListBookmarks(user authctx.CurrentUser, folderID *uuid.UUID, sort string) ([]model.Bookmark, error) {
 	if user.ID == uuid.Nil {
 		return nil, apperr.Unauthorized("Login required")
 	}
-	return s.repo.ListBookmarks(user.ID, folderID)
+	return s.repo.ListBookmarks(user.ID, folderID, sort)
 }
 
 func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, folderID *uuid.UUID) (model.Bookmark, error) {
@@ -633,6 +635,15 @@ func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName stri
 		if ensureErr := s.ensureDefaultCollectionForChannel(existing.ID); ensureErr != nil {
 			return model.Channel{}, ensureErr
 		}
+		if existing.ContentType == "" {
+			if saveErr := s.db.Model(&existing).Update("content_type", model.ChannelContentTypeBlog).Error; saveErr != nil {
+				return model.Channel{}, saveErr
+			}
+			existing.ContentType = model.ChannelContentTypeBlog
+		}
+		if ensureErr := s.upsertUserDefaultChannelSelection(userID, model.ChannelContentTypeBlog, existing.ID); ensureErr != nil {
+			return model.Channel{}, ensureErr
+		}
 		return existing, nil
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -658,12 +669,16 @@ func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName stri
 		Name:        name,
 		Slug:        slug,
 		Description: "默认合集",
+		ContentType: model.ChannelContentTypeBlog,
 		IsDefault:   true,
 	}
 	if err := s.db.Create(&channel).Error; err != nil {
 		return model.Channel{}, err
 	}
 	if err := s.ensureDefaultCollectionForChannel(channel.ID); err != nil {
+		return model.Channel{}, err
+	}
+	if err := s.upsertUserDefaultChannelSelection(userID, model.ChannelContentTypeBlog, channel.ID); err != nil {
 		return model.Channel{}, err
 	}
 	return channel, nil
@@ -1003,6 +1018,17 @@ func (s *Service) uniqueChannelName(base string) (string, error) {
 		candidate = fmt.Sprintf("%s %d", base, counter)
 		counter++
 	}
+}
+
+func (s *Service) upsertUserDefaultChannelSelection(userID uuid.UUID, contentType string, channelID uuid.UUID) error {
+	return s.db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}, {Name: "content_type"}},
+		DoUpdates: clause.AssignmentColumns([]string{"channel_id", "updated_at"}),
+	}).Create(&model.UserDefaultChannel{
+		UserID:      userID,
+		ContentType: contentType,
+		ChannelID:   channelID,
+	}).Error
 }
 
 func dedupeUUIDs(values []uuid.UUID) []uuid.UUID {

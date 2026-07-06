@@ -30,6 +30,7 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		&model.User{},
 		&model.Channel{},
 		&model.Collection{},
+		&model.UserDefaultChannel{},
 		&model.Post{},
 		&model.PostCollection{},
 		&model.PodcastEpisode{},
@@ -42,7 +43,7 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		t.Fatalf("create user: %v", err)
 	}
 
-	channel := model.Channel{Name: "Podcast", Slug: "podcast"}
+	channel := model.Channel{Name: "Podcast", Slug: "podcast", ContentType: "podcast"}
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
@@ -427,6 +428,47 @@ func TestListAndDeletePodcastEpisodeBookmarks(t *testing.T) {
 	}
 }
 
+func TestPodcastEpisodeBookmarksSupportPopularSort(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	hotEpisode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
+	coldEpisode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
+	if err := db.Create(&model.PodcastEpisodeBookmark{UserID: user.UUID, EpisodeID: coldEpisode.ID}).Error; err != nil {
+		t.Fatalf("create cold bookmark: %v", err)
+	}
+	if err := db.Create(&model.PodcastEpisodeBookmark{UserID: user.UUID, EpisodeID: hotEpisode.ID}).Error; err != nil {
+		t.Fatalf("create hot bookmark: %v", err)
+	}
+	if err := db.Model(&model.Post{}).Where("id = ?", hotEpisode.PostID).Updates(map[string]any{
+		"rating_average_score": 95,
+		"rating_count":         8,
+	}).Error; err != nil {
+		t.Fatalf("update hot post rating: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/bookmarks?sort=popular", nil)
+	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data []struct {
+			EpisodeID string `json:"episode_id"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) < 2 {
+		t.Fatalf("expected 2 bookmarks, got %s", w.Body.String())
+	}
+	if resp.Data[0].EpisodeID != hotEpisode.ID.String() {
+		t.Fatalf("expected hot episode first, got %#v", resp.Data)
+	}
+}
+
 func TestCreatePodcastShowBookmarkIsIdempotentWithRepeatedRequests(t *testing.T) {
 	r, db, user, channel := newPodcastHandlerTestDB(t)
 
@@ -556,6 +598,13 @@ func TestCreatePodcastEpisodeRequiresOwnedChannel(t *testing.T) {
 		want      int
 	}{
 		{name: "other user's channel is forbidden", channelID: channel.ID.String(), want: http.StatusForbidden},
+		{name: "content type mismatch is rejected", channelID: func() string {
+			mismatched := model.Channel{Name: "Blog Channel", Slug: "blog-channel-" + uuid.NewString()[:8], UserID: &user.UUID, ContentType: "blog"}
+			if err := db.Create(&mismatched).Error; err != nil {
+				t.Fatalf("create mismatched channel: %v", err)
+			}
+			return mismatched.ID.String()
+		}(), want: http.StatusBadRequest},
 		{name: "missing channel is not found", channelID: uuid.NewString(), want: http.StatusNotFound},
 	}
 

@@ -2,6 +2,7 @@ package blog
 
 import (
 	"atoman/internal/model"
+	"strings"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -57,7 +58,9 @@ func (r *Repo) DeleteChannel(id uuid.UUID) error {
 	return r.db.Delete(&model.Channel{}, "id = ?", id).Error
 }
 
-func (r *Repo) CreateCollection(collection *model.Collection) error { return r.db.Create(collection).Error }
+func (r *Repo) CreateCollection(collection *model.Collection) error {
+	return r.db.Create(collection).Error
+}
 
 func (r *Repo) SaveCollection(collection *model.Collection) error { return r.db.Save(collection).Error }
 
@@ -88,13 +91,36 @@ func (r *Repo) CountPostLikes(postID uuid.UUID) (int64, error) {
 	return count, err
 }
 
-func (r *Repo) ListBookmarks(userID uuid.UUID, folderID *uuid.UUID) ([]model.Bookmark, error) {
+func (r *Repo) ListBookmarks(userID uuid.UUID, folderID *uuid.UUID, sort string) ([]model.Bookmark, error) {
 	var bookmarks []model.Bookmark
 	query := r.db.Preload("Post").Preload("Post.User").Where("user_id = ?", userID)
 	if folderID != nil && *folderID != uuid.Nil {
 		query = query.Where("bookmark_folder_id = ?", *folderID)
 	}
-	err := query.Order("created_at DESC").Find(&bookmarks).Error
+
+	switch strings.ToLower(strings.TrimSpace(sort)) {
+	case "popular":
+		likesSubquery := r.db.
+			Table("likes").
+			Select("target_id, COUNT(*) AS likes_count").
+			Where("target_type = ? AND deleted_at IS NULL", "post").
+			Group("target_id")
+		commentsSubquery := r.db.
+			Table("comments").
+			Select("target_id, COUNT(*) AS comments_count").
+			Where("target_type = ?", "post").
+			Group("target_id")
+		query = query.
+			Joins("LEFT JOIN (?) AS post_likes ON post_likes.target_id = bookmarks.post_id", likesSubquery).
+			Joins("LEFT JOIN (?) AS post_comments ON post_comments.target_id = bookmarks.post_id", commentsSubquery).
+			Order("COALESCE(post_likes.likes_count, 0) DESC").
+			Order("COALESCE(post_comments.comments_count, 0) DESC").
+			Order("bookmarks.created_at DESC")
+	default:
+		query = query.Order("bookmarks.created_at DESC")
+	}
+
+	err := query.Find(&bookmarks).Error
 	return bookmarks, err
 }
 

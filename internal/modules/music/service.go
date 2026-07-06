@@ -699,12 +699,12 @@ func marshalObject(value map[string]any, fallback map[string]any) ([]byte, error
 	return json.Marshal(value)
 }
 
-func (s *Service) ListArtistBookmarks(user authctx.CurrentUser, page int, pageSize int) ([]model.ArtistBookmark, int64, error) {
+func (s *Service) ListArtistBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.ArtistBookmark, int64, error) {
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
-	return s.repo.ListArtistBookmarks(user.ID, page, pageSize)
+	return s.repo.ListArtistBookmarks(user.ID, page, pageSize, sort)
 }
 
 func (s *Service) BookmarkArtist(user authctx.CurrentUser, artistID uuid.UUID) (model.ArtistBookmark, error) {
@@ -724,12 +724,12 @@ func (s *Service) DeleteArtistBookmark(user authctx.CurrentUser, artistID uuid.U
 	return s.repo.DeleteArtistBookmark(user.ID, artistID)
 }
 
-func (s *Service) ListAlbumBookmarks(user authctx.CurrentUser, page int, pageSize int) ([]model.AlbumBookmark, int64, error) {
+func (s *Service) ListAlbumBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.AlbumBookmark, int64, error) {
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
-	return s.repo.ListAlbumBookmarks(user.ID, page, pageSize)
+	return s.repo.ListAlbumBookmarks(user.ID, page, pageSize, sort)
 }
 
 func (s *Service) BookmarkAlbum(user authctx.CurrentUser, albumID uuid.UUID) (model.AlbumBookmark, error) {
@@ -749,12 +749,12 @@ func (s *Service) DeleteAlbumBookmark(user authctx.CurrentUser, albumID uuid.UUI
 	return s.repo.DeleteAlbumBookmark(user.ID, albumID)
 }
 
-func (s *Service) ListSongBookmarks(user authctx.CurrentUser, page int, pageSize int) ([]model.SongBookmark, int64, error) {
+func (s *Service) ListSongBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.SongBookmark, int64, error) {
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
-	return s.repo.ListSongBookmarks(user.ID, page, pageSize)
+	return s.repo.ListSongBookmarks(user.ID, page, pageSize, sort)
 }
 
 func (s *Service) BookmarkSong(user authctx.CurrentUser, songID uuid.UUID) (model.SongBookmark, error) {
@@ -772,6 +772,99 @@ func (s *Service) DeleteSongBookmark(user authctx.CurrentUser, songID uuid.UUID)
 		return apperr.Unauthorized("Login required")
 	}
 	return s.repo.DeleteSongBookmark(user.ID, songID)
+}
+
+func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest) (model.Artist, error) {
+	if user.ID == uuid.Nil {
+		return model.Artist{}, apperr.Unauthorized("Login required")
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return model.Artist{}, apperr.BadRequest("validation.invalid_request", "name is required")
+	}
+
+	artist := model.Artist{
+		Name:        name,
+		Bio:         strings.TrimSpace(req.Bio),
+		ImageURL:    strings.TrimSpace(req.ImageURL),
+		Nationality: strings.TrimSpace(req.Nationality),
+		BirthYear:   req.BirthYear,
+		DeathYear:   req.DeathYear,
+		ArtistForm:  "person",
+		EntryStatus: "open",
+	}
+	if strings.TrimSpace(req.BirthDate) != "" {
+		birthDate, err := parseMusicDate(req.BirthDate, "birth_date")
+		if err != nil {
+			return model.Artist{}, err
+		}
+		artist.BirthDate = &birthDate
+	}
+	return s.repo.CreateArtist(artist)
+}
+
+func (s *Service) UpdateArtist(user authctx.CurrentUser, artistID uuid.UUID, req UpdateArtistRequest) (model.Artist, error) {
+	if user.ID == uuid.Nil {
+		return model.Artist{}, apperr.Unauthorized("Login required")
+	}
+	artist, err := s.repo.GetArtist(artistID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Artist{}, apperr.NotFound("music.artist_not_found", "Artist not found")
+		}
+		return model.Artist{}, err
+	}
+
+	updates := map[string]any{}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return model.Artist{}, apperr.BadRequest("validation.invalid_request", "name is required")
+		}
+		updates["name"] = name
+	}
+	if req.Bio != nil {
+		updates["bio"] = strings.TrimSpace(*req.Bio)
+	}
+	if req.ImageURL != nil {
+		updates["image_url"] = strings.TrimSpace(*req.ImageURL)
+	}
+	if req.Nationality != nil {
+		updates["nationality"] = strings.TrimSpace(*req.Nationality)
+	}
+	if req.BirthDate != nil {
+		if strings.TrimSpace(*req.BirthDate) == "" {
+			updates["birth_date"] = nil
+		} else {
+			birthDate, err := parseMusicDate(*req.BirthDate, "birth_date")
+			if err != nil {
+				return model.Artist{}, err
+			}
+			updates["birth_date"] = birthDate
+		}
+	}
+	if req.BirthYear != nil {
+		updates["birth_year"] = *req.BirthYear
+	}
+	if req.DeathYear != nil {
+		updates["death_year"] = *req.DeathYear
+	}
+	if len(updates) == 0 {
+		return artist, nil
+	}
+
+	if err := s.repo.UpdateArtist(&artist, updates); err != nil {
+		return model.Artist{}, err
+	}
+	return s.repo.GetArtist(artistID)
+}
+
+func parseMusicDate(raw string, field string) (time.Time, error) {
+	parsed, err := time.Parse("2006-01-02", strings.TrimSpace(raw))
+	if err != nil {
+		return time.Time{}, apperr.BadRequest("validation.invalid_request", field+" must use YYYY-MM-DD")
+	}
+	return parsed, nil
 }
 
 func (s *Service) CreatePlaylist(user authctx.CurrentUser, req CreatePlaylistRequest) (model.Playlist, error) {
@@ -793,12 +886,12 @@ func (s *Service) CreatePlaylist(user authctx.CurrentUser, req CreatePlaylistReq
 	return s.repo.CreatePlaylist(playlist)
 }
 
-func (s *Service) ListPlaylists(user authctx.CurrentUser, page int, pageSize int) ([]model.Playlist, int64, error) {
+func (s *Service) ListPlaylists(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.Playlist, int64, error) {
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
-	return s.repo.ListPlaylists(user.ID, page, pageSize)
+	return s.repo.ListPlaylists(user.ID, page, pageSize, sort)
 }
 
 func (s *Service) DeletePlaylist(user authctx.CurrentUser, playlistID uuid.UUID) error {
@@ -806,6 +899,45 @@ func (s *Service) DeletePlaylist(user authctx.CurrentUser, playlistID uuid.UUID)
 		return apperr.Unauthorized("Login required")
 	}
 	return s.repo.DeletePlaylist(user.ID, playlistID)
+}
+
+func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID, req UpdatePlaylistRequest) (model.Playlist, error) {
+	if user.ID == uuid.Nil {
+		return model.Playlist{}, apperr.Unauthorized("Login required")
+	}
+	playlist, err := s.repo.GetPlaylistForUser(user.ID, playlistID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Playlist{}, apperr.NotFound("music.playlist_not_found", "Playlist not found")
+		}
+		return model.Playlist{}, err
+	}
+
+	updates := map[string]any{}
+	if req.Name != nil {
+		name := strings.TrimSpace(*req.Name)
+		if name == "" {
+			return model.Playlist{}, apperr.BadRequest("validation.invalid_request", "name is required")
+		}
+		updates["name"] = name
+	}
+	if req.Description != nil {
+		updates["description"] = strings.TrimSpace(*req.Description)
+	}
+	if req.CoverURL != nil {
+		updates["cover_url"] = strings.TrimSpace(*req.CoverURL)
+	}
+	if req.IsPublic != nil {
+		updates["is_public"] = *req.IsPublic
+	}
+	if len(updates) == 0 {
+		return playlist, nil
+	}
+
+	if err := s.repo.UpdatePlaylist(&playlist, updates); err != nil {
+		return model.Playlist{}, err
+	}
+	return s.repo.GetPlaylistForUser(user.ID, playlistID)
 }
 
 func (s *Service) GetPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.Playlist, error) {

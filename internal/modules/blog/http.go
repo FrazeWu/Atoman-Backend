@@ -536,7 +536,8 @@ func (h *Handler) listBookmarks(c *gin.Context) {
 		}
 		folderID = &parsed
 	}
-	bookmarks, err := h.service.ListBookmarks(user, folderID)
+	sort := strings.TrimSpace(c.DefaultQuery("sort", "latest"))
+	bookmarks, err := h.service.ListBookmarks(user, folderID, sort)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -792,7 +793,33 @@ func (h *Handler) getPost(c *gin.Context) {
 		}
 	}
 
-	httpx.OK(c, http.StatusOK, post)
+	likesCount, err := h.service.CountPostLikes(post.ID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	liked := false
+	if viewerID != nil {
+		var likedCount int64
+		if err := h.service.db.Model(&model.Like{}).
+			Where("user_id = ? AND target_type = ? AND target_id = ?", *viewerID, "post", post.ID).
+			Count(&likedCount).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		liked = likedCount > 0
+	}
+
+	httpx.OK(c, http.StatusOK, struct {
+		model.Post
+		Liked      bool  `json:"liked"`
+		LikesCount int64 `json:"likes_count"`
+	}{
+		Post:       post,
+		Liked:      liked,
+		LikesCount: likesCount,
+	})
 }
 
 func currentViewerID(c *gin.Context) *uuid.UUID {

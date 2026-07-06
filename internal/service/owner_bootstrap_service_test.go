@@ -18,6 +18,7 @@ func setupOwnerBootstrapTestDB(t *testing.T) *gorm.DB {
 		&model.User{},
 		&model.UserSettings{},
 		&model.Channel{},
+		&model.UserDefaultChannel{},
 		&model.Collection{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},

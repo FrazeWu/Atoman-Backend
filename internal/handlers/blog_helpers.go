@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"atoman/internal/model"
 	"atoman/internal/service"
@@ -169,6 +170,15 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 	// Check if user already has a default channel
 	err := db.Where("user_id = ? AND is_default = ?", userID, true).First(&channel).Error
 	if err == nil {
+		if channel.ContentType == "" {
+			if saveErr := db.Model(&channel).Update("content_type", model.ChannelContentTypeBlog).Error; saveErr != nil {
+				return nil, saveErr
+			}
+			channel.ContentType = model.ChannelContentTypeBlog
+		}
+		if err := upsertDefaultChannelSelection(db, userID, channel.ID); err != nil {
+			return nil, err
+		}
 		return &channel, nil
 	}
 
@@ -185,7 +195,17 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 	// If user has channels but none marked as default, mark the first one as default
 	if len(channels) > 0 {
 		channels[0].IsDefault = true
-		if err := db.Model(&channels[0]).Update("is_default", true).Error; err != nil {
+		updates := map[string]any{"is_default": true}
+		if channels[0].ContentType == "" {
+			updates["content_type"] = model.ChannelContentTypeBlog
+		}
+		if err := db.Model(&channels[0]).Updates(updates).Error; err != nil {
+			return nil, err
+		}
+		if channels[0].ContentType == "" {
+			channels[0].ContentType = model.ChannelContentTypeBlog
+		}
+		if err := upsertDefaultChannelSelection(db, userID, channels[0].ID); err != nil {
 			return nil, err
 		}
 		return &channels[0], nil
@@ -203,6 +223,7 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 		Name:        defaultChannelName,
 		Slug:        channelSlug,
 		Description: "默认合集",
+		ContentType: model.ChannelContentTypeBlog,
 		IsDefault:   true,
 	}
 
@@ -214,6 +235,9 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 	if _, err := ensureDefaultCollection(db, channel.ID); err != nil {
 		return nil, err
 	}
+	if err := upsertDefaultChannelSelection(db, userID, channel.ID); err != nil {
+		return nil, err
+	}
 
 	// Auto-subscribe user to their own channel
 	if err := autoSubscribeToChannel(db, userID, channel.ID); err != nil {
@@ -222,6 +246,17 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 	}
 
 	return &channel, nil
+}
+
+func upsertDefaultChannelSelection(db *gorm.DB, userID uuid.UUID, channelID uuid.UUID) error {
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "user_id"}, {Name: "content_type"}},
+		DoUpdates: clause.AssignmentColumns([]string{"channel_id", "updated_at"}),
+	}).Create(&model.UserDefaultChannel{
+		UserID:      userID,
+		ContentType: model.ChannelContentTypeBlog,
+		ChannelID:   channelID,
+	}).Error
 }
 
 // autoSubscribeToChannel creates a feed subscription for user to their own channel

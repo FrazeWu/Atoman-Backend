@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,25 @@ import (
 type NullableUserUUID struct {
 	uuid.UUID
 	Valid bool
+}
+
+const (
+	ChannelContentTypeBlog    = "blog"
+	ChannelContentTypePodcast = "podcast"
+	ChannelContentTypeVideo   = "video"
+)
+
+func NormalizeChannelContentType(value string) string {
+	return strings.TrimSpace(strings.ToLower(value))
+}
+
+func IsValidChannelContentType(value string) bool {
+	switch NormalizeChannelContentType(value) {
+	case ChannelContentTypeBlog, ChannelContentTypePodcast, ChannelContentTypeVideo:
+		return true
+	default:
+		return false
+	}
 }
 
 func NewNullableUserUUID(id uuid.UUID) NullableUserUUID {
@@ -89,6 +109,7 @@ type Channel struct {
 	Slug        string     `json:"slug" gorm:"uniqueIndex"`
 	Description string     `json:"description" gorm:"type:text"`
 	CoverURL    string     `json:"cover_url" gorm:"type:text"`
+	ContentType string     `json:"content_type" gorm:"type:varchar(16);not null;default:'blog';index"`
 	IsDefault   bool       `json:"is_default" gorm:"default:false;index"`
 	IsAnonymous bool       `json:"is_anonymous" gorm:"default:false;index"`
 	BanUntil    *time.Time `json:"ban_until,omitempty"`
@@ -96,6 +117,17 @@ type Channel struct {
 }
 
 func (Channel) TableName() string { return "channels" }
+
+type UserDefaultChannel struct {
+	Base
+	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_user_default_channels_user_content,priority:1"`
+	User        *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	ContentType string    `json:"content_type" gorm:"type:varchar(16);not null;uniqueIndex:idx_user_default_channels_user_content,priority:2"`
+	ChannelID   uuid.UUID `json:"channel_id" gorm:"type:uuid;not null;index"`
+	Channel     *Channel  `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
+}
+
+func (UserDefaultChannel) TableName() string { return "user_default_channels" }
 
 type Collection struct {
 	Base
