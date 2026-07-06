@@ -1372,58 +1372,6 @@ func TestMusicRecommendationArtistsReturnsData(t *testing.T) {
 	}
 }
 
-func TestMusicRecommendationArtistsReturnsData(t *testing.T) {
-	service, db, user := newMusicHTTPTestService(t)
-	artist := model.Artist{
-		Name:        "Recommend Artist",
-		Bio:         "artist summary",
-		EntryStatus: "open",
-	}
-	if err := db.Create(&artist).Error; err != nil {
-		t.Fatalf("create artist: %v", err)
-	}
-	r := newMusicHTTPRouter(service, &user)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/recommend/artists?mode=hot", nil)
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp struct {
-		Data []struct {
-			ID         string `json:"id"`
-			Title      string `json:"title"`
-			Summary    string `json:"summary"`
-			ImageURL   string `json:"image_url"`
-			TargetPath string `json:"target_path"`
-			ScoreLabel string `json:"score_label"`
-		} `json:"data"`
-		Meta struct {
-			Total int64 `json:"total"`
-		} `json:"meta"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(resp.Data) == 0 {
-		t.Fatalf("expected recommendation data, got %s", w.Body.String())
-	}
-	first := resp.Data[0]
-	if first.ID == "" || first.Title != "Recommend Artist" || first.TargetPath == "" || first.ScoreLabel == "" {
-		t.Fatalf("unexpected artist recommendation dto: %#v", first)
-	}
-	if first.TargetPath != "/music/artist/"+artist.ID.String() {
-		t.Fatalf("expected target path %s, got %s", "/music/artist/"+artist.ID.String(), first.TargetPath)
-	}
-	if resp.Meta.Total == 0 {
-		t.Fatalf("expected total > 0, got %#v", resp.Meta)
-	}
-}
-
 func TestAlbumSortOrdersSupportsRandomMode(t *testing.T) {
 	got := albumSortOrders("random")
 
