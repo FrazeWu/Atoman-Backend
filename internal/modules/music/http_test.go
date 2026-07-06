@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
@@ -26,6 +27,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Artist{},
+		&model.ArtistMember{},
 		&model.ArtistAlias{},
 		&model.ArtistMerge{},
 		&model.Album{},
@@ -181,6 +183,158 @@ func TestRegisterRoutesArtistSearchMatchesAliasAndReturnsPrimaryArtist(t *testin
 	if len(resp.Data[0].Aliases) != 1 || resp.Data[0].Aliases[0].Alias != "kanye" {
 		t.Fatalf("expected aliases preloaded in artist response, got %#v", resp.Data[0].Aliases)
 	}
+}
+
+func TestRegisterRoutesGetArtistReturnsGroupedMembersForGroupArtist(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	memberCurrent := model.Artist{Name: "Current Member", EntryStatus: "open"}
+	memberFormer := model.Artist{Name: "Former Member", EntryStatus: "open"}
+	memberFuture := model.Artist{Name: "Future Member", EntryStatus: "open"}
+	memberLeavingSoon := model.Artist{Name: "Leaving Soon Member", EntryStatus: "open"}
+	group := model.Artist{Name: "Unit Group", EntryStatus: "open", ArtistForm: "group"}
+	if err := db.Create(&memberCurrent).Error; err != nil {
+		t.Fatalf("create current member: %v", err)
+	}
+	if err := db.Create(&memberFormer).Error; err != nil {
+		t.Fatalf("create former member: %v", err)
+	}
+	if err := db.Create(&memberFuture).Error; err != nil {
+		t.Fatalf("create future member: %v", err)
+	}
+	if err := db.Create(&memberLeavingSoon).Error; err != nil {
+		t.Fatalf("create leaving soon member: %v", err)
+	}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatalf("create group artist: %v", err)
+	}
+	if err := db.Create(&model.ArtistMember{
+		GroupArtistID:  group.ID,
+		MemberArtistID: memberCurrent.ID,
+		JoinDate:       mustDatePtr(t, "2021-01-01"),
+	}).Error; err != nil {
+		t.Fatalf("create current membership: %v", err)
+	}
+	if err := db.Create(&model.ArtistMember{
+		GroupArtistID:  group.ID,
+		MemberArtistID: memberFormer.ID,
+		JoinDate:       mustDatePtr(t, "2019-01-01"),
+		LeaveDate:      mustDatePtr(t, "2020-12-31"),
+	}).Error; err != nil {
+		t.Fatalf("create former membership: %v", err)
+	}
+	futureJoin := time.Now().AddDate(0, 0, 7).Format("2006-01-02")
+	futureLeave := time.Now().AddDate(0, 0, 7).Format("2006-01-02")
+	if err := db.Create(&model.ArtistMember{
+		GroupArtistID:  group.ID,
+		MemberArtistID: memberFuture.ID,
+		JoinDate:       mustDatePtr(t, futureJoin),
+	}).Error; err != nil {
+		t.Fatalf("create future membership: %v", err)
+	}
+	if err := db.Create(&model.ArtistMember{
+		GroupArtistID:  group.ID,
+		MemberArtistID: memberLeavingSoon.ID,
+		JoinDate:       mustDatePtr(t, "2022-01-01"),
+		LeaveDate:      mustDatePtr(t, futureLeave),
+	}).Error; err != nil {
+		t.Fatalf("create leaving soon membership: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/artists/"+group.ID.String(), nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data struct {
+			ID           string `json:"id"`
+			ArtistForm   string `json:"artist_form"`
+			MemberGroups struct {
+				Current []struct {
+					ArtistID string `json:"artist_id"`
+				} `json:"current"`
+				Former []struct {
+					ArtistID string `json:"artist_id"`
+				} `json:"former"`
+			} `json:"member_groups"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.ArtistForm != "group" {
+		t.Fatalf("expected group artist form, got %#v", resp.Data)
+	}
+	if len(resp.Data.MemberGroups.Current) != 2 {
+		t.Fatalf("unexpected current member groups: %#v", resp.Data.MemberGroups.Current)
+	}
+	if len(resp.Data.MemberGroups.Former) != 1 || resp.Data.MemberGroups.Former[0].ArtistID != memberFormer.ID.String() {
+		t.Fatalf("unexpected former member groups: %#v", resp.Data.MemberGroups.Former)
+	}
+	foundLeavingSoon := false
+	for _, item := range resp.Data.MemberGroups.Current {
+		if item.ArtistID == memberFuture.ID.String() {
+			t.Fatalf("future member should not be current: %#v", resp.Data.MemberGroups.Current)
+		}
+		if item.ArtistID == memberLeavingSoon.ID.String() {
+			foundLeavingSoon = true
+		}
+	}
+	if !foundLeavingSoon {
+		t.Fatalf("member with future leave date should still be current: %#v", resp.Data.MemberGroups.Current)
+	}
+}
+
+func TestRegisterRoutesGetArtistStillReturnsArtistWhenArtistMembersTableMissing(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Legacy Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	if err := db.Migrator().DropTable(&model.ArtistMember{}); err != nil {
+		t.Fatalf("drop artist_members table: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/artists/"+artist.ID.String(), nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Data struct {
+			ID           string `json:"id"`
+			MemberGroups struct {
+				Current []struct{} `json:"current"`
+				Former  []struct{} `json:"former"`
+			} `json:"member_groups"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.ID != artist.ID.String() {
+		t.Fatalf("expected artist %s, got %#v", artist.ID.String(), resp.Data)
+	}
+	if len(resp.Data.MemberGroups.Current) != 0 || len(resp.Data.MemberGroups.Former) != 0 {
+		t.Fatalf("expected empty member groups when table is missing, got %#v", resp.Data.MemberGroups)
+	}
+}
+
+func mustDatePtr(t *testing.T, value string) *time.Time {
+	t.Helper()
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		t.Fatalf("parse date %q: %v", value, err)
+	}
+	return &parsed
 }
 
 func TestRegisterRoutesListsMusicEditsForModerator(t *testing.T) {
@@ -1747,16 +1901,16 @@ func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
 
 	var resp struct {
 		Data []struct {
-			Type        string `json:"type"`
-			ID          string `json:"id"`
-			Title       string `json:"title"`
-			Summary     string `json:"summary"`
-			ImageURL    string `json:"image_url"`
-			TargetPath  string `json:"target_path"`
-			PlayCount   int64  `json:"play_count"`
-			BookmarkCount int64 `json:"bookmark_count"`
-			SongCount   int64  `json:"song_count"`
-			OwnerUserID string `json:"owner_user_id"`
+			Type          string `json:"type"`
+			ID            string `json:"id"`
+			Title         string `json:"title"`
+			Summary       string `json:"summary"`
+			ImageURL      string `json:"image_url"`
+			TargetPath    string `json:"target_path"`
+			PlayCount     int64  `json:"play_count"`
+			BookmarkCount int64  `json:"bookmark_count"`
+			SongCount     int64  `json:"song_count"`
+			OwnerUserID   string `json:"owner_user_id"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {

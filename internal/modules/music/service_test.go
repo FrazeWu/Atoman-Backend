@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -21,6 +22,7 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Artist{},
+		&model.ArtistMember{},
 		&model.ArtistAlias{},
 		&model.ArtistMerge{},
 		&model.Album{},
@@ -239,6 +241,71 @@ func TestSubmitEditAutoAppliesUpdateArtistForMainWikiFlow(t *testing.T) {
 	}
 }
 
+func TestSubmitEditAutoAppliesUpdateArtistSupportsClearingFieldsAndMembers(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+
+	activeEndDate := mustParseDate(t, "2024-12-31")
+	member := model.Artist{Name: "Group Member", EntryStatus: "open"}
+	group := model.Artist{
+		Name:          "Editable Group",
+		LegalName:     "Old Legal",
+		Bio:           "old bio",
+		ImageURL:      "https://cdn.example.com/old.jpg",
+		ArtistForm:    "group",
+		ActiveEndDate: activeEndDate,
+		EntryStatus:   "open",
+	}
+	if err := db.Create(&member).Error; err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := db.Create(&model.ArtistMember{
+		GroupArtistID:  group.ID,
+		MemberArtistID: member.ID,
+		JoinDate:       mustDatePtr(t, "2020-01-01"),
+	}).Error; err != nil {
+		t.Fatalf("create member relation: %v", err)
+	}
+
+	_, err := svc.SubmitEdit(user, SubmitEditRequest{
+		Type:       "update_artist",
+		EntityType: "artist",
+		EntityID:   &group.ID,
+		Changes: map[string]any{
+			"legal_name":      "",
+			"bio":             "",
+			"image_url":       "",
+			"active_end_date": "",
+			"members":         []map[string]any{},
+		},
+		Reason: "clear artist fields",
+	})
+	if err != nil {
+		t.Fatalf("submit clear edit: %v", err)
+	}
+
+	var persisted model.Artist
+	if err := db.First(&persisted, "id = ?", group.ID).Error; err != nil {
+		t.Fatalf("reload group: %v", err)
+	}
+	if persisted.LegalName != "" || persisted.Bio != "" || persisted.ImageURL != "" {
+		t.Fatalf("expected clearable fields cleared, got %#v", persisted)
+	}
+	if !persisted.ActiveEndDate.IsZero() {
+		t.Fatalf("expected active_end_date cleared, got %#v", persisted.ActiveEndDate)
+	}
+
+	var members int64
+	if err := db.Model(&model.ArtistMember{}).Where("group_artist_id = ?", group.ID).Count(&members).Error; err != nil {
+		t.Fatalf("count members: %v", err)
+	}
+	if members != 0 {
+		t.Fatalf("expected members cleared, got %d", members)
+	}
+}
+
 func TestSubmitEditAutoAppliesCreateArtistForMainWikiFlow(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 
@@ -279,6 +346,82 @@ func TestSubmitEditAutoAppliesCreateArtistForMainWikiFlow(t *testing.T) {
 	if len(stageNames) != 2 || !stageNames[0].IsPrimary || stageNames[0].Name != "Instant Artist" || stageNames[1].Name != "IA" || stageNames[1].EndDateText != "2021" {
 		t.Fatalf("expected structured stage names, got %#v", stageNames)
 	}
+}
+
+func TestSubmitEditAutoAppliesCreateGroupArtistForMainWikiFlow(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+
+	memberA := model.Artist{Name: "Member A", EntryStatus: "open"}
+	memberB := model.Artist{Name: "Member B", EntryStatus: "open"}
+	if err := db.Create(&memberA).Error; err != nil {
+		t.Fatalf("create member A: %v", err)
+	}
+	if err := db.Create(&memberB).Error; err != nil {
+		t.Fatalf("create member B: %v", err)
+	}
+
+	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
+		Type:       "create_artist",
+		EntityType: "artist",
+		Payload: map[string]any{
+			"name":              "Test Group",
+			"artist_form":       "group",
+			"active_start_date": "2020-01-01",
+			"active_end_date":   "2024-12-31",
+			"members": []map[string]any{
+				{
+					"artist_id":  memberA.ID.String(),
+					"join_date":  "2020-01-01",
+					"leave_date": "2022-05-01",
+				},
+				{
+					"artist_id": memberB.ID.String(),
+					"join_date": "2020-01-01",
+				},
+			},
+		},
+		Reason: "new group artist",
+	})
+	if err != nil {
+		t.Fatalf("submit edit: %v", err)
+	}
+	if edit.Status != "applied" || !edit.AutoApplied {
+		t.Fatalf("expected auto-applied create group artist edit, got %#v", edit)
+	}
+
+	var artist model.Artist
+	if err := db.Where("name = ?", "Test Group").First(&artist).Error; err != nil {
+		t.Fatalf("load group artist: %v", err)
+	}
+	if artist.ArtistForm != "group" {
+		t.Fatalf("expected group form, got %#v", artist)
+	}
+	if got := artist.ActiveStartDate.Format("2006-01-02"); got != "2020-01-01" {
+		t.Fatalf("expected active_start_date, got %q", got)
+	}
+	if got := artist.ActiveEndDate.Format("2006-01-02"); got != "2024-12-31" {
+		t.Fatalf("expected active_end_date, got %q", got)
+	}
+
+	var members []model.ArtistMember
+	if err := db.Where("group_artist_id = ?", artist.ID).Order("join_date ASC, created_at ASC").Find(&members).Error; err != nil {
+		t.Fatalf("load group members: %v", err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("expected 2 group members, got %#v", members)
+	}
+	if members[0].MemberArtistID != memberA.ID || members[0].LeaveDate == nil || members[1].MemberArtistID != memberB.ID || members[1].LeaveDate != nil {
+		t.Fatalf("unexpected member relations: %#v", members)
+	}
+}
+
+func mustParseDate(t *testing.T, value string) time.Time {
+	t.Helper()
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		t.Fatalf("parse date %q: %v", value, err)
+	}
+	return parsed
 }
 
 func TestMergeArtistsMovesAlbumRelationsAndAliasesToTarget(t *testing.T) {
@@ -346,9 +489,13 @@ func TestMergeArtistsMovesAlbumRelationsAndAliasesToTarget(t *testing.T) {
 func TestSubmitEditAutoAppliesCreateAlbumForMainWikiFlow(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 
-	artist := model.Artist{Name: "Seed Artist", EntryStatus: "open"}
-	if err := db.Create(&artist).Error; err != nil {
-		t.Fatalf("create artist: %v", err)
+	artistA := model.Artist{Name: "Seed Artist A", EntryStatus: "open"}
+	artistB := model.Artist{Name: "Seed Artist B", EntryStatus: "open"}
+	if err := db.Create(&artistA).Error; err != nil {
+		t.Fatalf("create artist A: %v", err)
+	}
+	if err := db.Create(&artistB).Error; err != nil {
+		t.Fatalf("create artist B: %v", err)
 	}
 
 	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
@@ -356,7 +503,7 @@ func TestSubmitEditAutoAppliesCreateAlbumForMainWikiFlow(t *testing.T) {
 		EntityType: "album",
 		Payload: map[string]any{
 			"title":        "Instant Album",
-			"artist_ids":   []string{artist.ID.String()},
+			"artist_ids":   []string{artistA.ID.String(), artistB.ID.String()},
 			"album_type":   "album",
 			"release_year": 2024,
 			"tracks": []map[string]any{
@@ -377,8 +524,8 @@ func TestSubmitEditAutoAppliesCreateAlbumForMainWikiFlow(t *testing.T) {
 	if err := db.Preload("Artists").Where("title = ?", "Instant Album").First(&album).Error; err != nil {
 		t.Fatalf("expected album persisted immediately: %v", err)
 	}
-	if len(album.Artists) != 1 || album.Artists[0].ID != artist.ID {
-		t.Fatalf("expected linked artist, got %#v", album.Artists)
+	if len(album.Artists) != 2 {
+		t.Fatalf("expected linked artists, got %#v", album.Artists)
 	}
 	if album.ReleaseYear != 2024 {
 		t.Fatalf("expected release year persisted, got %#v", album)

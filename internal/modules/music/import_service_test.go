@@ -735,6 +735,142 @@ func TestCommitAlbumImportSessionUsesExistingArtistWhenArtistIDProvided(t *testi
 	}
 }
 
+func TestCommitAlbumImportSessionSupportsMultipleCreators(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+
+	existingArtist := model.Artist{
+		Name:        "Existing Creator",
+		EntryStatus: "open",
+	}
+	if err := db.Create(&existingArtist).Error; err != nil {
+		t.Fatalf("create existing artist: %v", err)
+	}
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusReady,
+		Payload: AlbumImportPayload{
+			Artists: []AlbumImportArtistPayload{
+				{Name: "Existing Creator"},
+				{Name: "New Creator", ArtistForm: "person"},
+			},
+			Album: AlbumImportAlbumPayload{
+				Title:       "Joint Album",
+				ReleaseDate: "2022-09-09",
+				Tracks: []AlbumImportTrackPayload{
+					{Title: "Together", TrackNumber: 1},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artists: []CommitAlbumImportArtistInput{
+			{ArtistID: existingArtist.ID.String()},
+			{
+				Name:       "New Creator",
+				ArtistForm: "person",
+			},
+		},
+		Album: AlbumImportAlbumPayload{
+			Title:       "Joint Album",
+			ReleaseDate: "2022-09-09",
+			Tracks: []AlbumImportTrackPayload{
+				{Title: "Together", TrackNumber: 1},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("commit multi-creator session: %v", err)
+	}
+
+	var album model.Album
+	if err := db.Preload("Artists").Where("title = ?", "Joint Album").First(&album).Error; err != nil {
+		t.Fatalf("load album: %v", err)
+	}
+	if len(album.Artists) != 2 {
+		t.Fatalf("expected album linked to 2 creators, got %#v", album.Artists)
+	}
+
+	var songs []model.Song
+	if err := db.Preload("Artists").Where("album_id = ?", album.ID).Find(&songs).Error; err != nil {
+		t.Fatalf("load songs: %v", err)
+	}
+	if len(songs) != 1 || len(songs[0].Artists) != 2 {
+		t.Fatalf("expected song linked to 2 creators, got %#v", songs)
+	}
+}
+
+func TestCommitAlbumImportSessionUsesResolvedSourceKindsAndTrackNumberAwareAudioMatch(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+
+	sessionPayload := map[string]any{
+		"derived_cover": "https://cdn.example.com/covers/joint-album.jpg",
+		"derived_tracks": []map[string]any{
+			{
+				"title":        "Intro",
+				"track_number": 1,
+				"audio_url":    "s3/music/audio/intro-1.mp3",
+			},
+			{
+				"title":        "Intro",
+				"track_number": 2,
+				"audio_url":    "https://cdn.example.com/audio/intro-2.mp3",
+			},
+		},
+	}
+	payloadJSON, err := json.Marshal(sessionPayload)
+	if err != nil {
+		t.Fatalf("marshal session payload: %v", err)
+	}
+	session := model.AlbumImportSession{
+		Status:      AlbumImportStatusReady,
+		PayloadJSON: string(payloadJSON),
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artist: AlbumImportArtistPayload{Name: "Source Artist"},
+		Album: AlbumImportAlbumPayload{
+			Title:       "Source Album",
+			ReleaseDate: "2024-01-02",
+			Tracks: []AlbumImportTrackPayload{
+				{Title: "Intro", TrackNumber: 1},
+				{Title: "Intro", TrackNumber: 2},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("commit session: %v", err)
+	}
+
+	var album model.Album
+	if err := db.Where("title = ?", "Source Album").First(&album).Error; err != nil {
+		t.Fatalf("load album: %v", err)
+	}
+	if album.CoverSource != "external" {
+		t.Fatalf("expected derived cover source external, got %#v", album)
+	}
+
+	var songs []model.Song
+	if err := db.Where("album_id = ?", album.ID).Order("track_number ASC").Find(&songs).Error; err != nil {
+		t.Fatalf("load songs: %v", err)
+	}
+	if len(songs) != 2 {
+		t.Fatalf("expected 2 songs, got %#v", songs)
+	}
+	if songs[0].AudioURL != "s3/music/audio/intro-1.mp3" || songs[0].AudioSource != "s3" {
+		t.Fatalf("unexpected first song source: %#v", songs[0])
+	}
+	if songs[1].AudioURL != "https://cdn.example.com/audio/intro-2.mp3" || songs[1].AudioSource != "external" {
+		t.Fatalf("unexpected second song source: %#v", songs[1])
+	}
+}
+
 func TestUploadAlbumImportArchiveTransitionsPendingUploadToReady(t *testing.T) {
 	svc, _, user := newMusicTestService(t)
 

@@ -1811,6 +1811,10 @@ definitions:
     type: object
   model.Artist:
     properties:
+      active_end_date:
+        type: string
+      active_start_date:
+        type: string
       albums:
         items:
           $ref: '#/definitions/model.Album'
@@ -1819,6 +1823,8 @@ definitions:
         items:
           $ref: '#/definitions/model.ArtistAlias'
         type: array
+      artist_form:
+        type: string
       bio:
         type: string
       birth_date:
@@ -1912,6 +1918,8 @@ definitions:
       ban_reason:
         type: string
       ban_until:
+        type: string
+      content_type:
         type: string
       cover_url:
         type: string
@@ -2820,11 +2828,36 @@ definitions:
     type: object
   music.DiscoverItemResponse:
     properties:
+      artists:
+        items:
+          properties:
+            id:
+              type: string
+            name:
+              type: string
+          type: object
+        type: array
+      bio:
+        type: string
+      bookmark_count:
+        type: integer
+      cover_url:
+        type: string
+      description:
+        type: string
       id:
         type: string
       image_url:
         type: string
+      legal_name:
+        type: string
+      name:
+        type: string
       owner_user_id:
+        type: string
+      play_count:
+        type: integer
+      release_date:
         type: string
       song_count:
         type: integer
@@ -2836,6 +2869,8 @@ definitions:
         type: string
       type:
         type: string
+      year:
+        type: integer
     type: object
   music.DiscoverListResponse:
     properties:

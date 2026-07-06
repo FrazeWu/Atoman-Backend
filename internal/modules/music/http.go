@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/modules/recommendation"
@@ -245,7 +246,7 @@ func (h *Handler) getArtist(c *gin.Context) {
 	}
 
 	var artist model.Artist
-	if err := h.service.db.Preload("Aliases").Preload("Albums.Artists").First(&artist, "id = ?", artistID).Error; err != nil {
+	if err := h.service.db.Preload("Aliases").Preload("Albums.Artists").Preload("MemberRelations.MemberArtist").First(&artist, "id = ?", artistID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("music.artist_not_found", "Artist not found"))
 			return
@@ -267,8 +268,74 @@ func (h *Handler) getArtist(c *gin.Context) {
 			artist.Albums[i].Artists[j].ImageURL = resolveMusicMediaURL(artist.Albums[i].Artists[j].ImageURL)
 		}
 	}
+	for i := range artist.MemberRelations {
+		if artist.MemberRelations[i].MemberArtist != nil {
+			artist.MemberRelations[i].MemberArtist.ImageURL = resolveMusicMediaURL(artist.MemberRelations[i].MemberArtist.ImageURL)
+		}
+	}
 
-	httpx.OK(c, http.StatusOK, artist)
+	httpx.OK(c, http.StatusOK, buildArtistDetailResponse(artist))
+}
+
+func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
+	now := time.Now()
+	resp := ArtistDetailResponse{
+		ID:             artist.ID,
+		Name:           artist.Name,
+		LegalName:      artist.LegalName,
+		StageNamesJSON: artist.StageNamesJSON,
+		Bio:            artist.Bio,
+		ImageURL:       artist.ImageURL,
+		Nationality:    artist.Nationality,
+		BirthPlace:     artist.BirthPlace,
+		BirthDate:      artist.BirthDate,
+		BirthYear:      artist.BirthYear,
+		DeathYear:      artist.DeathYear,
+		ArtistForm:     artist.ArtistForm,
+		Members:        artist.Members,
+		EntryStatus:    artist.EntryStatus,
+		RedirectTo:     artist.RedirectTo,
+		Albums:         artist.Albums,
+		Aliases:        artist.Aliases,
+		PlayCount:      artist.PlayCount,
+		BookmarkCount:  artist.BookmarkCount,
+		MemberGroups: ArtistMemberGroupsResponse{
+			Current: []ArtistMemberGroupItemResponse{},
+			Former:  []ArtistMemberGroupItemResponse{},
+		},
+	}
+	if !artist.ActiveStartDate.IsZero() {
+		resp.ActiveStartDate = artist.ActiveStartDate.Format("2006-01-02")
+	}
+	if !artist.ActiveEndDate.IsZero() {
+		resp.ActiveEndDate = artist.ActiveEndDate.Format("2006-01-02")
+	}
+	for _, relation := range artist.MemberRelations {
+		if relation.MemberArtist == nil {
+			continue
+		}
+		item := ArtistMemberGroupItemResponse{
+			ArtistID: relation.MemberArtist.ID,
+			Name:     relation.MemberArtist.Name,
+			ImageURL: relation.MemberArtist.ImageURL,
+		}
+		if relation.JoinDate != nil {
+			item.JoinDate = relation.JoinDate.Format("2006-01-02")
+		}
+		if relation.JoinDate != nil && relation.JoinDate.After(now) {
+			continue
+		}
+		if relation.LeaveDate != nil && !relation.LeaveDate.After(now) {
+			item.LeaveDate = relation.LeaveDate.Format("2006-01-02")
+			resp.MemberGroups.Former = append(resp.MemberGroups.Former, item)
+			continue
+		}
+		if relation.LeaveDate != nil {
+			item.LeaveDate = relation.LeaveDate.Format("2006-01-02")
+		}
+		resp.MemberGroups.Current = append(resp.MemberGroups.Current, item)
+	}
+	return resp
 }
 
 func (h *Handler) listAlbums(c *gin.Context) {

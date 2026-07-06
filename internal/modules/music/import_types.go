@@ -12,11 +12,21 @@ type ArtistStageNamePayload struct {
 	EndDateText   string `json:"end_date_text"`
 }
 
+type ArtistMemberPayload struct {
+	ArtistID  string `json:"artist_id"`
+	JoinDate  string `json:"join_date"`
+	LeaveDate string `json:"leave_date"`
+}
+
 type AlbumImportArtistPayload struct {
-	Name       string                   `json:"name"`
-	LegalName  string                   `json:"legal_name"`
-	StageNames []ArtistStageNamePayload `json:"stage_names"`
-	BirthPlace string                   `json:"birth_place"`
+	Name            string                   `json:"name"`
+	LegalName       string                   `json:"legal_name"`
+	StageNames      []ArtistStageNamePayload `json:"stage_names"`
+	BirthPlace      string                   `json:"birth_place"`
+	ArtistForm      string                   `json:"artist_form"`
+	ActiveStartDate string                   `json:"active_start_date"`
+	ActiveEndDate   string                   `json:"active_end_date"`
+	Members         []ArtistMemberPayload    `json:"members"`
 }
 
 type AlbumImportAlbumPayload struct {
@@ -27,8 +37,9 @@ type AlbumImportAlbumPayload struct {
 }
 
 type AlbumImportPayload struct {
-	Artist AlbumImportArtistPayload `json:"artist"`
-	Album  AlbumImportAlbumPayload  `json:"album"`
+	Artist  AlbumImportArtistPayload   `json:"artist"`
+	Artists []AlbumImportArtistPayload `json:"artists"`
+	Album   AlbumImportAlbumPayload    `json:"album"`
 }
 
 type CreateAlbumImportSessionInput struct {
@@ -37,9 +48,22 @@ type CreateAlbumImportSessionInput struct {
 }
 
 type CommitAlbumImportSessionInput struct {
-	ArtistID string                   `json:"artist_id"`
-	Artist   AlbumImportArtistPayload `json:"artist"`
-	Album    AlbumImportAlbumPayload  `json:"album"`
+	ArtistID string                         `json:"artist_id"`
+	Artist   AlbumImportArtistPayload       `json:"artist"`
+	Artists  []CommitAlbumImportArtistInput `json:"artists"`
+	Album    AlbumImportAlbumPayload        `json:"album"`
+}
+
+type CommitAlbumImportArtistInput struct {
+	ArtistID        string                   `json:"artist_id"`
+	Name            string                   `json:"name"`
+	LegalName       string                   `json:"legal_name"`
+	StageNames      []ArtistStageNamePayload `json:"stage_names"`
+	BirthPlace      string                   `json:"birth_place"`
+	ArtistForm      string                   `json:"artist_form"`
+	ActiveStartDate string                   `json:"active_start_date"`
+	ActiveEndDate   string                   `json:"active_end_date"`
+	Members         []ArtistMemberPayload    `json:"members"`
 }
 
 type StartAlbumImportMultipartInput struct {

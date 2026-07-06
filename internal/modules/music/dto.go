@@ -65,24 +65,24 @@ type PlaylistSummaryResponse struct {
 }
 
 type DiscoverItemResponse struct {
-	Type        string `json:"type"`
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Summary     string `json:"summary,omitempty"`
-	ImageURL    string `json:"image_url,omitempty"`
-	TargetPath  string `json:"target_path"`
-	PlayCount   int64  `json:"play_count,omitempty"`
-	BookmarkCount int64 `json:"bookmark_count,omitempty"`
-	SongCount   int64  `json:"song_count,omitempty"`
-	OwnerUserID string `json:"owner_user_id,omitempty"`
-	Name        string `json:"name,omitempty"`
-	LegalName   string `json:"legal_name,omitempty"`
-	Bio         string `json:"bio,omitempty"`
-	CoverURL    string `json:"cover_url,omitempty"`
-	Description string `json:"description,omitempty"`
-	ReleaseDate string `json:"release_date,omitempty"`
-	Year        int    `json:"year,omitempty"`
-	Artists     []struct {
+	Type          string `json:"type"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Summary       string `json:"summary,omitempty"`
+	ImageURL      string `json:"image_url,omitempty"`
+	TargetPath    string `json:"target_path"`
+	PlayCount     int64  `json:"play_count,omitempty"`
+	BookmarkCount int64  `json:"bookmark_count,omitempty"`
+	SongCount     int64  `json:"song_count,omitempty"`
+	OwnerUserID   string `json:"owner_user_id,omitempty"`
+	Name          string `json:"name,omitempty"`
+	LegalName     string `json:"legal_name,omitempty"`
+	Bio           string `json:"bio,omitempty"`
+	CoverURL      string `json:"cover_url,omitempty"`
+	Description   string `json:"description,omitempty"`
+	ReleaseDate   string `json:"release_date,omitempty"`
+	Year          int    `json:"year,omitempty"`
+	Artists       []struct {
 		ID   string `json:"id"`
 		Name string `json:"name"`
 	} `json:"artists,omitempty"`
@@ -97,7 +97,7 @@ type PaginationMetaResponse struct {
 
 type PlaylistSummaryListResponse struct {
 	Data []PlaylistSummaryResponse `json:"data"`
-	Meta PaginationMetaResponse   `json:"meta"`
+	Meta PaginationMetaResponse    `json:"meta"`
 }
 
 type DiscoverListResponse struct {
@@ -124,4 +124,42 @@ type PlaylistSongDetail struct {
 	AudioURL    string    `json:"audio_url"`
 	CoverURL    string    `json:"cover_url"`
 	EntryStatus string    `json:"entry_status"`
+}
+
+type ArtistMemberGroupItemResponse struct {
+	ArtistID  uuid.UUID `json:"artist_id"`
+	Name      string    `json:"name"`
+	ImageURL  string    `json:"image_url,omitempty"`
+	JoinDate  string    `json:"join_date,omitempty"`
+	LeaveDate string    `json:"leave_date,omitempty"`
+}
+
+type ArtistMemberGroupsResponse struct {
+	Current []ArtistMemberGroupItemResponse `json:"current"`
+	Former  []ArtistMemberGroupItemResponse `json:"former"`
+}
+
+type ArtistDetailResponse struct {
+	ID              uuid.UUID                  `json:"id"`
+	Name            string                     `json:"name"`
+	LegalName       string                     `json:"legal_name"`
+	StageNamesJSON  string                     `json:"stage_names_json"`
+	Bio             string                     `json:"bio"`
+	ImageURL        string                     `json:"image_url"`
+	Nationality     string                     `json:"nationality"`
+	BirthPlace      string                     `json:"birth_place"`
+	BirthDate       any                        `json:"birth_date,omitempty"`
+	BirthYear       int                        `json:"birth_year"`
+	DeathYear       int                        `json:"death_year"`
+	ArtistForm      string                     `json:"artist_form"`
+	ActiveStartDate string                     `json:"active_start_date,omitempty"`
+	ActiveEndDate   string                     `json:"active_end_date,omitempty"`
+	Members         string                     `json:"members"`
+	EntryStatus     string                     `json:"entry_status"`
+	RedirectTo      *uuid.UUID                 `json:"redirect_to,omitempty"`
+	Albums          any                        `json:"albums,omitempty"`
+	Aliases         any                        `json:"aliases,omitempty"`
+	PlayCount       int64                      `json:"play_count"`
+	BookmarkCount   int64                      `json:"bookmark_count"`
+	MemberGroups    ArtistMemberGroupsResponse `json:"member_groups"`
 }

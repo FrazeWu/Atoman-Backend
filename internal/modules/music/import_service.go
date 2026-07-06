@@ -526,39 +526,19 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 
 		payload := AlbumImportPayload{
-			Artist: input.Artist,
-			Album:  input.Album,
+			Artist:  input.Artist,
+			Artists: nil,
+			Album:   input.Album,
 		}
 		if strings.TrimSpace(payload.Album.Title) == "" {
 			return apperr.BadRequest("validation.invalid_request", "album title is required")
 		}
-		var artist model.Artist
-		artistID := strings.TrimSpace(input.ArtistID)
-		if artistID != "" {
-			parsedArtistID, err := uuid.Parse(artistID)
-			if err != nil {
-				return apperr.BadRequest("validation.invalid_request", "artist_id must be a valid UUID")
-			}
-			if err := tx.First(&artist, "id = ?", parsedArtistID).Error; err != nil {
-				if err == gorm.ErrRecordNotFound {
-					return apperr.NotFound("music.artist_not_found", "Artist not found")
-				}
-				return err
-			}
-		} else {
-			if strings.TrimSpace(payload.Artist.Name) == "" {
-				return apperr.BadRequest("validation.invalid_request", "artist name is required")
-			}
-			artist = model.Artist{
-				Name:           strings.TrimSpace(payload.Artist.Name),
-				LegalName:      strings.TrimSpace(payload.Artist.LegalName),
-				StageNamesJSON: mustMarshalStageNames(payload.Artist.StageNames),
-				BirthPlace:     strings.TrimSpace(payload.Artist.BirthPlace),
-				EntryStatus:    "open",
-			}
-			if err := createAlbumImportArtist(tx, &artist); err != nil {
-				return err
-			}
+		artists, err := resolveCommitAlbumImportArtists(tx, input)
+		if err != nil {
+			return err
+		}
+		if len(artists) == 0 {
+			return apperr.BadRequest("validation.invalid_request", "at least one artist is required")
 		}
 
 		var sessionPayload map[string]any
@@ -580,6 +560,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			ReleaseYear: payload.Album.ReleaseYear,
 			Year:        payload.Album.ReleaseYear,
 			CoverURL:    coverURL,
+			CoverSource: coverSourceFromURL(coverURL),
 			Status:      "open",
 			EntryStatus: "open",
 			AlbumType:   "album",
@@ -601,26 +582,19 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if err := createAlbumImportAlbum(tx, &album); err != nil {
 			return err
 		}
-		if err := tx.Model(&album).Association("Artists").Append(&artist); err != nil {
+		if err := tx.Model(&album).Association("Artists").Append(artists); err != nil {
 			return err
 		}
 
-		for _, track := range payload.Album.Tracks {
-			audioURL := ""
-			if sessionPayload != nil {
-				if rawTracks, ok := sessionPayload["derived_tracks"].([]any); ok {
-					for _, rawTrack := range rawTracks {
-						trackMap, ok := rawTrack.(map[string]any)
-						if !ok {
-							continue
-						}
-						if strings.TrimSpace(stringValue(trackMap["title"])) == strings.TrimSpace(track.Title) {
-							audioURL = stringValue(trackMap["audio_url"])
-							break
-						}
-					}
-				}
+		usedDerivedTrackIndexes := map[int]bool{}
+		rawDerivedTracks := []any(nil)
+		if sessionPayload != nil {
+			if derivedTracks, ok := sessionPayload["derived_tracks"].([]any); ok {
+				rawDerivedTracks = derivedTracks
 			}
+		}
+		for index, track := range payload.Album.Tracks {
+			audioURL := matchDerivedTrackAudio(rawDerivedTracks, track, index, usedDerivedTrackIndexes)
 
 			song := model.Song{
 				Title:       strings.TrimSpace(track.Title),
@@ -628,13 +602,13 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				AlbumID:     &album.ID,
 				Status:      "open",
 				AudioURL:    audioURL,
-				AudioSource: "local",
+				AudioSource: coverSourceFromURL(audioURL),
 				UploadedBy:  &user.ID,
 			}
 			if err := tx.Create(&song).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&song).Association("Artists").Append(&artist); err != nil {
+			if err := tx.Model(&song).Association("Artists").Append(artists); err != nil {
 				return err
 			}
 		}
@@ -653,6 +627,126 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		return model.AlbumImportSession{}, err
 	}
 	return out, nil
+}
+
+func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayload, index int, used map[int]bool) string {
+	tryMatch := func(predicate func(map[string]any) bool) string {
+		for i, rawTrack := range rawDerivedTracks {
+			if used[i] {
+				continue
+			}
+			trackMap, ok := rawTrack.(map[string]any)
+			if !ok || !predicate(trackMap) {
+				continue
+			}
+			used[i] = true
+			return stringValue(trackMap["audio_url"])
+		}
+		return ""
+	}
+
+	title := strings.TrimSpace(track.Title)
+	if track.TrackNumber > 0 {
+		if audioURL := tryMatch(func(trackMap map[string]any) bool {
+			return strings.TrimSpace(stringValue(trackMap["title"])) == title &&
+				int(int64Value(trackMap["track_number"])) == track.TrackNumber
+		}); audioURL != "" {
+			return audioURL
+		}
+	}
+	if audioURL := tryMatch(func(trackMap map[string]any) bool {
+		return strings.TrimSpace(stringValue(trackMap["title"])) == title
+	}); audioURL != "" {
+		return audioURL
+	}
+	if index >= 0 && index < len(rawDerivedTracks) && !used[index] {
+		if trackMap, ok := rawDerivedTracks[index].(map[string]any); ok {
+			used[index] = true
+			return stringValue(trackMap["audio_url"])
+		}
+	}
+	return ""
+}
+
+func resolveCommitAlbumImportArtists(tx *gorm.DB, input CommitAlbumImportSessionInput) ([]*model.Artist, error) {
+	entries := make([]CommitAlbumImportArtistInput, 0, len(input.Artists))
+	if len(input.Artists) > 0 {
+		entries = append(entries, input.Artists...)
+	} else if strings.TrimSpace(input.ArtistID) != "" || strings.TrimSpace(input.Artist.Name) != "" {
+		entries = append(entries, CommitAlbumImportArtistInput{
+			ArtistID:        input.ArtistID,
+			Name:            input.Artist.Name,
+			LegalName:       input.Artist.LegalName,
+			StageNames:      input.Artist.StageNames,
+			BirthPlace:      input.Artist.BirthPlace,
+			ArtistForm:      input.Artist.ArtistForm,
+			ActiveStartDate: input.Artist.ActiveStartDate,
+			ActiveEndDate:   input.Artist.ActiveEndDate,
+			Members:         input.Artist.Members,
+		})
+	}
+
+	out := make([]*model.Artist, 0, len(entries))
+	for _, entry := range entries {
+		artistID := strings.TrimSpace(entry.ArtistID)
+		if artistID != "" {
+			parsedArtistID, err := uuid.Parse(artistID)
+			if err != nil {
+				return nil, apperr.BadRequest("validation.invalid_request", "artist_id must be a valid UUID")
+			}
+			var artist model.Artist
+			if err := tx.First(&artist, "id = ?", parsedArtistID).Error; err != nil {
+				if err == gorm.ErrRecordNotFound {
+					return nil, apperr.NotFound("music.artist_not_found", "Artist not found")
+				}
+				return nil, err
+			}
+			out = append(out, &artist)
+			continue
+		}
+
+		if strings.TrimSpace(entry.Name) == "" {
+			return nil, apperr.BadRequest("validation.invalid_request", "artist name is required")
+		}
+		artist, err := buildArtistFromImportInput(entry)
+		if err != nil {
+			return nil, err
+		}
+		if err := createAlbumImportArtist(tx, artist); err != nil {
+			return nil, err
+		}
+		if err := replaceArtistMembers(tx, artist.ID, entry.Members); err != nil {
+			return nil, err
+		}
+		out = append(out, artist)
+	}
+	return out, nil
+}
+
+func buildArtistFromImportInput(input CommitAlbumImportArtistInput) (*model.Artist, error) {
+	activeStartDate, err := parseOptionalDate(input.ActiveStartDate, "active_start_date")
+	if err != nil {
+		return nil, err
+	}
+	activeEndDate, err := parseOptionalDate(input.ActiveEndDate, "active_end_date")
+	if err != nil {
+		return nil, err
+	}
+	artist := &model.Artist{
+		Name:           strings.TrimSpace(input.Name),
+		LegalName:      strings.TrimSpace(input.LegalName),
+		StageNamesJSON: mustMarshalStageNames(input.StageNames),
+		BirthPlace:     strings.TrimSpace(input.BirthPlace),
+		ArtistForm:     normalizeArtistForm(input.ArtistForm),
+		EntryStatus:    "open",
+	}
+	if activeStartDate != nil {
+		artist.ActiveStartDate = *activeStartDate
+	}
+	if activeEndDate != nil {
+		artist.ActiveEndDate = *activeEndDate
+	}
+	return artist, nil
 }
 
 func createAlbumImportArtist(tx *gorm.DB, artist *model.Artist) error {

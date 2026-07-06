@@ -3,6 +3,8 @@ package music
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -13,27 +15,31 @@ import (
 )
 
 type artistEditFields struct {
-	Name        string                   `json:"name"`
-	LegalName   string                   `json:"legal_name"`
-	StageNames  []ArtistStageNamePayload `json:"stage_names"`
-	Bio         string                   `json:"bio"`
-	ImageURL    string                   `json:"image_url"`
-	Nationality string                   `json:"nationality"`
-	BirthPlace  string                   `json:"birth_place"`
-	BirthDate   string                   `json:"birth_date"`
-	BirthYear   int                      `json:"birth_year"`
-	DeathYear   int                      `json:"death_year"`
+	Name            string                   `json:"name"`
+	LegalName       string                   `json:"legal_name"`
+	StageNames      []ArtistStageNamePayload `json:"stage_names"`
+	Bio             string                   `json:"bio"`
+	ImageURL        string                   `json:"image_url"`
+	Nationality     string                   `json:"nationality"`
+	BirthPlace      string                   `json:"birth_place"`
+	BirthDate       string                   `json:"birth_date"`
+	BirthYear       int                      `json:"birth_year"`
+	DeathYear       int                      `json:"death_year"`
+	ArtistForm      string                   `json:"artist_form"`
+	ActiveStartDate string                   `json:"active_start_date"`
+	ActiveEndDate   string                   `json:"active_end_date"`
+	Members         []ArtistMemberPayload    `json:"members"`
 }
 
 type albumEditFields struct {
-	Title       string                    `json:"title"`
-	ArtistIDs   []string                  `json:"artist_ids"`
-	ReleaseDate string                    `json:"release_date"`
-	ReleaseYear int                       `json:"release_year"`
-	CoverURL    string                    `json:"cover_url"`
-	CoverKey    string                    `json:"cover_key"`
-	AlbumType   string                    `json:"album_type"`
-	Tracks      []albumTrackEditPayload   `json:"tracks"`
+	Title       string                  `json:"title"`
+	ArtistIDs   []string                `json:"artist_ids"`
+	ReleaseDate string                  `json:"release_date"`
+	ReleaseYear int                     `json:"release_year"`
+	CoverURL    string                  `json:"cover_url"`
+	CoverKey    string                  `json:"cover_key"`
+	AlbumType   string                  `json:"album_type"`
+	Tracks      []albumTrackEditPayload `json:"tracks"`
 }
 
 type albumTrackEditPayload struct {
@@ -63,6 +69,14 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		if birthDate != nil {
 			birthYear = birthDate.Year()
 		}
+		activeStartDate, err := parseOptionalDate(payload.ActiveStartDate, "active_start_date")
+		if err != nil {
+			return err
+		}
+		activeEndDate, err := parseOptionalDate(payload.ActiveEndDate, "active_end_date")
+		if err != nil {
+			return err
+		}
 
 		artist := model.Artist{
 			Name:           payload.Name,
@@ -75,9 +89,19 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 			BirthDate:      birthDate,
 			BirthYear:      birthYear,
 			DeathYear:      payload.DeathYear,
+			ArtistForm:     normalizeArtistForm(payload.ArtistForm),
 			EntryStatus:    "open",
 		}
+		if activeStartDate != nil {
+			artist.ActiveStartDate = *activeStartDate
+		}
+		if activeEndDate != nil {
+			artist.ActiveEndDate = *activeEndDate
+		}
 		if err := tx.Create(&artist).Error; err != nil {
+			return err
+		}
+		if err := replaceArtistMembers(tx, artist.ID, payload.Members); err != nil {
 			return err
 		}
 		edit.EntityID = &artist.ID
@@ -85,6 +109,10 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 	case "update_artist":
 		if edit.EntityID == nil {
 			return apperr.BadRequest("validation.invalid_request", "entity_id is required")
+		}
+		var rawChanges map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(edit.ChangesJSON), &rawChanges); err != nil {
+			return apperr.BadRequest("validation.invalid_request", "changes are not valid JSON")
 		}
 		var changes artistEditFields
 		if err := json.Unmarshal([]byte(edit.ChangesJSON), &changes); err != nil {
@@ -94,16 +122,16 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		if changes.Name != "" {
 			updates["name"] = changes.Name
 		}
-		if changes.Bio != "" {
+		if fieldPresent(rawChanges, "bio") {
 			updates["bio"] = changes.Bio
 		}
-		if changes.LegalName != "" {
+		if fieldPresent(rawChanges, "legal_name") {
 			updates["legal_name"] = changes.LegalName
 		}
 		if len(changes.StageNames) > 0 {
 			updates["stage_names_json"] = mustMarshalStageNames(changes.StageNames)
 		}
-		if changes.ImageURL != "" {
+		if fieldPresent(rawChanges, "image_url") {
 			updates["image_url"] = changes.ImageURL
 		}
 		if changes.Nationality != "" {
@@ -128,8 +156,33 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		if changes.DeathYear != 0 {
 			updates["death_year"] = changes.DeathYear
 		}
+		if changes.ArtistForm != "" {
+			updates["artist_form"] = normalizeArtistForm(changes.ArtistForm)
+		}
+		if changes.ActiveStartDate != "" {
+			activeStartDate, err := parseOptionalDate(changes.ActiveStartDate, "active_start_date")
+			if err != nil {
+				return err
+			}
+			if activeStartDate != nil {
+				updates["active_start_date"] = *activeStartDate
+			}
+		}
+		if fieldPresent(rawChanges, "active_end_date") {
+			activeEndDate, err := parseOptionalDate(changes.ActiveEndDate, "active_end_date")
+			if err != nil {
+				return err
+			}
+			if activeEndDate != nil {
+				updates["active_end_date"] = *activeEndDate
+			} else {
+				updates["active_end_date"] = time.Time{}
+			}
+		}
 		if len(updates) == 0 {
-			return apperr.BadRequest("validation.invalid_request", "artist changes are required")
+			if !fieldPresent(rawChanges, "members") {
+				return apperr.BadRequest("validation.invalid_request", "artist changes are required")
+			}
 		}
 		result := tx.Model(&model.Artist{}).Where("id = ?", *edit.EntityID).Updates(updates)
 		if result.Error != nil {
@@ -137,6 +190,11 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		}
 		if result.RowsAffected == 0 {
 			return apperr.NotFound("music.artist_not_found", "Artist not found")
+		}
+		if fieldPresent(rawChanges, "members") {
+			if err := replaceArtistMembers(tx, *edit.EntityID, changes.Members); err != nil {
+				return err
+			}
 		}
 		return nil
 	case "delete_artist":
@@ -365,18 +423,44 @@ func parseOptionalReleaseDate(raw string) (*time.Time, error) {
 	if raw == "" {
 		return nil, nil
 	}
-	releaseDate, err := time.Parse("2006-01-02", raw)
-	if err != nil {
-		return nil, apperr.BadRequest("validation.invalid_request", "release_date must be YYYY-MM-DD")
+	return parseOptionalDate(raw, "release_date")
+}
+
+func parseOptionalDate(raw string, fieldName string) (*time.Time, error) {
+	if raw == "" {
+		return nil, nil
 	}
-	return &releaseDate, nil
+	parsed, err := time.Parse("2006-01-02", raw)
+	if err != nil {
+		return nil, apperr.BadRequest("validation.invalid_request", fmt.Sprintf("%s must be YYYY-MM-DD", fieldName))
+	}
+	return &parsed, nil
 }
 
 func coverSourceFromURL(url string) string {
-	if url == "" {
+	trimmed := strings.TrimSpace(url)
+	if trimmed == "" {
 		return ""
 	}
-	return "s3"
+	if strings.HasPrefix(trimmed, "/uploads/") || strings.HasPrefix(trimmed, "uploads/") {
+		return "local"
+	}
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		publicUploadsBase := strings.TrimRight(strings.TrimSpace(os.Getenv("PUBLIC_UPLOADS_BASE_URL")), "/")
+		if publicUploadsBase != "" && (trimmed == publicUploadsBase || strings.HasPrefix(trimmed, publicUploadsBase+"/")) {
+			return "local"
+		}
+
+		s3Prefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
+		if s3Prefix != "" && (trimmed == s3Prefix || strings.HasPrefix(trimmed, s3Prefix+"/")) {
+			return "s3"
+		}
+		return "external"
+	}
+	if strings.HasPrefix(trimmed, "s3/") || strings.TrimSpace(os.Getenv("STORAGE_TYPE")) == "s3" {
+		return "s3"
+	}
+	return "local"
 }
 
 func linkAlbumArtists(tx *gorm.DB, album *model.Album, artistIDs []uuid.UUID) error {
@@ -389,6 +473,60 @@ func linkAlbumArtists(tx *gorm.DB, album *model.Album, artistIDs []uuid.UUID) er
 			return err
 		}
 		if err := tx.Model(album).Association("Artists").Append(&artist); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeArtistForm(raw string) string {
+	switch raw {
+	case "group":
+		return "group"
+	default:
+		return "person"
+	}
+}
+
+func fieldPresent(raw map[string]json.RawMessage, key string) bool {
+	_, ok := raw[key]
+	return ok
+}
+
+func replaceArtistMembers(tx *gorm.DB, groupArtistID uuid.UUID, members []ArtistMemberPayload) error {
+	if err := tx.Where("group_artist_id = ?", groupArtistID).Delete(&model.ArtistMember{}).Error; err != nil {
+		return err
+	}
+	for _, member := range members {
+		memberArtistID, err := uuid.Parse(member.ArtistID)
+		if err != nil {
+			return apperr.BadRequest("validation.invalid_request", "members.artist_id must be a valid UUID")
+		}
+		if memberArtistID == groupArtistID {
+			return apperr.BadRequest("validation.invalid_request", "group artist cannot reference itself as a member")
+		}
+		var artist model.Artist
+		if err := tx.First(&artist, "id = ?", memberArtistID).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return apperr.NotFound("music.artist_not_found", "Artist not found")
+			}
+			return err
+		}
+		joinDate, err := parseOptionalDate(member.JoinDate, "join_date")
+		if err != nil {
+			return err
+		}
+		leaveDate, err := parseOptionalDate(member.LeaveDate, "leave_date")
+		if err != nil {
+			return err
+		}
+		artistMember := model.ArtistMember{
+			GroupArtistID:  groupArtistID,
+			MemberArtistID: memberArtistID,
+			JoinDate:       joinDate,
+			LeaveDate:      leaveDate,
+		}
+		if err := tx.Create(&artistMember).Error; err != nil {
 			return err
 		}
 	}

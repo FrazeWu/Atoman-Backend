@@ -13595,6 +13595,12 @@ const docTemplate = `{
         "model.Artist": {
             "type": "object",
             "properties": {
+                "active_end_date": {
+                    "type": "string"
+                },
+                "active_start_date": {
+                    "type": "string"
+                },
                 "albums": {
                     "type": "array",
                     "items": {
@@ -13606,6 +13612,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/model.ArtistAlias"
                     }
+                },
+                "artist_form": {
+                    "type": "string"
                 },
                 "bio": {
                     "type": "string"
@@ -13746,6 +13755,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "ban_until": {
+                    "type": "string"
+                },
+                "content_type": {
                     "type": "string"
                 },
                 "cover_url": {
@@ -15099,13 +15111,51 @@ const docTemplate = `{
         "music.DiscoverItemResponse": {
             "type": "object",
             "properties": {
+                "artists": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                },
+                "bio": {
+                    "type": "string"
+                },
+                "bookmark_count": {
+                    "type": "integer"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
                 "image_url": {
                     "type": "string"
                 },
+                "legal_name": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
                 "owner_user_id": {
+                    "type": "string"
+                },
+                "play_count": {
+                    "type": "integer"
+                },
+                "release_date": {
                     "type": "string"
                 },
                 "song_count": {
@@ -15122,6 +15172,9 @@ const docTemplate = `{
                 },
                 "type": {
                     "type": "string"
+                },
+                "year": {
+                    "type": "integer"
                 }
             }
         },

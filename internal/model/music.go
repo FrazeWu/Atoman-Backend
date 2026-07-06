@@ -8,28 +8,46 @@ import (
 
 type Artist struct {
 	Base
-	Name           string        `json:"name" gorm:"unique;not null"`
-	LegalName      string        `json:"legal_name"`
-	StageNamesJSON string        `json:"stage_names_json" gorm:"type:text"`
-	Bio            string        `json:"bio" gorm:"type:text"`
-	ImageURL       string        `json:"image_url"`
-	Nationality    string        `json:"nationality"`
-	BirthPlace     string        `json:"birth_place"`
-	BirthDate      *time.Time    `json:"birth_date,omitempty" gorm:"type:date"`
-	BirthYear      int           `json:"birth_year"`
-	DeathYear      int           `json:"death_year"`
-	Members        string        `json:"members" gorm:"type:text"`
-	EntryStatus    string        `json:"entry_status" gorm:"default:'open'"`
-	RedirectTo     *uuid.UUID    `json:"redirect_to,omitempty" gorm:"type:uuid"`
-	Albums         []Album       `json:"albums,omitempty" gorm:"many2many:album_artists;"`
-	Songs          []Song        `json:"songs,omitempty" gorm:"many2many:song_artists;"`
-	Aliases        []ArtistAlias `json:"aliases,omitempty" gorm:"foreignKey:ArtistID"`
-	PlayCount      int64         `json:"play_count" gorm:"-"`
-	BookmarkCount  int64         `json:"bookmark_count" gorm:"-"`
+	Name            string         `json:"name" gorm:"unique;not null"`
+	LegalName       string         `json:"legal_name"`
+	StageNamesJSON  string         `json:"stage_names_json" gorm:"type:text"`
+	Bio             string         `json:"bio" gorm:"type:text"`
+	ImageURL        string         `json:"image_url"`
+	Nationality     string         `json:"nationality"`
+	BirthPlace      string         `json:"birth_place"`
+	BirthDate       *time.Time     `json:"birth_date,omitempty" gorm:"type:date"`
+	BirthYear       int            `json:"birth_year"`
+	DeathYear       int            `json:"death_year"`
+	ArtistForm      string         `json:"artist_form" gorm:"default:'person'"`
+	ActiveStartDate time.Time      `json:"active_start_date,omitempty" gorm:"type:date"`
+	ActiveEndDate   time.Time      `json:"active_end_date,omitempty" gorm:"type:date"`
+	Members         string         `json:"members" gorm:"type:text"`
+	EntryStatus     string         `json:"entry_status" gorm:"default:'open'"`
+	RedirectTo      *uuid.UUID     `json:"redirect_to,omitempty" gorm:"type:uuid"`
+	Albums          []Album        `json:"albums,omitempty" gorm:"many2many:album_artists;"`
+	Songs           []Song         `json:"songs,omitempty" gorm:"many2many:song_artists;"`
+	Aliases         []ArtistAlias  `json:"aliases,omitempty" gorm:"foreignKey:ArtistID"`
+	MemberRelations []ArtistMember `json:"-" gorm:"foreignKey:GroupArtistID"`
+	PlayCount       int64          `json:"play_count" gorm:"-"`
+	BookmarkCount   int64          `json:"bookmark_count" gorm:"-"`
 }
 
 func (Artist) TableName() string {
 	return "Artists"
+}
+
+type ArtistMember struct {
+	Base
+	GroupArtistID  uuid.UUID  `json:"group_artist_id" gorm:"type:uuid;index;not null"`
+	GroupArtist    *Artist    `json:"group_artist,omitempty" gorm:"foreignKey:GroupArtistID"`
+	MemberArtistID uuid.UUID  `json:"member_artist_id" gorm:"type:uuid;index;not null"`
+	MemberArtist   *Artist    `json:"member_artist,omitempty" gorm:"foreignKey:MemberArtistID"`
+	JoinDate       *time.Time `json:"join_date,omitempty" gorm:"type:date"`
+	LeaveDate      *time.Time `json:"leave_date,omitempty" gorm:"type:date"`
+}
+
+func (ArtistMember) TableName() string {
+	return "artist_members"
 }
 
 type Album struct {
