@@ -528,6 +528,11 @@ func main() {
 			fatalLogger.Fatal("Failed to run music bookmarks and playlists migration: ", err)
 		}
 		log.Println("Migration step completed: music bookmarks and playlists")
+		log.Println("Migration step: channel default selection")
+		if err := migrations.RunChannelDefaultSelectionMigration(db); err != nil {
+			fatalLogger.Fatal("Failed to run channel default selection migration: ", err)
+		}
+		log.Println("Migration step completed: channel default selection")
 		log.Println("Migration step: auto migrate models")
 		if err := db.AutoMigrate(
 			&model.User{},
@@ -539,6 +544,7 @@ func main() {
 			&model.AlbumCorrection{},
 			&model.ArtistCorrection{},
 			&model.Channel{},
+			&model.UserDefaultChannel{},
 			&model.Collection{},
 			&model.Post{},
 			&model.PostCollection{},

@@ -77,6 +77,10 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	if err := migrations.RunChannelDefaultSelectionMigration(db); err != nil {
+		return fmt.Errorf("channel default selection migration: %w", err)
+	}
+
 	if err := migrations.RunBlogInteractionUniqueIndexes(db); err != nil {
 		return fmt.Errorf("blog interaction unique indexes migration: %w", err)
 	}
@@ -142,6 +146,7 @@ func migrateSchema(db *gorm.DB) error {
 	models := []any{
 		&model.User{},
 		&model.Channel{},
+		&model.UserDefaultChannel{},
 		&model.Collection{},
 		&model.Post{},
 		&model.PostCollection{},
