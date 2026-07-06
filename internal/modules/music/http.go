@@ -246,7 +246,11 @@ func (h *Handler) getArtist(c *gin.Context) {
 	}
 
 	var artist model.Artist
-	if err := h.service.db.Preload("Aliases").Preload("Albums.Artists").Preload("MemberRelations.MemberArtist").First(&artist, "id = ?", artistID).Error; err != nil {
+	query := h.service.db.Preload("Aliases").Preload("Albums.Artists")
+	if h.service.db.Migrator().HasTable(&model.ArtistMember{}) {
+		query = query.Preload("MemberRelations.MemberArtist")
+	}
+	if err := query.First(&artist, "id = ?", artistID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("music.artist_not_found", "Artist not found"))
 			return
