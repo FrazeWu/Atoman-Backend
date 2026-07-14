@@ -197,14 +197,12 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 		return CommentListDTO{}, fmt.Errorf("find discussion target: %w", err)
 	}
 	if target.ResourceID != resolved.ResourceID {
-		updated := s.db.Model(&model.DiscussionTarget{}).
-			Where("id = ? AND resource_id = ?", target.ID, target.ResourceID).
-			Update("resource_id", resolved.ResourceID)
-		if updated.Error != nil {
-			return CommentListDTO{}, updated.Error
-		}
-		if updated.RowsAffected != 1 {
-			return CommentListDTO{}, ErrInvalidTargetResource
+		if err := withCreateTransactionMutex(s.createMu, func() error {
+			return s.db.Model(&model.DiscussionTarget{}).
+				Where("id = ?", target.ID).
+				Update("resource_id", resolved.ResourceID).Error
+		}); err != nil {
+			return CommentListDTO{}, err
 		}
 		target.ResourceID = resolved.ResourceID
 	}

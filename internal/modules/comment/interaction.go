@@ -377,7 +377,7 @@ func (s *Service) resolveCommentMutation(viewer Viewer, commentID uuid.UUID) (mo
 }
 
 func targetMatchesResolved(target model.DiscussionTarget, resolved ResolvedTarget) bool {
-	return target.Kind == resolved.Kind && target.ResourceID == resolved.ResourceID && target.ResourceKey == resolved.ResourceKey
+	return target.Kind == resolved.Kind && target.ResourceKey == resolved.ResourceKey
 }
 
 func (s *Service) recomputeRootHotScore(tx *gorm.DB, rootID uuid.UUID, now time.Time) error {

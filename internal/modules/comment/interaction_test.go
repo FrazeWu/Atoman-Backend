@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -147,6 +148,81 @@ func TestListRefreshesRepresentativeResourceAndMutationsResolveItAgain(t *testin
 	visible = true
 	canonicalKey = "https://example.com/changed"
 	require.ErrorIs(t, ctx.service.Unlike(ctx.users[1], created.ID), ErrInvalidTargetResource)
+}
+
+func TestConcurrentCanonicalListsRefreshRepresentativeIdempotently(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindFeedArticle, 0)
+	primaryID := ctx.target.ResourceID
+	mirrorIDs := []uuid.UUID{uuid.New(), uuid.New()}
+	canonicalKey := ctx.resolved.ResourceKey
+	ctx.service.registry.resolvers[TargetKindFeedArticle] = targetResolverFunc(func(_ Viewer, id uuid.UUID) (ResolvedTarget, error) {
+		if id != primaryID && id != mirrorIDs[0] && id != mirrorIDs[1] {
+			return ResolvedTarget{}, ErrTargetNotFound
+		}
+		return ResolvedTarget{Kind: TargetKindFeedArticle, ResourceID: id, ResourceKey: canonicalKey, Visible: true}, nil
+	})
+	ctx.create(t, 0, "shared", nil)
+
+	for round := 0; round < 5; round++ {
+		arrived := make(chan struct{}, 2)
+		release := make(chan struct{})
+		callbackName := "rss-list-barrier-" + uuid.NewString()
+		require.NoError(t, ctx.db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+			if tx.Statement.Table == "discussion_targets" {
+				arrived <- struct{}{}
+				<-release
+			}
+		}))
+
+		errs := make(chan error, 2)
+		var wg sync.WaitGroup
+		for _, id := range mirrorIDs {
+			wg.Add(1)
+			go func(resourceID uuid.UUID) {
+				defer wg.Done()
+				_, err := ctx.service.List(ctx.users[0], TargetRef{Kind: TargetKindFeedArticle, ResourceID: resourceID}, ListCommentsInput{Page: 1})
+				errs <- err
+			}(id)
+		}
+		<-arrived
+		<-arrived
+		close(release)
+		wg.Wait()
+		close(errs)
+		require.NoError(t, ctx.db.Callback().Query().Remove(callbackName))
+		for err := range errs {
+			require.NoError(t, err)
+		}
+	}
+}
+
+func TestCanonicalListRefreshCanInterleaveWithMutation(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindFeedArticle, 0)
+	primaryID := ctx.target.ResourceID
+	alternateID := uuid.New()
+	canonicalKey := ctx.resolved.ResourceKey
+	oldResolved := make(chan struct{}, 1)
+	continueMutation := make(chan struct{})
+	blockPrimary := false
+	ctx.service.registry.resolvers[TargetKindFeedArticle] = targetResolverFunc(func(_ Viewer, id uuid.UUID) (ResolvedTarget, error) {
+		if id != primaryID && id != alternateID {
+			return ResolvedTarget{}, ErrTargetNotFound
+		}
+		if id == primaryID && blockPrimary {
+			oldResolved <- struct{}{}
+			<-continueMutation
+		}
+		return ResolvedTarget{Kind: TargetKindFeedArticle, ResourceID: id, ResourceKey: canonicalKey, Visible: true}, nil
+	})
+	created := ctx.create(t, 0, "shared", nil)
+	blockPrimary = true
+	mutationErr := make(chan error, 1)
+	go func() { mutationErr <- ctx.service.Like(ctx.users[1], created.ID) }()
+	<-oldResolved
+	_, err := ctx.service.List(ctx.users[0], TargetRef{Kind: TargetKindFeedArticle, ResourceID: alternateID}, ListCommentsInput{Page: 1})
+	require.NoError(t, err)
+	close(continueMutation)
+	require.NoError(t, <-mutationErr)
 }
 
 func TestDeleteUsesFreshResolvedOwnerInsteadOfCachedOwner(t *testing.T) {
