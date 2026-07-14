@@ -75,7 +75,52 @@ go build -o start_server ./cmd/start_server
 
 Production runtime can start with `--mode prod`, or read environment variables from `.env.prod` through `systemd`.
 
-## systemd Deployment
+## Production Deployment Script
+
+The production deployment script manages the backend and its host dependencies. It does not deploy the frontend, which remains on Cloudflare Pages.
+
+Before the first deployment, install Git, Go 1.24+, Docker with the Compose plugin, systemd, Nginx, and curl. Also provide:
+
+```bash
+.env.prod
+nginx/ssl/atoman.org.pem
+nginx/ssl/atoman.org.key
+```
+
+Check the host without changing it:
+
+```bash
+scripts/deploy-production.sh check
+```
+
+Run the first deployment:
+
+```bash
+scripts/deploy-production.sh install
+```
+
+Deploy later updates:
+
+```bash
+scripts/deploy-production.sh update
+```
+
+The script:
+
+- fast-forwards the local `main` branch to `origin/main`
+- starts PostgreSQL with the `postgres` and `db-init` services in `docker-compose.dev.yml`
+- builds the Go backend and starts it with systemd
+- synchronizes the checked-in Nginx configuration and, during `install`, the TLS certificate
+- uses Cloudflare R2 through `.env.prod`; it does not start MinIO in production
+- runs the backend's automatic migrations on startup
+- verifies both the local and public API endpoints
+- restores the previous backend binary when startup or health checks fail
+
+The deployment requires a clean `main` worktree. Run `install` once on a new host, then use `update` for subsequent deployments.
+
+## Manual systemd Deployment
+
+The deployment script is the recommended method. The following commands are retained as a manual reference and must be adjusted to match the actual repository path and service user.
 
 Install the service:
 
@@ -166,7 +211,6 @@ The root path `/` intentionally returns `404`.
 Local dependencies:
 
 ```bash
-cd ..
 docker compose -f docker-compose.dev.yml up -d
 ```
 
