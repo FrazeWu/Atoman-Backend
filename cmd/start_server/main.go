@@ -79,6 +79,29 @@ func prepareCommentTargetMigration(db *gorm.DB) error {
 	return nil
 }
 
+func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
+	models = append(models,
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
+		&model.CommentMention{},
+		&model.CommentAttachment{},
+		&model.CommentLike{},
+		&model.CommentReport{},
+		&model.CommentTimeAnchor{},
+		&model.TimelineRevisionProposal{},
+		&model.DebateArgumentDetail{},
+		&model.DebateArgumentReference{},
+		&model.DebateArgumentDebateRef{},
+	)
+	if err := db.AutoMigrate(models...); err != nil {
+		return fmt.Errorf("auto migrate startup models: %w", err)
+	}
+	if err := migrations.RunUnifiedCommentIndexes(db); err != nil {
+		return fmt.Errorf("create unified comment indexes: %w", err)
+	}
+	return nil
+}
+
 func ensureSoftDeleteColumns(db *gorm.DB) {
 	softDeleteModels := []interface{}{
 		&model.User{},
@@ -534,7 +557,7 @@ func main() {
 		}
 		log.Println("Migration step completed: channel default selection")
 		log.Println("Migration step: auto migrate models")
-		if err := db.AutoMigrate(
+		models := []any{
 			&model.User{},
 			&model.UserSettings{},
 			&model.Artist{},
@@ -617,7 +640,8 @@ func main() {
 			&model.CategoryRequest{},
 			&model.ForumModeratorAssignment{},
 			&model.SiteSetting{},
-		); err != nil {
+		}
+		if err := runUnifiedCommentStartupMigrations(db, models...); err != nil {
 			fatalLogger.Fatal("Failed to run migrations: ", err)
 		}
 		log.Println("Migration step completed: auto migrate models")
