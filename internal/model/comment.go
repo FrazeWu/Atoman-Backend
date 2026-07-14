@@ -20,19 +20,20 @@ type DiscussionTarget struct {
 
 type CommentEntry struct {
 	Base
-	TargetID    uuid.UUID  `json:"target_id" gorm:"type:uuid;not null;index"`
-	AuthorID    uuid.UUID  `json:"author_id" gorm:"type:uuid;not null;index"`
-	RootID      *uuid.UUID `json:"root_id,omitempty" gorm:"type:uuid;index"`
-	ReplyToID   *uuid.UUID `json:"reply_to_id,omitempty" gorm:"type:uuid;index"`
-	FloorNumber *int       `json:"floor_number,omitempty"`
-	Content     string     `json:"content" gorm:"type:text;not null"`
-	ContentHash string     `json:"content_hash" gorm:"not null;index"`
-	Status      string     `json:"status" gorm:"not null;default:'active';index"`
-	EditedAt    *time.Time `json:"edited_at,omitempty"`
-	LikeCount   int        `json:"like_count" gorm:"not null;default:0"`
-	ReplyCount  int        `json:"reply_count" gorm:"not null;default:0"`
-	ReportCount int        `json:"report_count" gorm:"not null;default:0"`
-	HotScore    float64    `json:"hot_score" gorm:"not null;default:0;index"`
+	TargetID        uuid.UUID  `json:"target_id" gorm:"type:uuid;not null;index"`
+	AuthorID        uuid.UUID  `json:"author_id" gorm:"type:uuid;not null;index"`
+	RootID          *uuid.UUID `json:"root_id,omitempty" gorm:"type:uuid;index"`
+	ReplyToID       *uuid.UUID `json:"reply_to_id,omitempty" gorm:"type:uuid;index"`
+	ReplyToAuthorID *uuid.UUID `json:"reply_to_author_id,omitempty" gorm:"type:uuid;index"`
+	FloorNumber     *int       `json:"floor_number,omitempty"`
+	Content         string     `json:"content" gorm:"type:text;not null"`
+	ContentHash     string     `json:"content_hash" gorm:"not null;index"`
+	Status          string     `json:"status" gorm:"not null;default:'active';index"`
+	EditedAt        *time.Time `json:"edited_at,omitempty"`
+	LikeCount       int        `json:"like_count" gorm:"not null;default:0"`
+	ReplyCount      int        `json:"reply_count" gorm:"not null;default:0"`
+	ReportCount     int        `json:"report_count" gorm:"not null;default:0"`
+	HotScore        float64    `json:"hot_score" gorm:"not null;default:0;index"`
 }
 
 type CommentMention struct {

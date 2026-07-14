@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -262,6 +263,57 @@ func TestCreateValidatesAttachmentSize(t *testing.T) {
 	require.NoError(t, ctx.db.Model(&boundary).Update("size", 10*1024*1024).Error)
 	_, err = ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{AttachmentIDs: []uuid.UUID{boundary.ID}})
 	require.NoError(t, err)
+}
+
+func TestCreateRejectsNonCommentImageAttachmentPurpose(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	asset := createImageAsset(t, ctx.db, ctx.users[0].ID, "image/png")
+	require.NoError(t, ctx.db.Model(&asset).Update("purpose", "music.cover").Error)
+	_, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{AttachmentIDs: []uuid.UUID{asset.ID}})
+	require.ErrorIs(t, err, ErrInvalidAttachment)
+}
+
+func TestCommentDTOIncludesAuthorsAndPersistsReplyIdentity(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	root := ctx.create(t, 0, "root author", nil)
+	child := ctx.create(t, 1, "child author", &root.ID)
+	nested := ctx.create(t, 2, "nested author", &child.ID)
+	direct := ctx.create(t, 3, "direct author", &root.ID)
+
+	listed, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1})
+	require.NoError(t, err)
+	require.Equal(t, ctx.users[0].ID, listed.Items[0].Author.ID)
+	require.Nil(t, listed.Items[0].ReplyToAuthor)
+	require.Equal(t, ctx.users[1].ID, listed.Items[0].Replies[0].Author.ID)
+	require.Equal(t, ctx.users[0].ID, listed.Items[0].Replies[0].ReplyToAuthor.ID)
+	require.Equal(t, ctx.users[2].ID, listed.Items[0].Replies[1].Author.ID)
+	require.Equal(t, ctx.users[1].ID, listed.Items[0].Replies[1].ReplyToAuthor.ID)
+	require.Equal(t, ctx.users[3].ID, listed.Items[0].Replies[2].Author.ID)
+	require.Equal(t, ctx.users[0].ID, listed.Items[0].Replies[2].ReplyToAuthor.ID)
+
+	var stored model.CommentEntry
+	require.NoError(t, ctx.db.First(&stored, "id = ?", nested.ID).Error)
+	require.NotNil(t, stored.ReplyToAuthorID)
+	require.Equal(t, ctx.users[1].ID, *stored.ReplyToAuthorID)
+
+	page, err := ctx.service.ListReplies(Viewer{}, root.ID, 2, 1)
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, nested.ID, page.Items[0].ID)
+	require.Equal(t, ctx.users[1].ID, page.Items[0].ReplyToAuthor.ID)
+
+	require.NoError(t, ctx.db.Unscoped().Delete(&model.CommentEntry{}, "id = ?", child.ID).Error)
+	page, err = ctx.service.ListReplies(Viewer{}, root.ID, 1, 20)
+	require.NoError(t, err)
+	require.Len(t, page.Items, 2)
+	require.Equal(t, nested.ID, page.Items[0].ID)
+	require.Equal(t, ctx.users[1].ID, page.Items[0].ReplyToAuthor.ID)
+	require.Equal(t, direct.ID, page.Items[1].ID)
+	require.NoError(t, ctx.db.Unscoped().Delete(&model.User{}, "uuid = ?", ctx.users[1].ID).Error)
+	page, err = ctx.service.ListReplies(Viewer{}, root.ID, 1, 20)
+	require.NoError(t, err)
+	require.Equal(t, ctx.users[1].ID, page.Items[0].ReplyToAuthor.ID)
+	require.Empty(t, page.Items[0].ReplyToAuthor.Username)
 }
 
 func TestAttachmentValidationLocksInStableOrderAndReturnsInputOrder(t *testing.T) {
@@ -625,6 +677,19 @@ func TestListCustomPageSizeWithMarkedRootIsCompleteAndUnique(t *testing.T) {
 	require.NotEqual(t, marked.ID, second.Items[0].ID)
 
 	_, err = ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, PageSize: 21})
+	require.ErrorIs(t, err, ErrInvalidListOptions)
+}
+
+func TestCommentListsRejectOverflowingPagination(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	root := ctx.create(t, 0, "overflow", nil)
+	_, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: math.MaxInt, PageSize: 20})
+	require.ErrorIs(t, err, ErrInvalidListOptions)
+	_, err = ctx.service.ListReplies(Viewer{}, root.ID, math.MaxInt, 50)
+	require.ErrorIs(t, err, ErrInvalidListOptions)
+	moderator := ctx.users[0]
+	moderator.Role = authctx.RoleModerator
+	_, err = ctx.service.ListReports(moderator, "", math.MaxInt, 50)
 	require.ErrorIs(t, err, ErrInvalidListOptions)
 }
 

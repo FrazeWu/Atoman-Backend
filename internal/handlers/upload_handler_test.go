@@ -225,6 +225,18 @@ func TestUploadCommentImageStoresCommentPurposeAndReturnsAssetID(t *testing.T) {
 	}
 }
 
+func TestUniqueUploadFilenameUsesVerifiedImageContentTypeExtension(t *testing.T) {
+	if got := uniqueUploadFilename("spoofed.jpg", "image/png"); !strings.HasSuffix(got, ".png") {
+		t.Fatalf("expected verified PNG extension, got %q", got)
+	}
+	if got := uniqueUploadFilename("photo.png", "image/jpeg"); !strings.HasSuffix(got, ".jpg") {
+		t.Fatalf("expected verified JPEG extension, got %q", got)
+	}
+	if got := uniqueUploadFilename("track.custom", "audio/mpeg"); !strings.HasSuffix(got, ".custom") {
+		t.Fatalf("expected audio extension preservation, got %q", got)
+	}
+}
+
 func TestUploadMusicCoverRejectsSpoofedImageContentType(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("S3_BUCKET", "atoman-test")

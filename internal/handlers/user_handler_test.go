@@ -237,6 +237,34 @@ func TestSearchUsersMentionRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestSearchUsersMentionRejectsInvalidLimitWhilePublicSearchKeepsFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{})
+	user := model.User{Username: "searcher", Email: "searcher@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser})
+		c.Next()
+	})
+	r.GET("/users/search", SearchUsers(db))
+	for _, limit := range []string{"0", "-1", "abc"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/search?scope=mention&limit="+limit, nil))
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"code":"user.invalid_limit"`) {
+			t.Fatalf("limit %s: expected stable 400, got %d: %s", limit, w.Code, w.Body.String())
+		}
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/search?limit=abc", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("public fallback changed: %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestListUsersForRoleManagementScansCreatedAt(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)

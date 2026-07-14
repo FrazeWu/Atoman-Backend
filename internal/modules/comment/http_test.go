@@ -3,8 +3,11 @@ package comment
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
 
 	"atoman/internal/model"
@@ -63,6 +66,9 @@ func TestCommentHTTPPublicRoutesAndMutationAuth(t *testing.T) {
 			req := httptest.NewRequest(tc.method, tc.path, nil)
 			router.ServeHTTP(w, req)
 			require.Equal(t, tc.want, w.Code, w.Body.String())
+			if tc.want == http.StatusUnauthorized {
+				require.Contains(t, w.Body.String(), `"code":"auth.unauthorized"`)
+			}
 			if tc.want != http.StatusNotFound {
 				require.NotEqual(t, http.StatusNotFound, w.Code, "route was not mounted")
 			}
@@ -115,18 +121,58 @@ func TestCommentHTTPRootPageSizeIsReturnedAndCapped(t *testing.T) {
 
 func TestCommentHTTPStrictJSONDecoderRejectsUnknownAndTrailingValues(t *testing.T) {
 	var input CreateCommentInput
-	require.Error(t, decodeJSONStrict(bytes.NewBufferString(`{"content":"ok","root_id":"`+uuid.NewString()+`"}`), &input))
-	require.Error(t, decodeJSONStrict(bytes.NewBufferString(`{"content":"ok"}{"content":"extra"}`), &input))
+	require.Error(t, decodeJSONStrict(newStrictJSONTestContext(`{"content":"ok","root_id":"`+uuid.NewString()+`"}`, "application/json"), &input))
+	require.Error(t, decodeJSONStrict(newStrictJSONTestContext(`{"content":"ok"}{"content":"extra"}`, "application/json"), &input))
 }
 
 func TestCommentHTTPStrictJSONUsesMentionSnakeCase(t *testing.T) {
 	userID := uuid.NewString()
 	var create CreateCommentInput
-	require.NoError(t, decodeJSONStrict(bytes.NewBufferString(`{"content":"@alice","mentions":[{"user_id":"`+userID+`","start":0,"end":6}]}`), &create))
+	require.NoError(t, decodeJSONStrict(newStrictJSONTestContext(`{"content":"@alice","mentions":[{"user_id":"`+userID+`","start":0,"end":6}]}`, "application/json; charset=utf-8"), &create))
 	require.Equal(t, uuid.MustParse(userID), create.Mentions[0].UserID)
-	require.Error(t, decodeJSONStrict(bytes.NewBufferString(`{"content":"@alice","mentions":[{"userID":"`+userID+`","start":0,"end":6}]}`), &create))
+	require.Error(t, decodeJSONStrict(newStrictJSONTestContext(`{"content":"@alice","mentions":[{"userID":"`+userID+`","start":0,"end":6}]}`, "application/json"), &create))
 	var edit EditCommentInput
-	require.NoError(t, decodeJSONStrict(bytes.NewBufferString(`{"content":"@alice","mentions":[{"user_id":"`+userID+`","start":0,"end":6}]}`), &edit))
+	require.NoError(t, decodeJSONStrict(newStrictJSONTestContext(`{"content":"@alice","mentions":[{"user_id":"`+userID+`","start":0,"end":6}]}`, "application/vnd.api+json"), &edit))
+}
+
+func newStrictJSONTestContext(body, contentType string) *gin.Context {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	if contentType != "" {
+		c.Request.Header.Set("Content-Type", contentType)
+	}
+	return c
+}
+
+func TestCommentHTTPStrictJSONRejectsMediaTypeAndLargeBody(t *testing.T) {
+	var input CreateCommentInput
+	require.ErrorIs(t, decodeJSONStrict(newStrictJSONTestContext(`{"content":"ok"}`, ""), &input), ErrUnsupportedMediaType)
+	require.ErrorIs(t, decodeJSONStrict(newStrictJSONTestContext(`{"content":"ok"}`, "text/plain"), &input), ErrUnsupportedMediaType)
+	large := `{"content":"` + strings.Repeat("x", 70*1024) + `"}`
+	require.ErrorIs(t, decodeJSONStrict(newStrictJSONTestContext(large, "application/json"), &input), ErrRequestTooLarge)
+
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	h := &HTTP{service: ctx.service}
+	router := gin.New()
+	router.Use(func(c *gin.Context) { authctx.SetCurrentUser(c, ctx.users[0]); c.Next() })
+	router.POST("/discussions/:kind/:resource_id/comments", h.create)
+	cases := []struct {
+		contentType, body string
+		status            int
+	}{
+		{"", `{"content":"ok"}`, http.StatusUnsupportedMediaType},
+		{"text/plain", `{"content":"ok"}`, http.StatusUnsupportedMediaType},
+		{"application/json", large, http.StatusRequestEntityTooLarge},
+	}
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/discussions/"+ctx.target.Kind+"/"+ctx.target.ResourceID.String()+"/comments", bytes.NewBufferString(tc.body))
+		if tc.contentType != "" {
+			req.Header.Set("Content-Type", tc.contentType)
+		}
+		router.ServeHTTP(w, req)
+		require.Equal(t, tc.status, w.Code, w.Body.String())
+	}
 }
 
 func TestCommentHTTPInvalidCommentUUIDUsesStableInvalidID(t *testing.T) {
@@ -192,9 +238,37 @@ func TestCommentHTTPLegalMissingCommentUUIDRemainsNotFound(t *testing.T) {
 	for _, tc := range cases {
 		w := httptest.NewRecorder()
 		req := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+		if tc.body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
 		router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusNotFound, w.Code, "%s %s: %s", tc.method, tc.path, w.Body.String())
 		require.Contains(t, w.Body.String(), `"code":"comment.not_found"`)
+	}
+}
+
+func TestCommentHTTPRejectsOverflowingPageAcrossLists(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	root := ctx.create(t, 0, "overflow root", nil)
+	h := &HTTP{service: ctx.service}
+	moderator := ctx.users[0]
+	moderator.Role = authctx.RoleModerator
+	router := gin.New()
+	router.Use(func(c *gin.Context) { authctx.SetCurrentUser(c, moderator); c.Next() })
+	router.GET("/discussions/:kind/:resource_id/comments", h.list)
+	router.GET("/comments/:root_comment_id/replies", h.listReplies)
+	router.GET("/admin/comment-reports", h.listReports)
+	page := strconv.FormatInt(math.MaxInt64, 10)
+	paths := []string{
+		"/discussions/" + ctx.target.Kind + "/" + ctx.target.ResourceID.String() + "/comments?page=" + page,
+		"/comments/" + root.ID.String() + "/replies?page=" + page,
+		"/admin/comment-reports?page=" + page,
+	}
+	for _, path := range paths {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		require.Equal(t, http.StatusBadRequest, w.Code, "%s: %s", path, w.Body.String())
+		require.Contains(t, w.Body.String(), `"code":"comment.invalid_list"`)
 	}
 }
 

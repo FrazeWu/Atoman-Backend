@@ -3,6 +3,7 @@ package middleware
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -115,6 +116,22 @@ func setAuthContext(c *gin.Context, claims jwt.MapClaims) bool {
 
 // AuthMiddleware validates JWT tokens and sets user context
 func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if len(authTokenCandidatesFromRequest(c)) == 0 {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
+			c.Abort()
+			return
+		}
+		if _, ok := resolveAuthClaims(c); !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+func StableAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if len(authTokenCandidatesFromRequest(c)) == 0 {
 			httpx.Error(c, apperr.Unauthorized("Authorization header required"))

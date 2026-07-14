@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,13 +20,19 @@ import (
 
 type HTTP struct{ service *Service }
 
+var (
+	ErrInvalidJSON          = errors.New("invalid comment JSON")
+	ErrUnsupportedMediaType = errors.New("unsupported comment media type")
+	ErrRequestTooLarge      = errors.New("comment request too large")
+)
+
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &HTTP{service: service}
 	group.GET("/discussions/:kind/:resource_id/comments", middleware.OptionalAuthMiddleware(), h.list)
 	group.GET("/comments/:root_comment_id/replies", middleware.OptionalAuthMiddleware(), h.listReplies)
 
 	mutations := group.Group("")
-	mutations.Use(middleware.AuthMiddleware())
+	mutations.Use(middleware.StableAuthMiddleware())
 	mutations.POST("/discussions/:kind/:resource_id/comments", h.create)
 	mutations.PATCH("/comments/:comment_id", h.edit)
 	mutations.DELETE("/comments/:comment_id", h.delete)
@@ -81,18 +88,28 @@ func parsePage(raw string, fallback, capValue int) (int, error) {
 	return value, nil
 }
 
-func decodeJSONStrict(reader io.Reader, output any) error {
+func decodeJSONStrict(c *gin.Context, output any) error {
+	mediaType, _, err := mime.ParseMediaType(c.GetHeader("Content-Type"))
+	if err != nil || mediaType != "application/json" && !(strings.HasPrefix(mediaType, "application/") && strings.HasSuffix(mediaType, "+json")) {
+		return ErrUnsupportedMediaType
+	}
+	reader := http.MaxBytesReader(c.Writer, c.Request.Body, 64*1024)
 	decoder := json.NewDecoder(reader)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(output); err != nil {
-		return err
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return ErrRequestTooLarge
+		}
+		return ErrInvalidJSON
 	}
 	var trailing any
 	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
-		if err == nil {
-			return errors.New("request body must contain one JSON value")
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return ErrRequestTooLarge
 		}
-		return err
+		return ErrInvalidJSON
 	}
 	return nil
 }
@@ -132,12 +149,14 @@ func writeCommentError(c *gin.Context, err error) {
 		status, code, message = 400, "comment.invalid_mark", "Invalid marked comment"
 	case errors.Is(err, ErrInvalidListOptions):
 		status, code, message = 400, "comment.invalid_list", "Invalid list options"
+	case errors.Is(err, ErrInvalidJSON):
+		status, code, message = 400, "comment.invalid_json", "Invalid request body"
+	case errors.Is(err, ErrUnsupportedMediaType):
+		status, code, message = 415, "comment.unsupported_media_type", "Content-Type must be JSON"
+	case errors.Is(err, ErrRequestTooLarge):
+		status, code, message = 413, "comment.request_too_large", "Request body is too large"
 	}
 	httpx.Error(c, apperr.New(status, code, message, nil))
-}
-
-func writeInvalidJSON(c *gin.Context) {
-	httpx.Error(c, apperr.BadRequest("comment.invalid_json", "Invalid request body"))
 }
 
 // list godoc
@@ -233,6 +252,8 @@ func (h *HTTP) listReplies(c *gin.Context) {
 // @Failure 404 {object} ErrorResponse
 // @Failure 409 {object} ErrorResponse
 // @Failure 429 {object} ErrorResponse
+// @Failure 413 {object} ErrorResponse
+// @Failure 415 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -244,8 +265,8 @@ func (h *HTTP) create(c *gin.Context) {
 		return
 	}
 	var input CreateCommentInput
-	if err := decodeJSONStrict(c.Request.Body, &input); err != nil {
-		writeInvalidJSON(c)
+	if err := decodeJSONStrict(c, &input); err != nil {
+		writeCommentError(c, err)
 		return
 	}
 	result, err := h.service.Create(currentUser(c), target, input)
@@ -268,6 +289,8 @@ func (h *HTTP) create(c *gin.Context) {
 // @Failure 401 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 413 {object} ErrorResponse
+// @Failure 415 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -279,8 +302,8 @@ func (h *HTTP) edit(c *gin.Context) {
 		return
 	}
 	var input EditCommentInput
-	if err := decodeJSONStrict(c.Request.Body, &input); err != nil {
-		writeInvalidJSON(c)
+	if err := decodeJSONStrict(c, &input); err != nil {
+		writeCommentError(c, err)
 		return
 	}
 	result, err := h.service.Edit(currentUser(c), id, input)
@@ -366,6 +389,8 @@ func (h *HTTP) commentAction(c *gin.Context, action func(authctx.CurrentUser, uu
 // @Failure 401 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 413 {object} ErrorResponse
+// @Failure 415 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -377,8 +402,8 @@ func (h *HTTP) report(c *gin.Context) {
 		return
 	}
 	var input ReportInput
-	if err := decodeJSONStrict(c.Request.Body, &input); err != nil {
-		writeInvalidJSON(c)
+	if err := decodeJSONStrict(c, &input); err != nil {
+		writeCommentError(c, err)
 		return
 	}
 	if err := h.service.Report(currentUser(c), id, input); err != nil {
@@ -402,6 +427,8 @@ func (h *HTTP) report(c *gin.Context) {
 // @Failure 401 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 413 {object} ErrorResponse
+// @Failure 415 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -413,8 +440,12 @@ func (h *HTTP) mark(c *gin.Context) {
 		return
 	}
 	var input PinCommentInput
-	if err := decodeJSONStrict(c.Request.Body, &input); err != nil || input.CommentID == uuid.Nil {
-		writeInvalidJSON(c)
+	if err := decodeJSONStrict(c, &input); err != nil {
+		writeCommentError(c, err)
+		return
+	}
+	if input.CommentID == uuid.Nil {
+		writeCommentError(c, ErrInvalidJSON)
 		return
 	}
 	if err := h.service.Mark(currentUser(c), target, input.CommentID); err != nil {
@@ -498,6 +529,8 @@ func (h *HTTP) listReports(c *gin.Context) {
 // @Failure 401 {object} ErrorResponse
 // @Failure 403 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
+// @Failure 413 {object} ErrorResponse
+// @Failure 415 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
@@ -509,8 +542,8 @@ func (h *HTTP) moderate(c *gin.Context) {
 		return
 	}
 	var input ModerateInput
-	if err := decodeJSONStrict(c.Request.Body, &input); err != nil {
-		writeInvalidJSON(c)
+	if err := decodeJSONStrict(c, &input); err != nil {
+		writeCommentError(c, err)
 		return
 	}
 	if err := h.service.Moderate(currentUser(c), id, input); err != nil {

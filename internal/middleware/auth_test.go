@@ -81,6 +81,20 @@ func TestAuthMiddlewareRejectsMissingAuthorizationHeader(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status 401, got %d", w.Code)
 	}
+	if w.Body.String() != `{"error":"Authorization header required"}` {
+		t.Fatalf("expected legacy auth body, got %s", w.Body.String())
+	}
+}
+
+func TestStableAuthMiddlewareUsesStructuredErrorEnvelope(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/protected", StableAuthMiddleware(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/protected", nil))
+	if w.Code != http.StatusUnauthorized || !strings.Contains(w.Body.String(), `"code":"auth.unauthorized"`) {
+		t.Fatalf("expected stable auth body, got %d: %s", w.Code, w.Body.String())
+	}
 }
 
 func TestAuthMiddlewareRejectsJWTWhenAuthDBMissing(t *testing.T) {

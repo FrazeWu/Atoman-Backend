@@ -211,7 +211,9 @@ func uploadContentMatchesDeclared(file interface {
 
 func uniqueUploadFilename(originalName string, contentType string) string {
 	ext := strings.ToLower(filepath.Ext(originalName))
-	if ext == "" {
+	if strings.HasPrefix(contentType, "image/") {
+		ext = contentTypeToExt(contentType)
+	} else if ext == "" {
 		ext = contentTypeToExt(contentType)
 	}
 	if ext == ".jpeg" {

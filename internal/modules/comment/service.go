@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -135,6 +136,7 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 					return ErrInvalidReply
 				}
 				created.ReplyToID = input.ReplyToID
+				created.ReplyToAuthorID = &reply.AuthorID
 				created.RootID = &root.ID
 				replyAuthorID = &reply.AuthorID
 			}
@@ -238,6 +240,10 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	if effectivePageSize < 1 || effectivePageSize > pageSize {
 		return CommentListDTO{}, ErrInvalidListOptions
 	}
+	offset, _, err := safePagination(input.Page, effectivePageSize)
+	if err != nil {
+		return CommentListDTO{}, err
+	}
 	if input.Sort == "" {
 		input.Sort = SortOldest
 	}
@@ -297,14 +303,13 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 
 	query := s.db.Where("target_id = ? AND root_id IS NULL AND status IN ?", target.ID, visible)
 	limit := effectivePageSize
-	offset := (input.Page - 1) * effectivePageSize
 	if marked != nil {
 		query = query.Where("id <> ?", marked.ID)
 		if input.Page == 1 {
 			limit = effectivePageSize - 1
 			offset = 0
 		} else {
-			offset = effectivePageSize - 1 + (input.Page-2)*effectivePageSize
+			offset--
 		}
 	}
 	switch input.Sort {
@@ -375,6 +380,10 @@ func (s *Service) ListReplies(viewer Viewer, rootID uuid.UUID, page, pageSize in
 	if rootID == uuid.Nil || page < 1 || pageSize < 1 || pageSize > 50 {
 		return ReplyListDTO{}, ErrInvalidListOptions
 	}
+	offset, end, err := safePagination(page, pageSize)
+	if err != nil {
+		return ReplyListDTO{}, err
+	}
 	root, err := s.repo.findComment(s.db, rootID)
 	if isNotFound(err) {
 		return ReplyListDTO{}, ErrCommentNotFound
@@ -405,7 +414,7 @@ func (s *Service) ListReplies(viewer Viewer, rootID uuid.UUID, page, pageSize in
 	}
 	var entries []model.CommentEntry
 	if err := s.db.Where("root_id = ? AND status IN ?", root.ID, visible).
-		Order("created_at ASC").Order("id ASC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&entries).Error; err != nil {
+		Order("created_at ASC").Order("id ASC").Offset(offset).Limit(pageSize).Find(&entries).Error; err != nil {
 		return ReplyListDTO{}, err
 	}
 	dtos, err := s.entryDTOs(s.db, entries, viewer.UserID)
@@ -416,7 +425,22 @@ func (s *Service) ListReplies(viewer Viewer, rootID uuid.UUID, page, pageSize in
 	for _, entry := range entries {
 		items = append(items, dtos[entry.ID])
 	}
-	return ReplyListDTO{Items: items, Page: page, PerPage: pageSize, Total: total, HasMore: int64(page*pageSize) < total}, nil
+	return ReplyListDTO{Items: items, Page: page, PerPage: pageSize, Total: total, HasMore: end < total}, nil
+}
+
+func safePagination(page, pageSize int) (int, int64, error) {
+	if page < 1 || pageSize < 1 {
+		return 0, 0, ErrInvalidListOptions
+	}
+	p, size := int64(page), int64(pageSize)
+	if p > math.MaxInt64/size || p-1 > math.MaxInt64/size {
+		return 0, 0, ErrInvalidListOptions
+	}
+	offset := (p - 1) * size
+	if offset > int64(^uint(0)>>1) {
+		return 0, 0, ErrInvalidListOptions
+	}
+	return int(offset), p * size, nil
 }
 
 func (s *Service) validateAuthor(user authctx.CurrentUser) error {
@@ -489,7 +513,7 @@ func (s *Service) validateAttachments(db *gorm.DB, userID uuid.UUID, ids []uuid.
 	const maxAttachmentSize = 10 * 1024 * 1024
 	for _, id := range orderedIDs {
 		var asset model.MediaAsset
-		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&asset, "id = ?", id).Error; err != nil || asset.UserID == nil || *asset.UserID != userID || !allowed[asset.ContentType] || asset.Size <= 0 || asset.Size > maxAttachmentSize || strings.TrimSpace(asset.Key) == "" || strings.TrimSpace(asset.URL) == "" {
+		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&asset, "id = ?", id).Error; err != nil || asset.UserID == nil || *asset.UserID != userID || asset.Purpose != "comment.image" || !allowed[asset.ContentType] || asset.Size <= 0 || asset.Size > maxAttachmentSize || strings.TrimSpace(asset.Key) == "" || strings.TrimSpace(asset.URL) == "" {
 			return nil, ErrInvalidAttachment
 		}
 		assetsByID[id] = asset
@@ -617,6 +641,7 @@ type commentAttachmentRow struct {
 func (s *Service) entryDTOs(db *gorm.DB, entries []model.CommentEntry, viewerIDs ...*uuid.UUID) (map[uuid.UUID]CommentDTO, error) {
 	dtos := make(map[uuid.UUID]CommentDTO, len(entries))
 	ids := make([]uuid.UUID, 0, len(entries))
+	userIDSet := make(map[uuid.UUID]struct{}, len(entries)*2)
 	for _, entry := range entries {
 		rendered, err := RenderCommentMarkdown(entry.Content)
 		if err != nil {
@@ -642,9 +667,38 @@ func (s *Service) entryDTOs(db *gorm.DB, entries []model.CommentEntry, viewerIDs
 			Replies:      []CommentDTO{},
 		}
 		ids = append(ids, entry.ID)
+		userIDSet[entry.AuthorID] = struct{}{}
+		if entry.ReplyToAuthorID != nil {
+			userIDSet[*entry.ReplyToAuthorID] = struct{}{}
+		}
 	}
 	if len(ids) == 0 {
 		return dtos, nil
+	}
+	userIDs := make([]uuid.UUID, 0, len(userIDSet))
+	for id := range userIDSet {
+		userIDs = append(userIDs, id)
+	}
+	userIDs = sortedUUIDs(userIDs)
+	var users []model.User
+	if err := db.Unscoped().Select("uuid", "username", "display_name", "avatar_url").Where("uuid IN ?", userIDs).Order("uuid ASC").Find(&users).Error; err != nil {
+		return nil, err
+	}
+	userSummaries := make(map[uuid.UUID]UserSummaryDTO, len(userIDs))
+	for _, id := range userIDs {
+		userSummaries[id] = UserSummaryDTO{ID: id}
+	}
+	for _, user := range users {
+		userSummaries[user.UUID] = UserSummaryDTO{ID: user.UUID, Username: user.Username, DisplayName: user.DisplayName, AvatarURL: user.AvatarURL}
+	}
+	for _, entry := range entries {
+		dto := dtos[entry.ID]
+		dto.Author = userSummaries[entry.AuthorID]
+		if entry.ReplyToAuthorID != nil {
+			summary := userSummaries[*entry.ReplyToAuthorID]
+			dto.ReplyToAuthor = &summary
+		}
+		dtos[entry.ID] = dto
 	}
 	if len(viewerIDs) > 0 && viewerIDs[0] != nil {
 		var likedIDs []uuid.UUID

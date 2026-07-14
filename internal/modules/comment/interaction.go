@@ -57,6 +57,10 @@ func (s *Service) ListReports(user authctx.CurrentUser, status string, page, pag
 	if page < 1 || pageSize < 1 || pageSize > 50 || status != "" && status != ReportStatusPending && status != ReportStatusUpheld && status != ReportStatusRejected {
 		return ReportQueueDTO{}, ErrInvalidListOptions
 	}
+	offset, end, err := safePagination(page, pageSize)
+	if err != nil {
+		return ReportQueueDTO{}, err
+	}
 	query := s.db.Table("comment_reports AS reports").
 		Joins("JOIN comment_entries AS comments ON comments.id = reports.comment_id").
 		Joins("JOIN discussion_targets AS targets ON targets.id = comments.target_id").
@@ -70,20 +74,20 @@ func (s *Service) ListReports(user authctx.CurrentUser, status string, page, pag
 		return ReportQueueDTO{}, err
 	}
 	var items []ReportQueueItemDTO
-	err := query.Select(`reports.id, reports.reason, reports.note, reports.status, reports.reviewer_id,
+	err = query.Select(`reports.id, reports.reason, reports.note, reports.status, reports.reviewer_id,
 		reports.created_at, reports.reviewed_at, comments.id AS comment_id,
 		CASE WHEN comments.root_id IS NULL THEN comments.id ELSE comments.root_id END AS root_id,
 		targets.kind AS target_kind, targets.resource_id, reports.reporter_id,
 		reporters.username, comments.content, comments.status AS comment_status`).
 		Order("reports.created_at DESC").Order("reports.id DESC").
-		Offset((page - 1) * pageSize).Limit(pageSize).Scan(&items).Error
+		Offset(offset).Limit(pageSize).Scan(&items).Error
 	if err != nil {
 		return ReportQueueDTO{}, err
 	}
 	if items == nil {
 		items = []ReportQueueItemDTO{}
 	}
-	return ReportQueueDTO{Items: items, Page: page, PerPage: pageSize, Total: total, HasMore: int64(page*pageSize) < total}, nil
+	return ReportQueueDTO{Items: items, Page: page, PerPage: pageSize, Total: total, HasMore: end < total}, nil
 }
 
 func (s *Service) Edit(user authctx.CurrentUser, commentID uuid.UUID, input EditCommentInput) (CommentDTO, error) {

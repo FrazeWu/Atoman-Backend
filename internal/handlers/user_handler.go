@@ -730,9 +730,9 @@ func GetUserFollowing(db *gorm.DB) gin.HandlerFunc {
 // @Param limit query int false "结果数量上限，1-20" default(5)
 // @Param scope query string false "搜索范围，例如 mention"
 // @Success 200 {object} SearchUsersResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
-// @Security BearerAuth
-// @Security CookieAuth
 // @Router /api/v1/users/search [get]
 func SearchUsers(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -740,7 +740,12 @@ func SearchUsers(db *gorm.DB) gin.HandlerFunc {
 		scope := strings.TrimSpace(c.Query("scope"))
 		limit := 5
 		if raw := c.Query("limit"); raw != "" {
-			if l, err := strconv.Atoi(raw); err == nil && l > 0 {
+			l, parseErr := strconv.Atoi(raw)
+			if scope == "mention" && (parseErr != nil || l < 1) {
+				httpx.Error(c, apperr.BadRequest("user.invalid_limit", "Limit must be a positive integer"))
+				return
+			}
+			if parseErr == nil && l > 0 {
 				limit = l
 				if limit > 20 {
 					limit = 20

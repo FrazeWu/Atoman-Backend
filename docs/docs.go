@@ -218,6 +218,18 @@ const docTemplate = `{
                             "$ref": "#/definitions/comment.ErrorResponse"
                         }
                     },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -4353,6 +4365,18 @@ const docTemplate = `{
                             "$ref": "#/definitions/comment.ErrorResponse"
                         }
                     },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
@@ -4545,6 +4569,18 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
                         "schema": {
                             "$ref": "#/definitions/comment.ErrorResponse"
                         }
@@ -4999,6 +5035,18 @@ const docTemplate = `{
                             "$ref": "#/definitions/comment.ErrorResponse"
                         }
                     },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
                     "429": {
                         "description": "Too Many Requests",
                         "schema": {
@@ -5087,6 +5135,18 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
                         "schema": {
                             "$ref": "#/definitions/comment.ErrorResponse"
                         }
@@ -10875,14 +10935,6 @@ const docTemplate = `{
         },
         "/api/v1/users/search": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
                 "description": "按用户名或显示名搜索活跃用户；scope=mention 时要求登录并搜索全部活跃用户。",
                 "produces": [
                     "application/json"
@@ -10917,6 +10969,18 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.SearchUsersResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "500": {
@@ -11915,6 +11979,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/comment.AttachmentDTO"
                     }
                 },
+                "author": {
+                    "$ref": "#/definitions/comment.UserSummaryDTO"
+                },
                 "author_id": {
                     "type": "string"
                 },
@@ -11962,6 +12029,9 @@ const docTemplate = `{
                 },
                 "reply_count": {
                     "type": "integer"
+                },
+                "reply_to_author": {
+                    "$ref": "#/definitions/comment.UserSummaryDTO"
                 },
                 "reply_to_id": {
                     "type": "string"
@@ -12301,6 +12371,23 @@ const docTemplate = `{
                 },
                 "start": {
                     "type": "integer"
+                }
+            }
+        },
+        "comment.UserSummaryDTO": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
                 }
             }
         },

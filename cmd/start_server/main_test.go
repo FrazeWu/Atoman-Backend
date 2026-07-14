@@ -66,6 +66,9 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 	if !db.Migrator().HasColumn(&model.DiscussionTarget{}, "resource_id") {
 		t.Fatal("expected discussion_targets.resource_id")
 	}
+	if !db.Migrator().HasColumn(&model.CommentEntry{}, "reply_to_author_id") {
+		t.Fatal("expected comment_entries.reply_to_author_id")
+	}
 
 	for table, index := range map[string]string{
 		"discussion_targets":      "uq_discussion_target_kind_key",
