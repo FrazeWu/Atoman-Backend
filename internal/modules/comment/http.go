@@ -62,7 +62,7 @@ func parseTarget(c *gin.Context) (TargetRef, error) {
 func parseUUIDParam(c *gin.Context, name string) (uuid.UUID, error) {
 	id, err := uuid.Parse(c.Param(name))
 	if err != nil || id == uuid.Nil {
-		return uuid.Nil, ErrInvalidTargetResource
+		return uuid.Nil, ErrInvalidCommentID
 	}
 	return id, nil
 }
@@ -108,6 +108,8 @@ func writeCommentError(c *gin.Context, err error) {
 		status, code, message = 404, "comment.target_not_found", "Discussion target not found"
 	case errors.Is(err, ErrCommentNotFound):
 		status, code, message = 404, "comment.not_found", "Comment not found"
+	case errors.Is(err, ErrInvalidCommentID):
+		status, code, message = 400, "comment.invalid_id", "Invalid comment ID"
 	case errors.Is(err, ErrCommentRateLimited):
 		status, code, message = 429, "comment.rate_limited", "Comment rate limit exceeded"
 	case errors.Is(err, ErrDuplicateComment):
@@ -170,9 +172,8 @@ func (h *HTTP) list(c *gin.Context) {
 		writeCommentError(c, err)
 		return
 	}
-	_ = pageSize
 	sort := c.Query("sort")
-	result, err := h.service.List(currentUser(c), target, ListCommentsInput{Page: page, Sort: sort})
+	result, err := h.service.List(currentUser(c), target, ListCommentsInput{Page: page, PageSize: pageSize, Sort: sort})
 	if err != nil {
 		writeCommentError(c, err)
 		return
@@ -196,7 +197,7 @@ func (h *HTTP) list(c *gin.Context) {
 func (h *HTTP) listReplies(c *gin.Context) {
 	id, err := parseUUIDParam(c, "root_comment_id")
 	if err != nil {
-		writeCommentError(c, ErrInvalidReply)
+		writeCommentError(c, err)
 		return
 	}
 	page, err := parsePage(c.Query("page"), 1, int(^uint(0)>>1))
@@ -274,7 +275,7 @@ func (h *HTTP) create(c *gin.Context) {
 func (h *HTTP) edit(c *gin.Context) {
 	id, err := parseUUIDParam(c, "comment_id")
 	if err != nil {
-		writeCommentError(c, ErrInvalidContent)
+		writeCommentError(c, err)
 		return
 	}
 	var input EditCommentInput
@@ -343,7 +344,7 @@ func (h *HTTP) unlike(c *gin.Context) {
 func (h *HTTP) commentAction(c *gin.Context, action func(authctx.CurrentUser, uuid.UUID) error) {
 	id, err := parseUUIDParam(c, "comment_id")
 	if err != nil {
-		writeCommentError(c, ErrCommentNotFound)
+		writeCommentError(c, err)
 		return
 	}
 	if err := action(currentUser(c), id); err != nil {
@@ -372,7 +373,7 @@ func (h *HTTP) commentAction(c *gin.Context, action func(authctx.CurrentUser, uu
 func (h *HTTP) report(c *gin.Context) {
 	id, err := parseUUIDParam(c, "comment_id")
 	if err != nil {
-		writeCommentError(c, ErrInvalidReport)
+		writeCommentError(c, err)
 		return
 	}
 	var input ReportInput
@@ -504,7 +505,7 @@ func (h *HTTP) listReports(c *gin.Context) {
 func (h *HTTP) moderate(c *gin.Context) {
 	id, err := parseUUIDParam(c, "comment_id")
 	if err != nil {
-		writeCommentError(c, ErrInvalidModeration)
+		writeCommentError(c, err)
 		return
 	}
 	var input ModerateInput

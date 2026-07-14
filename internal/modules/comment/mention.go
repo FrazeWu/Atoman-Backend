@@ -8,9 +8,9 @@ import (
 )
 
 type MentionInput struct {
-	UserID uuid.UUID
-	Start  int
-	End    int
+	UserID uuid.UUID `json:"user_id"`
+	Start  int       `json:"start"`
+	End    int       `json:"end"`
 }
 
 func ValidateMentions(content string, inputs []MentionInput) error {

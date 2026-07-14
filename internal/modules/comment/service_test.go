@@ -590,6 +590,44 @@ func TestListMarkedRootPaginationIsBoundedCompleteAndUnique(t *testing.T) {
 	require.Equal(t, want, seen)
 }
 
+func TestListCustomPageSizeWithMarkedRootIsCompleteAndUnique(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	marked := ctx.create(t, 0, "marked-small-page", nil)
+	want := map[uuid.UUID]bool{marked.ID: true}
+	for i := 0; i < 11; i++ {
+		root := ctx.create(t, i%len(ctx.users), fmt.Sprintf("small-page-%02d", i), nil)
+		want[root.ID] = true
+	}
+	var target model.DiscussionTarget
+	require.NoError(t, ctx.db.First(&target).Error)
+	require.NoError(t, ctx.db.Model(&target).Update("pinned_comment_id", marked.ID).Error)
+
+	seen := map[uuid.UUID]bool{}
+	for pageNumber, wantCount := range []int{5, 5, 2} {
+		page, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: pageNumber + 1, PageSize: 5, Sort: SortOldest})
+		require.NoError(t, err)
+		require.Equal(t, 5, page.PerPage)
+		require.Len(t, page.Items, wantCount)
+		for _, item := range page.Items {
+			require.False(t, seen[item.ID], "comment %s repeated", item.ID)
+			seen[item.ID] = true
+		}
+	}
+	require.Equal(t, want, seen)
+
+	first, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, PageSize: 1})
+	require.NoError(t, err)
+	require.Len(t, first.Items, 1)
+	require.Equal(t, []uuid.UUID{marked.ID}, []uuid.UUID{first.Items[0].ID})
+	second, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 2, PageSize: 1})
+	require.NoError(t, err)
+	require.Len(t, second.Items, 1)
+	require.NotEqual(t, marked.ID, second.Items[0].ID)
+
+	_, err = ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, PageSize: 21})
+	require.ErrorIs(t, err, ErrInvalidListOptions)
+}
+
 func TestListInvalidPinnedReferenceFallsBackToOrdinaryPagination(t *testing.T) {
 	cases := map[string]func(t *testing.T, ctx commentTestContext) uuid.UUID{
 		"missing": func(_ *testing.T, _ commentTestContext) uuid.UUID {

@@ -25,6 +25,7 @@ var (
 	ErrInvalidAttachment      = errors.New("invalid comment attachment")
 	ErrInvalidMention         = errors.New("invalid comment mention")
 	ErrInvalidListOptions     = errors.New("invalid comment list options")
+	ErrInvalidCommentID       = errors.New("invalid comment ID")
 	ErrCommentForbidden       = errors.New("comment operation forbidden")
 	ErrCommentNotFound        = errors.New("comment not found")
 	ErrInvalidMark            = errors.New("invalid comment mark")
@@ -230,6 +231,13 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	if input.Page < 1 {
 		return CommentListDTO{}, ErrInvalidListOptions
 	}
+	effectivePageSize := input.PageSize
+	if effectivePageSize == 0 {
+		effectivePageSize = pageSize
+	}
+	if effectivePageSize < 1 || effectivePageSize > pageSize {
+		return CommentListDTO{}, ErrInvalidListOptions
+	}
 	if input.Sort == "" {
 		input.Sort = SortOldest
 	}
@@ -246,7 +254,7 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	}
 	target, err := s.repo.findTarget(s.db, resolved)
 	if isNotFound(err) {
-		return CommentListDTO{Items: []CommentDTO{}, Page: input.Page, PerPage: pageSize, Target: targetSummary(resolved, model.DiscussionTarget{}, viewer.UserID)}, nil
+		return CommentListDTO{Items: []CommentDTO{}, Page: input.Page, PerPage: effectivePageSize, Target: targetSummary(resolved, model.DiscussionTarget{}, viewer.UserID)}, nil
 	}
 	if err != nil {
 		return CommentListDTO{}, fmt.Errorf("find discussion target: %w", err)
@@ -288,15 +296,15 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	}
 
 	query := s.db.Where("target_id = ? AND root_id IS NULL AND status IN ?", target.ID, visible)
-	limit := pageSize
-	offset := (input.Page - 1) * pageSize
+	limit := effectivePageSize
+	offset := (input.Page - 1) * effectivePageSize
 	if marked != nil {
 		query = query.Where("id <> ?", marked.ID)
 		if input.Page == 1 {
-			limit = pageSize - 1
+			limit = effectivePageSize - 1
 			offset = 0
 		} else {
-			offset = pageSize - 1 + (input.Page-2)*pageSize
+			offset = effectivePageSize - 1 + (input.Page-2)*effectivePageSize
 		}
 	}
 	switch input.Sort {
@@ -346,7 +354,7 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	return CommentListDTO{
 		Items:         items,
 		Page:          input.Page,
-		PerPage:       pageSize,
+		PerPage:       effectivePageSize,
 		TotalRoots:    int(totalRoots),
 		TotalComments: int(totalComments),
 		TotalReplies:  int(totalReplies),

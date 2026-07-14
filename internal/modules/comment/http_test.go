@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
@@ -77,6 +78,9 @@ func TestCommentHTTPRejectsInvalidPathPaginationAndUnknownJSON(t *testing.T) {
 		"/api/v1/discussions/blog_post/" + uuid.NewString() + "/comments?page=0",
 		"/api/v1/discussions/blog_post/" + uuid.NewString() + "/comments?page=abc",
 		"/api/v1/discussions/blog_post/" + uuid.NewString() + "/comments?sort=bad",
+		"/api/v1/discussions/blog_post/" + uuid.NewString() + "/comments?page_size=0",
+		"/api/v1/discussions/blog_post/" + uuid.NewString() + "/comments?page_size=-1",
+		"/api/v1/discussions/blog_post/" + uuid.NewString() + "/comments?page_size=abc",
 	}
 	for _, path := range cases {
 		w := httptest.NewRecorder()
@@ -92,10 +96,106 @@ func TestCommentHTTPRejectsInvalidPathPaginationAndUnknownJSON(t *testing.T) {
 	}
 }
 
+func TestCommentHTTPRootPageSizeIsReturnedAndCapped(t *testing.T) {
+	router, _ := newCommentHTTPRouter(t)
+	resourceID := uuid.NewString()
+	for raw, want := range map[string]int{"5": 5, "21": 20} {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/discussions/blog_post/"+resourceID+"/comments?page_size="+raw, nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var body struct {
+			Data struct {
+				PerPage int `json:"per_page"`
+			} `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+		require.Equal(t, want, body.Data.PerPage)
+	}
+}
+
 func TestCommentHTTPStrictJSONDecoderRejectsUnknownAndTrailingValues(t *testing.T) {
 	var input CreateCommentInput
 	require.Error(t, decodeJSONStrict(bytes.NewBufferString(`{"content":"ok","root_id":"`+uuid.NewString()+`"}`), &input))
 	require.Error(t, decodeJSONStrict(bytes.NewBufferString(`{"content":"ok"}{"content":"extra"}`), &input))
+}
+
+func TestCommentHTTPStrictJSONUsesMentionSnakeCase(t *testing.T) {
+	userID := uuid.NewString()
+	var create CreateCommentInput
+	require.NoError(t, decodeJSONStrict(bytes.NewBufferString(`{"content":"@alice","mentions":[{"user_id":"`+userID+`","start":0,"end":6}]}`), &create))
+	require.Equal(t, uuid.MustParse(userID), create.Mentions[0].UserID)
+	require.Error(t, decodeJSONStrict(bytes.NewBufferString(`{"content":"@alice","mentions":[{"userID":"`+userID+`","start":0,"end":6}]}`), &create))
+	var edit EditCommentInput
+	require.NoError(t, decodeJSONStrict(bytes.NewBufferString(`{"content":"@alice","mentions":[{"user_id":"`+userID+`","start":0,"end":6}]}`), &edit))
+}
+
+func TestCommentHTTPInvalidCommentUUIDUsesStableInvalidID(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	h := &HTTP{service: ctx.service}
+	router := gin.New()
+	router.Use(func(c *gin.Context) { authctx.SetCurrentUser(c, ctx.users[0]); c.Next() })
+	router.GET("/comments/:root_comment_id/replies", h.listReplies)
+	router.PATCH("/comments/:comment_id", h.edit)
+	router.DELETE("/comments/:comment_id", h.delete)
+	router.PUT("/comments/:comment_id/like", h.like)
+	router.DELETE("/comments/:comment_id/like", h.unlike)
+	router.PUT("/comments/:comment_id/report", h.report)
+	router.PUT("/admin/comments/:comment_id/moderation", h.moderate)
+	cases := []struct{ method, path string }{
+		{http.MethodGet, "/comments/bad/replies"},
+		{http.MethodPatch, "/comments/bad"},
+		{http.MethodDelete, "/comments/bad"},
+		{http.MethodPut, "/comments/bad/like"},
+		{http.MethodDelete, "/comments/bad/like"},
+		{http.MethodPut, "/comments/bad/report"},
+		{http.MethodPut, "/admin/comments/bad/moderation"},
+	}
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(`{}`))
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code, "%s %s: %s", tc.method, tc.path, w.Body.String())
+		require.Contains(t, w.Body.String(), `"code":"comment.invalid_id"`)
+	}
+
+	missing := uuid.NewString()
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/comments/"+missing+"/replies", nil))
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), `"code":"comment.not_found"`)
+}
+
+func TestCommentHTTPLegalMissingCommentUUIDRemainsNotFound(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	h := &HTTP{service: ctx.service}
+	moderator := ctx.users[0]
+	moderator.Role = authctx.RoleModerator
+	router := gin.New()
+	router.Use(func(c *gin.Context) { authctx.SetCurrentUser(c, moderator); c.Next() })
+	router.GET("/comments/:root_comment_id/replies", h.listReplies)
+	router.PATCH("/comments/:comment_id", h.edit)
+	router.DELETE("/comments/:comment_id", h.delete)
+	router.PUT("/comments/:comment_id/like", h.like)
+	router.DELETE("/comments/:comment_id/like", h.unlike)
+	router.PUT("/comments/:comment_id/report", h.report)
+	router.PUT("/admin/comments/:comment_id/moderation", h.moderate)
+	id := uuid.NewString()
+	cases := []struct{ method, path, body string }{
+		{http.MethodGet, "/comments/" + id + "/replies", ""},
+		{http.MethodPatch, "/comments/" + id, `{"content":"edit"}`},
+		{http.MethodDelete, "/comments/" + id, ""},
+		{http.MethodPut, "/comments/" + id + "/like", ""},
+		{http.MethodDelete, "/comments/" + id + "/like", ""},
+		{http.MethodPut, "/comments/" + id + "/report", `{"reason":"spam","note":""}`},
+		{http.MethodPut, "/admin/comments/" + id + "/moderation", `{"action":"hide","reason":"review"}`},
+	}
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusNotFound, w.Code, "%s %s: %s", tc.method, tc.path, w.Body.String())
+		require.Contains(t, w.Body.String(), `"code":"comment.not_found"`)
+	}
 }
 
 func TestListRepliesPaginatesVisibleChildrenAndRejectsChildRoot(t *testing.T) {
