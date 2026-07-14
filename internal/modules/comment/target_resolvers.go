@@ -154,22 +154,20 @@ func (r *databaseTargetResolvers) resolveDebate(_ Viewer, resourceID uuid.UUID) 
 	return ownedTarget(TargetKindDebate, debate.ID, debate.UserID, true, 0, markLabelPinned), nil
 }
 
-func (r *databaseTargetResolvers) resolveTimelineEvent(viewer Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
+func (r *databaseTargetResolvers) resolveTimelineEvent(_ Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
 	var event model.TimelineEvent
 	if err := r.db.First(&event, "id = ?", resourceID).Error; err != nil {
 		return ResolvedTarget{}, targetLookupError(TargetKindTimelineEvent, resourceID, err)
 	}
-	visible := event.IsPublic || viewerOwns(viewer, event.UserID)
-	return ownedTarget(TargetKindTimelineEvent, event.ID, event.UserID, visible, 0, markLabelPinned), nil
+	return ownedTarget(TargetKindTimelineEvent, event.ID, event.UserID, event.IsPublic, 0, markLabelPinned), nil
 }
 
-func (r *databaseTargetResolvers) resolveTimelinePerson(viewer Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
+func (r *databaseTargetResolvers) resolveTimelinePerson(_ Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
 	var person model.TimelinePerson
 	if err := r.db.First(&person, "id = ?", resourceID).Error; err != nil {
 		return ResolvedTarget{}, targetLookupError(TargetKindTimelinePerson, resourceID, err)
 	}
-	visible := person.IsPublic || viewerOwns(viewer, person.UserID)
-	return ownedTarget(TargetKindTimelinePerson, person.ID, person.UserID, visible, 0, markLabelPinned), nil
+	return ownedTarget(TargetKindTimelinePerson, person.ID, person.UserID, person.IsPublic, 0, markLabelPinned), nil
 }
 
 func (r *databaseTargetResolvers) canViewPublishedContent(
@@ -278,7 +276,14 @@ func normalizeArticleURL(raw string) (string, error) {
 	query := parsed.Query()
 	for key := range query {
 		lowerKey := strings.ToLower(key)
-		if strings.HasPrefix(lowerKey, "utm_") || lowerKey == "fbclid" || lowerKey == "gclid" {
+		if strings.HasPrefix(lowerKey, "utm_") ||
+			lowerKey == "fbclid" ||
+			lowerKey == "gclid" ||
+			lowerKey == "mc_cid" ||
+			lowerKey == "mc_eid" ||
+			lowerKey == "ref" ||
+			lowerKey == "ref_src" ||
+			lowerKey == "source" {
 			query.Del(key)
 		}
 	}

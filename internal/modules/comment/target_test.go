@@ -115,16 +115,23 @@ func TestFeedArticleResolverNormalizesTrackingAndStableQueryOrder(t *testing.T) 
 	registry, db := newTargetTestRegistry(t)
 	source := model.FeedSource{SourceType: "external_rss", Provider: "rss", Category: "blog", Hash: uuid.NewString()}
 	require.NoError(t, db.Create(&source).Error)
-	item := model.FeedItem{
+	items := []model.FeedItem{{
 		FeedSourceID: source.ID,
 		GUID:         "query",
-		Link:         "HTTP://Example.COM/a/../post/?z=2&utm_medium=x&a=1&fbclid=y&gclid=z",
-	}
-	require.NoError(t, db.Create(&item).Error)
+		Link:         "HTTP://Example.COM/a/../post/?z=2&utm_medium=x&a=1&fbclid=y&gclid=z&MC_CID=a&mc_eid=b&Ref=c&REF_SRC=d&Source=e",
+	}, {
+		FeedSourceID: source.ID,
+		GUID:         "query-clean",
+		Link:         "http://example.com/post?a=1&z=2",
+	}}
+	require.NoError(t, db.Create(&items).Error)
 
-	resolved, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: item.ID})
+	resolved, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: items[0].ID})
 	require.NoError(t, err)
 	require.Equal(t, "http://example.com/post?a=1&z=2", resolved.ResourceKey)
+	clean, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: items[1].ID})
+	require.NoError(t, err)
+	require.Equal(t, clean.ResourceKey, resolved.ResourceKey)
 }
 
 func TestFeedArticleResolverRejectsInvalidOriginalURL(t *testing.T) {
@@ -292,6 +299,11 @@ func TestResolversKeepHiddenModuleResourcesInvisible(t *testing.T) {
 		resolved, err := registry.Resolve(Viewer{}, TargetRef{Kind: entities[i].kind, ResourceID: value})
 		require.NoError(t, err)
 		require.False(t, resolved.Visible, entities[i].kind)
+		if entities[i].kind == TargetKindTimelineEvent || entities[i].kind == TargetKindTimelinePerson {
+			ownerResolved, err := registry.Resolve(Viewer{UserID: &owner.UUID}, TargetRef{Kind: entities[i].kind, ResourceID: value})
+			require.NoError(t, err)
+			require.False(t, ownerResolved.Visible, entities[i].kind)
+		}
 	}
 }
 
