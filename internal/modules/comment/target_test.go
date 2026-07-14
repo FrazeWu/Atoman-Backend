@@ -133,6 +133,34 @@ func TestFeedArticleResolverPreservesEncodedPathSeparators(t *testing.T) {
 	require.Equal(t, "https://example.com/a%2Fb", encodedSeparator.ResourceKey)
 }
 
+func TestFeedArticleResolverNormalizesPercentEncodedPath(t *testing.T) {
+	registry, db := newTargetTestRegistry(t)
+	source := model.FeedSource{SourceType: "external_rss", Provider: "rss", Category: "blog", Hash: uuid.NewString()}
+	require.NoError(t, db.Create(&source).Error)
+	items := []model.FeedItem{
+		{FeedSourceID: source.ID, GUID: "reserved-upper", Link: "https://example.com/a%2Fb"},
+		{FeedSourceID: source.ID, GUID: "reserved-lower", Link: "https://example.com/a%2fb"},
+		{FeedSourceID: source.ID, GUID: "unreserved-encoded", Link: "https://example.com/%7Euser"},
+		{FeedSourceID: source.ID, GUID: "unreserved-plain", Link: "https://example.com/~user"},
+		{FeedSourceID: source.ID, GUID: "unicode-literal", Link: "https://example.com/café/%7euser/"},
+		{FeedSourceID: source.ID, GUID: "unicode-encoded", Link: "https://example.com/caf%C3%A9/~user"},
+	}
+	require.NoError(t, db.Create(&items).Error)
+
+	keys := make([]string, len(items))
+	for i, item := range items {
+		resolved, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: item.ID})
+		require.NoError(t, err)
+		keys[i] = resolved.ResourceKey
+	}
+	require.Equal(t, "https://example.com/a%2Fb", keys[0])
+	require.Equal(t, keys[0], keys[1])
+	require.Equal(t, "https://example.com/~user", keys[2])
+	require.Equal(t, keys[2], keys[3])
+	require.Equal(t, "https://example.com/caf%C3%A9/~user", keys[4])
+	require.Equal(t, keys[4], keys[5])
+}
+
 func TestFeedArticleResolverNormalizesTrackingAndStableQueryOrder(t *testing.T) {
 	registry, db := newTargetTestRegistry(t)
 	source := model.FeedSource{SourceType: "external_rss", Provider: "rss", Category: "blog", Hash: uuid.NewString()}

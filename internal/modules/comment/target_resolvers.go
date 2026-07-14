@@ -274,7 +274,11 @@ func normalizeArticleURL(raw string) (string, error) {
 		parsed.Host = hostname
 	}
 
-	cleanPath := path.Clean(parsed.EscapedPath())
+	normalizedPath, err := normalizeEscapedPath(parsed.EscapedPath())
+	if err != nil {
+		return "", err
+	}
+	cleanPath := path.Clean(normalizedPath)
 	if cleanPath == "." {
 		cleanPath = "/"
 	}
@@ -307,4 +311,57 @@ func normalizeArticleURL(raw string) (string, error) {
 	}
 	parsed.RawQuery = query.Encode()
 	return parsed.String(), nil
+}
+
+func normalizeEscapedPath(escapedPath string) (string, error) {
+	const upperHex = "0123456789ABCDEF"
+	var normalized strings.Builder
+	normalized.Grow(len(escapedPath))
+	for i := 0; i < len(escapedPath); i++ {
+		if escapedPath[i] != '%' {
+			normalized.WriteByte(escapedPath[i])
+			continue
+		}
+		if i+2 >= len(escapedPath) {
+			return "", errors.New("incomplete percent escape in URL path")
+		}
+		high, ok := hexValue(escapedPath[i+1])
+		if !ok {
+			return "", errors.New("invalid percent escape in URL path")
+		}
+		low, ok := hexValue(escapedPath[i+2])
+		if !ok {
+			return "", errors.New("invalid percent escape in URL path")
+		}
+		decoded := high<<4 | low
+		if isRFC3986Unreserved(decoded) {
+			normalized.WriteByte(decoded)
+		} else {
+			normalized.WriteByte('%')
+			normalized.WriteByte(upperHex[decoded>>4])
+			normalized.WriteByte(upperHex[decoded&0x0f])
+		}
+		i += 2
+	}
+	return normalized.String(), nil
+}
+
+func hexValue(value byte) (byte, bool) {
+	switch {
+	case value >= '0' && value <= '9':
+		return value - '0', true
+	case value >= 'a' && value <= 'f':
+		return value - 'a' + 10, true
+	case value >= 'A' && value <= 'F':
+		return value - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
+
+func isRFC3986Unreserved(value byte) bool {
+	return value >= 'a' && value <= 'z' ||
+		value >= 'A' && value <= 'Z' ||
+		value >= '0' && value <= '9' ||
+		value == '-' || value == '.' || value == '_' || value == '~'
 }
