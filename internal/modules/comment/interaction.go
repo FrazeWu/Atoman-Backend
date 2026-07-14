@@ -3,9 +3,11 @@ package comment
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/audit"
 	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
@@ -14,6 +16,35 @@ import (
 )
 
 var hotScoreStatuses = []string{commentStatusActive, "auto_folded"}
+
+var (
+	ErrInvalidReport     = errors.New("invalid comment report")
+	ErrInvalidModeration = errors.New("invalid comment moderation")
+)
+
+const (
+	ReportReasonSpam           = "spam"
+	ReportReasonHarassment     = "harassment"
+	ReportReasonHate           = "hate"
+	ReportReasonSexual         = "sexual"
+	ReportReasonViolence       = "violence"
+	ReportReasonMisinformation = "misinformation"
+	ReportReasonOther          = "other"
+	ReportStatusPending        = "pending"
+	ReportStatusUpheld         = "upheld"
+	ReportStatusRejected       = "rejected"
+
+	ModerationRestore      = "restore"
+	ModerationHide         = "hide"
+	ModerationDelete       = "delete"
+	ModerationUpholdReport = "uphold_report"
+	ModerationRejectReport = "reject_report"
+)
+
+var validReportReasons = map[string]bool{
+	ReportReasonSpam: true, ReportReasonHarassment: true, ReportReasonHate: true,
+	ReportReasonSexual: true, ReportReasonViolence: true, ReportReasonMisinformation: true, ReportReasonOther: true,
+}
 
 func (s *Service) Edit(user authctx.CurrentUser, commentID uuid.UUID, input EditCommentInput) (CommentDTO, error) {
 	if err := s.validateAuthor(user); err != nil {
@@ -69,7 +100,10 @@ func (s *Service) Edit(user authctx.CurrentUser, commentID uuid.UUID, input Edit
 			if err := createCommentRelations(tx, entry.ID, input.Mentions, assets, resolved, normalized); err != nil {
 				return err
 			}
-			now := time.Now()
+			if err := s.notifyNewEditMentions(tx, entry, resolved, user.ID, input.Mentions); err != nil {
+				return err
+			}
+			now := s.now()
 			result := tx.Model(&model.CommentEntry{}).Where("id = ?", entry.ID).Updates(map[string]any{
 				"content": normalized, "content_hash": ContentHash(normalized, input.AttachmentIDs), "edited_at": now,
 			})
@@ -122,60 +156,186 @@ func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
 				return ErrCommentForbidden
 			}
 
-			ids := []uuid.UUID{entry.ID}
-			rootDelta := 0
-			if entry.RootID == nil {
-				var childIDs []uuid.UUID
-				if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).Model(&model.CommentEntry{}).Where("root_id = ?", entry.ID).Order("id ASC").Pluck("id", &childIDs).Error; err != nil {
-					return err
-				}
-				ids = append(ids, childIDs...)
-				rootDelta = 1
+			return s.deleteCommentLocked(tx, target, entry)
+		})
+	})
+}
+
+func (s *Service) deleteCommentLocked(tx *gorm.DB, target model.DiscussionTarget, entry model.CommentEntry) error {
+	ids := []uuid.UUID{entry.ID}
+	rootDelta := 0
+	if entry.RootID == nil {
+		var childIDs []uuid.UUID
+		if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).Model(&model.CommentEntry{}).Where("root_id = ?", entry.ID).Order("id ASC").Pluck("id", &childIDs).Error; err != nil {
+			return err
+		}
+		ids = append(ids, childIDs...)
+		rootDelta = 1
+	}
+	var visibleDeleteCount int64
+	if err := tx.Model(&model.CommentEntry{}).Where("id IN ? AND status IN ?", ids, hotScoreStatuses).Count(&visibleDeleteCount).Error; err != nil {
+		return err
+	}
+	if err := deleteCommentRelations(tx, ids); err != nil {
+		return err
+	}
+	result := tx.Unscoped().Where("id IN ?", ids).Delete(&model.CommentEntry{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != int64(len(ids)) {
+		return ErrCommentNotFound
+	}
+	updates := map[string]any{"comment_count": gorm.Expr("comment_count - ?", visibleDeleteCount), "root_count": gorm.Expr("root_count - ?", rootDelta)}
+	if target.PinnedCommentID != nil && *target.PinnedCommentID == entry.ID {
+		updates["pinned_comment_id"] = gorm.Expr("NULL")
+	}
+	counter := tx.Model(&model.DiscussionTarget{}).Where("id = ? AND comment_count >= ? AND root_count >= ?", target.ID, visibleDeleteCount, rootDelta).Updates(updates)
+	if counter.Error != nil || counter.RowsAffected != 1 {
+		if counter.Error != nil {
+			return counter.Error
+		}
+		return fmt.Errorf("delete comment counters: inconsistent target")
+	}
+	if entry.RootID != nil {
+		var replyCount int64
+		if err := tx.Model(&model.CommentEntry{}).Where("root_id = ? AND status IN ?", *entry.RootID, hotScoreStatuses).Count(&replyCount).Error; err != nil {
+			return err
+		}
+		updated := tx.Model(&model.CommentEntry{}).Where("id = ? AND root_id IS NULL", *entry.RootID).Update("reply_count", replyCount)
+		if updated.Error != nil || updated.RowsAffected != 1 {
+			if updated.Error != nil {
+				return updated.Error
 			}
-			var visibleDeleteCount int64
-			if err := tx.Model(&model.CommentEntry{}).Where("id IN ? AND status IN ?", ids, hotScoreStatuses).Count(&visibleDeleteCount).Error; err != nil {
-				return err
-			}
-			if err := deleteCommentRelations(tx, ids); err != nil {
-				return err
-			}
-			result := tx.Unscoped().Where("id IN ?", ids).Delete(&model.CommentEntry{})
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected != int64(len(ids)) {
+			return ErrCommentNotFound
+		}
+		return s.recomputeRootHotScore(tx, *entry.RootID, s.now())
+	}
+	return nil
+}
+
+func (s *Service) Report(user authctx.CurrentUser, commentID uuid.UUID, input ReportInput) error {
+	if err := s.validateAuthor(user); err != nil {
+		return err
+	}
+	input.Reason = strings.TrimSpace(input.Reason)
+	input.Note = strings.TrimSpace(input.Note)
+	if !validReportReasons[input.Reason] || input.Reason == ReportReasonOther && input.Note == "" {
+		return ErrInvalidReport
+	}
+	located, _, resolved, err := s.resolveCommentMutation(Viewer{UserID: &user.ID}, commentID)
+	if err != nil {
+		return err
+	}
+	return withCreateTransactionMutex(s.createMu, func() error {
+		return s.db.Transaction(func(tx *gorm.DB) error {
+			h, err := s.repo.lockCommentHierarchy(tx, located)
+			if err != nil {
 				return ErrCommentNotFound
 			}
-			updates := map[string]any{
-				"comment_count": gorm.Expr("comment_count - ?", visibleDeleteCount),
-				"root_count":    gorm.Expr("root_count - ?", rootDelta),
+			if !targetMatchesResolved(h.Target, resolved) {
+				return ErrInvalidTargetResource
 			}
-			if target.PinnedCommentID != nil && *target.PinnedCommentID == entry.ID {
-				updates["pinned_comment_id"] = gorm.Expr("NULL")
+			if !isVisibleCommentStatus(h.Entry.Status) {
+				return ErrCommentNotFound
 			}
-			counter := tx.Model(&model.DiscussionTarget{}).
-				Where("id = ? AND comment_count >= ? AND root_count >= ?", target.ID, visibleDeleteCount, rootDelta).Updates(updates)
-			if counter.Error != nil {
-				return counter.Error
+			if h.Entry.AuthorID == user.ID {
+				return ErrCommentForbidden
 			}
-			if counter.RowsAffected != 1 {
-				return fmt.Errorf("delete comment counters: inconsistent target")
+			var existing model.CommentReport
+			if err := tx.Unscoped().Where("comment_id = ? AND reporter_id = ?", commentID, user.ID).First(&existing).Error; err == nil {
+				return nil
+			} else if !isNotFound(err) {
+				return err
 			}
-			if entry.RootID != nil {
-				var replyCount int64
-				if err := tx.Model(&model.CommentEntry{}).Where("root_id = ? AND status IN ?", *entry.RootID, hotScoreStatuses).Count(&replyCount).Error; err != nil {
+			report := model.CommentReport{CommentID: commentID, ReporterID: user.ID, Reason: input.Reason, Note: input.Note, Status: ReportStatusPending}
+			if err := tx.Create(&report).Error; err != nil {
+				return err
+			}
+			return s.recalibrateReports(tx, h.Entry)
+		})
+	})
+}
+
+func (s *Service) recalibrateReports(tx *gorm.DB, entry model.CommentEntry) error {
+	var reports []model.CommentReport
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("comment_id = ?", entry.ID).Order("id ASC").Find(&reports).Error; err != nil {
+		return err
+	}
+	count := 0
+	for _, report := range reports {
+		if report.Status == ReportStatusPending || report.Status == ReportStatusUpheld {
+			count++
+		}
+	}
+	status := entry.Status
+	if count >= 4 && status == CommentStatusActive {
+		status = CommentStatusAutoFolded
+	}
+	if count < 4 && status == CommentStatusAutoFolded {
+		status = CommentStatusActive
+	}
+	return tx.Model(&model.CommentEntry{}).Where("id = ?", entry.ID).Updates(map[string]any{"report_count": count, "status": status}).Error
+}
+
+func (s *Service) Moderate(user authctx.CurrentUser, commentID uuid.UUID, input ModerateInput) error {
+	if err := s.validateAuthor(user); err != nil {
+		return err
+	}
+	if !authctx.RoleAtLeast(user.Role, authctx.RoleModerator) {
+		return ErrCommentForbidden
+	}
+	valid := input.Action == ModerationRestore || input.Action == ModerationHide || input.Action == ModerationDelete || input.Action == ModerationUpholdReport || input.Action == ModerationRejectReport
+	if !valid {
+		return ErrInvalidModeration
+	}
+	located, _, resolved, err := s.resolveCommentMutation(Viewer{UserID: &user.ID}, commentID)
+	if err != nil {
+		return err
+	}
+	return withCreateTransactionMutex(s.createMu, func() error {
+		return s.db.Transaction(func(tx *gorm.DB) error {
+			h, err := s.repo.lockCommentHierarchy(tx, located)
+			if err != nil {
+				return ErrCommentNotFound
+			}
+			if !targetMatchesResolved(h.Target, resolved) {
+				return ErrInvalidTargetResource
+			}
+			switch input.Action {
+			case ModerationRestore:
+				if err := tx.Model(&model.CommentEntry{}).Where("id = ?", commentID).Update("status", CommentStatusActive).Error; err != nil {
 					return err
 				}
-				updated := tx.Model(&model.CommentEntry{}).Where("id = ? AND root_id IS NULL", *entry.RootID).Update("reply_count", replyCount)
-				if updated.Error != nil {
-					return updated.Error
+			case ModerationHide:
+				if err := tx.Model(&model.CommentEntry{}).Where("id = ?", commentID).Update("status", CommentStatusModeratorHidden).Error; err != nil {
+					return err
 				}
-				if updated.RowsAffected != 1 {
-					return ErrCommentNotFound
+			case ModerationDelete:
+				if err := s.deleteCommentLocked(tx, h.Target, h.Entry); err != nil {
+					return err
 				}
-				return s.recomputeRootHotScore(tx, *entry.RootID, time.Now())
+			default:
+				if input.ReportID == nil {
+					return ErrInvalidModeration
+				}
+				var report model.CommentReport
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND comment_id = ? AND status = ?", *input.ReportID, commentID, ReportStatusPending).First(&report).Error; err != nil {
+					return ErrInvalidModeration
+				}
+				now := s.now()
+				status := ReportStatusUpheld
+				if input.Action == ModerationRejectReport {
+					status = ReportStatusRejected
+				}
+				if err := tx.Model(&report).Updates(map[string]any{"status": status, "reviewer_id": user.ID, "reviewed_at": now}).Error; err != nil {
+					return err
+				}
+				if err := s.recalibrateReports(tx, h.Entry); err != nil {
+					return err
+				}
 			}
-			return nil
+			return audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "comment.moderate." + input.Action, EntityType: "comment", EntityID: &commentID, Reason: strings.TrimSpace(input.Reason)})
 		})
 	})
 }
@@ -192,6 +352,9 @@ func deleteCommentRelations(tx *gorm.DB, ids []uuid.UUID) error {
 	}
 	if err := deleteCommentExtensionRelations(tx, ids); err != nil {
 		return err
+	}
+	if err := tx.Unscoped().Where("source_id IN ? AND source_type LIKE ?", ids, "comment_%").Delete(&model.Notification{}).Error; err != nil {
+		return fmt.Errorf("delete comment notifications: %w", err)
 	}
 	return nil
 }
@@ -242,14 +405,17 @@ func (s *Service) setLiked(user authctx.CurrentUser, commentID uuid.UUID, liked 
 			}
 			var existing model.CommentLike
 			err = tx.Where("comment_id = ? AND user_id = ?", commentID, user.ID).First(&existing).Error
+			changed := false
 			if liked && isNotFound(err) {
 				if err := tx.Create(&model.CommentLike{CommentID: commentID, UserID: user.ID}).Error; err != nil {
 					return err
 				}
+				changed = true
 			} else if !liked && err == nil {
 				if err := tx.Delete(&existing).Error; err != nil {
 					return err
 				}
+				changed = true
 			} else if err != nil && !isNotFound(err) {
 				return err
 			}
@@ -264,7 +430,12 @@ func (s *Service) setLiked(user authctx.CurrentUser, commentID uuid.UUID, liked 
 			if updated.RowsAffected != 1 {
 				return ErrCommentNotFound
 			}
-			return s.recomputeRootHotScore(tx, hierarchy.Root.ID, time.Now())
+			if changed {
+				if err := s.syncLikeNotification(tx, hierarchy.Entry, user.ID, count, liked); err != nil {
+					return err
+				}
+			}
+			return s.recomputeRootHotScore(tx, hierarchy.Root.ID, s.now())
 		})
 	})
 }
@@ -306,7 +477,7 @@ func (s *Service) Mark(user authctx.CurrentUser, targetRef TargetRef, commentID 
 			if updated.RowsAffected != 1 {
 				return ErrInvalidMark
 			}
-			return nil
+			return s.notifyMarkedComment(tx, entry, resolved, user.ID)
 		})
 	})
 }

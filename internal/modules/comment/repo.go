@@ -18,6 +18,11 @@ type lockedCommentHierarchy struct {
 	Entry  model.CommentEntry
 }
 
+func (repository) lockUser(tx *gorm.DB, id uuid.UUID) error {
+	var user model.User
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("uuid").First(&user, "uuid = ?", id).Error
+}
+
 func (repository) lockTarget(tx *gorm.DB, resolved ResolvedTarget) (model.DiscussionTarget, error) {
 	candidate := model.DiscussionTarget{
 		Kind:        resolved.Kind,

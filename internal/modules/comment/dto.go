@@ -26,6 +26,17 @@ type EditCommentInput struct {
 	AttachmentIDs []uuid.UUID    `json:"attachment_ids"`
 }
 
+type ReportInput struct {
+	Reason string `json:"reason"`
+	Note   string `json:"note"`
+}
+
+type ModerateInput struct {
+	Action   string     `json:"action"`
+	ReportID *uuid.UUID `json:"report_id"`
+	Reason   string     `json:"reason"`
+}
+
 type ListCommentsInput struct {
 	Page int    `form:"page" json:"page"`
 	Sort string `form:"sort" json:"sort"`

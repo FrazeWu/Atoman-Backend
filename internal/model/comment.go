@@ -61,6 +61,7 @@ type CommentReport struct {
 	CommentID  uuid.UUID  `json:"comment_id" gorm:"type:uuid;not null;index"`
 	ReporterID uuid.UUID  `json:"reporter_id" gorm:"type:uuid;not null;index"`
 	Reason     string     `json:"reason" gorm:"type:text;not null"`
+	Note       string     `json:"note" gorm:"type:text;not null;default:''"`
 	Status     string     `json:"status" gorm:"not null;default:'pending';index"`
 	ReviewerID *uuid.UUID `json:"reviewer_id,omitempty" gorm:"type:uuid"`
 	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`

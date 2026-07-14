@@ -34,6 +34,8 @@ func newCommentTestContext(t *testing.T, kind string, duration int) commentTestC
 		&model.CommentLike{},
 		&model.CommentReport{},
 		&model.CommentTimeAnchor{},
+		&model.Notification{},
+		&model.AuditLog{},
 		&model.TimelineRevisionProposal{},
 		&model.DebateArgumentDetail{},
 		&model.DebateArgumentReference{},
@@ -42,6 +44,9 @@ func newCommentTestContext(t *testing.T, kind string, duration int) commentTestC
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_comment_root_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_comment_like_user ON comment_likes (comment_id, user_id) WHERE deleted_at IS NULL`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_comment_report_user ON comment_reports (comment_id, reporter_id)`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_notification_dedup ON notifications (recipient_id, source_type, source_id) WHERE aggregation_key = '' AND deleted_at IS NULL`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_notification_unread_aggregate ON notifications (recipient_id, aggregation_key) WHERE aggregation_key <> '' AND read_at IS NULL AND deleted_at IS NULL`).Error)
 
 	users := make([]authctx.CurrentUser, 4)
 	for i := range users {
@@ -74,8 +79,10 @@ func newCommentTestContext(t *testing.T, kind string, duration int) commentTestC
 		}),
 	}}
 
+	service := NewService(db, registry)
+	service.checkAbuse = false
 	return commentTestContext{
-		service:  NewService(db, registry),
+		service:  service,
 		db:       db,
 		users:    users,
 		target:   TargetRef{Kind: kind, ResourceID: resourceID},

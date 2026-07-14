@@ -28,21 +28,30 @@ var (
 	ErrCommentForbidden       = errors.New("comment operation forbidden")
 	ErrCommentNotFound        = errors.New("comment not found")
 	ErrInvalidMark            = errors.New("invalid comment mark")
+	ErrCommentRateLimited     = errors.New("comment rate limited")
+	ErrDuplicateComment       = errors.New("duplicate comment")
 )
 
-const commentStatusActive = "active"
+const (
+	CommentStatusActive          = "active"
+	CommentStatusAutoFolded      = "auto_folded"
+	CommentStatusModeratorHidden = "moderator_hidden"
+	commentStatusActive          = CommentStatusActive
+)
 
 type ExtensionWriter func(tx *gorm.DB, comment *model.CommentEntry) error
 
 type Service struct {
-	db       *gorm.DB
-	registry *TargetRegistry
-	repo     repository
-	createMu *sync.Mutex
+	db         *gorm.DB
+	registry   *TargetRegistry
+	repo       repository
+	createMu   *sync.Mutex
+	now        func() time.Time
+	checkAbuse bool
 }
 
 func NewService(db *gorm.DB, registry *TargetRegistry) *Service {
-	return &Service{db: db, registry: registry, createMu: createTransactionMutex(db.Dialector.Name())}
+	return &Service{db: db, registry: registry, createMu: createTransactionMutex(db.Dialector.Name()), now: time.Now, checkAbuse: true}
 }
 
 func createTransactionMutex(dialect string) *sync.Mutex {
@@ -88,9 +97,17 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	var created model.CommentEntry
 	runTransaction := func() error {
 		return s.db.Transaction(func(tx *gorm.DB) error {
+			if err := s.repo.lockUser(tx, user.ID); err != nil {
+				return ErrAuthenticationRequired
+			}
 			target, err := s.repo.lockTarget(tx, resolved)
 			if err != nil {
 				return fmt.Errorf("lock discussion target: %w", err)
+			}
+			if s.checkAbuse {
+				if err := s.checkCreateAbuse(tx, user.ID, target.ID, ContentHash(normalized, input.AttachmentIDs)); err != nil {
+					return err
+				}
 			}
 
 			created = model.CommentEntry{
@@ -100,7 +117,9 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 				ContentHash: ContentHash(normalized, input.AttachmentIDs),
 				Status:      commentStatusActive,
 			}
+			created.CreatedAt = s.now()
 			isRoot := input.ReplyToID == nil
+			var replyAuthorID *uuid.UUID
 			if isRoot {
 				floor := target.NextFloor
 				created.FloorNumber = &floor
@@ -114,6 +133,7 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 				}
 				created.ReplyToID = input.ReplyToID
 				created.RootID = &root.ID
+				replyAuthorID = &reply.AuthorID
 			}
 			assets, err = s.validateAttachments(tx, user.ID, input.AttachmentIDs)
 			if err != nil {
@@ -152,8 +172,11 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 					return err
 				}
 			}
+			if err := s.notifyCreatedComment(tx, created, resolved, replyAuthorID, input.Mentions); err != nil {
+				return err
+			}
 			if !isRoot {
-				if err := s.recomputeRootHotScore(tx, *created.RootID, time.Now()); err != nil {
+				if err := s.recomputeRootHotScore(tx, *created.RootID, s.now()); err != nil {
 					return err
 				}
 			}
@@ -170,6 +193,28 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	}
 	dto.RenderedHTML = rendered
 	return dto, nil
+}
+
+func (s *Service) checkCreateAbuse(tx *gorm.DB, userID, targetID uuid.UUID, contentHash string) error {
+	now := s.now()
+	var recentCount int64
+	if err := tx.Model(&model.CommentEntry{}).
+		Where("author_id = ? AND created_at > ?", userID, now.Add(-time.Minute)).Count(&recentCount).Error; err != nil {
+		return err
+	}
+	if recentCount >= 5 {
+		return ErrCommentRateLimited
+	}
+	var duplicateCount int64
+	if err := tx.Model(&model.CommentEntry{}).
+		Where("author_id = ? AND target_id = ? AND content_hash = ? AND created_at > ?", userID, targetID, contentHash, now.Add(-5*time.Minute)).
+		Count(&duplicateCount).Error; err != nil {
+		return err
+	}
+	if duplicateCount > 0 {
+		return ErrDuplicateComment
+	}
+	return nil
 }
 
 func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input ListCommentsInput) (CommentListDTO, error) {
