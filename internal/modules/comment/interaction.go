@@ -79,7 +79,7 @@ func (s *Service) Edit(user authctx.CurrentUser, commentID uuid.UUID, input Edit
 				return ErrInvalidTargetResource
 			}
 			entry := hierarchy.Entry
-			if !isVisibleCommentStatus(entry.Status) {
+			if !isVisibleCommentStatus(entry.Status) || !isVisibleCommentStatus(hierarchy.Root.Status) {
 				return ErrCommentNotFound
 			}
 			if entry.AuthorID != user.ID {
@@ -147,7 +147,7 @@ func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
 				return ErrInvalidTargetResource
 			}
 			entry := hierarchy.Entry
-			if !isVisibleCommentStatus(entry.Status) {
+			if !isVisibleCommentStatus(entry.Status) || !isVisibleCommentStatus(hierarchy.Root.Status) {
 				return ErrCommentNotFound
 			}
 			target := hierarchy.Target
@@ -156,25 +156,33 @@ func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
 				return ErrCommentForbidden
 			}
 
-			return s.deleteCommentLocked(tx, target, entry)
+			return s.deleteCommentLocked(tx, target, hierarchy.Root, entry)
 		})
 	})
 }
 
-func (s *Service) deleteCommentLocked(tx *gorm.DB, target model.DiscussionTarget, entry model.CommentEntry) error {
+func (s *Service) deleteCommentLocked(tx *gorm.DB, target model.DiscussionTarget, root model.CommentEntry, entry model.CommentEntry) error {
 	ids := []uuid.UUID{entry.ID}
 	rootDelta := 0
+	visibleDeleteCount := int64(0)
 	if entry.RootID == nil {
 		var childIDs []uuid.UUID
 		if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).Model(&model.CommentEntry{}).Where("root_id = ?", entry.ID).Order("id ASC").Pluck("id", &childIDs).Error; err != nil {
 			return err
 		}
 		ids = append(ids, childIDs...)
-		rootDelta = 1
-	}
-	var visibleDeleteCount int64
-	if err := tx.Model(&model.CommentEntry{}).Where("id IN ? AND status IN ?", ids, hotScoreStatuses).Count(&visibleDeleteCount).Error; err != nil {
-		return err
+		if isVisibleCommentStatus(entry.Status) {
+			var visibleChildren int64
+			if err := tx.Model(&model.CommentEntry{}).Where("root_id = ? AND status IN ?", entry.ID, hotScoreStatuses).Count(&visibleChildren).Error; err != nil {
+				return err
+			}
+			visibleDeleteCount = 1 + visibleChildren
+			rootDelta = 1
+		}
+	} else {
+		if isVisibleCommentStatus(root.Status) && isVisibleCommentStatus(entry.Status) {
+			visibleDeleteCount = 1
+		}
 	}
 	if err := deleteCommentRelations(tx, ids); err != nil {
 		return err
@@ -202,7 +210,7 @@ func (s *Service) deleteCommentLocked(tx *gorm.DB, target model.DiscussionTarget
 		if err := tx.Model(&model.CommentEntry{}).Where("root_id = ? AND status IN ?", *entry.RootID, hotScoreStatuses).Count(&replyCount).Error; err != nil {
 			return err
 		}
-		updated := tx.Model(&model.CommentEntry{}).Where("id = ? AND root_id IS NULL", *entry.RootID).Update("reply_count", replyCount)
+		updated := tx.Model(&model.CommentEntry{}).Where("id = ? AND root_id IS NULL AND reply_count >= 0", *entry.RootID).Update("reply_count", replyCount)
 		if updated.Error != nil || updated.RowsAffected != 1 {
 			if updated.Error != nil {
 				return updated.Error
@@ -236,7 +244,7 @@ func (s *Service) Report(user authctx.CurrentUser, commentID uuid.UUID, input Re
 			if !targetMatchesResolved(h.Target, resolved) {
 				return ErrInvalidTargetResource
 			}
-			if !isVisibleCommentStatus(h.Entry.Status) {
+			if !isVisibleCommentStatus(h.Entry.Status) || !isVisibleCommentStatus(h.Root.Status) {
 				return ErrCommentNotFound
 			}
 			if h.Entry.AuthorID == user.ID {
@@ -304,15 +312,15 @@ func (s *Service) Moderate(user authctx.CurrentUser, commentID uuid.UUID, input 
 			}
 			switch input.Action {
 			case ModerationRestore:
-				if err := tx.Model(&model.CommentEntry{}).Where("id = ?", commentID).Update("status", CommentStatusActive).Error; err != nil {
+				if err := s.setModerationVisibility(tx, h, true); err != nil {
 					return err
 				}
 			case ModerationHide:
-				if err := tx.Model(&model.CommentEntry{}).Where("id = ?", commentID).Update("status", CommentStatusModeratorHidden).Error; err != nil {
+				if err := s.setModerationVisibility(tx, h, false); err != nil {
 					return err
 				}
 			case ModerationDelete:
-				if err := s.deleteCommentLocked(tx, h.Target, h.Entry); err != nil {
+				if err := s.deleteCommentLocked(tx, h.Target, h.Root, h.Entry); err != nil {
 					return err
 				}
 			default:
@@ -338,6 +346,88 @@ func (s *Service) Moderate(user authctx.CurrentUser, commentID uuid.UUID, input 
 			return audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "comment.moderate." + input.Action, EntityType: "comment", EntityID: &commentID, Reason: strings.TrimSpace(input.Reason)})
 		})
 	})
+}
+
+func (s *Service) setModerationVisibility(tx *gorm.DB, hierarchy lockedCommentHierarchy, restore bool) error {
+	entry := hierarchy.Entry
+	if restore {
+		if entry.Status != CommentStatusModeratorHidden {
+			return nil
+		}
+	} else if !isVisibleCommentStatus(entry.Status) {
+		return nil
+	}
+
+	commentDelta, rootDelta := 0, 0
+	updates := map[string]any{}
+	if entry.RootID == nil {
+		var visibleChildren int64
+		if err := tx.Model(&model.CommentEntry{}).Where("root_id = ? AND status IN ?", entry.ID, hotScoreStatuses).Count(&visibleChildren).Error; err != nil {
+			return err
+		}
+		commentDelta = 1 + int(visibleChildren)
+		rootDelta = 1
+		if !restore {
+			commentDelta = -commentDelta
+			rootDelta = -rootDelta
+			updates["pinned_comment_id"] = gorm.Expr("CASE WHEN pinned_comment_id = ? THEN NULL ELSE pinned_comment_id END", entry.ID)
+		}
+	} else if isVisibleCommentStatus(hierarchy.Root.Status) {
+		commentDelta = 1
+		if !restore {
+			commentDelta = -1
+		}
+	}
+
+	status := CommentStatusModeratorHidden
+	if restore {
+		status = CommentStatusActive
+	}
+	statusResult := tx.Model(&model.CommentEntry{}).Where("id = ?", entry.ID).Update("status", status)
+	if statusResult.Error != nil {
+		return statusResult.Error
+	}
+	if statusResult.RowsAffected != 1 {
+		return ErrCommentNotFound
+	}
+	updates["comment_count"] = gorm.Expr("comment_count + ?", commentDelta)
+	updates["root_count"] = gorm.Expr("root_count + ?", rootDelta)
+	query := tx.Model(&model.DiscussionTarget{}).Where("id = ? AND comment_count >= 0 AND root_count >= 0", hierarchy.Target.ID)
+	if commentDelta < 0 {
+		query = query.Where("comment_count >= ?", -commentDelta)
+	}
+	if rootDelta < 0 {
+		query = query.Where("root_count >= ?", -rootDelta)
+	}
+	result := query.Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return fmt.Errorf("moderate comment counters: inconsistent target")
+	}
+	if entry.RootID == nil {
+		if restore {
+			return s.calibrateRootRepliesAndHotScore(tx, entry.ID)
+		}
+		return nil
+	}
+	return s.calibrateRootRepliesAndHotScore(tx, *entry.RootID)
+}
+
+func (s *Service) calibrateRootRepliesAndHotScore(tx *gorm.DB, rootID uuid.UUID) error {
+	var replyCount int64
+	if err := tx.Model(&model.CommentEntry{}).Where("root_id = ? AND status IN ?", rootID, hotScoreStatuses).Count(&replyCount).Error; err != nil {
+		return err
+	}
+	result := tx.Model(&model.CommentEntry{}).Where("id = ? AND root_id IS NULL AND reply_count >= 0", rootID).Update("reply_count", replyCount)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrCommentNotFound
+	}
+	return s.recomputeRootHotScore(tx, rootID, s.now())
 }
 
 func isVisibleCommentStatus(status string) bool {
@@ -400,7 +490,7 @@ func (s *Service) setLiked(user authctx.CurrentUser, commentID uuid.UUID, liked 
 				return ErrInvalidTargetResource
 			}
 			entry := hierarchy.Entry
-			if !isVisibleCommentStatus(entry.Status) {
+			if !isVisibleCommentStatus(entry.Status) || !isVisibleCommentStatus(hierarchy.Root.Status) {
 				return ErrCommentNotFound
 			}
 			var existing model.CommentLike

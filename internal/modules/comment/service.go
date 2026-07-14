@@ -254,16 +254,19 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	}
 
 	visible := []string{commentStatusActive, "auto_folded"}
-	base := s.db.Model(&model.CommentEntry{}).Where("target_id = ? AND status IN ?", target.ID, visible)
-	var totalComments, totalRoots int64
-	if err := base.Count(&totalComments).Error; err != nil {
-		return CommentListDTO{}, err
-	}
+	var totalRoots, totalReplies int64
 	if err := s.db.Model(&model.CommentEntry{}).
 		Where("target_id = ? AND root_id IS NULL AND status IN ?", target.ID, visible).
 		Count(&totalRoots).Error; err != nil {
 		return CommentListDTO{}, err
 	}
+	if err := s.db.Model(&model.CommentEntry{}).
+		Where("target_id = ? AND root_id IS NOT NULL AND status IN ?", target.ID, visible).
+		Where("EXISTS (SELECT 1 FROM comment_entries AS roots WHERE roots.id = comment_entries.root_id AND roots.status IN ? AND roots.deleted_at IS NULL)", visible).
+		Count(&totalReplies).Error; err != nil {
+		return CommentListDTO{}, err
+	}
+	totalComments := totalRoots + totalReplies
 
 	var marked *model.CommentEntry
 	if target.PinnedCommentID != nil {
@@ -337,7 +340,7 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 		PerPage:       pageSize,
 		TotalRoots:    int(totalRoots),
 		TotalComments: int(totalComments),
-		TotalReplies:  int(totalComments - totalRoots),
+		TotalReplies:  int(totalReplies),
 	}, nil
 }
 

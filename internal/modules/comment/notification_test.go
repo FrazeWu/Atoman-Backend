@@ -39,6 +39,7 @@ func TestFourthDistinctReportAutoFoldsAndDuplicateIsIdempotent(t *testing.T) {
 			require.Equal(t, CommentStatusAutoFolded, entry.Status)
 		}
 	}
+	assertTargetCounters(t, ctx, 1, 1)
 }
 
 func TestReportValidationAndLifetimeUniqueness(t *testing.T) {
@@ -126,6 +127,111 @@ func TestModerateActionsAndAuditFailureRollback(t *testing.T) {
 	child := ctx.create(t, 1, "child", &comment.ID)
 	require.NoError(t, ctx.service.Moderate(moderator, child.ID, ModerateInput{Action: ModerationDelete, Reason: "delete"}))
 	require.ErrorIs(t, ctx.service.Report(ctx.users[2], child.ID, ReportInput{Reason: ReportReasonSpam}), ErrCommentNotFound)
+}
+
+func TestModerateHideRestoreRootUsesEffectiveVisibleCounters(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	root := ctx.create(t, 1, "root", nil)
+	active := ctx.create(t, 2, "active", &root.ID)
+	folded := ctx.create(t, 2, "folded", &root.ID)
+	hidden := ctx.create(t, 2, "hidden", &root.ID)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", folded.ID).Update("status", CommentStatusAutoFolded).Error)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", hidden.ID).Update("status", CommentStatusModeratorHidden).Error)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", root.ID).Update("status", CommentStatusAutoFolded).Error)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", root.ID).Update("reply_count", 2).Error)
+	require.NoError(t, ctx.db.Model(&model.DiscussionTarget{}).Where("kind = ?", TargetKindBlogPost).Updates(map[string]any{"comment_count": 3, "pinned_comment_id": root.ID}).Error)
+	moderator := addCommentUser(t, ctx, authctx.RoleModerator)
+
+	require.NoError(t, ctx.service.Moderate(moderator, root.ID, ModerateInput{Action: ModerationHide}))
+	require.NoError(t, ctx.service.Moderate(moderator, root.ID, ModerateInput{Action: ModerationHide}))
+	assertTargetCounters(t, ctx, 0, 0)
+	list, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1})
+	require.NoError(t, err)
+	require.Zero(t, list.TotalComments)
+	require.Zero(t, list.TotalReplies)
+	var target model.DiscussionTarget
+	require.NoError(t, ctx.db.Where("kind = ?", TargetKindBlogPost).First(&target).Error)
+	require.Nil(t, target.PinnedCommentID)
+
+	require.NoError(t, ctx.service.Moderate(moderator, root.ID, ModerateInput{Action: ModerationRestore}))
+	require.NoError(t, ctx.service.Moderate(moderator, root.ID, ModerateInput{Action: ModerationRestore}))
+	assertTargetCounters(t, ctx, 3, 1)
+	var restored, stillHidden model.CommentEntry
+	require.NoError(t, ctx.db.First(&restored, "id = ?", root.ID).Error)
+	require.Equal(t, 2, restored.ReplyCount)
+	require.NoError(t, ctx.db.First(&stillHidden, "id = ?", hidden.ID).Error)
+	require.Equal(t, CommentStatusModeratorHidden, stillHidden.Status)
+	var activeAfter, foldedAfter model.CommentEntry
+	require.NoError(t, ctx.db.First(&activeAfter, "id = ?", active.ID).Error)
+	require.Equal(t, CommentStatusActive, activeAfter.Status)
+	require.NoError(t, ctx.db.First(&foldedAfter, "id = ?", folded.ID).Error)
+	require.Equal(t, CommentStatusAutoFolded, foldedAfter.Status)
+	var auditCount int64
+	require.NoError(t, ctx.db.Model(&model.AuditLog{}).Where("entity_id = ?", root.ID).Count(&auditCount).Error)
+	require.EqualValues(t, 4, auditCount)
+}
+
+func TestModerateHideRestoreChildKeepsCountersRepliesAndHotScoreAccurate(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	root := ctx.create(t, 0, "root", nil)
+	child := ctx.create(t, 1, "child", &root.ID)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", child.ID).Update("status", CommentStatusAutoFolded).Error)
+	moderator := addCommentUser(t, ctx, authctx.RoleModerator)
+	var before model.CommentEntry
+	require.NoError(t, ctx.db.First(&before, "id = ?", root.ID).Error)
+	require.NoError(t, ctx.service.Moderate(moderator, child.ID, ModerateInput{Action: ModerationHide}))
+	require.NoError(t, ctx.service.Moderate(moderator, child.ID, ModerateInput{Action: ModerationHide}))
+	assertTargetCounters(t, ctx, 1, 1)
+	var hiddenRoot model.CommentEntry
+	require.NoError(t, ctx.db.First(&hiddenRoot, "id = ?", root.ID).Error)
+	require.Zero(t, hiddenRoot.ReplyCount)
+	require.NotEqual(t, before.HotScore, hiddenRoot.HotScore)
+	require.NoError(t, ctx.service.Moderate(moderator, child.ID, ModerateInput{Action: ModerationRestore}))
+	require.NoError(t, ctx.service.Moderate(moderator, child.ID, ModerateInput{Action: ModerationRestore}))
+	assertTargetCounters(t, ctx, 2, 1)
+	var restoredRoot model.CommentEntry
+	require.NoError(t, ctx.db.First(&restoredRoot, "id = ?", root.ID).Error)
+	require.Equal(t, 1, restoredRoot.ReplyCount)
+}
+
+func TestModerateDeleteHiddenCommentsDoesNotDoubleDecrement(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	moderator := addCommentUser(t, ctx, authctx.RoleModerator)
+	root := ctx.create(t, 0, "root", nil)
+	child := ctx.create(t, 1, "child", &root.ID)
+	require.NoError(t, ctx.service.Moderate(moderator, root.ID, ModerateInput{Action: ModerationHide}))
+	require.NoError(t, ctx.service.Moderate(moderator, root.ID, ModerateInput{Action: ModerationDelete}))
+	assertTargetCounters(t, ctx, 0, 0)
+	var count int64
+	require.NoError(t, ctx.db.Unscoped().Model(&model.CommentEntry{}).Where("id IN ?", []uuid.UUID{root.ID, child.ID}).Count(&count).Error)
+	require.Zero(t, count)
+
+	root = ctx.create(t, 0, "root-2", nil)
+	child = ctx.create(t, 1, "child-2", &root.ID)
+	require.NoError(t, ctx.service.Moderate(moderator, child.ID, ModerateInput{Action: ModerationHide}))
+	require.NoError(t, ctx.service.Moderate(moderator, child.ID, ModerateInput{Action: ModerationDelete}))
+	assertTargetCounters(t, ctx, 1, 1)
+}
+
+func TestHiddenRootBlocksOrdinaryChildMutations(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	root := ctx.create(t, 0, "root", nil)
+	child := ctx.create(t, 1, "child", &root.ID)
+	moderator := addCommentUser(t, ctx, authctx.RoleModerator)
+	require.NoError(t, ctx.service.Moderate(moderator, root.ID, ModerateInput{Action: ModerationHide}))
+	_, err := ctx.service.Edit(ctx.users[1], child.ID, EditCommentInput{Content: "edited"})
+	require.ErrorIs(t, err, ErrCommentNotFound)
+	require.ErrorIs(t, ctx.service.Delete(ctx.users[1], child.ID), ErrCommentNotFound)
+	require.ErrorIs(t, ctx.service.Like(ctx.users[2], child.ID), ErrCommentNotFound)
+	require.ErrorIs(t, ctx.service.Report(ctx.users[2], child.ID, ReportInput{Reason: ReportReasonSpam}), ErrCommentNotFound)
+}
+
+func assertTargetCounters(t *testing.T, ctx commentTestContext, comments, roots int) {
+	t.Helper()
+	var target model.DiscussionTarget
+	require.NoError(t, ctx.db.Where("kind = ?", TargetKindBlogPost).First(&target).Error)
+	require.Equal(t, comments, target.CommentCount)
+	require.Equal(t, roots, target.RootCount)
 }
 
 func TestNotificationReplyMentionEditMarkAndDelete(t *testing.T) {
