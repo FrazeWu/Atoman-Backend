@@ -46,6 +46,46 @@ var validReportReasons = map[string]bool{
 	ReportReasonSexual: true, ReportReasonViolence: true, ReportReasonMisinformation: true, ReportReasonOther: true,
 }
 
+func (s *Service) ListReports(user authctx.CurrentUser, status string, page, pageSize int) (ReportQueueDTO, error) {
+	if err := s.validateAuthor(user); err != nil {
+		return ReportQueueDTO{}, err
+	}
+	if !authctx.RoleAtLeast(user.Role, authctx.RoleModerator) {
+		return ReportQueueDTO{}, ErrCommentForbidden
+	}
+	status = strings.TrimSpace(status)
+	if page < 1 || pageSize < 1 || pageSize > 50 || status != "" && status != ReportStatusPending && status != ReportStatusUpheld && status != ReportStatusRejected {
+		return ReportQueueDTO{}, ErrInvalidListOptions
+	}
+	query := s.db.Table("comment_reports AS reports").
+		Joins("JOIN comment_entries AS comments ON comments.id = reports.comment_id").
+		Joins("JOIN discussion_targets AS targets ON targets.id = comments.target_id").
+		Joins(`JOIN "Users" AS reporters ON reporters.uuid = reports.reporter_id`).
+		Where("reports.deleted_at IS NULL")
+	if status != "" {
+		query = query.Where("reports.status = ?", status)
+	}
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return ReportQueueDTO{}, err
+	}
+	var items []ReportQueueItemDTO
+	err := query.Select(`reports.id, reports.reason, reports.note, reports.status, reports.reviewer_id,
+		reports.created_at, reports.reviewed_at, comments.id AS comment_id,
+		CASE WHEN comments.root_id IS NULL THEN comments.id ELSE comments.root_id END AS root_id,
+		targets.kind AS target_kind, targets.resource_id, reports.reporter_id,
+		reporters.username, comments.content, comments.status AS comment_status`).
+		Order("reports.created_at DESC").Order("reports.id DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).Scan(&items).Error
+	if err != nil {
+		return ReportQueueDTO{}, err
+	}
+	if items == nil {
+		items = []ReportQueueItemDTO{}
+	}
+	return ReportQueueDTO{Items: items, Page: page, PerPage: pageSize, Total: total, HasMore: int64(page*pageSize) < total}, nil
+}
+
 func (s *Service) Edit(user authctx.CurrentUser, commentID uuid.UUID, input EditCommentInput) (CommentDTO, error) {
 	if err := s.validateAuthor(user); err != nil {
 		return CommentDTO{}, err
@@ -124,6 +164,33 @@ func (s *Service) Edit(user authctx.CurrentUser, commentID uuid.UUID, input Edit
 		return CommentDTO{}, err
 	}
 	return dto, nil
+}
+
+func (s *Service) resolveCommentModeration(commentID uuid.UUID) (model.CommentEntry, model.DiscussionTarget, ResolvedTarget, error) {
+	entry, err := s.repo.findComment(s.db, commentID)
+	if isNotFound(err) {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, ErrCommentNotFound
+	}
+	if err != nil {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, err
+	}
+	target, err := s.repo.findTargetByID(s.db, entry.TargetID)
+	if isNotFound(err) {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, ErrCommentNotFound
+	}
+	if err != nil {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, err
+	}
+	resolved, err := s.registry.Resolve(Viewer{}, TargetRef{Kind: target.Kind, ResourceID: target.ResourceID})
+	if errors.Is(err, ErrTargetNotFound) {
+		resolved = ResolvedTarget{Kind: target.Kind, ResourceID: target.ResourceID, ResourceKey: target.ResourceKey, OwnerID: target.OwnerID, Visible: true}
+	} else if err != nil {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, err
+	}
+	if !targetMatchesResolved(target, resolved) {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, ErrInvalidTargetResource
+	}
+	return entry, target, resolved, nil
 }
 
 func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
@@ -306,7 +373,7 @@ func (s *Service) Moderate(user authctx.CurrentUser, commentID uuid.UUID, input 
 	if !valid {
 		return ErrInvalidModeration
 	}
-	located, _, resolved, err := s.resolveCommentMutation(Viewer{UserID: &user.ID}, commentID)
+	located, _, resolved, err := s.resolveCommentModeration(commentID)
 	if err != nil {
 		return err
 	}

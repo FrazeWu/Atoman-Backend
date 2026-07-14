@@ -30,6 +30,284 @@ definitions:
     required:
     - collection_id
     type: object
+  comment.ActionResponse:
+    properties:
+      data:
+        properties:
+          ok:
+            type: boolean
+        type: object
+    type: object
+  comment.AttachmentDTO:
+    properties:
+      content_type:
+        type: string
+      id:
+        type: string
+      position:
+        type: integer
+      url:
+        type: string
+    type: object
+  comment.CommentDTO:
+    properties:
+      attachments:
+        items:
+          $ref: '#/definitions/comment.AttachmentDTO'
+        type: array
+      author_id:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      edited_at:
+        type: string
+      floor_number:
+        type: integer
+      hot_score:
+        type: number
+      id:
+        type: string
+      like_count:
+        type: integer
+      liked:
+        type: boolean
+      marked:
+        type: boolean
+      mentions:
+        items:
+          $ref: '#/definitions/comment.MentionDTO'
+        type: array
+      rendered_html:
+        type: string
+      replies:
+        items:
+          $ref: '#/definitions/comment.CommentDTO'
+        type: array
+      reply_count:
+        type: integer
+      reply_to_id:
+        type: string
+      root_id:
+        type: string
+      status:
+        type: string
+      time_anchors:
+        items:
+          $ref: '#/definitions/comment.TimeAnchorDTO'
+        type: array
+    type: object
+  comment.CommentListDTO:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/comment.CommentDTO'
+        type: array
+      page:
+        type: integer
+      per_page:
+        type: integer
+      target:
+        $ref: '#/definitions/comment.TargetSummaryDTO'
+      total_comments:
+        type: integer
+      total_replies:
+        type: integer
+      total_roots:
+        type: integer
+    type: object
+  comment.CommentListResponse:
+    properties:
+      data:
+        $ref: '#/definitions/comment.CommentListDTO'
+    type: object
+  comment.CommentResponse:
+    properties:
+      data:
+        $ref: '#/definitions/comment.CommentDTO'
+    type: object
+  comment.CreateCommentInput:
+    properties:
+      attachment_ids:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      mentions:
+        items:
+          $ref: '#/definitions/comment.MentionInput'
+        type: array
+      reply_to_id:
+        type: string
+    type: object
+  comment.EditCommentInput:
+    properties:
+      attachment_ids:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      mentions:
+        items:
+          $ref: '#/definitions/comment.MentionInput'
+        type: array
+    type: object
+  comment.ErrorBodyDTO:
+    properties:
+      code:
+        type: string
+      details:
+        additionalProperties: {}
+        type: object
+      message:
+        type: string
+    type: object
+  comment.ErrorResponse:
+    properties:
+      error:
+        $ref: '#/definitions/comment.ErrorBodyDTO'
+    type: object
+  comment.MentionDTO:
+    properties:
+      end:
+        type: integer
+      start:
+        type: integer
+      user_id:
+        type: string
+    type: object
+  comment.MentionInput:
+    properties:
+      end:
+        type: integer
+      start:
+        type: integer
+      userID:
+        type: string
+    type: object
+  comment.ModerateInput:
+    properties:
+      action:
+        type: string
+      reason:
+        type: string
+      report_id:
+        type: string
+    type: object
+  comment.PinCommentInput:
+    properties:
+      comment_id:
+        type: string
+    type: object
+  comment.ReplyListDTO:
+    properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/comment.CommentDTO'
+        type: array
+      page:
+        type: integer
+      per_page:
+        type: integer
+      total:
+        type: integer
+    type: object
+  comment.ReplyListResponse:
+    properties:
+      data:
+        $ref: '#/definitions/comment.ReplyListDTO'
+    type: object
+  comment.ReportInput:
+    properties:
+      note:
+        type: string
+      reason:
+        type: string
+    type: object
+  comment.ReportQueueDTO:
+    properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/comment.ReportQueueItemDTO'
+        type: array
+      page:
+        type: integer
+      per_page:
+        type: integer
+      total:
+        type: integer
+    type: object
+  comment.ReportQueueItemDTO:
+    properties:
+      comment_id:
+        type: string
+      comment_status:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      note:
+        type: string
+      reason:
+        type: string
+      reporter_id:
+        type: string
+      resource_id:
+        type: string
+      reviewed_at:
+        type: string
+      reviewer_id:
+        type: string
+      root_id:
+        type: string
+      status:
+        type: string
+      target_kind:
+        type: string
+      username:
+        type: string
+    type: object
+  comment.ReportQueueResponse:
+    properties:
+      data:
+        $ref: '#/definitions/comment.ReportQueueDTO'
+    type: object
+  comment.TargetSummaryDTO:
+    properties:
+      can_mark:
+        type: boolean
+      comment_count:
+        type: integer
+      kind:
+        type: string
+      mark_label:
+        type: string
+      marked_comment_id:
+        type: string
+      resource_id:
+        type: string
+      root_count:
+        type: integer
+    type: object
+  comment.TimeAnchorDTO:
+    properties:
+      end:
+        type: integer
+      seconds:
+        type: integer
+      start:
+        type: integer
+    type: object
   feed.AutoSubscriptionAddRequest:
     properties:
       candidate_feed_url:
@@ -1704,6 +1982,8 @@ definitions:
     properties:
       content_type:
         type: string
+      id:
+        type: string
       key:
         type: string
       size:
@@ -2495,6 +2775,8 @@ definitions:
         type: string
       created_at:
         type: string
+      duration_sec:
+        type: integer
       id:
         type: string
       lyrics:
@@ -3123,6 +3405,101 @@ paths:
       summary: 合并艺人
       tags:
       - music-artists
+  /api/v1/admin/comment-reports:
+    get:
+      parameters:
+      - description: 状态：pending/upheld/rejected
+        in: query
+        name: status
+        type: string
+      - default: 1
+        description: 页码
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 每页数量，最多50
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.ReportQueueResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取评论举报队列
+      tags:
+      - comment-admin
+  /api/v1/admin/comments/{comment_id}/moderation:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 评论 UUID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: 审核动作
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/comment.ModerateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.ActionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 审核评论或举报
+      tags:
+      - comment-admin
   /api/v1/admin/discussions/{id}:
     delete:
       description: 管理员可软删除任意讨论。
@@ -5656,6 +6033,257 @@ paths:
       summary: 获取频道视频 RSS
       tags:
       - videos
+  /api/v1/comments/{comment_id}:
+    delete:
+      parameters:
+      - description: 评论 UUID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.ActionResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 删除评论
+      tags:
+      - comments
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 评论 UUID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: 评论内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/comment.EditCommentInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.CommentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 编辑评论
+      tags:
+      - comments
+  /api/v1/comments/{comment_id}/like:
+    delete:
+      parameters:
+      - description: 评论 UUID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.ActionResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 取消点赞评论
+      tags:
+      - comments
+    put:
+      parameters:
+      - description: 评论 UUID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.ActionResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 点赞评论
+      tags:
+      - comments
+  /api/v1/comments/{comment_id}/report:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 评论 UUID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: 举报信息
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/comment.ReportInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.ActionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 举报评论
+      tags:
+      - comments
+  /api/v1/comments/{root_comment_id}/replies:
+    get:
+      parameters:
+      - description: 父楼 UUID
+        in: path
+        name: root_comment_id
+        required: true
+        type: string
+      - default: 1
+        description: 页码
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 每页数量，最多50
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.ReplyListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      summary: 获取楼中楼回复
+      tags:
+      - comments
   /api/v1/corrections/album:
     post:
       consumes:
@@ -5790,6 +6418,222 @@ paths:
       summary: 提交歌曲纠错
       tags:
       - music-corrections
+  /api/v1/discussions/{kind}/{resource_id}/comments:
+    get:
+      description: 按目标获取一级评论与前三条楼中楼回复。
+      parameters:
+      - description: 目标类型
+        in: path
+        name: kind
+        required: true
+        type: string
+      - description: 目标公开 UUID
+        in: path
+        name: resource_id
+        required: true
+        type: string
+      - default: oldest
+        description: 排序：oldest/newest/hot
+        in: query
+        name: sort
+        type: string
+      - default: 1
+        description: 页码
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 每页数量，最多20
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.CommentListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      summary: 获取评论楼层
+      tags:
+      - comments
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 目标类型
+        in: path
+        name: kind
+        required: true
+        type: string
+      - description: 目标公开 UUID
+        in: path
+        name: resource_id
+        required: true
+        type: string
+      - description: 评论内容
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/comment.CreateCommentInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/comment.CommentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 发表评论或回复
+      tags:
+      - comments
+  /api/v1/discussions/{kind}/{resource_id}/pinned-comment:
+    delete:
+      parameters:
+      - description: 目标类型
+        in: path
+        name: kind
+        required: true
+        type: string
+      - description: 目标公开 UUID
+        in: path
+        name: resource_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.ActionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 取消父楼标记
+      tags:
+      - comments
+    put:
+      consumes:
+      - application/json
+      description: 内容作者可置顶；论坛作者可标记最佳回答。
+      parameters:
+      - description: 目标类型
+        in: path
+        name: kind
+        required: true
+        type: string
+      - description: 目标公开 UUID
+        in: path
+        name: resource_id
+        required: true
+        type: string
+      - description: 父楼 UUID
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/comment.PinCommentInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/comment.ActionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/comment.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 标记父楼
+      tags:
+      - comments
   /api/v1/dm/conversations:
     get:
       description: 返回当前用户的私信会话列表和未读计数。
@@ -9165,14 +10009,14 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: 上传音乐封面或音频资源。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。
+      description: 上传音乐封面、音频或评论图片。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。
       parameters:
       - description: 文件
         in: formData
         name: file
         required: true
         type: file
-      - description: 用途：music.cover / music.audio
+      - description: 用途：music.cover / music.audio / comment.image
         in: formData
         name: purpose
         required: true
@@ -9543,7 +10387,7 @@ paths:
       - users
   /api/v1/users/search:
     get:
-      description: 按用户名或显示名搜索用户；scope=mention 时仅返回当前用户关注的人。
+      description: 按用户名或显示名搜索活跃用户；scope=mention 时要求登录并搜索全部活跃用户。
       parameters:
       - description: 搜索关键字
         in: query

@@ -16,7 +16,9 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/httpx"
 )
 
 // SetupUserRoutes configures user-related routes
@@ -721,7 +723,7 @@ func GetUserFollowing(db *gorm.DB) gin.HandlerFunc {
 // GET /api/users/search?q=<query>&limit=<n>&scope=mention
 // SearchUsers godoc
 // @Summary 搜索用户
-// @Description 按用户名或显示名搜索用户；scope=mention 时仅返回当前用户关注的人。
+// @Description 按用户名或显示名搜索活跃用户；scope=mention 时要求登录并搜索全部活跃用户。
 // @Tags users
 // @Produce json
 // @Param q query string false "搜索关键字"
@@ -737,8 +739,13 @@ func SearchUsers(db *gorm.DB) gin.HandlerFunc {
 		q := strings.TrimSpace(c.Query("q"))
 		scope := strings.TrimSpace(c.Query("scope"))
 		limit := 5
-		if l, err := strconv.Atoi(c.Query("limit")); err == nil && l > 0 && l <= 20 {
-			limit = l
+		if raw := c.Query("limit"); raw != "" {
+			if l, err := strconv.Atoi(raw); err == nil && l > 0 {
+				limit = l
+				if limit > 20 {
+					limit = 20
+				}
+			}
 		}
 
 		type UserResult struct {
@@ -754,23 +761,18 @@ func SearchUsers(db *gorm.DB) gin.HandlerFunc {
 			Where("Users.is_active = ?", true)
 
 		if scope == "mention" {
-			userIDVal, ok := c.Get("user_id")
-			if !ok {
-				c.JSON(http.StatusOK, gin.H{"data": []UserResult{}})
+			if current, ok := authctx.Current(c); !ok || current.ID == uuid.Nil {
+				httpx.Error(c, apperr.Unauthorized("Authentication is required"))
 				return
 			}
-			userID, ok := userIDVal.(uuid.UUID)
-			if !ok {
-				c.JSON(http.StatusOK, gin.H{"data": []UserResult{}})
-				return
-			}
-			query = query.Joins(`JOIN follows ON follows.follower_id = ? AND follows.following_id = "Users".uuid`, userID)
 		}
 
 		if q != "" {
 			like := "%" + q + "%"
 			query = query.Where("LOWER(Users.username) LIKE LOWER(?) OR LOWER(Users.display_name) LIKE LOWER(?)", like, like)
+			query = query.Order(clause.Expr{SQL: "CASE WHEN LOWER(Users.username) LIKE LOWER(?) THEN 0 ELSE 1 END", Vars: []any{q + "%"}, WithoutParentheses: true})
 		}
+		query = query.Order("LOWER(Users.username) ASC").Order("Users.uuid ASC")
 
 		var results []UserResult
 		if err := query.Limit(limit).Scan(&results).Error; err != nil {

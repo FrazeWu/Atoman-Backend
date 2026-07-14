@@ -7,6 +7,7 @@ import (
 	"atoman/internal/handlers"
 	"atoman/internal/middleware"
 	"atoman/internal/modules/blog"
+	"atoman/internal/modules/comment"
 	"atoman/internal/modules/debate"
 	"atoman/internal/modules/debate_voting"
 	"atoman/internal/modules/feed"
@@ -32,6 +33,7 @@ func RegisterV1Routes(
 	collabHub *collab.Hub,
 ) {
 	group := r.Group("/api/v1")
+	comment.RegisterRoutes(group, comment.NewService(db, comment.NewTargetRegistry(db)))
 	blog.RegisterRoutes(group.Group("/blog"), blog.NewService(db))
 	feed.RegisterRoutes(group.Group("/feed"), feed.NewService(db))
 	notification.RegisterRoutes(group, notification.NewService(db))

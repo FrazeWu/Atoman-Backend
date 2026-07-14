@@ -17,8 +17,8 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 func signedRouterTokenForTest(t *testing.T, user model.User) string {
@@ -78,6 +78,21 @@ func TestRegisterV1RoutesMountsMusicSubmitEdit(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestRegisterV1RoutesMountsUnifiedCommentHTTP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	r := gin.New()
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/discussions/unknown/"+uuid.NewString()+"/comments", nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected mounted unified comment route to return 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"comment.invalid_target"`) {
+		t.Fatalf("expected stable comment error, got %s", w.Body.String())
 	}
 }
 

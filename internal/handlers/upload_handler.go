@@ -52,13 +52,19 @@ var uploadPurposes = map[string]uploadPurposeConfig{
 		},
 		maxSize: 200 * 1024 * 1024,
 	},
+	"comment.image": {
+		keyKind:            "comments",
+		allowedContentType: allowedImageUploadTypes(),
+		maxSize:            10 * 1024 * 1024,
+	},
 }
 
 type uploadAssetResponse struct {
-	URL         string `json:"url"`
-	Key         string `json:"key"`
-	ContentType string `json:"content_type"`
-	Size        int64  `json:"size"`
+	ID          uuid.UUID `json:"id"`
+	URL         string    `json:"url"`
+	Key         string    `json:"key"`
+	ContentType string    `json:"content_type"`
+	Size        int64     `json:"size"`
 }
 
 // SetupUploadRoutes configures S3-only generic media upload routes.
@@ -71,12 +77,12 @@ func SetupUploadRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // UploadAsset handles media uploads for newer API clients.
 // UploadAsset godoc
 // @Summary 上传媒体资源
-// @Description 上传音乐封面或音频资源。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。
+// @Description 上传音乐封面、音频或评论图片。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。
 // @Tags uploads
 // @Accept mpfd
 // @Produce json
 // @Param file formData file true "文件"
-// @Param purpose formData string true "用途：music.cover / music.audio"
+// @Param purpose formData string true "用途：music.cover / music.audio / comment.image"
 // @Success 201 {object} uploadAssetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
@@ -136,6 +142,9 @@ func UploadAsset(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 
 		filename := uniqueUploadFilename(header.Filename, contentType)
 		key := storage.BuildMusicUploadKey(config.keyKind, current.ID.String(), filename, time.Now())
+		if purpose == "comment.image" {
+			key = storage.BuildUserMediaKey("comments", "images", current.ID.String(), filename, time.Now())
+		}
 		if _, err := s3Client.PutObject(&s3.PutObjectInput{
 			Bucket:      aws.String(bucket),
 			Key:         aws.String(key),
@@ -162,6 +171,7 @@ func UploadAsset(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		}
 
 		httpx.OK(c, http.StatusCreated, uploadAssetResponse{
+			ID:          asset.ID,
 			URL:         asset.URL,
 			Key:         asset.Key,
 			ContentType: asset.ContentType,

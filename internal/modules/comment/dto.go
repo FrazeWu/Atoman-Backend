@@ -84,10 +84,85 @@ type CommentDTO struct {
 }
 
 type CommentListDTO struct {
-	Items         []CommentDTO `json:"items"`
-	Page          int          `json:"page"`
-	PerPage       int          `json:"per_page"`
-	TotalRoots    int          `json:"total_roots"`
-	TotalComments int          `json:"total_comments"`
-	TotalReplies  int          `json:"total_replies"`
+	Items         []CommentDTO     `json:"items"`
+	Page          int              `json:"page"`
+	PerPage       int              `json:"per_page"`
+	TotalRoots    int              `json:"total_roots"`
+	TotalComments int              `json:"total_comments"`
+	TotalReplies  int              `json:"total_replies"`
+	Target        TargetSummaryDTO `json:"target"`
+}
+
+type TargetSummaryDTO struct {
+	Kind            string     `json:"kind"`
+	ResourceID      uuid.UUID  `json:"resource_id"`
+	MarkLabel       string     `json:"mark_label"`
+	CanMark         bool       `json:"can_mark"`
+	MarkedCommentID *uuid.UUID `json:"marked_comment_id,omitempty"`
+	CommentCount    int        `json:"comment_count"`
+	RootCount       int        `json:"root_count"`
+}
+
+type ReplyListDTO struct {
+	Items   []CommentDTO `json:"items"`
+	Page    int          `json:"page"`
+	PerPage int          `json:"per_page"`
+	Total   int64        `json:"total"`
+	HasMore bool         `json:"has_more"`
+}
+
+type PinCommentInput struct {
+	CommentID uuid.UUID `json:"comment_id"`
+}
+
+type ReportQueueItemDTO struct {
+	ID            uuid.UUID  `json:"id"`
+	Reason        string     `json:"reason"`
+	Note          string     `json:"note"`
+	Status        string     `json:"status"`
+	ReviewerID    *uuid.UUID `json:"reviewer_id,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	ReviewedAt    *time.Time `json:"reviewed_at,omitempty"`
+	CommentID     uuid.UUID  `json:"comment_id"`
+	RootID        uuid.UUID  `json:"root_id"`
+	TargetKind    string     `json:"target_kind"`
+	ResourceID    uuid.UUID  `json:"resource_id"`
+	ReporterID    uuid.UUID  `json:"reporter_id"`
+	Username      string     `json:"username"`
+	Content       string     `json:"content"`
+	CommentStatus string     `json:"comment_status"`
+}
+
+type ReportQueueDTO struct {
+	Items   []ReportQueueItemDTO `json:"items"`
+	Page    int                  `json:"page"`
+	PerPage int                  `json:"per_page"`
+	Total   int64                `json:"total"`
+	HasMore bool                 `json:"has_more"`
+}
+
+type CommentResponse struct {
+	Data CommentDTO `json:"data"`
+}
+type CommentListResponse struct {
+	Data CommentListDTO `json:"data"`
+}
+type ReplyListResponse struct {
+	Data ReplyListDTO `json:"data"`
+}
+type ReportQueueResponse struct {
+	Data ReportQueueDTO `json:"data"`
+}
+type ActionResponse struct {
+	Data struct {
+		OK bool `json:"ok"`
+	} `json:"data"`
+}
+type ErrorBodyDTO struct {
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details"`
+}
+type ErrorResponse struct {
+	Error ErrorBodyDTO `json:"error"`
 }

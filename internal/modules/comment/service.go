@@ -246,7 +246,7 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	}
 	target, err := s.repo.findTarget(s.db, resolved)
 	if isNotFound(err) {
-		return CommentListDTO{Items: []CommentDTO{}, Page: input.Page, PerPage: pageSize}, nil
+		return CommentListDTO{Items: []CommentDTO{}, Page: input.Page, PerPage: pageSize, Target: targetSummary(resolved, model.DiscussionTarget{}, viewer.UserID)}, nil
 	}
 	if err != nil {
 		return CommentListDTO{}, fmt.Errorf("find discussion target: %w", err)
@@ -350,7 +350,65 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 		TotalRoots:    int(totalRoots),
 		TotalComments: int(totalComments),
 		TotalReplies:  int(totalReplies),
+		Target:        targetSummary(resolved, target, viewer.UserID),
 	}, nil
+}
+
+func targetSummary(resolved ResolvedTarget, target model.DiscussionTarget, viewerID *uuid.UUID) TargetSummaryDTO {
+	canMark := viewerID != nil && resolved.OwnerID != nil && *viewerID == *resolved.OwnerID
+	return TargetSummaryDTO{
+		Kind: resolved.Kind, ResourceID: resolved.ResourceID, MarkLabel: resolved.MarkLabel,
+		CanMark: canMark, MarkedCommentID: target.PinnedCommentID,
+		CommentCount: target.CommentCount, RootCount: target.RootCount,
+	}
+}
+
+func (s *Service) ListReplies(viewer Viewer, rootID uuid.UUID, page, pageSize int) (ReplyListDTO, error) {
+	if rootID == uuid.Nil || page < 1 || pageSize < 1 || pageSize > 50 {
+		return ReplyListDTO{}, ErrInvalidListOptions
+	}
+	root, err := s.repo.findComment(s.db, rootID)
+	if isNotFound(err) {
+		return ReplyListDTO{}, ErrCommentNotFound
+	}
+	if err != nil {
+		return ReplyListDTO{}, err
+	}
+	if root.RootID != nil {
+		return ReplyListDTO{}, ErrInvalidReply
+	}
+	target, err := s.repo.findTargetByID(s.db, root.TargetID)
+	if isNotFound(err) {
+		return ReplyListDTO{}, ErrCommentNotFound
+	}
+	if err != nil {
+		return ReplyListDTO{}, err
+	}
+	if _, err := s.resolveStoredTarget(viewer, target); err != nil {
+		return ReplyListDTO{}, err
+	}
+	if !isVisibleCommentStatus(root.Status) {
+		return ReplyListDTO{}, ErrCommentNotFound
+	}
+	visible := []string{CommentStatusActive, CommentStatusAutoFolded}
+	var total int64
+	if err := s.db.Model(&model.CommentEntry{}).Where("root_id = ? AND status IN ?", root.ID, visible).Count(&total).Error; err != nil {
+		return ReplyListDTO{}, err
+	}
+	var entries []model.CommentEntry
+	if err := s.db.Where("root_id = ? AND status IN ?", root.ID, visible).
+		Order("created_at ASC").Order("id ASC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&entries).Error; err != nil {
+		return ReplyListDTO{}, err
+	}
+	dtos, err := s.entryDTOs(s.db, entries, viewer.UserID)
+	if err != nil {
+		return ReplyListDTO{}, err
+	}
+	items := make([]CommentDTO, 0, len(entries))
+	for _, entry := range entries {
+		items = append(items, dtos[entry.ID])
+	}
+	return ReplyListDTO{Items: items, Page: page, PerPage: pageSize, Total: total, HasMore: int64(page*pageSize) < total}, nil
 }
 
 func (s *Service) validateAuthor(user authctx.CurrentUser) error {
