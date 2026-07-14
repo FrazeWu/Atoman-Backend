@@ -80,16 +80,20 @@ func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *test
 
 func TestApproveRevisionKeepsOnlyOneCurrentWithUniqueIndex(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Album{}, &model.Revision{})
+	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{})
 
 	contentID := uuid.New()
 	editorID := uuid.New()
 	reviewerID := uuid.New()
+	album := model.Album{Base: model.Base{ID: contentID}, Title: "base"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
 	current := model.Revision{
 		ContentType:     "album",
 		ContentID:       contentID,
 		VersionNumber:   1,
-		ContentSnapshot: []byte(`{"title":"base"}`),
+		ContentSnapshot: []byte(`{"album":{"title":"base"},"songs":[]}`),
 		EditorID:        editorID,
 		EditSummary:     "base",
 		EditType:        "creation",
@@ -105,7 +109,7 @@ func TestApproveRevisionKeepsOnlyOneCurrentWithUniqueIndex(t *testing.T) {
 		ContentID:          contentID,
 		VersionNumber:      2,
 		PreviousRevisionID: &current.ID,
-		ContentSnapshot:    []byte(`{"title":"next"}`),
+		ContentSnapshot:    []byte(`{"album":{"title":"next"},"songs":[]}`),
 		EditorID:           editorID,
 		EditSummary:        "next",
 		EditType:           "edit",
