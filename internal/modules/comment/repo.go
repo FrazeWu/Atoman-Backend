@@ -70,6 +70,18 @@ func (repository) findComment(db *gorm.DB, id uuid.UUID) (model.CommentEntry, er
 	return entry, err
 }
 
+func (repository) lockComment(tx *gorm.DB, id uuid.UUID) (model.CommentEntry, error) {
+	var entry model.CommentEntry
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&entry, "id = ?", id).Error
+	return entry, err
+}
+
+func (repository) lockTargetByID(tx *gorm.DB, id uuid.UUID) (model.DiscussionTarget, error) {
+	var target model.DiscussionTarget
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&target, "id = ?", id).Error
+	return target, err
+}
+
 func sameOptionalUUID(left, right *uuid.UUID) bool {
 	if left == nil || right == nil {
 		return left == nil && right == nil

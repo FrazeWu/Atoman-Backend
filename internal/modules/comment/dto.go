@@ -20,6 +20,12 @@ type CreateCommentInput struct {
 	AttachmentIDs []uuid.UUID    `json:"attachment_ids"`
 }
 
+type EditCommentInput struct {
+	Content       string         `json:"content"`
+	Mentions      []MentionInput `json:"mentions"`
+	AttachmentIDs []uuid.UUID    `json:"attachment_ids"`
+}
+
 type ListCommentsInput struct {
 	Page int    `form:"page" json:"page"`
 	Sort string `form:"sort" json:"sort"`
@@ -59,6 +65,7 @@ type CommentDTO struct {
 	HotScore     float64         `json:"hot_score"`
 	CreatedAt    time.Time       `json:"created_at"`
 	Marked       bool            `json:"marked"`
+	Liked        bool            `json:"liked"`
 	Mentions     []MentionDTO    `json:"mentions"`
 	Attachments  []AttachmentDTO `json:"attachments"`
 	TimeAnchors  []TimeAnchorDTO `json:"time_anchors"`

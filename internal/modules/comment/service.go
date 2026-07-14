@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
@@ -22,6 +23,9 @@ var (
 	ErrInvalidAttachment      = errors.New("invalid comment attachment")
 	ErrInvalidMention         = errors.New("invalid comment mention")
 	ErrInvalidListOptions     = errors.New("invalid comment list options")
+	ErrCommentForbidden       = errors.New("comment operation forbidden")
+	ErrCommentNotFound        = errors.New("comment not found")
+	ErrInvalidMark            = errors.New("invalid comment mark")
 )
 
 const commentStatusActive = "active"
@@ -146,6 +150,11 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 					return err
 				}
 			}
+			if !isRoot {
+				if err := s.recomputeRootHotScore(tx, *created.RootID, time.Now()); err != nil {
+					return err
+				}
+			}
 			return nil
 		})
 	}
@@ -248,7 +257,7 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	allEntries := make([]model.CommentEntry, 0, len(roots)+len(children))
 	allEntries = append(allEntries, roots...)
 	allEntries = append(allEntries, children...)
-	dtos, err := s.entryDTOs(s.db, allEntries)
+	dtos, err := s.entryDTOs(s.db, allEntries, viewer.UserID)
 	if err != nil {
 		return CommentListDTO{}, err
 	}
@@ -408,12 +417,12 @@ func ContentHash(content string, attachments []uuid.UUID) string {
 	return fmt.Sprintf("%x", hash.Sum(nil))
 }
 
-func (s *Service) loadCommentDTO(db *gorm.DB, id uuid.UUID) (CommentDTO, error) {
+func (s *Service) loadCommentDTO(db *gorm.DB, id uuid.UUID, viewerIDs ...*uuid.UUID) (CommentDTO, error) {
 	entry, err := s.repo.findComment(db, id)
 	if err != nil {
 		return CommentDTO{}, err
 	}
-	dtos, err := s.entryDTOs(db, []model.CommentEntry{entry})
+	dtos, err := s.entryDTOs(db, []model.CommentEntry{entry}, viewerIDs...)
 	if err != nil {
 		return CommentDTO{}, err
 	}
@@ -443,7 +452,7 @@ type commentAttachmentRow struct {
 	Position    int
 }
 
-func (s *Service) entryDTOs(db *gorm.DB, entries []model.CommentEntry) (map[uuid.UUID]CommentDTO, error) {
+func (s *Service) entryDTOs(db *gorm.DB, entries []model.CommentEntry, viewerIDs ...*uuid.UUID) (map[uuid.UUID]CommentDTO, error) {
 	dtos := make(map[uuid.UUID]CommentDTO, len(entries))
 	ids := make([]uuid.UUID, 0, len(entries))
 	for _, entry := range entries {
@@ -474,6 +483,19 @@ func (s *Service) entryDTOs(db *gorm.DB, entries []model.CommentEntry) (map[uuid
 	}
 	if len(ids) == 0 {
 		return dtos, nil
+	}
+	if len(viewerIDs) > 0 && viewerIDs[0] != nil {
+		var likedIDs []uuid.UUID
+		if err := db.Model(&model.CommentLike{}).
+			Where("comment_id IN ? AND user_id = ?", ids, *viewerIDs[0]).
+			Pluck("comment_id", &likedIDs).Error; err != nil {
+			return nil, err
+		}
+		for _, id := range likedIDs {
+			dto := dtos[id]
+			dto.Liked = true
+			dtos[id] = dto
+		}
 	}
 	var mentions []model.CommentMention
 	if err := db.Where("comment_id IN ?", ids).Order("comment_id ASC").Order("start_offset ASC").Find(&mentions).Error; err != nil {
