@@ -33,7 +33,7 @@ func (r *Repo) GetPublicPublishedPost(id uuid.UUID) (model.Post, error) {
 func (r *Repo) ListPublicPublishedPosts() ([]model.Post, error) {
 	var posts []model.Post
 	err := r.db.Where("status = ? AND visibility = ?", "published", "public").
-		Order("published_at DESC").
+		Order("COALESCE(published_at, created_at) DESC").
 		Order("created_at DESC").
 		Order("id DESC").
 		Find(&posts).Error

@@ -1197,10 +1197,12 @@ func TestSEOSitemapFiltersAndOrdersPublicPublishedPosts(t *testing.T) {
 	publishedOld := time.Date(2026, time.July, 11, 10, 0, 0, 0, time.UTC)
 	createdEarlier := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
 	createdLater := createdEarlier.Add(time.Hour)
+	legacyCreated := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
 	posts := []model.Post{
 		{Base: model.Base{CreatedAt: createdEarlier}, UserID: owner.ID, Title: "Newest A", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedNew},
 		{Base: model.Base{CreatedAt: createdLater}, UserID: owner.ID, Title: "Newest B", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedNew},
 		{UserID: owner.ID, Title: "Older", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedOld},
+		{Base: model.Base{CreatedAt: legacyCreated}, UserID: owner.ID, Title: "Legacy", Content: "Body", Status: "published", Visibility: "public"},
 		{UserID: owner.ID, Title: "Draft", Content: "Body", Status: "draft", Visibility: "public"},
 		{UserID: owner.ID, Title: "Private", Content: "Body", Status: "published", Visibility: "private", PublishedAt: &publishedNew},
 	}
@@ -1225,10 +1227,10 @@ func TestSEOSitemapFiltersAndOrdersPublicPublishedPosts(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(response.Data) != 3 {
-		t.Fatalf("expected three public published posts, got %d: %s", len(response.Data), w.Body.String())
+	if len(response.Data) != 4 {
+		t.Fatalf("expected four public published posts, got %d: %s", len(response.Data), w.Body.String())
 	}
-	want := []model.Post{posts[1], posts[0], posts[2]}
+	want := []model.Post{posts[1], posts[0], posts[3], posts[2]}
 	for i, item := range response.Data {
 		if item.Path != "/posts/post/"+want[i].ID.String() || !item.LastModified.Equal(want[i].UpdatedAt) {
 			t.Fatalf("unexpected sitemap item %d: %#v", i, item)
