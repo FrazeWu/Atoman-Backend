@@ -77,6 +77,10 @@ func runMigrations(db *gorm.DB) error {
 		return err
 	}
 
+	if err := migrations.RunUnifiedCommentIndexes(db); err != nil {
+		return fmt.Errorf("unified comment indexes migration: %w", err)
+	}
+
 	if err := migrations.RunChannelDefaultSelectionMigration(db); err != nil {
 		return fmt.Errorf("channel default selection migration: %w", err)
 	}
@@ -205,6 +209,17 @@ func migrateSchema(db *gorm.DB) error {
 		&model.DebateVote{},
 		&model.VoteHistory{},
 		&model.DebateConcludeVote{},
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
+		&model.CommentMention{},
+		&model.CommentAttachment{},
+		&model.CommentLike{},
+		&model.CommentReport{},
+		&model.CommentTimeAnchor{},
+		&model.TimelineRevisionProposal{},
+		&model.DebateArgumentDetail{},
+		&model.DebateArgumentReference{},
+		&model.DebateArgumentDebateRef{},
 	}
 	if !db.Migrator().HasTable(&model.ForumDraft{}) {
 		models = append(models, &model.ForumDraft{})
