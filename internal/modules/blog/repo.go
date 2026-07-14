@@ -24,6 +24,22 @@ func (r *Repo) GetPost(id uuid.UUID) (model.Post, error) {
 	return post, err
 }
 
+func (r *Repo) GetPublicPublishedPost(id uuid.UUID) (model.Post, error) {
+	var post model.Post
+	err := r.db.Preload("User").Where("status = ? AND visibility = ?", "published", "public").First(&post, "id = ?", id).Error
+	return post, err
+}
+
+func (r *Repo) ListPublicPublishedPosts() ([]model.Post, error) {
+	var posts []model.Post
+	err := r.db.Where("status = ? AND visibility = ?", "published", "public").
+		Order("published_at DESC").
+		Order("created_at DESC").
+		Order("id DESC").
+		Find(&posts).Error
+	return posts, err
+}
+
 func (r *Repo) ListChannels(userID *uuid.UUID) ([]model.Channel, error) {
 	var channels []model.Channel
 	query := r.db.Preload("User")

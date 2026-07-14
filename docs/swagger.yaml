@@ -38,6 +38,32 @@ definitions:
       title:
         type: string
     type: object
+  blog.SEOPostDTO:
+    properties:
+      author_name:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      image_url:
+        type: string
+      path:
+        type: string
+      published_at:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  blog.SEOSitemapItemDTO:
+    properties:
+      last_modified:
+        type: string
+      path:
+        type: string
+    type: object
   blog.bookmarkFolderInput:
     properties:
       name:
@@ -5711,6 +5737,56 @@ paths:
               $ref: '#/definitions/blog.RecommendationItemDTO'
             type: array
       summary: 获取博客综合推荐
+      tags:
+      - blog
+  /api/v1/blog/seo/posts/{id}:
+    get:
+      description: 仅返回已发布且公开的文章元数据，不计入阅读数。
+      parameters:
+      - description: 文章 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/blog.SEOPostDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取公开文章 SEO 元数据
+      tags:
+      - blog
+  /api/v1/blog/seo/sitemap:
+    get:
+      description: 返回全部已发布且公开的文章路径及最后修改时间。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/blog.SEOSitemapItemDTO'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取公开文章站点地图数据
       tags:
       - blog
   /api/v1/blog/upload-image:
