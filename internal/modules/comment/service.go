@@ -174,9 +174,27 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 		return CommentListDTO{}, err
 	}
 
-	query := s.db.Where("target_id = ? AND root_id IS NULL AND status IN ?", target.ID, visible)
+	var marked *model.CommentEntry
 	if target.PinnedCommentID != nil {
-		query = query.Where("id <> ?", *target.PinnedCommentID)
+		var entry model.CommentEntry
+		if err := s.db.Where("id = ? AND target_id = ? AND root_id IS NULL AND status IN ?", *target.PinnedCommentID, target.ID, visible).First(&entry).Error; err == nil {
+			marked = &entry
+		} else if !isNotFound(err) {
+			return CommentListDTO{}, err
+		}
+	}
+
+	query := s.db.Where("target_id = ? AND root_id IS NULL AND status IN ?", target.ID, visible)
+	limit := pageSize
+	offset := (input.Page - 1) * pageSize
+	if marked != nil {
+		query = query.Where("id <> ?", marked.ID)
+		if input.Page == 1 {
+			limit = pageSize - 1
+			offset = 0
+		} else {
+			offset = pageSize - 1 + (input.Page-2)*pageSize
+		}
 	}
 	switch input.Sort {
 	case SortLatest:
@@ -187,16 +205,11 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 		query = query.Order("floor_number ASC")
 	}
 	var roots []model.CommentEntry
-	if err := query.Offset((input.Page - 1) * pageSize).Limit(pageSize).Find(&roots).Error; err != nil {
+	if err := query.Offset(offset).Limit(limit).Find(&roots).Error; err != nil {
 		return CommentListDTO{}, err
 	}
-	if target.PinnedCommentID != nil {
-		var marked model.CommentEntry
-		if err := s.db.Where("id = ? AND target_id = ? AND root_id IS NULL AND status IN ?", *target.PinnedCommentID, target.ID, visible).First(&marked).Error; err == nil {
-			roots = append([]model.CommentEntry{marked}, roots...)
-		} else if !isNotFound(err) {
-			return CommentListDTO{}, err
-		}
+	if marked != nil && input.Page == 1 {
+		roots = append([]model.CommentEntry{*marked}, roots...)
 	}
 
 	items := make([]CommentDTO, 0, len(roots))
@@ -205,7 +218,7 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 		if err != nil {
 			return CommentListDTO{}, err
 		}
-		dto.Marked = target.PinnedCommentID != nil && root.ID == *target.PinnedCommentID
+		dto.Marked = marked != nil && root.ID == marked.ID
 		var children []model.CommentEntry
 		if err := s.db.Where("root_id = ? AND status IN ?", root.ID, visible).
 			Order("created_at ASC").Order("id ASC").Limit(3).Find(&children).Error; err != nil {

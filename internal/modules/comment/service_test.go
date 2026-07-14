@@ -386,7 +386,7 @@ func TestCreateKeepsErrorIdentityFromExtension(t *testing.T) {
 	require.ErrorIs(t, err, want)
 }
 
-func TestListMarkedRootDoesNotConsumeOrdinaryPageSize(t *testing.T) {
+func TestListMarkedRootConsumesOneSlotOnFirstPage(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	marked := ctx.create(t, 0, "marked", nil)
 	for i := 0; i < 20; i++ {
@@ -397,8 +397,100 @@ func TestListMarkedRootDoesNotConsumeOrdinaryPageSize(t *testing.T) {
 	require.NoError(t, ctx.db.Model(&target).Update("pinned_comment_id", marked.ID).Error)
 	listed, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, Sort: SortOldest})
 	require.NoError(t, err)
-	require.Len(t, listed.Items, 21)
+	require.Len(t, listed.Items, 20)
 	require.Equal(t, marked.ID, listed.Items[0].ID)
+}
+
+func TestListMarkedRootPaginationIsBoundedCompleteAndUnique(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	marked := ctx.create(t, 0, "marked", nil)
+	want := map[uuid.UUID]bool{marked.ID: true}
+	for i := 0; i < 41; i++ {
+		root := ctx.create(t, i%len(ctx.users), fmt.Sprintf("ordinary-%02d", i), nil)
+		want[root.ID] = true
+	}
+	var target model.DiscussionTarget
+	require.NoError(t, ctx.db.First(&target).Error)
+	require.NoError(t, ctx.db.Model(&target).Update("pinned_comment_id", marked.ID).Error)
+
+	seen := map[uuid.UUID]bool{}
+	for pageNumber, wantCount := range []int{20, 20, 2} {
+		page, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: pageNumber + 1, Sort: SortOldest})
+		require.NoError(t, err)
+		require.Len(t, page.Items, wantCount)
+		require.LessOrEqual(t, len(page.Items), 20)
+		require.Equal(t, 42, page.TotalRoots)
+		require.Equal(t, 42, page.TotalComments)
+		require.Zero(t, page.TotalReplies)
+		require.Equal(t, 20, page.PerPage)
+		for index, item := range page.Items {
+			require.False(t, seen[item.ID], "comment %s repeated across pages", item.ID)
+			seen[item.ID] = true
+			if item.ID == marked.ID {
+				require.Equal(t, 0, pageNumber)
+				require.Equal(t, 0, index)
+			}
+		}
+	}
+	require.Equal(t, want, seen)
+}
+
+func TestListInvalidPinnedReferenceFallsBackToOrdinaryPagination(t *testing.T) {
+	cases := map[string]func(t *testing.T, ctx commentTestContext) uuid.UUID{
+		"missing": func(_ *testing.T, _ commentTestContext) uuid.UUID {
+			return uuid.New()
+		},
+		"child": func(t *testing.T, ctx commentTestContext) uuid.UUID {
+			root := ctx.create(t, 0, "child-parent", nil)
+			return ctx.create(t, 1, "child", &root.ID).ID
+		},
+		"other target": func(t *testing.T, ctx commentTestContext) uuid.UUID {
+			otherID := uuid.New()
+			primaryResolver := ctx.service.registry.resolvers[TargetKindBlogPost]
+			ctx.service.registry.resolvers[TargetKindBlogPost] = targetResolverFunc(func(viewer Viewer, id uuid.UUID) (ResolvedTarget, error) {
+				if id == otherID {
+					return ResolvedTarget{Kind: TargetKindBlogPost, ResourceKey: otherID.String(), Visible: true}, nil
+				}
+				return primaryResolver.Resolve(viewer, id)
+			})
+			created, err := ctx.service.Create(ctx.users[0], TargetRef{Kind: TargetKindBlogPost, ResourceID: otherID}, CreateCommentInput{Content: "other-target"})
+			require.NoError(t, err)
+			return created.ID
+		},
+		"hidden": func(t *testing.T, ctx commentTestContext) uuid.UUID {
+			root := ctx.create(t, 0, "hidden-pinned", nil)
+			require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", root.ID).Update("status", "hidden").Error)
+			return root.ID
+		},
+	}
+
+	for name, badPinned := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+			pinnedID := badPinned(t, ctx)
+			ordinary := make([]uuid.UUID, 20)
+			for i := range ordinary {
+				ordinary[i] = ctx.create(t, i%len(ctx.users), fmt.Sprintf("ordinary-%02d", i), nil).ID
+			}
+			var target model.DiscussionTarget
+			require.NoError(t, ctx.db.Where("kind = ? AND resource_key = ?", ctx.resolved.Kind, ctx.resolved.ResourceKey).First(&target).Error)
+			require.NoError(t, ctx.db.Model(&target).Update("pinned_comment_id", pinnedID).Error)
+
+			listed, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, Sort: SortLatest})
+			require.NoError(t, err)
+			require.Len(t, listed.Items, 20)
+			for _, item := range listed.Items {
+				require.False(t, item.Marked)
+			}
+			seen := make(map[uuid.UUID]bool, len(listed.Items))
+			for _, item := range listed.Items {
+				seen[item.ID] = true
+			}
+			for _, id := range ordinary {
+				require.True(t, seen[id], "ordinary root %s was lost", id)
+			}
+		})
+	}
 }
 
 func TestCreateRejectsInactiveAuthor(t *testing.T) {
