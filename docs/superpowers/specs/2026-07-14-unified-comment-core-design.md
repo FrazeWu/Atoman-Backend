@@ -1,7 +1,7 @@
 # Unified Comment Core Design
 
 Date: 2026-07-14
-Status: awaiting user specification review
+Status: approved
 Scope: Atoman Backend and Web
 
 ## 1. Goal
@@ -93,6 +93,7 @@ The existing iOS blog publishing request may continue sending `allow_comments`; 
 ### 3.6 Reports and Automatic Folding
 
 - A user can report a comment once and selects a reason.
+- Report reasons are `spam`, `harassment`, `hate`, `sexual`, `violence`, `misinformation`, and `other`; `other` requires a short note.
 - The fourth report from a distinct user changes the comment to `auto_folded`.
 - Folded content keeps a visible placeholder and can be expanded by readers.
 - Moderators can restore or delete folded content.
@@ -105,6 +106,7 @@ The existing iOS blog publishing request may continue sending `allow_comments`; 
 - Users never receive notifications for their own actions.
 - Recipients are deduplicated across reply and mention causes.
 - Editing does not repeat reply notifications. A newly added mention not previously notified for that comment produces one mention notification.
+- Notification metadata contains the public target kind/resource ID and comment/root ID so Web can open the correct module and floor.
 
 ### 3.8 Abuse Limits
 
