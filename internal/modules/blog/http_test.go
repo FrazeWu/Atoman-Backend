@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	apidocs "atoman/docs"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
@@ -1164,6 +1165,37 @@ func TestSEOGetPostBuildsUnicodeSafeDescriptionFromMarkdown(t *testing.T) {
 	}
 }
 
+func TestSEOGetPostMarkdownFallbackPreservesComparisonOperators(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	post := model.Post{
+		UserID: owner.ID, Title: "Comparison",
+		Content: "Use 2 < 3 and 5 > 4 with <strong>bold</strong> text.",
+		Status:  "published", Visibility: "public",
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/blog/seo/posts/"+post.ID.String(), nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Description string `json:"description"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := "Use 2 < 3 and 5 > 4 with bold text."
+	if response.Data.Description != want {
+		t.Fatalf("expected %q, got %q", want, response.Data.Description)
+	}
+}
+
 func TestSEOGetPostHidesNonPublicAndMissingPosts(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
 	posts := []model.Post{
@@ -1234,6 +1266,66 @@ func TestSEOSitemapFiltersAndOrdersPublicPublishedPosts(t *testing.T) {
 	for i, item := range response.Data {
 		if item.Path != "/posts/post/"+want[i].ID.String() || !item.LastModified.Equal(want[i].UpdatedAt) {
 			t.Fatalf("unexpected sitemap item %d: %#v", i, item)
+		}
+	}
+}
+
+func TestSEOSitemapQuerySelectsOnlyRequiredColumns(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	post := model.Post{
+		UserID: owner.ID, Title: "Large title", Content: strings.Repeat("large content ", 100),
+		Summary: "large summary", Status: "published", Visibility: "public",
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+
+	posts, err := service.repo.ListPublicPublishedPosts()
+	if err != nil {
+		t.Fatalf("list sitemap posts: %v", err)
+	}
+	if len(posts) != 1 {
+		t.Fatalf("expected one post, got %d", len(posts))
+	}
+	if posts[0].ID != post.ID || posts[0].UpdatedAt.IsZero() {
+		t.Fatalf("expected sitemap fields, got %#v", posts[0])
+	}
+	if posts[0].Title != "" || posts[0].Content != "" || posts[0].Summary != "" {
+		t.Fatalf("expected large content fields not to be selected, got %#v", posts[0])
+	}
+}
+
+func TestSEOSwaggerSuccessResponsesUseDataEnvelope(t *testing.T) {
+	var spec struct {
+		Paths map[string]struct {
+			Get struct {
+				Responses map[string]struct {
+					Schema struct {
+						Ref string `json:"$ref"`
+					} `json:"schema"`
+				} `json:"responses"`
+			} `json:"get"`
+		} `json:"paths"`
+		Definitions map[string]struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		} `json:"definitions"`
+	}
+	if err := json.Unmarshal([]byte(apidocs.SwaggerInfo.ReadDoc()), &spec); err != nil {
+		t.Fatalf("decode swagger document: %v", err)
+	}
+
+	cases := map[string]string{
+		"/api/v1/blog/seo/posts/{id}": "#/definitions/blog.SEOPostResponse",
+		"/api/v1/blog/seo/sitemap":    "#/definitions/blog.SEOSitemapResponse",
+	}
+	for path, wantRef := range cases {
+		gotRef := spec.Paths[path].Get.Responses["200"].Schema.Ref
+		if gotRef != wantRef {
+			t.Fatalf("expected %s success schema %q, got %q", path, wantRef, gotRef)
+		}
+		definition := strings.TrimPrefix(wantRef, "#/definitions/")
+		if _, ok := spec.Definitions[definition].Properties["data"]; !ok {
+			t.Fatalf("expected %s definition to contain data envelope", definition)
 		}
 	}
 }

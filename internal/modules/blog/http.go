@@ -150,7 +150,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 // @Tags blog
 // @Produce json
 // @Param id path string true "文章 UUID"
-// @Success 200 {object} SEOPostDTO
+// @Success 200 {object} SEOPostResponse
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Failure 500 {object} handlers.ErrorResponse
@@ -174,7 +174,7 @@ func (h *Handler) getSEOPost(c *gin.Context) {
 // @Description 返回全部已发布且公开的文章路径及最后修改时间。
 // @Tags blog
 // @Produce json
-// @Success 200 {array} SEOSitemapItemDTO
+// @Success 200 {object} SEOSitemapResponse
 // @Failure 500 {object} handlers.ErrorResponse
 // @Router /api/v1/blog/seo/sitemap [get]
 func (h *Handler) listSEOSitemap(c *gin.Context) {

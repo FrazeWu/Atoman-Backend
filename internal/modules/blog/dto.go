@@ -24,6 +24,14 @@ type SEOSitemapItemDTO struct {
 	LastModified time.Time `json:"last_modified"`
 }
 
+type SEOPostResponse struct {
+	Data SEOPostDTO `json:"data"`
+}
+
+type SEOSitemapResponse struct {
+	Data []SEOSitemapItemDTO `json:"data"`
+}
+
 type CreatePostRequest struct {
 	Title         string      `json:"title"`
 	Content       string      `json:"content"`

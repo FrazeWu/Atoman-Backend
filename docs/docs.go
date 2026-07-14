@@ -4127,7 +4127,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/blog.SEOPostDTO"
+                            "$ref": "#/definitions/blog.SEOPostResponse"
                         }
                     },
                     "400": {
@@ -4165,10 +4165,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/blog.SEOSitemapItemDTO"
-                            }
+                            "$ref": "#/definitions/blog.SEOSitemapResponse"
                         }
                     },
                     "500": {
@@ -11265,6 +11262,14 @@ const docTemplate = `{
                 }
             }
         },
+        "blog.SEOPostResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/blog.SEOPostDTO"
+                }
+            }
+        },
         "blog.SEOSitemapItemDTO": {
             "type": "object",
             "properties": {
@@ -11273,6 +11278,17 @@ const docTemplate = `{
                 },
                 "path": {
                     "type": "string"
+                }
+            }
+        },
+        "blog.SEOSitemapResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/blog.SEOSitemapItemDTO"
+                    }
                 }
             }
         },

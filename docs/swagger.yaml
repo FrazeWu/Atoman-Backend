@@ -57,12 +57,24 @@ definitions:
       updated_at:
         type: string
     type: object
+  blog.SEOPostResponse:
+    properties:
+      data:
+        $ref: '#/definitions/blog.SEOPostDTO'
+    type: object
   blog.SEOSitemapItemDTO:
     properties:
       last_modified:
         type: string
       path:
         type: string
+    type: object
+  blog.SEOSitemapResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/blog.SEOSitemapItemDTO'
+        type: array
     type: object
   blog.bookmarkFolderInput:
     properties:
@@ -5754,7 +5766,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/blog.SEOPostDTO'
+            $ref: '#/definitions/blog.SEOPostResponse'
         "400":
           description: Bad Request
           schema:
@@ -5779,9 +5791,7 @@ paths:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/blog.SEOSitemapItemDTO'
-            type: array
+            $ref: '#/definitions/blog.SEOSitemapResponse'
         "500":
           description: Internal Server Error
           schema:
