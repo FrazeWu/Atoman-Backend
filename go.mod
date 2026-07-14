@@ -16,6 +16,7 @@ require (
 	github.com/joho/godotenv v1.4.0
 	github.com/lib/pq v1.12.3
 	github.com/stretchr/testify v1.11.1
+	github.com/yuin/goldmark v1.7.8
 	golang.org/x/crypto v0.46.0
 	golang.org/x/net v0.48.0
 	gorm.io/driver/postgres v1.6.0
