@@ -1,6 +1,7 @@
 package comment
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,4 +41,10 @@ func TestParseTimeAnchorsAllowsAdjacentProse(t *testing.T) {
 func TestParseTimeAnchorsFiltersInvalidPartialAndOverDurationTokens(t *testing.T) {
 	got := ParseTimeAnchors("1:60 1:99:02 1:02:60 12:34:56:07 5:00 4:59", 299)
 	require.Equal(t, []int{299}, anchorSeconds(got))
+}
+
+func TestParseTimeAnchorsRejectsIntegerOverflow(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	content := fmt.Sprintf("%d:00 %d:00:00", maxInt/60+1, maxInt/3600+1)
+	require.Empty(t, ParseTimeAnchors(content, 0))
 }

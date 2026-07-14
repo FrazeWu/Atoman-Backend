@@ -45,6 +45,11 @@ func TestValidateMentionsRejectsInvalidRangesAndText(t *testing.T) {
 	}
 }
 
+func TestValidateMentionsRejectsNilUserID(t *testing.T) {
+	err := ValidateMentions("@阿明", []MentionInput{{UserID: uuid.Nil, Start: 0, End: 3}})
+	require.Error(t, err)
+}
+
 func TestMentionRecipientsDeduplicatesInStableOrder(t *testing.T) {
 	authorID := uuid.New()
 	replyAuthorID := uuid.New()
@@ -64,4 +69,15 @@ func TestMentionRecipientsHandlesNoReply(t *testing.T) {
 	authorID := uuid.New()
 	mentioned := uuid.New()
 	require.Equal(t, []uuid.UUID{mentioned}, MentionRecipients(authorID, nil, []MentionInput{{UserID: mentioned}}))
+}
+
+func TestMentionRecipientsFiltersNilUserIDs(t *testing.T) {
+	authorID := uuid.New()
+	nilReplyAuthorID := uuid.Nil
+	mentioned := uuid.New()
+	got := MentionRecipients(authorID, &nilReplyAuthorID, []MentionInput{
+		{UserID: uuid.Nil},
+		{UserID: mentioned},
+	})
+	require.Equal(t, []uuid.UUID{mentioned}, got)
 }

@@ -35,6 +35,7 @@ func ParseTimeAnchors(content string, durationSec int) []TimeAnchor {
 }
 
 func parseTimeToken(token string) (int, bool) {
+	maxInt := int(^uint(0) >> 1)
 	parts := strings.Split(token, ":")
 	values := make([]int, len(parts))
 	for i, part := range parts {
@@ -50,12 +51,19 @@ func parseTimeToken(token string) (int, bool) {
 		if values[1] > 59 {
 			return 0, false
 		}
+		if values[0] > (maxInt-values[1])/60 {
+			return 0, false
+		}
 		return values[0]*60 + values[1], true
 	case 3:
 		if values[1] > 59 || values[2] > 59 {
 			return 0, false
 		}
-		return values[0]*3600 + values[1]*60 + values[2], true
+		tailSeconds := values[1]*60 + values[2]
+		if values[0] > (maxInt-tailSeconds)/3600 {
+			return 0, false
+		}
+		return values[0]*3600 + tailSeconds, true
 	default:
 		return 0, false
 	}

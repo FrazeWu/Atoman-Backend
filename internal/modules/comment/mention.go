@@ -16,6 +16,9 @@ type MentionInput struct {
 func ValidateMentions(content string, inputs []MentionInput) error {
 	runes := []rune(content)
 	for i, input := range inputs {
+		if input.UserID == uuid.Nil {
+			return errors.New("mention user ID is required")
+		}
 		if input.Start < 0 || input.End > len(runes) || input.End-input.Start < 2 {
 			return errors.New("invalid mention range")
 		}
@@ -43,6 +46,9 @@ func MentionRecipients(authorID uuid.UUID, replyAuthorID *uuid.UUID, inputs []Me
 	seen := map[uuid.UUID]struct{}{authorID: {}}
 	recipients := make([]uuid.UUID, 0, len(inputs)+1)
 	appendRecipient := func(userID uuid.UUID) {
+		if userID == uuid.Nil {
+			return
+		}
 		if _, exists := seen[userID]; exists {
 			return
 		}
