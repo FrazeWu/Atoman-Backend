@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"path"
 	"strings"
@@ -116,7 +117,7 @@ func (r *databaseTargetResolvers) resolveMusicArtist(_ Viewer, resourceID uuid.U
 	if err := r.db.First(&artist, "id = ?", resourceID).Error; err != nil {
 		return ResolvedTarget{}, targetLookupError(TargetKindMusicArtist, resourceID, err)
 	}
-	return communityTarget(TargetKindMusicArtist, artist.ID, !isMusicHiddenStatus(artist.EntryStatus)), nil
+	return communityTarget(TargetKindMusicArtist, artist.ID, !isMusicClosed(artist.EntryStatus)), nil
 }
 
 func (r *databaseTargetResolvers) resolveMusicAlbum(_ Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
@@ -124,7 +125,7 @@ func (r *databaseTargetResolvers) resolveMusicAlbum(_ Viewer, resourceID uuid.UU
 	if err := r.db.First(&album, "id = ?", resourceID).Error; err != nil {
 		return ResolvedTarget{}, targetLookupError(TargetKindMusicAlbum, resourceID, err)
 	}
-	visible := !isMusicHiddenStatus(album.EntryStatus) && !isMusicHiddenStatus(album.Status)
+	visible := !isMusicClosed(album.EntryStatus) && !isMusicClosed(album.Status)
 	return communityTarget(TargetKindMusicAlbum, album.ID, visible), nil
 }
 
@@ -133,7 +134,7 @@ func (r *databaseTargetResolvers) resolveMusicSong(_ Viewer, resourceID uuid.UUI
 	if err := r.db.First(&song, "id = ?", resourceID).Error; err != nil {
 		return ResolvedTarget{}, targetLookupError(TargetKindMusicSong, resourceID, err)
 	}
-	target := communityTarget(TargetKindMusicSong, song.ID, !isMusicHiddenStatus(song.Status))
+	target := communityTarget(TargetKindMusicSong, song.ID, !isMusicClosed(song.Status))
 	target.DurationSec = song.DurationSec
 	return target, nil
 }
@@ -243,13 +244,8 @@ func viewerOwns(viewer Viewer, ownerID uuid.UUID) bool {
 	return viewer.UserID != nil && *viewer.UserID == ownerID
 }
 
-func isMusicHiddenStatus(status string) bool {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "closed", "rejected", "draft":
-		return true
-	default:
-		return false
-	}
+func isMusicClosed(status string) bool {
+	return strings.ToLower(strings.TrimSpace(status)) == "closed"
 }
 
 func normalizeArticleURL(raw string) (string, error) {
@@ -258,22 +254,44 @@ func normalizeArticleURL(raw string) (string, error) {
 		return "", err
 	}
 	parsed.Scheme = strings.ToLower(parsed.Scheme)
-	parsed.Host = strings.ToLower(parsed.Host)
-	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Opaque != "" {
+	if (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.Opaque != "" || parsed.User != nil {
 		return "", errors.New("original URL must be an absolute HTTP(S) URL")
 	}
+	hostname := strings.ToLower(parsed.Hostname())
+	if hostname == "" {
+		return "", errors.New("original URL must have a hostname")
+	}
+	port := parsed.Port()
+	if (parsed.Scheme == "http" && port == "80") || (parsed.Scheme == "https" && port == "443") {
+		port = ""
+	}
+	switch {
+	case port != "":
+		parsed.Host = net.JoinHostPort(hostname, port)
+	case strings.Contains(hostname, ":"):
+		parsed.Host = "[" + hostname + "]"
+	default:
+		parsed.Host = hostname
+	}
 
-	cleanPath := path.Clean(parsed.Path)
+	cleanPath := path.Clean(parsed.EscapedPath())
 	if cleanPath == "." {
 		cleanPath = "/"
 	}
-	parsed.Path = cleanPath
-	parsed.RawPath = ""
+	decodedPath, err := url.PathUnescape(cleanPath)
+	if err != nil {
+		return "", err
+	}
+	parsed.Path = decodedPath
+	parsed.RawPath = cleanPath
 	parsed.Fragment = ""
 	parsed.RawFragment = ""
 	parsed.ForceQuery = false
 
-	query := parsed.Query()
+	query, err := url.ParseQuery(parsed.RawQuery)
+	if err != nil {
+		return "", err
+	}
 	for key := range query {
 		lowerKey := strings.ToLower(key)
 		if strings.HasPrefix(lowerKey, "utm_") ||

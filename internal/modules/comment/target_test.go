@@ -111,6 +111,28 @@ func TestFeedArticleResolverSharesCanonicalOriginalURL(t *testing.T) {
 	require.Empty(t, first.MarkLabel)
 }
 
+func TestFeedArticleResolverPreservesEncodedPathSeparators(t *testing.T) {
+	registry, db := newTargetTestRegistry(t)
+	source := model.FeedSource{SourceType: "external_rss", Provider: "rss", Category: "blog", Hash: uuid.NewString()}
+	require.NoError(t, db.Create(&source).Error)
+	items := []model.FeedItem{
+		{FeedSourceID: source.ID, GUID: "duplicate-slashes", Link: "https://example.com/a//b/"},
+		{FeedSourceID: source.ID, GUID: "clean-path", Link: "https://example.com/a/b"},
+		{FeedSourceID: source.ID, GUID: "encoded-separator", Link: "https://example.com/a%2Fb"},
+	}
+	require.NoError(t, db.Create(&items).Error)
+
+	duplicateSlashes, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: items[0].ID})
+	require.NoError(t, err)
+	cleanPath, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: items[1].ID})
+	require.NoError(t, err)
+	encodedSeparator, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: items[2].ID})
+	require.NoError(t, err)
+	require.Equal(t, cleanPath.ResourceKey, duplicateSlashes.ResourceKey)
+	require.NotEqual(t, cleanPath.ResourceKey, encodedSeparator.ResourceKey)
+	require.Equal(t, "https://example.com/a%2Fb", encodedSeparator.ResourceKey)
+}
+
 func TestFeedArticleResolverNormalizesTrackingAndStableQueryOrder(t *testing.T) {
 	registry, db := newTargetTestRegistry(t)
 	source := model.FeedSource{SourceType: "external_rss", Provider: "rss", Category: "blog", Hash: uuid.NewString()}
@@ -143,6 +165,50 @@ func TestFeedArticleResolverRejectsInvalidOriginalURL(t *testing.T) {
 
 	_, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: item.ID})
 	require.ErrorIs(t, err, ErrInvalidTargetResource)
+}
+
+func TestFeedArticleResolverRejectsMalformedQuery(t *testing.T) {
+	registry, db := newTargetTestRegistry(t)
+	source := model.FeedSource{SourceType: "external_rss", Provider: "rss", Category: "blog", Hash: uuid.NewString()}
+	require.NoError(t, db.Create(&source).Error)
+	items := []model.FeedItem{
+		{FeedSourceID: source.ID, GUID: "bad-percent-query", Link: "https://example.com/post?key=%zz"},
+		{FeedSourceID: source.ID, GUID: "bad-semicolon-query", Link: "https://example.com/post?key=value;other=value"},
+	}
+	require.NoError(t, db.Create(&items).Error)
+
+	for _, item := range items {
+		_, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: item.ID})
+		require.ErrorIs(t, err, ErrInvalidTargetResource)
+	}
+}
+
+func TestFeedArticleResolverNormalizesHostCredentialsAndPorts(t *testing.T) {
+	registry, db := newTargetTestRegistry(t)
+	source := model.FeedSource{SourceType: "external_rss", Provider: "rss", Category: "blog", Hash: uuid.NewString()}
+	require.NoError(t, db.Create(&source).Error)
+	items := []model.FeedItem{
+		{FeedSourceID: source.ID, GUID: "userinfo", Link: "https://user:password@EXAMPLE.com/post"},
+		{FeedSourceID: source.ID, GUID: "http-default", Link: "http://EXAMPLE.com:80/post"},
+		{FeedSourceID: source.ID, GUID: "https-default", Link: "https://EXAMPLE.com:443/post"},
+		{FeedSourceID: source.ID, GUID: "non-default", Link: "https://EXAMPLE.com:8443/post"},
+		{FeedSourceID: source.ID, GUID: "ipv6-default", Link: "https://[2001:DB8::1]:443/post"},
+	}
+	require.NoError(t, db.Create(&items).Error)
+
+	_, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: items[0].ID})
+	require.ErrorIs(t, err, ErrInvalidTargetResource)
+	want := []string{
+		"http://example.com/post",
+		"https://example.com/post",
+		"https://example.com:8443/post",
+		"https://[2001:db8::1]/post",
+	}
+	for i, expected := range want {
+		resolved, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindFeedArticle, ResourceID: items[i+1].ID})
+		require.NoError(t, err)
+		require.Equal(t, expected, resolved.ResourceKey)
+	}
 }
 
 func TestContentResolversRespectPublicationVisibilityAndOwnership(t *testing.T) {
@@ -285,8 +351,8 @@ func TestResolversKeepHiddenModuleResourcesInvisible(t *testing.T) {
 	}{
 		{TargetKindFeedArticle, &model.FeedItem{FeedSourceID: source.ID, GUID: "hidden", Link: "https://example.com/hidden"}},
 		{TargetKindMusicArtist, &model.Artist{Name: "hidden artist", EntryStatus: "closed"}},
-		{TargetKindMusicAlbum, &model.Album{Title: "hidden album", Status: "draft", EntryStatus: "open"}},
-		{TargetKindMusicSong, &model.Song{Title: "hidden song", AudioURL: "hidden.mp3", Status: "rejected"}},
+		{TargetKindMusicAlbum, &model.Album{Title: "hidden album", Status: "closed", EntryStatus: "open"}},
+		{TargetKindMusicSong, &model.Song{Title: "hidden song", AudioURL: "hidden.mp3", Status: "closed"}},
 		{TargetKindTimelineEvent, &model.TimelineEvent{UserID: owner.UUID, Title: "hidden event"}},
 		{TargetKindTimelinePerson, &model.TimelinePerson{UserID: owner.UUID, Name: "hidden person"}},
 	}
@@ -304,6 +370,24 @@ func TestResolversKeepHiddenModuleResourcesInvisible(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, ownerResolved.Visible, entities[i].kind)
 		}
+	}
+}
+
+func TestMusicResolversOnlyHideClosedStatus(t *testing.T) {
+	registry, db := newTargetTestRegistry(t)
+	entities := []struct {
+		kind   string
+		entity any
+	}{
+		{TargetKindMusicArtist, &model.Artist{Name: "draft artist", EntryStatus: "draft"}},
+		{TargetKindMusicAlbum, &model.Album{Title: "rejected album", Status: "rejected", EntryStatus: "open"}},
+		{TargetKindMusicSong, &model.Song{Title: "unknown song", AudioURL: "song.mp3", Status: "custom"}},
+	}
+	for _, tt := range entities {
+		require.NoError(t, db.Create(tt.entity).Error)
+		resolved, err := registry.Resolve(Viewer{}, TargetRef{Kind: tt.kind, ResourceID: requireTargetEntityID(t, tt.entity)})
+		require.NoError(t, err)
+		require.True(t, resolved.Visible, tt.kind)
 	}
 }
 
