@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -348,9 +349,7 @@ func (s *Service) validateAttachments(db *gorm.DB, userID uuid.UUID, ids []uuid.
 		return nil, ErrInvalidAttachment
 	}
 	seen := make(map[uuid.UUID]struct{}, len(ids))
-	assets := make([]model.MediaAsset, 0, len(ids))
-	allowed := map[string]bool{"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true}
-	const maxAttachmentSize = 10 * 1024 * 1024
+	orderedIDs := make([]uuid.UUID, 0, len(ids))
 	for _, id := range ids {
 		if id == uuid.Nil {
 			return nil, ErrInvalidAttachment
@@ -359,11 +358,22 @@ func (s *Service) validateAttachments(db *gorm.DB, userID uuid.UUID, ids []uuid.
 			return nil, ErrInvalidAttachment
 		}
 		seen[id] = struct{}{}
+		orderedIDs = append(orderedIDs, id)
+	}
+	orderedIDs = sortedUUIDs(orderedIDs)
+	assetsByID := make(map[uuid.UUID]model.MediaAsset, len(ids))
+	allowed := map[string]bool{"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true}
+	const maxAttachmentSize = 10 * 1024 * 1024
+	for _, id := range orderedIDs {
 		var asset model.MediaAsset
 		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&asset, "id = ?", id).Error; err != nil || asset.UserID == nil || *asset.UserID != userID || !allowed[asset.ContentType] || asset.Size <= 0 || asset.Size > maxAttachmentSize || strings.TrimSpace(asset.Key) == "" || strings.TrimSpace(asset.URL) == "" {
 			return nil, ErrInvalidAttachment
 		}
-		assets = append(assets, asset)
+		assetsByID[id] = asset
+	}
+	assets := make([]model.MediaAsset, 0, len(ids))
+	for _, id := range ids {
+		assets = append(assets, assetsByID[id])
 	}
 	return assets, nil
 }
@@ -381,9 +391,10 @@ func (s *Service) validateMentions(db *gorm.DB, content string, mentions []Menti
 		seen[mention.UserID] = struct{}{}
 		userIDs = append(userIDs, mention.UserID)
 	}
+	userIDs = sortedUUIDs(userIDs)
 	var users []model.User
 	if len(userIDs) > 0 {
-		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Select("uuid", "username").Where("uuid IN ? AND is_active = ?", userIDs, true).Find(&users).Error; err != nil {
+		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Select("uuid", "username").Where("uuid IN ? AND is_active = ?", userIDs, true).Order("uuid ASC").Find(&users).Error; err != nil {
 			return ErrInvalidMention
 		}
 	}
@@ -399,6 +410,12 @@ func (s *Service) validateMentions(db *gorm.DB, content string, mentions []Menti
 		}
 	}
 	return nil
+}
+
+func sortedUUIDs(ids []uuid.UUID) []uuid.UUID {
+	result := append([]uuid.UUID(nil), ids...)
+	sort.Slice(result, func(i, j int) bool { return result[i].String() < result[j].String() })
+	return result
 }
 
 func createCommentRelations(tx *gorm.DB, commentID uuid.UUID, mentions []MentionInput, assets []model.MediaAsset, resolved ResolvedTarget, content string) error {

@@ -264,6 +264,58 @@ func TestCreateValidatesAttachmentSize(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestAttachmentValidationLocksInStableOrderAndReturnsInputOrder(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	aID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	bID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	for _, id := range []uuid.UUID{aID, bID} {
+		asset := model.MediaAsset{
+			Base: model.Base{ID: id}, UserID: &ctx.users[0].ID, Purpose: "comment.image",
+			URL: "https://assets.example/" + id.String(), Key: "comments/" + id.String(), ContentType: "image/png", Size: 128,
+		}
+		require.NoError(t, ctx.db.Create(&asset).Error)
+	}
+
+	lockedIDs := make([]uuid.UUID, 0, 4)
+	callbackName := "attachment-lock-order-" + uuid.NewString()
+	require.NoError(t, ctx.db.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "media_assets" {
+			return
+		}
+		for _, value := range tx.Statement.Vars {
+			if id, ok := value.(uuid.UUID); ok {
+				lockedIDs = append(lockedIDs, id)
+				return
+			}
+		}
+	}))
+	t.Cleanup(func() { _ = ctx.db.Callback().Query().Remove(callbackName) })
+
+	ba, err := ctx.service.validateAttachments(ctx.db, ctx.users[0].ID, []uuid.UUID{bID, aID})
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{bID, aID}, []uuid.UUID{ba[0].ID, ba[1].ID})
+	ab, err := ctx.service.validateAttachments(ctx.db, ctx.users[0].ID, []uuid.UUID{aID, bID})
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{aID, bID}, []uuid.UUID{ab[0].ID, ab[1].ID})
+	require.Equal(t, []uuid.UUID{aID, bID, aID, bID}, lockedIDs)
+}
+
+func TestMentionValidationUsesSortedUniqueUserIDs(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	a := model.User{UUID: uuid.MustParse("00000000-0000-0000-0000-000000000011"), Username: "mention-a", Email: "mention-a@example.com", Password: "hash", IsActive: true}
+	b := model.User{UUID: uuid.MustParse("00000000-0000-0000-0000-000000000012"), Username: "mention-b", Email: "mention-b@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, ctx.db.Create(&a).Error)
+	require.NoError(t, ctx.db.Create(&b).Error)
+	content := "@mention-b @mention-a"
+	secondStart := len([]rune("@mention-b "))
+	mentions := []MentionInput{
+		{UserID: b.UUID, Start: 0, End: len([]rune("@mention-b"))},
+		{UserID: a.UUID, Start: secondStart, End: secondStart + len([]rune("@mention-a"))},
+	}
+	require.Equal(t, []uuid.UUID{a.UUID, b.UUID}, sortedUUIDs([]uuid.UUID{b.UUID, a.UUID}))
+	require.NoError(t, ctx.service.validateMentions(ctx.db, content, mentions))
+}
+
 func TestCreateValidatesAndPersistsMentionOccurrences(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	content := "@comment-user-1 and @comment-user-1"
