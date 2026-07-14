@@ -174,6 +174,7 @@ func ownerBootstrapModels() []interface{} {
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 		&model.BookmarkFolder{},
+		&model.UserDefaultChannel{},
 	}
 }
 
