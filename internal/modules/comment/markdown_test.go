@@ -26,6 +26,17 @@ func TestRenderCommentMarkdownAllowsStrikethroughMarkersInsideCode(t *testing.T)
 	require.Contains(t, got, "<code>~~不是删除线~~</code>")
 }
 
+func TestRenderCommentMarkdownAllowsTableDelimiterInsideMultilineCodeSpan(t *testing.T) {
+	got, err := RenderCommentMarkdown("`第一行\n| - | - |\n第三行`")
+	require.NoError(t, err)
+	require.Contains(t, got, "<code>第一行 | - | - | 第三行</code>")
+}
+
+func TestRenderCommentMarkdownRejectsStrikethroughAfterUnclosedBacktick(t *testing.T) {
+	_, err := RenderCommentMarkdown("`未闭合 ``合法代码`` ~~删除线~~")
+	require.Error(t, err)
+}
+
 func TestRenderCommentMarkdownRejectsHTMLAndImages(t *testing.T) {
 	_, err := RenderCommentMarkdown("<script>x</script> ![x](https://x.test/a.png)")
 	require.Error(t, err)

@@ -26,13 +26,13 @@ func NormalizeContent(raw string) string {
 
 func RenderCommentMarkdown(raw string) (string, error) {
 	content := NormalizeContent(raw)
-	if containsStrikethroughSyntax(content) || tableDelimiterPattern.MatchString(content) {
-		return "", errUnsupportedMarkdown
-	}
-
 	markdown := goldmark.New(goldmark.WithRendererOptions(html.WithHardWraps()))
 	source := []byte(content)
 	document := markdown.Parser().Parse(text.NewReader(source))
+	plainSource := sourceOutsideCodeSpans(source, document)
+	if containsStrikethroughSyntax(string(plainSource)) || tableDelimiterPattern.Match(plainSource) {
+		return "", errUnsupportedMarkdown
+	}
 	if err := validateMarkdownNodes(document); err != nil {
 		return "", err
 	}
@@ -45,31 +45,39 @@ func RenderCommentMarkdown(raw string) (string, error) {
 }
 
 func containsStrikethroughSyntax(content string) bool {
-	codeDelimiterLength := 0
 	for i := 0; i < len(content); {
-		if content[i] == '\\' && codeDelimiterLength == 0 {
+		if content[i] == '\\' {
 			i += 2
 			continue
 		}
-		if content[i] == '`' {
-			runLength := 1
-			for i+runLength < len(content) && content[i+runLength] == '`' {
-				runLength++
-			}
-			if codeDelimiterLength == 0 {
-				codeDelimiterLength = runLength
-			} else if codeDelimiterLength == runLength {
-				codeDelimiterLength = 0
-			}
-			i += runLength
-			continue
-		}
-		if codeDelimiterLength == 0 && i+1 < len(content) && content[i:i+2] == "~~" {
+		if i+1 < len(content) && content[i:i+2] == "~~" {
 			return true
 		}
 		i++
 	}
 	return false
+}
+
+func sourceOutsideCodeSpans(source []byte, document ast.Node) []byte {
+	plainSource := append([]byte(nil), source...)
+	_ = ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering || node.Kind() != ast.KindCodeSpan {
+			return ast.WalkContinue, nil
+		}
+		for child := node.FirstChild(); child != nil; child = child.NextSibling() {
+			textNode, ok := child.(*ast.Text)
+			if !ok {
+				continue
+			}
+			for i := textNode.Segment.Start; i < textNode.Segment.Stop; i++ {
+				if plainSource[i] != '\n' {
+					plainSource[i] = ' '
+				}
+			}
+		}
+		return ast.WalkSkipChildren, nil
+	})
+	return plainSource
 }
 
 func validateMarkdownNodes(document ast.Node) error {
