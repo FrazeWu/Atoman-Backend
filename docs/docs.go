@@ -12679,9 +12679,6 @@ const docTemplate = `{
                 "password_confirm": {
                     "type": "string"
                 },
-                "turnstile_token": {
-                    "type": "string"
-                },
                 "username": {
                     "type": "string"
                 },

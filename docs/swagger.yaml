@@ -1178,8 +1178,6 @@ definitions:
         type: string
       password_confirm:
         type: string
-      turnstile_token:
-        type: string
       username:
         type: string
       verification_code:

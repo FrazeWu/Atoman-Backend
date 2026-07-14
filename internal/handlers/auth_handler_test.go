@@ -416,6 +416,27 @@ func TestSendVerificationHandlerDoesNotLogVerificationCode(t *testing.T) {
 	}
 }
 
+func TestSendVerificationHandlerRequiresTurnstileInProduction(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ENV", "production")
+	t.Setenv("GIN_MODE", gin.ReleaseMode)
+	t.Setenv("TURNSTILE_SECRET_KEY", "configured-secret")
+
+	db := newAuthTestDB(t)
+	r := gin.New()
+	r.POST("/send-verification", SendVerificationHandler(service.NewEmailServiceWithoutRedis(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/send-verification", strings.NewReader(`{"email":"protected@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without Turnstile token, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestRegisterHandlerRejectsReservedUsername(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("ENV", "development")
@@ -618,6 +639,32 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	}
 	if playlistSongs != 0 {
 		t.Fatalf("expected empty favorite playlist, got %d songs", playlistSongs)
+	}
+}
+
+func TestRegisterHandlerDoesNotRequireSecondTurnstileVerification(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ENV", "production")
+	t.Setenv("GIN_MODE", gin.ReleaseMode)
+	t.Setenv("TURNSTILE_SECRET_KEY", "configured-secret")
+	t.Setenv("JWT_SECRET", "test-secret")
+
+	db := newAuthTestDB(t)
+	email := "single-turnstile@example.com"
+	seedAuthVerificationCode(t, db, email)
+
+	r := gin.New()
+	r.POST("/register", RegisterHandler(db, service.NewEmailServiceWithoutRedis(db)))
+
+	body := `{"username":"singleturnstile","email":"` + email + `","password":"secret123","password_confirm":"secret123","verification_code":"123456"}`
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 without a second Turnstile token, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

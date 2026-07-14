@@ -131,7 +131,6 @@ type RegisterInput struct {
 	Password         string `json:"password" binding:"required,min=6"`
 	PasswordConfirm  string `json:"password_confirm" binding:"required,eqfield=Password"`
 	VerificationCode string `json:"verification_code" binding:"required,len=6"`
-	TurnstileToken   string `json:"turnstile_token"`
 }
 
 // LoginInput represents user login request
@@ -194,11 +193,6 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		if err := verifyTurnstileToken(input.TurnstileToken, c.ClientIP()); err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}
 
