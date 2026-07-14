@@ -88,6 +88,7 @@ type PlaylistSummaryResponse struct {
 	Description string    `json:"description,omitempty"`
 	CoverURL    string    `json:"cover_url,omitempty"`
 	IsPublic    bool      `json:"is_public"`
+	IsFavorite  bool      `json:"is_favorite"`
 	SongCount   int64     `json:"song_count"`
 }
 

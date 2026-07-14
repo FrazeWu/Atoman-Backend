@@ -15,15 +15,18 @@ import (
 
 func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Revision{}, &model.EditConflict{})
+	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{}, &model.EditConflict{})
 
 	contentID := uuid.New()
 	editorID := uuid.New()
+	if err := db.Create(&model.Album{Base: model.Base{ID: contentID}, Title: "base"}).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
 	base := model.Revision{
 		ContentType:     "album",
 		ContentID:       contentID,
 		VersionNumber:   1,
-		ContentSnapshot: []byte(`{"title":"base","note":"start"}`),
+		ContentSnapshot: []byte(`{"album":{"title":"base"},"songs":[]}`),
 		EditorID:        editorID,
 		EditSummary:     "base",
 		EditType:        "creation",
@@ -49,7 +52,10 @@ func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *test
 				"album",
 				contentID,
 				editorID,
-				map[string]interface{}{"title": title},
+				map[string]interface{}{
+					"album": map[string]interface{}{"title": title},
+					"songs": []interface{}{},
+				},
 				title,
 				1,
 				true,
@@ -78,18 +84,67 @@ func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *test
 	assertSingleCurrentAndUniqueVersions(t, db, contentID)
 }
 
+func TestCreateRevisionAutoApproveAppliesArtistChanges(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Artist{}, &model.Revision{})
+
+	artist := model.Artist{Name: "Before"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+
+	base := model.Revision{
+		ContentType:     "artist",
+		ContentID:       artist.ID,
+		VersionNumber:   1,
+		ContentSnapshot: []byte(`{"name":"Before"}`),
+		EditorID:        uuid.New(),
+		EditSummary:     "base",
+		EditType:        "creation",
+		Status:          "approved",
+		IsCurrent:       true,
+	}
+	if err := db.Create(&base).Error; err != nil {
+		t.Fatalf("create base revision: %v", err)
+	}
+
+	if _, _, err := NewRevisionService(db).CreateRevision(
+		"artist",
+		artist.ID,
+		uuid.New(),
+		map[string]interface{}{"name": "After"},
+		"rename",
+		1,
+		true,
+	); err != nil {
+		t.Fatalf("create auto-approved revision: %v", err)
+	}
+
+	var reloaded model.Artist
+	if err := db.First(&reloaded, "id = ?", artist.ID).Error; err != nil {
+		t.Fatalf("reload artist: %v", err)
+	}
+	if reloaded.Name != "After" {
+		t.Fatalf("expected auto-approved revision to update artist, got %q", reloaded.Name)
+	}
+}
+
 func TestApproveRevisionKeepsOnlyOneCurrentWithUniqueIndex(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Album{}, &model.Revision{})
+	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{})
 
 	contentID := uuid.New()
 	editorID := uuid.New()
 	reviewerID := uuid.New()
+	album := model.Album{Base: model.Base{ID: contentID}, Title: "base"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
 	current := model.Revision{
 		ContentType:     "album",
 		ContentID:       contentID,
 		VersionNumber:   1,
-		ContentSnapshot: []byte(`{"title":"base"}`),
+		ContentSnapshot: []byte(`{"album":{"title":"base"},"songs":[]}`),
 		EditorID:        editorID,
 		EditSummary:     "base",
 		EditType:        "creation",
@@ -105,7 +160,7 @@ func TestApproveRevisionKeepsOnlyOneCurrentWithUniqueIndex(t *testing.T) {
 		ContentID:          contentID,
 		VersionNumber:      2,
 		PreviousRevisionID: &current.ID,
-		ContentSnapshot:    []byte(`{"title":"next"}`),
+		ContentSnapshot:    []byte(`{"album":{"title":"next"},"songs":[]}`),
 		EditorID:           editorID,
 		EditSummary:        "next",
 		EditType:           "edit",
@@ -129,6 +184,49 @@ func TestApproveRevisionKeepsOnlyOneCurrentWithUniqueIndex(t *testing.T) {
 	}
 	if approved.Status != "approved" || !approved.IsCurrent {
 		t.Fatalf("expected pending revision to be approved current, got status=%q current=%v", approved.Status, approved.IsCurrent)
+	}
+}
+
+func TestApproveArtistRevisionRollsBackWhenTargetDoesNotExist(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Artist{}, &model.Revision{})
+
+	contentID := uuid.New()
+	current := model.Revision{
+		ContentType:     "artist",
+		ContentID:       contentID,
+		VersionNumber:   1,
+		ContentSnapshot: []byte(`{"name":"base"}`),
+		EditorID:        uuid.New(),
+		Status:          "approved",
+		IsCurrent:       true,
+	}
+	if err := db.Create(&current).Error; err != nil {
+		t.Fatalf("create current revision: %v", err)
+	}
+	pending := model.Revision{
+		ContentType:        "artist",
+		ContentID:          contentID,
+		VersionNumber:      2,
+		PreviousRevisionID: &current.ID,
+		ContentSnapshot:    []byte(`{"name":"next"}`),
+		EditorID:           uuid.New(),
+		Status:             "pending",
+	}
+	if err := db.Create(&pending).Error; err != nil {
+		t.Fatalf("create pending revision: %v", err)
+	}
+
+	if err := NewRevisionService(db).ApproveRevision(pending.ID, uuid.New(), "approve"); err == nil {
+		t.Fatal("expected approval to fail when target artist does not exist")
+	}
+
+	var reloaded model.Revision
+	if err := db.First(&reloaded, "id = ?", pending.ID).Error; err != nil {
+		t.Fatalf("reload pending revision: %v", err)
+	}
+	if reloaded.Status != "pending" || reloaded.IsCurrent {
+		t.Fatalf("expected approval transaction to roll back, got status=%q current=%v", reloaded.Status, reloaded.IsCurrent)
 	}
 }
 
@@ -173,41 +271,41 @@ func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 	releaseDate := time.Date(2024, 9, 13, 0, 0, 0, 0, time.UTC)
 
 	album := model.Album{
-		Base: model.Base{ID: albumID},
-		Title: "Before",
-		Year:  2024,
+		Base:        model.Base{ID: albumID},
+		Title:       "Before",
+		Year:        2024,
 		ReleaseDate: releaseDate,
-		AlbumType: "album",
+		AlbumType:   "album",
 		EntryStatus: "open",
-		Status: "open",
+		Status:      "open",
 	}
 	if err := db.Create(&album).Error; err != nil {
 		t.Fatalf("create album: %v", err)
 	}
 
 	existingSong := model.Song{
-		Base: model.Base{ID: existingSongID},
-		Title: "Old Track",
+		Base:        model.Base{ID: existingSongID},
+		Title:       "Old Track",
 		TrackNumber: 1,
 		ReleaseDate: releaseDate,
-		AudioURL: "https://cdn.example.com/old.mp3",
+		AudioURL:    "https://cdn.example.com/old.mp3",
 		AudioSource: "s3",
-		Status: "open",
-		AlbumID: &albumID,
+		Status:      "open",
+		AlbumID:     &albumID,
 	}
 	if err := db.Create(&existingSong).Error; err != nil {
 		t.Fatalf("create existing song: %v", err)
 	}
 
 	deletedSong := model.Song{
-		Base: model.Base{ID: uuid.New()},
-		Title: "Deleted Track",
+		Base:        model.Base{ID: uuid.New()},
+		Title:       "Deleted Track",
 		TrackNumber: 2,
 		ReleaseDate: releaseDate,
-		AudioURL: "https://cdn.example.com/deleted.mp3",
+		AudioURL:    "https://cdn.example.com/deleted.mp3",
 		AudioSource: "s3",
-		Status: "open",
-		AlbumID: &albumID,
+		Status:      "open",
+		AlbumID:     &albumID,
 	}
 	if err := db.Create(&deletedSong).Error; err != nil {
 		t.Fatalf("create deleted song: %v", err)
@@ -215,29 +313,29 @@ func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 
 	baseSnapshot, err := json.Marshal(map[string]interface{}{
 		"album": map[string]interface{}{
-			"id": albumID.String(),
-			"title": "Before",
+			"id":           albumID.String(),
+			"title":        "Before",
 			"release_date": "2024-09-13",
-			"album_type": "album",
+			"album_type":   "album",
 			"entry_status": "open",
-			"cover_url": "",
+			"cover_url":    "",
 		},
 		"songs": []map[string]interface{}{
 			{
-				"id": existingSongID.String(),
-				"title": "Old Track",
+				"id":           existingSongID.String(),
+				"title":        "Old Track",
 				"track_number": 1,
-				"lyrics": "",
-				"audio_url": "https://cdn.example.com/old.mp3",
-				"status": "open",
+				"lyrics":       "",
+				"audio_url":    "https://cdn.example.com/old.mp3",
+				"status":       "open",
 			},
 			{
-				"id": deletedSong.ID.String(),
-				"title": "Deleted Track",
+				"id":           deletedSong.ID.String(),
+				"title":        "Deleted Track",
 				"track_number": 2,
-				"lyrics": "",
-				"audio_url": "https://cdn.example.com/deleted.mp3",
-				"status": "open",
+				"lyrics":       "",
+				"audio_url":    "https://cdn.example.com/deleted.mp3",
+				"status":       "open",
 			},
 		},
 	})
@@ -246,15 +344,15 @@ func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 	}
 
 	current := model.Revision{
-		ContentType: "album",
-		ContentID: albumID,
-		VersionNumber: 1,
+		ContentType:     "album",
+		ContentID:       albumID,
+		VersionNumber:   1,
 		ContentSnapshot: baseSnapshot,
-		EditorID: editorID,
-		EditSummary: "base",
-		EditType: "creation",
-		Status: "approved",
-		IsCurrent: true,
+		EditorID:        editorID,
+		EditSummary:     "base",
+		EditType:        "creation",
+		Status:          "approved",
+		IsCurrent:       true,
 	}
 	if err := db.Create(&current).Error; err != nil {
 		t.Fatalf("create current revision: %v", err)
@@ -262,28 +360,28 @@ func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 
 	nextSnapshot, err := json.Marshal(map[string]interface{}{
 		"album": map[string]interface{}{
-			"id": albumID.String(),
-			"title": "After",
+			"id":           albumID.String(),
+			"title":        "After",
 			"release_date": "2024-10-01",
-			"album_type": "ep",
+			"album_type":   "ep",
 			"entry_status": "open",
-			"cover_url": "https://cdn.example.com/cover.jpg",
+			"cover_url":    "https://cdn.example.com/cover.jpg",
 		},
 		"songs": []map[string]interface{}{
 			{
-				"id": existingSongID.String(),
-				"title": "Renamed Track",
+				"id":           existingSongID.String(),
+				"title":        "Renamed Track",
 				"track_number": 3,
-				"lyrics": "new words",
-				"audio_url": "https://cdn.example.com/renamed.mp3",
-				"status": "open",
+				"lyrics":       "new words",
+				"audio_url":    "https://cdn.example.com/renamed.mp3",
+				"status":       "open",
 			},
 			{
-				"title": "Brand New Track",
+				"title":        "Brand New Track",
 				"track_number": 4,
-				"lyrics": "brand new lyrics",
-				"audio_url": "https://cdn.example.com/new.mp3",
-				"status": "open",
+				"lyrics":       "brand new lyrics",
+				"audio_url":    "https://cdn.example.com/new.mp3",
+				"status":       "open",
 			},
 		},
 	})
@@ -292,16 +390,16 @@ func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 	}
 
 	pending := model.Revision{
-		ContentType: "album",
-		ContentID: albumID,
-		VersionNumber: 2,
+		ContentType:        "album",
+		ContentID:          albumID,
+		VersionNumber:      2,
 		PreviousRevisionID: &current.ID,
-		ContentSnapshot: nextSnapshot,
-		EditorID: editorID,
-		EditSummary: "update album",
-		EditType: "edit",
-		Status: "pending",
-		IsCurrent: false,
+		ContentSnapshot:    nextSnapshot,
+		EditorID:           editorID,
+		EditSummary:        "update album",
+		EditType:           "edit",
+		Status:             "pending",
+		IsCurrent:          false,
 	}
 	if err := db.Create(&pending).Error; err != nil {
 		t.Fatalf("create pending revision: %v", err)
@@ -357,5 +455,89 @@ func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 	}
 	if closedSong.Status != "closed" {
 		t.Fatalf("expected missing snapshot song to be closed, got %q", closedSong.Status)
+	}
+}
+
+func TestApproveAlbumRevisionRejectsFlatSnapshot(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{})
+
+	album := model.Album{Title: "Before", AlbumType: "album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	song := model.Song{Title: "Existing Track", Status: "open", AlbumID: &album.ID}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	current := model.Revision{
+		ContentType:     "album",
+		ContentID:       album.ID,
+		VersionNumber:   1,
+		ContentSnapshot: []byte(`{"album":{"title":"Before"},"songs":[{"id":"` + song.ID.String() + `","title":"Existing Track"}]}`),
+		EditorID:        uuid.New(),
+		Status:          "approved",
+		IsCurrent:       true,
+	}
+	if err := db.Create(&current).Error; err != nil {
+		t.Fatalf("create current revision: %v", err)
+	}
+	pending := model.Revision{
+		ContentType:        "album",
+		ContentID:          album.ID,
+		VersionNumber:      2,
+		PreviousRevisionID: &current.ID,
+		ContentSnapshot:    []byte(`{"title":"Legacy Flat Snapshot"}`),
+		EditorID:           uuid.New(),
+		Status:             "pending",
+	}
+	if err := db.Create(&pending).Error; err != nil {
+		t.Fatalf("create pending revision: %v", err)
+	}
+
+	if err := NewRevisionService(db).ApproveRevision(pending.ID, uuid.New(), "approve"); err == nil {
+		t.Fatal("expected flat album snapshot approval to fail")
+	}
+
+	var reloadedRevision model.Revision
+	if err := db.First(&reloadedRevision, "id = ?", pending.ID).Error; err != nil {
+		t.Fatalf("reload revision: %v", err)
+	}
+	if reloadedRevision.Status != "pending" || reloadedRevision.IsCurrent {
+		t.Fatalf("expected revision approval to roll back, got status=%q current=%v", reloadedRevision.Status, reloadedRevision.IsCurrent)
+	}
+
+	var reloadedSong model.Song
+	if err := db.First(&reloadedSong, "id = ?", song.ID).Error; err != nil {
+		t.Fatalf("reload song: %v", err)
+	}
+	if reloadedSong.Status != "open" {
+		t.Fatalf("expected existing song to remain open, got %q", reloadedSong.Status)
+	}
+}
+
+func TestCreateAlbumSnapshotUsesEmptySongsArray(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{})
+
+	album := model.Album{Title: "No Tracks", AlbumType: "album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	if err := NewRevisionService(db).CreateAlbumSnapshot(album.ID, uuid.New(), "snapshot", db); err != nil {
+		t.Fatalf("create album snapshot: %v", err)
+	}
+
+	var revision model.Revision
+	if err := db.Where("content_type = ? AND content_id = ?", "album", album.ID).First(&revision).Error; err != nil {
+		t.Fatalf("load album snapshot: %v", err)
+	}
+	var snapshot map[string]json.RawMessage
+	if err := json.Unmarshal(revision.ContentSnapshot, &snapshot); err != nil {
+		t.Fatalf("parse album snapshot: %v", err)
+	}
+	if string(snapshot["songs"]) != "[]" {
+		t.Fatalf("expected empty songs array, got %s", snapshot["songs"])
 	}
 }

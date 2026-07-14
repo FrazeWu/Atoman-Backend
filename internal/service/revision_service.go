@@ -20,7 +20,7 @@ type RevisionService struct {
 }
 
 type albumRevisionSnapshot struct {
-	Album albumRevisionAlbum `json:"album"`
+	Album *albumRevisionAlbum `json:"album"`
 	Songs []albumRevisionSong `json:"songs"`
 }
 
@@ -154,6 +154,11 @@ func (s *RevisionService) CreateRevision(
 
 		if err := tx.Create(&newRevision).Error; err != nil {
 			return fmt.Errorf("failed to create revision: %w", err)
+		}
+		if autoApprove {
+			if err := s.applyRevisionToContent(tx, &newRevision); err != nil {
+				return fmt.Errorf("failed to apply revision: %w", err)
+			}
 		}
 
 		return nil
@@ -366,24 +371,34 @@ func (s *RevisionService) applyRevisionToContent(tx *gorm.DB, revision *model.Re
 		return s.applyAlbumRevisionSnapshot(tx, revision.ContentID, revision.ContentSnapshot)
 
 	case "song":
-		return tx.Model(&model.Song{}).
-			Where("id = ?", revision.ContentID).
-			Updates(content).Error
+		return applyFlatRevisionSnapshot(tx, &model.Song{}, revision.ContentID, revision.ContentType, content)
 
 	case "artist":
-		return tx.Model(&model.Artist{}).
-			Where("id = ?", revision.ContentID).
-			Updates(content).Error
+		return applyFlatRevisionSnapshot(tx, &model.Artist{}, revision.ContentID, revision.ContentType, content)
 
 	default:
 		return fmt.Errorf("unsupported content type: %s", revision.ContentType)
 	}
 }
 
+func applyFlatRevisionSnapshot(tx *gorm.DB, target any, contentID uuid.UUID, contentType string, content map[string]interface{}) error {
+	result := tx.Model(target).Where("id = ?", contentID).Updates(content)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("%s not found", contentType)
+	}
+	return nil
+}
+
 func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID uuid.UUID, raw []byte) error {
 	var snapshot albumRevisionSnapshot
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
 		return fmt.Errorf("failed to parse album snapshot: %w", err)
+	}
+	if snapshot.Album == nil || snapshot.Songs == nil {
+		return errors.New("album snapshot must contain album and songs")
 	}
 
 	var album model.Album
@@ -579,7 +594,7 @@ func (s *RevisionService) GetRevisionDiff(
 
 // CreateAlbumSnapshot captures the current album state (with songs) as a new revision.
 // This is the lightweight "append-only history" helper used after direct wiki edits.
-	func (s *RevisionService) CreateAlbumSnapshot(
+func (s *RevisionService) CreateAlbumSnapshot(
 	albumID uuid.UUID,
 	editorID uuid.UUID,
 	editSummary string,
@@ -591,7 +606,10 @@ func (s *RevisionService) GetRevisionDiff(
 			return fmt.Errorf("album not found: %w", err)
 		}
 
-		snap := albumRevisionSnapshot{}
+		snap := albumRevisionSnapshot{
+			Album: &albumRevisionAlbum{},
+			Songs: make([]albumRevisionSong, 0, len(album.Songs)),
+		}
 		snap.Album.ID = album.ID.String()
 		snap.Album.Title = album.Title
 		snap.Album.AlbumType = album.AlbumType

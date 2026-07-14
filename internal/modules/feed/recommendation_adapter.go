@@ -135,7 +135,7 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 			EntityType:      recommendation.EntityChannel,
 			EntityID:        row.ChannelID.String(),
 			SourceKey:       row.ChannelID.String(),
-			QualityScore:    clamp01(row.AverageRating / 100),
+			QualityScore:    clamp01(row.AverageViews / 100),
 			TrendScore:      clamp01(float64(row.RecentPostCount) / 5),
 			FreshnessScore:  normalizePostRecency(publishedAt, 14*24*time.Hour),
 			AuthorityScore:  clamp01(float64(row.PublishedCount) / 10),
@@ -300,9 +300,7 @@ func recommendationSourceKeyForFeedItem(item model.FeedItem) string {
 }
 
 func normalizeArticleQuality(post model.Post) float64 {
-	ratingComponent := clamp01(float64(post.RatingAverageScore) / 100)
-	countComponent := clamp01(float64(post.RatingCount) / 10)
-	return clamp01(0.7*ratingComponent + 0.3*countComponent)
+	return clamp01(float64(post.ViewCount) / 100)
 }
 
 func normalizeFeedItemQuality(item model.FeedItem) float64 {

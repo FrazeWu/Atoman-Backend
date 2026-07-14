@@ -839,6 +839,16 @@ func (s *Service) DeletePlaylist(user authctx.CurrentUser, playlistID uuid.UUID)
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
 	}
+	playlist, err := s.repo.GetPlaylistForUser(user.ID, playlistID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.NotFound("music.playlist_not_found", "Playlist not found")
+		}
+		return err
+	}
+	if playlist.IsFavorite {
+		return apperr.Conflict("music.favorite_playlist_protected", "Favorite playlist cannot be deleted")
+	}
 	return s.repo.DeletePlaylist(user.ID, playlistID)
 }
 
@@ -860,6 +870,9 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 		if name == "" {
 			return model.Playlist{}, apperr.BadRequest("validation.invalid_request", "name is required")
 		}
+		if playlist.IsFavorite && name != playlist.Name {
+			return model.Playlist{}, apperr.Conflict("music.favorite_playlist_protected", "Favorite playlist cannot be renamed")
+		}
 		updates["name"] = name
 	}
 	if req.Description != nil {
@@ -869,6 +882,9 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 		updates["cover_url"] = strings.TrimSpace(*req.CoverURL)
 	}
 	if req.IsPublic != nil {
+		if playlist.IsFavorite && *req.IsPublic {
+			return model.Playlist{}, apperr.Conflict("music.favorite_playlist_protected", "Favorite playlist cannot be public")
+		}
 		updates["is_public"] = *req.IsPublic
 	}
 	if len(updates) == 0 {

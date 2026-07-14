@@ -429,72 +429,19 @@ func TestGetMyDefaultChannelsReturnsEmptyPayloadWhenSelectionTableMissing(t *tes
 	}
 }
 
-func TestExplorePostsReturnsCommentCountFromTargetFields(t *testing.T) {
+func TestSetupUserRoutesDoesNotRegisterLegacyBlogExplore(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Post{}, &model.Comment{}, &model.Like{})
-
-	user := model.User{
-		Username: "explore-user",
-		Email:    "explore-user@example.com",
-		Password: "hash",
-		Role:     "user",
-		IsActive: true,
-	}
-	if err := db.Create(&user).Error; err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-
-	post := model.Post{
-		UserID:        user.UUID,
-		Title:         "Explore Post",
-		Content:       "content",
-		Status:        "published",
-		Visibility:    "public",
-		AllowComments: true,
-	}
-	if err := db.Create(&post).Error; err != nil {
-		t.Fatalf("create post: %v", err)
-	}
-
-	comment := model.Comment{
-		TargetType: "post",
-		TargetID:   post.ID,
-		Content:    "first",
-		Status:     "visible",
-	}
-	if err := db.Create(&comment).Error; err != nil {
-		t.Fatalf("create comment: %v", err)
-	}
 
 	r := gin.New()
-	r.GET("/api/v1/blog/explore", ExplorePosts(db))
+	SetupUserRoutes(r, db)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/explore?page=1&limit=20", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/explore", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp struct {
-		Data []struct {
-			ID            string `json:"id"`
-			CommentsCount int64  `json:"comments_count"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("expected 1 post, got %d: %s", len(resp.Data), w.Body.String())
-	}
-	if resp.Data[0].ID != post.ID.String() {
-		t.Fatalf("expected post %s, got %#v", post.ID, resp.Data[0])
-	}
-	if resp.Data[0].CommentsCount != 1 {
-		t.Fatalf("expected comments_count=1, got %#v", resp.Data[0])
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy explore route to be absent, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

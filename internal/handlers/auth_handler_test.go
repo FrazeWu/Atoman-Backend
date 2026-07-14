@@ -3,7 +3,6 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,8 +13,8 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/service"
+	"atoman/internal/testdb"
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
@@ -29,11 +28,7 @@ type authErrorBody struct {
 
 func newAuthTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
+	db := testdb.Open(t)
 	if err := db.AutoMigrate(
 		&model.User{},
 		&model.UserSettings{},
@@ -577,19 +572,24 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	}
 
 	var channels []model.Channel
-	if err := db.Where("user_id = ? AND is_default = ?", user.UUID, true).Find(&channels).Error; err != nil {
+	if err := db.Where("user_id = ?", user.UUID).Find(&channels).Error; err != nil {
 		t.Fatalf("find default channels: %v", err)
 	}
-	if len(channels) != 1 {
-		t.Fatalf("expected one default channel, got %d", len(channels))
+	if len(channels) != 3 {
+		t.Fatalf("expected three module channels, got %d", len(channels))
 	}
-
-	var collections []model.Collection
-	if err := db.Where("channel_id = ? AND is_default = ?", channels[0].ID, true).Find(&collections).Error; err != nil {
-		t.Fatalf("find default collections: %v", err)
-	}
-	if len(collections) != 1 {
-		t.Fatalf("expected one default collection, got %d", len(collections))
+	for _, contentType := range []string{model.ChannelContentTypeBlog, model.ChannelContentTypePodcast, model.ChannelContentTypeVideo} {
+		var selection model.UserDefaultChannel
+		if err := db.Preload("Channel").Where("user_id = ? AND content_type = ?", user.UUID, contentType).First(&selection).Error; err != nil {
+			t.Fatalf("find %s default channel selection: %v", contentType, err)
+		}
+		if selection.Channel == nil || selection.Channel.ContentType != contentType {
+			t.Fatalf("unexpected %s default channel: %#v", contentType, selection.Channel)
+		}
+		var collection model.Collection
+		if err := db.Where("channel_id = ? AND is_default = ?", selection.ChannelID, true).First(&collection).Error; err != nil {
+			t.Fatalf("find %s default collection: %v", contentType, err)
+		}
 	}
 
 	var groups []model.SubscriptionGroup
@@ -618,7 +618,7 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	}
 
 	var folders []model.BookmarkFolder
-	if err := db.Where("user_id = ? AND name = ?", user.UUID, "默认收藏").Find(&folders).Error; err != nil {
+	if err := db.Where("user_id = ? AND name = ?", user.UUID, "默认收藏夹").Find(&folders).Error; err != nil {
 		t.Fatalf("find bookmark folders: %v", err)
 	}
 	if len(folders) != 1 {
@@ -631,6 +631,9 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	}
 	if len(playlists) != 1 {
 		t.Fatalf("expected one default favorite playlist, got %d", len(playlists))
+	}
+	if !playlists[0].IsFavorite || playlists[0].IsPublic {
+		t.Fatalf("expected private system favorite playlist, got %#v", playlists[0])
 	}
 
 	var playlistSongs int64

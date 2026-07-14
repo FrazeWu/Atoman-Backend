@@ -248,7 +248,7 @@ func TestReadingListHandlerUsesUnifiedPagedResponse(t *testing.T) {
 	if err := db.Where("title = ?", "Feed item").First(&feedItem).Error; err != nil {
 		t.Fatalf("find feed item: %v", err)
 	}
-	if err := db.Create(&model.ReadingListItem{UserID: user.ID, FeedItemID: feedItem.ID, CreatedAt: time.Now().UTC()}).Error; err != nil {
+	if err := db.Create(&model.ReadingListItem{UserID: user.ID, TargetType: "feed_item", TargetID: feedItem.ID, CreatedAt: time.Now().UTC()}).Error; err != nil {
 		t.Fatalf("create reading list item: %v", err)
 	}
 
@@ -275,6 +275,55 @@ func TestReadingListHandlerUsesUnifiedPagedResponse(t *testing.T) {
 	}
 	if payload.Meta.Total != 1 || len(payload.Data) != 1 {
 		t.Fatalf("expected one unified reading list item, got total=%d len=%d body=%s", payload.Meta.Total, len(payload.Data), rr.Body.String())
+	}
+}
+
+func TestReadingListHandlerTogglesAndListsInternalPostTargets(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+	var post model.Post
+	if err := db.Where("status = ?", "published").First(&post).Error; err != nil {
+		t.Fatalf("find published post: %v", err)
+	}
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	token := signedFeedHTTPTokenForTest(t, user)
+
+	toggle := func() *httptest.ResponseRecorder {
+		body, _ := json.Marshal(map[string]any{"target_type": "post", "target_id": post.ID})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/reading-list", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+token)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		return rr
+	}
+
+	first := toggle()
+	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"saved":true`) {
+		t.Fatalf("expected post to be saved, got %d %s", first.Code, first.Body.String())
+	}
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/feed/reading-list?page=1&page_size=20", nil)
+	listReq.Header.Set("Authorization", "Bearer "+token)
+	listRR := httptest.NewRecorder()
+	router.ServeHTTP(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("list reading list: %d %s", listRR.Code, listRR.Body.String())
+	}
+	var payload struct {
+		Data []model.ReadingListItem `json:"data"`
+	}
+	if err := json.Unmarshal(listRR.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].TargetType != "post" || payload.Data[0].TargetID != post.ID || payload.Data[0].Post == nil || payload.Data[0].Post.ID != post.ID {
+		t.Fatalf("expected hydrated post target, got %s", listRR.Body.String())
+	}
+
+	second := toggle()
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"saved":false`) {
+		t.Fatalf("expected post to be removed, got %d %s", second.Code, second.Body.String())
 	}
 }
 

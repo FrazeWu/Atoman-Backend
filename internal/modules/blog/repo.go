@@ -150,7 +150,11 @@ func (r *Repo) CreateBookmarkFolder(folder *model.BookmarkFolder) error {
 
 func (r *Repo) DeleteBookmarkFolder(id uuid.UUID, userID uuid.UUID) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.Bookmark{}).Where("bookmark_folder_id = ? AND user_id = ?", id, userID).UpdateColumn("bookmark_folder_id", nil).Error; err != nil {
+		fallback := model.BookmarkFolder{UserID: userID, Name: "默认收藏夹"}
+		if err := tx.Where("user_id = ? AND name = ?", userID, fallback.Name).FirstOrCreate(&fallback).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Bookmark{}).Where("bookmark_folder_id = ? AND user_id = ?", id, userID).UpdateColumn("bookmark_folder_id", fallback.ID).Error; err != nil {
 			return err
 		}
 		return tx.Where("id = ? AND user_id = ?", id, userID).Delete(&model.BookmarkFolder{}).Error

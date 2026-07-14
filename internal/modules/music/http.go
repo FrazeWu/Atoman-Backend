@@ -722,6 +722,7 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 			Description: playlist.Description,
 			CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
 			IsPublic:    playlist.IsPublic,
+			IsFavorite:  playlist.IsFavorite,
 			SongCount:   songCounts[playlist.ID],
 		})
 	}
@@ -753,6 +754,7 @@ func (h *Handler) listPublicPlaylists(c *gin.Context) {
 			Description: playlist.Description,
 			CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
 			IsPublic:    playlist.IsPublic,
+			IsFavorite:  playlist.IsFavorite,
 			SongCount:   songCounts[playlist.ID],
 		})
 	}
@@ -788,6 +790,7 @@ func buildPlaylistSummaryResponse(playlist model.Playlist, songCount int64) Play
 		Description: playlist.Description,
 		CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
 		IsPublic:    playlist.IsPublic,
+		IsFavorite:  playlist.IsFavorite,
 		SongCount:   songCount,
 	}
 }

@@ -146,7 +146,7 @@ func backfillBlogChannelFields(db *gorm.DB) {
 	}
 
 	var posts []model.Post
-	if err := db.Preload("Collections").Find(&posts).Error; err != nil {
+	if err := db.Preload("Collection").Find(&posts).Error; err != nil {
 		log.Printf("WARN: failed to load posts for channel backfill: %v", err)
 		return
 	}
@@ -155,10 +155,10 @@ func backfillBlogChannelFields(db *gorm.DB) {
 		if post.ChannelID != nil {
 			continue
 		}
-		if len(post.Collections) == 0 {
+		if post.Collection == nil {
 			continue
 		}
-		channelID := post.Collections[0].ChannelID
+		channelID := post.Collection.ChannelID
 		if err := db.Model(&model.Post{}).Where("id = ?", post.ID).Update("channel_id", channelID).Error; err != nil {
 			log.Printf("WARN: failed to backfill post %s channel_id: %v", post.ID, err)
 		}
@@ -533,6 +533,11 @@ func main() {
 			fatalLogger.Fatal("Failed to run channel default selection migration: ", err)
 		}
 		log.Println("Migration step completed: channel default selection")
+		log.Println("Migration step: unified reading list")
+		if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
+			fatalLogger.Fatal("Failed to run unified reading list migration: ", err)
+		}
+		log.Println("Migration step completed: unified reading list")
 		log.Println("Migration step: auto migrate models")
 		if err := db.AutoMigrate(
 			&model.User{},
@@ -548,7 +553,6 @@ func main() {
 			&model.Collection{},
 			&model.Post{},
 			&model.PostCollection{},
-			&model.BlogPostRating{},
 			&model.BlogDraft{},
 			&model.MediaAsset{},
 			&model.Comment{},
@@ -621,6 +625,11 @@ func main() {
 			fatalLogger.Fatal("Failed to run migrations: ", err)
 		}
 		log.Println("Migration step completed: auto migrate models")
+		log.Println("Migration step: clean reading list target constraints")
+		if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
+			fatalLogger.Fatal("Failed to clean reading list target constraints: ", err)
+		}
+		log.Println("Migration step completed: clean reading list target constraints")
 		log.Println("Migration step: blog interaction unique indexes")
 		if err := migrations.RunBlogInteractionUniqueIndexes(db); err != nil {
 			fatalLogger.Fatal("Failed to run blog interaction unique indexes migration: ", err)

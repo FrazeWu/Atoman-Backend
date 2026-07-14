@@ -9,14 +9,14 @@ import (
 	"atoman/internal/testdb"
 )
 
-func TestBlogV1ModelsMigrateAndCreateRating(t *testing.T) {
+func TestBlogV1ModelsMigrateWithoutRating(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&User{},
 		&Channel{},
 		&Collection{},
 		&Post{},
-		&BlogPostRating{},
+		&BlogPostVersion{},
 		&MediaAsset{},
 	)
 
@@ -69,28 +69,17 @@ func TestBlogV1ModelsMigrateAndCreateRating(t *testing.T) {
 	}
 
 	post := Post{
-		UserID:             ownerID,
-		ChannelID:          &channel.ID,
-		Title:              "A rated post",
-		Content:            "content",
-		Status:             "published",
-		Visibility:         "public",
-		AllowComments:      true,
-		RatingAverageScore: 4,
-		RatingCount:        1,
+		UserID:        ownerID,
+		ChannelID:     &channel.ID,
+		CollectionID:  &collection.ID,
+		Title:         "A post",
+		Content:       "content",
+		Status:        "published",
+		Visibility:    "public",
+		AllowComments: true,
 	}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
-	}
-
-	rating := BlogPostRating{
-		PostID:  post.ID,
-		UserID:  creatorID,
-		Score:   4,
-		Comment: "值得一读",
-	}
-	if err := db.Create(&rating).Error; err != nil {
-		t.Fatalf("create rating: %v", err)
 	}
 
 	asset := MediaAsset{
@@ -113,9 +102,6 @@ func TestBlogV1ModelsMigrateAndCreateRating(t *testing.T) {
 	}
 	if post.ID == uuid.Nil {
 		t.Fatal("expected post ID to be generated")
-	}
-	if rating.ID == uuid.Nil {
-		t.Fatal("expected rating ID to be generated")
 	}
 	if asset.ID == uuid.Nil {
 		t.Fatal("expected media asset ID to be generated")

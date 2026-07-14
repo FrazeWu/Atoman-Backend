@@ -80,7 +80,7 @@ func GetRecommendedPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 		page, pageSize := httpx.PageParams(c)
 
 		var episodes []model.PodcastEpisode
-		if err := db.Preload("Post.Collections").Preload("Channel").
+		if err := db.Preload("Post.Collection").Preload("Channel").
 			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
 			Where("posts.visibility = ?", "public").
 			Order("podcast_episodes.created_at DESC").
@@ -156,8 +156,7 @@ func normalizePodcastRecommendationQuality(episode model.PodcastEpisode) float64
 		score += 0.15
 	}
 	if episode.Post != nil {
-		score += 0.20 * clampRecommendation(float64(episode.Post.RatingAverageScore)/100)
-		score += 0.15 * clampRecommendation(float64(episode.Post.RatingCount)/10)
+		score += 0.35 * clampRecommendation(float64(episode.Post.ViewCount)/100)
 	}
 	return clampRecommendation(score)
 }
@@ -165,7 +164,7 @@ func normalizePodcastRecommendationQuality(episode model.PodcastEpisode) float64
 func normalizePodcastRecommendationTrend(episode model.PodcastEpisode) float64 {
 	base := normalizePodcastRecommendationFreshness(episode.CreatedAt, 7*24*time.Hour)
 	if episode.Post != nil {
-		return clampRecommendation(0.6*base + 0.4*clampRecommendation(float64(episode.Post.RatingCount)/10))
+		return clampRecommendation(0.6*base + 0.4*clampRecommendation(float64(episode.Post.ViewCount)/100))
 	}
 	return base
 }
@@ -238,7 +237,7 @@ func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 		limit := boundedListLimit(c.Query("limit"), 40, 40)
 
 		var episodes []model.PodcastEpisode
-		q := db.Preload("Post.Collections").Preload("Channel").
+		q := db.Preload("Post.Collection").Preload("Channel").
 			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL")
 		if channelID != "" {
 			q = q.Where("podcast_episodes.channel_id = ?", channelID)
@@ -273,7 +272,7 @@ func GetShowEpisodes(db *gorm.DB) gin.HandlerFunc {
 		}
 		var episodes []model.PodcastEpisode
 		db.Where("podcast_episodes.channel_id = ?", channel.ID).
-			Preload("Post.Collections").Preload("Channel").
+			Preload("Post.Collection").Preload("Channel").
 			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
 			Order("podcast_episodes.season_number ASC, podcast_episodes.episode_number ASC").
 			Find(&episodes)
@@ -295,7 +294,7 @@ func GetPodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		var ep model.PodcastEpisode
-		if err := db.Preload("Post.Collections").Preload("Channel").
+		if err := db.Preload("Post.Collection").Preload("Channel").
 			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
 			First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
@@ -408,7 +407,7 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		db.Preload("Post.Collections").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID)
+		db.Preload("Post.Collection").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID)
 		c.JSON(http.StatusCreated, ep)
 	}
 }
@@ -511,7 +510,7 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			}
 		}
 
-		db.Preload("Post.Collections").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID)
+		db.Preload("Post.Collection").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID)
 		c.JSON(http.StatusOK, ep)
 	}
 }
@@ -589,7 +588,7 @@ func GetPodcastRSS(db *gorm.DB) gin.HandlerFunc {
 
 		var episodes []model.PodcastEpisode
 		db.Where("podcast_episodes.channel_id = ?", channel.ID).
-			Preload("Post.Collections").
+			Preload("Post.Collection").
 			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
 			Order("podcast_episodes.season_number ASC, podcast_episodes.episode_number ASC").
 			Limit(100).Find(&episodes)
@@ -618,8 +617,8 @@ func buildPodcastRSS(ch model.Channel, episodes []model.PodcastEpisode, siteURL 
 		}
 		pubDate := ep.CreatedAt.Format(time.RFC1123Z)
 		epCover := ep.EpisodeCoverURL
-		if epCover == "" && ep.Post != nil && len(ep.Post.Collections) > 0 {
-			epCover = ep.Post.Collections[0].CoverURL
+		if epCover == "" && ep.Post != nil && ep.Post.Collection != nil {
+			epCover = ep.Post.Collection.CoverURL
 		}
 		if epCover == "" {
 			epCover = coverURL
@@ -880,8 +879,7 @@ func GetPodcastEpisodeBookmarks(db *gorm.DB) gin.HandlerFunc {
 			query = query.
 				Joins("JOIN podcast_episodes ON podcast_episodes.id = podcast_episode_bookmarks.episode_id").
 				Joins("JOIN posts ON posts.id = podcast_episodes.post_id").
-				Order("COALESCE(posts.rating_average_score, 0) DESC").
-				Order("COALESCE(posts.rating_count, 0) DESC").
+				Order("COALESCE(posts.view_count, 0) DESC").
 				Order("podcast_episode_bookmarks.created_at DESC")
 		} else {
 			query = query.Order("podcast_episode_bookmarks.created_at DESC")

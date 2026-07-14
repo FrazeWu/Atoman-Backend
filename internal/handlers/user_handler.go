@@ -21,9 +21,6 @@ import (
 
 // SetupUserRoutes configures user-related routes
 func SetupUserRoutes(router *gin.Engine, db *gorm.DB) {
-	// Blog explore route
-	router.GET("/api/v1/blog/explore", ExplorePosts(db))
-
 	users := router.Group("/api/v1/users")
 	{
 		// Public routes — lookup by username (must come before /:id routes)
@@ -246,61 +243,6 @@ func PutMyDefaultChannel(db *gorm.DB) gin.HandlerFunc {
 			},
 			"message": "ok",
 		})
-	}
-}
-
-// ExplorePostResponse represents a post in the explore feed
-type ExplorePostResponse struct {
-	model.Post
-	LikesCount    int64 `json:"likes_count"`
-	CommentsCount int64 `json:"comments_count"`
-}
-
-// ExplorePosts returns a paginated list of published posts with interaction counts
-// ExplorePosts godoc
-// @Summary 获取博客探索流
-// @Description 返回已发布文章的分页列表，并附带点赞数和评论数。
-// @Tags users
-// @Produce json
-// @Param page query int false "页码" default(1)
-// @Param limit query int false "每页数量" default(20)
-// @Success 200 {object} ExplorePostListResponse
-// @Failure 500 {object} ErrorResponse
-// @Router /api/v1/blog/explore [get]
-func ExplorePosts(db *gorm.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-		offset := (page - 1) * limit
-
-		var posts []model.Post
-		if err := db.Preload("User").
-			Where("status = ?", "published").
-			Order("created_at DESC").
-			Limit(limit).
-			Offset(offset).
-			Find(&posts).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch explore posts"})
-			return
-		}
-
-		// Get counts for each post
-		var response []ExplorePostResponse
-		for _, post := range posts {
-			var likesCount int64
-			var commentsCount int64
-
-			db.Model(&model.Like{}).Where("target_type = ? AND target_id = ?", "post", post.ID).Count(&likesCount)
-			db.Model(&model.Comment{}).Where("target_type = ? AND target_id = ? AND status = ?", "post", post.ID, "visible").Count(&commentsCount)
-
-			response = append(response, ExplorePostResponse{
-				Post:          post,
-				LikesCount:    likesCount,
-				CommentsCount: commentsCount,
-			})
-		}
-
-		c.JSON(http.StatusOK, gin.H{"data": response, "message": "ok"})
 	}
 }
 

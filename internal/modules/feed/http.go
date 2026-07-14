@@ -18,6 +18,11 @@ type Handler struct {
 	service *Service
 }
 
+type ReadingListInput struct {
+	TargetType string    `json:"target_type" enums:"feed_item,post"`
+	TargetID   uuid.UUID `json:"target_id"`
+}
+
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.GET("/timeline", middleware.OptionalAuthMiddleware(), h.getSubscribedFeed)
@@ -41,7 +46,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/events/read", h.recordReadEvent)
 		protected.GET("/reading-list", h.listReadingList)
 		protected.POST("/reading-list", h.toggleReadingList)
-		protected.DELETE("/reading-list/:id", h.removeReadingListItem)
+		protected.DELETE("/reading-list/:target_type/:id", h.removeReadingListItem)
 		protected.POST("/discover", DiscoverFeedCandidates())
 		protected.POST("/sources/create-from-provider", CreateSubscriptionFromProvider(service.db))
 		protected.GET("/subscriptions", GetSubscriptions(service.db))
@@ -249,6 +254,16 @@ func (h *Handler) toggleStar(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"starred": starred})
 }
 
+// listReadingList godoc
+// @Summary 获取统一稍后阅读列表
+// @Tags feed
+// @Produce json
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Success 200 {array} model.ReadingListItem
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/reading-list [get]
 func (h *Handler) listReadingList(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -285,20 +300,28 @@ func (h *Handler) recordReadEvent(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
 }
 
+// toggleReadingList godoc
+// @Summary 切换稍后阅读状态
+// @Tags feed
+// @Accept json
+// @Produce json
+// @Param input body ReadingListInput true "稍后阅读目标"
+// @Success 200 {object} map[string]bool
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/reading-list [post]
 func (h *Handler) toggleReadingList(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	var req struct {
-		FeedItemID uuid.UUID `json:"feed_item_id"`
-	}
+	var req ReadingListInput
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
 		return
 	}
-	saved, err := h.service.ToggleReadingList(user, req.FeedItemID)
+	saved, err := h.service.ToggleReadingList(user, strings.TrimSpace(req.TargetType), req.TargetID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -308,29 +331,30 @@ func (h *Handler) toggleReadingList(c *gin.Context) {
 
 // removeReadingListItem godoc
 // @Summary 从待读列表移除条目
-// @Description 删除当前用户待读列表中的指定 feed item。
+// @Description 删除当前用户稍后阅读列表中的指定 RSS 条目或站内文章。
 // @Tags feed
 // @Produce json
-// @Param id path string true "Feed item UUID"
+// @Param target_type path string true "目标类型" Enums(feed_item,post)
+// @Param id path string true "目标 UUID"
 // @Success 200 {object} handlers.RemoveStatusResponse
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/v1/feed/reading-list/{id} [delete]
+// @Router /api/v1/feed/reading-list/{target_type}/{id} [delete]
 func (h *Handler) removeReadingListItem(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	feedItemID, err := uuid.Parse(c.Param("id"))
+	targetID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "feed item id must be a valid uuid"))
 		return
 	}
-	if err := h.service.RemoveReadingListItem(user, feedItemID); err != nil {
+	if err := h.service.RemoveReadingListItem(user, c.Param("target_type"), targetID); err != nil {
 		httpx.Error(c, err)
 		return
 	}

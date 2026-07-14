@@ -57,6 +57,34 @@ func createModerator(t *testing.T, db *gorm.DB) authctx.CurrentUser {
 	return authctx.CurrentUser{ID: moderatorModel.UUID, Username: moderatorModel.Username, Role: authctx.RoleModerator}
 }
 
+func TestDeletePlaylistSoftDeletesPlaylistSongs(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	playlist := model.Playlist{UserID: user.ID, Name: "Disposable"}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	song := model.Song{Title: "Disposable Song", AudioURL: "/audio/disposable.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	playlistSong := model.PlaylistSong{PlaylistID: playlist.ID, SongID: song.ID}
+	if err := db.Create(&playlistSong).Error; err != nil {
+		t.Fatalf("create playlist song: %v", err)
+	}
+
+	if err := svc.DeletePlaylist(user, playlist.ID); err != nil {
+		t.Fatalf("delete playlist: %v", err)
+	}
+
+	var remaining int64
+	if err := db.Model(&model.PlaylistSong{}).Where("playlist_id = ?", playlist.ID).Count(&remaining).Error; err != nil {
+		t.Fatalf("count playlist songs: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("expected playlist songs to be soft deleted, got %d", remaining)
+	}
+}
+
 func TestApproveEditOnlyAllowsOneDecision(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	moderator := createModerator(t, db)

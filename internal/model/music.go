@@ -278,6 +278,7 @@ type Playlist struct {
 	Description string    `json:"description" gorm:"type:text"`
 	CoverURL    string    `json:"cover_url"`
 	IsPublic    bool      `json:"is_public" gorm:"default:false;index"`
+	IsFavorite  bool      `json:"is_favorite" gorm:"default:false;index"`
 }
 
 func (Playlist) TableName() string {

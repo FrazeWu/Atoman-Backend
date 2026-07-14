@@ -289,15 +289,14 @@ func TestSetupPodcastRoutesMountsRecommendationEpisodesEndpoint(t *testing.T) {
 	r, db, user, channel := newPodcastHandlerTestDB(t)
 
 	post := model.Post{
-		UserID:             user.UUID,
-		ChannelID:          &channel.ID,
-		Title:              "推荐播客",
-		Content:            "这是适合推荐的播客 shownotes。",
-		Summary:            "推荐摘要",
-		Status:             "published",
-		Visibility:         "public",
-		RatingAverageScore: 82,
-		RatingCount:        8,
+		UserID:     user.UUID,
+		ChannelID:  &channel.ID,
+		Title:      "推荐播客",
+		Content:    "这是适合推荐的播客 shownotes。",
+		Summary:    "推荐摘要",
+		Status:     "published",
+		Visibility: "public",
+		ViewCount:  82,
 	}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
@@ -438,11 +437,8 @@ func TestPodcastEpisodeBookmarksSupportPopularSort(t *testing.T) {
 	if err := db.Create(&model.PodcastEpisodeBookmark{UserID: user.UUID, EpisodeID: hotEpisode.ID}).Error; err != nil {
 		t.Fatalf("create hot bookmark: %v", err)
 	}
-	if err := db.Model(&model.Post{}).Where("id = ?", hotEpisode.PostID).Updates(map[string]any{
-		"rating_average_score": 95,
-		"rating_count":         8,
-	}).Error; err != nil {
-		t.Fatalf("update hot post rating: %v", err)
+	if err := db.Model(&model.Post{}).Where("id = ?", hotEpisode.PostID).Update("view_count", 95).Error; err != nil {
+		t.Fatalf("update hot post view count: %v", err)
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/bookmarks?sort=popular", nil)

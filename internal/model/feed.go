@@ -144,36 +144,43 @@ func (Collection) TableName() string { return "collections" }
 
 type Post struct {
 	Base
-	UserID             uuid.UUID    `json:"user_id" gorm:"type:uuid;not null;index"`
-	User               *User        `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	ChannelID          *uuid.UUID   `json:"channel_id,omitempty" gorm:"type:uuid;index"`
-	Channel            *Channel     `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
-	Title              string       `json:"title" gorm:"not null"`
-	Content            string       `json:"content" gorm:"type:text;not null"`
-	Summary            string       `json:"summary" gorm:"type:text"`
-	CoverURL           string       `json:"cover_url" gorm:"type:text"`
-	Status             string       `json:"status" gorm:"default:'draft'"` // draft / published
-	Visibility         string       `json:"visibility" gorm:"not null;default:'public'"`
-	AllowComments      bool         `json:"allow_comments" gorm:"default:true"`
-	Pinned             bool         `json:"pinned" gorm:"default:false"`
-	RatingAverageScore int          `json:"rating_average_score" gorm:"default:0"`
-	RatingCount        int          `json:"rating_count" gorm:"default:0"`
-	Collections        []Collection `json:"collections,omitempty" gorm:"many2many:post_collections;"`
+	UserID             uuid.UUID   `json:"user_id" gorm:"type:uuid;not null;index"`
+	User               *User       `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	ChannelID          *uuid.UUID  `json:"channel_id,omitempty" gorm:"type:uuid;index"`
+	Channel            *Channel    `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
+	CollectionID       *uuid.UUID  `json:"collection_id,omitempty" gorm:"type:uuid;index"`
+	Collection         *Collection `json:"collection,omitempty" gorm:"foreignKey:CollectionID"`
+	CollectionPosition int         `json:"collection_position" gorm:"not null;default:0"`
+	Title              string      `json:"title" gorm:"not null"`
+	Content            string      `json:"content" gorm:"type:text;not null"`
+	Summary            string      `json:"summary" gorm:"type:text"`
+	CoverURL           string      `json:"cover_url" gorm:"type:text"`
+	Status             string      `json:"status" gorm:"default:'draft'"` // draft / published
+	Visibility         string      `json:"visibility" gorm:"not null;default:'public'"`
+	AllowComments      bool        `json:"allow_comments" gorm:"default:true"`
+	Pinned             bool        `json:"pinned" gorm:"default:false"`
+	PublishedAt        *time.Time  `json:"published_at,omitempty" gorm:"index"`
+	ViewCount          int64       `json:"view_count" gorm:"not null;default:0"`
 }
 
 func (Post) TableName() string { return "posts" }
 
-type BlogPostRating struct {
+type BlogPostVersion struct {
 	Base
-	PostID  uuid.UUID `json:"post_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_blog_post_ratings_post_user,priority:1"`
-	Post    *Post     `json:"post,omitempty" gorm:"foreignKey:PostID"`
-	UserID  uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_blog_post_ratings_post_user,priority:2"`
-	User    *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	Score   int       `json:"score" gorm:"not null"`
-	Comment string    `json:"comment" gorm:"type:text"`
+	PostID        uuid.UUID  `json:"post_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_blog_post_version,priority:1"`
+	Version       int        `json:"version" gorm:"not null;uniqueIndex:idx_blog_post_version,priority:2"`
+	EditorID      uuid.UUID  `json:"editor_id" gorm:"type:uuid;not null;index"`
+	Title         string     `json:"title" gorm:"not null"`
+	Content       string     `json:"content" gorm:"type:text;not null"`
+	Summary       string     `json:"summary" gorm:"type:text"`
+	CoverURL      string     `json:"cover_url" gorm:"type:text"`
+	Visibility    string     `json:"visibility" gorm:"not null"`
+	AllowComments bool       `json:"allow_comments"`
+	CollectionID  uuid.UUID  `json:"collection_id" gorm:"type:uuid;not null;index"`
+	PublishedAt   *time.Time `json:"published_at,omitempty"`
 }
 
-func (BlogPostRating) TableName() string { return "blog_post_ratings" }
+func (BlogPostVersion) TableName() string { return "blog_post_versions" }
 
 type BlogDraft struct {
 	Base
@@ -187,7 +194,8 @@ type BlogDraft struct {
 	Visibility    string     `json:"visibility" gorm:"not null;default:'public'"`
 	AllowComments bool       `json:"allow_comments" gorm:"default:true"`
 	ChannelID     *uuid.UUID `json:"channel_id,omitempty" gorm:"type:uuid;index"`
-	CollectionIDs string     `json:"collection_ids" gorm:"type:text"`
+	CollectionID  *uuid.UUID `json:"collection_id,omitempty" gorm:"type:uuid;index"`
+	CollectionIDs string     `json:"-" gorm:"type:text"`
 }
 
 func (BlogDraft) TableName() string { return "blog_drafts" }
@@ -361,8 +369,10 @@ func (FeedItemStar) TableName() string { return "feed_item_stars" }
 
 type ReadingListItem struct {
 	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;primaryKey;index"`
-	FeedItemID uuid.UUID `json:"feed_item_id" gorm:"type:uuid;not null;primaryKey;index"`
-	FeedItem   *FeedItem `json:"feed_item,omitempty" gorm:"foreignKey:FeedItemID"`
+	TargetType string    `json:"target_type" gorm:"type:varchar(24);not null;primaryKey"`
+	TargetID   uuid.UUID `json:"target_id" gorm:"type:uuid;not null;primaryKey;index"`
+	FeedItem   *FeedItem `json:"feed_item,omitempty" gorm:"foreignKey:TargetID;references:ID;-:migration"`
+	Post       *Post     `json:"post,omitempty" gorm:"foreignKey:TargetID;references:ID;-:migration"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 

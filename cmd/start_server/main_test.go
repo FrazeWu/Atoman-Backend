@@ -169,11 +169,13 @@ func ownerBootstrapModels() []interface{} {
 		&model.User{},
 		&model.UserSettings{},
 		&model.Channel{},
+		&model.UserDefaultChannel{},
 		&model.Collection{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 		&model.BookmarkFolder{},
+		&model.Playlist{},
 	}
 }
 

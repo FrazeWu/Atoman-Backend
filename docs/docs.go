@@ -3555,29 +3555,135 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/blog/explore": {
+        "/api/v1/blog/bookmark-folders": {
             "get": {
-                "description": "返回已发布文章的分页列表，并附带点赞数和评论数。",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "获取收藏夹",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.BookmarkFolder"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "新建收藏夹",
+                "parameters": [
+                    {
+                        "description": "收藏夹输入",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.bookmarkFolderInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.BookmarkFolder"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/bookmark-folders/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "收藏会迁移到默认收藏夹。",
+                "tags": [
+                    "blog"
+                ],
+                "summary": "删除收藏夹",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "收藏夹 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/bookmarks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "users"
+                    "blog"
                 ],
-                "summary": "获取博客探索流",
+                "summary": "获取文章收藏",
                 "parameters": [
                     {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "页码",
-                        "name": "page",
+                        "type": "string",
+                        "description": "收藏夹 UUID",
+                        "name": "folder_id",
                         "in": "query"
                     },
                     {
-                        "type": "integer",
-                        "default": 20,
-                        "description": "每页数量",
-                        "name": "limit",
+                        "enum": [
+                            "latest",
+                            "popular"
+                        ],
+                        "type": "string",
+                        "description": "排序",
+                        "name": "sort",
                         "in": "query"
                     }
                 ],
@@ -3585,13 +3691,82 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ExplorePostListResponse"
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.Bookmark"
+                            }
                         }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "收藏文章到指定收藏夹",
+                "parameters": [
+                    {
+                        "description": "收藏输入",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/blog.bookmarkInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.Bookmark"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/bookmarks/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "取消文章收藏",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "收藏 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
                         }
                     }
                 }
@@ -3800,7 +3975,46 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/blog/posts/{id}/collections": {
+        "/api/v1/blog/posts/{id}/versions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "获取文章版本历史",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文章 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.BlogPostVersion"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{id}/versions/{version}/restore": {
             "post": {
                 "security": [
                     {
@@ -3810,17 +4024,13 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "为当前用户拥有的文章增加一个同频道合集归属。",
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "blog"
                 ],
-                "summary": "将文章加入合集",
+                "summary": "恢复文章版本",
                 "parameters": [
                     {
                         "type": "string",
@@ -3830,112 +4040,65 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "合集操作输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/blog.collectionActionInput"
-                        }
+                        "type": "integer",
+                        "description": "版本号",
+                        "name": "version",
+                        "in": "path",
+                        "required": true
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/model.Post"
                         }
                     }
                 }
             }
         },
-        "/api/v1/blog/posts/{id}/collections/{collection_id}": {
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "移除当前用户拥有文章与指定合集之间的关联。",
+        "/api/v1/blog/recommend/posts": {
+            "get": {
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "blog"
                 ],
-                "summary": "将文章移出合集",
+                "summary": "获取博客综合推荐",
                 "parameters": [
                     {
+                        "enum": [
+                            "hot",
+                            "featured",
+                            "discover"
+                        ],
                         "type": "string",
-                        "description": "文章 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
+                        "description": "推荐模式",
+                        "name": "mode",
+                        "in": "query"
                     },
                     {
-                        "type": "string",
-                        "description": "合集 UUID",
-                        "name": "collection_id",
-                        "in": "path",
-                        "required": true
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/blog.RecommendationItemDTO"
+                            }
                         }
                     }
                 }
@@ -5013,14 +5176,13 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "分页返回当前用户的稍后读条目。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "feed"
                 ],
-                "summary": "获取稍后读列表",
+                "summary": "获取统一稍后阅读列表",
                 "parameters": [
                     {
                         "type": "integer",
@@ -5031,7 +5193,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "每页数量",
-                        "name": "limit",
+                        "name": "page_size",
                         "in": "query"
                     }
                 ],
@@ -5039,13 +5201,10 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/feed.ReadingListResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/feed.ErrorResponse"
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.ReadingListItem"
+                            }
                         }
                     }
                 }
@@ -5059,7 +5218,6 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "为 feed item 添加或移除稍后读标记。",
                 "consumes": [
                     "application/json"
                 ],
@@ -5069,15 +5227,15 @@ const docTemplate = `{
                 "tags": [
                     "feed"
                 ],
-                "summary": "切换稍后读条目",
+                "summary": "切换稍后阅读状态",
                 "parameters": [
                     {
-                        "description": "稍后读输入",
+                        "description": "稍后阅读目标",
                         "name": "input",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/feed.StarToggleInput"
+                            "$ref": "#/definitions/feed.ReadingListInput"
                         }
                     }
                 ],
@@ -5085,31 +5243,16 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/feed.SaveToggleResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/feed.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/feed.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/feed.ErrorResponse"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
                         }
                     }
                 }
             }
         },
-        "/api/v1/feed/reading-list/{id}": {
+        "/api/v1/feed/reading-list/{target_type}/{id}": {
             "delete": {
                 "security": [
                     {
@@ -5119,7 +5262,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "删除当前用户待读列表中的指定 feed item。",
+                "description": "删除当前用户稍后阅读列表中的指定 RSS 条目或站内文章。",
                 "produces": [
                     "application/json"
                 ],
@@ -5129,8 +5272,19 @@ const docTemplate = `{
                 "summary": "从待读列表移除条目",
                 "parameters": [
                     {
+                        "enum": [
+                            "feed_item",
+                            "post"
+                        ],
                         "type": "string",
-                        "description": "Feed item UUID",
+                        "description": "目标类型",
+                        "name": "target_type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "目标 UUID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -10954,11 +11108,8 @@ const docTemplate = `{
                 "channel_id": {
                     "type": "string"
                 },
-                "collection_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "collection_id": {
+                    "type": "string"
                 },
                 "content": {
                     "type": "string"
@@ -10983,13 +11134,53 @@ const docTemplate = `{
                 }
             }
         },
-        "blog.collectionActionInput": {
+        "blog.RecommendationItemDTO": {
+            "type": "object",
+            "properties": {
+                "content_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "score_label": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "target_path": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.bookmarkFolderInput": {
             "type": "object",
             "required": [
-                "collection_id"
+                "name"
             ],
             "properties": {
-                "collection_id": {
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.bookmarkInput": {
+            "type": "object",
+            "required": [
+                "post_id"
+            ],
+            "properties": {
+                "bookmark_folder_id": {
+                    "type": "string"
+                },
+                "post_id": {
                     "type": "string"
                 }
             }
@@ -11331,6 +11522,21 @@ const docTemplate = `{
                 "reused": {
                     "type": "integer",
                     "example": 3
+                }
+            }
+        },
+        "feed.ReadingListInput": {
+            "type": "object",
+            "properties": {
+                "target_id": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": [
+                        "feed_item",
+                        "post"
+                    ]
                 }
             }
         },
@@ -12285,90 +12491,6 @@ const docTemplate = `{
                 "error": {
                     "type": "string",
                     "example": "用户名和密码不匹配"
-                }
-            }
-        },
-        "handlers.ExplorePostListResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.ExplorePostResponse"
-                    }
-                },
-                "message": {
-                    "type": "string",
-                    "example": "ok"
-                }
-            }
-        },
-        "handlers.ExplorePostResponse": {
-            "type": "object",
-            "properties": {
-                "allow_comments": {
-                    "type": "boolean"
-                },
-                "channel": {
-                    "$ref": "#/definitions/model.Channel"
-                },
-                "channel_id": {
-                    "type": "string"
-                },
-                "collections": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.Collection"
-                    }
-                },
-                "comments_count": {
-                    "type": "integer"
-                },
-                "content": {
-                    "type": "string"
-                },
-                "cover_url": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "likes_count": {
-                    "type": "integer"
-                },
-                "pinned": {
-                    "type": "boolean"
-                },
-                "rating_average_score": {
-                    "type": "integer"
-                },
-                "rating_count": {
-                    "type": "integer"
-                },
-                "status": {
-                    "description": "draft / published",
-                    "type": "string"
-                },
-                "summary": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
-                    "type": "string"
-                },
-                "visibility": {
-                    "type": "string"
                 }
             }
         },
@@ -13745,6 +13867,108 @@ const docTemplate = `{
                 }
             }
         },
+        "model.BlogPostVersion": {
+            "type": "object",
+            "properties": {
+                "allow_comments": {
+                    "type": "boolean"
+                },
+                "collection_id": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "editor_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "post_id": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "visibility": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.Bookmark": {
+            "type": "object",
+            "properties": {
+                "bookmark_folder": {
+                    "$ref": "#/definitions/model.BookmarkFolder"
+                },
+                "bookmark_folder_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "post": {
+                    "$ref": "#/definitions/model.Post"
+                },
+                "post_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.BookmarkFolder": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "model.Channel": {
             "type": "object",
             "properties": {
@@ -14439,11 +14663,14 @@ const docTemplate = `{
                 "channel_id": {
                     "type": "string"
                 },
-                "collections": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.Collection"
-                    }
+                "collection": {
+                    "$ref": "#/definitions/model.Collection"
+                },
+                "collection_id": {
+                    "type": "string"
+                },
+                "collection_position": {
+                    "type": "integer"
                 },
                 "content": {
                     "type": "string"
@@ -14460,11 +14687,8 @@ const docTemplate = `{
                 "pinned": {
                     "type": "boolean"
                 },
-                "rating_average_score": {
-                    "type": "integer"
-                },
-                "rating_count": {
-                    "type": "integer"
+                "published_at": {
+                    "type": "string"
                 },
                 "status": {
                     "description": "draft / published",
@@ -14485,6 +14709,9 @@ const docTemplate = `{
                 "user_id": {
                     "type": "string"
                 },
+                "view_count": {
+                    "type": "integer"
+                },
                 "visibility": {
                     "type": "string"
                 }
@@ -14499,7 +14726,13 @@ const docTemplate = `{
                 "feed_item": {
                     "$ref": "#/definitions/model.FeedItem"
                 },
-                "feed_item_id": {
+                "post": {
+                    "$ref": "#/definitions/model.Post"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_type": {
                     "type": "string"
                 },
                 "user_id": {
@@ -15285,6 +15518,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "is_favorite": {
+                    "type": "boolean"
                 },
                 "is_public": {
                     "type": "boolean"

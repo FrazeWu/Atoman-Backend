@@ -1086,7 +1086,7 @@ func TestListReadingListReturnsPagedItems(t *testing.T) {
 	if err := db.First(&feedItem).Error; err != nil {
 		t.Fatalf("find feed item: %v", err)
 	}
-	if err := db.Create(&model.ReadingListItem{UserID: user.ID, FeedItemID: feedItem.ID, CreatedAt: time.Now().UTC()}).Error; err != nil {
+	if err := db.Create(&model.ReadingListItem{UserID: user.ID, TargetType: "feed_item", TargetID: feedItem.ID, CreatedAt: time.Now().UTC()}).Error; err != nil {
 		t.Fatalf("create reading list item: %v", err)
 	}
 
@@ -1097,8 +1097,8 @@ func TestListReadingListReturnsPagedItems(t *testing.T) {
 	if total != 1 || len(items) != 1 {
 		t.Fatalf("expected one reading list item, got total=%d len=%d", total, len(items))
 	}
-	if items[0].FeedItemID != feedItem.ID {
-		t.Fatalf("expected feed item id %s, got %s", feedItem.ID, items[0].FeedItemID)
+	if items[0].TargetType != "feed_item" || items[0].TargetID != feedItem.ID {
+		t.Fatalf("expected feed item target %s, got %#v", feedItem.ID, items[0])
 	}
 	if items[0].FeedItem == nil || items[0].FeedItem.Title != feedItem.Title {
 		t.Fatalf("expected preloaded feed item, got %#v", items[0].FeedItem)
@@ -1203,15 +1203,15 @@ func TestRemoveReadingListItemDeletesUserItem(t *testing.T) {
 	if err := db.First(&feedItem).Error; err != nil {
 		t.Fatalf("find feed item: %v", err)
 	}
-	if err := db.Create(&model.ReadingListItem{UserID: user.ID, FeedItemID: feedItem.ID, CreatedAt: time.Now().UTC()}).Error; err != nil {
+	if err := db.Create(&model.ReadingListItem{UserID: user.ID, TargetType: "feed_item", TargetID: feedItem.ID, CreatedAt: time.Now().UTC()}).Error; err != nil {
 		t.Fatalf("create reading list item: %v", err)
 	}
 
-	if err := service.RemoveReadingListItem(user, feedItem.ID); err != nil {
+	if err := service.RemoveReadingListItem(user, "feed_item", feedItem.ID); err != nil {
 		t.Fatalf("remove reading list item: %v", err)
 	}
 	var count int64
-	if err := db.Model(&model.ReadingListItem{}).Where("user_id = ? AND feed_item_id = ?", user.ID, feedItem.ID).Count(&count).Error; err != nil {
+	if err := db.Model(&model.ReadingListItem{}).Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, "feed_item", feedItem.ID).Count(&count).Error; err != nil {
 		t.Fatalf("count reading list item: %v", err)
 	}
 	if count != 0 {
@@ -1226,7 +1226,7 @@ func TestRemoveReadingListItemReturnsNotFoundWhenItemMissing(t *testing.T) {
 		t.Fatalf("find feed item: %v", err)
 	}
 
-	err := service.RemoveReadingListItem(user, feedItem.ID)
+	err := service.RemoveReadingListItem(user, "feed_item", feedItem.ID)
 	if err == nil {
 		t.Fatal("expected missing reading list item to return an error")
 	}

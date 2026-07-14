@@ -25,10 +25,6 @@ type Handler struct {
 	service *Service
 }
 
-type setRatingRequest struct {
-	Score int `json:"score"`
-}
-
 type channelInput struct {
 	Name        string `json:"name" binding:"required"`
 	Slug        string `json:"slug"`
@@ -60,11 +56,8 @@ type postInput struct {
 	AllowComments *bool    `json:"allow_comments"`
 	Status        string   `json:"status"`
 	ChannelID     *string  `json:"channel_id"`
-	CollectionIDs []string `json:"collection_ids"`
-}
-
-type collectionActionInput struct {
-	CollectionID uuid.UUID `json:"collection_id" binding:"required"`
+	CollectionID  *string  `json:"collection_id"`
+	CollectionIDs []string `json:"collection_ids" swaggerignore:"true"`
 }
 
 type reorderCollectionPostsInput struct {
@@ -72,16 +65,16 @@ type reorderCollectionPostsInput struct {
 }
 
 type blogDraftInput struct {
-	ContextKey    string   `json:"context_key" binding:"required"`
-	SourcePostID  string   `json:"source_post_id"`
-	Title         string   `json:"title"`
-	Content       string   `json:"content"`
-	Summary       string   `json:"summary"`
-	CoverURL      string   `json:"cover_url"`
-	Visibility    string   `json:"visibility"`
-	AllowComments *bool    `json:"allow_comments"`
-	ChannelID     string   `json:"channel_id"`
-	CollectionIDs []string `json:"collection_ids"`
+	ContextKey    string `json:"context_key" binding:"required"`
+	SourcePostID  string `json:"source_post_id"`
+	Title         string `json:"title"`
+	Content       string `json:"content"`
+	Summary       string `json:"summary"`
+	CoverURL      string `json:"cover_url"`
+	Visibility    string `json:"visibility"`
+	AllowComments *bool  `json:"allow_comments"`
+	ChannelID     string `json:"channel_id"`
+	CollectionID  string `json:"collection_id"`
 }
 
 type blogDraftResponse struct {
@@ -96,7 +89,7 @@ type blogDraftResponse struct {
 	Visibility    string    `json:"visibility"`
 	AllowComments bool      `json:"allow_comments"`
 	ChannelID     *string   `json:"channel_id,omitempty"`
-	CollectionIDs []string  `json:"collection_ids"`
+	CollectionID  *string   `json:"collection_id,omitempty"`
 	CreatedAt     any       `json:"created_at"`
 	UpdatedAt     any       `json:"updated_at"`
 }
@@ -133,6 +126,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/posts", h.listPosts)
 	group.GET("/recommend/posts", h.listRecommendedPosts)
 	group.GET("/posts/drafts", h.getDrafts)
+	group.GET("/posts/:id/versions", h.listPostVersions)
+	group.POST("/posts/:id/versions/:version/restore", h.restorePostVersion)
 	group.GET("/posts/:id", h.getPost)
 	group.POST("/posts", h.createPost)
 	group.PUT("/posts/:id", h.updatePost)
@@ -141,13 +136,10 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/posts/:id/unpublish", h.unpublishPost)
 	group.POST("/posts/:id/pin", h.pinPost)
 	group.POST("/posts/:id/unpin", h.unpinPost)
-	group.POST("/posts/:id/collections", h.addPostToCollection)
-	group.DELETE("/posts/:id/collections/:collection_id", h.removePostFromCollection)
 	group.PUT("/collections/:id/posts/order", h.reorderCollectionPosts)
 	group.GET("/drafts", h.getBlogDraft)
 	group.PUT("/drafts", h.putBlogDraft)
 	group.DELETE("/drafts", h.deleteBlogDraft)
-	group.PUT("/posts/:id/rating", h.setRating)
 }
 
 func (h *Handler) listChannels(c *gin.Context) {
@@ -521,6 +513,16 @@ func (h *Handler) toggleLike(c *gin.Context, isLike bool) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
 
+// listBookmarks godoc
+// @Summary 获取文章收藏
+// @Tags blog
+// @Produce json
+// @Param folder_id query string false "收藏夹 UUID"
+// @Param sort query string false "排序" Enums(latest,popular)
+// @Success 200 {array} model.Bookmark
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/bookmarks [get]
 func (h *Handler) listBookmarks(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -545,6 +547,16 @@ func (h *Handler) listBookmarks(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, bookmarks)
 }
 
+// createBookmark godoc
+// @Summary 收藏文章到指定收藏夹
+// @Tags blog
+// @Accept json
+// @Produce json
+// @Param input body bookmarkInput true "收藏输入"
+// @Success 201 {object} model.Bookmark
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/bookmarks [post]
 func (h *Handler) createBookmark(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -564,6 +576,14 @@ func (h *Handler) createBookmark(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, bookmark)
 }
 
+// deleteBookmark godoc
+// @Summary 取消文章收藏
+// @Tags blog
+// @Param id path string true "收藏 UUID"
+// @Success 200 {object} handlers.MessageResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/bookmarks/{id} [delete]
 func (h *Handler) deleteBookmark(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -582,6 +602,13 @@ func (h *Handler) deleteBookmark(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
 
+// listBookmarkFolders godoc
+// @Summary 获取收藏夹
+// @Tags blog
+// @Success 200 {array} model.BookmarkFolder
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/bookmark-folders [get]
 func (h *Handler) listBookmarkFolders(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -596,6 +623,15 @@ func (h *Handler) listBookmarkFolders(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, folders)
 }
 
+// createBookmarkFolder godoc
+// @Summary 新建收藏夹
+// @Tags blog
+// @Accept json
+// @Param input body bookmarkFolderInput true "收藏夹输入"
+// @Success 201 {object} model.BookmarkFolder
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/bookmark-folders [post]
 func (h *Handler) createBookmarkFolder(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -615,6 +651,15 @@ func (h *Handler) createBookmarkFolder(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, folder)
 }
 
+// deleteBookmarkFolder godoc
+// @Summary 删除收藏夹
+// @Description 收藏会迁移到默认收藏夹。
+// @Tags blog
+// @Param id path string true "收藏夹 UUID"
+// @Success 200 {object} handlers.MessageResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/bookmark-folders/{id} [delete]
 func (h *Handler) deleteBookmarkFolder(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok || user.ID == uuid.Nil {
@@ -690,49 +735,92 @@ func buildArticleRSS(ch model.Channel, posts []model.Post, siteURL string) strin
 // @Router /api/v1/blog/posts [get]
 func (h *Handler) listPosts(c *gin.Context) {
 	var posts []model.Post
-	limit := boundedListLimit(c.Query("limit"), 0, 40)
-	query := h.service.db.Preload("User").Preload("Channel").Preload("Collections").Where("status = ?", "published")
+	page, pageSize := httpx.PageParams(c)
+	query := h.service.db.Model(&model.Post{}).Preload("User").Preload("Channel").Preload("Collection").Where("status = ?", "published")
+	query = applyPostListVisibility(query, currentViewerID(c))
 
 	if userID := c.Query("user_id"); userID != "" {
 		query = query.Where("user_id = ?", userID)
 	}
-	if channelID := c.Query("channel_id"); channelID != "" {
+	channelID := c.Query("channel_id")
+	if channelID != "" {
 		query = query.Where("channel_id = ?", channelID)
 	}
 	if collectionID := c.Query("collection_id"); collectionID != "" {
-		query = query.Joins("JOIN post_collections pc ON pc.post_id = posts.id").Where("pc.collection_id = ?", collectionID)
-		query = query.Order("pc.position ASC")
+		query = query.Where("posts.collection_id = ?", collectionID)
+		query = query.Order("posts.collection_position ASC")
+	} else if channelID != "" {
+		query = query.Order("pinned DESC, published_at DESC, posts.id DESC")
 	} else {
-		query = query.Order("pinned DESC, created_at DESC")
+		query = query.Order("published_at DESC, posts.id DESC")
 	}
 	if q := strings.TrimSpace(c.Query("q")); q != "" {
 		searchLike := "%" + q + "%"
-		query = query.Where("(title ILIKE ? OR summary ILIKE ? OR content ILIKE ?)", searchLike, searchLike, searchLike)
+		query = query.Where("(LOWER(title) LIKE LOWER(?) OR LOWER(summary) LIKE LOWER(?) OR LOWER(content) LIKE LOWER(?))", searchLike, searchLike, searchLike)
 	}
-	if limit > 0 {
-		query = query.Limit(limit)
+
+	var total int64
+	if err := query.Session(&gorm.Session{}).Distinct("posts.id").Count(&total).Error; err != nil {
+		httpx.Error(c, err)
+		return
 	}
-	if err := query.Find(&posts).Error; err != nil {
+	if err := query.Offset(httpx.Offset(page, pageSize)).Limit(pageSize).Find(&posts).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
 
-	viewerID := currentViewerID(c)
-	visiblePosts := make([]model.Post, 0, len(posts))
+	items := make([]PostListItemDTO, 0, len(posts))
 	for _, post := range posts {
-		allowed, err := canViewPublishedPost(h.service.db, viewerID, post)
+		likes, err := h.service.CountPostLikes(post.ID)
 		if err != nil {
 			httpx.Error(c, err)
 			return
 		}
-		if allowed {
-			visiblePosts = append(visiblePosts, post)
+		var comments int64
+		if err := h.service.db.Model(&model.Comment{}).Where("target_type = ? AND target_id = ? AND status = ?", "post", post.ID, "visible").Count(&comments).Error; err != nil {
+			httpx.Error(c, err)
+			return
 		}
+		var bookmarks int64
+		if err := h.service.db.Model(&model.Bookmark{}).Where("post_id = ?", post.ID).Count(&bookmarks).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		items = append(items, PostListItemDTO{Post: post, LikesCount: likes, CommentsCount: comments, BookmarksCount: bookmarks})
 	}
 
-	httpx.OK(c, http.StatusOK, visiblePosts)
+	httpx.List(c, items, page, pageSize, total)
 }
 
+func applyPostListVisibility(query *gorm.DB, viewerID *uuid.UUID) *gorm.DB {
+	public := query.Where("(visibility = ? OR visibility = ?)", "", "public")
+	if viewerID == nil {
+		return public
+	}
+
+	subscribedChannelIDs := query.Session(&gorm.Session{NewDB: true}).
+		Table("feed_sources").
+		Select("feed_sources.source_id").
+		Joins("JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id").
+		Where("subscriptions.user_id = ?", *viewerID).
+		Where("feed_sources.source_type = ?", "internal_channel").
+		Where("feed_sources.deleted_at IS NULL AND subscriptions.deleted_at IS NULL")
+
+	return query.Where(
+		"(visibility = ? OR visibility = ? OR user_id = ? OR (visibility = ? AND channel_id IN (?)))",
+		"", "public", *viewerID, "followers", subscribedChannelIDs,
+	)
+}
+
+// listRecommendedPosts godoc
+// @Summary 获取博客综合推荐
+// @Tags blog
+// @Produce json
+// @Param mode query string false "推荐模式" Enums(hot,featured,discover)
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Success 200 {array} RecommendationItemDTO
+// @Router /api/v1/blog/recommend/posts [get]
 func (h *Handler) listRecommendedPosts(c *gin.Context) {
 	mode, err := parseRecommendationMode(c.DefaultQuery("mode", "hot"))
 	if err != nil {
@@ -740,7 +828,7 @@ func (h *Handler) listRecommendedPosts(c *gin.Context) {
 		return
 	}
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.RecommendPostsByMode(mode, page, pageSize)
+	items, total, err := h.service.RecommendPostsByMode(mode, currentViewerID(c), page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -766,7 +854,7 @@ func (h *Handler) getPost(c *gin.Context) {
 	}
 
 	var post model.Post
-	if err := h.service.db.Preload("User").Preload("Channel").Preload("Collections").First(&post, "id = ?", postID).Error; err != nil {
+	if err := h.service.db.Preload("User").Preload("Channel").Preload("Collection").First(&post, "id = ?", postID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
 			return
@@ -792,6 +880,14 @@ func (h *Handler) getPost(c *gin.Context) {
 			return
 		}
 	}
+	if post.Status == "published" && (viewerID == nil || *viewerID != post.UserID) {
+		if err := h.service.db.Model(&model.Post{}).Where("id = ?", post.ID).
+			UpdateColumn("view_count", gorm.Expr("view_count + ?", 1)).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		post.ViewCount++
+	}
 
 	likesCount, err := h.service.CountPostLikes(post.ID)
 	if err != nil {
@@ -810,15 +906,43 @@ func (h *Handler) getPost(c *gin.Context) {
 		}
 		liked = likedCount > 0
 	}
+	var commentsCount int64
+	if err := h.service.db.Model(&model.Comment{}).
+		Where("target_type = ? AND target_id = ? AND status = ?", "post", post.ID, "visible").
+		Count(&commentsCount).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var bookmarksCount int64
+	if err := h.service.db.Model(&model.Bookmark{}).Where("post_id = ?", post.ID).Count(&bookmarksCount).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var channelFollowersCount int64
+	if post.ChannelID != nil {
+		if err := h.service.db.Model(&model.Subscription{}).
+			Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+			Where("feed_sources.source_type = ? AND feed_sources.source_id = ?", "internal_channel", *post.ChannelID).
+			Count(&channelFollowersCount).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+	}
 
 	httpx.OK(c, http.StatusOK, struct {
 		model.Post
-		Liked      bool  `json:"liked"`
-		LikesCount int64 `json:"likes_count"`
+		Liked                 bool  `json:"liked"`
+		LikesCount            int64 `json:"likes_count"`
+		CommentsCount         int64 `json:"comments_count"`
+		BookmarksCount        int64 `json:"bookmarks_count"`
+		ChannelFollowersCount int64 `json:"channel_followers_count"`
 	}{
-		Post:       post,
-		Liked:      liked,
-		LikesCount: likesCount,
+		Post:                  post,
+		Liked:                 liked,
+		LikesCount:            likesCount,
+		CommentsCount:         commentsCount,
+		BookmarksCount:        bookmarksCount,
+		ChannelFollowersCount: channelFollowersCount,
 	})
 }
 
@@ -916,31 +1040,66 @@ func (h *Handler) createPost(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, post)
 }
 
-func (h *Handler) setRating(c *gin.Context) {
+// listPostVersions godoc
+// @Summary 获取文章版本历史
+// @Tags blog
+// @Produce json
+// @Param id path string true "文章 UUID"
+// @Success 200 {array} model.BlogPostVersion
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/posts/{id}/versions [get]
+func (h *Handler) listPostVersions(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-
 	postID, err := parsePostID(c.Param("id"))
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-
-	var req setRatingRequest
-	if err := bindJSON(c, &req); err != nil {
-		httpx.Error(c, err)
-		return
-	}
-
-	summary, err := h.service.SetRating(user, postID, req.Score)
+	versions, err := h.service.ListPostVersions(user, postID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, summary)
+	httpx.OK(c, http.StatusOK, versions)
+}
+
+// restorePostVersion godoc
+// @Summary 恢复文章版本
+// @Tags blog
+// @Produce json
+// @Param id path string true "文章 UUID"
+// @Param version path int true "版本号"
+// @Success 200 {object} model.Post
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/posts/{id}/versions/{version}/restore [post]
+func (h *Handler) restorePostVersion(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	postID, err := parsePostID(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	version, err := strconv.Atoi(c.Param("version"))
+	if err != nil || version < 1 {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "version must be a positive integer"))
+		return
+	}
+	post, err := h.service.RestorePostVersion(user, postID, version)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, post)
 }
 
 func (h *Handler) updatePost(c *gin.Context) {
@@ -984,63 +1143,49 @@ func (h *Handler) updatePost(c *gin.Context) {
 		"visibility": normalizeBlogVisibility(req.Visibility),
 	}
 
-	targetChannelID := post.ChannelID
-	if req.ChannelID != nil {
-		trimmedChannelID := strings.TrimSpace(*req.ChannelID)
-		if trimmedChannelID == "" {
-			targetChannelID = nil
-			updates["channel_id"] = nil
-		} else {
-			parsedChannelID, err := uuid.Parse(trimmedChannelID)
-			if err != nil {
-				httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid channel UUID"))
-				return
-			}
-			var channel model.Channel
-			if err := h.service.db.First(&channel, "id = ?", parsedChannelID).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					httpx.Error(c, apperr.NotFound("blog.channel_not_found", "Channel not found"))
-					return
-				}
-				httpx.Error(c, err)
-				return
-			}
-			if channel.UserID == nil || *channel.UserID != user.ID {
-				httpx.Error(c, apperr.Forbidden("blog.channel_forbidden", "You don't have permission to move post to this channel"))
-				return
-			}
-			targetChannelID = &parsedChannelID
-			updates["channel_id"] = parsedChannelID
-		}
+	if len(req.CollectionIDs) > 0 {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "collection_ids is no longer supported"))
+		return
 	}
-
-	selectedCollections := make([]model.Collection, 0, len(req.CollectionIDs))
-	if req.CollectionIDs != nil {
-		for _, collectionIDStr := range req.CollectionIDs {
-			collectionID, err := uuid.Parse(collectionIDStr)
-			if err != nil {
-				httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid collection UUID"))
+	if req.CollectionID != nil {
+		collectionID, err := uuid.Parse(strings.TrimSpace(*req.CollectionID))
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid collection UUID"))
+			return
+		}
+		var collection model.Collection
+		if err := h.service.db.Preload("Channel").First(&collection, "id = ?", collectionID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				httpx.Error(c, apperr.NotFound("blog.collection_not_found", "Collection not found"))
 				return
 			}
-			var collection model.Collection
-			if err := h.service.db.Preload("Channel").First(&collection, "id = ?", collectionID).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					httpx.Error(c, apperr.NotFound("blog.collection_not_found", "Collection not found"))
-					return
-				}
-				httpx.Error(c, err)
-				return
-			}
-			if collection.Channel == nil || collection.Channel.UserID == nil || *collection.Channel.UserID != user.ID {
-				httpx.Error(c, apperr.Forbidden("blog.collection_forbidden", "You don't have permission to assign this collection"))
-				return
-			}
-			if targetChannelID == nil || collection.ChannelID != *targetChannelID {
+			httpx.Error(c, err)
+			return
+		}
+		if collection.Channel == nil || collection.Channel.UserID == nil || *collection.Channel.UserID != user.ID {
+			httpx.Error(c, apperr.Forbidden("blog.collection_forbidden", "You don't have permission to assign this collection"))
+			return
+		}
+		if req.ChannelID != nil {
+			channelID, err := uuid.Parse(strings.TrimSpace(*req.ChannelID))
+			if err != nil || channelID != collection.ChannelID {
 				httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Collection does not belong to selected channel"))
 				return
 			}
-			selectedCollections = append(selectedCollections, collection)
 		}
+		updates["collection_id"] = collection.ID
+		updates["channel_id"] = collection.ChannelID
+		if post.CollectionID == nil || *post.CollectionID != collection.ID {
+			var maxPosition int
+			if err := h.service.db.Model(&model.Post{}).Where("collection_id = ?", collection.ID).Select("COALESCE(MAX(collection_position), -1)").Scan(&maxPosition).Error; err != nil {
+				httpx.Error(c, err)
+				return
+			}
+			updates["collection_position"] = maxPosition + 1
+		}
+	} else if post.CollectionID == nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "collection_id is required"))
+		return
 	}
 
 	if req.Status == "published" || req.Status == "draft" {
@@ -1049,41 +1194,22 @@ func (h *Handler) updatePost(c *gin.Context) {
 	if req.AllowComments != nil {
 		updates["allow_comments"] = *req.AllowComments
 	}
-
-	shouldUpdateCollections := req.ChannelID != nil || req.CollectionIDs != nil
+	if req.Status == "published" && post.PublishedAt == nil {
+		now := time.Now().UTC()
+		updates["published_at"] = now
+	}
 	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&post).Updates(updates).Error; err != nil {
 			return err
 		}
-
-		if shouldUpdateCollections {
-			if targetChannelID != nil {
-				defaultCollection, err := ensureDefaultCollection(tx, *targetChannelID)
-				if err != nil {
-					return err
-				}
-				collectionsToAssign := make([]model.Collection, 0, len(selectedCollections)+1)
-				collectionsToAssign = append(collectionsToAssign, *defaultCollection)
-				for _, collection := range selectedCollections {
-					if collection.ID == defaultCollection.ID {
-						continue
-					}
-					collectionsToAssign = append(collectionsToAssign, collection)
-				}
-				if err := tx.Model(&post).Association("Collections").Replace(collectionsToAssign); err != nil {
-					return err
-				}
-			} else if err := tx.Model(&post).Association("Collections").Clear(); err != nil {
-				return err
-			}
+		if err := tx.Preload("Channel").Preload("Collection").First(&post, "id = ?", post.ID).Error; err != nil {
+			return err
+		}
+		if post.Status == "published" {
+			return saveBlogPostVersion(tx, post, user.ID)
 		}
 		return nil
 	}); err != nil {
-		httpx.Error(c, err)
-		return
-	}
-
-	if err := h.service.db.Preload("Channel").Preload("Collections").First(&post, "id = ?", post.ID).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -1149,7 +1275,7 @@ func (h *Handler) getDrafts(c *gin.Context) {
 		return
 	}
 	var posts []model.Post
-	if err := h.service.db.Preload("Collections").Where("user_id = ? AND status = ?", user.ID, "draft").Order("updated_at DESC").Find(&posts).Error; err != nil {
+	if err := h.service.db.Preload("Collection").Where("user_id = ? AND status = ?", user.ID, "draft").Order("updated_at DESC").Find(&posts).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -1200,9 +1326,9 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid channel_id"))
 		return
 	}
-	collectionIDs, err := normalizeUUIDList(req.CollectionIDs)
+	collectionID, err := parseOptionalUUID(req.CollectionID)
 	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid collection_ids"))
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid collection_id"))
 		return
 	}
 	allowComments := true
@@ -1220,11 +1346,11 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 		Visibility:    normalizeBlogVisibility(req.Visibility),
 		AllowComments: allowComments,
 		ChannelID:     channelID,
-		CollectionIDs: strings.Join(collectionIDs, ","),
+		CollectionID:  collectionID,
 	}
 	if err := h.service.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "user_id"}, {Name: "context_key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"source_post_id", "title", "content", "summary", "cover_url", "visibility", "allow_comments", "channel_id", "collection_ids", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"source_post_id", "title", "content", "summary", "cover_url", "visibility", "allow_comments", "channel_id", "collection_id", "updated_at"}),
 	}).Create(&draft).Error; err != nil {
 		httpx.Error(c, err)
 		return
@@ -1244,151 +1370,6 @@ func (h *Handler) deleteBlogDraft(c *gin.Context) {
 		return
 	}
 	if err := h.service.db.Where("user_id = ? AND context_key = ?", user.ID, contextKey).Delete(&model.BlogDraft{}).Error; err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
-}
-
-// addPostToCollection godoc
-// @Summary 将文章加入合集
-// @Description 为当前用户拥有的文章增加一个同频道合集归属。
-// @Tags blog
-// @Accept json
-// @Produce json
-// @Param id path string true "文章 UUID"
-// @Param input body collectionActionInput true "合集操作输入"
-// @Success 200 {object} handlers.MessageResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 403 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Security BearerAuth
-// @Security CookieAuth
-// @Router /api/v1/blog/posts/{id}/collections [post]
-func (h *Handler) addPostToCollection(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	postID, err := parsePostID(c.Param("id"))
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	var req collectionActionInput
-	if err := bindJSON(c, &req); err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	var post model.Post
-	if err := h.service.db.First(&post, "id = ?", postID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
-			return
-		}
-		httpx.Error(c, err)
-		return
-	}
-	if post.UserID != user.ID {
-		httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to modify this post"))
-		return
-	}
-	if post.ChannelID == nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Post is not assigned to a channel"))
-		return
-	}
-	var collection model.Collection
-	if err := h.service.db.Preload("Channel").First(&collection, "id = ?", req.CollectionID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.Error(c, apperr.NotFound("blog.collection_not_found", "Collection not found"))
-			return
-		}
-		httpx.Error(c, err)
-		return
-	}
-	if collection.Channel == nil || collection.Channel.UserID == nil || *collection.Channel.UserID != user.ID {
-		httpx.Error(c, apperr.Forbidden("blog.collection_forbidden", "You don't have permission to add to this collection"))
-		return
-	}
-	if collection.ChannelID != *post.ChannelID {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Collection does not belong to post channel"))
-		return
-	}
-	if err := h.service.db.Model(&post).Association("Collections").Append(&collection); err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	if err := h.service.appendPostCollectionAtTail(post.ID, collection.ID); err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
-}
-
-// removePostFromCollection godoc
-// @Summary 将文章移出合集
-// @Description 移除当前用户拥有文章与指定合集之间的关联。
-// @Tags blog
-// @Produce json
-// @Param id path string true "文章 UUID"
-// @Param collection_id path string true "合集 UUID"
-// @Success 200 {object} handlers.MessageResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 403 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Security BearerAuth
-// @Security CookieAuth
-// @Router /api/v1/blog/posts/{id}/collections/{collection_id} [delete]
-func (h *Handler) removePostFromCollection(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	postID, err := parsePostID(c.Param("id"))
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	collectionID, err := uuid.Parse(c.Param("collection_id"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "collection_id must be a valid UUID"))
-		return
-	}
-	var post model.Post
-	if err := h.service.db.First(&post, "id = ?", postID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
-			return
-		}
-		httpx.Error(c, err)
-		return
-	}
-	if post.UserID != user.ID {
-		httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to modify this post"))
-		return
-	}
-	if post.ChannelID == nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Post is not assigned to a channel"))
-		return
-	}
-	var collection model.Collection
-	if err := h.service.db.First(&collection, "id = ?", collectionID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.Error(c, apperr.NotFound("blog.collection_not_found", "Collection not found"))
-			return
-		}
-		httpx.Error(c, err)
-		return
-	}
-	if collection.ChannelID != *post.ChannelID {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Collection does not belong to post channel"))
-		return
-	}
-	if err := h.service.db.Model(&post).Association("Collections").Delete(&collection); err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -1480,7 +1461,23 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 		httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to modify this post"))
 		return
 	}
-	if err := h.service.db.Model(&post).Update("status", status).Error; err != nil {
+	wasPublished := post.Status == "published"
+	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
+		updates := map[string]any{"status": status}
+		if status == "published" && post.PublishedAt == nil {
+			updates["published_at"] = time.Now().UTC()
+		}
+		if err := tx.Model(&post).Updates(updates).Error; err != nil {
+			return err
+		}
+		if status != "published" || wasPublished {
+			return nil
+		}
+		if err := tx.Preload("Channel").Preload("Collection").First(&post, "id = ?", post.ID).Error; err != nil {
+			return err
+		}
+		return saveBlogPostVersion(tx, post, user.ID)
+	}); err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -1557,27 +1554,6 @@ func parseOptionalUUID(raw string) (*uuid.UUID, error) {
 	return &parsed, nil
 }
 
-func normalizeUUIDList(values []string) ([]string, error) {
-	if len(values) == 0 {
-		return []string{}, nil
-	}
-	normalized := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		parsed, err := uuid.Parse(strings.TrimSpace(value))
-		if err != nil {
-			return nil, err
-		}
-		stringID := parsed.String()
-		if _, exists := seen[stringID]; exists {
-			continue
-		}
-		seen[stringID] = struct{}{}
-		normalized = append(normalized, stringID)
-	}
-	return normalized, nil
-}
-
 func buildBlogDraftResponse(draft model.BlogDraft) blogDraftResponse {
 	var sourcePostID *string
 	if draft.SourcePostID != nil {
@@ -1591,13 +1567,10 @@ func buildBlogDraftResponse(draft model.BlogDraft) blogDraftResponse {
 		channelID = &value
 	}
 
-	collectionIDs := []string{}
-	for _, collectionID := range strings.Split(draft.CollectionIDs, ",") {
-		trimmed := strings.TrimSpace(collectionID)
-		if trimmed == "" {
-			continue
-		}
-		collectionIDs = append(collectionIDs, trimmed)
+	var collectionID *string
+	if draft.CollectionID != nil {
+		value := draft.CollectionID.String()
+		collectionID = &value
 	}
 
 	return blogDraftResponse{
@@ -1612,7 +1585,7 @@ func buildBlogDraftResponse(draft model.BlogDraft) blogDraftResponse {
 		Visibility:    draft.Visibility,
 		AllowComments: draft.AllowComments,
 		ChannelID:     channelID,
-		CollectionIDs: collectionIDs,
+		CollectionID:  collectionID,
 		CreatedAt:     draft.CreatedAt,
 		UpdatedAt:     draft.UpdatedAt,
 	}

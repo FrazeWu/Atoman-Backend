@@ -2533,6 +2533,14 @@ func GetStarredItems(db *gorm.DB) gin.HandlerFunc {
 
 		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
+		if page < 1 {
+			page = 1
+		}
+		if limit < 1 {
+			limit = 20
+		} else if limit > 500 {
+			limit = 500
+		}
 		offset := (page - 1) * limit
 
 		starQuery := db.Where("user_id = ?", userID)
@@ -2626,7 +2634,6 @@ func GetStarredItems(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/v1/feed/reading-list [post]
 func ToggleReadingListItem(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2648,7 +2655,7 @@ func ToggleReadingListItem(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var existing model.ReadingListItem
-		err := db.Where("user_id = ? AND feed_item_id = ?", userID, input.FeedItemID).First(&existing).Error
+		err := db.Where("user_id = ? AND target_type = ? AND target_id = ?", userID, "feed_item", input.FeedItemID).First(&existing).Error
 
 		if err == nil {
 			if err := db.Delete(&existing).Error; err != nil {
@@ -2666,7 +2673,8 @@ func ToggleReadingListItem(db *gorm.DB) gin.HandlerFunc {
 
 		item := model.ReadingListItem{
 			UserID:     userID,
-			FeedItemID: input.FeedItemID,
+			TargetType: "feed_item",
+			TargetID:   input.FeedItemID,
 			CreatedAt:  time.Now(),
 		}
 		if err := db.Create(&item).Error; err != nil {
@@ -2689,7 +2697,6 @@ func ToggleReadingListItem(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/v1/feed/reading-list [get]
 func GetReadingListItems(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")
@@ -2709,7 +2716,7 @@ func GetReadingListItems(db *gorm.DB) gin.HandlerFunc {
 		db.Model(&model.ReadingListItem{}).Where("user_id = ?", userID).Count(&total)
 
 		var listItems []model.ReadingListItem
-		if err := db.Preload("FeedItem").Preload("FeedItem.FeedSource").
+		if err := db.Preload("FeedItem").Preload("FeedItem.FeedSource").Preload("Post").
 			Where("user_id = ?", userID).
 			Order("created_at DESC").
 			Offset(offset).
@@ -2738,7 +2745,7 @@ func RemoveReadingListItem(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		if err := db.Where("user_id = ? AND feed_item_id = ?", userID, feedItemID).Delete(&model.ReadingListItem{}).Error; err != nil {
+		if err := db.Where("user_id = ? AND target_type = ? AND target_id = ?", userID, "feed_item", feedItemID).Delete(&model.ReadingListItem{}).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to remove reading list item"})
 			return
 		}

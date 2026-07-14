@@ -2574,3 +2574,30 @@ func TestGetStarredItemsReturnsStableTotalAcrossPages(t *testing.T) {
 		t.Fatalf("expected page 2 to return 1 item, got %d", len(page2.Items))
 	}
 }
+
+func TestGetStarredItemsNormalizesInvalidPagination(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	if err := db.AutoMigrate(&model.FeedStarGroup{}, &model.FeedItemStar{}); err != nil {
+		t.Fatalf("migrate starred models: %v", err)
+	}
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	router.GET("/api/v1/feed/stars", withFeedAuth(user.UUID, GetStarredItems(db)))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/stars?page=0&limit=-1", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Page int `json:"page"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Page != 1 {
+		t.Fatalf("expected normalized page 1, got %d", payload.Page)
+	}
+}

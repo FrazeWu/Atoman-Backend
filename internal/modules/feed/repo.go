@@ -72,7 +72,7 @@ func (r *Repo) ListPublishedPostsByUserIDs(userIDs []uuid.UUID) ([]model.Post, e
 		return []model.Post{}, nil
 	}
 	var posts []model.Post
-	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
+	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("status = ?", "published").
 		Where("user_id IN ?", userIDs).
 		Find(&posts).Error
@@ -84,7 +84,7 @@ func (r *Repo) ListPublishedPostsByChannelIDs(channelIDs []uuid.UUID) ([]model.P
 		return []model.Post{}, nil
 	}
 	var posts []model.Post
-	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
+	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("status = ?", "published").
 		Where("channel_id IN ?", channelIDs).
 		Find(&posts).Error
@@ -96,10 +96,9 @@ func (r *Repo) ListPublishedPostsByCollectionIDs(collectionIDs []uuid.UUID) ([]m
 		return []model.Post{}, nil
 	}
 	var posts []model.Post
-	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
-		Joins("JOIN post_collections ON post_collections.post_id = posts.id").
+	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("posts.status = ?", "published").
-		Where("post_collections.collection_id IN ?", collectionIDs).
+		Where("posts.collection_id IN ?", collectionIDs).
 		Find(&posts).Error
 	return posts, err
 }
@@ -210,7 +209,7 @@ func (r *Repo) DeleteReads(userID uuid.UUID, ids []uuid.UUID) error {
 
 func (r *Repo) ListExplorePosts(limit int, offset int) ([]model.Post, error) {
 	var posts []model.Post
-	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
+	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("status = ?", "published").
 		Order("created_at DESC, id DESC").
 		Offset(offset).
@@ -221,7 +220,7 @@ func (r *Repo) ListExplorePosts(limit int, offset int) ([]model.Post, error) {
 
 func (r *Repo) ListExplorePostsAll() ([]model.Post, error) {
 	var posts []model.Post
-	err := r.db.Preload("User").Preload("Channel").Preload("Collections").
+	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("status = ?", "published").
 		Order("created_at DESC, id DESC").
 		Find(&posts).Error
@@ -251,7 +250,7 @@ type RecommendationChannelRow struct {
 	CoverURL              string
 	PublishedCount        int64
 	RecentPostCount       int64
-	AverageRating         float64
+	AverageViews          float64
 	LatestPublishedAtUnix sql.NullInt64
 }
 
@@ -267,7 +266,7 @@ func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) 
 			channels.cover_url AS cover_url,
 			COUNT(posts.id) AS published_count,
 			SUM(CASE WHEN posts.created_at >= ? THEN 1 ELSE 0 END) AS recent_post_count,
-			COALESCE(AVG(posts.rating_average_score), 0) AS average_rating,
+			COALESCE(AVG(posts.view_count), 0) AS average_views,
 			`+latestPublishedExpr+` AS latest_published_at_unix
 		`, time.Now().Add(-7*24*time.Hour)).
 		Joins("JOIN posts ON posts.channel_id = channels.id").
@@ -600,9 +599,9 @@ func (r *Repo) DeleteStar(userID uuid.UUID, feedItemID uuid.UUID) error {
 	return r.db.Where("user_id = ? AND feed_item_id = ?", userID, feedItemID).Delete(&model.FeedItemStar{}).Error
 }
 
-func (r *Repo) FindReadingListItem(userID uuid.UUID, feedItemID uuid.UUID) (model.ReadingListItem, error) {
+func (r *Repo) FindReadingListItem(userID uuid.UUID, targetType string, targetID uuid.UUID) (model.ReadingListItem, error) {
 	var item model.ReadingListItem
-	err := r.db.Where("user_id = ? AND feed_item_id = ?", userID, feedItemID).First(&item).Error
+	err := r.db.Where("user_id = ? AND target_type = ? AND target_id = ?", userID, targetType, targetID).First(&item).Error
 	return item, err
 }
 
@@ -612,7 +611,7 @@ func (r *Repo) CreateReadingListItem(item *model.ReadingListItem) error {
 
 func (r *Repo) ListReadingListItems(userID uuid.UUID, limit int, offset int) ([]model.ReadingListItem, error) {
 	var items []model.ReadingListItem
-	err := r.db.Preload("FeedItem").Preload("FeedItem.FeedSource").
+	err := r.db.Preload("FeedItem").Preload("FeedItem.FeedSource").Preload("Post").Preload("Post.User").Preload("Post.Channel").Preload("Post.Collection").
 		Where("user_id = ?", userID).
 		Order("created_at DESC").
 		Offset(offset).
@@ -627,8 +626,8 @@ func (r *Repo) CountReadingListItems(userID uuid.UUID) (int64, error) {
 	return count, err
 }
 
-func (r *Repo) DeleteReadingListItem(userID uuid.UUID, feedItemID uuid.UUID) error {
-	result := r.db.Where("user_id = ? AND feed_item_id = ?", userID, feedItemID).Delete(&model.ReadingListItem{})
+func (r *Repo) DeleteReadingListItem(userID uuid.UUID, targetType string, targetID uuid.UUID) error {
+	result := r.db.Where("user_id = ? AND target_type = ? AND target_id = ?", userID, targetType, targetID).Delete(&model.ReadingListItem{})
 	if result.Error != nil {
 		return result.Error
 	}

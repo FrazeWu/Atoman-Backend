@@ -44,14 +44,25 @@ func TestEnsureOwnerCreatesDefaultResources(t *testing.T) {
 		t.Fatalf("EnsureOwner created = false, want true")
 	}
 
-	var channel model.Channel
-	if err := db.Where("user_id = ? AND is_default = ?", owner.UUID, true).First(&channel).Error; err != nil {
-		t.Fatalf("find default channel: %v", err)
+	var channels []model.Channel
+	if err := db.Where("user_id = ?", owner.UUID).Find(&channels).Error; err != nil {
+		t.Fatalf("find default channels: %v", err)
 	}
-
-	var collection model.Collection
-	if err := db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&collection).Error; err != nil {
-		t.Fatalf("find default collection: %v", err)
+	if len(channels) != 3 {
+		t.Fatalf("expected 3 module channels, got %d", len(channels))
+	}
+	for _, contentType := range []string{model.ChannelContentTypeBlog, model.ChannelContentTypePodcast, model.ChannelContentTypeVideo} {
+		var selection model.UserDefaultChannel
+		if err := db.Preload("Channel").Where("user_id = ? AND content_type = ?", owner.UUID, contentType).First(&selection).Error; err != nil {
+			t.Fatalf("find %s default channel selection: %v", contentType, err)
+		}
+		if selection.Channel == nil || selection.Channel.ContentType != contentType {
+			t.Fatalf("unexpected %s default channel: %#v", contentType, selection.Channel)
+		}
+		var collection model.Collection
+		if err := db.Where("channel_id = ? AND is_default = ?", selection.ChannelID, true).First(&collection).Error; err != nil {
+			t.Fatalf("find %s default collection: %v", contentType, err)
+		}
 	}
 
 	var group model.SubscriptionGroup
@@ -70,7 +81,7 @@ func TestEnsureOwnerCreatesDefaultResources(t *testing.T) {
 	}
 
 	var folder model.BookmarkFolder
-	if err := db.Where("user_id = ? AND name = ?", owner.UUID, "默认收藏").First(&folder).Error; err != nil {
+	if err := db.Where("user_id = ? AND name = ?", owner.UUID, "默认收藏夹").First(&folder).Error; err != nil {
 		t.Fatalf("find default bookmark folder: %v", err)
 	}
 
@@ -78,8 +89,8 @@ func TestEnsureOwnerCreatesDefaultResources(t *testing.T) {
 	if err := db.Where("user_id = ?", owner.UUID).Find(&playlists).Error; err != nil {
 		t.Fatalf("find playlists: %v", err)
 	}
-	if len(playlists) != 0 {
-		t.Fatalf("expected bootstrap service not to create playlists, got %d", len(playlists))
+	if len(playlists) != 1 || !playlists[0].IsFavorite || playlists[0].IsPublic {
+		t.Fatalf("expected one private favorite playlist, got %#v", playlists)
 	}
 }
 

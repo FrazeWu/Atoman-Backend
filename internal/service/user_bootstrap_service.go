@@ -17,7 +17,7 @@ import (
 
 const (
 	defaultSubscriptionGroupName = "默认分组"
-	defaultBookmarkFolderName    = "默认收藏"
+	defaultBookmarkFolderName    = "默认收藏夹"
 	defaultChannelDescription    = "默认合集"
 	defaultCollectionName        = "默认合集"
 )
@@ -31,15 +31,21 @@ func NewUserBootstrapService(db *gorm.DB) *UserBootstrapService {
 }
 
 func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string) error {
-	channel, err := s.ensureDefaultChannel(userID, username)
-	if err != nil {
-		return err
-	}
-	if err := s.ensureDefaultCollectionForChannel(channel.ID); err != nil {
-		return err
-	}
-	if err := s.upsertUserDefaultChannelSelection(userID, model.ChannelContentTypeBlog, channel.ID); err != nil {
-		return err
+	for _, contentType := range []string{
+		model.ChannelContentTypeBlog,
+		model.ChannelContentTypePodcast,
+		model.ChannelContentTypeVideo,
+	} {
+		channel, err := s.ensureDefaultChannel(userID, username, contentType)
+		if err != nil {
+			return err
+		}
+		if err := s.ensureDefaultCollectionForChannel(channel.ID); err != nil {
+			return err
+		}
+		if err := s.upsertUserDefaultChannelSelection(userID, contentType, channel.ID); err != nil {
+			return err
+		}
 	}
 
 	group, err := s.ensureDefaultSubscriptionGroup(userID)
@@ -52,20 +58,26 @@ func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string)
 	if err := s.ensureDefaultBookmarkFolder(userID); err != nil {
 		return err
 	}
+	if err := s.ensureFavoritePlaylist(userID); err != nil {
+		return err
+	}
 
 	return nil
 }
 
-func (s *UserBootstrapService) ensureDefaultChannel(userID uuid.UUID, username string) (*model.Channel, error) {
-	var channel model.Channel
-	err := s.db.Where("user_id = ? AND is_default = ?", userID, true).First(&channel).Error
-	if err == nil {
-		if channel.ContentType == "" {
-			if saveErr := s.db.Model(&channel).Update("content_type", model.ChannelContentTypeBlog).Error; saveErr != nil {
-				return nil, saveErr
-			}
-			channel.ContentType = model.ChannelContentTypeBlog
+func (s *UserBootstrapService) ensureDefaultChannel(userID uuid.UUID, username string, contentType string) (*model.Channel, error) {
+	var selection model.UserDefaultChannel
+	if err := s.db.Preload("Channel").Where("user_id = ? AND content_type = ?", userID, contentType).First(&selection).Error; err == nil {
+		if selection.Channel != nil && selection.Channel.UserID != nil && *selection.Channel.UserID == userID && model.NormalizeChannelContentType(selection.Channel.ContentType) == contentType {
+			return selection.Channel, nil
 		}
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	var channel model.Channel
+	err := s.db.Where("user_id = ? AND content_type = ?", userID, contentType).Order("created_at ASC").First(&channel).Error
+	if err == nil {
 		return &channel, nil
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -76,12 +88,24 @@ func (s *UserBootstrapService) ensureDefaultChannel(userID uuid.UUID, username s
 	if baseName == "" {
 		baseName = defaultChannelDescription
 	}
+	slugBase := strings.TrimSpace(username)
+	if slugBase == "" {
+		slugBase = "channel"
+	}
+	switch contentType {
+	case model.ChannelContentTypePodcast:
+		baseName += " 播客"
+		slugBase += "-podcast"
+	case model.ChannelContentTypeVideo:
+		baseName += " 视频"
+		slugBase += "-video"
+	}
 
 	name, err := s.uniqueChannelName(baseName)
 	if err != nil {
 		return nil, err
 	}
-	slug, err := s.uniqueChannelSlug(baseName)
+	slug, err := s.uniqueChannelSlug(slugBase)
 	if err != nil {
 		return nil, err
 	}
@@ -91,8 +115,8 @@ func (s *UserBootstrapService) ensureDefaultChannel(userID uuid.UUID, username s
 		Name:        name,
 		Slug:        slug,
 		Description: defaultChannelDescription,
-		ContentType: model.ChannelContentTypeBlog,
-		IsDefault:   true,
+		ContentType: contentType,
+		IsDefault:   contentType == model.ChannelContentTypeBlog,
 	}
 	if err := s.db.Create(&channel).Error; err != nil {
 		return nil, err
@@ -246,6 +270,21 @@ func (s *UserBootstrapService) ensureDefaultBookmarkFolder(userID uuid.UUID) err
 		Name:   defaultBookmarkFolderName,
 	}
 	return s.db.Create(&folder).Error
+}
+
+func (s *UserBootstrapService) ensureFavoritePlaylist(userID uuid.UUID) error {
+	var playlist model.Playlist
+	err := s.db.Where("user_id = ? AND is_favorite = ?", userID, true).First(&playlist).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		err = s.db.Where("user_id = ? AND name = ?", userID, "最爱").First(&playlist).Error
+	}
+	if err == nil {
+		return s.db.Model(&playlist).Updates(map[string]any{"is_favorite": true, "is_public": false}).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return s.db.Create(&model.Playlist{UserID: userID, Name: "最爱", IsFavorite: true}).Error
 }
 
 func buildUserBootstrapFeedSourceHash(sourceType string, sourceID uuid.UUID) string {

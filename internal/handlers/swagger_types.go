@@ -50,11 +50,6 @@ type UserSettingsResponse struct {
 	Message string             `json:"message" example:"ok"`
 }
 
-type ExplorePostListResponse struct {
-	Data    []ExplorePostResponse `json:"data"`
-	Message string                `json:"message" example:"ok"`
-}
-
 type SearchUserSummary struct {
 	UUID        string `json:"uuid" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
 	Username    string `json:"username" example:"fafa"`

@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,8 +9,8 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/testdb"
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -19,11 +18,7 @@ import (
 
 func newMiddlewareAuthTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
+	db := testdb.Open(t)
 	if err := db.AutoMigrate(&model.User{}); err != nil {
 		t.Fatalf("migrate db: %v", err)
 	}

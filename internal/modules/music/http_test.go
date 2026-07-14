@@ -1877,6 +1877,35 @@ func TestRegisterRoutesUpdatesOwnPlaylistThroughMusicV1(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesProtectsFavoritePlaylist(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	favorite := model.Playlist{UserID: user.ID, Name: "最爱", IsFavorite: true}
+	if err := db.Create(&favorite).Error; err != nil {
+		t.Fatalf("create favorite playlist: %v", err)
+	}
+	router := newMusicHTTPRouter(service, &user)
+
+	listRecorder := httptest.NewRecorder()
+	router.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists", nil))
+	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), `"is_favorite":true`) {
+		t.Fatalf("expected favorite metadata in list response, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+
+	patchRecorder := httptest.NewRecorder()
+	patchRequest := httptest.NewRequest(http.MethodPatch, "/api/v1/music/playlists/"+favorite.ID.String(), bytes.NewBufferString(`{"name":"Renamed","is_public":true}`))
+	patchRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(patchRecorder, patchRequest)
+	if patchRecorder.Code != http.StatusConflict {
+		t.Fatalf("expected favorite patch 409, got %d: %s", patchRecorder.Code, patchRecorder.Body.String())
+	}
+
+	deleteRecorder := httptest.NewRecorder()
+	router.ServeHTTP(deleteRecorder, httptest.NewRequest(http.MethodDelete, "/api/v1/music/playlists/"+favorite.ID.String(), nil))
+	if deleteRecorder.Code != http.StatusConflict {
+		t.Fatalf("expected favorite delete 409, got %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
+}
+
 func TestRegisterRoutesDeletePlaylistSongIsIdempotent(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	song := model.Song{Title: "Delete Playlist Song", AudioURL: "/audio/delete-playlist-song.mp3", Status: "open"}

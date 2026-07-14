@@ -4,10 +4,8 @@ definitions:
     properties:
       channel_id:
         type: string
-      collection_ids:
-        items:
-          type: string
-        type: array
+      collection_id:
+        type: string
       content:
         type: string
       cover_url:
@@ -23,12 +21,38 @@ definitions:
       visibility:
         type: string
     type: object
-  blog.collectionActionInput:
+  blog.RecommendationItemDTO:
     properties:
-      collection_id:
+      content_type:
+        type: string
+      id:
+        type: string
+      image_url:
+        type: string
+      score_label:
+        type: string
+      summary:
+        type: string
+      target_path:
+        type: string
+      title:
+        type: string
+    type: object
+  blog.bookmarkFolderInput:
+    properties:
+      name:
         type: string
     required:
-    - collection_id
+    - name
+    type: object
+  blog.bookmarkInput:
+    properties:
+      bookmark_folder_id:
+        type: string
+      post_id:
+        type: string
+    required:
+    - post_id
     type: object
   feed.AutoSubscriptionAddRequest:
     properties:
@@ -255,6 +279,16 @@ definitions:
       reused:
         example: 3
         type: integer
+    type: object
+  feed.ReadingListInput:
+    properties:
+      target_id:
+        type: string
+      target_type:
+        enum:
+        - feed_item
+        - post
+        type: string
     type: object
   feed.ReadingListResponse:
     properties:
@@ -909,62 +943,6 @@ definitions:
         type: string
       error:
         example: 用户名和密码不匹配
-        type: string
-    type: object
-  handlers.ExplorePostListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/handlers.ExplorePostResponse'
-        type: array
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.ExplorePostResponse:
-    properties:
-      allow_comments:
-        type: boolean
-      channel:
-        $ref: '#/definitions/model.Channel'
-      channel_id:
-        type: string
-      collections:
-        items:
-          $ref: '#/definitions/model.Collection'
-        type: array
-      comments_count:
-        type: integer
-      content:
-        type: string
-      cover_url:
-        type: string
-      created_at:
-        type: string
-      id:
-        type: string
-      likes_count:
-        type: integer
-      pinned:
-        type: boolean
-      rating_average_score:
-        type: integer
-      rating_count:
-        type: integer
-      status:
-        description: draft / published
-        type: string
-      summary:
-        type: string
-      title:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-      visibility:
         type: string
     type: object
   handlers.ImageUploadResponse:
@@ -1911,6 +1889,73 @@ definitions:
       user_id:
         type: string
     type: object
+  model.BlogPostVersion:
+    properties:
+      allow_comments:
+        type: boolean
+      collection_id:
+        type: string
+      content:
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      editor_id:
+        type: string
+      id:
+        type: string
+      post_id:
+        type: string
+      published_at:
+        type: string
+      summary:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: integer
+      visibility:
+        type: string
+    type: object
+  model.Bookmark:
+    properties:
+      bookmark_folder:
+        $ref: '#/definitions/model.BookmarkFolder'
+      bookmark_folder_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      post:
+        $ref: '#/definitions/model.Post'
+      post_id:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+      user_id:
+        type: string
+    type: object
+  model.BookmarkFolder:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+      user_id:
+        type: string
+    type: object
   model.Channel:
     properties:
       ban_reason:
@@ -2378,10 +2423,12 @@ definitions:
         $ref: '#/definitions/model.Channel'
       channel_id:
         type: string
-      collections:
-        items:
-          $ref: '#/definitions/model.Collection'
-        type: array
+      collection:
+        $ref: '#/definitions/model.Collection'
+      collection_id:
+        type: string
+      collection_position:
+        type: integer
       content:
         type: string
       cover_url:
@@ -2392,10 +2439,8 @@ definitions:
         type: string
       pinned:
         type: boolean
-      rating_average_score:
-        type: integer
-      rating_count:
-        type: integer
+      published_at:
+        type: string
       status:
         description: draft / published
         type: string
@@ -2409,6 +2454,8 @@ definitions:
         $ref: '#/definitions/model.User'
       user_id:
         type: string
+      view_count:
+        type: integer
       visibility:
         type: string
     type: object
@@ -2418,7 +2465,11 @@ definitions:
         type: string
       feed_item:
         $ref: '#/definitions/model.FeedItem'
-      feed_item_id:
+      post:
+        $ref: '#/definitions/model.Post'
+      target_id:
+        type: string
+      target_type:
         type: string
       user_id:
         type: string
@@ -2942,6 +2993,8 @@ definitions:
         type: string
       id:
         type: string
+      is_favorite:
+        type: boolean
       is_public:
         type: boolean
       name:
@@ -5324,34 +5377,133 @@ paths:
       summary: 校验邮箱验证码
       tags:
       - auth
-  /api/v1/blog/explore:
+  /api/v1/blog/bookmark-folders:
     get:
-      description: 返回已发布文章的分页列表，并附带点赞数和评论数。
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.BookmarkFolder'
+            type: array
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取收藏夹
+      tags:
+      - blog
+    post:
+      consumes:
+      - application/json
       parameters:
-      - default: 1
-        description: 页码
+      - description: 收藏夹输入
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/blog.bookmarkFolderInput'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.BookmarkFolder'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 新建收藏夹
+      tags:
+      - blog
+  /api/v1/blog/bookmark-folders/{id}:
+    delete:
+      description: 收藏会迁移到默认收藏夹。
+      parameters:
+      - description: 收藏夹 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 删除收藏夹
+      tags:
+      - blog
+  /api/v1/blog/bookmarks:
+    get:
+      parameters:
+      - description: 收藏夹 UUID
         in: query
-        name: page
-        type: integer
-      - default: 20
-        description: 每页数量
+        name: folder_id
+        type: string
+      - description: 排序
+        enum:
+        - latest
+        - popular
         in: query
-        name: limit
-        type: integer
+        name: sort
+        type: string
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.ExplorePostListResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取博客探索流
+            items:
+              $ref: '#/definitions/model.Bookmark'
+            type: array
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取文章收藏
       tags:
-      - users
+      - blog
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 收藏输入
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/blog.bookmarkInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Bookmark'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 收藏文章到指定收藏夹
+      tags:
+      - blog
+  /api/v1/blog/bookmarks/{id}:
+    delete:
+      parameters:
+      - description: 收藏 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 取消文章收藏
+      tags:
+      - blog
   /api/v1/blog/posts:
     get:
       description: 返回已发布文章，可按用户、频道或合集筛选。
@@ -5455,93 +5607,53 @@ paths:
       summary: 获取文章详情
       tags:
       - blog
-  /api/v1/blog/posts/{id}/collections:
-    post:
-      consumes:
-      - application/json
-      description: 为当前用户拥有的文章增加一个同频道合集归属。
+  /api/v1/blog/posts/{id}/versions:
+    get:
       parameters:
       - description: 文章 UUID
         in: path
         name: id
         required: true
         type: string
-      - description: 合集操作输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/blog.collectionActionInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            items:
+              $ref: '#/definitions/model.BlogPostVersion'
+            type: array
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 将文章加入合集
+      summary: 获取文章版本历史
       tags:
       - blog
-  /api/v1/blog/posts/{id}/collections/{collection_id}:
-    delete:
-      description: 移除当前用户拥有文章与指定合集之间的关联。
+  /api/v1/blog/posts/{id}/versions/{version}/restore:
+    post:
       parameters:
       - description: 文章 UUID
         in: path
         name: id
         required: true
         type: string
-      - description: 合集 UUID
+      - description: 版本号
         in: path
-        name: collection_id
+        name: version
         required: true
-        type: string
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/model.Post'
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 将文章移出合集
+      summary: 恢复文章版本
       tags:
       - blog
   /api/v1/blog/posts/drafts:
@@ -5568,6 +5680,37 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 获取我的草稿文章
+      tags:
+      - blog
+  /api/v1/blog/recommend/posts:
+    get:
+      parameters:
+      - description: 推荐模式
+        enum:
+        - hot
+        - featured
+        - discover
+        in: query
+        name: mode
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/blog.RecommendationItemDTO'
+            type: array
+      summary: 获取博客综合推荐
       tags:
       - blog
   /api/v1/blog/upload-image:
@@ -6232,7 +6375,6 @@ paths:
       - feed
   /api/v1/feed/reading-list:
     get:
-      description: 分页返回当前用户的稍后读条目。
       parameters:
       - description: 页码
         in: query
@@ -6240,7 +6382,7 @@ paths:
         type: integer
       - description: 每页数量
         in: query
-        name: limit
+        name: page_size
         type: integer
       produces:
       - application/json
@@ -6248,58 +6390,53 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/feed.ReadingListResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/feed.ErrorResponse'
+            items:
+              $ref: '#/definitions/model.ReadingListItem'
+            type: array
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 获取稍后读列表
+      summary: 获取统一稍后阅读列表
       tags:
       - feed
     post:
       consumes:
       - application/json
-      description: 为 feed item 添加或移除稍后读标记。
       parameters:
-      - description: 稍后读输入
+      - description: 稍后阅读目标
         in: body
         name: input
         required: true
         schema:
-          $ref: '#/definitions/feed.StarToggleInput'
+          $ref: '#/definitions/feed.ReadingListInput'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/feed.SaveToggleResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/feed.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/feed.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/feed.ErrorResponse'
+            additionalProperties:
+              type: boolean
+            type: object
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 切换稍后读条目
+      summary: 切换稍后阅读状态
       tags:
       - feed
-  /api/v1/feed/reading-list/{id}:
+  /api/v1/feed/reading-list/{target_type}/{id}:
     delete:
-      description: 删除当前用户待读列表中的指定 feed item。
+      description: 删除当前用户稍后阅读列表中的指定 RSS 条目或站内文章。
       parameters:
-      - description: Feed item UUID
+      - description: 目标类型
+        enum:
+        - feed_item
+        - post
+        in: path
+        name: target_type
+        required: true
+        type: string
+      - description: 目标 UUID
         in: path
         name: id
         required: true

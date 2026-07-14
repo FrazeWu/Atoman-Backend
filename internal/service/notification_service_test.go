@@ -119,6 +119,7 @@ func TestNotifyForumLikeConcurrentUpdatesKeepActorCountAndRecentActors(t *testin
 	const concurrentActors = 2
 	errs := make(chan error, concurrentActors)
 	var wg sync.WaitGroup
+	atomic.StoreInt32(&barrierEnabled, 1)
 	for i := 1; i <= concurrentActors; i++ {
 		i := i
 		actor := model.User{Username: fmt.Sprintf("actor_%d", i), Email: uuid.NewString() + "@example.com", Password: "secret", IsActive: true}
@@ -132,7 +133,6 @@ func TestNotifyForumLikeConcurrentUpdatesKeepActorCountAndRecentActors(t *testin
 			errs <- service.NotifyForumLike(recipient.UUID, actor.UUID, actor.Username, "forum_topic", sourceID, topicID, "topic", nil)
 		}()
 	}
-	atomic.StoreInt32(&barrierEnabled, 1)
 	<-queriesReady
 	close(releaseQueries)
 	wg.Wait()

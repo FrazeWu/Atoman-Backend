@@ -222,7 +222,7 @@ func (r *Repo) ListPlaylists(userID uuid.UUID, page int, pageSize int, sort stri
 
 func (r *Repo) ListPublicPlaylists(page int, pageSize int) ([]model.Playlist, int64, error) {
 	var total int64
-	db := r.db.Model(&model.Playlist{}).Where("is_public = ?", true)
+	db := r.db.Model(&model.Playlist{}).Where("is_public = ? AND is_favorite = ?", true, false)
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -236,7 +236,7 @@ func (r *Repo) ListRecentPublicPlaylists(limit int) ([]model.Playlist, int64, er
 		limit = 1
 	}
 	var total int64
-	base := r.db.Model(&model.Playlist{}).Where("is_public = ?", true)
+	base := r.db.Model(&model.Playlist{}).Where("is_public = ? AND is_favorite = ?", true, false)
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -272,7 +272,12 @@ func (r *Repo) CountPlaylistSongs(playlistIDs []uuid.UUID) (map[uuid.UUID]int64,
 }
 
 func (r *Repo) DeletePlaylist(userID uuid.UUID, playlistID uuid.UUID) error {
-	return r.db.Where("user_id = ? AND id = ?", userID, playlistID).Delete(&model.Playlist{}).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("playlist_id = ?", playlistID).Delete(&model.PlaylistSong{}).Error; err != nil {
+			return err
+		}
+		return tx.Where("user_id = ? AND id = ?", userID, playlistID).Delete(&model.Playlist{}).Error
+	})
 }
 
 func (r *Repo) GetPlaylistForUser(userID uuid.UUID, playlistID uuid.UUID) (model.Playlist, error) {

@@ -1,6 +1,7 @@
 package debate
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -49,10 +50,10 @@ func (s *Service) CreateDebate(user authctx.CurrentUser, req CreateDebateRequest
 	}
 
 	debate := model.Debate{
-		UserID:      user.ID,
-		Title:       title,
-		Description: description,
-		Status:      "open",
+		UserID:            user.ID,
+		Title:             title,
+		Description:       description,
+		Status:            "open",
 		ConcludeThreshold: 10,
 	}
 	if err := s.repo.CreateDebate(&debate); err != nil {
@@ -157,25 +158,41 @@ func (s *Service) CreateArgument(user authctx.CurrentUser, req CreateArgumentReq
 		return model.Argument{}, apperr.BadRequest("debate.closed", "Debate is closed")
 	}
 	content := strings.TrimSpace(req.Content)
-	argumentType := strings.TrimSpace(req.ArgumentType)
-	if content == "" || argumentType == "" {
+	argumentType, validArgumentType := parseArgumentType(req.ArgumentType)
+	if content == "" || strings.TrimSpace(req.ArgumentType) == "" {
 		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "content and argument_type are required")
 	}
+	if !validArgumentType {
+		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "argument_type is invalid")
+	}
+	if req.ParentID != nil {
+		var quoted model.Argument
+		if err := s.db.Select("id").Where("id = ? AND debate_id = ?", *req.ParentID, req.DebateID).First(&quoted).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return model.Argument{}, apperr.BadRequest("validation.invalid_request", "quoted argument not found")
+			}
+			return model.Argument{}, err
+		}
+	}
 	argument := model.Argument{
-		DebateID:     req.DebateID,
-		ParentID:     req.ParentID,
-		UserID:       user.ID,
-		Content:      content,
-		ArgumentType: model.ArgumentType(argumentType),
-		SourceURL:    strings.TrimSpace(req.SourceURL),
-		SourceTitle:  strings.TrimSpace(req.SourceTitle),
+		DebateID:      req.DebateID,
+		ParentID:      req.ParentID,
+		UserID:        user.ID,
+		Content:       content,
+		ArgumentType:  argumentType,
+		SourceURL:     strings.TrimSpace(req.SourceURL),
+		SourceTitle:   strings.TrimSpace(req.SourceTitle),
 		SourceExcerpt: strings.TrimSpace(req.SourceExcerpt),
 	}
-	if err := s.repo.CreateArgument(&argument); err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := NewRepo(tx).CreateArgument(&argument); err != nil {
+			return err
+		}
+		return tx.Model(&model.Debate{}).Where("id = ?", req.DebateID).
+			UpdateColumn("argument_count", gorm.Expr("argument_count + 1")).Error
+	}); err != nil {
 		return model.Argument{}, err
 	}
-	_ = s.db.Model(&model.Debate{}).Where("id = ?", req.DebateID).
-		UpdateColumn("argument_count", gorm.Expr("argument_count + 1")).Error
 	return s.repo.GetArgument(argument.ID)
 }
 
@@ -191,12 +208,15 @@ func (s *Service) UpdateArgument(user authctx.CurrentUser, argumentID uuid.UUID,
 		return model.Argument{}, apperr.Forbidden("debate.forbidden", "Not authorized")
 	}
 	content := strings.TrimSpace(req.Content)
-	argumentType := strings.TrimSpace(req.ArgumentType)
-	if content == "" || argumentType == "" {
+	argumentType, validArgumentType := parseArgumentType(req.ArgumentType)
+	if content == "" || strings.TrimSpace(req.ArgumentType) == "" {
 		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "content and argument_type are required")
 	}
+	if !validArgumentType {
+		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "argument_type is invalid")
+	}
 	argument.Content = content
-	argument.ArgumentType = model.ArgumentType(argumentType)
+	argument.ArgumentType = argumentType
 	argument.SourceURL = strings.TrimSpace(req.SourceURL)
 	argument.SourceTitle = strings.TrimSpace(req.SourceTitle)
 	argument.SourceExcerpt = strings.TrimSpace(req.SourceExcerpt)
@@ -243,6 +263,9 @@ func (s *Service) AddArgumentReference(user authctx.CurrentUser, argumentID uuid
 		}
 		return err
 	}
+	if !canManageArgument(user, argument) {
+		return apperr.Forbidden("debate.forbidden", "Not authorized")
+	}
 	refArgument, err := s.repo.GetArgument(referenceID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -263,6 +286,9 @@ func (s *Service) RemoveArgumentReference(user authctx.CurrentUser, argumentID u
 			return apperr.NotFound("debate.argument_not_found", "Argument not found")
 		}
 		return err
+	}
+	if !canManageArgument(user, argument) {
+		return apperr.Forbidden("debate.forbidden", "Not authorized")
 	}
 	refArgument, err := s.repo.GetArgument(referenceID)
 	if err != nil {
@@ -285,6 +311,9 @@ func (s *Service) AddDebateReference(user authctx.CurrentUser, argumentID uuid.U
 		}
 		return err
 	}
+	if !canManageArgument(user, argument) {
+		return apperr.Forbidden("debate.forbidden", "Not authorized")
+	}
 	debate, err := s.repo.GetDebate(debateID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -306,6 +335,9 @@ func (s *Service) RemoveDebateReference(user authctx.CurrentUser, argumentID uui
 		}
 		return err
 	}
+	if !canManageArgument(user, argument) {
+		return apperr.Forbidden("debate.forbidden", "Not authorized")
+	}
 	debate, err := s.repo.GetDebate(debateID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
@@ -314,6 +346,25 @@ func (s *Service) RemoveDebateReference(user authctx.CurrentUser, argumentID uui
 		return err
 	}
 	return s.db.Model(&argument).Association("ReferencedDebates").Delete(&debate)
+}
+
+func parseArgumentType(value string) (model.ArgumentType, bool) {
+	argumentType := model.ArgumentType(strings.TrimSpace(value))
+	switch argumentType {
+	case model.ArgumentTypeSupport,
+		model.ArgumentTypeOppose,
+		model.ArgumentTypeNeutral,
+		model.ArgumentTypeEvidence,
+		model.ArgumentTypeQuestion,
+		model.ArgumentTypeCounter:
+		return argumentType, true
+	default:
+		return "", false
+	}
+}
+
+func canManageArgument(user authctx.CurrentUser, argument model.Argument) bool {
+	return argument.UserID == user.ID || authctx.RoleAtLeast(user.Role, authctx.RoleAdmin)
 }
 
 func (s *Service) FoldArgument(user authctx.CurrentUser, argumentID uuid.UUID, foldNote string) error {

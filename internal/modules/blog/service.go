@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/apperr"
-	"atoman/internal/platform/audit"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/sitehandle"
 
@@ -26,7 +26,6 @@ var slugInvalidChars = regexp.MustCompile(`[^a-z0-9一-龥]+`)
 var allowedPostStatuses = map[string]struct{}{
 	"draft":     {},
 	"published": {},
-	"archived":  {},
 }
 
 var allowedPostVisibilities = map[string]struct{}{
@@ -55,7 +54,31 @@ func parseRecommendationMode(raw string) (recommendation.Mode, error) {
 	}
 }
 
-func (s *Service) RecommendPostsByMode(mode recommendation.Mode, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+type blogRecommendationRow struct {
+	model.Post
+	LikesCount            int64
+	CommentsCount         int64
+	BookmarksCount        int64
+	ChannelFollowersCount int64
+}
+
+type blogEngagementSignals struct {
+	Reads       float64
+	Bookmarks   float64
+	Likes       float64
+	Comments    float64
+	Subscribers float64
+}
+
+type blogRankedPost struct {
+	ID          string
+	ChannelID   string
+	Score       float64
+	PublishedAt time.Time
+	Post        model.Post
+}
+
+func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.UUID, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -66,42 +89,72 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, page int, pageS
 		pageSize = 100
 	}
 
-	var posts []model.Post
-	if err := s.db.
-		Preload("User").
-		Preload("Channel").
-		Where("status = ? AND visibility = ?", "published", "public").
-		Order("pinned DESC, created_at DESC").
-		Find(&posts).Error; err != nil {
+	var rows []blogRecommendationRow
+	if err := s.db.Model(&model.Post{}).Select(`posts.*,
+		(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
+		(SELECT COUNT(*) FROM comments WHERE comments.target_type = 'post' AND comments.target_id = posts.id AND comments.status = 'visible' AND comments.deleted_at IS NULL) AS comments_count,
+		(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count,
+		(SELECT COUNT(*) FROM subscriptions JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id
+		 WHERE feed_sources.source_type = 'internal_channel' AND feed_sources.source_id = posts.channel_id
+		 AND subscriptions.deleted_at IS NULL AND feed_sources.deleted_at IS NULL) AS channel_followers_count`).
+		Where("posts.status = ? AND posts.visibility = ?", "published", "public").
+		Scan(&rows).Error; err != nil {
 		return nil, 0, err
 	}
 
-	candidates := make([]recommendation.Candidate, 0, len(posts))
-	postByID := make(map[string]model.Post, len(posts))
-	for _, post := range posts {
-		candidates = append(candidates, recommendation.Candidate{
-			Module:          "blog",
-			EntityType:      recommendation.EntityBlog,
-			EntityID:        post.ID.String(),
-			SourceKey:       blogRecommendationSourceKey(post),
-			QualityScore:    normalizeBlogRecommendationQuality(post),
-			TrendScore:      normalizeBlogRecommendationTrend(post),
-			FreshnessScore:  normalizeBlogRecommendationFreshness(post.CreatedAt, 14*24*time.Hour),
-			AuthorityScore:  normalizeBlogRecommendationAuthority(post),
-			ExposureScore:   0,
-			EditorialScore:  0,
-			PublishedAtUnix: post.CreatedAt.Unix(),
-		})
-		postByID[post.ID.String()] = post
+	subscribedChannels := map[uuid.UUID]struct{}{}
+	if viewerID != nil {
+		var channelIDs []uuid.UUID
+		if err := s.db.Table("feed_sources").Select("feed_sources.source_id").
+			Joins("JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id").
+			Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", *viewerID, "internal_channel").
+			Where("subscriptions.deleted_at IS NULL AND feed_sources.deleted_at IS NULL").
+			Scan(&channelIDs).Error; err != nil {
+			return nil, 0, err
+		}
+		for _, channelID := range channelIDs {
+			subscribedChannels[channelID] = struct{}{}
+		}
 	}
 
-	ranked := recommendation.RankCandidates(mode, candidates, 0)
+	reads, likes, comments, bookmarks, subscribers := make([]float64, len(rows)), make([]float64, len(rows)), make([]float64, len(rows)), make([]float64, len(rows)), make([]float64, len(rows))
+	for i, row := range rows {
+		reads[i], likes[i], comments[i], bookmarks[i], subscribers[i] = float64(row.ViewCount), float64(row.LikesCount), float64(row.CommentsCount), float64(row.BookmarksCount), float64(row.ChannelFollowersCount)
+	}
+
+	now := time.Now().UTC()
+	ranked := make([]blogRankedPost, 0, len(rows))
+	for i, row := range rows {
+		signals := blogEngagementSignals{
+			Reads: percentileScore(reads[i], reads), Bookmarks: percentileScore(bookmarks[i], bookmarks),
+			Likes: percentileScore(likes[i], likes), Comments: percentileScore(comments[i], comments),
+			Subscribers: percentileScore(subscribers[i], subscribers),
+		}
+		composite := blogCompositeScore(signals)
+		publishedAt := blogPublishedAt(row.Post)
+		_, subscribed := subscribedChannels[uuidValue(row.ChannelID)]
+		score := composite
+		switch mode {
+		case recommendation.ModeHot:
+			score = blogHotScore(composite, publishedAt, now)
+		case recommendation.ModeFeatured:
+			score = blogRecommendedScore(composite, subscribed, publishedAt, now)
+		case recommendation.ModeDiscover:
+			score = blogRecommendedScore(composite, subscribed, publishedAt, now) + 0.10*(1-signals.Reads)
+		}
+		ranked = append(ranked, blogRankedPost{ID: row.ID.String(), ChannelID: blogRecommendationSourceKey(row.Post), Score: score, PublishedAt: publishedAt, Post: row.Post})
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].Score == ranked[j].Score {
+			return ranked[i].PublishedAt.After(ranked[j].PublishedAt)
+		}
+		return ranked[i].Score > ranked[j].Score
+	})
+	ranked = rerankBlogDiversity(ranked, 2)
+
 	items := make([]RecommendationItemDTO, 0, len(ranked))
 	for _, rankedItem := range ranked {
-		post, ok := postByID[rankedItem.EntityID]
-		if !ok {
-			continue
-		}
+		post := rankedItem.Post
 		items = append(items, RecommendationItemDTO{
 			ID:          post.ID.String(),
 			Title:       post.Title,
@@ -109,7 +162,7 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, page int, pageS
 			ContentType: "blog",
 			ImageURL:    post.CoverURL,
 			TargetPath:  "/post/" + post.ID.String(),
-			ScoreLabel:  blogRecommendationLabel(mode, rankedItem.FinalScore),
+			ScoreLabel:  blogRecommendationLabel(mode, rankedItem.Score),
 		})
 	}
 
@@ -125,6 +178,79 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, page int, pageS
 	return items[start:end], total, nil
 }
 
+func uuidValue(value *uuid.UUID) uuid.UUID {
+	if value == nil {
+		return uuid.Nil
+	}
+	return *value
+}
+
+func percentileScore(value float64, values []float64) float64 {
+	if len(values) <= 1 {
+		return 0.5
+	}
+	lower := 0
+	for _, candidate := range values {
+		if candidate < value {
+			lower++
+		}
+	}
+	return float64(lower) / float64(len(values)-1)
+}
+
+func blogCompositeScore(signals blogEngagementSignals) float64 {
+	return 0.20*signals.Reads + 0.30*signals.Bookmarks + 0.20*signals.Likes + 0.20*signals.Comments + 0.10*signals.Subscribers
+}
+
+func blogHotScore(composite float64, publishedAt time.Time, now time.Time) float64 {
+	age := now.Sub(publishedAt)
+	if age < 0 {
+		age = 0
+	}
+	return composite * math.Exp(-float64(age)/(float64(7*24*time.Hour)))
+}
+
+func blogRecommendedScore(composite float64, subscribed bool, publishedAt time.Time, now time.Time) float64 {
+	score := composite + 0.05*math.Exp(-math.Max(0, float64(now.Sub(publishedAt)))/float64(14*24*time.Hour))
+	if subscribed {
+		score += 0.15
+	}
+	return score
+}
+
+func blogPublishedAt(post model.Post) time.Time {
+	if post.PublishedAt != nil {
+		return *post.PublishedAt
+	}
+	return post.CreatedAt
+}
+
+func rerankBlogDiversity(items []blogRankedPost, maxConsecutive int) []blogRankedPost {
+	remaining := append([]blogRankedPost(nil), items...)
+	result := make([]blogRankedPost, 0, len(items))
+	lastChannel, consecutive := "", 0
+	for len(remaining) > 0 {
+		pick := 0
+		if maxConsecutive > 0 && consecutive >= maxConsecutive {
+			for i, item := range remaining {
+				if item.ChannelID != lastChannel {
+					pick = i
+					break
+				}
+			}
+		}
+		item := remaining[pick]
+		remaining = append(remaining[:pick], remaining[pick+1:]...)
+		if item.ChannelID == lastChannel {
+			consecutive++
+		} else {
+			lastChannel, consecutive = item.ChannelID, 1
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
 func blogRecommendationSourceKey(post model.Post) string {
 	if post.ChannelID != nil {
 		return post.ChannelID.String()
@@ -133,17 +259,16 @@ func blogRecommendationSourceKey(post model.Post) string {
 }
 
 func normalizeBlogRecommendationQuality(post model.Post) float64 {
-	ratingComponent := clampBlogRecommendation(float64(post.RatingAverageScore) / 100)
-	countComponent := clampBlogRecommendation(float64(post.RatingCount) / 10)
+	readComponent := clampBlogRecommendation(math.Log1p(float64(post.ViewCount)) / math.Log1p(1000))
 	summaryComponent := 0.0
 	if strings.TrimSpace(post.Summary) != "" {
 		summaryComponent = 0.15
 	}
-	return clampBlogRecommendation(0.55*ratingComponent + 0.30*countComponent + summaryComponent)
+	return clampBlogRecommendation(0.85*readComponent + summaryComponent)
 }
 
 func normalizeBlogRecommendationTrend(post model.Post) float64 {
-	return clampBlogRecommendation(0.6*normalizeBlogRecommendationFreshness(post.CreatedAt, 7*24*time.Hour) + 0.4*clampBlogRecommendation(float64(post.RatingCount)/10))
+	return clampBlogRecommendation(0.6*normalizeBlogRecommendationFreshness(post.CreatedAt, 7*24*time.Hour) + 0.4*clampBlogRecommendation(math.Log1p(float64(post.ViewCount))/math.Log1p(1000)))
 }
 
 func normalizeBlogRecommendationFreshness(createdAt time.Time, horizon time.Duration) float64 {
@@ -402,6 +527,9 @@ func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, fol
 	if user.ID == uuid.Nil {
 		return model.Bookmark{}, apperr.Unauthorized("Login required")
 	}
+	if folderID == nil || *folderID == uuid.Nil {
+		return model.Bookmark{}, apperr.BadRequest("validation.invalid_request", "bookmark_folder_id is required")
+	}
 	post, err := s.repo.GetPost(postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -422,18 +550,30 @@ func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, fol
 			return model.Bookmark{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
 		}
 	}
-	if folderID != nil && *folderID != uuid.Nil {
-		var folder model.BookmarkFolder
-		if err := s.db.Where("id = ? AND user_id = ?", *folderID, user.ID).First(&folder).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return model.Bookmark{}, apperr.NotFound("blog.bookmark_folder_not_found", "Bookmark folder not found")
-			}
+	var folder model.BookmarkFolder
+	if err := s.db.Where("id = ? AND user_id = ?", *folderID, user.ID).First(&folder).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Bookmark{}, apperr.NotFound("blog.bookmark_folder_not_found", "Bookmark folder not found")
+		}
+		return model.Bookmark{}, err
+	}
+	var bookmark model.Bookmark
+	err = s.db.Where("user_id = ? AND post_id = ?", user.ID, postID).First(&bookmark).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		bookmark = model.Bookmark{UserID: user.ID, PostID: postID, BookmarkFolderID: folderID}
+		if err := s.db.Create(&bookmark).Error; err != nil {
 			return model.Bookmark{}, err
 		}
+		return bookmark, nil
 	}
-	bookmark := model.Bookmark{UserID: user.ID, PostID: postID, BookmarkFolderID: folderID}
-	if err := s.db.Where(model.Bookmark{UserID: user.ID, PostID: postID}).FirstOrCreate(&bookmark).Error; err != nil {
+	if err != nil {
 		return model.Bookmark{}, err
+	}
+	if bookmark.BookmarkFolderID == nil || *bookmark.BookmarkFolderID != *folderID {
+		if err := s.db.Model(&bookmark).Update("bookmark_folder_id", *folderID).Error; err != nil {
+			return model.Bookmark{}, err
+		}
+		bookmark.BookmarkFolderID = folderID
 	}
 	return bookmark, nil
 }
@@ -688,11 +828,24 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	if user.ID == uuid.Nil {
 		return model.Post{}, apperr.Unauthorized("Login required")
 	}
-	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Content) == "" || req.ChannelID == uuid.Nil {
-		return model.Post{}, apperr.BadRequest("validation.invalid_request", "title, content and channel_id are required")
+	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Content) == "" || req.CollectionID == uuid.Nil {
+		return model.Post{}, apperr.BadRequest("validation.invalid_request", "title, content and collection_id are required")
+	}
+	if len(req.CollectionIDs) > 0 {
+		return model.Post{}, apperr.BadRequest("validation.invalid_request", "collection_ids is no longer supported")
 	}
 
-	channel, err := s.repo.GetChannel(req.ChannelID)
+	var collection model.Collection
+	if err := s.db.Preload("Channel").First(&collection, "id = ?", req.CollectionID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Post{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
+		}
+		return model.Post{}, err
+	}
+	if collection.Channel == nil {
+		return model.Post{}, apperr.NotFound("blog.channel_not_found", "Channel not found")
+	}
+	channel, err := s.repo.GetChannel(collection.ChannelID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.Post{}, apperr.NotFound("blog.channel_not_found", "Channel not found")
@@ -701,6 +854,9 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	}
 	if channel.UserID == nil || *channel.UserID != user.ID {
 		return model.Post{}, apperr.Forbidden("blog.channel_forbidden", "You don't have permission to create post in this channel")
+	}
+	if req.ChannelID != uuid.Nil && req.ChannelID != channel.ID {
+		return model.Post{}, apperr.BadRequest("validation.invalid_request", "collection does not belong to selected channel")
 	}
 	if isChannelBanned(channel) && strings.TrimSpace(req.Status) == "published" {
 		return model.Post{}, apperr.Forbidden("blog.channel_banned", "Banned channel cannot publish posts")
@@ -721,205 +877,163 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 		return model.Post{}, apperr.BadRequest("blog.invalid_status_transition", "status is invalid")
 	}
 
-	collectionIDs := dedupeUUIDs(req.CollectionIDs)
-	if len(collectionIDs) > 0 {
-		var collections []model.Collection
-		if err := s.db.Where("id IN ?", collectionIDs).Find(&collections).Error; err != nil {
-			return model.Post{}, err
-		}
-		if len(collections) != len(collectionIDs) {
-			return model.Post{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
-		}
-		for _, collection := range collections {
-			if collection.ChannelID != channel.ID {
-				return model.Post{}, apperr.BadRequest("validation.invalid_request", "collection does not belong to selected channel")
-			}
-		}
-	}
-
 	summary := strings.TrimSpace(req.Summary)
 	if summary == "" {
 		summary = strings.TrimSpace(req.Excerpt)
 	}
 
 	post := model.Post{
-		UserID:     user.ID,
-		ChannelID:  &channel.ID,
-		Title:      strings.TrimSpace(req.Title),
-		Content:    strings.TrimSpace(req.Content),
-		Summary:    summary,
-		CoverURL:   strings.TrimSpace(req.CoverURL),
-		Visibility: visibility,
-		Status:     status,
+		UserID:       user.ID,
+		ChannelID:    &channel.ID,
+		CollectionID: &collection.ID,
+		Title:        strings.TrimSpace(req.Title),
+		Content:      strings.TrimSpace(req.Content),
+		Summary:      summary,
+		CoverURL:     strings.TrimSpace(req.CoverURL),
+		Visibility:   visibility,
+		Status:       status,
+	}
+	if status == "published" {
+		now := time.Now().UTC()
+		post.PublishedAt = &now
 	}
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		var maxPosition int
+		if err := tx.Model(&model.Post{}).Where("collection_id = ?", collection.ID).Select("COALESCE(MAX(collection_position), -1)").Scan(&maxPosition).Error; err != nil {
+			return err
+		}
+		post.CollectionPosition = maxPosition + 1
 		if err := tx.Create(&post).Error; err != nil {
 			return err
 		}
-
-		if err := s.ensureDefaultCollectionForChannelDB(tx, channel.ID); err != nil {
-			return err
+		if post.Status == "published" {
+			return saveBlogPostVersion(tx, post, user.ID)
 		}
-		var defaultCollection model.Collection
-		if err := tx.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&defaultCollection).Error; err != nil {
-			return err
-		}
-		collectionsToAssign := []model.Collection{defaultCollection}
-		if len(collectionIDs) > 0 {
-			collections := make([]model.Collection, 0, len(collectionIDs))
-			if err := tx.Where("id IN ?", collectionIDs).Find(&collections).Error; err != nil {
-				return err
-			}
-			for _, collection := range collections {
-				if collection.ID == defaultCollection.ID {
-					continue
-				}
-				collectionsToAssign = append(collectionsToAssign, collection)
-			}
-		}
-		return tx.Model(&post).Association("Collections").Append(collectionsToAssign)
+		return nil
 	}); err != nil {
 		return model.Post{}, err
 	}
-
+	post.Channel = &channel
+	post.Collection = &collection
 	return post, nil
 }
 
-func (s *Service) SetRating(user authctx.CurrentUser, postID uuid.UUID, score int) (RatingSummary, error) {
-	if user.ID == uuid.Nil {
-		return RatingSummary{}, apperr.Unauthorized("Login required")
+func saveBlogPostVersion(tx *gorm.DB, post model.Post, editorID uuid.UUID) error {
+	if post.CollectionID == nil || *post.CollectionID == uuid.Nil {
+		return apperr.BadRequest("validation.invalid_request", "collection_id is required")
 	}
-	if score < 1 || score > 10 {
-		return RatingSummary{}, apperr.BadRequest("blog.rating_invalid_score", "score must be between 1 and 10")
+	var maxVersion int
+	if err := tx.Model(&model.BlogPostVersion{}).Where("post_id = ?", post.ID).Select("COALESCE(MAX(version), 0)").Scan(&maxVersion).Error; err != nil {
+		return err
 	}
+	version := model.BlogPostVersion{
+		PostID:        post.ID,
+		Version:       maxVersion + 1,
+		EditorID:      editorID,
+		Title:         post.Title,
+		Content:       post.Content,
+		Summary:       post.Summary,
+		CoverURL:      post.CoverURL,
+		Visibility:    post.Visibility,
+		AllowComments: post.AllowComments,
+		CollectionID:  *post.CollectionID,
+		PublishedAt:   post.PublishedAt,
+	}
+	return tx.Create(&version).Error
+}
 
-	post, err := s.repo.GetPost(postID)
-	if err != nil {
+func (s *Service) ListPostVersions(user authctx.CurrentUser, postID uuid.UUID) ([]model.BlogPostVersion, error) {
+	var post model.Post
+	if err := s.db.First(&post, "id = ?", postID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return RatingSummary{}, apperr.NotFound("blog.post_not_found", "Post not found")
+			return nil, apperr.NotFound("blog.post_not_found", "Post not found")
 		}
-		return RatingSummary{}, err
+		return nil, err
 	}
-	if post.UserID == user.ID {
-		return RatingSummary{}, apperr.Forbidden("blog.rating_self_forbidden", "Authors cannot rate their own posts")
+	if post.UserID != user.ID {
+		return nil, apperr.Forbidden("blog.post_forbidden", "You don't have permission to view post versions")
 	}
-	if post.Status != "published" || post.Visibility != "public" {
-		return RatingSummary{}, apperr.Forbidden("blog.rating_forbidden", "Only published public posts can be rated")
+	var versions []model.BlogPostVersion
+	if err := s.db.Where("post_id = ?", postID).Order("version DESC").Find(&versions).Error; err != nil {
+		return nil, err
 	}
-
-	rating := model.BlogPostRating{PostID: postID, UserID: user.ID}
-	assignments := map[string]any{"score": score}
-	if err := s.db.Where("post_id = ? AND user_id = ?", postID, user.ID).Assign(assignments).FirstOrCreate(&rating).Error; err != nil {
-		return RatingSummary{}, err
-	}
-
-	myScore := score
-	return s.recalculateRating(postID, &myScore)
+	return versions, nil
 }
 
-func (s *Service) recalculateRating(postID uuid.UUID, myScore *int) (RatingSummary, error) {
-	type aggregate struct {
-		Count int
-		Avg   float64
-	}
-
-	var agg aggregate
-	if err := s.db.Model(&model.BlogPostRating{}).
-		Select("COUNT(*) as count, AVG(score) as avg").
-		Where("post_id = ?", postID).
-		Scan(&agg).Error; err != nil {
-		return RatingSummary{}, err
-	}
-
-	averageScore := int(agg.Avg * 10)
-	summary := RatingSummary{
-		AverageScore: averageScore,
-		AverageStars: float64(averageScore) / 20,
-		RatingCount:  agg.Count,
-		MyScore:      myScore,
-	}
-
-	if err := s.db.Model(&model.Post{}).Where("id = ?", postID).Updates(map[string]any{
-		"rating_average_score": averageScore,
-		"rating_count":         agg.Count,
-	}).Error; err != nil {
-		return RatingSummary{}, err
-	}
-
-	if myScore != nil {
-		_ = audit.Record(s.db, audit.Entry{Action: "blog.rating.set", EntityType: "post", EntityID: &postID})
-	}
-
-	return summary, nil
-}
-
-func (s *Service) appendPostCollectionAtTail(postID uuid.UUID, collectionID uuid.UUID) error {
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		var link model.PostCollection
-		if err := tx.Where("post_id = ? AND collection_id = ?", postID, collectionID).First(&link).Error; err != nil {
+func (s *Service) RestorePostVersion(user authctx.CurrentUser, postID uuid.UUID, versionNumber int) (model.Post, error) {
+	var restored model.Post
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var post model.Post
+		if err := tx.First(&post, "id = ?", postID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("blog.post_not_found", "Post not found")
+			}
 			return err
 		}
-
-		var maxPosition int
-		if err := tx.Model(&model.PostCollection{}).
-			Where("collection_id = ?", collectionID).
-			Select("COALESCE(MAX(position), -1)").
-			Scan(&maxPosition).Error; err != nil {
+		if post.UserID != user.ID {
+			return apperr.Forbidden("blog.post_forbidden", "You don't have permission to restore this post")
+		}
+		var version model.BlogPostVersion
+		if err := tx.Where("post_id = ? AND version = ?", postID, versionNumber).First(&version).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("blog.version_not_found", "Post version not found")
+			}
 			return err
 		}
-
-		return tx.Model(&model.PostCollection{}).
-			Where("post_id = ? AND collection_id = ?", postID, collectionID).
-			Update("position", maxPosition+1).Error
+		var collection model.Collection
+		if err := tx.First(&collection, "id = ?", version.CollectionID).Error; err != nil {
+			return err
+		}
+		updates := map[string]any{
+			"title": version.Title, "content": version.Content, "summary": version.Summary,
+			"cover_url": version.CoverURL, "visibility": version.Visibility,
+			"allow_comments": version.AllowComments, "collection_id": version.CollectionID,
+			"channel_id": collection.ChannelID,
+		}
+		if err := tx.Model(&post).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.Preload("Channel").Preload("Collection").First(&restored, "id = ?", postID).Error; err != nil {
+			return err
+		}
+		return saveBlogPostVersion(tx, restored, user.ID)
 	})
+	return restored, err
 }
 
 func (s *Service) reorderCollectionPosts(collection model.Collection, orderedPostIDs []uuid.UUID, userID uuid.UUID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		var links []model.PostCollection
-		if err := tx.Where("collection_id = ?", collection.ID).Find(&links).Error; err != nil {
-			return err
-		}
-		if len(links) != len(orderedPostIDs) {
-			return apperr.BadRequest("validation.invalid_request", "post_ids must include every post in the collection")
-		}
-
-		linkSet := make(map[uuid.UUID]model.PostCollection, len(links))
-		for _, link := range links {
-			linkSet[link.PostID] = link
-		}
-
-		for _, postID := range orderedPostIDs {
-			link, exists := linkSet[postID]
-			if !exists {
-				return apperr.BadRequest("validation.invalid_request", "post_ids contains a post outside this collection")
-			}
-			if link.CollectionID != collection.ID {
-				return apperr.BadRequest("validation.invalid_request", "post_ids contains a post outside this collection")
-			}
-		}
-
 		var posts []model.Post
-		if err := tx.Where("id IN ?", orderedPostIDs).Find(&posts).Error; err != nil {
+		if err := tx.Where("collection_id = ?", collection.ID).Find(&posts).Error; err != nil {
 			return err
 		}
 		if len(posts) != len(orderedPostIDs) {
-			return apperr.BadRequest("validation.invalid_request", "post_ids contains an unknown post")
+			return apperr.BadRequest("validation.invalid_request", "post_ids must include every post in the collection")
 		}
+
+		postSet := make(map[uuid.UUID]model.Post, len(posts))
 		for _, post := range posts {
+			postSet[post.ID] = post
+		}
+
+		for _, postID := range orderedPostIDs {
+			post, exists := postSet[postID]
+			if !exists {
+				return apperr.BadRequest("validation.invalid_request", "post_ids contains a post outside this collection")
+			}
 			if post.UserID != userID {
 				return apperr.Forbidden("blog.post_forbidden", "You don't have permission to reorder this collection")
 			}
-			if post.ChannelID == nil || *post.ChannelID != collection.ChannelID {
+			if post.CollectionID == nil || *post.CollectionID != collection.ID {
 				return apperr.BadRequest("validation.invalid_request", "post_ids contains a post outside this collection channel")
 			}
 		}
 
 		for position, postID := range orderedPostIDs {
-			if err := tx.Model(&model.PostCollection{}).
-				Where("collection_id = ? AND post_id = ?", collection.ID, postID).
-				Update("position", position).Error; err != nil {
+			if err := tx.Model(&model.Post{}).
+				Where("collection_id = ? AND id = ?", collection.ID, postID).
+				Update("collection_position", position).Error; err != nil {
 				return err
 			}
 		}

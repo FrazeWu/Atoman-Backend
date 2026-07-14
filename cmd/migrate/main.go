@@ -13,6 +13,7 @@ import (
 	"atoman/internal/config"
 	"atoman/internal/migrations"
 	"atoman/internal/model"
+	"atoman/internal/service"
 )
 
 func main() {
@@ -72,9 +73,21 @@ func runMigrations(db *gorm.DB) error {
 	if err := migrations.DeduplicateBlogInteractions(db); err != nil {
 		return fmt.Errorf("deduplicate blog interactions: %w", err)
 	}
+	if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
+		return fmt.Errorf("unified reading list migration: %w", err)
+	}
 
 	if err := migrateSchema(db); err != nil {
 		return err
+	}
+	if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
+		return fmt.Errorf("unified reading list post-schema migration: %w", err)
+	}
+	if err := migrations.RunBlogSingleCollectionMigration(db); err != nil {
+		return fmt.Errorf("blog single collection migration: %w", err)
+	}
+	if err := migrations.RunBlogBookmarkFolderMigration(db); err != nil {
+		return fmt.Errorf("blog bookmark folder migration: %w", err)
 	}
 
 	if err := migrations.RunChannelDefaultSelectionMigration(db); err != nil {
@@ -124,11 +137,35 @@ func runMigrations(db *gorm.DB) error {
 	if err := migrations.RunMusicBookmarksPlaylistsMigration(db); err != nil {
 		return fmt.Errorf("music bookmarks playlists migration: %w", err)
 	}
+	if err := migrations.RunMusicFavoritePlaylistMigration(db); err != nil {
+		return fmt.Errorf("music favorite playlist migration: %w", err)
+	}
 
 	if err := migrations.RunMusicPlayCountsMigration(db); err != nil {
 		return fmt.Errorf("music play counts migration: %w", err)
 	}
+	if err := backfillUserDefaultResources(db); err != nil {
+		return fmt.Errorf("user default resources migration: %w", err)
+	}
 
+	return nil
+}
+
+func backfillUserDefaultResources(db *gorm.DB) error {
+	var users []model.User
+	if err := db.Find(&users).Error; err != nil {
+		return err
+	}
+	for _, user := range users {
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.FirstOrCreate(&model.UserSettings{UserID: user.UUID}, model.UserSettings{UserID: user.UUID}).Error; err != nil {
+				return err
+			}
+			return service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.Username)
+		}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -145,11 +182,13 @@ func preparePostgresExtensions(db *gorm.DB) error {
 func migrateSchema(db *gorm.DB) error {
 	models := []any{
 		&model.User{},
+		&model.UserSettings{},
+		&model.EmailVerificationCode{},
 		&model.Channel{},
 		&model.UserDefaultChannel{},
 		&model.Collection{},
 		&model.Post{},
-		&model.PostCollection{},
+		&model.BlogPostVersion{},
 		&model.Comment{},
 		&model.AuditLog{},
 		&model.MediaAsset{},
@@ -162,7 +201,6 @@ func migrateSchema(db *gorm.DB) error {
 		&model.SongBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
-		&model.BlogPostRating{},
 		&model.Bookmark{},
 		&model.BookmarkFolder{},
 		&model.ChannelBookmark{},

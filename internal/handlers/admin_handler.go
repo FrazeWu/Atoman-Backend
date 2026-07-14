@@ -452,7 +452,7 @@ func AdminDeleteFeedSourceRow(db *gorm.DB) gin.HandlerFunc {
 				if err := tx.Where("feed_item_id IN ?", itemIDs).Delete(&model.FeedItemStar{}).Error; err != nil {
 					return err
 				}
-				if err := tx.Where("feed_item_id IN ?", itemIDs).Delete(&model.ReadingListItem{}).Error; err != nil {
+				if err := tx.Where("target_type = ? AND target_id IN ?", "feed_item", itemIDs).Delete(&model.ReadingListItem{}).Error; err != nil {
 					return err
 				}
 			}

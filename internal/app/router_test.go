@@ -17,8 +17,8 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 func signedRouterTokenForTest(t *testing.T, user model.User) string {
@@ -184,7 +184,6 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 		&model.Channel{},
 		&model.Collection{},
 		&model.Post{},
-		&model.BlogPostRating{},
 		&model.BlogDraft{},
 		&model.AuditLog{},
 		&model.FeedSource{},
@@ -212,12 +211,12 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
 
 	body := map[string]any{
-		"title":          "Router Post",
-		"content":        "content",
-		"channel_id":     channel.ID,
-		"collection_ids": []string{collection.ID.String()},
-		"visibility":     "public",
-		"status":         "draft",
+		"title":         "Router Post",
+		"content":       "content",
+		"channel_id":    channel.ID,
+		"collection_id": collection.ID.String(),
+		"visibility":    "public",
+		"status":        "draft",
 	}
 	raw, _ := json.Marshal(body)
 	w := httptest.NewRecorder()
@@ -300,20 +299,6 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 		}
 	}
 
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/00000000-0000-0000-0000-000000000001/collections", bytes.NewBufferString(`{"collection_id":"00000000-0000-0000-0000-000000000001"}`))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusNotFound || !bytes.Contains(w.Body.Bytes(), []byte("blog.post_not_found")) {
-		t.Fatalf("expected mounted blog post collection add route to return blog.post_not_found, got %d: %s", w.Code, w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/blog/posts/00000000-0000-0000-0000-000000000001/collections/00000000-0000-0000-0000-000000000001", nil)
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusNotFound || !bytes.Contains(w.Body.Bytes(), []byte("blog.post_not_found")) {
-		t.Fatalf("expected mounted blog post collection remove route to return blog.post_not_found, got %d: %s", w.Code, w.Body.String())
-	}
 }
 
 func TestRegisterV1RoutesMountsSiteResolve(t *testing.T) {

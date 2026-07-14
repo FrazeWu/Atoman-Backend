@@ -411,28 +411,49 @@ func (s *Service) ToggleStar(user authctx.CurrentUser, feedItemID uuid.UUID) (bo
 	return true, nil
 }
 
-func (s *Service) ToggleReadingList(user authctx.CurrentUser, feedItemID uuid.UUID) (bool, error) {
+func (s *Service) ToggleReadingList(user authctx.CurrentUser, targetType string, targetID uuid.UUID) (bool, error) {
 	if user.ID == uuid.Nil {
 		return false, apperr.Unauthorized("Login required")
 	}
-	if feedItemID == uuid.Nil {
-		return false, apperr.BadRequest("validation.invalid_request", "feed_item_id is required")
+	if targetID == uuid.Nil {
+		return false, apperr.BadRequest("validation.invalid_request", "target_id is required")
 	}
-	if err := s.ensureFeedItemExists(feedItemID); err != nil {
+	if err := s.ensureReadingListTarget(user, targetType, targetID); err != nil {
 		return false, err
 	}
-	_, err := s.repo.FindReadingListItem(user.ID, feedItemID)
+	_, err := s.repo.FindReadingListItem(user.ID, targetType, targetID)
 	if err == nil {
-		return false, s.repo.DeleteReadingListItem(user.ID, feedItemID)
+		return false, s.repo.DeleteReadingListItem(user.ID, targetType, targetID)
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return false, err
 	}
-	item := model.ReadingListItem{UserID: user.ID, FeedItemID: feedItemID, CreatedAt: time.Now()}
+	item := model.ReadingListItem{UserID: user.ID, TargetType: targetType, TargetID: targetID, CreatedAt: time.Now()}
 	if err := s.repo.CreateReadingListItem(&item); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *Service) ensureReadingListTarget(user authctx.CurrentUser, targetType string, targetID uuid.UUID) error {
+	switch targetType {
+	case "feed_item":
+		return s.ensureFeedItemExists(targetID)
+	case "post":
+		var post model.Post
+		if err := s.db.First(&post, "id = ?", targetID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("blog.post_not_found", "Post not found")
+			}
+			return err
+		}
+		if post.Status != "published" || (post.Visibility != "public" && post.UserID != user.ID) {
+			return apperr.Forbidden("blog.post_forbidden", "You don't have permission to save this post")
+		}
+		return nil
+	default:
+		return apperr.BadRequest("validation.invalid_request", "target_type must be feed_item or post")
+	}
 }
 
 func (s *Service) ListReadingList(user authctx.CurrentUser, query FeedQuery) ([]model.ReadingListItem, int64, error) {
@@ -452,14 +473,14 @@ func (s *Service) ListReadingList(user authctx.CurrentUser, query FeedQuery) ([]
 	return items, total, nil
 }
 
-func (s *Service) RemoveReadingListItem(user authctx.CurrentUser, feedItemID uuid.UUID) error {
+func (s *Service) RemoveReadingListItem(user authctx.CurrentUser, targetType string, targetID uuid.UUID) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
 	}
-	if feedItemID == uuid.Nil {
-		return apperr.BadRequest("validation.invalid_request", "feed item id must be a valid uuid")
+	if targetID == uuid.Nil || (targetType != "feed_item" && targetType != "post") {
+		return apperr.BadRequest("validation.invalid_request", "valid target_type and target_id are required")
 	}
-	return s.repo.DeleteReadingListItem(user.ID, feedItemID)
+	return s.repo.DeleteReadingListItem(user.ID, targetType, targetID)
 }
 
 func (s *Service) RecordSourceReadEvent(sourceType string, sourceID string, eventType string) error {

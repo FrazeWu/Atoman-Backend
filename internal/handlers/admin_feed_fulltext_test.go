@@ -229,7 +229,7 @@ func TestAdminDeleteFeedSourceCleansDependentFeedItemTables(t *testing.T) {
 	if err := db.Create(&star).Error; err != nil {
 		t.Fatalf("create star: %v", err)
 	}
-	readingListItem := model.ReadingListItem{UserID: user.UUID, FeedItemID: item.ID, CreatedAt: time.Now().UTC()}
+	readingListItem := model.ReadingListItem{UserID: user.UUID, TargetType: "feed_item", TargetID: item.ID, CreatedAt: time.Now().UTC()}
 	if err := db.Create(&readingListItem).Error; err != nil {
 		t.Fatalf("create reading list item: %v", err)
 	}
