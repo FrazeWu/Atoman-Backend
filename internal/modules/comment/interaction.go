@@ -104,6 +104,9 @@ func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
 			if err != nil {
 				return err
 			}
+			if !isVisibleCommentStatus(entry.Status) {
+				return ErrCommentNotFound
+			}
 			target, err := s.repo.lockTargetByID(tx, entry.TargetID)
 			if err != nil {
 				return err
@@ -117,11 +120,15 @@ func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
 			rootDelta := 0
 			if entry.RootID == nil {
 				var childIDs []uuid.UUID
-				if err := tx.Unscoped().Model(&model.CommentEntry{}).Where("root_id = ?", entry.ID).Pluck("id", &childIDs).Error; err != nil {
+				if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).Model(&model.CommentEntry{}).Where("root_id = ?", entry.ID).Pluck("id", &childIDs).Error; err != nil {
 					return err
 				}
 				ids = append(ids, childIDs...)
 				rootDelta = 1
+			}
+			var visibleDeleteCount int64
+			if err := tx.Model(&model.CommentEntry{}).Where("id IN ? AND status IN ?", ids, hotScoreStatuses).Count(&visibleDeleteCount).Error; err != nil {
+				return err
 			}
 			if err := deleteCommentRelations(tx, ids); err != nil {
 				return err
@@ -134,14 +141,14 @@ func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
 				return ErrCommentNotFound
 			}
 			updates := map[string]any{
-				"comment_count": gorm.Expr("comment_count - ?", len(ids)),
+				"comment_count": gorm.Expr("comment_count - ?", visibleDeleteCount),
 				"root_count":    gorm.Expr("root_count - ?", rootDelta),
 			}
 			if target.PinnedCommentID != nil && *target.PinnedCommentID == entry.ID {
 				updates["pinned_comment_id"] = gorm.Expr("NULL")
 			}
 			counter := tx.Model(&model.DiscussionTarget{}).
-				Where("id = ? AND comment_count >= ? AND root_count >= ?", target.ID, len(ids), rootDelta).Updates(updates)
+				Where("id = ? AND comment_count >= ? AND root_count >= ?", target.ID, visibleDeleteCount, rootDelta).Updates(updates)
 			if counter.Error != nil {
 				return counter.Error
 			}
@@ -165,6 +172,10 @@ func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
 			return nil
 		})
 	})
+}
+
+func isVisibleCommentStatus(status string) bool {
+	return status == commentStatusActive || status == "auto_folded"
 }
 
 func deleteCommentRelations(tx *gorm.DB, ids []uuid.UUID) error {

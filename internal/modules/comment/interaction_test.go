@@ -59,20 +59,29 @@ func TestEditRevalidatesAndReplacesRelationsWithoutChangingThreadIdentity(t *tes
 	require.Empty(t, imageOnly.Content)
 }
 
-func TestDeleteRootPhysicallyDeletesBuildingRelationsAndCounters(t *testing.T) {
+func TestDeleteRootPhysicallyDeletesMixedBuildingAndDecrementsOnlyVisibleCounters(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	root := ctx.create(t, 1, "root", nil)
-	child := ctx.create(t, 2, "child", &root.ID)
-	grandchild := ctx.create(t, 3, "reply child", &child.ID)
+	active := ctx.create(t, 2, "active", &root.ID)
+	folded := ctx.create(t, 3, "folded", &active.ID)
+	hidden := ctx.create(t, 0, "hidden", &root.ID)
+	softDeleted := ctx.create(t, 2, "soft deleted", &root.ID)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", folded.ID).Update("status", "auto_folded").Error)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", hidden.ID).Update("status", "moderator_hidden").Error)
+	require.NoError(t, ctx.db.Delete(&model.CommentEntry{}, "id = ?", softDeleted.ID).Error)
 	require.NoError(t, ctx.service.Like(ctx.users[0], root.ID))
-	require.NoError(t, ctx.db.Create(&model.CommentReport{CommentID: child.ID, ReporterID: ctx.users[0].ID, Reason: "spam"}).Error)
-	require.NoError(t, ctx.db.Create(&model.CommentMention{CommentID: grandchild.ID, UserID: ctx.users[0].ID, StartOffset: 0, EndOffset: 1}).Error)
+	require.NoError(t, ctx.db.Create(&model.CommentReport{CommentID: active.ID, ReporterID: ctx.users[0].ID, Reason: "spam"}).Error)
+	require.NoError(t, ctx.db.Create(&model.CommentMention{CommentID: folded.ID, UserID: ctx.users[0].ID, StartOffset: 0, EndOffset: 1}).Error)
+	asset := createImageAsset(t, ctx.db, ctx.users[0].ID, "image/png")
+	require.NoError(t, ctx.db.Create(&model.CommentAttachment{CommentID: hidden.ID, MediaAssetID: asset.ID}).Error)
+	require.NoError(t, ctx.db.Create(&model.CommentTimeAnchor{CommentID: softDeleted.ID, StartOffset: 0, EndOffset: 4, Seconds: 12}).Error)
 	var target model.DiscussionTarget
 	require.NoError(t, ctx.db.First(&target).Error)
-	require.NoError(t, ctx.db.Model(&target).Update("pinned_comment_id", root.ID).Error)
+	require.NoError(t, ctx.db.Model(&target).Updates(map[string]any{"pinned_comment_id": root.ID, "comment_count": 3, "root_count": 1}).Error)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", root.ID).Update("reply_count", 2).Error)
 
 	require.NoError(t, ctx.service.Delete(ctx.users[0], root.ID)) // target owner
-	ids := []uuid.UUID{root.ID, child.ID, grandchild.ID}
+	ids := []uuid.UUID{root.ID, active.ID, folded.ID, hidden.ID, softDeleted.ID}
 	var commentCount int64
 	require.NoError(t, ctx.db.Unscoped().Model(&model.CommentEntry{}).Where("id IN ?", ids).Count(&commentCount).Error)
 	require.Zero(t, commentCount)
@@ -87,6 +96,28 @@ func TestDeleteRootPhysicallyDeletesBuildingRelationsAndCounters(t *testing.T) {
 	require.Zero(t, updatedTarget.RootCount)
 	require.Nil(t, updatedTarget.PinnedCommentID)
 	require.ErrorIs(t, ctx.service.Delete(ctx.users[0], root.ID), ErrCommentNotFound)
+}
+
+func TestDeleteAllowsVisibleStatusesAndRejectsModeratorHidden(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	root := ctx.create(t, 0, "root", nil)
+	folded := ctx.create(t, 1, "folded", &root.ID)
+	hidden := ctx.create(t, 2, "hidden", &root.ID)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", folded.ID).Update("status", "auto_folded").Error)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", hidden.ID).Update("status", "moderator_hidden").Error)
+	require.NoError(t, ctx.db.Model(&model.DiscussionTarget{}).Where("id = (SELECT target_id FROM comment_entries WHERE id = ?)", root.ID).Update("comment_count", 2).Error)
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", root.ID).Update("reply_count", 1).Error)
+
+	require.ErrorIs(t, ctx.service.Delete(ctx.users[2], hidden.ID), ErrCommentNotFound)
+	require.NoError(t, ctx.service.Delete(ctx.users[1], folded.ID))
+	var target model.DiscussionTarget
+	require.NoError(t, ctx.db.First(&target).Error)
+	require.Equal(t, 1, target.CommentCount)
+	var storedRoot model.CommentEntry
+	require.NoError(t, ctx.db.First(&storedRoot, "id = ?", root.ID).Error)
+	require.Zero(t, storedRoot.ReplyCount)
+	var stillHidden model.CommentEntry
+	require.NoError(t, ctx.db.First(&stillHidden, "id = ?", hidden.ID).Error)
 }
 
 func TestDeleteChildKeepsThreadAndHistoricalReplyReference(t *testing.T) {
