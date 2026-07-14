@@ -9,8 +9,11 @@ import (
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
+	"github.com/yuin/goldmark/renderer"
 	"github.com/yuin/goldmark/renderer/html"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -21,12 +24,15 @@ var (
 func NormalizeContent(raw string) string {
 	normalized := strings.ReplaceAll(raw, "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
-	return strings.TrimSpace(normalized)
+	return strings.TrimSpace(norm.NFC.String(normalized))
 }
 
 func RenderCommentMarkdown(raw string) (string, error) {
 	content := NormalizeContent(raw)
-	markdown := goldmark.New(goldmark.WithRendererOptions(html.WithHardWraps()))
+	markdown := goldmark.New(goldmark.WithRendererOptions(
+		html.WithHardWraps(),
+		renderer.WithNodeRenderers(util.Prioritized(externalLinkRenderer{}, 500)),
+	))
 	source := []byte(content)
 	document := markdown.Parser().Parse(text.NewReader(source))
 	plainSource := sourceOutsideCodeSpans(source, document)
@@ -42,6 +48,30 @@ func RenderCommentMarkdown(raw string) (string, error) {
 		return "", err
 	}
 	return output.String(), nil
+}
+
+type externalLinkRenderer struct{}
+
+func (externalLinkRenderer) RegisterFuncs(register renderer.NodeRendererFuncRegisterer) {
+	register.Register(ast.KindLink, renderExternalLink)
+}
+
+func renderExternalLink(writer util.BufWriter, _ []byte, node ast.Node, entering bool) (ast.WalkStatus, error) {
+	link := node.(*ast.Link)
+	if !entering {
+		_, _ = writer.WriteString("</a>")
+		return ast.WalkContinue, nil
+	}
+	_, _ = writer.WriteString(`<a href="`)
+	_, _ = writer.Write(util.EscapeHTML(util.URLEscape(link.Destination, true)))
+	_, _ = writer.WriteString(`" rel="nofollow noreferrer noopener"`)
+	if link.Title != nil {
+		_, _ = writer.WriteString(` title="`)
+		_, _ = writer.Write(util.EscapeHTML(link.Title))
+		_ = writer.WriteByte('"')
+	}
+	_ = writer.WriteByte('>')
+	return ast.WalkContinue, nil
 }
 
 func containsStrikethroughSyntax(content string) bool {

@@ -1,11 +1,13 @@
 package comment
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -69,6 +71,18 @@ func TestCreateConcurrentRootsAssignsContinuousFloors(t *testing.T) {
 	var target model.DiscussionTarget
 	require.NoError(t, ctx.db.First(&target).Error)
 	require.Equal(t, 3, target.NextFloor)
+}
+
+func TestCreateSerializationIsEnabledOnlyForSQLite(t *testing.T) {
+	mutex := createTransactionMutex("sqlite")
+	require.NotNil(t, mutex)
+	require.Nil(t, createTransactionMutex("postgres"))
+	require.NoError(t, withCreateTransactionMutex(mutex, func() error {
+		require.False(t, mutex.TryLock())
+		return nil
+	}))
+	require.True(t, mutex.TryLock())
+	mutex.Unlock()
 }
 
 func TestCreateExtensionFailureRollsBackFloorAndRelations(t *testing.T) {
@@ -154,6 +168,40 @@ func TestCreateValidatesAuthenticationTargetAndReply(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidReply)
 }
 
+func TestCreateReplyToChildRejectsCorruptRoot(t *testing.T) {
+	cases := map[string]func(t *testing.T, ctx commentTestContext, root model.CommentEntry){
+		"missing": func(t *testing.T, ctx commentTestContext, root model.CommentEntry) {
+			require.NoError(t, ctx.db.Unscoped().Delete(&model.CommentEntry{}, "id = ?", root.ID).Error)
+		},
+		"hidden": func(t *testing.T, ctx commentTestContext, root model.CommentEntry) {
+			require.NoError(t, ctx.db.Model(&root).Update("status", "hidden").Error)
+		},
+		"other target": func(t *testing.T, ctx commentTestContext, root model.CommentEntry) {
+			other := model.DiscussionTarget{Kind: TargetKindBlogPost, ResourceKey: uuid.NewString(), NextFloor: 1}
+			require.NoError(t, ctx.db.Create(&other).Error)
+			require.NoError(t, ctx.db.Model(&root).Update("target_id", other.ID).Error)
+		},
+	}
+	for name, corrupt := range cases {
+		t.Run(name, func(t *testing.T) {
+			ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+			rootDTO := ctx.create(t, 0, "root", nil)
+			child := ctx.create(t, 1, "child", &rootDTO.ID)
+			var root model.CommentEntry
+			require.NoError(t, ctx.db.First(&root, "id = ?", rootDTO.ID).Error)
+			corrupt(t, ctx, root)
+			var before int64
+			require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Count(&before).Error)
+
+			_, err := ctx.service.Create(ctx.users[2], ctx.target, CreateCommentInput{Content: "reply", ReplyToID: &child.ID})
+			require.ErrorIs(t, err, ErrInvalidReply)
+			var after int64
+			require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Count(&after).Error)
+			require.Equal(t, before, after)
+		})
+	}
+}
+
 func TestCreateValidatesContentAndAttachments(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	_, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{})
@@ -197,6 +245,24 @@ func TestCreateValidatesContentAndAttachments(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidAttachment)
 }
 
+func TestCreateValidatesAttachmentSize(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	zero := createImageAsset(t, ctx.db, ctx.users[0].ID, "image/png")
+	require.NoError(t, ctx.db.Model(&zero).Update("size", 0).Error)
+	_, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{AttachmentIDs: []uuid.UUID{zero.ID}})
+	require.ErrorIs(t, err, ErrInvalidAttachment)
+
+	tooLarge := createImageAsset(t, ctx.db, ctx.users[0].ID, "image/png")
+	require.NoError(t, ctx.db.Model(&tooLarge).Update("size", 10*1024*1024+1).Error)
+	_, err = ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{AttachmentIDs: []uuid.UUID{tooLarge.ID}})
+	require.ErrorIs(t, err, ErrInvalidAttachment)
+
+	boundary := createImageAsset(t, ctx.db, ctx.users[0].ID, "image/png")
+	require.NoError(t, ctx.db.Model(&boundary).Update("size", 10*1024*1024).Error)
+	_, err = ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{AttachmentIDs: []uuid.UUID{boundary.ID}})
+	require.NoError(t, err)
+}
+
 func TestCreateValidatesAndPersistsMentionOccurrences(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	content := "@comment-user-1 and @comment-user-1"
@@ -221,6 +287,37 @@ func TestCreateValidatesAndPersistsMentionOccurrences(t *testing.T) {
 	require.ErrorIs(t, err, ErrInvalidMention)
 }
 
+func TestCreateRejectsMentionUsernameSpoofing(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	content := "@comment-user-2"
+	_, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{
+		Content:  content,
+		Mentions: []MentionInput{{UserID: ctx.users[1].ID, Start: 0, End: len([]rune(content))}},
+	})
+	require.ErrorIs(t, err, ErrInvalidMention)
+}
+
+func TestCreateMentionOffsetsReferToNFCNormalizedContent(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	mentioned := model.User{Username: "café", Email: "cafe@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, ctx.db.Create(&mentioned).Error)
+	created, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{
+		Content:  "@cafe\u0301",
+		Mentions: []MentionInput{{UserID: mentioned.UUID, Start: 0, End: len([]rune("@café"))}},
+	})
+	require.NoError(t, err)
+	require.Equal(t, "@café", created.Content)
+}
+
+func TestCreateContentLimitCountsNFCRunes(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	created, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: strings.Repeat("e\u0301", 2000)})
+	require.NoError(t, err)
+	require.Len(t, []rune(created.Content), 2000)
+	_, err = ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: strings.Repeat("e\u0301", 2001)})
+	require.ErrorIs(t, err, ErrInvalidContent)
+}
+
 func TestCreatePersistsContentHashFromNormalizedContentAndOrderedAttachments(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	a := createImageAsset(t, ctx.db, ctx.users[0].ID, "image/png")
@@ -235,9 +332,12 @@ func TestCreatePersistsContentHashFromNormalizedContentAndOrderedAttachments(t *
 	require.NoError(t, err)
 	three, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "hello\nworld", AttachmentIDs: []uuid.UUID{b.ID, a.ID}})
 	require.NoError(t, err)
-	require.NotEmpty(t, one.ContentHash)
-	require.Equal(t, one.ContentHash, two.ContentHash)
-	require.NotEqual(t, one.ContentHash, three.ContentHash)
+	var stored []model.CommentEntry
+	require.NoError(t, ctx.db.Where("id IN ?", []uuid.UUID{one.ID, two.ID, three.ID}).Order("created_at ASC").Find(&stored).Error)
+	require.NotEmpty(t, stored[0].ContentHash)
+	require.Equal(t, stored[0].ContentHash, stored[1].ContentHash)
+	require.NotEqual(t, stored[0].ContentHash, stored[2].ContentHash)
+	require.Equal(t, ContentHash("café", nil), ContentHash("cafe\u0301", nil))
 }
 
 func TestCreatePersistsTimeAnchorsOnlyForMediaKinds(t *testing.T) {
@@ -280,12 +380,14 @@ func TestListPaginatesRootsAndPreviewsEarliestActiveChildren(t *testing.T) {
 	require.Equal(t, 4, page.TotalReplies)
 	require.Equal(t, 20, page.PerPage)
 
-	latest, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, Sort: SortLatest})
+	latest, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, Sort: SortNewest})
 	require.NoError(t, err)
 	require.Equal(t, 22, *latest.Items[0].FloorNumber)
 	_, err = ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 0, Sort: SortOldest})
 	require.ErrorIs(t, err, ErrInvalidListOptions)
 	_, err = ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, Sort: "random"})
+	require.ErrorIs(t, err, ErrInvalidListOptions)
+	_, err = ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, Sort: "latest"})
 	require.ErrorIs(t, err, ErrInvalidListOptions)
 }
 
@@ -476,7 +578,7 @@ func TestListInvalidPinnedReferenceFallsBackToOrdinaryPagination(t *testing.T) {
 			require.NoError(t, ctx.db.Where("kind = ? AND resource_key = ?", ctx.resolved.Kind, ctx.resolved.ResourceKey).First(&target).Error)
 			require.NoError(t, ctx.db.Model(&target).Update("pinned_comment_id", pinnedID).Error)
 
-			listed, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, Sort: SortLatest})
+			listed, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, Sort: SortNewest})
 			require.NoError(t, err)
 			require.Len(t, listed.Items, 20)
 			for _, item := range listed.Items {
@@ -535,6 +637,36 @@ func TestListReturnsReplyToSpecificChild(t *testing.T) {
 	listed, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1})
 	require.NoError(t, err)
 	require.Equal(t, child.ID, *listed.Items[0].Replies[1].ReplyToID)
+}
+
+func TestListUsesConstantQueryCount(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	for i := 0; i < 20; i++ {
+		root := ctx.create(t, i%len(ctx.users), fmt.Sprintf("root-%02d", i), nil)
+		for child := 0; child < 3; child++ {
+			ctx.create(t, (i+child+1)%len(ctx.users), fmt.Sprintf("child-%02d-%d", i, child), &root.ID)
+		}
+	}
+	var queries atomic.Int64
+	callbackName := "test:count_comment_list_queries"
+	require.NoError(t, ctx.db.Callback().Query().Before("gorm:query").Register(callbackName, func(*gorm.DB) {
+		queries.Add(1)
+	}))
+	t.Cleanup(func() { _ = ctx.db.Callback().Query().Remove(callbackName) })
+
+	listed, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1, Sort: SortOldest})
+	require.NoError(t, err)
+	require.Len(t, listed.Items, 20)
+	for _, root := range listed.Items {
+		require.Len(t, root.Replies, 3)
+	}
+	require.LessOrEqual(t, queries.Load(), int64(10))
+}
+
+func TestCommentDTODoesNotExposeContentHash(t *testing.T) {
+	payload, err := json.Marshal(CommentDTO{})
+	require.NoError(t, err)
+	require.NotContains(t, string(payload), "content_hash")
 }
 
 func TestListReturnsDatabaseErrors(t *testing.T) {

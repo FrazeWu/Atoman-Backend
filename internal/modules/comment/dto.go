@@ -8,7 +8,7 @@ import (
 
 const (
 	SortOldest = "oldest"
-	SortLatest = "latest"
+	SortNewest = "newest"
 	SortHot    = "hot"
 	pageSize   = 20
 )
@@ -51,7 +51,6 @@ type CommentDTO struct {
 	ReplyToID    *uuid.UUID      `json:"reply_to_id,omitempty"`
 	FloorNumber  *int            `json:"floor_number,omitempty"`
 	Content      string          `json:"content"`
-	ContentHash  string          `json:"content_hash"`
 	RenderedHTML string          `json:"rendered_html"`
 	Status       string          `json:"status"`
 	EditedAt     *time.Time      `json:"edited_at,omitempty"`

@@ -54,6 +54,12 @@ func (repository) findReply(tx *gorm.DB, id uuid.UUID) (model.CommentEntry, erro
 	return reply, err
 }
 
+func (repository) findRoot(tx *gorm.DB, id uuid.UUID) (model.CommentEntry, error) {
+	var root model.CommentEntry
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&root, "id = ?", id).Error
+	return root, err
+}
+
 func (repository) createComment(tx *gorm.DB, entry *model.CommentEntry) error {
 	return tx.Create(entry).Error
 }

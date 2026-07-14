@@ -32,11 +32,27 @@ type Service struct {
 	db       *gorm.DB
 	registry *TargetRegistry
 	repo     repository
-	createMu sync.Mutex
+	createMu *sync.Mutex
 }
 
 func NewService(db *gorm.DB, registry *TargetRegistry) *Service {
-	return &Service{db: db, registry: registry}
+	return &Service{db: db, registry: registry, createMu: createTransactionMutex(db.Dialector.Name())}
+}
+
+func createTransactionMutex(dialect string) *sync.Mutex {
+	if dialect == "sqlite" {
+		return &sync.Mutex{}
+	}
+	return nil
+}
+
+func withCreateTransactionMutex(mutex *sync.Mutex, transaction func() error) error {
+	if mutex == nil {
+		return transaction()
+	}
+	mutex.Lock()
+	defer mutex.Unlock()
+	return transaction()
 }
 
 func (s *Service) Create(user authctx.CurrentUser, target TargetRef, input CreateCommentInput) (CommentDTO, error) {
@@ -63,68 +79,77 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 		return CommentDTO{}, err
 	}
 
-	// SQLite ignores FOR UPDATE, so serialize creates within one service as well.
-	// PostgreSQL correctness still comes from the target row lock and floor index.
-	s.createMu.Lock()
-	defer s.createMu.Unlock()
-
 	var created model.CommentEntry
-	err = s.db.Transaction(func(tx *gorm.DB) error {
-		target, err := s.repo.lockTarget(tx, resolved)
-		if err != nil {
-			return fmt.Errorf("lock discussion target: %w", err)
-		}
-
-		created = model.CommentEntry{
-			TargetID:    target.ID,
-			AuthorID:    user.ID,
-			Content:     normalized,
-			ContentHash: ContentHash(normalized, input.AttachmentIDs),
-			Status:      commentStatusActive,
-		}
-		isRoot := input.ReplyToID == nil
-		if isRoot {
-			floor := target.NextFloor
-			created.FloorNumber = &floor
-		} else {
-			reply, err := s.repo.findReply(tx, *input.ReplyToID)
-			if err != nil || reply.TargetID != target.ID || reply.Status != commentStatusActive {
-				return ErrInvalidReply
+	runTransaction := func() error {
+		return s.db.Transaction(func(tx *gorm.DB) error {
+			target, err := s.repo.lockTarget(tx, resolved)
+			if err != nil {
+				return fmt.Errorf("lock discussion target: %w", err)
 			}
-			created.ReplyToID = input.ReplyToID
-			if reply.RootID == nil {
-				created.RootID = &reply.ID
+
+			created = model.CommentEntry{
+				TargetID:    target.ID,
+				AuthorID:    user.ID,
+				Content:     normalized,
+				ContentHash: ContentHash(normalized, input.AttachmentIDs),
+				Status:      commentStatusActive,
+			}
+			isRoot := input.ReplyToID == nil
+			if isRoot {
+				floor := target.NextFloor
+				created.FloorNumber = &floor
 			} else {
-				created.RootID = reply.RootID
+				reply, err := s.repo.findReply(tx, *input.ReplyToID)
+				if err != nil || reply.TargetID != target.ID || reply.Status != commentStatusActive {
+					return ErrInvalidReply
+				}
+				root := reply
+				if reply.RootID != nil {
+					root, err = s.repo.findRoot(tx, *reply.RootID)
+					if err != nil {
+						return ErrInvalidReply
+					}
+				}
+				if root.TargetID != target.ID || root.RootID != nil || root.Status != commentStatusActive {
+					return ErrInvalidReply
+				}
+				created.ReplyToID = input.ReplyToID
+				created.RootID = &root.ID
 			}
-		}
 
-		if err := s.repo.createComment(tx, &created); err != nil {
-			return fmt.Errorf("create comment: %w", err)
-		}
-		if err := createCommentRelations(tx, created.ID, input.Mentions, assets, resolved, normalized); err != nil {
-			return err
-		}
-		updates := map[string]any{"comment_count": gorm.Expr("comment_count + 1")}
-		if isRoot {
-			updates["root_count"] = gorm.Expr("root_count + 1")
-			updates["next_floor"] = gorm.Expr("next_floor + 1")
-		} else {
-			if err := tx.Model(&model.CommentEntry{}).Where("id = ?", created.RootID).
-				UpdateColumn("reply_count", gorm.Expr("reply_count + 1")).Error; err != nil {
-				return fmt.Errorf("update root reply count: %w", err)
+			if err := s.repo.createComment(tx, &created); err != nil {
+				return fmt.Errorf("create comment: %w", err)
 			}
-		}
-		if err := tx.Model(&model.DiscussionTarget{}).Where("id = ?", target.ID).Updates(updates).Error; err != nil {
-			return fmt.Errorf("update discussion target counters: %w", err)
-		}
-		if write != nil {
-			if err := write(tx, &created); err != nil {
+			if err := createCommentRelations(tx, created.ID, input.Mentions, assets, resolved, normalized); err != nil {
 				return err
 			}
-		}
-		return nil
-	})
+			updates := map[string]any{"comment_count": gorm.Expr("comment_count + 1")}
+			if isRoot {
+				updates["root_count"] = gorm.Expr("root_count + 1")
+				updates["next_floor"] = gorm.Expr("next_floor + 1")
+			} else {
+				result := tx.Model(&model.CommentEntry{}).
+					Where("id = ? AND target_id = ? AND root_id IS NULL AND status = ?", created.RootID, target.ID, commentStatusActive).
+					UpdateColumn("reply_count", gorm.Expr("reply_count + 1"))
+				if result.Error != nil {
+					return fmt.Errorf("update root reply count: %w", result.Error)
+				}
+				if result.RowsAffected != 1 {
+					return ErrInvalidReply
+				}
+			}
+			if err := tx.Model(&model.DiscussionTarget{}).Where("id = ?", target.ID).Updates(updates).Error; err != nil {
+				return fmt.Errorf("update discussion target counters: %w", err)
+			}
+			if write != nil {
+				if err := write(tx, &created); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	}
+	err = withCreateTransactionMutex(s.createMu, runTransaction)
 	if err != nil {
 		return CommentDTO{}, err
 	}
@@ -143,7 +168,7 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	if input.Sort == "" {
 		input.Sort = SortOldest
 	}
-	if input.Sort != SortOldest && input.Sort != SortLatest && input.Sort != SortHot {
+	if input.Sort != SortOldest && input.Sort != SortNewest && input.Sort != SortHot {
 		return CommentListDTO{}, ErrInvalidListOptions
 	}
 	viewer := Viewer{}
@@ -197,7 +222,7 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 		}
 	}
 	switch input.Sort {
-	case SortLatest:
+	case SortNewest:
 		query = query.Order("floor_number DESC")
 	case SortHot:
 		query = query.Order("hot_score DESC").Order("floor_number ASC")
@@ -212,24 +237,31 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 		roots = append([]model.CommentEntry{*marked}, roots...)
 	}
 
+	rootIDs := make([]uuid.UUID, 0, len(roots))
+	for _, root := range roots {
+		rootIDs = append(rootIDs, root.ID)
+	}
+	children, err := s.previewChildren(s.db, rootIDs, visible)
+	if err != nil {
+		return CommentListDTO{}, err
+	}
+	allEntries := make([]model.CommentEntry, 0, len(roots)+len(children))
+	allEntries = append(allEntries, roots...)
+	allEntries = append(allEntries, children...)
+	dtos, err := s.entryDTOs(s.db, allEntries)
+	if err != nil {
+		return CommentListDTO{}, err
+	}
+	childrenByRoot := make(map[uuid.UUID][]model.CommentEntry, len(roots))
+	for _, child := range children {
+		childrenByRoot[*child.RootID] = append(childrenByRoot[*child.RootID], child)
+	}
 	items := make([]CommentDTO, 0, len(roots))
 	for _, root := range roots {
-		dto, err := s.entryDTO(s.db, root)
-		if err != nil {
-			return CommentListDTO{}, err
-		}
+		dto := dtos[root.ID]
 		dto.Marked = marked != nil && root.ID == marked.ID
-		var children []model.CommentEntry
-		if err := s.db.Where("root_id = ? AND status IN ?", root.ID, visible).
-			Order("created_at ASC").Order("id ASC").Limit(3).Find(&children).Error; err != nil {
-			return CommentListDTO{}, err
-		}
-		for _, child := range children {
-			childDTO, err := s.entryDTO(s.db, child)
-			if err != nil {
-				return CommentListDTO{}, err
-			}
-			dto.Replies = append(dto.Replies, childDTO)
+		for _, child := range childrenByRoot[root.ID] {
+			dto.Replies = append(dto.Replies, dtos[child.ID])
 		}
 		items = append(items, dto)
 	}
@@ -287,6 +319,7 @@ func (s *Service) validateAttachments(userID uuid.UUID, ids []uuid.UUID) ([]mode
 	seen := make(map[uuid.UUID]struct{}, len(ids))
 	assets := make([]model.MediaAsset, 0, len(ids))
 	allowed := map[string]bool{"image/jpeg": true, "image/png": true, "image/gif": true, "image/webp": true}
+	const maxAttachmentSize = 10 * 1024 * 1024
 	for _, id := range ids {
 		if id == uuid.Nil {
 			return nil, ErrInvalidAttachment
@@ -296,7 +329,7 @@ func (s *Service) validateAttachments(userID uuid.UUID, ids []uuid.UUID) ([]mode
 		}
 		seen[id] = struct{}{}
 		var asset model.MediaAsset
-		if err := s.db.First(&asset, "id = ?", id).Error; err != nil || asset.UserID == nil || *asset.UserID != userID || !allowed[asset.ContentType] || strings.TrimSpace(asset.Key) == "" || strings.TrimSpace(asset.URL) == "" {
+		if err := s.db.First(&asset, "id = ?", id).Error; err != nil || asset.UserID == nil || *asset.UserID != userID || !allowed[asset.ContentType] || asset.Size <= 0 || asset.Size > maxAttachmentSize || strings.TrimSpace(asset.Key) == "" || strings.TrimSpace(asset.URL) == "" {
 			return nil, ErrInvalidAttachment
 		}
 		assets = append(assets, asset)
@@ -309,13 +342,28 @@ func (s *Service) validateMentions(content string, mentions []MentionInput) erro
 		return fmt.Errorf("%w: %v", ErrInvalidMention, err)
 	}
 	seen := make(map[uuid.UUID]struct{}, len(mentions))
+	userIDs := make([]uuid.UUID, 0, len(mentions))
 	for _, mention := range mentions {
 		if _, exists := seen[mention.UserID]; exists {
 			continue
 		}
 		seen[mention.UserID] = struct{}{}
-		var user model.User
-		if err := s.db.Select("uuid", "is_active").First(&user, "uuid = ?", mention.UserID).Error; err != nil || !user.IsActive {
+		userIDs = append(userIDs, mention.UserID)
+	}
+	var users []model.User
+	if len(userIDs) > 0 {
+		if err := s.db.Select("uuid", "username").Where("uuid IN ? AND is_active = ?", userIDs, true).Find(&users).Error; err != nil {
+			return ErrInvalidMention
+		}
+	}
+	usernames := make(map[uuid.UUID]string, len(users))
+	for _, user := range users {
+		usernames[user.UUID] = user.Username
+	}
+	runes := []rune(content)
+	for _, mention := range mentions {
+		username, exists := usernames[mention.UserID]
+		if !exists || string(runes[mention.Start:mention.End]) != "@"+username {
 			return ErrInvalidMention
 		}
 	}
@@ -365,63 +413,100 @@ func (s *Service) loadCommentDTO(db *gorm.DB, id uuid.UUID) (CommentDTO, error) 
 	if err != nil {
 		return CommentDTO{}, err
 	}
-	return s.entryDTO(db, entry)
-}
-
-func (s *Service) entryDTO(db *gorm.DB, entry model.CommentEntry) (CommentDTO, error) {
-	rendered, err := RenderCommentMarkdown(entry.Content)
+	dtos, err := s.entryDTOs(db, []model.CommentEntry{entry})
 	if err != nil {
 		return CommentDTO{}, err
 	}
-	dto := CommentDTO{
-		ID:           entry.ID,
-		AuthorID:     entry.AuthorID,
-		RootID:       entry.RootID,
-		ReplyToID:    entry.ReplyToID,
-		FloorNumber:  entry.FloorNumber,
-		Content:      entry.Content,
-		ContentHash:  entry.ContentHash,
-		RenderedHTML: rendered,
-		Status:       entry.Status,
-		EditedAt:     entry.EditedAt,
-		LikeCount:    entry.LikeCount,
-		ReplyCount:   entry.ReplyCount,
-		HotScore:     entry.HotScore,
-		CreatedAt:    entry.CreatedAt,
-		Mentions:     []MentionDTO{},
-		Attachments:  []AttachmentDTO{},
-		TimeAnchors:  []TimeAnchorDTO{},
-		Replies:      []CommentDTO{},
+	return dtos[id], nil
+}
+
+func (s *Service) previewChildren(db *gorm.DB, rootIDs []uuid.UUID, visible []string) ([]model.CommentEntry, error) {
+	if len(rootIDs) == 0 {
+		return []model.CommentEntry{}, nil
+	}
+	ranked := db.Model(&model.CommentEntry{}).
+		Select("comment_entries.*, ROW_NUMBER() OVER (PARTITION BY root_id ORDER BY created_at ASC, id ASC) AS row_number").
+		Where("root_id IN ? AND status IN ?", rootIDs, visible)
+	var children []model.CommentEntry
+	err := db.Table("(?) AS ranked", ranked).
+		Where("row_number <= 3").
+		Order("created_at ASC").Order("id ASC").
+		Find(&children).Error
+	return children, err
+}
+
+type commentAttachmentRow struct {
+	CommentID   uuid.UUID
+	ID          uuid.UUID
+	URL         string
+	ContentType string
+	Position    int
+}
+
+func (s *Service) entryDTOs(db *gorm.DB, entries []model.CommentEntry) (map[uuid.UUID]CommentDTO, error) {
+	dtos := make(map[uuid.UUID]CommentDTO, len(entries))
+	ids := make([]uuid.UUID, 0, len(entries))
+	for _, entry := range entries {
+		rendered, err := RenderCommentMarkdown(entry.Content)
+		if err != nil {
+			return nil, err
+		}
+		dtos[entry.ID] = CommentDTO{
+			ID:           entry.ID,
+			AuthorID:     entry.AuthorID,
+			RootID:       entry.RootID,
+			ReplyToID:    entry.ReplyToID,
+			FloorNumber:  entry.FloorNumber,
+			Content:      entry.Content,
+			RenderedHTML: rendered,
+			Status:       entry.Status,
+			EditedAt:     entry.EditedAt,
+			LikeCount:    entry.LikeCount,
+			ReplyCount:   entry.ReplyCount,
+			HotScore:     entry.HotScore,
+			CreatedAt:    entry.CreatedAt,
+			Mentions:     []MentionDTO{},
+			Attachments:  []AttachmentDTO{},
+			TimeAnchors:  []TimeAnchorDTO{},
+			Replies:      []CommentDTO{},
+		}
+		ids = append(ids, entry.ID)
+	}
+	if len(ids) == 0 {
+		return dtos, nil
 	}
 	var mentions []model.CommentMention
-	if err := db.Where("comment_id = ?", entry.ID).Order("start_offset ASC").Find(&mentions).Error; err != nil {
-		return CommentDTO{}, err
+	if err := db.Where("comment_id IN ?", ids).Order("comment_id ASC").Order("start_offset ASC").Find(&mentions).Error; err != nil {
+		return nil, err
 	}
 	for _, mention := range mentions {
+		dto := dtos[mention.CommentID]
 		dto.Mentions = append(dto.Mentions, MentionDTO{UserID: mention.UserID, Start: mention.StartOffset, End: mention.EndOffset})
+		dtos[mention.CommentID] = dto
 	}
-	type attachmentRow struct {
-		ID          uuid.UUID
-		URL         string
-		ContentType string
-		Position    int
-	}
-	var attachments []attachmentRow
+	var attachments []commentAttachmentRow
 	if err := db.Table("comment_attachments AS ca").
-		Select("ma.id, ma.url, ma.content_type, ca.position").
+		Select("ca.comment_id, ma.id, ma.url, ma.content_type, ca.position").
 		Joins("JOIN media_assets AS ma ON ma.id = ca.media_asset_id").
-		Where("ca.comment_id = ?", entry.ID).Order("ca.position ASC").Scan(&attachments).Error; err != nil {
-		return CommentDTO{}, err
+		Where("ca.comment_id IN ? AND ca.deleted_at IS NULL AND ma.deleted_at IS NULL", ids).
+		Order("ca.comment_id ASC").Order("ca.position ASC").Scan(&attachments).Error; err != nil {
+		return nil, err
 	}
 	for _, attachment := range attachments {
-		dto.Attachments = append(dto.Attachments, AttachmentDTO(attachment))
+		dto := dtos[attachment.CommentID]
+		dto.Attachments = append(dto.Attachments, AttachmentDTO{
+			ID: attachment.ID, URL: attachment.URL, ContentType: attachment.ContentType, Position: attachment.Position,
+		})
+		dtos[attachment.CommentID] = dto
 	}
 	var anchors []model.CommentTimeAnchor
-	if err := db.Where("comment_id = ?", entry.ID).Order("start_offset ASC").Find(&anchors).Error; err != nil {
-		return CommentDTO{}, err
+	if err := db.Where("comment_id IN ?", ids).Order("comment_id ASC").Order("start_offset ASC").Find(&anchors).Error; err != nil {
+		return nil, err
 	}
 	for _, anchor := range anchors {
+		dto := dtos[anchor.CommentID]
 		dto.TimeAnchors = append(dto.TimeAnchors, TimeAnchorDTO{Start: anchor.StartOffset, End: anchor.EndOffset, Seconds: anchor.Seconds})
+		dtos[anchor.CommentID] = dto
 	}
-	return dto, nil
+	return dtos, nil
 }

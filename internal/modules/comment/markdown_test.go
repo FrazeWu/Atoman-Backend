@@ -11,10 +11,14 @@ func TestNormalizeContent(t *testing.T) {
 	require.Equal(t, "第一行\n  第二行\n第三行", NormalizeContent(" \r\n第一行\r  第二行\r\n第三行 \t"))
 }
 
+func TestNormalizeContentAppliesUnicodeNFC(t *testing.T) {
+	require.Equal(t, "café", NormalizeContent(" cafe\u0301 "))
+}
+
 func TestRenderCommentMarkdownAllowsMinimalFormatting(t *testing.T) {
 	got, err := RenderCommentMarkdown("普通 **粗体** *斜体* `代码` [链接](https://example.com/a?q=1)\n换行\n\n> 引用")
 	require.NoError(t, err)
-	for _, tag := range []string{"<p>", "<strong>", "<em>", "<code>", `<a href="https://example.com/a?q=1">`, "<br>", "<blockquote>"} {
+	for _, tag := range []string{"<p>", "<strong>", "<em>", "<code>", `<a href="https://example.com/a?q=1"`, "<br>", "<blockquote>"} {
 		require.Contains(t, got, tag)
 	}
 	require.NotContains(t, got, "<html")
@@ -75,6 +79,13 @@ func TestRenderCommentMarkdownAllowsCaseInsensitiveHTTPScheme(t *testing.T) {
 	got, err := RenderCommentMarkdown("[x](HTTPS://example.com/path)")
 	require.NoError(t, err)
 	require.Contains(t, got, `href="HTTPS://example.com/path"`)
+}
+
+func TestRenderCommentMarkdownAddsSafeExternalLinkAttributes(t *testing.T) {
+	got, err := RenderCommentMarkdown(`[x](https://example.com/a?x=1&y="quoted")`)
+	require.NoError(t, err)
+	require.Contains(t, got, `rel="nofollow noreferrer noopener"`)
+	require.Contains(t, got, `href="https://example.com/a?x=1&amp;y=%22quoted%22"`)
 }
 
 func TestRenderCommentMarkdownEscapesPlainText(t *testing.T) {
