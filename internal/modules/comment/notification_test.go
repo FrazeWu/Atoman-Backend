@@ -99,6 +99,25 @@ func TestModerateReportRestoresFoldedAndWritesAudit(t *testing.T) {
 	require.NotNil(t, reports[0].ReviewedAt)
 }
 
+func TestModerationRestoreExplicitlyUnfoldsWithoutChangingReportsOrCounters(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	comment := ctx.create(t, 0, "reported", nil)
+	for i := 0; i < 4; i++ {
+		reporter := addCommentUser(t, ctx, authctx.RoleUser)
+		require.NoError(t, ctx.service.Report(reporter, comment.ID, ReportInput{Reason: ReportReasonSpam}))
+	}
+	moderator := addCommentUser(t, ctx, authctx.RoleModerator)
+	require.NoError(t, ctx.service.Moderate(moderator, comment.ID, ModerateInput{Action: ModerationRestore}))
+	var entry model.CommentEntry
+	require.NoError(t, ctx.db.First(&entry, "id = ?", comment.ID).Error)
+	require.Equal(t, CommentStatusActive, entry.Status)
+	require.Equal(t, 4, entry.ReportCount)
+	var reportCount int64
+	require.NoError(t, ctx.db.Model(&model.CommentReport{}).Where("comment_id = ?", comment.ID).Count(&reportCount).Error)
+	require.EqualValues(t, 4, reportCount)
+	assertTargetCounters(t, ctx, 1, 1)
+}
+
 func TestModerateActionsAndAuditFailureRollback(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	comment := ctx.create(t, 0, "moderate", nil)
@@ -309,31 +328,60 @@ func TestConcurrentRateLimitAcrossTargetsAllowsOnlyOneOfFifthAndSixth(t *testing
 	require.Equal(t, 1, limited)
 }
 
-func TestLikeAggregatesUnreadNotificationAndUnlikeRemovesZero(t *testing.T) {
+func TestLikeAggregateCountsOnlyExternalLikesInCurrentUnreadWindow(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	comment := ctx.create(t, 0, "like", nil)
-	require.NoError(t, ctx.service.Like(ctx.users[1], comment.ID))
-	require.NoError(t, ctx.service.Like(ctx.users[1], comment.ID))
-	require.NoError(t, ctx.service.Like(ctx.users[2], comment.ID))
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ctx.service.now = func() time.Time { return now }
+	windowStart := now
+	require.NoError(t, ctx.service.Like(ctx.users[0], comment.ID))
 	var notifications []model.Notification
+	require.NoError(t, ctx.db.Where("recipient_id = ? AND aggregation_key <> '' AND read_at IS NULL", ctx.users[0].ID).Find(&notifications).Error)
+	require.Empty(t, notifications)
+	require.NoError(t, ctx.service.Like(ctx.users[1], comment.ID))
+	require.NoError(t, ctx.service.Like(ctx.users[1], comment.ID))
+	now = now.Add(time.Second)
+	require.NoError(t, ctx.service.Like(ctx.users[2], comment.ID))
 	require.NoError(t, ctx.db.Where("recipient_id = ? AND aggregation_key <> '' AND read_at IS NULL", ctx.users[0].ID).Find(&notifications).Error)
 	require.Len(t, notifications, 1)
 	require.EqualValues(t, 2, notifications[0].Meta["like_count"])
-	now := time.Now()
-	require.NoError(t, ctx.db.Model(&notifications[0]).Update("read_at", now).Error)
-	require.NoError(t, ctx.service.Like(ctx.users[2], comment.ID))
-	require.NoError(t, ctx.db.Where("recipient_id = ? AND aggregation_key <> '' AND read_at IS NULL", ctx.users[0].ID).Find(&notifications).Error)
-	require.Empty(t, notifications)
+	require.True(t, notifications[0].CreatedAt.Equal(windowStart))
+	require.Equal(t, ctx.users[2].ID, *notifications[0].ActorID)
+	require.NoError(t, ctx.service.Unlike(ctx.users[0], comment.ID))
 	require.NoError(t, ctx.service.Unlike(ctx.users[1], comment.ID))
 	require.NoError(t, ctx.db.Where("recipient_id = ? AND aggregation_key <> '' AND read_at IS NULL", ctx.users[0].ID).Find(&notifications).Error)
-	require.Empty(t, notifications)
-	require.NoError(t, ctx.service.Like(ctx.users[3], comment.ID))
-	require.NoError(t, ctx.db.Where("recipient_id = ? AND aggregation_key <> '' AND read_at IS NULL", ctx.users[0].ID).Find(&notifications).Error)
 	require.Len(t, notifications, 1)
+	require.EqualValues(t, 1, notifications[0].Meta["like_count"])
+	require.Equal(t, ctx.users[2].ID, *notifications[0].ActorID)
 	require.NoError(t, ctx.service.Unlike(ctx.users[2], comment.ID))
-	require.NoError(t, ctx.service.Unlike(ctx.users[3], comment.ID))
 	require.NoError(t, ctx.db.Where("recipient_id = ? AND aggregation_key <> '' AND read_at IS NULL", ctx.users[0].ID).Find(&notifications).Error)
 	require.Empty(t, notifications)
+}
+
+func TestLikeAggregateStartsFreshAfterPreviousAggregateWasRead(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	comment := ctx.create(t, 0, "like", nil)
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ctx.service.now = func() time.Time { return now }
+	require.NoError(t, ctx.service.Like(ctx.users[1], comment.ID))
+	var first model.Notification
+	require.NoError(t, ctx.db.Where("recipient_id = ? AND read_at IS NULL AND aggregation_key <> ''", ctx.users[0].ID).First(&first).Error)
+	readAt := now.Add(time.Second)
+	require.NoError(t, ctx.db.Model(&first).Update("read_at", readAt).Error)
+	now = now.Add(time.Minute)
+	require.NoError(t, ctx.service.Like(ctx.users[2], comment.ID))
+	var unread model.Notification
+	require.NoError(t, ctx.db.Where("recipient_id = ? AND read_at IS NULL AND aggregation_key <> ''", ctx.users[0].ID).First(&unread).Error)
+	require.EqualValues(t, 1, unread.Meta["like_count"])
+	require.Equal(t, ctx.users[2].ID, *unread.ActorID)
+	require.NoError(t, ctx.service.Unlike(ctx.users[1], comment.ID))
+	require.NoError(t, ctx.db.First(&unread, "id = ?", unread.ID).Error)
+	require.EqualValues(t, 1, unread.Meta["like_count"])
+	require.Equal(t, ctx.users[2].ID, *unread.ActorID)
+	require.NoError(t, ctx.service.Unlike(ctx.users[2], comment.ID))
+	var count int64
+	require.NoError(t, ctx.db.Model(&model.Notification{}).Where("id = ?", unread.ID).Count(&count).Error)
+	require.Zero(t, count)
 }
 
 func TestRateLimitAndDuplicateCommentUseInjectedClock(t *testing.T) {
@@ -345,6 +393,9 @@ func TestRateLimitAndDuplicateCommentUseInjectedClock(t *testing.T) {
 		_, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: fmt.Sprintf("comment-%d", i)})
 		require.NoError(t, err)
 	}
+	var ledgerCount int64
+	require.NoError(t, ctx.db.Model(&model.CommentPublishRecord{}).Where("author_id = ?", ctx.users[0].ID).Count(&ledgerCount).Error)
+	require.EqualValues(t, 5, ledgerCount)
 	writerCalled := false
 	_, err := ctx.service.CreateWithExtension(ctx.users[0], ctx.target, CreateCommentInput{Content: "sixth"}, func(_ *gorm.DB, _ *model.CommentEntry) error {
 		writerCalled = true
@@ -363,4 +414,35 @@ func TestRateLimitAndDuplicateCommentUseInjectedClock(t *testing.T) {
 	_, err = ctx.service.Create(ctx.users[1], ctx.target, CreateCommentInput{Content: "duplicate"})
 	require.NoError(t, err)
 	require.True(t, errors.Is(ErrCommentRateLimited, ErrCommentRateLimited))
+}
+
+func TestPublishLedgerPreventsPhysicalDeleteFromBypassingAbuseWindows(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	ctx.service.now = func() time.Time { return now }
+	ctx.service.checkAbuse = true
+	for i := 0; i < 5; i++ {
+		comment, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: fmt.Sprintf("deleted-%d", i)})
+		require.NoError(t, err)
+		require.NoError(t, ctx.service.Delete(ctx.users[0], comment.ID))
+	}
+	_, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "sixth"})
+	require.ErrorIs(t, err, ErrCommentRateLimited)
+
+	comment, err := ctx.service.Create(ctx.users[1], ctx.target, CreateCommentInput{Content: "same"})
+	require.NoError(t, err)
+	require.NoError(t, ctx.service.Delete(ctx.users[1], comment.ID))
+	_, err = ctx.service.Create(ctx.users[1], ctx.target, CreateCommentInput{Content: "same"})
+	require.ErrorIs(t, err, ErrDuplicateComment)
+}
+
+func TestFailedExtensionDoesNotWritePublishRecord(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	ctx.service.checkAbuse = true
+	expected := errors.New("extension failed")
+	_, err := ctx.service.CreateWithExtension(ctx.users[0], ctx.target, CreateCommentInput{Content: "fails"}, func(_ *gorm.DB, _ *model.CommentEntry) error { return expected })
+	require.ErrorIs(t, err, expected)
+	var count int64
+	require.NoError(t, ctx.db.Model(&model.CommentPublishRecord{}).Where("author_id = ?", ctx.users[0].ID).Count(&count).Error)
+	require.Zero(t, count)
 }

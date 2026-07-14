@@ -95,17 +95,19 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	}
 
 	var created model.CommentEntry
+	contentHash := ContentHash(normalized, input.AttachmentIDs)
 	runTransaction := func() error {
 		return s.db.Transaction(func(tx *gorm.DB) error {
 			if err := s.repo.lockUser(tx, user.ID); err != nil {
 				return ErrAuthenticationRequired
 			}
+			createNow := s.now()
 			target, err := s.repo.lockTarget(tx, resolved)
 			if err != nil {
 				return fmt.Errorf("lock discussion target: %w", err)
 			}
 			if s.checkAbuse {
-				if err := s.checkCreateAbuse(tx, user.ID, target.ID, ContentHash(normalized, input.AttachmentIDs)); err != nil {
+				if err := s.checkCreateAbuse(tx, user.ID, target.ID, contentHash, createNow); err != nil {
 					return err
 				}
 			}
@@ -114,10 +116,10 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 				TargetID:    target.ID,
 				AuthorID:    user.ID,
 				Content:     normalized,
-				ContentHash: ContentHash(normalized, input.AttachmentIDs),
+				ContentHash: contentHash,
 				Status:      commentStatusActive,
 			}
-			created.CreatedAt = s.now()
+			created.CreatedAt = createNow
 			isRoot := input.ReplyToID == nil
 			var replyAuthorID *uuid.UUID
 			if isRoot {
@@ -176,9 +178,14 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 				return err
 			}
 			if !isRoot {
-				if err := s.recomputeRootHotScore(tx, *created.RootID, s.now()); err != nil {
+				if err := s.recomputeRootHotScore(tx, *created.RootID, createNow); err != nil {
 					return err
 				}
+			}
+			record := model.CommentPublishRecord{AuthorID: user.ID, TargetID: target.ID, ContentHash: contentHash}
+			record.CreatedAt = createNow
+			if err := tx.Create(&record).Error; err != nil {
+				return fmt.Errorf("create comment publish record: %w", err)
 			}
 			return nil
 		})
@@ -195,10 +202,12 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	return dto, nil
 }
 
-func (s *Service) checkCreateAbuse(tx *gorm.DB, userID, targetID uuid.UUID, contentHash string) error {
-	now := s.now()
+func (s *Service) checkCreateAbuse(tx *gorm.DB, userID, targetID uuid.UUID, contentHash string, now time.Time) error {
+	if err := tx.Unscoped().Where("author_id = ? AND created_at <= ?", userID, now.Add(-5*time.Minute)).Delete(&model.CommentPublishRecord{}).Error; err != nil {
+		return err
+	}
 	var recentCount int64
-	if err := tx.Model(&model.CommentEntry{}).
+	if err := tx.Model(&model.CommentPublishRecord{}).
 		Where("author_id = ? AND created_at > ?", userID, now.Add(-time.Minute)).Count(&recentCount).Error; err != nil {
 		return err
 	}
@@ -206,7 +215,7 @@ func (s *Service) checkCreateAbuse(tx *gorm.DB, userID, targetID uuid.UUID, cont
 		return ErrCommentRateLimited
 	}
 	var duplicateCount int64
-	if err := tx.Model(&model.CommentEntry{}).
+	if err := tx.Model(&model.CommentPublishRecord{}).
 		Where("author_id = ? AND target_id = ? AND content_hash = ? AND created_at > ?", userID, targetID, contentHash, now.Add(-5*time.Minute)).
 		Count(&duplicateCount).Error; err != nil {
 		return err

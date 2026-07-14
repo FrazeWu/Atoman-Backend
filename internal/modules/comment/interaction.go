@@ -351,6 +351,16 @@ func (s *Service) Moderate(user authctx.CurrentUser, commentID uuid.UUID, input 
 func (s *Service) setModerationVisibility(tx *gorm.DB, hierarchy lockedCommentHierarchy, restore bool) error {
 	entry := hierarchy.Entry
 	if restore {
+		if entry.Status == CommentStatusAutoFolded {
+			result := tx.Model(&model.CommentEntry{}).Where("id = ?", entry.ID).Update("status", CommentStatusActive)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return ErrCommentNotFound
+			}
+			return nil
+		}
 		if entry.Status != CommentStatusModeratorHidden {
 			return nil
 		}
@@ -496,12 +506,17 @@ func (s *Service) setLiked(user authctx.CurrentUser, commentID uuid.UUID, liked 
 			var existing model.CommentLike
 			err = tx.Where("comment_id = ? AND user_id = ?", commentID, user.ID).First(&existing).Error
 			changed := false
+			eventAt := time.Time{}
 			if liked && isNotFound(err) {
-				if err := tx.Create(&model.CommentLike{CommentID: commentID, UserID: user.ID}).Error; err != nil {
+				like := model.CommentLike{CommentID: commentID, UserID: user.ID}
+				eventAt = s.now()
+				like.CreatedAt = eventAt
+				if err := tx.Create(&like).Error; err != nil {
 					return err
 				}
 				changed = true
 			} else if !liked && err == nil {
+				eventAt = existing.CreatedAt
 				if err := tx.Delete(&existing).Error; err != nil {
 					return err
 				}
@@ -521,7 +536,7 @@ func (s *Service) setLiked(user authctx.CurrentUser, commentID uuid.UUID, liked 
 				return ErrCommentNotFound
 			}
 			if changed {
-				if err := s.syncLikeNotification(tx, hierarchy.Entry, user.ID, count, liked); err != nil {
+				if err := s.syncLikeNotification(tx, hierarchy.Entry, user.ID, liked, eventAt); err != nil {
 					return err
 				}
 			}

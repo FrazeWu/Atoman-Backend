@@ -26,6 +26,9 @@ func TestMigrateSchemaCreatesDMTablesAndUnreadCountIndexes(t *testing.T) {
 	if !db.Migrator().HasTable(&model.UserDefaultChannel{}) {
 		t.Fatal("expected user_default_channels table to exist")
 	}
+	if !db.Migrator().HasTable(&model.CommentPublishRecord{}) {
+		t.Fatal("expected comment_publish_records table to exist")
+	}
 
 	assertIndexExists(t, db, "notifications", "idx_notification_recipient_read")
 	assertIndexExists(t, db, "dm_messages", "idx_dm_message_conv_sender_read")

@@ -88,6 +88,7 @@ func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 		&model.CommentLike{},
 		&model.CommentReport{},
 		&model.CommentTimeAnchor{},
+		&model.CommentPublishRecord{},
 		&model.TimelineRevisionProposal{},
 		&model.DebateArgumentDetail{},
 		&model.DebateArgumentReference{},

@@ -74,3 +74,10 @@ type CommentTimeAnchor struct {
 	EndOffset   int       `json:"end_offset" gorm:"not null"`
 	Seconds     int       `json:"seconds" gorm:"not null"`
 }
+
+type CommentPublishRecord struct {
+	Base
+	AuthorID    uuid.UUID `json:"author_id" gorm:"type:uuid;not null;index"`
+	TargetID    uuid.UUID `json:"target_id" gorm:"type:uuid;not null;index"`
+	ContentHash string    `json:"content_hash" gorm:"not null;index"`
+}

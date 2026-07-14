@@ -17,6 +17,8 @@ func TestUnifiedCommentSchemaCreatesRequiredIndexes(t *testing.T) {
 	assertIndexExists(t, db, "comment_entries", "uq_comment_root_floor")
 	assertIndexExists(t, db, "comment_likes", "uq_comment_like_user")
 	assertIndexExists(t, db, "comment_reports", "uq_comment_report_user")
+	assertIndexExists(t, db, "comment_publish_records", "idx_comment_publish_author_created")
+	assertIndexExists(t, db, "comment_publish_records", "idx_comment_publish_duplicate_window")
 	if !db.Migrator().HasColumn(&model.DiscussionTarget{}, "resource_id") {
 		t.Fatal("expected discussion_targets.resource_id")
 	}
@@ -123,6 +125,7 @@ func migrateUnifiedCommentSchema(t *testing.T) *gorm.DB {
 		&model.CommentLike{},
 		&model.CommentReport{},
 		&model.CommentTimeAnchor{},
+		&model.CommentPublishRecord{},
 		&model.TimelineRevisionProposal{},
 		&model.DebateArgumentDetail{},
 		&model.DebateArgumentReference{},

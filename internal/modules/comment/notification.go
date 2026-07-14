@@ -2,6 +2,7 @@ package comment
 
 import (
 	"fmt"
+	"time"
 
 	"atoman/internal/model"
 
@@ -101,33 +102,63 @@ func createImmediateNotification(tx *gorm.DB, recipientID, actorID uuid.UUID, no
 	return fmt.Errorf("create comment notification: %w", result.Error)
 }
 
-func (s *Service) syncLikeNotification(tx *gorm.DB, entry model.CommentEntry, actorID uuid.UUID, likeCount int64, liked bool) error {
+func (s *Service) syncLikeNotification(tx *gorm.DB, entry model.CommentEntry, actorID uuid.UUID, liked bool, eventAt time.Time) error {
 	if entry.AuthorID == actorID {
 		return nil
 	}
 	key := "comment_like:" + entry.ID.String()
 	query := tx.Where("recipient_id = ? AND aggregation_key = ? AND read_at IS NULL", entry.AuthorID, key)
-	if likeCount == 0 {
-		return query.Unscoped().Delete(&model.Notification{}).Error
+	var existing model.Notification
+	err := query.First(&existing).Error
+	hasUnread := err == nil
+	if err != nil && !isNotFound(err) {
+		return err
 	}
-	meta := model.NotificationMeta{}
+	if !hasUnread && !liked {
+		return nil
+	}
+	windowStart := eventAt
+	if hasUnread {
+		windowStart = existing.CreatedAt
+	}
+	count, latestActorID, err := externalLikeWindow(tx, entry, windowStart)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		if hasUnread {
+			return tx.Unscoped().Delete(&existing).Error
+		}
+		return nil
+	}
 	var target model.DiscussionTarget
 	if err := tx.First(&target, "id = ?", entry.TargetID).Error; err != nil {
 		return err
 	}
-	resolved := ResolvedTarget{Kind: target.Kind, ResourceID: target.ResourceID}
-	meta = notificationMeta(entry, resolved)
-	meta["like_count"] = likeCount
-	meta["actor_count"] = likeCount
-	var existing model.Notification
-	if err := query.First(&existing).Error; err == nil {
-		return tx.Model(&existing).Updates(map[string]any{"actor_id": actorID, "meta": meta}).Error
-	} else if !isNotFound(err) {
-		return err
+	meta := notificationMeta(entry, ResolvedTarget{Kind: target.Kind, ResourceID: target.ResourceID})
+	meta["like_count"] = count
+	meta["actor_count"] = count
+	if hasUnread {
+		return tx.Model(&existing).Updates(map[string]any{"actor_id": latestActorID, "meta": meta}).Error
 	}
-	if !liked {
-		return nil
-	}
-	notification := model.Notification{RecipientID: entry.AuthorID, ActorID: &actorID, Type: NotificationTypeLike, SourceType: "comment_like", SourceID: entry.ID, AggregationKey: key, Meta: meta}
+	notification := model.Notification{RecipientID: entry.AuthorID, ActorID: &latestActorID, Type: NotificationTypeLike, SourceType: "comment_like", SourceID: entry.ID, AggregationKey: key, Meta: meta}
+	notification.CreatedAt = eventAt
 	return tx.Create(&notification).Error
+}
+
+func externalLikeWindow(tx *gorm.DB, entry model.CommentEntry, windowStart time.Time) (int64, uuid.UUID, error) {
+	base := tx.Model(&model.CommentLike{}).
+		Where("comment_id = ? AND user_id <> ? AND created_at >= ?", entry.ID, entry.AuthorID, windowStart)
+	var count int64
+	if err := base.Count(&count).Error; err != nil {
+		return 0, uuid.Nil, err
+	}
+	if count == 0 {
+		return 0, uuid.Nil, nil
+	}
+	var latest model.CommentLike
+	if err := base.Order("created_at DESC").Order("id DESC").First(&latest).Error; err != nil {
+		return 0, uuid.Nil, err
+	}
+	return count, latest.UserID, nil
 }
