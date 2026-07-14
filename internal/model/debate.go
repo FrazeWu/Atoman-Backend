@@ -4,28 +4,29 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 // Debate represents a structured debate topic
 type Debate struct {
 	Base
-	UserID            uuid.UUID  `json:"user_id" gorm:"type:uuid;not null;index"`
-	User              *User      `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	Title             string     `json:"title" gorm:"not null"`
-	Description       string     `json:"description" gorm:"type:text"`
-	Content           string     `json:"content" gorm:"type:text"`
-	Status            string     `json:"status" gorm:"default:'open'"`
-	Tags              []string   `json:"tags" gorm:"type:text[]"`
-	ViewCount         int        `json:"view_count" gorm:"default:0"`
-	ArgumentCount     int        `json:"argument_count" gorm:"default:0"`
-	VoteCount         int        `json:"vote_count" gorm:"default:0"`
-	ConclusionType    string     `json:"conclusion_type" gorm:"default:''"`
-	ConclusionSummary string     `json:"conclusion_summary" gorm:"type:text"`
-	ConcludeVoteCount int        `json:"conclude_vote_count" gorm:"default:0"`
-	ConcludeThreshold int        `json:"conclude_threshold" gorm:"default:10"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	ConcludedAt       *time.Time `json:"concluded_at,omitempty"`
+	UserID            uuid.UUID      `json:"user_id" gorm:"type:uuid;not null;index"`
+	User              *User          `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	Title             string         `json:"title" gorm:"not null"`
+	Description       string         `json:"description" gorm:"type:text"`
+	Content           string         `json:"content" gorm:"type:text"`
+	Status            string         `json:"status" gorm:"default:'open'"`
+	Tags              pq.StringArray `json:"tags" gorm:"type:text[]"`
+	ViewCount         int            `json:"view_count" gorm:"default:0"`
+	ArgumentCount     int            `json:"argument_count" gorm:"default:0"`
+	VoteCount         int            `json:"vote_count" gorm:"default:0"`
+	ConclusionType    string         `json:"conclusion_type" gorm:"default:''"`
+	ConclusionSummary string         `json:"conclusion_summary" gorm:"type:text"`
+	ConcludeVoteCount int            `json:"conclude_vote_count" gorm:"default:0"`
+	ConcludeThreshold int            `json:"conclude_threshold" gorm:"default:10"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	ConcludedAt       *time.Time     `json:"concluded_at,omitempty"`
 }
 
 func (Debate) TableName() string { return "debates" }

@@ -138,6 +138,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 }
 
+func TestMigrateSchemaCreatesForumFollows(t *testing.T) {
+	db := testdb.Open(t)
+	if err := migrateSchema(db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+	if !db.Migrator().HasTable(&model.ForumFollow{}) {
+		t.Fatal("expected forum_follows table")
+	}
+}
+
 func assertIndexExists(t *testing.T, db *gorm.DB, table, name string) {
 	t.Helper()
 	if !db.Migrator().HasIndex(table, name) {

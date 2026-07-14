@@ -227,6 +227,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.ForumReply{},
 		&model.ForumLike{},
 		&model.ForumBookmark{},
+		&model.ForumFollow{},
 		&model.ForumReport{},
 		&model.CategoryRequest{},
 		&model.ForumModeratorAssignment{},

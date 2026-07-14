@@ -53,6 +53,8 @@ func (s *Service) CreateDebate(user authctx.CurrentUser, req CreateDebateRequest
 		UserID:            user.ID,
 		Title:             title,
 		Description:       description,
+		Content:           strings.TrimSpace(req.Content),
+		Tags:              req.Tags,
 		Status:            "open",
 		ConcludeThreshold: 10,
 	}
@@ -395,4 +397,22 @@ func (s *Service) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 		return nil, err
 	}
 	return s.repo.ListArguments(debateID)
+}
+
+func (s *Service) ListArgumentVotes(userID uuid.UUID, debateID uuid.UUID) (map[string]int, error) {
+	votes := make([]model.DebateVote, 0)
+	err := s.db.Where(
+		"user_id = ? AND argument_id IN (?)",
+		userID,
+		s.db.Model(&model.Argument{}).Select("id").Where("debate_id = ?", debateID),
+	).Find(&votes).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]int, len(votes))
+	for _, vote := range votes {
+		result[vote.ArgumentID.String()] = vote.VoteType
+	}
+	return result, nil
 }

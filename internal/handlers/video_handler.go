@@ -375,6 +375,7 @@ func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 // @Param tag query string false "标签"
 // @Param sort query string false "排序方式" Enums(latest,popular)
 // @Param limit query int false "返回数量上限"
+// @Param subscribed query bool false "仅返回当前用户订阅频道的视频"
 // @Success 200 {array} model.Video
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/videos [get]
@@ -385,8 +386,13 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 		tag := c.Query("tag")
 		sort := c.DefaultQuery("sort", "latest")
 		limit := boundedListLimit(c.Query("limit"), 40, 40)
+		subscribedOnly := c.Query("subscribed") == "true"
 
 		viewerID := currentBlogViewerID(c)
+		if subscribedOnly && viewerID == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
 
 		q := db.Model(&model.Video{}).
 			Preload("Channel").
@@ -428,6 +434,15 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 		if collectionID != "" {
 			q = q.Joins("JOIN video_collections vc ON vc.video_id = videos.id").
 				Where("vc.collection_id = ?", collectionID)
+		}
+		if subscribedOnly {
+			subscribedChannelIDs := db.Model(&model.FeedSource{}).
+				Select("feed_sources.source_id").
+				Joins("JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id").
+				Where("subscriptions.user_id = ?", viewerID).
+				Where("subscriptions.deleted_at IS NULL").
+				Where("feed_sources.source_type = ?", "internal_channel")
+			q = q.Where("videos.channel_id IN (?)", subscribedChannelIDs)
 		}
 		if tag != "" {
 			q = q.Joins("JOIN video_tag_relations vtr ON vtr.video_id = videos.id").

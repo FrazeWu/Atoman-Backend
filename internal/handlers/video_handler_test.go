@@ -34,8 +34,48 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.VideoCollection{},
 		&model.VideoTagRelation{},
 		&model.Comment{},
+		&model.FeedSource{},
+		&model.SubscriptionGroup{},
+		&model.Subscription{},
 	)
 	return db
+}
+
+func TestGetVideosFiltersCurrentUsersSubscribedChannels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	viewer := seedVideoUser(t, db)
+	creator := seedVideoUser(t, db)
+	subscribedChannel := seedVideoChannel(t, db, creator.UUID, "Subscribed Channel")
+	otherChannel := seedVideoChannel(t, db, creator.UUID, "Other Channel")
+	subscribedVideo := seedVideo(t, db, creator.UUID)
+	otherVideo := seedVideo(t, db, creator.UUID)
+	require.NoError(t, db.Model(&subscribedVideo).Update("channel_id", subscribedChannel.ID).Error)
+	require.NoError(t, db.Model(&otherVideo).Update("channel_id", otherChannel.ID).Error)
+
+	source := model.FeedSource{
+		SourceType: "internal_channel",
+		SourceID:   &subscribedChannel.ID,
+		Hash:       "video-subscription-" + subscribedChannel.ID.String(),
+		Title:      subscribedChannel.Name,
+	}
+	require.NoError(t, db.Create(&source).Error)
+	require.NoError(t, db.Create(&model.Subscription{UserID: viewer.UUID, FeedSourceID: source.ID}).Error)
+
+	r := gin.New()
+	r.GET("/api/v1/videos", func(c *gin.Context) {
+		c.Set("user_id", viewer.UUID)
+		GetVideos(db)(c)
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/videos?subscribed=true", nil)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var videos []model.Video
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &videos))
+	require.Len(t, videos, 1)
+	require.Equal(t, subscribedVideo.ID, videos[0].ID)
 }
 
 func seedVideoUser(t *testing.T, db *gorm.DB) model.User {
