@@ -42,6 +42,32 @@ func TestFourthDistinctReportAutoFoldsAndDuplicateIsIdempotent(t *testing.T) {
 	assertTargetCounters(t, ctx, 1, 1)
 }
 
+func TestFourthReportClearsPinnedRootAndRejectDoesNotRestorePin(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	root := ctx.create(t, 1, "pinned", nil)
+	require.NoError(t, ctx.service.Mark(ctx.users[0], ctx.target, root.ID))
+	var reports []model.CommentReport
+	for i := 0; i < 4; i++ {
+		reporter := addCommentUser(t, ctx, authctx.RoleUser)
+		require.NoError(t, ctx.service.Report(reporter, root.ID, ReportInput{Reason: ReportReasonSpam}))
+	}
+	var target model.DiscussionTarget
+	require.NoError(t, ctx.db.Where("kind = ?", TargetKindBlogPost).First(&target).Error)
+	require.Nil(t, target.PinnedCommentID)
+	moderator := addCommentUser(t, ctx, authctx.RoleModerator)
+	require.NoError(t, ctx.db.Where("comment_id = ?", root.ID).Order("id").Find(&reports).Error)
+	require.NoError(t, ctx.service.Moderate(moderator, root.ID, ModerateInput{Action: ModerationRejectReport, ReportID: &reports[0].ID}))
+	var entry model.CommentEntry
+	require.NoError(t, ctx.db.First(&entry, "id = ?", root.ID).Error)
+	require.Equal(t, CommentStatusActive, entry.Status)
+	require.NoError(t, ctx.db.First(&target, "id = ?", target.ID).Error)
+	require.Nil(t, target.PinnedCommentID)
+	list, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1})
+	require.NoError(t, err)
+	require.Len(t, list.Items, 1)
+	require.False(t, list.Items[0].Marked)
+}
+
 func TestReportValidationAndLifetimeUniqueness(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	comment := ctx.create(t, 0, "report me", nil)
@@ -445,4 +471,25 @@ func TestFailedExtensionDoesNotWritePublishRecord(t *testing.T) {
 	var count int64
 	require.NoError(t, ctx.db.Model(&model.CommentPublishRecord{}).Where("author_id = ?", ctx.users[0].ID).Count(&count).Error)
 	require.Zero(t, count)
+}
+
+func TestCreateUsesClockAfterUserAndTargetLocks(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	beforeLock := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	afterLock := beforeLock.Add(time.Minute)
+	current := beforeLock
+	ctx.service.now = func() time.Time { return current }
+	callback := "test:advance-clock-after-target-lock"
+	require.NoError(t, ctx.db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "discussion_targets" {
+			current = afterLock
+		}
+	}))
+	t.Cleanup(func() { _ = ctx.db.Callback().Query().Remove(callback) })
+	created, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "clock"})
+	require.NoError(t, err)
+	require.True(t, created.CreatedAt.Equal(afterLock))
+	var record model.CommentPublishRecord
+	require.NoError(t, ctx.db.Where("author_id = ?", ctx.users[0].ID).First(&record).Error)
+	require.True(t, record.CreatedAt.Equal(afterLock))
 }

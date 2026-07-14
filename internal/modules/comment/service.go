@@ -101,11 +101,11 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 			if err := s.repo.lockUser(tx, user.ID); err != nil {
 				return ErrAuthenticationRequired
 			}
-			createNow := s.now()
 			target, err := s.repo.lockTarget(tx, resolved)
 			if err != nil {
 				return fmt.Errorf("lock discussion target: %w", err)
 			}
+			createNow := s.now()
 			if s.checkAbuse {
 				if err := s.checkCreateAbuse(tx, user.ID, target.ID, contentHash, createNow); err != nil {
 					return err

@@ -277,11 +277,20 @@ func (s *Service) recalibrateReports(tx *gorm.DB, entry model.CommentEntry) erro
 		}
 	}
 	status := entry.Status
+	transitionedToFolded := false
 	if count >= 4 && status == CommentStatusActive {
 		status = CommentStatusAutoFolded
+		transitionedToFolded = true
 	}
 	if count < 4 && status == CommentStatusAutoFolded {
 		status = CommentStatusActive
+	}
+	if transitionedToFolded && entry.RootID == nil {
+		if err := tx.Model(&model.DiscussionTarget{}).
+			Where("id = ? AND pinned_comment_id = ?", entry.TargetID, entry.ID).
+			UpdateColumn("pinned_comment_id", gorm.Expr("NULL")).Error; err != nil {
+			return err
+		}
 	}
 	return tx.Model(&model.CommentEntry{}).Where("id = ?", entry.ID).Updates(map[string]any{"report_count": count, "status": status}).Error
 }
