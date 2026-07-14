@@ -354,6 +354,7 @@ func TestResolversCoverAllKindsDurationsOwnersAndMarkLabels(t *testing.T) {
 			resolved, err := registry.Resolve(Viewer{}, TargetRef{Kind: tt.kind, ResourceID: tt.id})
 			require.NoError(t, err)
 			require.Equal(t, tt.kind, resolved.Kind)
+			require.Equal(t, tt.id, resolved.ResourceID)
 			require.NotEmpty(t, resolved.ResourceKey)
 			require.True(t, resolved.Visible)
 			require.Equal(t, tt.duration, resolved.DurationSec)

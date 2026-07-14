@@ -38,6 +38,7 @@ type Viewer struct {
 
 type ResolvedTarget struct {
 	Kind        string
+	ResourceID  uuid.UUID
 	ResourceKey string
 	OwnerID     *uuid.UUID
 	Visible     bool

@@ -9,6 +9,7 @@ import (
 type DiscussionTarget struct {
 	Base
 	Kind            string     `json:"kind" gorm:"not null;index"`
+	ResourceID      uuid.UUID  `json:"resource_id" gorm:"type:uuid;not null;index"`
 	ResourceKey     string     `json:"resource_key" gorm:"type:text;not null"`
 	OwnerID         *uuid.UUID `json:"owner_id,omitempty" gorm:"type:uuid;index"`
 	CommentCount    int        `json:"comment_count" gorm:"not null;default:0"`

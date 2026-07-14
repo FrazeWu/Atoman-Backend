@@ -62,6 +62,9 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 			t.Fatalf("expected table for %T to exist", schemaModel)
 		}
 	}
+	if !db.Migrator().HasColumn(&model.DiscussionTarget{}, "resource_id") {
+		t.Fatal("expected discussion_targets.resource_id")
+	}
 
 	for table, index := range map[string]string{
 		"discussion_targets": "uq_discussion_target_kind_key",

@@ -150,7 +150,7 @@ func TestCreateValidatesAuthenticationTargetAndReply(t *testing.T) {
 	primaryResolver := ctx.service.registry.resolvers[TargetKindBlogPost]
 	ctx.service.registry.resolvers[TargetKindBlogPost] = targetResolverFunc(func(viewer Viewer, id uuid.UUID) (ResolvedTarget, error) {
 		if id == otherID {
-			return ResolvedTarget{Kind: TargetKindBlogPost, ResourceKey: otherID.String(), Visible: true}, nil
+			return ResolvedTarget{Kind: TargetKindBlogPost, ResourceID: otherID, ResourceKey: otherID.String(), Visible: true}, nil
 		}
 		return primaryResolver.Resolve(viewer, id)
 	})
@@ -177,7 +177,8 @@ func TestCreateReplyToChildRejectsCorruptRoot(t *testing.T) {
 			require.NoError(t, ctx.db.Model(&root).Update("status", "hidden").Error)
 		},
 		"other target": func(t *testing.T, ctx commentTestContext, root model.CommentEntry) {
-			other := model.DiscussionTarget{Kind: TargetKindBlogPost, ResourceKey: uuid.NewString(), NextFloor: 1}
+			otherID := uuid.New()
+			other := model.DiscussionTarget{Kind: TargetKindBlogPost, ResourceID: otherID, ResourceKey: otherID.String(), NextFloor: 1}
 			require.NoError(t, ctx.db.Create(&other).Error)
 			require.NoError(t, ctx.db.Model(&root).Update("target_id", other.ID).Error)
 		},
@@ -551,7 +552,7 @@ func TestListInvalidPinnedReferenceFallsBackToOrdinaryPagination(t *testing.T) {
 			primaryResolver := ctx.service.registry.resolvers[TargetKindBlogPost]
 			ctx.service.registry.resolvers[TargetKindBlogPost] = targetResolverFunc(func(viewer Viewer, id uuid.UUID) (ResolvedTarget, error) {
 				if id == otherID {
-					return ResolvedTarget{Kind: TargetKindBlogPost, ResourceKey: otherID.String(), Visible: true}, nil
+					return ResolvedTarget{Kind: TargetKindBlogPost, ResourceID: otherID, ResourceKey: otherID.String(), Visible: true}, nil
 				}
 				return primaryResolver.Resolve(viewer, id)
 			})

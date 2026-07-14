@@ -1,6 +1,7 @@
 package comment
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -22,32 +23,42 @@ func (s *Service) Edit(user authctx.CurrentUser, commentID uuid.UUID, input Edit
 	if err != nil {
 		return CommentDTO{}, err
 	}
-	assets, err := s.validateAttachments(user.ID, input.AttachmentIDs)
+	_, err = s.validateAttachments(s.db, user.ID, input.AttachmentIDs)
 	if err != nil {
 		return CommentDTO{}, err
 	}
-	if err := s.validateMentions(normalized, input.Mentions); err != nil {
+	if err := s.validateMentions(s.db, normalized, input.Mentions); err != nil {
+		return CommentDTO{}, err
+	}
+	located, _, resolved, err := s.resolveCommentMutation(Viewer{UserID: &user.ID}, commentID)
+	if err != nil {
 		return CommentDTO{}, err
 	}
 
-	now := time.Now()
 	err = withCreateTransactionMutex(s.createMu, func() error {
 		return s.db.Transaction(func(tx *gorm.DB) error {
-			entry, err := s.repo.lockComment(tx, commentID)
-			if isNotFound(err) {
+			hierarchy, err := s.repo.lockCommentHierarchy(tx, located)
+			if isNotFound(err) || errors.Is(err, ErrCommentNotFound) {
 				return ErrCommentNotFound
 			}
 			if err != nil {
 				return err
 			}
-			if entry.Status != commentStatusActive {
+			if !targetMatchesResolved(hierarchy.Target, resolved) {
+				return ErrInvalidTargetResource
+			}
+			entry := hierarchy.Entry
+			if !isVisibleCommentStatus(entry.Status) {
 				return ErrCommentNotFound
 			}
 			if entry.AuthorID != user.ID {
 				return ErrCommentForbidden
 			}
-			target, err := s.repo.lockTargetByID(tx, entry.TargetID)
+			assets, err := s.validateAttachments(tx, user.ID, input.AttachmentIDs)
 			if err != nil {
+				return err
+			}
+			if err := s.validateMentions(tx, normalized, input.Mentions); err != nil {
 				return err
 			}
 			for _, relation := range []any{&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentTimeAnchor{}} {
@@ -55,20 +66,10 @@ func (s *Service) Edit(user authctx.CurrentUser, commentID uuid.UUID, input Edit
 					return fmt.Errorf("replace comment relations: %w", err)
 				}
 			}
-			resolved := ResolvedTarget{Kind: target.Kind, ResourceKey: target.ResourceKey}
-			if isMediaTarget(target.Kind) {
-				resourceID, err := uuid.Parse(target.ResourceKey)
-				if err != nil {
-					return fmt.Errorf("resolve comment media target: %w", err)
-				}
-				resolved, err = s.resolveVisible(Viewer{UserID: &user.ID}, TargetRef{Kind: target.Kind, ResourceID: resourceID})
-				if err != nil {
-					return err
-				}
-			}
 			if err := createCommentRelations(tx, entry.ID, input.Mentions, assets, resolved, normalized); err != nil {
 				return err
 			}
+			now := time.Now()
 			result := tx.Model(&model.CommentEntry{}).Where("id = ?", entry.ID).Updates(map[string]any{
 				"content": normalized, "content_hash": ContentHash(normalized, input.AttachmentIDs), "edited_at": now,
 			})
@@ -95,23 +96,28 @@ func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
 	if err := s.validateAuthor(user); err != nil {
 		return err
 	}
+	located, _, resolved, err := s.resolveCommentMutation(Viewer{UserID: &user.ID}, commentID)
+	if err != nil {
+		return err
+	}
 	return withCreateTransactionMutex(s.createMu, func() error {
 		return s.db.Transaction(func(tx *gorm.DB) error {
-			entry, err := s.repo.lockComment(tx, commentID)
-			if isNotFound(err) {
+			hierarchy, err := s.repo.lockCommentHierarchy(tx, located)
+			if isNotFound(err) || errors.Is(err, ErrCommentNotFound) {
 				return ErrCommentNotFound
 			}
 			if err != nil {
 				return err
 			}
+			if !targetMatchesResolved(hierarchy.Target, resolved) {
+				return ErrInvalidTargetResource
+			}
+			entry := hierarchy.Entry
 			if !isVisibleCommentStatus(entry.Status) {
 				return ErrCommentNotFound
 			}
-			target, err := s.repo.lockTargetByID(tx, entry.TargetID)
-			if err != nil {
-				return err
-			}
-			isOwner := target.OwnerID != nil && *target.OwnerID == user.ID
+			target := hierarchy.Target
+			isOwner := resolved.OwnerID != nil && *resolved.OwnerID == user.ID
 			if entry.AuthorID != user.ID && !isOwner {
 				return ErrCommentForbidden
 			}
@@ -120,7 +126,7 @@ func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
 			rootDelta := 0
 			if entry.RootID == nil {
 				var childIDs []uuid.UUID
-				if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).Model(&model.CommentEntry{}).Where("root_id = ?", entry.ID).Pluck("id", &childIDs).Error; err != nil {
+				if err := tx.Unscoped().Clauses(clause.Locking{Strength: "UPDATE"}).Model(&model.CommentEntry{}).Where("root_id = ?", entry.ID).Order("id ASC").Pluck("id", &childIDs).Error; err != nil {
 					return err
 				}
 				ids = append(ids, childIDs...)
@@ -184,6 +190,21 @@ func deleteCommentRelations(tx *gorm.DB, ids []uuid.UUID) error {
 			return fmt.Errorf("delete comment relations: %w", err)
 		}
 	}
+	if err := deleteCommentExtensionRelations(tx, ids); err != nil {
+		return err
+	}
+	return nil
+}
+
+func deleteCommentExtensionRelations(tx *gorm.DB, ids []uuid.UUID) error {
+	for _, relation := range []any{&model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{}, &model.DebateArgumentDebateRef{}} {
+		if err := tx.Unscoped().Where("comment_id IN ?", ids).Delete(relation).Error; err != nil {
+			return fmt.Errorf("delete comment extension relations: %w", err)
+		}
+	}
+	if err := tx.Unscoped().Where("comment_id IN ? OR referenced_comment_id IN ?", ids, ids).Delete(&model.DebateArgumentReference{}).Error; err != nil {
+		return fmt.Errorf("delete comment extension references: %w", err)
+	}
 	return nil
 }
 
@@ -199,16 +220,24 @@ func (s *Service) setLiked(user authctx.CurrentUser, commentID uuid.UUID, liked 
 	if err := s.validateAuthor(user); err != nil {
 		return err
 	}
+	located, _, resolved, err := s.resolveCommentMutation(Viewer{UserID: &user.ID}, commentID)
+	if err != nil {
+		return err
+	}
 	return withCreateTransactionMutex(s.createMu, func() error {
 		return s.db.Transaction(func(tx *gorm.DB) error {
-			entry, err := s.repo.lockComment(tx, commentID)
-			if isNotFound(err) {
+			hierarchy, err := s.repo.lockCommentHierarchy(tx, located)
+			if isNotFound(err) || errors.Is(err, ErrCommentNotFound) {
 				return ErrCommentNotFound
 			}
 			if err != nil {
 				return err
 			}
-			if entry.Status != commentStatusActive {
+			if !targetMatchesResolved(hierarchy.Target, resolved) {
+				return ErrInvalidTargetResource
+			}
+			entry := hierarchy.Entry
+			if !isVisibleCommentStatus(entry.Status) {
 				return ErrCommentNotFound
 			}
 			var existing model.CommentLike
@@ -235,11 +264,7 @@ func (s *Service) setLiked(user authctx.CurrentUser, commentID uuid.UUID, liked 
 			if updated.RowsAffected != 1 {
 				return ErrCommentNotFound
 			}
-			rootID := entry.ID
-			if entry.RootID != nil {
-				rootID = *entry.RootID
-			}
-			return s.recomputeRootHotScore(tx, rootID, time.Now())
+			return s.recomputeRootHotScore(tx, hierarchy.Root.ID, time.Now())
 		})
 	})
 }
@@ -261,7 +286,7 @@ func (s *Service) Mark(user authctx.CurrentUser, targetRef TargetRef, commentID 
 			if err != nil {
 				return err
 			}
-			entry, err := s.repo.lockComment(tx, commentID)
+			entry, err := s.repo.findRoot(tx, commentID)
 			if isNotFound(err) {
 				return ErrInvalidMark
 			}
@@ -294,16 +319,30 @@ func (s *Service) Unmark(user authctx.CurrentUser, targetRef TargetRef) error {
 	if err != nil {
 		return err
 	}
-	if resolved.OwnerID == nil || *resolved.OwnerID != user.ID {
+	target, err := s.repo.findTarget(s.db, resolved)
+	if isNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	storedResolved, err := s.resolveStoredTarget(Viewer{UserID: &user.ID}, target)
+	if err != nil {
+		return err
+	}
+	if storedResolved.OwnerID == nil || *storedResolved.OwnerID != user.ID {
 		return ErrCommentForbidden
 	}
 	return withCreateTransactionMutex(s.createMu, func() error {
 		return s.db.Transaction(func(tx *gorm.DB) error {
-			target, err := s.repo.lockTarget(tx, resolved)
+			lockedTarget, err := s.repo.lockTargetByID(tx, target.ID)
 			if err != nil {
 				return err
 			}
-			updated := tx.Model(&model.DiscussionTarget{}).Where("id = ?", target.ID).Update("pinned_comment_id", gorm.Expr("NULL"))
+			if !targetMatchesResolved(lockedTarget, storedResolved) {
+				return ErrInvalidTargetResource
+			}
+			updated := tx.Model(&model.DiscussionTarget{}).Where("id = ?", lockedTarget.ID).Update("pinned_comment_id", gorm.Expr("NULL"))
 			if updated.Error != nil {
 				return updated.Error
 			}
@@ -313,6 +352,32 @@ func (s *Service) Unmark(user authctx.CurrentUser, targetRef TargetRef) error {
 			return nil
 		})
 	})
+}
+
+func (s *Service) resolveCommentMutation(viewer Viewer, commentID uuid.UUID) (model.CommentEntry, model.DiscussionTarget, ResolvedTarget, error) {
+	entry, err := s.repo.findComment(s.db, commentID)
+	if isNotFound(err) {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, ErrCommentNotFound
+	}
+	if err != nil {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, err
+	}
+	target, err := s.repo.findTargetByID(s.db, entry.TargetID)
+	if isNotFound(err) {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, ErrCommentNotFound
+	}
+	if err != nil {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, err
+	}
+	resolved, err := s.resolveStoredTarget(viewer, target)
+	if err != nil {
+		return model.CommentEntry{}, model.DiscussionTarget{}, ResolvedTarget{}, err
+	}
+	return entry, target, resolved, nil
+}
+
+func targetMatchesResolved(target model.DiscussionTarget, resolved ResolvedTarget) bool {
+	return target.Kind == resolved.Kind && target.ResourceID == resolved.ResourceID && target.ResourceKey == resolved.ResourceKey
 }
 
 func (s *Service) recomputeRootHotScore(tx *gorm.DB, rootID uuid.UUID, now time.Time) error {

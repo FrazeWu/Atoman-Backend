@@ -107,6 +107,7 @@ func (r *databaseTargetResolvers) resolveFeedArticle(_ Viewer, resourceID uuid.U
 	}
 	return ResolvedTarget{
 		Kind:        TargetKindFeedArticle,
+		ResourceID:  resourceID,
 		ResourceKey: resourceKey,
 		Visible:     !item.FeedSource.Hidden,
 	}, nil
@@ -228,6 +229,7 @@ func targetLookupError(kind string, resourceID uuid.UUID, err error) error {
 func ownedTarget(kind string, resourceID uuid.UUID, ownerID uuid.UUID, visible bool, durationSec int, markLabel string) ResolvedTarget {
 	return ResolvedTarget{
 		Kind:        kind,
+		ResourceID:  resourceID,
 		ResourceKey: resourceID.String(),
 		OwnerID:     &ownerID,
 		Visible:     visible,
@@ -237,7 +239,7 @@ func ownedTarget(kind string, resourceID uuid.UUID, ownerID uuid.UUID, visible b
 }
 
 func communityTarget(kind string, resourceID uuid.UUID, visible bool) ResolvedTarget {
-	return ResolvedTarget{Kind: kind, ResourceKey: resourceID.String(), Visible: visible}
+	return ResolvedTarget{Kind: kind, ResourceID: resourceID, ResourceKey: resourceID.String(), Visible: visible}
 }
 
 func viewerOwns(viewer Viewer, ownerID uuid.UUID) bool {

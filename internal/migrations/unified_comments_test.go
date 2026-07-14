@@ -17,16 +17,31 @@ func TestUnifiedCommentSchemaCreatesRequiredIndexes(t *testing.T) {
 	assertIndexExists(t, db, "comment_entries", "uq_comment_root_floor")
 	assertIndexExists(t, db, "comment_likes", "uq_comment_like_user")
 	assertIndexExists(t, db, "comment_reports", "uq_comment_report_user")
+	if !db.Migrator().HasColumn(&model.DiscussionTarget{}, "resource_id") {
+		t.Fatal("expected discussion_targets.resource_id")
+	}
+	columns, err := db.Migrator().ColumnTypes(&model.DiscussionTarget{})
+	if err != nil {
+		t.Fatalf("inspect discussion target columns: %v", err)
+	}
+	for _, column := range columns {
+		if column.Name() == "resource_id" {
+			nullable, ok := column.Nullable()
+			if !ok || nullable {
+				t.Fatal("expected discussion_targets.resource_id to be NOT NULL")
+			}
+		}
+	}
 }
 
 func TestUnifiedCommentIndexesEnforceWriteBehavior(t *testing.T) {
 	db := migrateUnifiedCommentSchema(t)
 
-	target := model.DiscussionTarget{Kind: "blog_post", ResourceKey: "post-1"}
+	target := model.DiscussionTarget{Kind: "blog_post", ResourceID: uuid.New(), ResourceKey: "post-1"}
 	if err := db.Create(&target).Error; err != nil {
 		t.Fatalf("create target: %v", err)
 	}
-	if err := db.Create(&model.DiscussionTarget{Kind: target.Kind, ResourceKey: target.ResourceKey}).Error; err == nil {
+	if err := db.Create(&model.DiscussionTarget{Kind: target.Kind, ResourceID: uuid.New(), ResourceKey: target.ResourceKey}).Error; err == nil {
 		t.Fatal("expected duplicate discussion target to be rejected")
 	}
 

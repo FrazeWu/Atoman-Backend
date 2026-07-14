@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -75,11 +76,11 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	if err != nil {
 		return CommentDTO{}, err
 	}
-	assets, err := s.validateAttachments(user.ID, input.AttachmentIDs)
+	assets, err := s.validateAttachments(s.db, user.ID, input.AttachmentIDs)
 	if err != nil {
 		return CommentDTO{}, err
 	}
-	if err := s.validateMentions(normalized, input.Mentions); err != nil {
+	if err := s.validateMentions(s.db, normalized, input.Mentions); err != nil {
 		return CommentDTO{}, err
 	}
 
@@ -103,22 +104,22 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 				floor := target.NextFloor
 				created.FloorNumber = &floor
 			} else {
-				reply, err := s.repo.findReply(tx, *input.ReplyToID)
-				if err != nil || reply.TargetID != target.ID || reply.Status != commentStatusActive {
+				reply, root, err := s.repo.lockReplyHierarchy(tx, target.ID, *input.ReplyToID)
+				if err != nil || reply.Status != commentStatusActive {
 					return ErrInvalidReply
-				}
-				root := reply
-				if reply.RootID != nil {
-					root, err = s.repo.findRoot(tx, *reply.RootID)
-					if err != nil {
-						return ErrInvalidReply
-					}
 				}
 				if root.TargetID != target.ID || root.RootID != nil || root.Status != commentStatusActive {
 					return ErrInvalidReply
 				}
 				created.ReplyToID = input.ReplyToID
 				created.RootID = &root.ID
+			}
+			assets, err = s.validateAttachments(tx, user.ID, input.AttachmentIDs)
+			if err != nil {
+				return err
+			}
+			if err := s.validateMentions(tx, normalized, input.Mentions); err != nil {
+				return err
 			}
 
 			if err := s.repo.createComment(tx, &created); err != nil {
@@ -194,6 +195,18 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	}
 	if err != nil {
 		return CommentListDTO{}, fmt.Errorf("find discussion target: %w", err)
+	}
+	if target.ResourceID != resolved.ResourceID {
+		updated := s.db.Model(&model.DiscussionTarget{}).
+			Where("id = ? AND resource_id = ?", target.ID, target.ResourceID).
+			Update("resource_id", resolved.ResourceID)
+		if updated.Error != nil {
+			return CommentListDTO{}, updated.Error
+		}
+		if updated.RowsAffected != 1 {
+			return CommentListDTO{}, ErrInvalidTargetResource
+		}
+		target.ResourceID = resolved.ResourceID
 	}
 
 	visible := []string{commentStatusActive, "auto_folded"}
@@ -306,6 +319,17 @@ func (s *Service) resolveVisible(viewer Viewer, target TargetRef) (ResolvedTarge
 	return resolved, nil
 }
 
+func (s *Service) resolveStoredTarget(viewer Viewer, target model.DiscussionTarget) (ResolvedTarget, error) {
+	resolved, err := s.resolveVisible(viewer, TargetRef{Kind: target.Kind, ResourceID: target.ResourceID})
+	if err != nil {
+		return ResolvedTarget{}, err
+	}
+	if resolved.Kind != target.Kind || resolved.ResourceID != target.ResourceID || resolved.ResourceKey != target.ResourceKey {
+		return ResolvedTarget{}, ErrInvalidTargetResource
+	}
+	return resolved, nil
+}
+
 func validateCommentContent(raw string, attachments []uuid.UUID) (string, string, error) {
 	normalized := NormalizeContent(raw)
 	if normalized == "" && len(attachments) == 0 {
@@ -321,7 +345,7 @@ func validateCommentContent(raw string, attachments []uuid.UUID) (string, string
 	return normalized, rendered, nil
 }
 
-func (s *Service) validateAttachments(userID uuid.UUID, ids []uuid.UUID) ([]model.MediaAsset, error) {
+func (s *Service) validateAttachments(db *gorm.DB, userID uuid.UUID, ids []uuid.UUID) ([]model.MediaAsset, error) {
 	if len(ids) > 4 {
 		return nil, ErrInvalidAttachment
 	}
@@ -338,7 +362,7 @@ func (s *Service) validateAttachments(userID uuid.UUID, ids []uuid.UUID) ([]mode
 		}
 		seen[id] = struct{}{}
 		var asset model.MediaAsset
-		if err := s.db.First(&asset, "id = ?", id).Error; err != nil || asset.UserID == nil || *asset.UserID != userID || !allowed[asset.ContentType] || asset.Size <= 0 || asset.Size > maxAttachmentSize || strings.TrimSpace(asset.Key) == "" || strings.TrimSpace(asset.URL) == "" {
+		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&asset, "id = ?", id).Error; err != nil || asset.UserID == nil || *asset.UserID != userID || !allowed[asset.ContentType] || asset.Size <= 0 || asset.Size > maxAttachmentSize || strings.TrimSpace(asset.Key) == "" || strings.TrimSpace(asset.URL) == "" {
 			return nil, ErrInvalidAttachment
 		}
 		assets = append(assets, asset)
@@ -346,7 +370,7 @@ func (s *Service) validateAttachments(userID uuid.UUID, ids []uuid.UUID) ([]mode
 	return assets, nil
 }
 
-func (s *Service) validateMentions(content string, mentions []MentionInput) error {
+func (s *Service) validateMentions(db *gorm.DB, content string, mentions []MentionInput) error {
 	if err := ValidateMentions(content, mentions); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidMention, err)
 	}
@@ -361,7 +385,7 @@ func (s *Service) validateMentions(content string, mentions []MentionInput) erro
 	}
 	var users []model.User
 	if len(userIDs) > 0 {
-		if err := s.db.Select("uuid", "username").Where("uuid IN ? AND is_active = ?", userIDs, true).Find(&users).Error; err != nil {
+		if err := db.Clauses(clause.Locking{Strength: "UPDATE"}).Select("uuid", "username").Where("uuid IN ? AND is_active = ?", userIDs, true).Find(&users).Error; err != nil {
 			return ErrInvalidMention
 		}
 	}
