@@ -130,6 +130,39 @@ func TestCreateAndUpdateTopicPersistNormalizedTags(t *testing.T) {
 	}
 }
 
+func TestUpdateTopicPreservesTagsWhenFieldIsOmitted(t *testing.T) {
+	router, db, user, category := newForumHTTPTestRouter(t)
+	topic := model.ForumTopic{
+		UserID: user.UUID, CategoryID: category.ID, Title: "Original", Content: "Original body",
+		Tags: model.StringSlice{"go", "sqlite"},
+	}
+	if err := db.Create(&topic).Error; err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+
+	response := performForumRequest(t, router, http.MethodPut, "/api/v1/forum/topics/"+topic.ID.String(), map[string]any{
+		"title": "Updated", "content": "Updated body",
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	updated, _ := decodeForumData[model.ForumTopic](t, response)
+	if got := []string(updated.Tags); len(got) != 2 || got[0] != "go" || got[1] != "sqlite" {
+		t.Fatalf("expected omitted tags to preserve existing value, got %#v", got)
+	}
+
+	response = performForumRequest(t, router, http.MethodPut, "/api/v1/forum/topics/"+topic.ID.String(), map[string]any{
+		"title": "Updated", "content": "Updated body", "tags": []string{},
+	})
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	updated, _ = decodeForumData[model.ForumTopic](t, response)
+	if len(updated.Tags) != 0 {
+		t.Fatalf("expected explicit empty tags to clear existing value, got %#v", updated.Tags)
+	}
+}
+
 func TestCreateTopicRejectsInvalidTags(t *testing.T) {
 	router, _, _, category := newForumHTTPTestRouter(t)
 	tests := []struct {

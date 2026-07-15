@@ -478,7 +478,7 @@ func (s *Service) ListUserCollections(userID uuid.UUID) ([]model.Collection, err
 	return s.repo.ListUserCollections(userID)
 }
 
-func (s *Service) CreateChannel(user authctx.CurrentUser, name string, slug string, description string, coverURL string) (model.Channel, error) {
+func (s *Service) CreateChannel(user authctx.CurrentUser, name string, slug string, description string, coverURL string, contentType string) (model.Channel, error) {
 	if user.ID == uuid.Nil {
 		return model.Channel{}, apperr.Unauthorized("Login required")
 	}
@@ -493,13 +493,20 @@ func (s *Service) CreateChannel(user authctx.CurrentUser, name string, slug stri
 			return model.Channel{}, err
 		}
 	}
+	contentType = model.NormalizeChannelContentType(contentType)
+	if contentType == "" {
+		contentType = model.ChannelContentTypeBlog
+	}
+	if !model.IsValidChannelContentType(contentType) {
+		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "content_type must be blog, podcast, or video")
+	}
 	channel := model.Channel{
 		UserID:      &user.ID,
 		Name:        name,
 		Slug:        slug,
 		Description: strings.TrimSpace(description),
 		CoverURL:    strings.TrimSpace(coverURL),
-		ContentType: model.ChannelContentTypeBlog,
+		ContentType: contentType,
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&channel).Error; err != nil {

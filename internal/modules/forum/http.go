@@ -2,6 +2,7 @@ package forum
 
 import (
 	"net/http"
+	"strconv"
 
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
@@ -27,12 +28,19 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.DELETE("/topics/:topicID", h.deleteTopic)
 	group.POST("/category-requests", h.createCategoryRequest)
 	group.GET("/topics/:topicID/replies", h.listReplies)
+	group.POST("/topics/:topicID/replies", h.createTopicReply)
 	group.POST("/replies", h.createReply)
 	group.PUT("/replies/:replyID", h.updateReply)
 	group.DELETE("/replies/:replyID", h.deleteReply)
 	group.GET("/drafts", h.listDrafts)
 	group.PUT("/drafts", h.saveDraft)
+	group.DELETE("/drafts", h.deleteDraftByContext)
 	group.DELETE("/drafts/:draftID", h.deleteDraft)
+	group.GET("/follows", h.listFollows)
+	group.PUT("/follows/:targetType", h.follow)
+	group.DELETE("/follows/:targetType", h.unfollow)
+	group.PUT("/follows/:targetType/:targetKey", h.follow)
+	group.DELETE("/follows/:targetType/:targetKey", h.unfollow)
 }
 
 func (h *Handler) listCategories(c *gin.Context) {
@@ -59,7 +67,13 @@ func (h *Handler) getCategory(c *gin.Context) {
 }
 
 func (h *Handler) listTopics(c *gin.Context) {
-	query := ListTopicsQuery{Page: page(c), PageSize: pageSize(c)}
+	query := ListTopicsQuery{
+		Sort:     c.Query("sort"),
+		Tag:      c.Query("tag"),
+		Search:   c.Query("search"),
+		Page:     page(c),
+		PageSize: pageSize(c),
+	}
 	if raw := c.Query("category_id"); raw != "" {
 		id, err := uuid.Parse(raw)
 		if err != nil {
@@ -190,7 +204,7 @@ func (h *Handler) listReplies(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "topicID must be a valid uuid"))
 		return
 	}
-	replies, err := h.service.ListReplies(topicID)
+	replies, err := h.service.ListReplies(topicID, c.DefaultQuery("sort", "oldest"))
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -198,7 +212,20 @@ func (h *Handler) listReplies(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, replies)
 }
 
+func (h *Handler) createTopicReply(c *gin.Context) {
+	topicID, err := uuid.Parse(c.Param("topicID"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "topicID must be a valid uuid"))
+		return
+	}
+	h.createReplyForTopic(c, topicID)
+}
+
 func (h *Handler) createReply(c *gin.Context) {
+	h.createReplyForTopic(c, uuid.Nil)
+}
+
+func (h *Handler) createReplyForTopic(c *gin.Context, topicID uuid.UUID) {
 	user, ok := authctx.Current(c)
 	if !ok {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
@@ -208,6 +235,9 @@ func (h *Handler) createReply(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
 		return
+	}
+	if topicID != uuid.Nil {
+		req.TopicID = topicID
 	}
 	reply, err := h.service.CreateReply(user, req)
 	if err != nil {
@@ -265,12 +295,83 @@ func (h *Handler) listDrafts(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
+	contextKey := c.Query("context_key")
+	if contextKey != "" {
+		draft, err := h.service.GetDraft(user, contextKey)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		httpx.OK(c, http.StatusOK, draft)
+		return
+	}
 	drafts, err := h.service.ListDrafts(user)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
 	httpx.OK(c, http.StatusOK, drafts)
+}
+
+func (h *Handler) deleteDraftByContext(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	if err := h.service.DeleteDraftByContext(user, c.Query("context_key")); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) listFollows(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	follows, err := h.service.ListFollows(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, follows)
+}
+
+func (h *Handler) follow(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	follow, err := h.service.Follow(user, c.Param("targetType"), followTargetKey(c))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, follow)
+}
+
+func (h *Handler) unfollow(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	if err := h.service.Unfollow(user, c.Param("targetType"), followTargetKey(c)); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
+}
+
+func followTargetKey(c *gin.Context) string {
+	if key, exists := c.GetQuery("target_key"); exists {
+		return key
+	}
+	return c.Param("targetKey")
 }
 
 func (h *Handler) saveDraft(c *gin.Context) {
@@ -315,6 +416,16 @@ func page(c *gin.Context) int {
 }
 
 func pageSize(c *gin.Context) int {
-	_, pageSize := httpx.PageParams(c)
-	return pageSize
+	_, size := httpx.PageParams(c)
+	if c.Query("page_size") != "" || c.Query("limit") == "" {
+		return size
+	}
+	legacy, err := strconv.Atoi(c.Query("limit"))
+	if err != nil || legacy < 1 {
+		return size
+	}
+	if legacy > 100 {
+		return 100
+	}
+	return legacy
 }

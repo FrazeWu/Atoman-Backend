@@ -42,6 +42,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 func (h *Handler) listDebates(c *gin.Context) {
 	query := ListDebatesQuery{
 		Status:   c.Query("status"),
+		Tag:      c.Query("tag"),
 		Page:     page(c),
 		PageSize: pageSize(c),
 	}
@@ -92,7 +93,15 @@ func (h *Handler) listArguments(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, arguments)
+	userVotes := map[string]int{}
+	if user, ok := authctx.Current(c); ok {
+		userVotes, err = h.service.ListArgumentVotes(user.ID, debateID)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+	}
+	httpx.OKMeta(c, http.StatusOK, arguments, gin.H{"user_votes": userVotes})
 }
 
 func (h *Handler) createDebate(c *gin.Context) {

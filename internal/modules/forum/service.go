@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -65,12 +66,17 @@ func (s *Service) CreateTopic(user authctx.CurrentUser, req CreateTopicRequest) 
 	if _, err := s.GetCategory(req.CategoryID); err != nil {
 		return model.ForumTopic{}, err
 	}
+	tags, err := normalizeTags(req.Tags)
+	if err != nil {
+		return model.ForumTopic{}, err
+	}
 
 	topic := model.ForumTopic{
 		UserID:     user.ID,
 		CategoryID: req.CategoryID,
 		Title:      title,
 		Content:    content,
+		Tags:       tags,
 	}
 	if err := s.repo.CreateTopic(&topic); err != nil {
 		return model.ForumTopic{}, err
@@ -93,6 +99,13 @@ func (s *Service) UpdateTopic(user authctx.CurrentUser, topicID uuid.UUID, req U
 	}
 	topic.Title = title
 	topic.Content = content
+	if req.Tags != nil {
+		tags, err := normalizeTags(*req.Tags)
+		if err != nil {
+			return model.ForumTopic{}, err
+		}
+		topic.Tags = tags
+	}
 	if err := s.repo.SaveTopic(&topic); err != nil {
 		return model.ForumTopic{}, err
 	}
@@ -110,11 +123,11 @@ func (s *Service) DeleteTopic(user authctx.CurrentUser, topicID uuid.UUID) error
 	return s.repo.DeleteTopic(topicID)
 }
 
-func (s *Service) ListReplies(topicID uuid.UUID) ([]model.ForumReply, error) {
+func (s *Service) ListReplies(topicID uuid.UUID, sort string) ([]model.ForumReply, error) {
 	if _, err := s.GetTopic(topicID); err != nil {
 		return nil, err
 	}
-	return s.repo.ListReplies(topicID)
+	return s.repo.ListReplies(topicID, sort)
 }
 
 func (s *Service) CreateReply(user authctx.CurrentUser, req CreateReplyRequest) (model.ForumReply, error) {
@@ -236,6 +249,24 @@ func (s *Service) ListDrafts(user authctx.CurrentUser) ([]model.ForumDraft, erro
 	return s.repo.ListDrafts(user.ID)
 }
 
+func (s *Service) GetDraft(user authctx.CurrentUser, contextKey string) (*model.ForumDraft, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	contextKey = strings.TrimSpace(contextKey)
+	if contextKey == "" {
+		return nil, apperr.BadRequest("validation.invalid_request", "context_key is required")
+	}
+	draft, err := s.repo.GetDraft(user.ID, contextKey)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &draft, nil
+}
+
 func (s *Service) SaveDraft(user authctx.CurrentUser, req SaveDraftRequest) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
@@ -262,6 +293,102 @@ func (s *Service) DeleteDraft(user authctx.CurrentUser, draftID uuid.UUID) error
 		return apperr.BadRequest("validation.invalid_request", "draft_id is required")
 	}
 	return s.repo.DeleteDraft(user.ID, draftID)
+}
+
+func (s *Service) DeleteDraftByContext(user authctx.CurrentUser, contextKey string) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	contextKey = strings.TrimSpace(contextKey)
+	if contextKey == "" {
+		return apperr.BadRequest("validation.invalid_request", "context_key is required")
+	}
+	return s.repo.DeleteDraftByContext(user.ID, contextKey)
+}
+
+func (s *Service) Follow(user authctx.CurrentUser, targetType, targetKey string) (model.ForumFollow, error) {
+	if user.ID == uuid.Nil {
+		return model.ForumFollow{}, apperr.Unauthorized("Login required")
+	}
+	key, err := s.normalizeFollowTarget(targetType, targetKey, true)
+	if err != nil {
+		return model.ForumFollow{}, err
+	}
+	follow := model.ForumFollow{UserID: user.ID, TargetType: targetType, TargetKey: key}
+	if err := s.repo.UpsertFollow(&follow); err != nil {
+		return model.ForumFollow{}, err
+	}
+	return follow, nil
+}
+
+func (s *Service) ListFollows(user authctx.CurrentUser) ([]model.ForumFollow, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	return s.repo.ListFollows(user.ID)
+}
+
+func (s *Service) Unfollow(user authctx.CurrentUser, targetType, targetKey string) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	key, err := s.normalizeFollowTarget(targetType, targetKey, false)
+	if err != nil {
+		return err
+	}
+	return s.repo.DeleteFollow(user.ID, targetType, key)
+}
+
+func (s *Service) ListFollowerIDs(targetType, targetKey string) ([]uuid.UUID, error) {
+	key, err := s.normalizeFollowTarget(targetType, targetKey, false)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.ListFollowerIDs(targetType, key)
+}
+
+func (s *Service) normalizeFollowTarget(targetType, targetKey string, requireExists bool) (string, error) {
+	switch targetType {
+	case model.ForumFollowTargetTopic:
+		id, err := uuid.Parse(targetKey)
+		if err != nil {
+			return "", apperr.BadRequest("validation.invalid_request", "targetKey must be a valid uuid")
+		}
+		if requireExists {
+			if _, err := s.GetTopic(id); err != nil {
+				return "", err
+			}
+		}
+		return id.String(), nil
+	case model.ForumFollowTargetCategory:
+		id, err := uuid.Parse(targetKey)
+		if err != nil {
+			return "", apperr.BadRequest("validation.invalid_request", "targetKey must be a valid uuid")
+		}
+		if requireExists {
+			if _, err := s.GetCategory(id); err != nil {
+				return "", err
+			}
+		}
+		return id.String(), nil
+	case model.ForumFollowTargetTag:
+		key := strings.TrimSpace(targetKey)
+		if key == "" || utf8.RuneCountInString(key) > 30 {
+			return "", apperr.BadRequest("validation.invalid_request", "tag must be 1 to 30 characters")
+		}
+		if requireExists {
+			exists, err := s.repo.TagExists(key)
+			if err != nil {
+				return "", err
+			}
+			if !exists {
+				return "", apperr.NotFound("forum.tag_not_found", "Forum tag not found")
+			}
+		}
+		return key, nil
+	default:
+		return "", apperr.BadRequest("validation.invalid_request", "targetType must be topic, category, or tag")
+	}
 }
 
 func (s *Service) CreateCategoryRequest(user authctx.CurrentUser, req CreateCategoryRequestRequest) (model.CategoryRequest, error) {
@@ -293,6 +420,29 @@ func requireTopicOwner(user authctx.CurrentUser, ownerID uuid.UUID) error {
 		return apperr.Forbidden("forum.forbidden", "You do not have permission to modify this resource")
 	}
 	return nil
+}
+
+func normalizeTags(raw []string) (model.StringSlice, error) {
+	tags := make(model.StringSlice, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, value := range raw {
+		tag := strings.TrimSpace(value)
+		if tag == "" {
+			continue
+		}
+		if utf8.RuneCountInString(tag) > 30 {
+			return nil, apperr.BadRequest("validation.invalid_request", "each tag must be at most 30 characters")
+		}
+		if _, exists := seen[tag]; exists {
+			continue
+		}
+		seen[tag] = struct{}{}
+		tags = append(tags, tag)
+	}
+	if len(tags) > 5 {
+		return nil, apperr.BadRequest("validation.invalid_request", "at most 5 tags are allowed")
+	}
+	return tags, nil
 }
 
 func (s *Service) recalculateTopicReplyState(tx *gorm.DB, topicID uuid.UUID) error {

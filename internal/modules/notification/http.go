@@ -82,7 +82,12 @@ func (h *Handler) markAllRead(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
+	unreadTotal, err := h.service.GetUnreadCount(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"ok": true, "unread_total": unreadTotal})
 }
 
 func normalizedPageFromQuery(c *gin.Context) int {

@@ -5,14 +5,15 @@ import "github.com/google/uuid"
 type ListDebatesQuery struct {
 	Status   string
 	Search   string
+	Tag      string
 	Page     int
 	PageSize int
 }
 
 type CreateDebateRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Content     string   `json:"content"`
 	Tags        []string `json:"tags"`
 }
 

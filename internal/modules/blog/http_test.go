@@ -199,6 +199,33 @@ func TestRegisterRoutesMountsChannelAndCollectionMutationEndpoints(t *testing.T)
 	}
 }
 
+func TestCreateChannelPersistsRequestedContentType(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
+	r := newBlogHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/blog/channels",
+		bytes.NewBufferString(`{"name":"Video Channel","content_type":"video"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected create channel 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		Data model.Channel `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Data.ContentType != model.ChannelContentTypeVideo {
+		t.Fatalf("expected video channel, got %#v", payload.Data)
+	}
+}
+
 func TestRegisterRoutesMountsChannelArticleRSS(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")

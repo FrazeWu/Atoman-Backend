@@ -18,7 +18,7 @@ func newDebateHTTPTestService(t *testing.T) (*Service, authctx.CurrentUser) {
 	t.Helper()
 
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Debate{}, &model.Argument{})
+	testdb.Migrate(t, db, &model.User{}, &model.Debate{}, &model.Argument{}, &model.DebateVote{})
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -67,6 +67,71 @@ func TestRegisterRoutesMountsListDetailSearchAndArgumentList(t *testing.T) {
 		if w.Code == http.StatusNotFound {
 			t.Fatalf("expected route %s to be mounted, got 404: %s", path, w.Body.String())
 		}
+	}
+}
+
+func TestListArgumentsReturnsCurrentUserVotes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, user := newDebateHTTPTestService(t)
+	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Voting Debate", Description: "Body"})
+	if err != nil {
+		t.Fatalf("create debate: %v", err)
+	}
+	argument, err := service.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "Argument", ArgumentType: string(model.ArgumentTypeSupport)})
+	if err != nil {
+		t.Fatalf("create argument: %v", err)
+	}
+	if err := service.db.Create(&model.DebateVote{ArgumentID: argument.ID, UserID: user.ID, VoteType: 1}).Error; err != nil {
+		t.Fatalf("create vote: %v", err)
+	}
+
+	r := newDebateHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/debate/topics/"+debate.ID.String()+"/arguments", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Meta struct {
+			UserVotes map[string]int `json:"user_votes"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Meta.UserVotes[argument.ID.String()] != 1 {
+		t.Fatalf("expected current user vote for %s, got %#v", argument.ID, response.Meta.UserVotes)
+	}
+}
+
+func TestListDebatesFiltersByTag(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, user := newDebateHTTPTestService(t)
+	if _, err := service.CreateDebate(user, CreateDebateRequest{Title: "Science", Description: "Body", Tags: []string{"science"}}); err != nil {
+		t.Fatalf("create science debate: %v", err)
+	}
+	if _, err := service.CreateDebate(user, CreateDebateRequest{Title: "History", Description: "Body", Tags: []string{"history"}}); err != nil {
+		t.Fatalf("create history debate: %v", err)
+	}
+
+	r := newDebateHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/debate/topics?tag=science", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data []model.Debate `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response.Data) != 1 || response.Data[0].Title != "Science" {
+		t.Fatalf("expected only science debate, got %#v", response.Data)
 	}
 }
 

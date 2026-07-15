@@ -30,6 +30,7 @@ type channelInput struct {
 	Slug        string `json:"slug"`
 	Description string `json:"description"`
 	CoverURL    string `json:"cover_url"`
+	ContentType string `json:"content_type"`
 }
 
 type collectionInput struct {
@@ -330,7 +331,7 @@ func (h *Handler) createChannel(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
 		return
 	}
-	channel, err := h.service.CreateChannel(user, req.Name, req.Slug, req.Description, req.CoverURL)
+	channel, err := h.service.CreateChannel(user, req.Name, req.Slug, req.Description, req.CoverURL, req.ContentType)
 	if err != nil {
 		httpx.Error(c, err)
 		return

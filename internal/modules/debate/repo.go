@@ -48,6 +48,13 @@ func (r *Repo) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error
 	if search := strings.TrimSpace(query.Search); search != "" {
 		db = db.Where("title LIKE ? OR description LIKE ? OR content LIKE ?", "%"+search+"%", "%"+search+"%", "%"+search+"%")
 	}
+	if tag := strings.TrimSpace(query.Tag); tag != "" {
+		if r.db.Dialector.Name() == "postgres" {
+			db = db.Where("? = ANY(tags)", tag)
+		} else {
+			db = db.Where("tags LIKE ?", "%\""+tag+"\"%")
+		}
+	}
 
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
