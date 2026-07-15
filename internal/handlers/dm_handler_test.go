@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/http"
@@ -105,6 +106,36 @@ func multipartDMImageBody(t *testing.T, filename, contentType string, content []
 		t.Fatalf("close multipart writer: %v", err)
 	}
 	return body, writer.FormDataContentType()
+}
+
+func TestListConversationsReturnsServerErrorWhenUnreadCountFails(t *testing.T) {
+	r, db, sender, recipient := newDMTestRouter(t)
+
+	participantA, participantB := normalizeConversationParticipants(sender.UUID, recipient.UUID)
+	if err := db.Create(&model.DMConversation{ParticipantA: participantA, ParticipantB: participantB}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	callbackName := "test:fail_dm_unread_count"
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Dest.(*int64); ok && tx.Statement.Table == "dm_messages" {
+			tx.AddError(errors.New("forced unread count failure"))
+		}
+	}); err != nil {
+		t.Fatalf("register unread count failure callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove(callbackName)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations", nil)
+	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 when unread count fails, got %d: %s", resp.Code, resp.Body.String())
+	}
 }
 
 func TestDMUploadImageRejectsSpoofedImageContentType(t *testing.T) {

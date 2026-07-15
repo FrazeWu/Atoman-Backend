@@ -107,9 +107,12 @@ func (h *dmHandler) listConversations(c *gin.Context) {
 			continue
 		}
 		var unread int64
-		h.db.Model(&model.DMMessage{}).
+		if err := h.db.Model(&model.DMMessage{}).
 			Where("conversation_id = ? AND sender_id != ? AND read_at IS NULL", conversation.ID, userID).
-			Count(&unread)
+			Count(&unread).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count unread messages"})
+			return
+		}
 		result = append(result, dmConversationItem{
 			ConversationID: conversation.ID.String(),
 			OtherUsername:  other.Username,
