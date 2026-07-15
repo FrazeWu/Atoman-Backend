@@ -231,6 +231,7 @@ func firstNonEmpty(values ...string) string {
 // @Param sort query string false "排序方式" Enums(latest,random)
 // @Param limit query int false "返回数量上限"
 // @Success 200 {array} model.PodcastEpisode
+// @Failure 500 {object} ErrorResponse
 // @Router /api/v1/podcast/episodes [get]
 func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -249,7 +250,10 @@ func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 		} else {
 			q = q.Order("podcast_episodes.created_at DESC")
 		}
-		q.Limit(limit).Find(&episodes)
+		if err := q.Limit(limit).Find(&episodes).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load podcast episodes"})
+			return
+		}
 		c.JSON(http.StatusOK, episodes)
 	}
 }

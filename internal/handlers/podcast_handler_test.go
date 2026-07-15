@@ -139,6 +139,30 @@ func validWAVBytes() []byte {
 	return append([]byte("RIFF$\x00\x00\x00WAVEfmt "), bytes.Repeat([]byte{0}, 64)...)
 }
 
+func TestGetPodcastEpisodesReturnsInternalServerErrorWhenQueryFails(t *testing.T) {
+	r, db, _, _ := newPodcastHandlerTestDB(t)
+
+	callbackName := "podcast_episode_list_error_" + strings.ReplaceAll(t.Name(), "/", "_")
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "podcast_episodes" {
+			tx.AddError(errors.New("injected episode list error"))
+		}
+	}); err != nil {
+		t.Fatalf("register query error callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove(callbackName)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/episodes", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestGetPodcastEpisodeAllowsPublishedOrAuthorDraftOnly(t *testing.T) {
 	r, db, user, channel := newPodcastHandlerTestDB(t)
 	otherUser := model.User{Username: "podcast-other-user", Email: "podcast-other-user@example.com", Password: "hash", Role: "user", IsActive: true}
