@@ -27,11 +27,11 @@ func (r *Repo) DeleteDebate(id uuid.UUID) error {
 	return r.db.Delete(&model.Debate{}, "id = ?", id).Error
 }
 
-func (r *Repo) GetArgument(id uuid.UUID) (model.Argument, error) {
+func (r *Repo) GetArgument(id uuid.UUID) (model.DebateArgumentDTO, error) {
 	return r.getArgument(id, true, true)
 }
 
-func (r *Repo) getArgument(id uuid.UUID, includeReferences bool, includeAttachments bool) (model.Argument, error) {
+func (r *Repo) getArgument(id uuid.UUID, includeReferences bool, includeAttachments bool) (model.DebateArgumentDTO, error) {
 	var entry model.CommentEntry
 	err := r.db.Table("comment_entries AS comments").
 		Select("comments.*").
@@ -39,25 +39,25 @@ func (r *Repo) getArgument(id uuid.UUID, includeReferences bool, includeAttachme
 		Joins("JOIN discussion_targets AS targets ON targets.id = comments.target_id AND targets.kind = ?", "debate").
 		Where("comments.id = ?", id).First(&entry).Error
 	if err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	var target model.DiscussionTarget
 	if err := r.db.First(&target, "id = ?", entry.TargetID).Error; err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	var detail model.DebateArgumentDetail
 	if err := r.db.First(&detail, "comment_id = ?", id).Error; err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	var user model.User
 	if err := r.db.First(&user, "uuid = ?", entry.AuthorID).Error; err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	var voteCount int
 	if err := r.db.Model(&model.DebateVote{}).Select("COALESCE(SUM(vote_type), 0)").Where("argument_id = ?", id).Scan(&voteCount).Error; err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
-	argument := model.Argument{
+	argument := model.DebateArgumentDTO{
 		Base:     model.Base{ID: entry.ID, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt},
 		DebateID: target.ResourceID, ParentID: entry.ReplyToID, UserID: entry.AuthorID, User: &user,
 		Content: entry.Content, ArgumentType: model.ArgumentType(detail.ArgumentType), VoteCount: voteCount,
@@ -66,7 +66,7 @@ func (r *Repo) getArgument(id uuid.UUID, includeReferences bool, includeAttachme
 	}
 	var mentions []model.CommentMention
 	if err := r.db.Where("comment_id = ?", id).Order("start_offset ASC").Find(&mentions).Error; err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	for _, mention := range mentions {
 		argument.Mentions = append(argument.Mentions, model.ArgumentMention{UserID: mention.UserID, Start: mention.StartOffset, End: mention.EndOffset})
@@ -74,7 +74,7 @@ func (r *Repo) getArgument(id uuid.UUID, includeReferences bool, includeAttachme
 	if includeAttachments {
 		attachments, err := r.loadArgumentAttachments([]uuid.UUID{id})
 		if err != nil {
-			return model.Argument{}, err
+			return model.DebateArgumentDTO{}, err
 		}
 		argument.Attachments = attachments[id]
 		for _, attachment := range argument.Attachments {
@@ -84,23 +84,23 @@ func (r *Repo) getArgument(id uuid.UUID, includeReferences bool, includeAttachme
 	if includeReferences {
 		var refs []model.DebateArgumentReference
 		if err := r.db.Where("comment_id = ?", id).Find(&refs).Error; err != nil {
-			return model.Argument{}, err
+			return model.DebateArgumentDTO{}, err
 		}
 		for _, ref := range refs {
 			loaded, err := r.getArgument(ref.ReferencedCommentID, false, includeAttachments)
 			if err != nil {
-				return model.Argument{}, err
+				return model.DebateArgumentDTO{}, err
 			}
 			argument.References = append(argument.References, loaded)
 		}
 		var debateRefs []model.DebateArgumentDebateRef
 		if err := r.db.Where("comment_id = ?", id).Find(&debateRefs).Error; err != nil {
-			return model.Argument{}, err
+			return model.DebateArgumentDTO{}, err
 		}
 		for _, ref := range debateRefs {
 			var debate model.Debate
 			if err := r.db.First(&debate, "id = ?", ref.DebateID).Error; err != nil {
-				return model.Argument{}, err
+				return model.DebateArgumentDTO{}, err
 			}
 			argument.ReferencedDebates = append(argument.ReferencedDebates, debate)
 		}
@@ -163,7 +163,7 @@ func (r *Repo) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error
 	return debates, total, err
 }
 
-func (r *Repo) ListArguments(debateID uuid.UUID, page, pageSize int) ([]model.Argument, int64, error) {
+func (r *Repo) ListArguments(debateID uuid.UUID, page, pageSize int) ([]model.DebateArgumentDTO, int64, error) {
 	type row struct {
 		ID, AuthorID                                                                               uuid.UUID
 		ReplyToID                                                                                  *uuid.UUID
@@ -229,10 +229,10 @@ func (r *Repo) ListArguments(debateID uuid.UUID, page, pageSize int) ([]model.Ar
 	if err != nil {
 		return nil, 0, err
 	}
-	arguments := make([]model.Argument, 0, len(rows))
+	arguments := make([]model.DebateArgumentDTO, 0, len(rows))
 	indexByID := make(map[uuid.UUID]int, len(rows))
 	for _, item := range rows {
-		argument := model.Argument{Base: model.Base{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, DebateID: debateID, ParentID: item.ReplyToID, UserID: item.AuthorID, User: userMap[item.AuthorID], Content: item.Content, ArgumentType: model.ArgumentType(item.ArgumentType), VoteCount: voteMap[item.ID], SourceURL: item.SourceURL, SourceTitle: item.SourceTitle, SourceExcerpt: item.SourceExcerpt, Conclusion: item.Conclusion, IsConcluded: item.Conclusion != "", IsFolded: item.IsFolded || item.Status == "auto_folded", FoldNote: item.FoldNote, Mentions: mentionMap[item.ID], Attachments: attachments[item.ID]}
+		argument := model.DebateArgumentDTO{Base: model.Base{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, DebateID: debateID, ParentID: item.ReplyToID, UserID: item.AuthorID, User: userMap[item.AuthorID], Content: item.Content, ArgumentType: model.ArgumentType(item.ArgumentType), VoteCount: voteMap[item.ID], SourceURL: item.SourceURL, SourceTitle: item.SourceTitle, SourceExcerpt: item.SourceExcerpt, Conclusion: item.Conclusion, IsConcluded: item.Conclusion != "", IsFolded: item.IsFolded || item.Status == "auto_folded", FoldNote: item.FoldNote, Mentions: mentionMap[item.ID], Attachments: attachments[item.ID]}
 		for _, attachment := range argument.Attachments {
 			argument.AttachmentIDs = append(argument.AttachmentIDs, attachment.ID)
 		}
@@ -253,7 +253,7 @@ func (r *Repo) ListArguments(debateID uuid.UUID, page, pageSize int) ([]model.Ar
 			missing = append(missing, ref.ReferencedCommentID)
 		}
 	}
-	briefMap := make(map[uuid.UUID]model.Argument, len(missing))
+	briefMap := make(map[uuid.UUID]model.DebateArgumentDTO, len(missing))
 	if len(missing) > 0 {
 		var briefRows []row
 		if err := r.db.Table("comment_entries AS comments").Select("comments.id, comments.author_id, comments.reply_to_id, comments.content, comments.status, comments.created_at, comments.updated_at, details.argument_type, details.source_url, details.source_title, details.source_excerpt, details.conclusion, details.is_folded, details.fold_note").
@@ -281,7 +281,7 @@ func (r *Repo) ListArguments(debateID uuid.UUID, page, pageSize int) ([]model.Ar
 			briefVoteMap[vote.ArgumentID] = vote.VoteCount
 		}
 		for _, item := range briefRows {
-			briefMap[item.ID] = model.Argument{Base: model.Base{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, DebateID: debateID, ParentID: item.ReplyToID, UserID: item.AuthorID, User: briefUsersMap[item.AuthorID], Content: item.Content, ArgumentType: model.ArgumentType(item.ArgumentType), VoteCount: briefVoteMap[item.ID], SourceURL: item.SourceURL, SourceTitle: item.SourceTitle, SourceExcerpt: item.SourceExcerpt, Conclusion: item.Conclusion, IsConcluded: item.Conclusion != "", IsFolded: item.IsFolded || item.Status == "auto_folded", FoldNote: item.FoldNote}
+			briefMap[item.ID] = model.DebateArgumentDTO{Base: model.Base{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, DebateID: debateID, ParentID: item.ReplyToID, UserID: item.AuthorID, User: briefUsersMap[item.AuthorID], Content: item.Content, ArgumentType: model.ArgumentType(item.ArgumentType), VoteCount: briefVoteMap[item.ID], SourceURL: item.SourceURL, SourceTitle: item.SourceTitle, SourceExcerpt: item.SourceExcerpt, Conclusion: item.Conclusion, IsConcluded: item.Conclusion != "", IsFolded: item.IsFolded || item.Status == "auto_folded", FoldNote: item.FoldNote}
 		}
 	}
 	for _, ref := range refs {

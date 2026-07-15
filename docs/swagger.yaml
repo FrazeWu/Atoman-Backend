@@ -323,6 +323,54 @@ definitions:
       username:
         type: string
     type: object
+  debate.CreateArgumentRequest:
+    properties:
+      argument_type:
+        type: string
+      attachment_ids:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      debate_id:
+        type: string
+      mentions:
+        items:
+          $ref: '#/definitions/comment.MentionInput'
+        type: array
+      parent_id:
+        type: string
+      source_excerpt:
+        type: string
+      source_title:
+        type: string
+      source_url:
+        type: string
+    type: object
+  debate.CreateDebateRequest:
+    properties:
+      content:
+        type: string
+      description:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    type: object
+  debate.DebateReferenceRequest:
+    properties:
+      debate_id:
+        type: string
+    type: object
+  debate.ReferenceRequest:
+    properties:
+      reference_id:
+        type: string
+    type: object
   feed.AutoSubscriptionAddRequest:
     properties:
       candidate_feed_url:
@@ -926,35 +974,6 @@ definitions:
         example: true
         type: boolean
     type: object
-  handlers.CommentInput:
-    properties:
-      content:
-        type: string
-      guest_name:
-        type: string
-      timestamp_sec:
-        type: integer
-    required:
-    - content
-    type: object
-  handlers.CommentListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.Comment'
-        type: array
-      message:
-        example: ok
-        type: string
-    type: object
-  handlers.CommentResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.Comment'
-      message:
-        example: ok
-        type: string
-    type: object
   handlers.ConflictWithIDResponse:
     properties:
       error:
@@ -983,15 +1002,6 @@ definitions:
       count:
         example: 8
         type: integer
-    type: object
-  handlers.CreateDiscussionInput:
-    properties:
-      content:
-        type: string
-      parent_id:
-        type: string
-    required:
-    - content
     type: object
   handlers.CreateEventInput:
     properties:
@@ -1141,39 +1151,26 @@ definitions:
         example: https://cdn.example.com/dm.png
         type: string
     type: object
-  handlers.DiscussionContentInput:
-    properties:
-      content:
-        example: 这段内容需要补充来源。
-        type: string
-    required:
-    - content
-    type: object
-  handlers.DiscussionListResponse:
+  handlers.DebateArgumentListResponse:
     properties:
       data:
         items:
-          $ref: '#/definitions/model.Discussion'
+          $ref: '#/definitions/model.DebateArgumentDTO'
         type: array
-      total:
-        example: 12
-        type: integer
+      user_votes:
+        additionalProperties:
+          type: integer
+        type: object
     type: object
-  handlers.DiscussionResponse:
+  handlers.DebateArgumentResponse:
     properties:
       data:
-        $ref: '#/definitions/model.Discussion'
+        $ref: '#/definitions/model.DebateArgumentDTO'
     type: object
-  handlers.DiscussionUnreadCountData:
-    properties:
-      unread_count:
-        example: 3
-        type: integer
-    type: object
-  handlers.DiscussionUnreadCountResponse:
+  handlers.DebateResponse:
     properties:
       data:
-        $ref: '#/definitions/handlers.DiscussionUnreadCountData'
+        $ref: '#/definitions/model.Debate'
     type: object
   handlers.EntryStatusInput:
     properties:
@@ -1216,8 +1213,6 @@ definitions:
     type: object
   handlers.ExplorePostResponse:
     properties:
-      allow_comments:
-        type: boolean
       channel:
         $ref: '#/definitions/model.Channel'
       channel_id:
@@ -1258,6 +1253,12 @@ definitions:
       user_id:
         type: string
       visibility:
+        type: string
+    type: object
+  handlers.FoldArgumentInput:
+    properties:
+      fold_note:
+        example: 证据不足，暂时折叠。
         type: string
     type: object
   handlers.ImageUploadResponse:
@@ -1718,6 +1719,24 @@ definitions:
       data:
         $ref: '#/definitions/model.TimelinePerson'
     type: object
+  handlers.TimelineProposalDecisionInput:
+    properties:
+      decision:
+        enum:
+        - accept
+        - reject
+        type: string
+    type: object
+  handlers.TimelineProposalListResponse:
+    properties:
+      data:
+        $ref: '#/definitions/service.TimelineProposalList'
+    type: object
+  handlers.TimelineProposalResponse:
+    properties:
+      data:
+        $ref: '#/definitions/service.TimelineProposal'
+    type: object
   handlers.TimelineRevisionListResponse:
     properties:
       data:
@@ -1993,6 +2012,24 @@ definitions:
         example: followers
         type: string
     type: object
+  handlers.timelineProposalRequest:
+    properties:
+      attachment_ids:
+        items:
+          type: string
+        type: array
+      content:
+        type: string
+      evidence:
+        type: string
+      mentions:
+        items:
+          $ref: '#/definitions/comment.MentionInput'
+        type: array
+      patch:
+        additionalProperties: {}
+        type: object
+    type: object
   handlers.uploadAssetResponse:
     properties:
       content_type:
@@ -2102,6 +2139,42 @@ definitions:
       user_id:
         type: string
     type: object
+  model.ArgumentAttachment:
+    properties:
+      content_type:
+        type: string
+      id:
+        type: string
+      position:
+        type: integer
+      url:
+        type: string
+    type: object
+  model.ArgumentMention:
+    properties:
+      end:
+        type: integer
+      start:
+        type: integer
+      user_id:
+        type: string
+    type: object
+  model.ArgumentType:
+    enum:
+    - support
+    - oppose
+    - neutral
+    - evidence
+    - question
+    - counter
+    type: string
+    x-enum-varnames:
+    - ArgumentTypeSupport
+    - ArgumentTypeOppose
+    - ArgumentTypeNeutral
+    - ArgumentTypeEvidence
+    - ArgumentTypeQuestion
+    - ArgumentTypeCounter
   model.Artist:
     properties:
       active_end_date:
@@ -2260,31 +2333,6 @@ definitions:
       updated_at:
         type: string
     type: object
-  model.Comment:
-    properties:
-      content:
-        type: string
-      created_at:
-        type: string
-      guest_name:
-        type: string
-      id:
-        type: string
-      status:
-        type: string
-      target_id:
-        type: string
-      target_type:
-        type: string
-      timestamp_sec:
-        type: integer
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        $ref: '#/definitions/model.NullableUserUUID'
-    type: object
   model.ContentProtection:
     properties:
       content_id:
@@ -2333,34 +2381,35 @@ definitions:
       updated_at:
         type: string
     type: object
-  model.Discussion:
+  model.Debate:
     properties:
+      argument_count:
+        type: integer
+      conclude_threshold:
+        type: integer
+      conclude_vote_count:
+        type: integer
+      concluded_at:
+        type: string
+      conclusion_summary:
+        type: string
+      conclusion_type:
+        type: string
       content:
-        description: Markdown format
-        type: string
-      content_id:
-        type: string
-      content_type:
-        description: '''album'' / ''song'''
         type: string
       created_at:
         type: string
+      description:
+        type: string
       id:
         type: string
-      parent:
-        $ref: '#/definitions/model.Discussion'
-      parent_id:
-        description: For nested replies
-        type: string
-      read_at:
-        description: When user read this discussion (NULL = unread)
-        type: string
-      replies:
-        items:
-          $ref: '#/definitions/model.Discussion'
-        type: array
       status:
-        description: '''active'' / ''resolved'' / ''deleted'''
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      title:
         type: string
       updated_at:
         type: string
@@ -2368,6 +2417,74 @@ definitions:
         $ref: '#/definitions/model.User'
       user_id:
         type: string
+      view_count:
+        type: integer
+      vote_count:
+        type: integer
+    type: object
+  model.DebateArgumentDTO:
+    properties:
+      argument_type:
+        $ref: '#/definitions/model.ArgumentType'
+      attachment_ids:
+        items:
+          type: string
+        type: array
+      attachments:
+        items:
+          $ref: '#/definitions/model.ArgumentAttachment'
+        type: array
+      conclusion:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      debate:
+        $ref: '#/definitions/model.Debate'
+      debate_id:
+        type: string
+      fold_note:
+        description: admin note for why folded
+        type: string
+      id:
+        type: string
+      is_concluded:
+        type: boolean
+      is_folded:
+        description: Admin moderation
+        type: boolean
+      mentions:
+        items:
+          $ref: '#/definitions/model.ArgumentMention'
+        type: array
+      parent:
+        $ref: '#/definitions/model.DebateArgumentDTO'
+      parent_id:
+        type: string
+      referenced_debates:
+        items:
+          $ref: '#/definitions/model.Debate'
+        type: array
+      references:
+        items:
+          $ref: '#/definitions/model.DebateArgumentDTO'
+        type: array
+      source_excerpt:
+        type: string
+      source_title:
+        type: string
+      source_url:
+        description: Evidence source fields (only used when ArgumentType == "evidence")
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+      user_id:
+        type: string
+      vote_count:
+        type: integer
     type: object
   model.EditConflict:
     properties:
@@ -2600,13 +2717,6 @@ definitions:
       user_id:
         type: string
     type: object
-  model.NullableUserUUID:
-    properties:
-      uuid.UUID:
-        type: string
-      valid:
-        type: boolean
-    type: object
   model.PersonLocation:
     properties:
       created_at:
@@ -2667,8 +2777,6 @@ definitions:
     type: object
   model.Post:
     properties:
-      allow_comments:
-        type: boolean
       channel:
         $ref: '#/definitions/model.Channel'
       channel_id:
@@ -2992,10 +3100,18 @@ definitions:
         type: string
       is_public:
         type: boolean
+      latitude:
+        type: number
       location:
         type: string
+      longitude:
+        type: number
       source:
         type: string
+      tags:
+        items:
+          type: string
+        type: array
       title:
         type: string
       updated_at:
@@ -3248,16 +3364,6 @@ definitions:
       user_id:
         type: string
     type: object
-  service.SiteAccessBlogSettings:
-    properties:
-      comment_mode:
-        type: string
-    type: object
-  service.SiteAccessBlogSettingsInput:
-    properties:
-      comment_mode:
-        type: string
-    type: object
   service.SiteAccessFeedSettings:
     properties:
       allow_add_source:
@@ -3360,8 +3466,6 @@ definitions:
     type: object
   service.SiteAccessSettings:
     properties:
-      blog:
-        $ref: '#/definitions/service.SiteAccessBlogSettings'
       feed:
         $ref: '#/definitions/service.SiteAccessFeedSettings'
       forum:
@@ -3369,12 +3473,45 @@ definitions:
     type: object
   service.SiteAccessSettingsInput:
     properties:
-      blog:
-        $ref: '#/definitions/service.SiteAccessBlogSettingsInput'
       feed:
         $ref: '#/definitions/service.SiteAccessFeedSettingsInput'
       forum:
         $ref: '#/definitions/service.SiteAccessForumSettingsInput'
+    type: object
+  service.TimelineProposal:
+    properties:
+      applied_revision_id:
+        type: string
+      comment:
+        $ref: '#/definitions/comment.CommentDTO'
+      evidence:
+        type: string
+      patch:
+        additionalProperties: {}
+        type: object
+      reviewer_id:
+        type: string
+      status:
+        type: string
+      target_id:
+        type: string
+      target_kind:
+        type: string
+    type: object
+  service.TimelineProposalList:
+    properties:
+      has_more:
+        type: boolean
+      items:
+        items:
+          $ref: '#/definitions/service.TimelineProposal'
+        type: array
+      page:
+        type: integer
+      per_page:
+        type: integer
+      total:
+        type: integer
     type: object
 info:
   contact: {}
@@ -3523,40 +3660,6 @@ paths:
       summary: 审核评论或举报
       tags:
       - comment-admin
-  /api/v1/admin/discussions/{id}:
-    delete:
-      description: 管理员可软删除任意讨论。
-      parameters:
-      - description: 讨论 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 管理员删除讨论
-      tags:
-      - music-discussions
   /api/v1/admin/music/entries:
     get:
       description: 管理员按类型和状态筛选音乐 wiki 条目。
@@ -4306,245 +4409,6 @@ paths:
       summary: 更新专辑
       tags:
       - music-albums
-  /api/v1/albums/{id}/discussions:
-    get:
-      description: 分页返回专辑的顶层讨论及其已预加载的回复。
-      parameters:
-      - description: 专辑 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 返回数量
-        in: query
-        name: limit
-        type: integer
-      - description: 偏移量
-        in: query
-        name: offset
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DiscussionListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取专辑讨论列表
-      tags:
-      - music-discussions
-    post:
-      consumes:
-      - application/json
-      description: 为专辑创建一条讨论，支持可选 parent_id 作为嵌套回复。
-      parameters:
-      - description: 专辑 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CreateDiscussionInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.DiscussionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建专辑讨论
-      tags:
-      - music-discussions
-  /api/v1/albums/{id}/discussions/{discussion_id}:
-    delete:
-      description: 讨论所有者或管理员可将专辑讨论软删除。
-      parameters:
-      - description: 专辑 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论 UUID
-        in: path
-        name: discussion_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除专辑讨论
-      tags:
-      - music-discussions
-    put:
-      consumes:
-      - application/json
-      description: 讨论所有者或管理员可以更新专辑讨论内容。
-      parameters:
-      - description: 专辑 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论 UUID
-        in: path
-        name: discussion_id
-        required: true
-        type: string
-      - description: 讨论内容
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.DiscussionContentInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DiscussionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 更新专辑讨论
-      tags:
-      - music-discussions
-  /api/v1/albums/{id}/discussions/{discussion_id}/reply:
-    post:
-      consumes:
-      - application/json
-      description: 为现有专辑或歌曲讨论创建一条回复。
-      parameters:
-      - description: 内容 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论 UUID
-        in: path
-        name: discussion_id
-        required: true
-        type: string
-      - description: 回复内容
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.DiscussionContentInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.DiscussionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 回复专辑或歌曲讨论
-      tags:
-      - music-discussions
-  /api/v1/albums/{id}/discussions/unread-count:
-    get:
-      description: 返回专辑下未读且未删除的讨论数量。
-      parameters:
-      - description: 专辑 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DiscussionUnreadCountResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取专辑未读讨论数
-      tags:
-      - music-discussions
   /api/v1/albums/{id}/entry-status:
     put:
       consumes:
@@ -5102,160 +4966,6 @@ paths:
       summary: 删除艺人别名
       tags:
       - music-artists
-  /api/v1/artists/{id}/discussions:
-    get:
-      description: 分页返回艺人条目的顶层讨论及其回复。
-      parameters:
-      - description: 艺人 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 返回数量
-        in: query
-        name: limit
-        type: integer
-      - description: 偏移量
-        in: query
-        name: offset
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DiscussionListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取艺人讨论列表
-      tags:
-      - music-discussions
-    post:
-      consumes:
-      - application/json
-      description: 为艺人条目创建一条讨论，支持可选 parent_id 作为嵌套回复。
-      parameters:
-      - description: 艺人 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CreateDiscussionInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.DiscussionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建艺人讨论
-      tags:
-      - music-discussions
-  /api/v1/artists/{id}/discussions/{discussion_id}:
-    delete:
-      description: 讨论所有者或管理员可将艺人讨论软删除。
-      parameters:
-      - description: 艺人 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论 UUID
-        in: path
-        name: discussion_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除艺人讨论
-      tags:
-      - music-discussions
-  /api/v1/artists/{id}/discussions/{discussion_id}/reply:
-    post:
-      consumes:
-      - application/json
-      description: 为艺人条目下的现有讨论创建一条回复。
-      parameters:
-      - description: 艺人 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论 UUID
-        in: path
-        name: discussion_id
-        required: true
-        type: string
-      - description: 回复内容
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.DiscussionContentInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.DiscussionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 回复艺人讨论
-      tags:
-      - music-discussions
   /api/v1/artists/{id}/edit:
     post:
       consumes:
@@ -6457,6 +6167,361 @@ paths:
       summary: 提交歌曲纠错
       tags:
       - music-corrections
+  /api/v1/debate-arguments/{argumentID}:
+    delete:
+      parameters:
+      - description: Argument ID
+        in: path
+        name: argumentID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete a typed debate argument
+      tags:
+      - Debate
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Argument ID
+        in: path
+        name: argumentID
+        required: true
+        type: string
+      - description: Argument
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.CreateArgumentRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateArgumentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update a typed debate argument
+      tags:
+      - Debate
+  /api/v1/debate-arguments/{argumentID}/debate-reference:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Argument ID
+        in: path
+        name: argumentID
+        required: true
+        type: string
+      - description: Debate reference
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.DebateReferenceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add a debate reference
+      tags:
+      - Debate
+  /api/v1/debate-arguments/{argumentID}/debate-reference/{debateRefID}:
+    delete:
+      parameters:
+      - description: Argument ID
+        in: path
+        name: argumentID
+        required: true
+        type: string
+      - description: Referenced debate ID
+        in: path
+        name: debateRefID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Remove a debate reference
+      tags:
+      - Debate
+  /api/v1/debate-arguments/{argumentID}/fold:
+    delete:
+      parameters:
+      - description: Argument ID
+        in: path
+        name: argumentID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Unfold a debate argument
+      tags:
+      - Debate
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Argument ID
+        in: path
+        name: argumentID
+        required: true
+        type: string
+      - description: Fold note
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/handlers.FoldArgumentInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Fold a debate argument
+      tags:
+      - Debate
+  /api/v1/debate-arguments/{argumentID}/reference:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Argument ID
+        in: path
+        name: argumentID
+        required: true
+        type: string
+      - description: Reference
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.ReferenceRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Add an argument reference
+      tags:
+      - Debate
+  /api/v1/debate-arguments/{argumentID}/reference/{referenceID}:
+    delete:
+      parameters:
+      - description: Argument ID
+        in: path
+        name: argumentID
+        required: true
+        type: string
+      - description: Referenced argument ID
+        in: path
+        name: referenceID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Remove an argument reference
+      tags:
+      - Debate
+  /api/v1/debates:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.CreateDebateRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.DebateResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a debate
+      tags:
+      - Debate
+  /api/v1/debates/{debateID}/arguments:
+    get:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: debateID
+        required: true
+        type: string
+      - description: Page
+        in: query
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateArgumentListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List typed debate arguments
+      tags:
+      - Debate
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate ID
+        in: path
+        name: debateID
+        required: true
+        type: string
+      - description: Argument
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.CreateArgumentRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.DebateArgumentResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a typed debate argument
+      tags:
+      - Debate
   /api/v1/discussions/{kind}/{resource_id}/comments:
     get:
       description: 按目标获取一级评论与前三条楼中楼回复。
@@ -9032,245 +9097,6 @@ paths:
       summary: 更新歌词注释
       tags:
       - music-annotations
-  /api/v1/songs/{id}/discussions:
-    get:
-      description: 分页返回歌曲的顶层讨论及其已预加载的回复。
-      parameters:
-      - description: 歌曲 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 返回数量
-        in: query
-        name: limit
-        type: integer
-      - description: 偏移量
-        in: query
-        name: offset
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DiscussionListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取歌曲讨论列表
-      tags:
-      - music-discussions
-    post:
-      consumes:
-      - application/json
-      description: 为歌曲创建一条讨论，支持可选 parent_id 作为嵌套回复。
-      parameters:
-      - description: 歌曲 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CreateDiscussionInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.DiscussionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建歌曲讨论
-      tags:
-      - music-discussions
-  /api/v1/songs/{id}/discussions/{discussion_id}:
-    delete:
-      description: 讨论所有者或管理员可将歌曲讨论软删除。
-      parameters:
-      - description: 歌曲 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论 UUID
-        in: path
-        name: discussion_id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除歌曲讨论
-      tags:
-      - music-discussions
-    put:
-      consumes:
-      - application/json
-      description: 讨论所有者或管理员可以更新歌曲讨论内容。
-      parameters:
-      - description: 歌曲 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论 UUID
-        in: path
-        name: discussion_id
-        required: true
-        type: string
-      - description: 讨论内容
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.DiscussionContentInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DiscussionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 更新歌曲讨论
-      tags:
-      - music-discussions
-  /api/v1/songs/{id}/discussions/{discussion_id}/reply:
-    post:
-      consumes:
-      - application/json
-      description: 为现有专辑或歌曲讨论创建一条回复。
-      parameters:
-      - description: 内容 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 讨论 UUID
-        in: path
-        name: discussion_id
-        required: true
-        type: string
-      - description: 回复内容
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.DiscussionContentInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.DiscussionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 回复专辑或歌曲讨论
-      tags:
-      - music-discussions
-  /api/v1/songs/{id}/discussions/unread-count:
-    get:
-      description: 返回歌曲下未读且未删除的讨论数量。
-      parameters:
-      - description: 歌曲 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DiscussionUnreadCountResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取歌曲未读讨论数
-      tags:
-      - music-discussions
   /api/v1/songs/{id}/protection:
     delete:
       description: 管理员移除歌曲的保护设置。
@@ -9754,6 +9580,83 @@ paths:
       summary: 回滚时间线事件
       tags:
       - timeline
+  /api/v1/timeline/events/{id}/revision-proposals:
+    get:
+      parameters:
+      - description: Event ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Page
+        in: query
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TimelineProposalListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List timeline event revision proposals
+      tags:
+      - Timeline
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Event ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Revision proposal
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.timelineProposalRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.TimelineProposalResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a timeline event revision proposal
+      tags:
+      - Timeline
   /api/v1/timeline/locations/{id}:
     delete:
       description: 人物作者或管理员可以删除地点轨迹记录。
@@ -10060,6 +9963,131 @@ paths:
       summary: 新增人物地点轨迹
       tags:
       - timeline
+  /api/v1/timeline/persons/{id}/revision-proposals:
+    get:
+      parameters:
+      - description: Person ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Page
+        in: query
+        name: page
+        type: integer
+      - description: Page size
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TimelineProposalListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: List timeline person revision proposals
+      tags:
+      - Timeline
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Person ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Revision proposal
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.timelineProposalRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.TimelineProposalResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create a timeline person revision proposal
+      tags:
+      - Timeline
+  /api/v1/timeline/revision-proposals/{comment_id}/decision:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Proposal comment ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: Decision
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.TimelineProposalDecisionInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TimelineProposalResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Accept or reject a timeline revision proposal
+      tags:
+      - Timeline
   /api/v1/uploads:
     post:
       consumes:
@@ -10651,78 +10679,6 @@ paths:
       summary: 更新视频
       tags:
       - videos
-  /api/v1/videos/{id}/comments:
-    get:
-      description: 返回视频下所有可见评论。
-      parameters:
-      - description: 视频 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.CommentListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取视频评论
-      tags:
-      - videos
-    post:
-      consumes:
-      - application/json
-      description: 为指定视频创建评论，可附带时间戳。
-      parameters:
-      - description: 视频 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 评论输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CommentInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.CommentResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建视频评论
-      tags:
-      - videos
   /api/v1/videos/{id}/recommended:
     get:
       description: 基于同频道和同标签返回推荐视频。
@@ -10765,44 +10721,6 @@ paths:
           schema:
             $ref: '#/definitions/handlers.BoolStatusResponse'
       summary: 增加视频播放量
-      tags:
-      - videos
-  /api/v1/videos/comments/{commentID}:
-    delete:
-      description: 评论作者或视频作者可删除评论。
-      parameters:
-      - description: 评论 UUID
-        in: path
-        name: commentID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 删除视频评论
       tags:
       - videos
   /api/v1/videos/upload-cover:

@@ -174,29 +174,29 @@ func (s *Service) ReopenDebate(user authctx.CurrentUser, debateID uuid.UUID) (mo
 	return s.repo.GetDebate(debate.ID)
 }
 
-func (s *Service) CreateArgument(user authctx.CurrentUser, req CreateArgumentRequest) (model.Argument, error) {
+func (s *Service) CreateArgument(user authctx.CurrentUser, req CreateArgumentRequest) (model.DebateArgumentDTO, error) {
 	if user.ID == uuid.Nil {
-		return model.Argument{}, apperr.Unauthorized("Login required")
+		return model.DebateArgumentDTO{}, apperr.Unauthorized("Login required")
 	}
 	if req.DebateID == uuid.Nil {
-		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "debate_id is required")
+		return model.DebateArgumentDTO{}, apperr.BadRequest("validation.invalid_request", "debate_id is required")
 	}
 	debate, err := s.GetDebate(req.DebateID)
 	if err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	if debate.Status != "open" {
-		return model.Argument{}, apperr.BadRequest("debate.closed", "Debate is closed")
+		return model.DebateArgumentDTO{}, apperr.BadRequest("debate.closed", "Debate is closed")
 	}
 	content := req.Content
 	argumentType := strings.TrimSpace(req.ArgumentType)
 	if err := validateArgumentMetadata(argumentType, strings.TrimSpace(req.SourceURL)); err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	if req.ParentID != nil {
 		parent, err := s.repo.GetArgument(*req.ParentID)
 		if err != nil || parent.DebateID != req.DebateID {
-			return model.Argument{}, apperr.BadRequest("debate.invalid_parent", "Parent argument is invalid")
+			return model.DebateArgumentDTO{}, apperr.BadRequest("debate.invalid_parent", "Parent argument is invalid")
 		}
 	}
 	created, err := s.comments.CreateWithExtension(user,
@@ -222,26 +222,26 @@ func (s *Service) CreateArgument(user authctx.CurrentUser, req CreateArgumentReq
 				UpdateColumn("argument_count", gorm.Expr("argument_count + 1")).Error
 		})
 	if err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	return s.repo.GetArgument(created.ID)
 }
 
-func (s *Service) UpdateArgument(user authctx.CurrentUser, argumentID uuid.UUID, req CreateArgumentRequest) (model.Argument, error) {
+func (s *Service) UpdateArgument(user authctx.CurrentUser, argumentID uuid.UUID, req CreateArgumentRequest) (model.DebateArgumentDTO, error) {
 	argument, err := s.repo.GetArgument(argumentID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
-			return model.Argument{}, apperr.NotFound("debate.argument_not_found", "Argument not found")
+			return model.DebateArgumentDTO{}, apperr.NotFound("debate.argument_not_found", "Argument not found")
 		}
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	if argument.UserID != user.ID {
-		return model.Argument{}, apperr.Forbidden("debate.forbidden", "Not authorized")
+		return model.DebateArgumentDTO{}, apperr.Forbidden("debate.forbidden", "Not authorized")
 	}
 	content := req.Content
 	argumentType := strings.TrimSpace(req.ArgumentType)
 	if err := validateArgumentMetadata(argumentType, strings.TrimSpace(req.SourceURL)); err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	if _, err := s.comments.EditWithExtension(user, argumentID, comment.EditCommentInput{Content: content, Mentions: req.Mentions, AttachmentIDs: req.AttachmentIDs}, func(tx *gorm.DB, _ *model.CommentEntry) error {
 		result := tx.Model(&model.DebateArgumentDetail{}).Where("comment_id = ?", argumentID).Updates(map[string]any{
@@ -256,15 +256,15 @@ func (s *Service) UpdateArgument(user authctx.CurrentUser, argumentID uuid.UUID,
 		}
 		return nil
 	}); err != nil {
-		return model.Argument{}, err
+		return model.DebateArgumentDTO{}, err
 	}
 	return s.repo.GetArgument(argument.ID)
 }
 
-func (s *Service) GetArgument(argumentID uuid.UUID) (model.Argument, error) {
+func (s *Service) GetArgument(argumentID uuid.UUID) (model.DebateArgumentDTO, error) {
 	argument, err := s.repo.GetArgument(argumentID)
 	if err == gorm.ErrRecordNotFound {
-		return model.Argument{}, apperr.NotFound("debate.argument_not_found", "Argument not found")
+		return model.DebateArgumentDTO{}, apperr.NotFound("debate.argument_not_found", "Argument not found")
 	}
 	return argument, err
 }
@@ -387,7 +387,7 @@ func (s *Service) UnfoldArgument(user authctx.CurrentUser, argumentID uuid.UUID)
 	}).Error
 }
 
-func (s *Service) ListArguments(debateID uuid.UUID, pageAndSize ...int) ([]model.Argument, int64, error) {
+func (s *Service) ListArguments(debateID uuid.UUID, pageAndSize ...int) ([]model.DebateArgumentDTO, int64, error) {
 	if debateID == uuid.Nil {
 		return nil, 0, apperr.BadRequest("validation.invalid_request", "debate_id is required")
 	}

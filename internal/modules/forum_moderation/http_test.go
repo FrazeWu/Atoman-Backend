@@ -12,7 +12,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/stretchr/testify/require"
 )
 
 func newForumModerationHTTPRouter(service *Service, current *authctx.CurrentUser) *gin.Engine {
@@ -26,24 +25,6 @@ func newForumModerationHTTPRouter(service *Service, current *authctx.CurrentUser
 	v1 := r.Group("/api/v1/forum/moderation")
 	RegisterRoutes(v1, service)
 	return r
-}
-
-func TestReplyReportMapsTrimmedCoreErrorsWithout500(t *testing.T) {
-	ctx := newForumModerationCommentContext(t)
-	current := ctx.participant
-	router := newForumModerationHTTPRouter(ctx.service, &current)
-
-	request := func(targetID string) *httptest.ResponseRecorder {
-		body := bytes.NewBufferString(`{"target_type":" reply ","target_id":"` + targetID + `","reason":"spam","note":""}`)
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/forum/moderation/report", body)
-		req.Header.Set("Content-Type", "application/json")
-		response := httptest.NewRecorder()
-		router.ServeHTTP(response, req)
-		return response
-	}
-	require.Equal(t, http.StatusNotFound, request(uuid.NewString()).Code)
-	created := ctx.createReply(t, ctx.participant, "own reply")
-	require.Equal(t, http.StatusForbidden, request(created.ID.String()).Code)
 }
 
 func seedForumModerationHTTPUsers(t *testing.T) (*Service, authctx.CurrentUser, authctx.CurrentUser, model.ForumCategory, model.User) {

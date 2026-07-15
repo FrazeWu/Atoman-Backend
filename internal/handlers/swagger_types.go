@@ -3,6 +3,7 @@ package handlers
 import (
 	"atoman/internal/model"
 	feedmodule "atoman/internal/modules/feed"
+	"atoman/internal/service"
 )
 
 type ErrorResponse struct {
@@ -190,16 +191,6 @@ type UserCollectionListResponse struct {
 	Message string               `json:"message" example:"ok"`
 }
 
-type CommentResponse struct {
-	Data    model.Comment `json:"data"`
-	Message string        `json:"message" example:"ok"`
-}
-
-type CommentListResponse struct {
-	Data    []model.Comment `json:"data"`
-	Message string          `json:"message" example:"ok"`
-}
-
 type LikeCountData struct {
 	Count int64 `json:"count" example:"12"`
 }
@@ -259,27 +250,6 @@ type BookmarkFolderListResponse struct {
 	Message string                 `json:"message" example:"ok"`
 }
 
-type DiscussionContentInput struct {
-	Content string `json:"content" binding:"required" example:"这段内容需要补充来源。"`
-}
-
-type DiscussionResponse struct {
-	Data model.Discussion `json:"data"`
-}
-
-type DiscussionListResponse struct {
-	Data  []model.Discussion `json:"data"`
-	Total int64              `json:"total" example:"12"`
-}
-
-type DiscussionUnreadCountData struct {
-	UnreadCount int64 `json:"unread_count" example:"3"`
-}
-
-type DiscussionUnreadCountResponse struct {
-	Data DiscussionUnreadCountData `json:"data"`
-}
-
 type ProtectionPayload struct {
 	ProtectionLevel string      `json:"protection_level" example:"semi"`
 	Reason          string      `json:"reason,omitempty" example:"条目进入审核期"`
@@ -315,15 +285,6 @@ type ForumTopicUpdateInput struct {
 	Title   string   `json:"title" example:"Updated title"`
 	Content string   `json:"content" example:"Updated content"`
 	Tags    []string `json:"tags" example:"workflow,updated"`
-}
-
-type ForumReplyCreateInput struct {
-	Content       string  `json:"content" binding:"required" example:"I think folder-based grouping works well."`
-	ParentReplyID *string `json:"parent_reply_id,omitempty" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
-}
-
-type ForumReplyUpdateInput struct {
-	Content string `json:"content" binding:"required" example:"Updated reply body"`
 }
 
 type ForumDraftInput struct {
@@ -369,14 +330,6 @@ type ForumTopicListResponse struct {
 	Total int64              `json:"total" example:"42"`
 	Page  int                `json:"page" example:"1"`
 	Limit int                `json:"limit" example:"20"`
-}
-
-type ForumReplyResponse struct {
-	Data model.ForumReply `json:"data"`
-}
-
-type ForumReplyListResponse struct {
-	Data []model.ForumReply `json:"data"`
 }
 
 type ForumDraftResponse struct {
@@ -819,12 +772,12 @@ type DebateConcludeVoteResponse struct {
 }
 
 type DebateArgumentResponse struct {
-	Data model.Argument `json:"data"`
+	Data model.DebateArgumentDTO `json:"data"`
 }
 
 type DebateArgumentListResponse struct {
-	Data      []model.Argument `json:"data"`
-	UserVotes map[string]int   `json:"user_votes"`
+	Data      []model.DebateArgumentDTO `json:"data"`
+	UserVotes map[string]int            `json:"user_votes"`
 }
 
 type DebateVoteListResponse struct {
@@ -833,4 +786,16 @@ type DebateVoteListResponse struct {
 
 type FoldArgumentInput struct {
 	FoldNote string `json:"fold_note" example:"证据不足，暂时折叠。"`
+}
+
+type TimelineProposalResponse struct {
+	Data service.TimelineProposal `json:"data"`
+}
+
+type TimelineProposalListResponse struct {
+	Data service.TimelineProposalList `json:"data"`
+}
+
+type TimelineProposalDecisionInput struct {
+	Decision string `json:"decision" enums:"accept,reject"`
 }

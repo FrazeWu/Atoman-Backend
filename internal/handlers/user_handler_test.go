@@ -482,7 +482,7 @@ func TestGetMyDefaultChannelsReturnsEmptyPayloadWhenSelectionTableMissing(t *tes
 func TestExplorePostsReturnsCommentCountFromTargetFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Post{}, &model.Comment{}, &model.Like{})
+	testdb.Migrate(t, db, &model.User{}, &model.Post{}, &model.DiscussionTarget{}, &model.Like{})
 
 	user := model.User{
 		Username: "explore-user",
@@ -496,25 +496,19 @@ func TestExplorePostsReturnsCommentCountFromTargetFields(t *testing.T) {
 	}
 
 	post := model.Post{
-		UserID:        user.UUID,
-		Title:         "Explore Post",
-		Content:       "content",
-		Status:        "published",
-		Visibility:    "public",
-		AllowComments: true,
+		UserID:     user.UUID,
+		Title:      "Explore Post",
+		Content:    "content",
+		Status:     "published",
+		Visibility: "public",
 	}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
 
-	comment := model.Comment{
-		TargetType: "post",
-		TargetID:   post.ID,
-		Content:    "first",
-		Status:     "visible",
-	}
-	if err := db.Create(&comment).Error; err != nil {
-		t.Fatalf("create comment: %v", err)
+	target := model.DiscussionTarget{Kind: "blog_post", ResourceID: post.ID, ResourceKey: post.ID.String(), CommentCount: 1, RootCount: 1}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create discussion target: %v", err)
 	}
 
 	r := gin.New()

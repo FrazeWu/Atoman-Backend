@@ -50,35 +50,6 @@ import (
 // @name atoman_token
 // @description 使用登录后写入的 atoman_token Cookie
 
-func prepareCommentTargetMigration(db *gorm.DB) error {
-	if !db.Migrator().HasTable(&model.Comment{}) {
-		return nil
-	}
-
-	if !db.Migrator().HasColumn(&model.Comment{}, "TargetType") {
-		if err := db.Exec(`ALTER TABLE comments ADD COLUMN target_type varchar(16)`).Error; err != nil {
-			return err
-		}
-	}
-
-	if !db.Migrator().HasColumn(&model.Comment{}, "TargetID") {
-		if err := db.Exec(`ALTER TABLE comments ADD COLUMN target_id uuid`).Error; err != nil {
-			return err
-		}
-	}
-
-	if db.Migrator().HasColumn(&model.Comment{}, "post_id") {
-		if err := db.Exec(`UPDATE comments SET target_type = 'post' WHERE target_type IS NULL AND post_id IS NOT NULL`).Error; err != nil {
-			return err
-		}
-		if err := db.Exec(`UPDATE comments SET target_id = post_id WHERE target_id IS NULL AND post_id IS NOT NULL`).Error; err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 	models = append(models,
 		&model.DiscussionTarget{},
@@ -112,7 +83,6 @@ func ensureSoftDeleteColumns(db *gorm.DB) {
 		&model.Channel{},
 		&model.Collection{},
 		&model.Post{},
-		&model.Comment{},
 		&model.FeedSource{},
 		&model.FeedItem{},
 		&model.AlbumCorrection{},
@@ -528,15 +498,7 @@ func main() {
 		}
 		log.Println("Migration step completed: enable ltree extension")
 		log.Println("Migration step: prepare comment target")
-		if err := prepareCommentTargetMigration(db); err != nil {
-			fatalLogger.Fatal("Failed to prepare comment target migration: ", err)
-		}
 		log.Println("Migration step completed: prepare comment target")
-		log.Println("Migration step: blog guest comments")
-		if err := migrations.RunBlogGuestCommentsMigration(db); err != nil {
-			fatalLogger.Fatal("Failed to run blog guest comments migration: ", err)
-		}
-		log.Println("Migration step completed: blog guest comments")
 		log.Println("Migration step: blog collection post order")
 		if err := migrations.RunBlogCollectionPostOrderMigration(db); err != nil {
 			fatalLogger.Fatal("Failed to run blog collection post order migration: ", err)
@@ -575,7 +537,6 @@ func main() {
 			&model.BlogPostRating{},
 			&model.BlogDraft{},
 			&model.MediaAsset{},
-			&model.Comment{},
 			&model.Like{},
 			&model.Bookmark{},
 			&model.BookmarkFolder{},
@@ -591,7 +552,6 @@ func main() {
 			&model.SubscriptionGroup{},
 			&model.ForumCategory{},
 			&model.ForumTopic{},
-			&model.ForumReply{},
 			&model.ForumLike{},
 			&model.ForumBookmark{},
 			&model.ForumDraft{},
@@ -601,7 +561,6 @@ func main() {
 			&model.ActivityLog{},
 			&model.AuditLog{},
 			&model.Debate{},
-			&model.Argument{},
 			&model.DebateVote{},
 			&model.VoteHistory{},
 			&model.DebateConcludeVote{},
@@ -614,7 +573,6 @@ func main() {
 			&model.Revision{},
 			&model.EditConflict{},
 			&model.ContentProtection{},
-			&model.Discussion{},
 			// Music wiki extensions
 			&model.ArtistAlias{},
 			&model.ArtistMerge{},
@@ -684,10 +642,6 @@ ON CONFLICT (key) DO NOTHING`)
 			log.Fatal("Failed to bootstrap owner user: ", err)
 		}
 
-		// Run forum-specific migrations (ltree extension, new columns, backfill)
-		if err := service.RunForumMigrations(db); err != nil {
-			log.Printf("WARN: forum migrations had errors: %v", err)
-		}
 	} // end migrations block
 
 	// Initialize email service (without Redis)

@@ -21,7 +21,6 @@ type BlogDraftResponse struct {
 	Summary       string    `json:"summary"`
 	CoverURL      string    `json:"cover_url"`
 	Visibility    string    `json:"visibility"`
-	AllowComments bool      `json:"allow_comments"`
 	ChannelID     *string   `json:"channel_id,omitempty"`
 	CollectionIDs []string  `json:"collection_ids"`
 	CreatedAt     any       `json:"created_at"`

@@ -293,7 +293,8 @@ func ExplorePosts(db *gorm.DB) gin.HandlerFunc {
 			var commentsCount int64
 
 			db.Model(&model.Like{}).Where("target_type = ? AND target_id = ?", "post", post.ID).Count(&likesCount)
-			db.Model(&model.Comment{}).Where("target_type = ? AND target_id = ? AND status = ?", "post", post.ID, "visible").Count(&commentsCount)
+			db.Model(&model.DiscussionTarget{}).Select("COALESCE(MAX(comment_count), 0)").
+				Where("kind = ? AND resource_id = ?", "blog_post", post.ID).Scan(&commentsCount)
 
 			response = append(response, ExplorePostResponse{
 				Post:          post,

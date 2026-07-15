@@ -19,7 +19,7 @@ func seededDebateCommentService(t *testing.T) (*Service, *gorm.DB, authctx.Curre
 	t.Helper()
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.MediaAsset{}, &model.Debate{}, &model.Argument{}, &model.DiscussionTarget{}, &model.CommentEntry{},
+		&model.User{}, &model.MediaAsset{}, &model.Debate{}, &model.DiscussionTarget{}, &model.CommentEntry{},
 		&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentTimeAnchor{},
 		&model.CommentLike{}, &model.CommentReport{}, &model.CommentPublishRecord{}, &model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{},
 		&model.DebateArgumentReference{}, &model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{},
@@ -56,9 +56,6 @@ func TestCreateArgumentWritesCommentAndTypedDetail(t *testing.T) {
 	var mention model.CommentMention
 	require.NoError(t, db.First(&mention, "comment_id = ?", got.ID).Error)
 	require.Equal(t, mentioned.UUID, mention.UserID)
-	var legacyCount int64
-	require.NoError(t, db.Model(&model.Argument{}).Count(&legacyCount).Error)
-	require.Zero(t, legacyCount)
 }
 
 func TestListArgumentsExcludesModerationHiddenComments(t *testing.T) {
@@ -291,7 +288,7 @@ func TestListArgumentsUsesBoundedQueryCount(t *testing.T) {
 
 func TestListArgumentsPaginatesAndKeepsCrossPageReferences(t *testing.T) {
 	svc, db, user, debate := seededDebateCommentService(t)
-	created := make([]model.Argument, 0, 6)
+	created := make([]model.DebateArgumentDTO, 0, 6)
 	for index := 0; index < 6; index++ {
 		argument, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: fmt.Sprintf("page-%d", index), ArgumentType: "support"})
 		require.NoError(t, err)

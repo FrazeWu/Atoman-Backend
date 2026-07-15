@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	"atoman/internal/model"
-	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -18,16 +17,11 @@ type ToggleState struct {
 }
 
 type Service struct {
-	db       *gorm.DB
-	comments *comment.Service
+	db *gorm.DB
 }
 
-func NewService(db *gorm.DB, services ...*comment.Service) *Service {
-	commentService := comment.NewService(db, comment.NewTargetRegistry(db))
-	if len(services) > 0 && services[0] != nil {
-		commentService = services[0]
-	}
-	return &Service{db: db, comments: commentService}
+func NewService(db *gorm.DB) *Service {
+	return &Service{db: db}
 }
 
 func (s *Service) ToggleTopicLike(user authctx.CurrentUser, topicID uuid.UUID) (ToggleState, error) {
@@ -124,33 +118,6 @@ func (s *Service) ToggleTopicBookmark(user authctx.CurrentUser, topicID uuid.UUI
 		return ToggleState{}, err
 	}
 	return state, nil
-}
-
-func (s *Service) ToggleReplyLike(user authctx.CurrentUser, replyID uuid.UUID) (ToggleState, error) {
-	if user.ID == uuid.Nil {
-		return ToggleState{}, apperr.Unauthorized("Login required")
-	}
-	if replyID == uuid.Nil {
-		return ToggleState{}, apperr.BadRequest("validation.invalid_request", "reply_id is required")
-	}
-	if _, err := s.comments.ResolveForumComment(replyID); err != nil {
-		return ToggleState{}, err
-	}
-	var like model.CommentLike
-	result := s.db.Where("user_id = ? AND comment_id = ?", user.ID, replyID).Limit(1).Find(&like)
-	if result.Error != nil {
-		return ToggleState{}, result.Error
-	}
-	if result.RowsAffected > 0 {
-		if err := s.comments.Unlike(user, replyID); err != nil {
-			return ToggleState{}, err
-		}
-		return ToggleState{Liked: false}, nil
-	}
-	if err := s.comments.Like(user, replyID); err != nil {
-		return ToggleState{}, err
-	}
-	return ToggleState{Liked: true}, nil
 }
 
 func (s *Service) ensureTopicExists(topicID uuid.UUID) error {

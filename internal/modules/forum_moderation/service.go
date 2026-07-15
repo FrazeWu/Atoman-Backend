@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"atoman/internal/model"
-	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -45,16 +44,11 @@ type ModeratorAssignmentInput struct {
 }
 
 type Service struct {
-	db       *gorm.DB
-	comments *comment.Service
+	db *gorm.DB
 }
 
-func NewService(db *gorm.DB, services ...*comment.Service) *Service {
-	commentService := comment.NewService(db, comment.NewTargetRegistry(db))
-	if len(services) > 0 && services[0] != nil {
-		commentService = services[0]
-	}
-	return &Service{db: db, comments: commentService}
+func NewService(db *gorm.DB) *Service {
+	return &Service{db: db}
 }
 
 func (s *Service) LockTopic(user authctx.CurrentUser, topicID uuid.UUID) (model.ForumTopic, error) {
@@ -79,39 +73,6 @@ func (s *Service) HideTopic(user authctx.CurrentUser, topicID uuid.UUID) (model.
 
 func (s *Service) RestoreTopic(user authctx.CurrentUser, topicID uuid.UUID) (model.ForumTopic, error) {
 	return s.setTopicHidden(user, topicID, false)
-}
-
-func (s *Service) HideReply(user authctx.CurrentUser, replyID uuid.UUID) (model.ForumReply, error) {
-	return s.moderateReply(user, replyID, comment.ModerationHide)
-}
-
-func (s *Service) RestoreReply(user authctx.CurrentUser, replyID uuid.UUID) (model.ForumReply, error) {
-	return s.moderateReply(user, replyID, comment.ModerationRestore)
-}
-
-func (s *Service) SolveReply(user authctx.CurrentUser, replyID uuid.UUID) (model.ForumReply, error) {
-	context, err := s.comments.ResolveForumComment(replyID)
-	if err != nil {
-		return model.ForumReply{}, err
-	}
-	if err := s.comments.Mark(user, comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: context.Topic.ID}, replyID); err != nil {
-		return model.ForumReply{}, err
-	}
-	return model.ForumReply{Base: model.Base{ID: replyID}, TopicID: context.Topic.ID, IsSolved: true}, nil
-}
-
-func (s *Service) UnsolveReply(user authctx.CurrentUser, replyID uuid.UUID) (model.ForumReply, error) {
-	context, err := s.comments.ResolveForumComment(replyID)
-	if err != nil {
-		return model.ForumReply{}, err
-	}
-	if context.Target.PinnedCommentID == nil || *context.Target.PinnedCommentID != replyID {
-		return model.ForumReply{}, apperr.Conflict("forum.reply_not_best_answer", "Reply is not the current best answer")
-	}
-	if err := s.comments.Unmark(user, comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: context.Topic.ID}); err != nil {
-		return model.ForumReply{}, err
-	}
-	return model.ForumReply{Base: model.Base{ID: replyID}, TopicID: context.Topic.ID}, nil
 }
 
 func (s *Service) ListReports(user authctx.CurrentUser, query ListReportsQuery) ([]model.ForumReport, int64, error) {
@@ -174,8 +135,8 @@ func (s *Service) CreateReport(user authctx.CurrentUser, req CreateReportRequest
 		return model.ForumReport{}, apperr.BadRequest("validation.invalid_request", "target_id is required")
 	}
 	targetType := strings.TrimSpace(req.TargetType)
-	if targetType != "topic" && targetType != "reply" {
-		return model.ForumReport{}, apperr.BadRequest("validation.invalid_request", "target_type must be topic or reply")
+	if targetType != "topic" {
+		return model.ForumReport{}, apperr.BadRequest("validation.invalid_request", "target_type must be topic")
 	}
 	reason := strings.TrimSpace(req.Reason)
 	switch reason {
@@ -183,24 +144,6 @@ func (s *Service) CreateReport(user authctx.CurrentUser, req CreateReportRequest
 	default:
 		return model.ForumReport{}, apperr.BadRequest("validation.invalid_request", "reason is invalid")
 	}
-	if targetType == "reply" {
-		if _, err := s.comments.ResolveForumComment(req.TargetID); err != nil {
-			return model.ForumReport{}, err
-		}
-		commentReason := reason
-		note := strings.TrimSpace(req.Note)
-		if commentReason == "off-topic" {
-			commentReason = comment.ReportReasonOther
-			if note == "" {
-				note = "off-topic"
-			}
-		}
-		if err := s.comments.Report(user, req.TargetID, comment.ReportInput{Reason: commentReason, Note: note}); err != nil {
-			return model.ForumReport{}, err
-		}
-		return model.ForumReport{UserID: user.ID, TargetType: targetType, TargetID: req.TargetID, Reason: reason, Note: note}, nil
-	}
-
 	var existing model.ForumReport
 	if err := s.db.Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, targetType, req.TargetID).First(&existing).Error; err == nil {
 		return model.ForumReport{}, apperr.Conflict("forum.report_exists", "already reported")
@@ -491,26 +434,6 @@ func (s *Service) setTopicHidden(user authctx.CurrentUser, topicID uuid.UUID, hi
 		return model.ForumTopic{}, err
 	}
 	return topic, nil
-}
-
-func (s *Service) moderateReply(user authctx.CurrentUser, replyID uuid.UUID, action string) (model.ForumReply, error) {
-	if replyID == uuid.Nil {
-		return model.ForumReply{}, apperr.BadRequest("validation.invalid_request", "reply_id is required")
-	}
-	context, err := s.comments.ResolveForumComment(replyID)
-	if err != nil {
-		return model.ForumReply{}, err
-	}
-	categoryID := context.Topic.CategoryID
-	if err := s.canModerateCategory(user, &categoryID, func(assignment model.ForumModeratorAssignment) bool {
-		return assignment.CanLockTopic
-	}); err != nil {
-		return model.ForumReply{}, err
-	}
-	if err := s.comments.Moderate(user, replyID, comment.ModerateInput{Action: action}); err != nil {
-		return model.ForumReply{}, err
-	}
-	return model.ForumReply{Base: model.Base{ID: replyID}, TopicID: context.Topic.ID}, nil
 }
 
 func (s *Service) requireAdminOrOwner(user authctx.CurrentUser) error {

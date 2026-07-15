@@ -22,7 +22,7 @@ type TimelineEvent struct {
 	Longitude   *float64       `json:"longitude,omitempty" gorm:"default:null"`
 	Source      string         `json:"source" gorm:"not null;default:''"` // 来源/参考资料（必填）
 	Category    string         `json:"category" gorm:"index"`
-	Tags        pq.StringArray `json:"tags" gorm:"type:text[]"`
+	Tags        pq.StringArray `json:"tags" gorm:"type:text[]" swaggertype:"array,string"`
 	IsPublic    bool           `json:"is_public" gorm:"default:true"`
 }
 
@@ -37,7 +37,7 @@ type TimelinePerson struct {
 	Bio       string           `json:"bio" gorm:"type:text"`
 	BirthDate *time.Time       `json:"birth_date,omitempty"`
 	DeathDate *time.Time       `json:"death_date,omitempty"`
-	Tags      pq.StringArray   `json:"tags" gorm:"type:text[]"`
+	Tags      pq.StringArray   `json:"tags" gorm:"type:text[]" swaggertype:"array,string"`
 	IsPublic  bool             `json:"is_public" gorm:"default:true"`
 	Locations []PersonLocation `json:"locations,omitempty" gorm:"-"`
 }
@@ -76,7 +76,7 @@ type TimelineRevision struct {
 	Longitude   *float64       `json:"longitude,omitempty"`
 	Source      string         `json:"source"`
 	Category    string         `json:"category"`
-	Tags        pq.StringArray `json:"tags" gorm:"type:text[]"`
+	Tags        pq.StringArray `json:"tags" gorm:"type:text[]" swaggertype:"array,string"`
 	IsPublic    bool           `json:"is_public"`
 }
 

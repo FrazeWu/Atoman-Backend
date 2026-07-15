@@ -15,17 +15,12 @@ import (
 )
 
 type Service struct {
-	db       *gorm.DB
-	repo     *Repo
-	comments *comment.Service
+	db   *gorm.DB
+	repo *Repo
 }
 
-func NewService(db *gorm.DB, services ...*comment.Service) *Service {
-	commentService := comment.NewService(db, comment.NewTargetRegistry(db))
-	if len(services) > 0 && services[0] != nil {
-		commentService = services[0]
-	}
-	return &Service{db: db, repo: NewRepo(db), comments: commentService}
+func NewService(db *gorm.DB) *Service {
+	return &Service{db: db, repo: NewRepo(db)}
 }
 
 func (s *Service) ListCategories() ([]model.ForumCategory, error) {
@@ -132,43 +127,6 @@ func (s *Service) DeleteTopic(user authctx.CurrentUser, topicID uuid.UUID) error
 	return s.repo.DeleteTopic(topicID)
 }
 
-func (s *Service) ListReplies(topicID uuid.UUID) (comment.CommentListDTO, error) {
-	if _, err := s.GetTopic(topicID); err != nil {
-		return comment.CommentListDTO{}, err
-	}
-	return s.comments.List(authctx.CurrentUser{}, forumTopicTarget(topicID), comment.ListCommentsInput{Page: 1, PageSize: 20, Sort: comment.SortOldest})
-}
-
-func (s *Service) CreateReply(user authctx.CurrentUser, req CreateReplyRequest) (comment.CommentDTO, error) {
-	if user.ID == uuid.Nil {
-		return comment.CommentDTO{}, apperr.Unauthorized("Login required")
-	}
-	if req.TopicID == uuid.Nil {
-		return comment.CommentDTO{}, apperr.BadRequest("validation.invalid_request", "topic_id is required")
-	}
-	if _, err := s.GetTopic(req.TopicID); err != nil {
-		return comment.CommentDTO{}, err
-	}
-	return s.comments.Create(user, forumTopicTarget(req.TopicID), comment.CreateCommentInput{
-		Content:   req.Content,
-		ReplyToID: req.ParentReplyID,
-	})
-}
-
-func (s *Service) UpdateReply(user authctx.CurrentUser, replyID uuid.UUID, req UpdateReplyRequest) (comment.CommentDTO, error) {
-	if _, err := s.comments.ResolveForumComment(replyID); err != nil {
-		return comment.CommentDTO{}, err
-	}
-	return s.comments.Edit(user, replyID, comment.EditCommentInput{Content: req.Content})
-}
-
-func (s *Service) DeleteReply(user authctx.CurrentUser, replyID uuid.UUID) error {
-	if _, err := s.comments.ResolveForumComment(replyID); err != nil {
-		return err
-	}
-	return s.comments.Delete(user, replyID)
-}
-
 func (s *Service) ListDrafts(user authctx.CurrentUser) ([]model.ForumDraft, error) {
 	if user.ID == uuid.Nil {
 		return nil, apperr.Unauthorized("Login required")
@@ -233,10 +191,6 @@ func requireTopicOwner(user authctx.CurrentUser, ownerID uuid.UUID) error {
 		return apperr.Forbidden("forum.forbidden", "You do not have permission to modify this resource")
 	}
 	return nil
-}
-
-func forumTopicTarget(topicID uuid.UUID) comment.TargetRef {
-	return comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: topicID}
 }
 
 func (s *Service) applyCommentState(topics []model.ForumTopic) error {

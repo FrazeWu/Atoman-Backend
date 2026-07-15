@@ -3,7 +3,6 @@ package forum
 import (
 	"net/http"
 
-	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -27,10 +26,6 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.PUT("/topics/:topicID", h.updateTopic)
 	group.DELETE("/topics/:topicID", h.deleteTopic)
 	group.POST("/category-requests", h.createCategoryRequest)
-	group.GET("/topics/:topicID/replies", h.listReplies)
-	group.POST("/replies", h.createReply)
-	group.PUT("/replies/:replyID", h.updateReply)
-	group.DELETE("/replies/:replyID", h.deleteReply)
 	group.GET("/drafts", h.listDrafts)
 	group.PUT("/drafts", h.saveDraft)
 	group.DELETE("/drafts/:draftID", h.deleteDraft)
@@ -180,81 +175,6 @@ func (h *Handler) deleteTopic(c *gin.Context) {
 	}
 	if err := h.service.DeleteTopic(user, topicID); err != nil {
 		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
-}
-
-func (h *Handler) listReplies(c *gin.Context) {
-	topicID, err := uuid.Parse(c.Param("topicID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "topicID must be a valid uuid"))
-		return
-	}
-	replies, err := h.service.ListReplies(topicID)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, replies)
-}
-
-func (h *Handler) createReply(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	var req CreateReplyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
-	}
-	reply, err := h.service.CreateReply(user, req)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusCreated, reply)
-}
-
-func (h *Handler) updateReply(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	replyID, err := uuid.Parse(c.Param("replyID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "replyID must be a valid uuid"))
-		return
-	}
-	var req UpdateReplyRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
-	}
-	reply, err := h.service.UpdateReply(user, replyID, req)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, reply)
-}
-
-func (h *Handler) deleteReply(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	replyID, err := uuid.Parse(c.Param("replyID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "replyID must be a valid uuid"))
-		return
-	}
-	if err := h.service.DeleteReply(user, replyID); err != nil {
-		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"ok": true})

@@ -57,9 +57,6 @@ func TestGetSiteAccessHandlerReturnsStructuredSettings(t *testing.T) {
 				AllowAddSource     bool   `json:"allow_add_source"`
 				FullTextMode       string `json:"full_text_mode"`
 			} `json:"feed"`
-			Blog struct {
-				CommentMode string `json:"comment_mode"`
-			} `json:"blog"`
 			Forum struct {
 				AllowCategoryRequest bool `json:"allow_category_request"`
 				ModeratorPermissions struct {
@@ -82,9 +79,6 @@ func TestGetSiteAccessHandlerReturnsStructuredSettings(t *testing.T) {
 	}
 	if payload.Settings.Feed.FullTextMode != "per_source" {
 		t.Fatalf("expected full_text_mode per_source, got %q", payload.Settings.Feed.FullTextMode)
-	}
-	if payload.Settings.Blog.CommentMode != "authenticated" {
-		t.Fatalf("expected comment_mode authenticated, got %q", payload.Settings.Blog.CommentMode)
 	}
 	if !payload.Settings.Forum.AllowCategoryRequest {
 		t.Fatal("expected allow_category_request to default true")
@@ -124,9 +118,6 @@ func TestUpdateSiteAccessHandlerPersistsStructuredSettings(t *testing.T) {
 	var updated struct {
 		Revision int `json:"revision"`
 		Settings struct {
-			Blog struct {
-				CommentMode string `json:"comment_mode"`
-			} `json:"blog"`
 			Forum struct {
 				AllowCategoryRequest bool `json:"allow_category_request"`
 			} `json:"forum"`
@@ -134,9 +125,6 @@ func TestUpdateSiteAccessHandlerPersistsStructuredSettings(t *testing.T) {
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("decode update response: %v", err)
-	}
-	if updated.Settings.Blog.CommentMode != "all" {
-		t.Fatalf("expected updated comment_mode all, got %q", updated.Settings.Blog.CommentMode)
 	}
 	if updated.Settings.Forum.AllowCategoryRequest {
 		t.Fatal("expected allow_category_request false after update")
@@ -154,9 +142,6 @@ func TestUpdateSiteAccessHandlerPersistsStructuredSettings(t *testing.T) {
 
 	var reloaded struct {
 		Settings struct {
-			Blog struct {
-				CommentMode string `json:"comment_mode"`
-			} `json:"blog"`
 			Forum struct {
 				AllowCategoryRequest bool `json:"allow_category_request"`
 			} `json:"forum"`
@@ -164,9 +149,6 @@ func TestUpdateSiteAccessHandlerPersistsStructuredSettings(t *testing.T) {
 	}
 	if err := json.Unmarshal(getRR.Body.Bytes(), &reloaded); err != nil {
 		t.Fatalf("decode get-after-save response: %v", err)
-	}
-	if reloaded.Settings.Blog.CommentMode != "all" {
-		t.Fatalf("expected persisted comment_mode all, got %q", reloaded.Settings.Blog.CommentMode)
 	}
 	if reloaded.Settings.Forum.AllowCategoryRequest {
 		t.Fatal("expected persisted allow_category_request false")

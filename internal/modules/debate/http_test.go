@@ -19,7 +19,7 @@ func newDebateHTTPTestService(t *testing.T) (*Service, authctx.CurrentUser) {
 	t.Helper()
 
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{}, &model.Debate{}, &model.Argument{},
+	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{}, &model.Debate{},
 		&model.DiscussionTarget{}, &model.CommentEntry{}, &model.CommentMention{},
 		&model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{}, &model.CommentPublishRecord{},
 		&model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{}, &model.DebateArgumentReference{},
@@ -309,7 +309,7 @@ func TestArgumentHTTPMapsCommentFailures(t *testing.T) {
 	}
 
 	var created struct {
-		Data model.Argument `json:"data"`
+		Data model.DebateArgumentDTO `json:"data"`
 	}
 	if err := json.Unmarshal(first.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)

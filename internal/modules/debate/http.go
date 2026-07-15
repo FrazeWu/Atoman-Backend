@@ -82,6 +82,17 @@ func (h *Handler) getDebate(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, debate)
 }
 
+// listArguments godoc
+// @Summary List typed debate arguments
+// @Tags Debate
+// @Produce json
+// @Param debateID path string true "Debate ID"
+// @Param page query int false "Page"
+// @Param page_size query int false "Page size"
+// @Success 200 {object} handlers.DebateArgumentListResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/debates/{debateID}/arguments [get]
 func (h *Handler) listArguments(c *gin.Context) {
 	debateID, err := uuid.Parse(c.Param("debateID"))
 	if err != nil {
@@ -97,6 +108,17 @@ func (h *Handler) listArguments(c *gin.Context) {
 	httpx.List(c, arguments, page, pageSize, total)
 }
 
+// createDebate godoc
+// @Summary Create a debate
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body CreateDebateRequest true "Debate"
+// @Success 201 {object} handlers.DebateResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Router /api/v1/debates [post]
 func (h *Handler) createDebate(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -162,6 +184,19 @@ func (h *Handler) deleteLegacyDebate(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Debate deleted"})
 }
 
+// createLegacyArgument godoc
+// @Summary Create a typed debate argument
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param debateID path string true "Debate ID"
+// @Param body body CreateArgumentRequest true "Argument"
+// @Success 201 {object} handlers.DebateArgumentResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/debates/{debateID}/arguments [post]
 func (h *Handler) createLegacyArgument(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -233,6 +268,20 @@ func (h *Handler) reopenLegacyDebate(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, debate)
 }
 
+// updateLegacyArgument godoc
+// @Summary Update a typed debate argument
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param argumentID path string true "Argument ID"
+// @Param body body CreateArgumentRequest true "Argument"
+// @Success 200 {object} handlers.DebateArgumentResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/debate-arguments/{argumentID} [patch]
 func (h *Handler) updateLegacyArgument(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -257,6 +306,17 @@ func (h *Handler) updateLegacyArgument(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, argument)
 }
 
+// deleteLegacyArgument godoc
+// @Summary Delete a typed debate argument
+// @Tags Debate
+// @Produce json
+// @Security BearerAuth
+// @Param argumentID path string true "Argument ID"
+// @Success 200 {object} handlers.MessageResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/debate-arguments/{argumentID} [delete]
 func (h *Handler) deleteLegacyArgument(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -275,6 +335,17 @@ func (h *Handler) deleteLegacyArgument(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Argument deleted"})
 }
 
+// addArgumentReference godoc
+// @Summary Add an argument reference
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param argumentID path string true "Argument ID"
+// @Param body body ReferenceRequest true "Reference"
+// @Success 200 {object} handlers.MessageResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Router /api/v1/debate-arguments/{argumentID}/reference [post]
 func (h *Handler) addArgumentReference(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -298,6 +369,16 @@ func (h *Handler) addArgumentReference(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Reference added"})
 }
 
+// removeArgumentReference godoc
+// @Summary Remove an argument reference
+// @Tags Debate
+// @Produce json
+// @Security BearerAuth
+// @Param argumentID path string true "Argument ID"
+// @Param referenceID path string true "Referenced argument ID"
+// @Success 200 {object} handlers.MessageResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Router /api/v1/debate-arguments/{argumentID}/reference/{referenceID} [delete]
 func (h *Handler) removeArgumentReference(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -321,6 +402,17 @@ func (h *Handler) removeArgumentReference(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Reference removed"})
 }
 
+// addDebateReference godoc
+// @Summary Add a debate reference
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param argumentID path string true "Argument ID"
+// @Param body body DebateReferenceRequest true "Debate reference"
+// @Success 200 {object} handlers.MessageResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Router /api/v1/debate-arguments/{argumentID}/debate-reference [post]
 func (h *Handler) addDebateReference(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -344,6 +436,16 @@ func (h *Handler) addDebateReference(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Debate reference added"})
 }
 
+// removeDebateReference godoc
+// @Summary Remove a debate reference
+// @Tags Debate
+// @Produce json
+// @Security BearerAuth
+// @Param argumentID path string true "Argument ID"
+// @Param debateRefID path string true "Referenced debate ID"
+// @Success 200 {object} handlers.MessageResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Router /api/v1/debate-arguments/{argumentID}/debate-reference/{debateRefID} [delete]
 func (h *Handler) removeDebateReference(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -367,6 +469,17 @@ func (h *Handler) removeDebateReference(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Debate reference removed"})
 }
 
+// foldArgument godoc
+// @Summary Fold a debate argument
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param argumentID path string true "Argument ID"
+// @Param body body handlers.FoldArgumentInput false "Fold note"
+// @Success 200 {object} handlers.MessageResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Router /api/v1/debate-arguments/{argumentID}/fold [post]
 func (h *Handler) foldArgument(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -389,6 +502,15 @@ func (h *Handler) foldArgument(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "folded"})
 }
 
+// unfoldArgument godoc
+// @Summary Unfold a debate argument
+// @Tags Debate
+// @Produce json
+// @Security BearerAuth
+// @Param argumentID path string true "Argument ID"
+// @Success 200 {object} handlers.MessageResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Router /api/v1/debate-arguments/{argumentID}/fold [delete]
 func (h *Handler) unfoldArgument(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {

@@ -106,10 +106,9 @@ func (r *Repo) ListBookmarks(userID uuid.UUID, folderID *uuid.UUID, sort string)
 			Where("target_type = ? AND deleted_at IS NULL", "post").
 			Group("target_id")
 		commentsSubquery := r.db.
-			Table("comments").
-			Select("target_id, COUNT(*) AS comments_count").
-			Where("target_type = ?", "post").
-			Group("target_id")
+			Table("discussion_targets").
+			Select("resource_id AS target_id, comment_count AS comments_count").
+			Where("kind = ? AND deleted_at IS NULL", "blog_post")
 		query = query.
 			Joins("LEFT JOIN (?) AS post_likes ON post_likes.target_id = bookmarks.post_id", likesSubquery).
 			Joins("LEFT JOIN (?) AS post_comments ON post_comments.target_id = bookmarks.post_id", commentsSubquery).

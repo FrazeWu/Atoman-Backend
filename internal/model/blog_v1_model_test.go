@@ -75,7 +75,6 @@ func TestBlogV1ModelsMigrateAndCreateRating(t *testing.T) {
 		Content:            "content",
 		Status:             "published",
 		Visibility:         "public",
-		AllowComments:      true,
 		RatingAverageScore: 4,
 		RatingCount:        1,
 	}

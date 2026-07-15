@@ -526,8 +526,9 @@ func MergeArtistsHandler(db *gorm.DB) gin.HandlerFunc {
 				return err
 			}
 			if err := tx.Exec(
-				"UPDATE discussions SET content_id = ? WHERE content_id = ? AND content_type = 'artist'",
+				"UPDATE discussion_targets SET resource_id = ?, resource_key = ? WHERE resource_id = ? AND kind = 'music_artist'",
 				targetID,
+				targetID.String(),
 				input.SourceID,
 			).Error; err != nil {
 				return err

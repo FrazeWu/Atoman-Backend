@@ -18,9 +18,6 @@ const SiteAccessPayloadVersion = 1
 const (
 	SiteAccessFeedFullTextModeDisabled  = "disabled"
 	SiteAccessFeedFullTextModePerSource = "per_source"
-	SiteAccessBlogCommentModeAll        = "all"
-	SiteAccessBlogCommentModeAuth       = "authenticated"
-	SiteAccessBlogCommentModeDisabled   = "disabled"
 )
 
 var ErrInvalidSiteAccessPayload = errors.New("invalid_site_access_payload")
@@ -41,7 +38,6 @@ type SiteAccessModule struct {
 
 type SiteAccessSettings struct {
 	Feed  SiteAccessFeedSettings  `json:"feed"`
-	Blog  SiteAccessBlogSettings  `json:"blog"`
 	Forum SiteAccessForumSettings `json:"forum"`
 }
 
@@ -49,10 +45,6 @@ type SiteAccessFeedSettings struct {
 	AllowManageSources bool   `json:"allow_manage_sources"`
 	AllowAddSource     bool   `json:"allow_add_source"`
 	FullTextMode       string `json:"full_text_mode"`
-}
-
-type SiteAccessBlogSettings struct {
-	CommentMode string `json:"comment_mode"`
 }
 
 type SiteAccessForumSettings struct {
@@ -82,7 +74,6 @@ type SiteAccessModuleInput struct {
 
 type SiteAccessSettingsInput struct {
 	Feed  *SiteAccessFeedSettingsInput  `json:"feed"`
-	Blog  *SiteAccessBlogSettingsInput  `json:"blog"`
 	Forum *SiteAccessForumSettingsInput `json:"forum"`
 }
 
@@ -90,10 +81,6 @@ type SiteAccessFeedSettingsInput struct {
 	AllowManageSources *bool   `json:"allow_manage_sources"`
 	AllowAddSource     *bool   `json:"allow_add_source"`
 	FullTextMode       *string `json:"full_text_mode"`
-}
-
-type SiteAccessBlogSettingsInput struct {
-	CommentMode *string `json:"comment_mode"`
 }
 
 type SiteAccessForumSettingsInput struct {
@@ -146,9 +133,6 @@ func DefaultSiteAccessMatrix() SiteAccessMatrix {
 				AllowManageSources: true,
 				AllowAddSource:     true,
 				FullTextMode:       SiteAccessFeedFullTextModePerSource,
-			},
-			Blog: SiteAccessBlogSettings{
-				CommentMode: SiteAccessBlogCommentModeAuth,
 			},
 			Forum: SiteAccessForumSettings{
 				AllowCategoryRequest: true,
@@ -356,7 +340,6 @@ func (m SiteAccessMatrix) ToInput() SiteAccessMatrixInput {
 	}
 
 	fullTextMode := m.Settings.Feed.FullTextMode
-	commentMode := m.Settings.Blog.CommentMode
 	allowManageSources := m.Settings.Feed.AllowManageSources
 	allowAddSource := m.Settings.Feed.AllowAddSource
 	allowCategoryRequest := m.Settings.Forum.AllowCategoryRequest
@@ -372,9 +355,6 @@ func (m SiteAccessMatrix) ToInput() SiteAccessMatrixInput {
 				AllowManageSources: &allowManageSources,
 				AllowAddSource:     &allowAddSource,
 				FullTextMode:       &fullTextMode,
-			},
-			Blog: &SiteAccessBlogSettingsInput{
-				CommentMode: &commentMode,
 			},
 			Forum: &SiteAccessForumSettingsInput{
 				AllowCategoryRequest: &allowCategoryRequest,
@@ -560,10 +540,6 @@ func applySettingsInput(base *SiteAccessMatrix, input *SiteAccessSettingsInput) 
 		}
 	}
 
-	if input.Blog != nil && input.Blog.CommentMode != nil {
-		base.Settings.Blog.CommentMode = *input.Blog.CommentMode
-	}
-
 	if input.Forum != nil {
 		if input.Forum.AllowCategoryRequest != nil {
 			base.Settings.Forum.AllowCategoryRequest = *input.Forum.AllowCategoryRequest
@@ -657,13 +633,6 @@ func validateSettingsInput(input *SiteAccessSettingsInput) error {
 			return fmt.Errorf("%w: invalid feed full_text_mode %q", ErrInvalidSiteAccessPayload, *input.Feed.FullTextMode)
 		}
 	}
-	if input.Blog != nil && input.Blog.CommentMode != nil {
-		switch *input.Blog.CommentMode {
-		case SiteAccessBlogCommentModeAll, SiteAccessBlogCommentModeAuth, SiteAccessBlogCommentModeDisabled:
-		default:
-			return fmt.Errorf("%w: invalid blog comment_mode %q", ErrInvalidSiteAccessPayload, *input.Blog.CommentMode)
-		}
-	}
 	return nil
 }
 
@@ -688,12 +657,6 @@ func validateSiteAccess(matrix SiteAccessMatrix) error {
 	if matrix.Settings.Feed.FullTextMode != SiteAccessFeedFullTextModeDisabled &&
 		matrix.Settings.Feed.FullTextMode != SiteAccessFeedFullTextModePerSource {
 		return fmt.Errorf("%w: invalid feed full_text_mode %q", ErrInvalidSiteAccessPayload, matrix.Settings.Feed.FullTextMode)
-	}
-
-	switch matrix.Settings.Blog.CommentMode {
-	case SiteAccessBlogCommentModeAll, SiteAccessBlogCommentModeAuth, SiteAccessBlogCommentModeDisabled:
-	default:
-		return fmt.Errorf("%w: invalid blog comment_mode %q", ErrInvalidSiteAccessPayload, matrix.Settings.Blog.CommentMode)
 	}
 
 	return nil

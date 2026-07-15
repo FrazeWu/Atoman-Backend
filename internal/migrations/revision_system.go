@@ -19,8 +19,6 @@ func MigrateToRevisionSystem(db *gorm.DB) error {
 		&model.Revision{},
 		&model.EditConflict{},
 		&model.ContentProtection{},
-		&model.Discussion{},
-		&model.DiscussionReadState{},
 	); err != nil {
 		log.Printf("Failed to create new tables: %v", err)
 		return err
@@ -351,7 +349,5 @@ func RollbackRevisionSystem(db *gorm.DB) error {
 		&model.Revision{},
 		&model.EditConflict{},
 		&model.ContentProtection{},
-		&model.DiscussionReadState{},
-		&model.Discussion{},
 	)
 }

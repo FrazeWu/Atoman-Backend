@@ -21,18 +21,68 @@ type timelineProposalRequest struct {
 	AttachmentIDs []uuid.UUID            `json:"attachment_ids"`
 }
 
+// CreateTimelineEventProposal godoc
+// @Summary Create a timeline event revision proposal
+// @Tags Timeline
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Event ID"
+// @Param body body timelineProposalRequest true "Revision proposal"
+// @Success 201 {object} TimelineProposalResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/v1/timeline/events/{id}/revision-proposals [post]
 func CreateTimelineEventProposal(service *proposalservice.TimelineRevisionProposalService) gin.HandlerFunc {
 	return createTimelineProposal(service, comment.TargetKindTimelineEvent)
 }
 
+// CreateTimelinePersonProposal godoc
+// @Summary Create a timeline person revision proposal
+// @Tags Timeline
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Person ID"
+// @Param body body timelineProposalRequest true "Revision proposal"
+// @Success 201 {object} TimelineProposalResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/v1/timeline/persons/{id}/revision-proposals [post]
 func CreateTimelinePersonProposal(service *proposalservice.TimelineRevisionProposalService) gin.HandlerFunc {
 	return createTimelineProposal(service, comment.TargetKindTimelinePerson)
 }
 
+// ListTimelineEventProposals godoc
+// @Summary List timeline event revision proposals
+// @Tags Timeline
+// @Produce json
+// @Param id path string true "Event ID"
+// @Param page query int false "Page"
+// @Param page_size query int false "Page size"
+// @Success 200 {object} TimelineProposalListResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/v1/timeline/events/{id}/revision-proposals [get]
 func ListTimelineEventProposals(service *proposalservice.TimelineRevisionProposalService) gin.HandlerFunc {
 	return listTimelineProposals(service, comment.TargetKindTimelineEvent)
 }
 
+// ListTimelinePersonProposals godoc
+// @Summary List timeline person revision proposals
+// @Tags Timeline
+// @Produce json
+// @Param id path string true "Person ID"
+// @Param page query int false "Page"
+// @Param page_size query int false "Page size"
+// @Success 200 {object} TimelineProposalListResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/v1/timeline/persons/{id}/revision-proposals [get]
 func ListTimelinePersonProposals(service *proposalservice.TimelineRevisionProposalService) gin.HandlerFunc {
 	return listTimelineProposals(service, comment.TargetKindTimelinePerson)
 }
@@ -96,6 +146,21 @@ func createTimelineProposal(service *proposalservice.TimelineRevisionProposalSer
 	}
 }
 
+// DecideTimelineRevisionProposal godoc
+// @Summary Accept or reject a timeline revision proposal
+// @Tags Timeline
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param comment_id path string true "Proposal comment ID"
+// @Param body body TimelineProposalDecisionInput true "Decision"
+// @Success 200 {object} TimelineProposalResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Router /api/v1/timeline/revision-proposals/{comment_id}/decision [put]
 func DecideTimelineRevisionProposal(service *proposalservice.TimelineRevisionProposalService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		user, ok := authctx.Current(c)

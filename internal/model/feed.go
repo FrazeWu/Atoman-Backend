@@ -154,7 +154,6 @@ type Post struct {
 	CoverURL           string       `json:"cover_url" gorm:"type:text"`
 	Status             string       `json:"status" gorm:"default:'draft'"` // draft / published
 	Visibility         string       `json:"visibility" gorm:"not null;default:'public'"`
-	AllowComments      bool         `json:"allow_comments" gorm:"default:true"`
 	Pinned             bool         `json:"pinned" gorm:"default:false"`
 	RatingAverageScore int          `json:"rating_average_score" gorm:"default:0"`
 	RatingCount        int          `json:"rating_count" gorm:"default:0"`
@@ -185,7 +184,6 @@ type BlogDraft struct {
 	Summary       string     `json:"summary" gorm:"type:text"`
 	CoverURL      string     `json:"cover_url" gorm:"type:text"`
 	Visibility    string     `json:"visibility" gorm:"not null;default:'public'"`
-	AllowComments bool       `json:"allow_comments" gorm:"default:true"`
 	ChannelID     *uuid.UUID `json:"channel_id,omitempty" gorm:"type:uuid;index"`
 	CollectionIDs string     `json:"collection_ids" gorm:"type:text"`
 }
@@ -199,20 +197,6 @@ type PostCollection struct {
 }
 
 func (PostCollection) TableName() string { return "post_collections" }
-
-type Comment struct {
-	Base
-	TargetType   string           `json:"target_type" gorm:"type:varchar(16);not null;index:idx_comments_target,priority:1"`
-	TargetID     uuid.UUID        `json:"target_id" gorm:"type:uuid;not null;index:idx_comments_target,priority:2"`
-	UserID       NullableUserUUID `json:"user_id,omitempty" gorm:"type:uuid;index"`
-	User         *User            `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	GuestName    string           `json:"guest_name" gorm:"type:varchar(80)"`
-	Content      string           `json:"content" gorm:"type:text;not null"`
-	TimestampSec *int             `json:"timestamp_sec,omitempty"`
-	Status       string           `json:"status" gorm:"type:varchar(16);not null;default:'visible'"`
-}
-
-func (Comment) TableName() string { return "comments" }
 
 type Like struct {
 	Base

@@ -57,10 +57,6 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("deduplicate subscription groups: %w", err)
 	}
 
-	if err := migrations.RunBlogGuestCommentsMigration(db); err != nil {
-		return fmt.Errorf("blog guest comments migration: %w", err)
-	}
-
 	if err := migrations.Migrate20260603FeedSourceManagementMVP(db); err != nil {
 		return fmt.Errorf("feed source management mvp migration: %w", err)
 	}
@@ -154,7 +150,6 @@ func migrateSchema(db *gorm.DB) error {
 		&model.Collection{},
 		&model.Post{},
 		&model.PostCollection{},
-		&model.Comment{},
 		&model.AuditLog{},
 		&model.MediaAsset{},
 		&model.MusicEdit{},
@@ -186,11 +181,8 @@ func migrateSchema(db *gorm.DB) error {
 		&model.Revision{},
 		&model.EditConflict{},
 		&model.ContentProtection{},
-		&model.Discussion{},
-		&model.DiscussionReadState{},
 		&model.ForumCategory{},
 		&model.ForumTopic{},
-		&model.ForumReply{},
 		&model.ForumLike{},
 		&model.ForumBookmark{},
 		&model.ForumReport{},
@@ -205,7 +197,6 @@ func migrateSchema(db *gorm.DB) error {
 		&model.PodcastEpisode{},
 		&model.PodcastEpisodeBookmark{},
 		&model.Debate{},
-		&model.Argument{},
 		&model.DebateVote{},
 		&model.VoteHistory{},
 		&model.DebateConcludeVote{},
@@ -233,10 +224,6 @@ func migrateSchema(db *gorm.DB) error {
 
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {
 		return fmt.Errorf("notification/dm index migration: %w", err)
-	}
-
-	if err := migrations.RunDiscussionReadStateMigration(db); err != nil {
-		return fmt.Errorf("discussion read state migration: %w", err)
 	}
 
 	return nil
