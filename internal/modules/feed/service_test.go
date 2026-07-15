@@ -202,11 +202,13 @@ func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 func TestGetSubscribedBlogFeedExcludesExternalAndNonBlogContent(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	pagedPostQueryHadLimit := false
+	pagedPostQueryUsedDistinct := false
 	if err := db.Callback().Query().Before("gorm:query").Register("test:blog_timeline_limit", func(tx *gorm.DB) {
 		if tx.Statement.Table != "posts" || reflect.TypeOf(tx.Statement.Dest) != reflect.TypeOf(&[]model.Post{}) {
 			return
 		}
 		_, pagedPostQueryHadLimit = tx.Statement.Clauses["LIMIT"]
+		pagedPostQueryUsedDistinct = tx.Statement.Distinct
 	}); err != nil {
 		t.Fatalf("register query callback: %v", err)
 	}
@@ -234,6 +236,9 @@ func TestGetSubscribedBlogFeedExcludesExternalAndNonBlogContent(t *testing.T) {
 	if !pagedPostQueryHadLimit {
 		t.Fatal("expected blog timeline posts to be paged by the database")
 	}
+	if pagedPostQueryUsedDistinct {
+		t.Fatal("expected blog timeline page query not to use SELECT DISTINCT")
+	}
 	seen := make(map[uuid.UUID]struct{})
 	allItems, allTotal, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 100, ContentType: model.ChannelContentTypeBlog})
 	if err != nil {
@@ -253,6 +258,68 @@ func TestGetSubscribedBlogFeedExcludesExternalAndNonBlogContent(t *testing.T) {
 			t.Fatalf("expected post %s to be deduplicated", item.Post.ID)
 		}
 		seen[item.Post.ID] = struct{}{}
+	}
+}
+
+func TestSubscribedBlogFeedUsesCanonicalCollectionWithoutLegacyJoinTable(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	if err := db.Unscoped().Where("user_id = ?", user.ID).Delete(&model.Subscription{}).Error; err != nil {
+		t.Fatalf("clear subscriptions: %v", err)
+	}
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "internal_collection").First(&source).Error; err != nil {
+		t.Fatalf("find collection source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+		t.Fatalf("create collection subscription: %v", err)
+	}
+	var collection model.Collection
+	if err := db.First(&collection, "id = ?", *source.SourceID).Error; err != nil {
+		t.Fatalf("find collection: %v", err)
+	}
+	post := model.Post{UserID: user.ID, ChannelID: &collection.ChannelID, CollectionID: &collection.ID, Title: "Canonical collection post", Content: "body", Status: "published", Visibility: "public"}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create canonical collection post: %v", err)
+	}
+	if err := db.Migrator().DropTable(&model.PostCollection{}); err != nil {
+		t.Fatalf("drop legacy post_collections table: %v", err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, ContentType: model.ChannelContentTypeBlog})
+	if err != nil {
+		t.Fatalf("get collection blog feed without legacy table: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].Post == nil || items[0].Post.ID != post.ID {
+		t.Fatalf("expected canonical collection post, got total=%d items=%#v", total, items)
+	}
+}
+
+func TestSubscribedBlogFeedExcludesPostsFromDeletedChannels(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	if err := db.Unscoped().Where("user_id = ?", user.ID).Delete(&model.Subscription{}).Error; err != nil {
+		t.Fatalf("clear subscriptions: %v", err)
+	}
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "internal_channel").First(&source).Error; err != nil {
+		t.Fatalf("find channel source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+		t.Fatalf("create channel subscription: %v", err)
+	}
+	var channel model.Channel
+	if err := db.First(&channel, "id = ?", *source.SourceID).Error; err != nil {
+		t.Fatalf("find channel: %v", err)
+	}
+	if err := db.Delete(&channel).Error; err != nil {
+		t.Fatalf("soft delete channel: %v", err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, ContentType: model.ChannelContentTypeBlog})
+	if err != nil {
+		t.Fatalf("get blog feed after channel deletion: %v", err)
+	}
+	if total != 0 || len(items) != 0 {
+		t.Fatalf("expected deleted channel posts excluded, got total=%d items=%#v", total, items)
 	}
 }
 

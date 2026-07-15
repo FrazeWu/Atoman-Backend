@@ -127,7 +127,7 @@ func (r *Repo) ListSubscribedBlogPosts(
 	buildQuery := func() *gorm.DB {
 		db := r.db.Model(&model.Post{}).
 			Joins("JOIN channels ON channels.id = posts.channel_id").
-			Where("posts.status = ? AND channels.content_type = ?", "published", model.ChannelContentTypeBlog)
+			Where("posts.status = ? AND channels.content_type = ? AND channels.deleted_at IS NULL", "published", model.ChannelContentTypeBlog)
 
 		sourceConditions := make([]string, 0, 3)
 		sourceArgs := make([]interface{}, 0, 3)
@@ -140,8 +140,8 @@ func (r *Repo) ListSubscribedBlogPosts(
 			sourceArgs = append(sourceArgs, channelIDs)
 		}
 		if len(collectionIDs) > 0 {
-			sourceConditions = append(sourceConditions, "(posts.collection_id IN ? OR EXISTS (SELECT 1 FROM post_collections WHERE post_collections.post_id = posts.id AND post_collections.collection_id IN ?))")
-			sourceArgs = append(sourceArgs, collectionIDs, collectionIDs)
+			sourceConditions = append(sourceConditions, "posts.collection_id IN ?")
+			sourceArgs = append(sourceArgs, collectionIDs)
 		}
 		db = db.Where("("+strings.Join(sourceConditions, " OR ")+")", sourceArgs...)
 
@@ -180,7 +180,7 @@ func (r *Repo) ListSubscribedBlogPosts(
 	pageSize := normalizedPageSize(query.PageSize)
 	var posts []model.Post
 	err := buildQuery().
-		Select("posts.*").Distinct().
+		Select("posts.*").
 		Preload("User").Preload("Channel").Preload("Collection").
 		Order("COALESCE(posts.published_at, posts.created_at) DESC").
 		Order("posts.created_at DESC").
