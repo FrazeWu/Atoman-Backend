@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -475,10 +476,6 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		if input.Status != nil {
 			postUpdates["status"] = *input.Status
 		}
-		if len(postUpdates) > 0 {
-			db.Model(ep.Post).Updates(postUpdates)
-		}
-
 		epUpdates := map[string]interface{}{}
 		if input.AudioURL != nil {
 			epUpdates["audio_url"] = strings.TrimSpace(*input.AudioURL)
@@ -495,22 +492,38 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		if input.EpisodeNumber != nil {
 			epUpdates["episode_number"] = *input.EpisodeNumber
 		}
-		if len(epUpdates) > 0 {
-			db.Model(&ep).Updates(epUpdates)
-		}
-		if input.CollectionIDs != nil {
-			if len(input.CollectionIDs) == 0 {
-				if err := db.Model(ep.Post).Association("Collections").Clear(); err != nil {
-					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-					return
+
+		statusCode := http.StatusInternalServerError
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if len(postUpdates) > 0 {
+				if err := tx.Model(ep.Post).Updates(postUpdates).Error; err != nil {
+					return err
 				}
-			} else if err := assignPodcastPostCollections(db, ep.Post, ep.ChannelID, input.CollectionIDs); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-				return
 			}
+			if len(epUpdates) > 0 {
+				if err := tx.Model(&ep).Updates(epUpdates).Error; err != nil {
+					return err
+				}
+			}
+			if input.CollectionIDs != nil {
+				if len(input.CollectionIDs) == 0 {
+					if err := tx.Model(ep.Post).Association("Collections").Clear(); err != nil {
+						return err
+					}
+				} else if err := assignPodcastPostCollections(tx, ep.Post, ep.ChannelID, input.CollectionIDs); err != nil {
+					if errors.Is(err, errInvalidPodcastCollections) {
+						statusCode = http.StatusBadRequest
+					}
+					return err
+				}
+			}
+
+			return tx.Preload("Post.Collection").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID).Error
+		}); err != nil {
+			c.JSON(statusCode, gin.H{"error": err.Error()})
+			return
 		}
 
-		db.Preload("Post.Collection").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID)
 		c.JSON(http.StatusOK, ep)
 	}
 }
@@ -555,13 +568,15 @@ func DeletePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+var errInvalidPodcastCollections = errors.New("存在无效合集或合集不属于当前频道")
+
 func assignPodcastPostCollections(db *gorm.DB, post *model.Post, channelID uuid.UUID, ids []uuid.UUID) error {
 	var collections []model.Collection
 	if err := db.Where("id IN ? AND channel_id = ?", ids, channelID).Find(&collections).Error; err != nil {
 		return err
 	}
 	if len(collections) != len(ids) {
-		return fmt.Errorf("存在无效合集或合集不属于当前频道")
+		return errInvalidPodcastCollections
 	}
 
 	return db.Model(post).Association("Collections").Replace(collections)

@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -618,5 +619,106 @@ func TestCreatePodcastEpisodeRequiresOwnedChannel(t *testing.T) {
 				t.Fatalf("expected %d, got %d: %s", tc.want, w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestUpdatePodcastEpisodeReturnsInternalServerErrorAndRollsBackWhenEpisodeUpdateFails(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "draft")
+
+	callbackName := "podcast_episode_update_error_" + strings.ReplaceAll(t.Name(), "/", "_")
+	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table == "podcast_episodes" {
+			tx.AddError(errors.New("injected episode update error"))
+		}
+	}); err != nil {
+		t.Fatalf("register update error callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Update().Remove(callbackName)
+	})
+
+	body := []byte(`{"title":"updated before failure","duration_sec":120}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/podcast/episodes/"+episode.ID.String(), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var post model.Post
+	if err := db.First(&post, "id = ?", episode.PostID).Error; err != nil {
+		t.Fatalf("reload post: %v", err)
+	}
+	if post.Title != "draft episode" {
+		t.Errorf("expected post update to roll back, got title %q", post.Title)
+	}
+}
+
+func TestUpdatePodcastEpisodeKeepsBadCollectionAsBadRequestAndRollsBack(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "draft")
+
+	body := []byte(`{"title":"updated before validation failure","collection_ids":["` + uuid.NewString() + `"]}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/podcast/episodes/"+episode.ID.String(), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var post model.Post
+	if err := db.First(&post, "id = ?", episode.PostID).Error; err != nil {
+		t.Fatalf("reload post: %v", err)
+	}
+	if post.Title != "draft episode" {
+		t.Errorf("expected post update to roll back, got title %q", post.Title)
+	}
+}
+
+func TestUpdatePodcastEpisodeReturnsInternalServerErrorWhenReloadFails(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "draft")
+
+	episodeQueries := 0
+	callbackName := "podcast_episode_reload_error_" + strings.ReplaceAll(t.Name(), "/", "_")
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "podcast_episodes" {
+			return
+		}
+		episodeQueries++
+		if episodeQueries == 2 {
+			tx.AddError(errors.New("injected episode reload error"))
+		}
+	}); err != nil {
+		t.Fatalf("register query error callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove(callbackName)
+	})
+
+	body := []byte(`{"title":"updated title"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/podcast/episodes/"+episode.ID.String(), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var post model.Post
+	if err := db.First(&post, "id = ?", episode.PostID).Error; err != nil {
+		t.Fatalf("reload post: %v", err)
+	}
+	if post.Title != "draft episode" {
+		t.Errorf("expected post update to roll back, got title %q", post.Title)
 	}
 }
