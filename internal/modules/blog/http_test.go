@@ -263,6 +263,8 @@ func TestChannelArticleRSSIncludesOnlyPublishedPublicPosts(t *testing.T) {
 	for _, post := range []model.Post{
 		{UserID: user.ID, ChannelID: &channel.ID, Title: "Public RSS post", Content: "Body", Status: "published", Visibility: "public"},
 		{UserID: user.ID, ChannelID: &channel.ID, Title: "Legacy empty visibility post", Content: "Body", Status: "published", Visibility: "public"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Early created late published", Content: "Body", Status: "published", Visibility: "public"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Late created early published", Content: "Body", Status: "published", Visibility: "public"},
 		{UserID: user.ID, ChannelID: &channel.ID, Title: "Followers RSS secret", Content: "Body", Status: "published", Visibility: "followers"},
 		{UserID: user.ID, ChannelID: &channel.ID, Title: "Private RSS secret", Content: "Body", Status: "published", Visibility: "private"},
 		{UserID: user.ID, ChannelID: &channel.ID, Title: "Draft RSS secret", Content: "Body", Status: "draft", Visibility: "public"},
@@ -275,6 +277,21 @@ func TestChannelArticleRSSIncludesOnlyPublishedPublicPosts(t *testing.T) {
 		Where("title = ?", "Legacy empty visibility post").
 		Update("visibility", "").Error; err != nil {
 		t.Fatalf("set legacy empty visibility: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	latePublishedAt := now
+	earlyPublishedAt := now.Add(-24 * time.Hour)
+	if err := db.Model(&model.Post{}).Where("title = ?", "Early created late published").Updates(map[string]any{
+		"created_at": now.Add(-48 * time.Hour), "published_at": latePublishedAt,
+	}).Error; err != nil {
+		t.Fatalf("set late publication timestamps: %v", err)
+	}
+	if err := db.Model(&model.Post{}).Where("title = ?", "Late created early published").Update("published_at", earlyPublishedAt).Error; err != nil {
+		t.Fatalf("set early publication timestamp: %v", err)
+	}
+	var latePublished model.Post
+	if err := db.Where("title = ?", "Early created late published").First(&latePublished).Error; err != nil {
+		t.Fatalf("find late-published post: %v", err)
 	}
 
 	r := newBlogHTTPRouter(service, &user)
@@ -296,6 +313,18 @@ func TestChannelArticleRSSIncludesOnlyPublishedPublicPosts(t *testing.T) {
 		if strings.Contains(body, secret) {
 			t.Fatalf("expected %q to be excluded from RSS: %s", secret, body)
 		}
+	}
+	lateIndex := strings.Index(body, "Early created late published")
+	earlyIndex := strings.Index(body, "Late created early published")
+	if lateIndex == -1 || earlyIndex == -1 || lateIndex > earlyIndex {
+		t.Fatalf("expected posts ordered by effective publication time: %s", body)
+	}
+	if !strings.Contains(body, "<pubDate>"+latePublishedAt.Format(time.RFC1123Z)+"</pubDate>") {
+		t.Fatalf("expected effective publication date in RSS: %s", body)
+	}
+	canonicalLink := "<link>https://example.com/posts/post/" + latePublished.ID.String() + "</link>"
+	if !strings.Contains(body, canonicalLink) {
+		t.Fatalf("expected canonical post link %q in RSS: %s", canonicalLink, body)
 	}
 }
 

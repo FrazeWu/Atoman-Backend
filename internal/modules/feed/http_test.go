@@ -524,6 +524,23 @@ func TestQueryFromContextIncludesContentType(t *testing.T) {
 	}
 }
 
+func TestGetSubscribedFeedHandlerRejectsUnsupportedContentType(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, _, _ := newFeedTestService(t)
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	for _, contentType := range []string{"video", "bolg"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?content_type="+contentType, nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for content_type=%s, got %d with body %s", contentType, rr.Code, rr.Body.String())
+		}
+	}
+}
+
 func TestGetSubscribedFeedHandlerParsesSearchQuery(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)

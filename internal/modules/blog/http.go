@@ -276,7 +276,9 @@ func (h *Handler) getChannelArticleRSS(c *gin.Context) {
 	if err := h.service.db.Where("channel_id = ? AND status = ?", channel.ID, "published").
 		Where("visibility = ? OR visibility = ?", "", "public").
 		Preload("User").
+		Order("COALESCE(published_at, created_at) DESC").
 		Order("created_at DESC").
+		Order("id DESC").
 		Limit(50).
 		Find(&posts).Error; err != nil {
 		httpx.Error(c, err)
@@ -727,7 +729,11 @@ func (h *Handler) deleteBookmarkFolder(c *gin.Context) {
 func buildArticleRSS(ch model.Channel, posts []model.Post, siteURL string) string {
 	var items strings.Builder
 	for _, p := range posts {
-		pubDate := p.CreatedAt.Format(time.RFC1123Z)
+		publishedAt := p.CreatedAt
+		if p.PublishedAt != nil {
+			publishedAt = *p.PublishedAt
+		}
+		pubDate := publishedAt.Format(time.RFC1123Z)
 		summary := p.Summary
 		if summary == "" && len(p.Content) > 280 {
 			summary = p.Content[:280] + "…"
@@ -744,8 +750,8 @@ func buildArticleRSS(ch model.Channel, posts []model.Post, siteURL string) strin
 		items.WriteString(fmt.Sprintf(`
     <item>
       <title><![CDATA[%s]]></title>
-      <link>%s/post/%s</link>
-      <guid isPermaLink="true">%s/post/%s</guid>
+      <link>%s/posts/post/%s</link>
+      <guid isPermaLink="true">%s/posts/post/%s</guid>
       <pubDate>%s</pubDate>
       <description><![CDATA[%s]]></description>
       <author>%s</author>

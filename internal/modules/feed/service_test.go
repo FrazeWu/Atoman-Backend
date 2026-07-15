@@ -201,6 +201,15 @@ func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 
 func TestGetSubscribedBlogFeedExcludesExternalAndNonBlogContent(t *testing.T) {
 	service, db, user := newFeedTestService(t)
+	pagedPostQueryHadLimit := false
+	if err := db.Callback().Query().Before("gorm:query").Register("test:blog_timeline_limit", func(tx *gorm.DB) {
+		if tx.Statement.Table != "posts" || reflect.TypeOf(tx.Statement.Dest) != reflect.TypeOf(&[]model.Post{}) {
+			return
+		}
+		_, pagedPostQueryHadLimit = tx.Statement.Clauses["LIMIT"]
+	}); err != nil {
+		t.Fatalf("register query callback: %v", err)
+	}
 
 	var author model.User
 	if err := db.First(&author, "uuid = ?", user.ID).Error; err != nil {
@@ -215,12 +224,15 @@ func TestGetSubscribedBlogFeedExcludesExternalAndNonBlogContent(t *testing.T) {
 		t.Fatalf("create video post: %v", err)
 	}
 
-	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 2, ContentType: model.ChannelContentTypeBlog})
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 1, ContentType: model.ChannelContentTypeBlog})
 	if err != nil {
 		t.Fatalf("get subscribed blog feed: %v", err)
 	}
-	if total < 3 || len(items) != 2 {
+	if total < 3 || len(items) != 1 {
 		t.Fatalf("expected filtered total with paginated data, got total=%d len=%d", total, len(items))
+	}
+	if !pagedPostQueryHadLimit {
+		t.Fatal("expected blog timeline posts to be paged by the database")
 	}
 	seen := make(map[uuid.UUID]struct{})
 	allItems, allTotal, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 100, ContentType: model.ChannelContentTypeBlog})

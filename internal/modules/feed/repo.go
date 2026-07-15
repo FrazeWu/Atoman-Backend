@@ -112,6 +112,85 @@ func (r *Repo) ListPublishedPostsByCollectionIDs(collectionIDs []uuid.UUID, cont
 	return posts, err
 }
 
+func (r *Repo) ListSubscribedBlogPosts(
+	userIDs []uuid.UUID,
+	channelIDs []uuid.UUID,
+	collectionIDs []uuid.UUID,
+	followedUserIDs []uuid.UUID,
+	followedChannelIDs []uuid.UUID,
+	query FeedQuery,
+) ([]model.Post, int64, error) {
+	if len(userIDs) == 0 && len(channelIDs) == 0 && len(collectionIDs) == 0 {
+		return []model.Post{}, 0, nil
+	}
+
+	buildQuery := func() *gorm.DB {
+		db := r.db.Model(&model.Post{}).
+			Joins("JOIN channels ON channels.id = posts.channel_id").
+			Where("posts.status = ? AND channels.content_type = ?", "published", model.ChannelContentTypeBlog)
+
+		sourceConditions := make([]string, 0, 3)
+		sourceArgs := make([]interface{}, 0, 3)
+		if len(userIDs) > 0 {
+			sourceConditions = append(sourceConditions, "posts.user_id IN ?")
+			sourceArgs = append(sourceArgs, userIDs)
+		}
+		if len(channelIDs) > 0 {
+			sourceConditions = append(sourceConditions, "posts.channel_id IN ?")
+			sourceArgs = append(sourceArgs, channelIDs)
+		}
+		if len(collectionIDs) > 0 {
+			sourceConditions = append(sourceConditions, "(posts.collection_id IN ? OR EXISTS (SELECT 1 FROM post_collections WHERE post_collections.post_id = posts.id AND post_collections.collection_id IN ?))")
+			sourceArgs = append(sourceArgs, collectionIDs, collectionIDs)
+		}
+		db = db.Where("("+strings.Join(sourceConditions, " OR ")+")", sourceArgs...)
+
+		visibility := "COALESCE(posts.visibility, '') IN ?"
+		visibilityArgs := []interface{}{[]string{"", "public"}}
+		followerConditions := make([]string, 0, 2)
+		if len(followedUserIDs) > 0 {
+			followerConditions = append(followerConditions, "posts.user_id IN ?")
+			visibilityArgs = append(visibilityArgs, followedUserIDs)
+		}
+		if len(followedChannelIDs) > 0 {
+			followerConditions = append(followerConditions, "posts.channel_id IN ?")
+			visibilityArgs = append(visibilityArgs, followedChannelIDs)
+		}
+		if len(followerConditions) > 0 {
+			visibility += " OR (posts.visibility = ? AND (" + strings.Join(followerConditions, " OR ") + "))"
+			visibilityArgs = append([]interface{}{[]string{"", "public"}, "followers"}, visibilityArgs[1:]...)
+		}
+		db = db.Where("("+visibility+")", visibilityArgs...)
+
+		if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
+			like := "%" + search + "%"
+			db = db.Where(
+				"LOWER(posts.title) LIKE ? OR LOWER(posts.summary) LIKE ? OR LOWER(channels.name) LIKE ? OR LOWER(channels.slug) LIKE ?",
+				like, like, like, like,
+			)
+		}
+		return db
+	}
+
+	var total int64
+	if err := buildQuery().Distinct("posts.id").Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	page := normalizedPage(query.Page)
+	pageSize := normalizedPageSize(query.PageSize)
+	var posts []model.Post
+	err := buildQuery().
+		Select("posts.*").Distinct().
+		Preload("User").Preload("Channel").Preload("Collection").
+		Order("COALESCE(posts.published_at, posts.created_at) DESC").
+		Order("posts.created_at DESC").
+		Order("posts.id DESC").
+		Offset((page - 1) * pageSize).
+		Limit(pageSize).
+		Find(&posts).Error
+	return posts, total, err
+}
+
 func (r *Repo) ListFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID) ([]model.FeedItem, error) {
 	if len(feedSourceIDs) == 0 {
 		return []model.FeedItem{}, nil
