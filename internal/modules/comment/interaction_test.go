@@ -335,12 +335,12 @@ func TestDeleteChildKeepsThreadAndHistoricalReplyReference(t *testing.T) {
 	require.Equal(t, 1, target.RootCount)
 }
 
-func TestDeletePermissionsRequireActiveAuthorOrTargetOwner(t *testing.T) {
+func TestDeletePermissionsAllowAdminAndRequireActiveUser(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	root := ctx.create(t, 1, "root", nil)
 	admin := ctx.users[2]
 	admin.Role = authctx.RoleAdmin
-	require.ErrorIs(t, ctx.service.Delete(admin, root.ID), ErrCommentForbidden)
+	require.NoError(t, ctx.service.Delete(admin, root.ID))
 	require.ErrorIs(t, ctx.service.Delete(authctx.CurrentUser{}, root.ID), ErrAuthenticationRequired)
 	require.NoError(t, ctx.db.Model(&model.User{}).Where("uuid = ?", ctx.users[1].ID).Update("is_active", false).Error)
 	require.ErrorIs(t, ctx.service.Delete(ctx.users[1], root.ID), ErrAuthenticationRequired)
@@ -427,4 +427,28 @@ func TestInteractionErrorsAreComparable(t *testing.T) {
 	require.True(t, errors.Is(ErrCommentForbidden, ErrCommentForbidden))
 	require.True(t, errors.Is(ErrCommentNotFound, ErrCommentNotFound))
 	require.True(t, errors.Is(ErrInvalidMark, ErrInvalidMark))
+}
+
+func TestEditWithExtensionRollsBackCommentRelations(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	created, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "before"})
+	require.NoError(t, err)
+	want := errors.New("typed edit failed")
+	_, err = ctx.service.EditWithExtension(ctx.users[0], created.ID, EditCommentInput{Content: "after"}, func(*gorm.DB, *model.CommentEntry) error { return want })
+	require.ErrorIs(t, err, want)
+	var stored model.CommentEntry
+	require.NoError(t, ctx.db.First(&stored, "id = ?", created.ID).Error)
+	require.Equal(t, "before", stored.Content)
+}
+
+func TestDeleteWithExtensionRollsBackCommentDelete(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	created, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "keep"})
+	require.NoError(t, err)
+	want := errors.New("typed delete failed")
+	err = ctx.service.DeleteWithExtension(ctx.users[0], created.ID, func(*gorm.DB, []uuid.UUID) error { return want })
+	require.ErrorIs(t, err, want)
+	var count int64
+	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
 }

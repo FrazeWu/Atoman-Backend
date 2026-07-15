@@ -43,6 +43,7 @@ const (
 )
 
 type ExtensionWriter func(tx *gorm.DB, comment *model.CommentEntry) error
+type DeleteExtensionWriter func(tx *gorm.DB, commentIDs []uuid.UUID) error
 
 type Service struct {
 	db         *gorm.DB

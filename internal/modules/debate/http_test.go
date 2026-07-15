@@ -12,6 +12,7 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 func newDebateHTTPTestService(t *testing.T) (*Service, authctx.CurrentUser) {
@@ -73,7 +74,6 @@ func TestRegisterRoutesMountsListDetailSearchAndArgumentList(t *testing.T) {
 		"/api/v1/debate/topics",
 		"/api/v1/debate/topics/" + debate.ID.String(),
 		"/api/v1/debate/topics/search?q=Router",
-		"/api/v1/debate/topics/" + debate.ID.String() + "/arguments",
 		"/api/v1/debates/" + debate.ID.String() + "/arguments",
 	}
 
@@ -175,7 +175,7 @@ func TestRegisterRoutesMountsConcludeReopenAndArgumentMutation(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate/arguments/"+argument.ID.String(), nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate-arguments/"+argument.ID.String(), nil)
 	r.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
 		t.Fatalf("expected argument delete route to be mounted, got 404: %s", w.Body.String())
@@ -210,7 +210,7 @@ func TestRegisterRoutesMountsReferenceAndFoldOperations(t *testing.T) {
 	userRouter := newDebateHTTPRouter(service, &user)
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/debate/arguments/"+argument.ID.String()+"/reference", bytes.NewBufferString(`{"reference_id":"`+refArgument.ID.String()+`"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/debate-arguments/"+argument.ID.String()+"/reference", bytes.NewBufferString(`{"reference_id":"`+refArgument.ID.String()+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	userRouter.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
@@ -218,14 +218,14 @@ func TestRegisterRoutesMountsReferenceAndFoldOperations(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate/arguments/"+argument.ID.String()+"/reference/"+refArgument.ID.String(), nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate-arguments/"+argument.ID.String()+"/reference/"+refArgument.ID.String(), nil)
 	userRouter.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
 		t.Fatalf("expected remove reference route to be mounted, got 404: %s", w.Body.String())
 	}
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate/arguments/"+argument.ID.String()+"/debate-reference", bytes.NewBufferString(`{"debate_id":"`+debate.ID.String()+`"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate-arguments/"+argument.ID.String()+"/debate-reference", bytes.NewBufferString(`{"debate_id":"`+debate.ID.String()+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	userRouter.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
@@ -233,14 +233,14 @@ func TestRegisterRoutesMountsReferenceAndFoldOperations(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate/arguments/"+argument.ID.String()+"/debate-reference/"+debate.ID.String(), nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate-arguments/"+argument.ID.String()+"/debate-reference/"+debate.ID.String(), nil)
 	userRouter.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
 		t.Fatalf("expected remove debate reference route to be mounted, got 404: %s", w.Body.String())
 	}
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate/arguments/"+argument.ID.String()+"/fold", bytes.NewBufferString(`{"fold_note":"note"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate-arguments/"+argument.ID.String()+"/fold", bytes.NewBufferString(`{"fold_note":"note"}`))
 	req.Header.Set("Content-Type", "application/json")
 	adminRouter.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
@@ -248,9 +248,27 @@ func TestRegisterRoutesMountsReferenceAndFoldOperations(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate/arguments/"+argument.ID.String()+"/fold", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate-arguments/"+argument.ID.String()+"/fold", nil)
 	adminRouter.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
 		t.Fatalf("expected unfold route to be mounted, got 404: %s", w.Body.String())
+	}
+}
+
+func TestRegisterRoutesDoesNotMountLegacyArgumentAliases(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, user := newDebateHTTPTestService(t)
+	r := newDebateHTTPRouter(service, &user)
+	for _, request := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/debate/topics/" + uuid.NewString() + "/arguments"},
+		{http.MethodPost, "/api/v1/debate/topics/" + uuid.NewString() + "/arguments"},
+		{http.MethodPut, "/api/v1/debate/arguments/" + uuid.NewString()},
+		{http.MethodDelete, "/api/v1/debate/arguments/" + uuid.NewString()},
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(request.method, request.path, nil))
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("legacy route %s %s returned %d", request.method, request.path, w.Code)
+		}
 	}
 }

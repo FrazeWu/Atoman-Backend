@@ -91,6 +91,10 @@ func (s *Service) ListReports(user authctx.CurrentUser, status string, page, pag
 }
 
 func (s *Service) Edit(user authctx.CurrentUser, commentID uuid.UUID, input EditCommentInput) (CommentDTO, error) {
+	return s.EditWithExtension(user, commentID, input, nil)
+}
+
+func (s *Service) EditWithExtension(user authctx.CurrentUser, commentID uuid.UUID, input EditCommentInput, write ExtensionWriter) (CommentDTO, error) {
 	if err := s.validateAuthor(user); err != nil {
 		return CommentDTO{}, err
 	}
@@ -157,6 +161,14 @@ func (s *Service) Edit(user authctx.CurrentUser, commentID uuid.UUID, input Edit
 			if result.RowsAffected != 1 {
 				return ErrCommentNotFound
 			}
+			entry.Content = normalized
+			entry.ContentHash = ContentHash(normalized, input.AttachmentIDs)
+			entry.EditedAt = &now
+			if write != nil {
+				if err := write(tx, &entry); err != nil {
+					return err
+				}
+			}
 			return nil
 		})
 	})
@@ -198,6 +210,10 @@ func (s *Service) resolveCommentModeration(commentID uuid.UUID) (model.CommentEn
 }
 
 func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
+	return s.DeleteWithExtension(user, commentID, nil)
+}
+
+func (s *Service) DeleteWithExtension(user authctx.CurrentUser, commentID uuid.UUID, write DeleteExtensionWriter) error {
 	if err := s.validateAuthor(user); err != nil {
 		return err
 	}
@@ -223,16 +239,16 @@ func (s *Service) Delete(user authctx.CurrentUser, commentID uuid.UUID) error {
 			}
 			target := hierarchy.Target
 			isOwner := resolved.OwnerID != nil && *resolved.OwnerID == user.ID
-			if entry.AuthorID != user.ID && !isOwner {
+			if entry.AuthorID != user.ID && !isOwner && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
 				return ErrCommentForbidden
 			}
 
-			return s.deleteCommentLocked(tx, target, hierarchy.Root, entry)
+			return s.deleteCommentLocked(tx, target, hierarchy.Root, entry, write)
 		})
 	})
 }
 
-func (s *Service) deleteCommentLocked(tx *gorm.DB, target model.DiscussionTarget, root model.CommentEntry, entry model.CommentEntry) error {
+func (s *Service) deleteCommentLocked(tx *gorm.DB, target model.DiscussionTarget, root model.CommentEntry, entry model.CommentEntry, write DeleteExtensionWriter) error {
 	ids := []uuid.UUID{entry.ID}
 	rootDelta := 0
 	visibleDeleteCount := int64(0)
@@ -253,6 +269,11 @@ func (s *Service) deleteCommentLocked(tx *gorm.DB, target model.DiscussionTarget
 	} else {
 		if isVisibleCommentStatus(root.Status) && isVisibleCommentStatus(entry.Status) {
 			visibleDeleteCount = 1
+		}
+	}
+	if write != nil {
+		if err := write(tx, ids); err != nil {
+			return err
 		}
 	}
 	if err := deleteCommentRelations(tx, ids); err != nil {
@@ -400,7 +421,7 @@ func (s *Service) Moderate(user authctx.CurrentUser, commentID uuid.UUID, input 
 					return err
 				}
 			case ModerationDelete:
-				if err := s.deleteCommentLocked(tx, h.Target, h.Root, h.Entry); err != nil {
+				if err := s.deleteCommentLocked(tx, h.Target, h.Root, h.Entry, nil); err != nil {
 					return err
 				}
 			default:

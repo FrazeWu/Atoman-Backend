@@ -1,6 +1,7 @@
 package debate
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Service struct {
@@ -82,11 +84,14 @@ func (s *Service) UpdateDebate(user authctx.CurrentUser, debateID uuid.UUID, req
 	if title == "" {
 		return model.Debate{}, apperr.BadRequest("validation.invalid_request", "title is required")
 	}
-	debate.Title = title
-	debate.Description = strings.TrimSpace(req.Description)
-	debate.Content = strings.TrimSpace(req.Content)
-	debate.Tags = req.Tags
-	if err := s.repo.SaveDebate(&debate); err != nil {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		var locked model.Debate
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", debateID).Error; err != nil {
+			return err
+		}
+		return tx.Model(&locked).Updates(map[string]any{"title": title, "description": strings.TrimSpace(req.Description), "content": strings.TrimSpace(req.Content), "tags": req.Tags}).Error
+	})
+	if err != nil {
 		return model.Debate{}, err
 	}
 	return s.repo.GetDebate(debate.ID)
@@ -121,12 +126,15 @@ func (s *Service) ConcludeDebate(user authctx.CurrentUser, debateID uuid.UUID, c
 	default:
 		return model.Debate{}, apperr.BadRequest("validation.invalid_request", "conclusion_type is invalid")
 	}
-	debate.Status = "concluded"
 	now := time.Now()
-	debate.ConcludedAt = &now
-	debate.ConclusionType = strings.TrimSpace(conclusionType)
-	debate.ConclusionSummary = strings.TrimSpace(conclusionSummary)
-	if err := s.repo.SaveDebate(&debate); err != nil {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		var locked model.Debate
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", debateID).Error; err != nil {
+			return err
+		}
+		return tx.Model(&locked).Updates(map[string]any{"status": "concluded", "concluded_at": now, "conclusion_type": strings.TrimSpace(conclusionType), "conclusion_summary": strings.TrimSpace(conclusionSummary)}).Error
+	})
+	if err != nil {
 		return model.Debate{}, err
 	}
 	return s.repo.GetDebate(debate.ID)
@@ -140,11 +148,14 @@ func (s *Service) ReopenDebate(user authctx.CurrentUser, debateID uuid.UUID) (mo
 	if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
 		return model.Debate{}, apperr.Forbidden("debate.forbidden", "Admin only")
 	}
-	debate.Status = "open"
-	debate.ConcludedAt = nil
-	debate.ConclusionType = ""
-	debate.ConclusionSummary = ""
-	if err := s.repo.SaveDebate(&debate); err != nil {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		var locked model.Debate
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", debateID).Error; err != nil {
+			return err
+		}
+		return tx.Model(&locked).Updates(map[string]any{"status": "open", "concluded_at": nil, "conclusion_type": "", "conclusion_summary": ""}).Error
+	})
+	if err != nil {
 		return model.Debate{}, err
 	}
 	return s.repo.GetDebate(debate.ID)
@@ -180,7 +191,7 @@ func (s *Service) CreateArgument(user authctx.CurrentUser, req CreateArgumentReq
 		comment.CreateCommentInput{Content: content, ReplyToID: req.ParentID, Mentions: req.Mentions, AttachmentIDs: req.AttachmentIDs},
 		func(tx *gorm.DB, entry *model.CommentEntry) error {
 			var current model.Debate
-			if err := tx.First(&current, "id = ?", req.DebateID).Error; err != nil {
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", req.DebateID).Error; err != nil {
 				return err
 			}
 			if current.Status != "open" {
@@ -219,13 +230,19 @@ func (s *Service) UpdateArgument(user authctx.CurrentUser, argumentID uuid.UUID,
 	if content == "" || argumentType == "" {
 		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "content and argument_type are required")
 	}
-	if _, err := s.comments.Edit(user, argumentID, comment.EditCommentInput{Content: content, Mentions: req.Mentions, AttachmentIDs: req.AttachmentIDs}); err != nil {
-		return model.Argument{}, err
-	}
-	if err := s.db.Model(&model.DebateArgumentDetail{}).Where("comment_id = ?", argumentID).Updates(map[string]any{
-		"argument_type": argumentType, "source_url": strings.TrimSpace(req.SourceURL),
-		"source_title": strings.TrimSpace(req.SourceTitle), "source_excerpt": strings.TrimSpace(req.SourceExcerpt),
-	}).Error; err != nil {
+	if _, err := s.comments.EditWithExtension(user, argumentID, comment.EditCommentInput{Content: content, Mentions: req.Mentions, AttachmentIDs: req.AttachmentIDs}, func(tx *gorm.DB, _ *model.CommentEntry) error {
+		result := tx.Model(&model.DebateArgumentDetail{}).Where("comment_id = ?", argumentID).Updates(map[string]any{
+			"argument_type": argumentType, "source_url": strings.TrimSpace(req.SourceURL),
+			"source_title": strings.TrimSpace(req.SourceTitle), "source_excerpt": strings.TrimSpace(req.SourceExcerpt),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	}); err != nil {
 		return model.Argument{}, err
 	}
 	return s.repo.GetArgument(argument.ID)
@@ -247,19 +264,21 @@ func (s *Service) DeleteArgument(user authctx.CurrentUser, argumentID uuid.UUID)
 		}
 		return err
 	}
-	if argument.UserID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
-		return apperr.Forbidden("debate.forbidden", "Not authorized")
-	}
-	var removed int64 = 1
-	if argument.ParentID == nil {
-		s.db.Model(&model.CommentEntry{}).Where("root_id = ?", argument.ID).Count(&removed)
-		removed++
-	}
-	if err := s.comments.Delete(user, argumentID); err != nil {
-		return err
-	}
-	return s.db.Model(&model.Debate{}).Where("id = ?", argument.DebateID).
-		UpdateColumn("argument_count", gorm.Expr("CASE WHEN argument_count >= ? THEN argument_count - ? ELSE 0 END", removed, removed)).Error
+	return s.comments.DeleteWithExtension(user, argumentID, func(tx *gorm.DB, ids []uuid.UUID) error {
+		var removed int64
+		if err := tx.Model(&model.DebateArgumentDetail{}).Where("comment_id IN ?", ids).Count(&removed).Error; err != nil {
+			return err
+		}
+		result := tx.Model(&model.Debate{}).Where("id = ? AND argument_count >= ?", argument.DebateID, removed).
+			UpdateColumn("argument_count", gorm.Expr("argument_count - ?", removed))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("debate argument count is inconsistent")
+		}
+		return nil
+	})
 }
 
 func (s *Service) AddArgumentReference(user authctx.CurrentUser, argumentID uuid.UUID, referenceID uuid.UUID) error {

@@ -33,6 +33,12 @@ func (Debate) TableName() string { return "debates" }
 // ArgumentType represents the type of argument
 type ArgumentType string
 
+type ArgumentMention struct {
+	UserID uuid.UUID `json:"user_id"`
+	Start  int       `json:"start"`
+	End    int       `json:"end"`
+}
+
 const (
 	ArgumentTypeSupport  ArgumentType = "support"
 	ArgumentTypeOppose   ArgumentType = "oppose"
@@ -64,10 +70,12 @@ type Argument struct {
 	SourceTitle   string `json:"source_title" gorm:"type:varchar(512);default:''"`
 	SourceExcerpt string `json:"source_excerpt" gorm:"type:text;default:''"`
 	// Admin moderation
-	IsFolded  bool      `json:"is_folded" gorm:"default:false"`
-	FoldNote  string    `json:"fold_note" gorm:"type:text;default:''"` // admin note for why folded
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	IsFolded      bool              `json:"is_folded" gorm:"default:false"`
+	FoldNote      string            `json:"fold_note" gorm:"type:text;default:''"` // admin note for why folded
+	Mentions      []ArgumentMention `json:"mentions,omitempty" gorm:"-"`
+	AttachmentIDs []uuid.UUID       `json:"attachment_ids,omitempty" gorm:"-"`
+	CreatedAt     time.Time         `json:"created_at"`
+	UpdatedAt     time.Time         `json:"updated_at"`
 }
 
 func (Argument) TableName() string { return "arguments" }

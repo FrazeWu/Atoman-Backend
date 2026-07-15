@@ -63,6 +63,16 @@ func (r *Repo) getArgument(id uuid.UUID, includeReferences bool) (model.Argument
 		SourceURL: detail.SourceURL, SourceTitle: detail.SourceTitle, SourceExcerpt: detail.SourceExcerpt,
 		Conclusion: detail.Conclusion, IsConcluded: detail.Conclusion != "", IsFolded: detail.IsFolded, FoldNote: detail.FoldNote,
 	}
+	var mentions []model.CommentMention
+	if err := r.db.Where("comment_id = ?", id).Order("start_offset ASC").Find(&mentions).Error; err != nil {
+		return model.Argument{}, err
+	}
+	for _, mention := range mentions {
+		argument.Mentions = append(argument.Mentions, model.ArgumentMention{UserID: mention.UserID, Start: mention.StartOffset, End: mention.EndOffset})
+	}
+	if err := r.db.Model(&model.CommentAttachment{}).Where("comment_id = ?", id).Order("position ASC").Pluck("media_asset_id", &argument.AttachmentIDs).Error; err != nil {
+		return model.Argument{}, err
+	}
 	if includeReferences {
 		var refs []model.DebateArgumentReference
 		if err := r.db.Where("comment_id = ?", id).Find(&refs).Error; err != nil {

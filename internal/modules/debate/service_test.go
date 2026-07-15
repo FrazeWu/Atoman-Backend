@@ -145,4 +145,44 @@ func TestDeleteArgumentRemovesTypedVotesAndReferences(t *testing.T) {
 	require.NoError(t, db.Model(&model.DebateArgumentReference{}).Where("comment_id IN ? OR referenced_comment_id IN ?", []uuid.UUID{root.ID, child.ID}, []uuid.UUID{root.ID, child.ID}).Count(&references).Error)
 	require.Zero(t, votes)
 	require.Zero(t, references)
+	var refreshed model.Debate
+	require.NoError(t, db.First(&refreshed, "id = ?", debate.ID).Error)
+	require.Zero(t, refreshed.ArgumentCount)
+}
+
+func TestUpdateArgumentRollsBackCoreEditWhenDetailUpdateFails(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "before", ArgumentType: "support"})
+	require.NoError(t, err)
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("reject_argument_detail_update", func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "debate_argument_details" {
+			tx.AddError(errors.New("detail update failed"))
+		}
+	}))
+	_, err = svc.UpdateArgument(user, created.ID, CreateArgumentRequest{Content: "after", ArgumentType: "evidence"})
+	require.ErrorContains(t, err, "detail update failed")
+	var stored model.CommentEntry
+	require.NoError(t, db.First(&stored, "id = ?", created.ID).Error)
+	require.Equal(t, "before", stored.Content)
+}
+
+func TestDebateCreatorCanDeleteAnotherUsersArgument(t *testing.T) {
+	svc, db, owner, debate := seededDebateCommentService(t)
+	authorModel := model.User{Username: "author", Email: "author@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	require.NoError(t, db.Create(&authorModel).Error)
+	author := authctx.CurrentUser{ID: authorModel.UUID, Username: authorModel.Username, Role: authorModel.Role}
+	created, err := svc.CreateArgument(author, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.NoError(t, err)
+	require.NoError(t, svc.DeleteArgument(owner, created.ID))
+}
+
+func TestDeleteArgumentRollsBackWhenArgumentCountIsInconsistent(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&model.Debate{}).Where("id = ?", debate.ID).Update("argument_count", 0).Error)
+	require.Error(t, svc.DeleteArgument(user, created.ID))
+	var count int64
+	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
 }
