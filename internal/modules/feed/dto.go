@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/httpx"
 
 	"github.com/google/uuid"
 )
@@ -21,11 +22,22 @@ type FeedQuery struct {
 }
 
 type TimelineItemDTO struct {
-	Type        string          `json:"type"`
-	Post        *model.Post     `json:"post,omitempty"`
-	FeedItem    *model.FeedItem `json:"feed_item,omitempty"`
-	PublishedAt time.Time       `json:"published_at"`
-	IsRead      bool            `json:"is_read"`
+	Type        string           `json:"type"`
+	Post        *TimelinePostDTO `json:"post,omitempty"`
+	FeedItem    *model.FeedItem  `json:"feed_item,omitempty"`
+	PublishedAt time.Time        `json:"published_at"`
+	IsRead      bool             `json:"is_read"`
+}
+
+type TimelinePostDTO struct {
+	model.Post
+	LikesCount    int64 `json:"likes_count,omitempty"`
+	CommentsCount int64 `json:"comments_count,omitempty"`
+}
+
+type TimelineListResponseDTO struct {
+	Data []TimelineItemDTO `json:"data"`
+	Meta httpx.PageMeta    `json:"meta"`
 }
 
 type ToggleStateDTO struct {

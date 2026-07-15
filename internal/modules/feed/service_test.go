@@ -2,6 +2,7 @@ package feed
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"reflect"
@@ -32,6 +33,8 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		&model.Collection{},
 		&model.Post{},
 		&model.PostCollection{},
+		&model.Like{},
+		&model.Comment{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
@@ -406,6 +409,60 @@ func TestGetPublicFeedBySourceIDReturnsOnlyRequestedSource(t *testing.T) {
 	}
 	if items[0].FeedItem.Title != "Feed item" {
 		t.Fatalf("expected original source item title, got %s", items[0].FeedItem.Title)
+	}
+}
+
+func TestUnaggregatedTimelinePathsOmitEngagementCounts(t *testing.T) {
+	service, _, user := newFeedTestService(t)
+
+	tests := []struct {
+		name string
+		load func() ([]TimelineItemDTO, error)
+	}{
+		{
+			name: "public",
+			load: func() ([]TimelineItemDTO, error) {
+				items, _, err := service.GetPublicFeed(FeedQuery{Page: 1, PageSize: 20})
+				return items, err
+			},
+		},
+		{
+			name: "public with duplicate filtering",
+			load: func() ([]TimelineItemDTO, error) {
+				items, _, err := service.GetPublicFeed(FeedQuery{Page: 1, PageSize: 20, HideDuplicates: true})
+				return items, err
+			},
+		},
+		{
+			name: "explore",
+			load: func() ([]TimelineItemDTO, error) {
+				items, _, err := service.GetExploreFeed(user, FeedQuery{Page: 1, PageSize: 20, Sort: "recent"})
+				return items, err
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			items, err := tc.load()
+			if err != nil {
+				t.Fatalf("load timeline: %v", err)
+			}
+			for _, item := range items {
+				if item.Post == nil {
+					continue
+				}
+				payload, err := json.Marshal(item.Post)
+				if err != nil {
+					t.Fatalf("marshal post: %v", err)
+				}
+				if strings.Contains(string(payload), "likes_count") || strings.Contains(string(payload), "comments_count") {
+					t.Fatalf("unaggregated timeline must not expose engagement counts: %s", payload)
+				}
+				return
+			}
+			t.Fatal("expected at least one post")
+		})
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 func signedFeedHTTPTokenForTest(t *testing.T, user authctx.CurrentUser) string {
@@ -196,6 +197,85 @@ func TestGetSubscribedFeedHandlerAllowsPublicReadByFeedSourceID(t *testing.T) {
 	}
 	if payload.Data[0].FeedItem.FeedSourceID != feedItem.FeedSourceID {
 		t.Fatalf("expected feed source %s, got %s", feedItem.FeedSourceID, payload.Data[0].FeedItem.FeedSourceID)
+	}
+}
+
+func TestGetSubscribedFeedHandlerReturnsPostEngagementCounts(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+
+	var post model.Post
+	if err := db.Where("title = ?", "Post item").First(&post).Error; err != nil {
+		t.Fatalf("find subscribed post: %v", err)
+	}
+	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
+		t.Fatalf("create post like: %v", err)
+	}
+	if err := db.Create(&model.Comment{TargetType: "post", TargetID: post.ID, Content: "Visible comment", Status: "visible"}).Error; err != nil {
+		t.Fatalf("create visible comment: %v", err)
+	}
+	if err := db.Create(&model.Comment{TargetType: "post", TargetID: post.ID, Content: "Hidden comment", Status: "hidden"}).Error; err != nil {
+		t.Fatalf("create hidden comment: %v", err)
+	}
+	deletedComment := model.Comment{TargetType: "post", TargetID: post.ID, Content: "Deleted comment", Status: "visible"}
+	if err := db.Create(&deletedComment).Error; err != nil {
+		t.Fatalf("create comment to delete: %v", err)
+	}
+	if err := db.Delete(&deletedComment).Error; err != nil {
+		t.Fatalf("soft delete comment: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?page=1&limit=20", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected subscribed timeline to return 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			Type string `json:"type"`
+			Post *struct {
+				ID            uuid.UUID `json:"id"`
+				Title         string    `json:"title"`
+				Status        string    `json:"status"`
+				LikesCount    int64     `json:"likes_count"`
+				CommentsCount int64     `json:"comments_count"`
+			} `json:"post"`
+			FeedItem *struct {
+				Title string `json:"title"`
+				Link  string `json:"link"`
+			} `json:"feed_item"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	var foundPost bool
+	var foundExternalItem bool
+	for _, item := range payload.Data {
+		if item.Post != nil && item.Post.ID == post.ID {
+			foundPost = true
+			if item.Post.Title != post.Title || item.Post.Status != post.Status {
+				t.Fatalf("expected original post fields to remain unchanged, got %#v", item.Post)
+			}
+			if item.Post.LikesCount != 1 || item.Post.CommentsCount != 1 {
+				t.Fatalf("expected post engagement 1/1, got %d/%d: %s", item.Post.LikesCount, item.Post.CommentsCount, rr.Body.String())
+			}
+		}
+		if item.Type == "feed_item" && item.FeedItem != nil && item.FeedItem.Title == "Feed item" {
+			foundExternalItem = item.FeedItem.Link == "https://example.com/items/1"
+		}
+	}
+	if !foundPost || !foundExternalItem {
+		t.Fatalf("expected subscribed post and unchanged external feed item, got %s", rr.Body.String())
 	}
 }
 

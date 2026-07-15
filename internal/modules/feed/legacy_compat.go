@@ -990,23 +990,7 @@ type feedReadEvent struct {
 	SourceTitle  string    `gorm:"column:source_title"`
 }
 
-// GetTimeline godoc
-// @Summary 获取订阅时间线
-// @Description 聚合博客文章与外部 RSS 条目时间线，支持分页和筛选。
-// @Tags feed
-// @Produce json
-// @Param page query int false "页码"
-// @Param limit query int false "每页数量"
-// @Param source_type query string false "源类型"
-// @Param source_id query string false "订阅 UUID"
-// @Param group_id query string false "分组 UUID"
-// @Param is_read query string false "是否已读" Enums(true,false)
-// @Param hide_duplicates query bool false "隐藏重复项"
-// @Success 200 {object} TimelineResponse
-// @Failure 500 {object} ErrorResponse
-// @Security BearerAuth
-// @Security CookieAuth
-// @Router /api/v1/feed/timeline [get]
+// GetTimeline is kept for legacy compatibility tests.
 func GetTimeline(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userIDVal, _ := c.Get("user_id")

@@ -17,6 +17,12 @@ type Repo struct{ db *gorm.DB }
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
+type PostEngagementCount struct {
+	PostID        uuid.UUID `gorm:"column:post_id"`
+	LikesCount    int64     `gorm:"column:likes_count"`
+	CommentsCount int64     `gorm:"column:comments_count"`
+}
+
 type ExploreSourceRow struct {
 	ID                uuid.UUID                 `json:"id"`
 	Title             string                    `json:"title"`
@@ -101,6 +107,19 @@ func (r *Repo) ListPublishedPostsByCollectionIDs(collectionIDs []uuid.UUID) ([]m
 		Where("posts.collection_id IN ?", collectionIDs).
 		Find(&posts).Error
 	return posts, err
+}
+
+func (r *Repo) ListPostEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCount, error) {
+	if len(postIDs) == 0 {
+		return []PostEngagementCount{}, nil
+	}
+	var counts []PostEngagementCount
+	err := r.db.Model(&model.Post{}).Select(`posts.id AS post_id,
+		(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
+		(SELECT COUNT(*) FROM comments WHERE comments.target_type = 'post' AND comments.target_id = posts.id AND comments.status = 'visible' AND comments.deleted_at IS NULL) AS comments_count`).
+		Where("posts.id IN ?", postIDs).
+		Scan(&counts).Error
+	return counts, err
 }
 
 func (r *Repo) ListFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID) ([]model.FeedItem, error) {

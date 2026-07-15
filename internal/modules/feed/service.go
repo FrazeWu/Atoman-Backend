@@ -126,6 +126,18 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	}
 	posts = append(posts, collectionPosts...)
 	posts = dedupePosts(posts)
+	postIDs := make([]uuid.UUID, 0, len(posts))
+	for i := range posts {
+		postIDs = append(postIDs, posts[i].ID)
+	}
+	engagementCounts, err := s.repo.ListPostEngagementCounts(postIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	engagementByPostID := make(map[uuid.UUID]PostEngagementCount, len(engagementCounts))
+	for _, count := range engagementCounts {
+		engagementByPostID[count.PostID] = count
+	}
 
 	feedItems, err := s.repo.ListFeedItemsBySourceIDs(feedSourceIDs)
 	if err != nil {
@@ -142,7 +154,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	for i := range posts {
 		items = append(items, TimelineItemDTO{
 			Type:        "post",
-			Post:        &posts[i],
+			Post:        timelinePostDTO(posts[i], engagementByPostID[posts[i].ID]),
 			PublishedAt: posts[i].CreatedAt,
 			IsRead:      false,
 		})
@@ -253,7 +265,7 @@ func (s *Service) GetPublicFeed(query FeedQuery) ([]TimelineItemDTO, int64, erro
 
 	items := make([]TimelineItemDTO, 0, len(posts)+len(feedItems))
 	for i := range posts {
-		items = append(items, TimelineItemDTO{Type: "post", Post: &posts[i], PublishedAt: posts[i].CreatedAt})
+		items = append(items, TimelineItemDTO{Type: "post", Post: timelinePostDTO(posts[i], PostEngagementCount{}), PublishedAt: posts[i].CreatedAt})
 	}
 	for i := range feedItems {
 		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt})
@@ -296,7 +308,7 @@ func (s *Service) getPublicFeedWithDuplicateFilter(query FeedQuery, page int, li
 
 	items := make([]TimelineItemDTO, 0, len(posts)+len(feedItems))
 	for i := range posts {
-		items = append(items, TimelineItemDTO{Type: "post", Post: &posts[i], PublishedAt: posts[i].CreatedAt})
+		items = append(items, TimelineItemDTO{Type: "post", Post: timelinePostDTO(posts[i], PostEngagementCount{}), PublishedAt: posts[i].CreatedAt})
 	}
 	for i := range feedItems {
 		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt})
@@ -331,7 +343,7 @@ func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]T
 
 	items := make([]TimelineItemDTO, 0, len(posts)+len(feedItems))
 	for i := range posts {
-		items = append(items, TimelineItemDTO{Type: "post", Post: &posts[i], PublishedAt: posts[i].CreatedAt})
+		items = append(items, TimelineItemDTO{Type: "post", Post: timelinePostDTO(posts[i], PostEngagementCount{}), PublishedAt: posts[i].CreatedAt})
 	}
 	for i := range feedItems {
 		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt, IsRead: readMap[feedItems[i].ID]})
@@ -341,6 +353,14 @@ func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]T
 	items = filterTimeline(items, query)
 	paged, total := paginateTimeline(items, page, limit)
 	return paged, total, nil
+}
+
+func timelinePostDTO(post model.Post, engagement PostEngagementCount) *TimelinePostDTO {
+	return &TimelinePostDTO{
+		Post:          post,
+		LikesCount:    engagement.LikesCount,
+		CommentsCount: engagement.CommentsCount,
+	}
 }
 
 func (s *Service) MarkRead(user authctx.CurrentUser, ids []uuid.UUID) error {
