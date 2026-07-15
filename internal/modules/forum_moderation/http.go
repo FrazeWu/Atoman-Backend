@@ -122,10 +122,7 @@ func (h *Handler) createReport(c *gin.Context) {
 	}
 	targetID, err := parseUUIDParam(raw.TargetID, "target_id")
 	if err != nil {
-		if raw.TargetType == "reply" {
-			err = comment.AppError(err)
-		}
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	report, err := h.service.CreateReport(user, CreateReportRequest{
@@ -135,10 +132,7 @@ func (h *Handler) createReport(c *gin.Context) {
 		Note:       raw.Note,
 	})
 	if err != nil {
-		if raw.TargetType == "reply" {
-			err = comment.AppError(err)
-		}
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusCreated, report)

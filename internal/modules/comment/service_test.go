@@ -14,6 +14,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/testdb"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -832,4 +833,25 @@ func TestListReturnsDatabaseErrors(t *testing.T) {
 	require.NoError(t, sqlDB.Close())
 	_, err = ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1})
 	require.Error(t, err)
+}
+
+func TestCreateRechecksLockedForumTargetInsideTransaction(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.CommentMention{}, &model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{}, &model.CommentPublishRecord{}, &model.Notification{}, &model.AuditLog{})
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error)
+	user := model.User{Username: "locked-author", Email: "locked-author@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, db.Create(&user).Error)
+	category := model.ForumCategory{Name: "Locked", Color: "#111111"}
+	require.NoError(t, db.Create(&category).Error)
+	topic := model.ForumTopic{UserID: user.UUID, CategoryID: category.ID, Title: "Locked", Content: "Body", Closed: true}
+	require.NoError(t, db.Create(&topic).Error)
+	registry := &TargetRegistry{resolvers: map[string]TargetResolver{TargetKindForumTopic: targetResolverFunc(func(_ Viewer, id uuid.UUID) (ResolvedTarget, error) {
+		return ResolvedTarget{Kind: TargetKindForumTopic, ResourceID: id, ResourceKey: id.String(), OwnerID: &user.UUID, Visible: true}, nil
+	})}}
+	service := NewService(db, registry)
+	_, err := service.Create(authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: user.Role}, TargetRef{Kind: TargetKindForumTopic, ResourceID: topic.ID}, CreateCommentInput{Content: "must not publish"})
+	require.ErrorIs(t, err, ErrTargetLocked)
+	var count int64
+	require.NoError(t, db.Model(&model.CommentEntry{}).Count(&count).Error)
+	require.Zero(t, count)
 }

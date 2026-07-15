@@ -27,6 +27,8 @@ func newCommentTestContext(t *testing.T, kind string, duration int) commentTestC
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.MediaAsset{},
+		&model.ForumCategory{},
+		&model.ForumTopic{},
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
 		&model.CommentMention{},
@@ -64,6 +66,12 @@ func newCommentTestContext(t *testing.T, kind string, duration int) commentTestC
 	}
 
 	resourceID := uuid.New()
+	if kind == TargetKindForumTopic {
+		category := model.ForumCategory{Name: "Comment tests", Color: "#111111"}
+		require.NoError(t, db.Create(&category).Error)
+		topic := model.ForumTopic{Base: model.Base{ID: resourceID}, UserID: users[0].ID, CategoryID: category.ID, Title: "Comment target", Content: "Body"}
+		require.NoError(t, db.Create(&topic).Error)
+	}
 	resolved := ResolvedTarget{
 		Kind:        kind,
 		ResourceID:  resourceID,

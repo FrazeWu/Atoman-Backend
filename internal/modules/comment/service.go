@@ -111,6 +111,9 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 			if err != nil {
 				return fmt.Errorf("lock discussion target: %w", err)
 			}
+			if err := s.validateCreateTargetTx(tx, resolved); err != nil {
+				return err
+			}
 			createNow := s.now()
 			if s.checkAbuse {
 				if err := s.checkCreateAbuse(tx, user.ID, target.ID, contentHash, createNow); err != nil {
@@ -207,6 +210,20 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	}
 	dto.RenderedHTML = rendered
 	return dto, nil
+}
+
+func (s *Service) validateCreateTargetTx(tx *gorm.DB, resolved ResolvedTarget) error {
+	if resolved.Kind != TargetKindForumTopic {
+		return nil
+	}
+	var topic model.ForumTopic
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "closed").First(&topic, "id = ?", resolved.ResourceID).Error; err != nil {
+		return ErrTargetNotFound
+	}
+	if topic.Closed {
+		return ErrTargetLocked
+	}
+	return nil
 }
 
 func (s *Service) checkCreateAbuse(tx *gorm.DB, userID, targetID uuid.UUID, contentHash string, now time.Time) error {
