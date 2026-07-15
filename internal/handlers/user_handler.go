@@ -407,14 +407,18 @@ func UpdateUserProfile(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		if err := db.Model(&user).Updates(model.User{
-			DisplayName: input.DisplayName,
-			AvatarURL:   input.AvatarURL,
-			Bio:         input.Bio,
-			Website:     input.Website,
-			Location:    input.Location,
+		if err := db.Model(&user).Updates(map[string]interface{}{
+			"display_name": input.DisplayName,
+			"avatar_url":   input.AvatarURL,
+			"bio":          input.Bio,
+			"website":      input.Website,
+			"location":     input.Location,
 		}).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
+			return
+		}
+		if err := db.First(&user, "uuid = ?", userID).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load updated profile"})
 			return
 		}
 

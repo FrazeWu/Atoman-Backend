@@ -167,6 +167,52 @@ func TestUpdateUserSettingsReturnsPersistedStateAfterInitialCreate(t *testing.T)
 	}
 }
 
+func TestUpdateUserProfileCanClearOptionalFields(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{})
+
+	user := model.User{
+		Username:    "profile-user",
+		Email:       "profile-user@example.com",
+		Password:    "hash",
+		Role:        "user",
+		IsActive:    true,
+		DisplayName: "Display Name",
+		AvatarURL:   "https://example.com/avatar.jpg",
+		Bio:         "Bio",
+		Website:     "https://example.com",
+		Location:    "Berlin",
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("user_id", user.UUID)
+		c.Next()
+	})
+	r.PUT("/users/me", UpdateUserProfile(db))
+
+	req := httptest.NewRequest(http.MethodPut, "/users/me", bytes.NewBufferString(`{"display_name":"","avatar_url":"","bio":"","website":"","location":""}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var updated model.User
+	if err := db.First(&updated, "uuid = ?", user.UUID).Error; err != nil {
+		t.Fatalf("load updated user: %v", err)
+	}
+	if updated.DisplayName != "" || updated.AvatarURL != "" || updated.Bio != "" || updated.Website != "" || updated.Location != "" {
+		t.Fatalf("expected optional profile fields to be cleared, got %#v", updated)
+	}
+}
+
 func TestSearchUsersMentionScopeReturnsUsersCurrentUserFollows(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
