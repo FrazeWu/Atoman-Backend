@@ -7201,7 +7201,7 @@ const docTemplate = `{
         },
         "/api/v1/podcast/episodes/{id}": {
             "get": {
-                "description": "按 UUID 返回单个播客单集。",
+                "description": "已发布单集可公开读取；作者可读取自己的草稿。",
                 "produces": [
                     "application/json"
                 ],

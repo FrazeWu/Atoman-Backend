@@ -21,6 +21,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/storage"
 )
@@ -284,7 +285,7 @@ func GetShowEpisodes(db *gorm.DB) gin.HandlerFunc {
 // GetPodcastEpisode returns a single episode by ID.
 // GetPodcastEpisode godoc
 // @Summary 获取播客单集详情
-// @Description 按 UUID 返回单个播客单集。
+// @Description 已发布单集可公开读取；作者可读取自己的草稿。
 // @Tags podcast
 // @Produce json
 // @Param id path string true "单集 UUID"
@@ -295,8 +296,13 @@ func GetPodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		var ep model.PodcastEpisode
-		if err := db.Preload("Post.Collection").Preload("Channel").
-			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
+		query := db.Preload("Post.Collection").Preload("Channel")
+		if viewer, ok := authctx.Current(c); ok {
+			query = query.Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL AND (posts.status = 'published' OR (posts.status = 'draft' AND posts.user_id = ?))", viewer.ID)
+		} else {
+			query = query.Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL")
+		}
+		if err := query.
 			First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
 			return

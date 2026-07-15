@@ -50,6 +50,7 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 	}
 
 	r := gin.New()
+	r.Use(middleware.OptionalAuthMiddleware())
 	SetupPodcastRoutes(r, db, nil)
 	return r, db, user, channel
 }
@@ -138,30 +139,47 @@ func validWAVBytes() []byte {
 	return append([]byte("RIFF$\x00\x00\x00WAVEfmt "), bytes.Repeat([]byte{0}, 64)...)
 }
 
-func TestGetPodcastEpisodePublicDetailRequiresPublishedLivePost(t *testing.T) {
+func TestGetPodcastEpisodeAllowsPublishedOrAuthorDraftOnly(t *testing.T) {
 	r, db, user, channel := newPodcastHandlerTestDB(t)
+	otherUser := model.User{Username: "podcast-other-user", Email: "podcast-other-user@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&otherUser).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
 
 	published := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
 	draft := createPodcastEpisodeForPostStatus(t, db, user, channel, "draft")
+	scheduled := createPodcastEpisodeForPostStatus(t, db, user, channel, "scheduled")
 	deletedPostEpisode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
 	if err := db.Delete(&model.Post{}, "id = ?", deletedPostEpisode.PostID).Error; err != nil {
 		t.Fatalf("soft delete post: %v", err)
 	}
+	deletedEpisode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
+	if err := db.Delete(&deletedEpisode).Error; err != nil {
+		t.Fatalf("soft delete episode: %v", err)
+	}
 
 	cases := []struct {
-		name string
-		id   string
-		want int
+		name       string
+		id         string
+		authHeader string
+		want       int
 	}{
 		{name: "published post is visible", id: published.ID.String(), want: http.StatusOK},
 		{name: "draft post is hidden", id: draft.ID.String(), want: http.StatusNotFound},
+		{name: "draft post is visible to its author", id: draft.ID.String(), authHeader: podcastAuthHeader(t, user), want: http.StatusOK},
+		{name: "draft post is hidden from another user", id: draft.ID.String(), authHeader: podcastAuthHeader(t, otherUser), want: http.StatusNotFound},
+		{name: "scheduled post is hidden from its author", id: scheduled.ID.String(), authHeader: podcastAuthHeader(t, user), want: http.StatusNotFound},
 		{name: "soft deleted post is hidden", id: deletedPostEpisode.ID.String(), want: http.StatusNotFound},
+		{name: "soft deleted episode is hidden", id: deletedEpisode.ID.String(), want: http.StatusNotFound},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/episodes/"+tc.id, nil)
+			if tc.authHeader != "" {
+				req.Header.Set("Authorization", tc.authHeader)
+			}
 
 			r.ServeHTTP(w, req)
 
