@@ -17,7 +17,7 @@ func newForumCommentCoreTestService(t *testing.T) (*Service, *comment.Service, *
 	t.Helper()
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumReply{},
+		&model.User{}, &model.Post{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumReply{},
 		&model.MediaAsset{}, &model.DiscussionTarget{}, &model.CommentEntry{},
 		&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentLike{},
 		&model.CommentReport{}, &model.CommentTimeAnchor{}, &model.CommentPublishRecord{},
@@ -33,6 +33,22 @@ func newForumCommentCoreTestService(t *testing.T) (*Service, *comment.Service, *
 	participant := createForumCoreUser(t, db, "participant")
 	commentService := comment.NewService(db, comment.NewTargetRegistry(db))
 	return NewService(db, commentService), commentService, db, owner, participant
+}
+
+func TestLegacyReplyMutationsRejectNonForumComment(t *testing.T) {
+	service, commentService, db, owner, _ := newForumCommentCoreTestService(t)
+	post := model.Post{UserID: owner.ID, Title: "Post", Content: "Body", Status: "published", Visibility: "public"}
+	require.NoError(t, db.Create(&post).Error)
+	created, err := commentService.Create(owner, comment.TargetRef{Kind: comment.TargetKindBlogPost, ResourceID: post.ID}, comment.CreateCommentInput{Content: "blog comment"})
+	require.NoError(t, err)
+
+	_, err = service.UpdateReply(owner, created.ID, UpdateReplyRequest{Content: "forum overwrite"})
+	require.Error(t, err)
+	require.Error(t, service.DeleteReply(owner, created.ID))
+
+	var stored model.CommentEntry
+	require.NoError(t, db.First(&stored, "id = ?", created.ID).Error)
+	require.Equal(t, "blog comment", stored.Content)
 }
 
 func createForumCoreUser(t *testing.T, db *gorm.DB, username string) authctx.CurrentUser {

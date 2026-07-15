@@ -90,25 +90,28 @@ func (s *Service) RestoreReply(user authctx.CurrentUser, replyID uuid.UUID) (mod
 }
 
 func (s *Service) SolveReply(user authctx.CurrentUser, replyID uuid.UUID) (model.ForumReply, error) {
-	topicID, err := s.commentTopicID(replyID)
+	context, err := s.comments.ResolveForumComment(replyID)
 	if err != nil {
 		return model.ForumReply{}, err
 	}
-	if err := s.comments.Mark(user, comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: topicID}, replyID); err != nil {
+	if err := s.comments.Mark(user, comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: context.Topic.ID}, replyID); err != nil {
 		return model.ForumReply{}, err
 	}
-	return model.ForumReply{Base: model.Base{ID: replyID}, TopicID: topicID, IsSolved: true}, nil
+	return model.ForumReply{Base: model.Base{ID: replyID}, TopicID: context.Topic.ID, IsSolved: true}, nil
 }
 
 func (s *Service) UnsolveReply(user authctx.CurrentUser, replyID uuid.UUID) (model.ForumReply, error) {
-	topicID, err := s.commentTopicID(replyID)
+	context, err := s.comments.ResolveForumComment(replyID)
 	if err != nil {
 		return model.ForumReply{}, err
 	}
-	if err := s.comments.Unmark(user, comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: topicID}); err != nil {
+	if context.Target.PinnedCommentID == nil || *context.Target.PinnedCommentID != replyID {
+		return model.ForumReply{}, apperr.Conflict("forum.reply_not_best_answer", "Reply is not the current best answer")
+	}
+	if err := s.comments.Unmark(user, comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: context.Topic.ID}); err != nil {
 		return model.ForumReply{}, err
 	}
-	return model.ForumReply{Base: model.Base{ID: replyID}, TopicID: topicID}, nil
+	return model.ForumReply{Base: model.Base{ID: replyID}, TopicID: context.Topic.ID}, nil
 }
 
 func (s *Service) ListReports(user authctx.CurrentUser, query ListReportsQuery) ([]model.ForumReport, int64, error) {
@@ -181,6 +184,9 @@ func (s *Service) CreateReport(user authctx.CurrentUser, req CreateReportRequest
 		return model.ForumReport{}, apperr.BadRequest("validation.invalid_request", "reason is invalid")
 	}
 	if targetType == "reply" {
+		if _, err := s.comments.ResolveForumComment(req.TargetID); err != nil {
+			return model.ForumReport{}, err
+		}
 		commentReason := reason
 		note := strings.TrimSpace(req.Note)
 		if commentReason == "off-topic" {
@@ -491,15 +497,11 @@ func (s *Service) moderateReply(user authctx.CurrentUser, replyID uuid.UUID, act
 	if replyID == uuid.Nil {
 		return model.ForumReply{}, apperr.BadRequest("validation.invalid_request", "reply_id is required")
 	}
-	topicID, err := s.commentTopicID(replyID)
+	context, err := s.comments.ResolveForumComment(replyID)
 	if err != nil {
 		return model.ForumReply{}, err
 	}
-	var topic model.ForumTopic
-	if err := s.db.Select("id", "category_id").First(&topic, "id = ?", topicID).Error; err != nil {
-		return model.ForumReply{}, err
-	}
-	categoryID := topic.CategoryID
+	categoryID := context.Topic.CategoryID
 	if err := s.canModerateCategory(user, &categoryID, func(assignment model.ForumModeratorAssignment) bool {
 		return assignment.CanLockTopic
 	}); err != nil {
@@ -508,26 +510,7 @@ func (s *Service) moderateReply(user authctx.CurrentUser, replyID uuid.UUID, act
 	if err := s.comments.Moderate(user, replyID, comment.ModerateInput{Action: action}); err != nil {
 		return model.ForumReply{}, err
 	}
-	return model.ForumReply{Base: model.Base{ID: replyID}, TopicID: topicID}, nil
-}
-
-func (s *Service) commentTopicID(replyID uuid.UUID) (uuid.UUID, error) {
-	if replyID == uuid.Nil {
-		return uuid.Nil, apperr.BadRequest("validation.invalid_request", "reply_id is required")
-	}
-	var target model.DiscussionTarget
-	err := s.db.Table("discussion_targets AS targets").
-		Select("targets.*").
-		Joins("JOIN comment_entries AS comments ON comments.target_id = targets.id").
-		Where("comments.id = ? AND targets.kind = ?", replyID, comment.TargetKindForumTopic).
-		First(&target).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return uuid.Nil, apperr.NotFound("forum.reply_not_found", "Forum reply not found")
-		}
-		return uuid.Nil, err
-	}
-	return target.ResourceID, nil
+	return model.ForumReply{Base: model.Base{ID: replyID}, TopicID: context.Topic.ID}, nil
 }
 
 func (s *Service) requireAdminOrOwner(user authctx.CurrentUser) error {

@@ -14,7 +14,7 @@ import (
 func TestToggleReplyLikeUsesCommentCore(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumLike{},
+		&model.User{}, &model.Post{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumLike{},
 		&model.MediaAsset{}, &model.DiscussionTarget{}, &model.CommentEntry{},
 		&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentLike{},
 		&model.CommentReport{}, &model.CommentTimeAnchor{}, &model.CommentPublishRecord{},
@@ -53,4 +53,32 @@ func TestToggleReplyLikeUsesCommentCore(t *testing.T) {
 	require.NoError(t, db.Model(&model.ForumLike{}).Where("target_type = ?", "reply").Count(&legacyLikes).Error)
 	require.Zero(t, coreLikes)
 	require.Zero(t, legacyLikes)
+}
+
+func TestToggleReplyLikeRejectsNonForumComment(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Post{}, &model.ForumLike{}, &model.MediaAsset{},
+		&model.DiscussionTarget{}, &model.CommentEntry{}, &model.CommentMention{},
+		&model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{},
+		&model.CommentTimeAnchor{}, &model.CommentPublishRecord{}, &model.Notification{},
+		&model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{},
+		&model.DebateArgumentReference{}, &model.DebateArgumentDebateRef{},
+	)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_comment_root_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error)
+	user := model.User{Username: "blog-owner", Email: "blog-owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	require.NoError(t, db.Create(&user).Error)
+	post := model.Post{UserID: user.UUID, Title: "Post", Content: "Body", Status: "published", Visibility: "public"}
+	require.NoError(t, db.Create(&post).Error)
+	current := authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: user.Role}
+	comments := comment.NewService(db, comment.NewTargetRegistry(db))
+	created, err := comments.Create(current, comment.TargetRef{Kind: comment.TargetKindBlogPost, ResourceID: post.ID}, comment.CreateCommentInput{Content: "blog comment"})
+	require.NoError(t, err)
+
+	_, err = NewService(db, comments).ToggleReplyLike(current, created.ID)
+	require.Error(t, err)
+	var likes int64
+	require.NoError(t, db.Model(&model.CommentLike{}).Count(&likes).Error)
+	require.Zero(t, likes)
 }

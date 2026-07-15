@@ -34,7 +34,7 @@ func newForumModerationCommentContext(t *testing.T) forumModerationCommentContex
 	t.Helper()
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumReply{},
+		&model.User{}, &model.Post{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumReply{},
 		&model.ForumModeratorAssignment{}, &model.MediaAsset{}, &model.DiscussionTarget{},
 		&model.CommentEntry{}, &model.CommentMention{}, &model.CommentAttachment{},
 		&model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{},
@@ -108,4 +108,40 @@ func TestOnlyTopicOwnerCanSetOneBestAnswer(t *testing.T) {
 	var target model.DiscussionTarget
 	require.NoError(t, ctx.db.Where("kind = ? AND resource_id = ?", comment.TargetKindForumTopic, ctx.topic.ID).First(&target).Error)
 	require.Equal(t, &second.ID, target.PinnedCommentID)
+}
+
+func TestLegacyReplyModerationRejectsNonForumComment(t *testing.T) {
+	ctx := newForumModerationCommentContext(t)
+	post := model.Post{UserID: ctx.owner.ID, Title: "Post", Content: "Body", Status: "published", Visibility: "public"}
+	require.NoError(t, ctx.db.Create(&post).Error)
+	created, err := ctx.comments.Create(ctx.owner, comment.TargetRef{Kind: comment.TargetKindBlogPost, ResourceID: post.ID}, comment.CreateCommentInput{Content: "blog comment"})
+	require.NoError(t, err)
+
+	_, err = ctx.service.HideReply(ctx.moderator, created.ID)
+	require.Error(t, err)
+	_, err = ctx.service.SolveReply(ctx.owner, created.ID)
+	require.Error(t, err)
+	_, err = ctx.service.CreateReport(ctx.participant, CreateReportRequest{TargetType: "reply", TargetID: created.ID, Reason: "spam"})
+	require.Error(t, err)
+
+	var stored model.CommentEntry
+	require.NoError(t, ctx.db.First(&stored, "id = ?", created.ID).Error)
+	require.Equal(t, comment.CommentStatusActive, stored.Status)
+	var reports int64
+	require.NoError(t, ctx.db.Model(&model.CommentReport{}).Where("comment_id = ?", created.ID).Count(&reports).Error)
+	require.Zero(t, reports)
+}
+
+func TestUnsolveReplyDoesNotClearDifferentBestAnswer(t *testing.T) {
+	ctx := newForumModerationCommentContext(t)
+	best := ctx.createReply(t, ctx.participant, "best")
+	other := ctx.createReply(t, ctx.moderator, "other")
+	_, err := ctx.service.SolveReply(ctx.owner, best.ID)
+	require.NoError(t, err)
+
+	_, err = ctx.service.UnsolveReply(ctx.owner, other.ID)
+	require.Error(t, err)
+	var target model.DiscussionTarget
+	require.NoError(t, ctx.db.Where("kind = ? AND resource_id = ?", comment.TargetKindForumTopic, ctx.topic.ID).First(&target).Error)
+	require.Equal(t, &best.ID, target.PinnedCommentID)
 }

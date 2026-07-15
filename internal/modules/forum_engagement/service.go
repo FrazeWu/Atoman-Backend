@@ -133,6 +133,9 @@ func (s *Service) ToggleReplyLike(user authctx.CurrentUser, replyID uuid.UUID) (
 	if replyID == uuid.Nil {
 		return ToggleState{}, apperr.BadRequest("validation.invalid_request", "reply_id is required")
 	}
+	if _, err := s.comments.ResolveForumComment(replyID); err != nil {
+		return ToggleState{}, err
+	}
 	var like model.CommentLike
 	result := s.db.Where("user_id = ? AND comment_id = ?", user.ID, replyID).Limit(1).Find(&like)
 	if result.Error != nil {

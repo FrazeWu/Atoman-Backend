@@ -156,10 +156,16 @@ func (s *Service) CreateReply(user authctx.CurrentUser, req CreateReplyRequest) 
 }
 
 func (s *Service) UpdateReply(user authctx.CurrentUser, replyID uuid.UUID, req UpdateReplyRequest) (comment.CommentDTO, error) {
+	if _, err := s.comments.ResolveForumComment(replyID); err != nil {
+		return comment.CommentDTO{}, err
+	}
 	return s.comments.Edit(user, replyID, comment.EditCommentInput{Content: req.Content})
 }
 
 func (s *Service) DeleteReply(user authctx.CurrentUser, replyID uuid.UUID) error {
+	if _, err := s.comments.ResolveForumComment(replyID); err != nil {
+		return err
+	}
 	return s.comments.Delete(user, replyID)
 }
 
