@@ -27,10 +27,10 @@ func (r *Repo) DeleteDebate(id uuid.UUID) error {
 }
 
 func (r *Repo) GetArgument(id uuid.UUID) (model.Argument, error) {
-	return r.getArgument(id, true)
+	return r.getArgument(id, true, true)
 }
 
-func (r *Repo) getArgument(id uuid.UUID, includeReferences bool) (model.Argument, error) {
+func (r *Repo) getArgument(id uuid.UUID, includeReferences bool, includeAttachments bool) (model.Argument, error) {
 	var entry model.CommentEntry
 	err := r.db.Table("comment_entries AS comments").
 		Select("comments.*").
@@ -70,8 +70,15 @@ func (r *Repo) getArgument(id uuid.UUID, includeReferences bool) (model.Argument
 	for _, mention := range mentions {
 		argument.Mentions = append(argument.Mentions, model.ArgumentMention{UserID: mention.UserID, Start: mention.StartOffset, End: mention.EndOffset})
 	}
-	if err := r.db.Model(&model.CommentAttachment{}).Where("comment_id = ?", id).Order("position ASC").Pluck("media_asset_id", &argument.AttachmentIDs).Error; err != nil {
-		return model.Argument{}, err
+	if includeAttachments {
+		attachments, err := r.loadArgumentAttachments([]uuid.UUID{id})
+		if err != nil {
+			return model.Argument{}, err
+		}
+		argument.Attachments = attachments[id]
+		for _, attachment := range argument.Attachments {
+			argument.AttachmentIDs = append(argument.AttachmentIDs, attachment.ID)
+		}
 	}
 	if includeReferences {
 		var refs []model.DebateArgumentReference
@@ -79,7 +86,7 @@ func (r *Repo) getArgument(id uuid.UUID, includeReferences bool) (model.Argument
 			return model.Argument{}, err
 		}
 		for _, ref := range refs {
-			loaded, err := r.getArgument(ref.ReferencedCommentID, false)
+			loaded, err := r.getArgument(ref.ReferencedCommentID, false, includeAttachments)
 			if err != nil {
 				return model.Argument{}, err
 			}
@@ -98,6 +105,30 @@ func (r *Repo) getArgument(id uuid.UUID, includeReferences bool) (model.Argument
 		}
 	}
 	return argument, nil
+}
+
+func (r *Repo) loadArgumentAttachments(ids []uuid.UUID) (map[uuid.UUID][]model.ArgumentAttachment, error) {
+	type row struct {
+		CommentID   uuid.UUID
+		ID          uuid.UUID
+		URL         string
+		ContentType string
+		Position    int
+	}
+	var rows []row
+	err := r.db.Table("comment_attachments AS attachments").
+		Select("attachments.comment_id, assets.id, assets.url, assets.content_type, attachments.position").
+		Joins("JOIN media_assets AS assets ON assets.id = attachments.media_asset_id AND assets.deleted_at IS NULL").
+		Where("attachments.comment_id IN ? AND attachments.deleted_at IS NULL", ids).
+		Order("attachments.comment_id ASC, attachments.position ASC").Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[uuid.UUID][]model.ArgumentAttachment, len(ids))
+	for _, item := range rows {
+		result[item.CommentID] = append(result[item.CommentID], model.ArgumentAttachment{ID: item.ID, URL: item.URL, ContentType: item.ContentType, Position: item.Position})
+	}
+	return result, nil
 }
 
 func (r *Repo) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error) {
@@ -143,11 +174,21 @@ func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 	}
 	arguments := make([]model.Argument, 0, len(ids))
 	for _, id := range ids {
-		argument, err := r.GetArgument(id)
+		argument, err := r.getArgument(id, true, false)
 		if err != nil {
 			return nil, err
 		}
 		arguments = append(arguments, argument)
+	}
+	attachments, err := r.loadArgumentAttachments(ids)
+	if err != nil {
+		return nil, err
+	}
+	for index := range arguments {
+		arguments[index].Attachments = attachments[arguments[index].ID]
+		for _, attachment := range arguments[index].Attachments {
+			arguments[index].AttachmentIDs = append(arguments[index].AttachmentIDs, attachment.ID)
+		}
 	}
 	return arguments, nil
 }

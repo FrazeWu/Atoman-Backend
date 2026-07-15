@@ -186,3 +186,41 @@ func TestDeleteArgumentRollsBackWhenArgumentCountIsInconsistent(t *testing.T) {
 	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Count(&count).Error)
 	require.Equal(t, int64(1), count)
 }
+
+func TestCreateAndEditImageOnlyArgument(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	asset := model.MediaAsset{UserID: &user.ID, Purpose: "comment.image", URL: "https://cdn.example/image.png", Key: "comments/image.png", ContentType: "image/png", Size: 10}
+	require.NoError(t, db.Create(&asset).Error)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ArgumentType: "evidence", AttachmentIDs: []uuid.UUID{asset.ID}})
+	require.NoError(t, err)
+	require.Empty(t, created.Content)
+	require.Len(t, created.Attachments, 1)
+	updated, err := svc.UpdateArgument(user, created.ID, CreateArgumentRequest{ArgumentType: "support", AttachmentIDs: []uuid.UUID{asset.ID}})
+	require.NoError(t, err)
+	require.Empty(t, updated.Content)
+	require.Equal(t, asset.ID, updated.Attachments[0].ID)
+}
+
+func TestCreateAndEditArgumentRejectEmptyContentAndAttachments(t *testing.T) {
+	svc, _, user, debate := seededDebateCommentService(t)
+	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ArgumentType: "support"})
+	require.Error(t, err)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.NoError(t, err)
+	_, err = svc.UpdateArgument(user, created.ID, CreateArgumentRequest{ArgumentType: "support"})
+	require.Error(t, err)
+}
+
+func TestListArgumentsLoadsAttachmentsInOneOrderedQuery(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	assets := make([]model.MediaAsset, 2)
+	for index := range assets {
+		assets[index] = model.MediaAsset{UserID: &user.ID, Purpose: "comment.image", URL: "https://cdn.example/" + string(rune('a'+index)), Key: "comments/" + string(rune('a'+index)), ContentType: "image/png", Size: 10}
+		require.NoError(t, db.Create(&assets[index]).Error)
+	}
+	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ArgumentType: "support", AttachmentIDs: []uuid.UUID{assets[1].ID, assets[0].ID}})
+	require.NoError(t, err)
+	arguments, err := svc.ListArguments(debate.ID)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{assets[1].ID, assets[0].ID}, []uuid.UUID{arguments[0].Attachments[0].ID, arguments[0].Attachments[1].ID})
+}

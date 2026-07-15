@@ -175,10 +175,10 @@ func (s *Service) CreateArgument(user authctx.CurrentUser, req CreateArgumentReq
 	if debate.Status != "open" {
 		return model.Argument{}, apperr.BadRequest("debate.closed", "Debate is closed")
 	}
-	content := strings.TrimSpace(req.Content)
+	content := req.Content
 	argumentType := strings.TrimSpace(req.ArgumentType)
-	if content == "" || argumentType == "" {
-		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "content and argument_type are required")
+	if argumentType == "" {
+		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "argument_type is required")
 	}
 	if req.ParentID != nil {
 		parent, err := s.repo.GetArgument(*req.ParentID)
@@ -225,10 +225,10 @@ func (s *Service) UpdateArgument(user authctx.CurrentUser, argumentID uuid.UUID,
 	if argument.UserID != user.ID {
 		return model.Argument{}, apperr.Forbidden("debate.forbidden", "Not authorized")
 	}
-	content := strings.TrimSpace(req.Content)
+	content := req.Content
 	argumentType := strings.TrimSpace(req.ArgumentType)
-	if content == "" || argumentType == "" {
-		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "content and argument_type are required")
+	if argumentType == "" {
+		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "argument_type is required")
 	}
 	if _, err := s.comments.EditWithExtension(user, argumentID, comment.EditCommentInput{Content: content, Mentions: req.Mentions, AttachmentIDs: req.AttachmentIDs}, func(tx *gorm.DB, _ *model.CommentEntry) error {
 		result := tx.Model(&model.DebateArgumentDetail{}).Where("comment_id = ?", argumentID).Updates(map[string]any{
