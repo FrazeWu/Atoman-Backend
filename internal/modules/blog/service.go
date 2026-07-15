@@ -71,11 +71,13 @@ type blogEngagementSignals struct {
 }
 
 type blogRankedPost struct {
-	ID          string
-	ChannelID   string
-	Score       float64
-	PublishedAt time.Time
-	Post        model.Post
+	ID            string
+	ChannelID     string
+	Score         float64
+	PublishedAt   time.Time
+	Post          model.Post
+	LikesCount    int64
+	CommentsCount int64
 }
 
 func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.UUID, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
@@ -142,7 +144,11 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		case recommendation.ModeDiscover:
 			score = blogRecommendedScore(composite, subscribed, publishedAt, now) + 0.10*(1-signals.Reads)
 		}
-		ranked = append(ranked, blogRankedPost{ID: row.ID.String(), ChannelID: blogRecommendationSourceKey(row.Post), Score: score, PublishedAt: publishedAt, Post: row.Post})
+		ranked = append(ranked, blogRankedPost{
+			ID: row.ID.String(), ChannelID: blogRecommendationSourceKey(row.Post), Score: score,
+			PublishedAt: publishedAt, Post: row.Post,
+			LikesCount: row.LikesCount, CommentsCount: row.CommentsCount,
+		})
 	}
 	sort.SliceStable(ranked, func(i, j int) bool {
 		if ranked[i].Score == ranked[j].Score {
@@ -156,13 +162,15 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 	for _, rankedItem := range ranked {
 		post := rankedItem.Post
 		items = append(items, RecommendationItemDTO{
-			ID:          post.ID.String(),
-			Title:       post.Title,
-			Summary:     post.Summary,
-			ContentType: "blog",
-			ImageURL:    post.CoverURL,
-			TargetPath:  "/post/" + post.ID.String(),
-			ScoreLabel:  blogRecommendationLabel(mode, rankedItem.Score),
+			ID:            post.ID.String(),
+			Title:         post.Title,
+			Summary:       post.Summary,
+			ContentType:   "blog",
+			ImageURL:      post.CoverURL,
+			TargetPath:    "/post/" + post.ID.String(),
+			ScoreLabel:    blogRecommendationLabel(mode, rankedItem.Score),
+			LikesCount:    rankedItem.LikesCount,
+			CommentsCount: rankedItem.CommentsCount,
 		})
 	}
 

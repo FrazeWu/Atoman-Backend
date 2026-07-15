@@ -20,13 +20,15 @@ type CreatePostRequest struct {
 }
 
 type RecommendationItemDTO struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Summary     string `json:"summary"`
-	ContentType string `json:"content_type"`
-	ImageURL    string `json:"image_url"`
-	TargetPath  string `json:"target_path"`
-	ScoreLabel  string `json:"score_label"`
+	ID            string `json:"id"`
+	Title         string `json:"title"`
+	Summary       string `json:"summary"`
+	ContentType   string `json:"content_type"`
+	ImageURL      string `json:"image_url"`
+	TargetPath    string `json:"target_path"`
+	ScoreLabel    string `json:"score_label"`
+	LikesCount    int64  `json:"likes_count"`
+	CommentsCount int64  `json:"comments_count"`
 }
 
 type PostListItemDTO struct {

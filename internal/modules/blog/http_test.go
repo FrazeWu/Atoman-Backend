@@ -323,6 +323,18 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
+	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
+		t.Fatalf("create like: %v", err)
+	}
+	if err := db.Create(&model.Comment{
+		TargetType: "post",
+		TargetID:   post.ID,
+		UserID:     model.NewNullableUserUUID(user.ID),
+		Content:    "推荐评论",
+		Status:     "visible",
+	}).Error; err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
 
 	r := newBlogHTTPRouter(service, &user)
 	w := httptest.NewRecorder()
@@ -338,12 +350,14 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			ID          string `json:"id"`
-			Title       string `json:"title"`
-			Summary     string `json:"summary"`
-			ContentType string `json:"content_type"`
-			TargetPath  string `json:"target_path"`
-			ScoreLabel  string `json:"score_label"`
+			ID            string `json:"id"`
+			Title         string `json:"title"`
+			Summary       string `json:"summary"`
+			ContentType   string `json:"content_type"`
+			TargetPath    string `json:"target_path"`
+			ScoreLabel    string `json:"score_label"`
+			LikesCount    int64  `json:"likes_count"`
+			CommentsCount int64  `json:"comments_count"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
@@ -353,6 +367,9 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 		t.Fatalf("expected recommendation items, got %s", w.Body.String())
 	}
 	first := payload.Data[0]
+	if first.LikesCount != 1 || first.CommentsCount != 1 {
+		t.Fatalf("expected recommendation engagement 1/1, got %d/%d: %s", first.LikesCount, first.CommentsCount, w.Body.String())
+	}
 	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType != "blog" {
 		t.Fatalf("expected recommendation dto fields, got %#v", first)
 	}
