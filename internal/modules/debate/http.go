@@ -37,6 +37,16 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/debate/arguments/:argumentID/fold", h.foldArgument)
 	group.DELETE("/debate/arguments/:argumentID/fold", h.unfoldArgument)
 	group.POST("/debates", h.createDebate)
+	group.GET("/debates/:debateID/arguments", h.listArguments)
+	group.POST("/debates/:debateID/arguments", h.createLegacyArgument)
+	group.PATCH("/debate-arguments/:argumentID", h.updateLegacyArgument)
+	group.DELETE("/debate-arguments/:argumentID", h.deleteLegacyArgument)
+	group.POST("/debate-arguments/:argumentID/reference", h.addArgumentReference)
+	group.DELETE("/debate-arguments/:argumentID/reference/:referenceID", h.removeArgumentReference)
+	group.POST("/debate-arguments/:argumentID/debate-reference", h.addDebateReference)
+	group.DELETE("/debate-arguments/:argumentID/debate-reference/:debateRefID", h.removeDebateReference)
+	group.POST("/debate-arguments/:argumentID/fold", h.foldArgument)
+	group.DELETE("/debate-arguments/:argumentID/fold", h.unfoldArgument)
 }
 
 func (h *Handler) listDebates(c *gin.Context) {

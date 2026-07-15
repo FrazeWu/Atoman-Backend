@@ -25,6 +25,8 @@ type DebateArgumentDetail struct {
 	SourceTitle   string    `json:"source_title"`
 	SourceExcerpt string    `json:"source_excerpt" gorm:"type:text"`
 	Conclusion    string    `json:"conclusion" gorm:"type:text"`
+	IsFolded      bool      `json:"is_folded" gorm:"not null;default:false"`
+	FoldNote      string    `json:"fold_note" gorm:"type:text;not null;default:''"`
 }
 
 type DebateArgumentReference struct {

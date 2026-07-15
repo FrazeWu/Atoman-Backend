@@ -43,6 +43,8 @@ func newCommentTestContext(t *testing.T, kind string, duration int) commentTestC
 		&model.DebateArgumentDetail{},
 		&model.DebateArgumentReference{},
 		&model.DebateArgumentDebateRef{},
+		&model.DebateVote{},
+		&model.VoteHistory{},
 	)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_comment_root_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error)

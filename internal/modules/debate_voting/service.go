@@ -47,8 +47,8 @@ func (s *Service) SetArgumentVote(user authctx.CurrentUser, argumentID uuid.UUID
 
 	var saved model.DebateVote
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var argument model.Argument
-		if err := tx.First(&argument, "id = ?", argumentID).Error; err != nil {
+		var detail model.DebateArgumentDetail
+		if err := tx.First(&detail, "comment_id = ?", argumentID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return apperr.NotFound("debate.argument_not_found", "Argument not found")
 			}
@@ -67,9 +67,6 @@ func (s *Service) SetArgumentVote(user authctx.CurrentUser, argumentID uuid.UUID
 			}
 			oldVoteType := existing.VoteType
 			if err := tx.Model(&existing).Update("vote_type", voteType).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&model.Argument{}).Where("id = ?", argumentID).UpdateColumn("vote_count", gorm.Expr("vote_count - ? + ?", oldVoteType, voteType)).Error; err != nil {
 				return err
 			}
 			history := model.VoteHistory{
@@ -92,9 +89,6 @@ func (s *Service) SetArgumentVote(user authctx.CurrentUser, argumentID uuid.UUID
 			VoteType:   voteType,
 		}
 		if err := tx.Create(&vote).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&model.Argument{}).Where("id = ?", argumentID).UpdateColumn("vote_count", gorm.Expr("vote_count + ?", voteType)).Error; err != nil {
 			return err
 		}
 		saved = vote
@@ -125,7 +119,7 @@ func (s *Service) RemoveArgumentVote(user authctx.CurrentUser, argumentID uuid.U
 		if err := tx.Delete(&vote).Error; err != nil {
 			return err
 		}
-		return tx.Model(&model.Argument{}).Where("id = ?", argumentID).UpdateColumn("vote_count", gorm.Expr("vote_count - ?", vote.VoteType)).Error
+		return nil
 	})
 }
 

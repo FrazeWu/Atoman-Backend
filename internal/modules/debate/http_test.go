@@ -18,7 +18,23 @@ func newDebateHTTPTestService(t *testing.T) (*Service, authctx.CurrentUser) {
 	t.Helper()
 
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Debate{}, &model.Argument{})
+	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{}, &model.Debate{}, &model.Argument{},
+		&model.DiscussionTarget{}, &model.CommentEntry{}, &model.CommentMention{},
+		&model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{}, &model.CommentPublishRecord{},
+		&model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{}, &model.DebateArgumentReference{},
+		&model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{})
+	if err := db.Exec(`CREATE UNIQUE INDEX uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error; err != nil {
+		t.Fatalf("create target index: %v", err)
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX uq_comment_root_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error; err != nil {
+		t.Fatalf("create floor index: %v", err)
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX uq_notification_dedup ON notifications (recipient_id, source_type, source_id) WHERE aggregation_key = '' AND deleted_at IS NULL`).Error; err != nil {
+		t.Fatalf("create notification index: %v", err)
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX uq_notification_unread_aggregate ON notifications (recipient_id, aggregation_key) WHERE aggregation_key <> '' AND read_at IS NULL AND deleted_at IS NULL`).Error; err != nil {
+		t.Fatalf("create aggregate index: %v", err)
+	}
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -58,6 +74,7 @@ func TestRegisterRoutesMountsListDetailSearchAndArgumentList(t *testing.T) {
 		"/api/v1/debate/topics/" + debate.ID.String(),
 		"/api/v1/debate/topics/search?q=Router",
 		"/api/v1/debate/topics/" + debate.ID.String() + "/arguments",
+		"/api/v1/debates/" + debate.ID.String() + "/arguments",
 	}
 
 	for _, path := range cases {
@@ -111,7 +128,7 @@ func TestRegisterRoutesMountsTopicMutationAndArgumentCreate(t *testing.T) {
 
 	argumentRaw := bytes.NewBufferString(`{"content":"Argument","argument_type":"support"}`)
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics/"+created.Data.ID.String()+"/arguments", argumentRaw)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/debates/"+created.Data.ID.String()+"/arguments", argumentRaw)
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
@@ -150,7 +167,7 @@ func TestRegisterRoutesMountsConcludeReopenAndArgumentMutation(t *testing.T) {
 
 	updateArgumentRaw := bytes.NewBufferString(`{"content":"Updated argument","argument_type":"support","source_url":"https://example.com"}`)
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPut, "/api/v1/debate/arguments/"+argument.ID.String(), updateArgumentRaw)
+	req = httptest.NewRequest(http.MethodPatch, "/api/v1/debate-arguments/"+argument.ID.String(), updateArgumentRaw)
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {

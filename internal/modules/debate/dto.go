@@ -1,6 +1,10 @@
 package debate
 
-import "github.com/google/uuid"
+import (
+	"atoman/internal/modules/comment"
+
+	"github.com/google/uuid"
+)
 
 type ListDebatesQuery struct {
 	Status   string
@@ -10,20 +14,22 @@ type ListDebatesQuery struct {
 }
 
 type CreateDebateRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Content     string `json:"content"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Content     string   `json:"content"`
 	Tags        []string `json:"tags"`
 }
 
 type CreateArgumentRequest struct {
-	DebateID      uuid.UUID  `json:"debate_id"`
-	ParentID      *uuid.UUID `json:"parent_id"`
-	Content       string     `json:"content"`
-	ArgumentType  string     `json:"argument_type"`
-	SourceURL     string     `json:"source_url"`
-	SourceTitle   string     `json:"source_title"`
-	SourceExcerpt string     `json:"source_excerpt"`
+	DebateID      uuid.UUID              `json:"debate_id"`
+	ParentID      *uuid.UUID             `json:"parent_id"`
+	Content       string                 `json:"content"`
+	ArgumentType  string                 `json:"argument_type"`
+	SourceURL     string                 `json:"source_url"`
+	SourceTitle   string                 `json:"source_title"`
+	SourceExcerpt string                 `json:"source_excerpt"`
+	Mentions      []comment.MentionInput `json:"mentions"`
+	AttachmentIDs []uuid.UUID            `json:"attachment_ids"`
 }
 
 type ReferenceRequest struct {

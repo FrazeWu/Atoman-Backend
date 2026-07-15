@@ -540,6 +540,11 @@ func deleteCommentRelations(tx *gorm.DB, ids []uuid.UUID) error {
 }
 
 func deleteCommentExtensionRelations(tx *gorm.DB, ids []uuid.UUID) error {
+	for _, relation := range []any{&model.DebateVote{}, &model.VoteHistory{}} {
+		if err := tx.Unscoped().Where("argument_id IN ?", ids).Delete(relation).Error; err != nil {
+			return err
+		}
+	}
 	for _, relation := range []any{&model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{}, &model.DebateArgumentDebateRef{}} {
 		if err := tx.Unscoped().Where("comment_id IN ?", ids).Delete(relation).Error; err != nil {
 			return fmt.Errorf("delete comment extension relations: %w", err)

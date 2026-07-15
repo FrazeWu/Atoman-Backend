@@ -20,8 +20,6 @@ func (r *Repo) GetDebate(id uuid.UUID) (model.Debate, error) {
 	return debate, err
 }
 
-func (r *Repo) CreateArgument(argument *model.Argument) error { return r.db.Create(argument).Error }
-
 func (r *Repo) SaveDebate(debate *model.Debate) error { return r.db.Save(debate).Error }
 
 func (r *Repo) DeleteDebate(id uuid.UUID) error {
@@ -29,15 +27,67 @@ func (r *Repo) DeleteDebate(id uuid.UUID) error {
 }
 
 func (r *Repo) GetArgument(id uuid.UUID) (model.Argument, error) {
-	var argument model.Argument
-	err := r.db.Preload("User").First(&argument, "id = ?", id).Error
-	return argument, err
+	return r.getArgument(id, true)
 }
 
-func (r *Repo) SaveArgument(argument *model.Argument) error { return r.db.Save(argument).Error }
-
-func (r *Repo) DeleteArgument(id uuid.UUID) error {
-	return r.db.Delete(&model.Argument{}, "id = ?", id).Error
+func (r *Repo) getArgument(id uuid.UUID, includeReferences bool) (model.Argument, error) {
+	var entry model.CommentEntry
+	err := r.db.Table("comment_entries AS comments").
+		Select("comments.*").
+		Joins("JOIN debate_argument_details AS details ON details.comment_id = comments.id").
+		Joins("JOIN discussion_targets AS targets ON targets.id = comments.target_id AND targets.kind = ?", "debate").
+		Where("comments.id = ?", id).First(&entry).Error
+	if err != nil {
+		return model.Argument{}, err
+	}
+	var target model.DiscussionTarget
+	if err := r.db.First(&target, "id = ?", entry.TargetID).Error; err != nil {
+		return model.Argument{}, err
+	}
+	var detail model.DebateArgumentDetail
+	if err := r.db.First(&detail, "comment_id = ?", id).Error; err != nil {
+		return model.Argument{}, err
+	}
+	var user model.User
+	if err := r.db.First(&user, "uuid = ?", entry.AuthorID).Error; err != nil {
+		return model.Argument{}, err
+	}
+	var voteCount int
+	if err := r.db.Model(&model.DebateVote{}).Select("COALESCE(SUM(vote_type), 0)").Where("argument_id = ?", id).Scan(&voteCount).Error; err != nil {
+		return model.Argument{}, err
+	}
+	argument := model.Argument{
+		Base:     model.Base{ID: entry.ID, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt},
+		DebateID: target.ResourceID, ParentID: entry.ReplyToID, UserID: entry.AuthorID, User: &user,
+		Content: entry.Content, ArgumentType: model.ArgumentType(detail.ArgumentType), VoteCount: voteCount,
+		SourceURL: detail.SourceURL, SourceTitle: detail.SourceTitle, SourceExcerpt: detail.SourceExcerpt,
+		Conclusion: detail.Conclusion, IsConcluded: detail.Conclusion != "", IsFolded: detail.IsFolded, FoldNote: detail.FoldNote,
+	}
+	if includeReferences {
+		var refs []model.DebateArgumentReference
+		if err := r.db.Where("comment_id = ?", id).Find(&refs).Error; err != nil {
+			return model.Argument{}, err
+		}
+		for _, ref := range refs {
+			loaded, err := r.getArgument(ref.ReferencedCommentID, false)
+			if err != nil {
+				return model.Argument{}, err
+			}
+			argument.References = append(argument.References, loaded)
+		}
+		var debateRefs []model.DebateArgumentDebateRef
+		if err := r.db.Where("comment_id = ?", id).Find(&debateRefs).Error; err != nil {
+			return model.Argument{}, err
+		}
+		for _, ref := range debateRefs {
+			var debate model.Debate
+			if err := r.db.First(&debate, "id = ?", ref.DebateID).Error; err != nil {
+				return model.Argument{}, err
+			}
+			argument.ReferencedDebates = append(argument.ReferencedDebates, debate)
+		}
+	}
+	return argument, nil
 }
 
 func (r *Repo) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error) {
@@ -72,7 +122,22 @@ func (r *Repo) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error
 }
 
 func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
-	var arguments []model.Argument
-	err := r.db.Preload("User").Where("debate_id = ?", debateID).Order("created_at ASC").Find(&arguments).Error
-	return arguments, err
+	var ids []uuid.UUID
+	err := r.db.Table("comment_entries AS comments").
+		Joins("JOIN debate_argument_details AS details ON details.comment_id = comments.id").
+		Joins("JOIN discussion_targets AS targets ON targets.id = comments.target_id").
+		Where("targets.kind = ? AND targets.resource_id = ? AND comments.deleted_at IS NULL AND comments.status IN ?", "debate", debateID, []string{"active", "auto_folded"}).
+		Order("comments.created_at ASC").Pluck("comments.id", &ids).Error
+	if err != nil {
+		return nil, err
+	}
+	arguments := make([]model.Argument, 0, len(ids))
+	for _, id := range ids {
+		argument, err := r.GetArgument(id)
+		if err != nil {
+			return nil, err
+		}
+		arguments = append(arguments, argument)
+	}
+	return arguments, nil
 }

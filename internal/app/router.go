@@ -43,7 +43,7 @@ func RegisterV1Routes(
 	forumModerationService := forum_moderation.NewService(db, commentService)
 	forum_moderation.RegisterRoutes(group.Group("/forum"), forumModerationService)
 	forum_moderation.RegisterRoutes(group.Group("/forum/moderation"), forumModerationService)
-	debate.RegisterRoutes(group, debate.NewService(db))
+	debate.RegisterRoutes(group, debate.NewService(db, commentService))
 	debate_voting.RegisterRoutes(group, debate_voting.NewService(db))
 	musicGroup := group.Group("/music")
 	musicGroup.Use(middleware.OptionalAuthMiddleware())
