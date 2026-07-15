@@ -28,7 +28,7 @@ import (
 func SetupVideoRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	v := router.Group("/api/v1/videos")
 	{
-		v.GET("", GetVideos(db))
+		v.GET("", middleware.OptionalAuthMiddleware(), GetVideos(db))
 		v.GET("/recommend/items", GetRecommendedVideoItems(db))
 		v.GET("/:id", GetVideo(db))
 		v.GET("/:id/recommended", GetRecommendedVideos(db))
@@ -368,10 +368,11 @@ func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 // GetVideos returns published videos. Supports ?channel_id=&tag=&sort=latest|popular&limit=40
 // GetVideos godoc
 // @Summary 获取视频列表
-// @Description 返回公开已发布的视频列表，可按频道、标签和排序方式筛选。
+// @Description 匿名返回公开已发布视频；有效认证按本人频道或合集筛选时也返回本人的非公开视频。
 // @Tags videos
 // @Produce json
 // @Param channel_id query string false "频道 UUID"
+// @Param collection_id query string false "合集 UUID"
 // @Param tag query string false "标签"
 // @Param sort query string false "排序方式" Enums(latest,popular)
 // @Param limit query int false "返回数量上限"

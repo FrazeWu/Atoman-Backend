@@ -10,8 +10,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"atoman/internal/middleware"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -41,6 +44,117 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.Subscription{},
 	)
 	return db
+}
+
+func signedVideoListTokenForTest(t *testing.T, user model.User) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"user_id":  user.UUID.String(),
+		"username": user.Username,
+		"role":     user.Role,
+		"exp":      time.Now().Add(time.Hour).Unix(),
+	})
+	signed, err := token.SignedString([]byte("test-secret"))
+	require.NoError(t, err)
+	return signed
+}
+
+func TestSetupVideoRoutesListUsesOptionalAuthForOwnerCollection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newVideoTestDB(t)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+
+	owner := seedVideoUser(t, db)
+	other := seedVideoUser(t, db)
+	ownerChannel := seedVideoChannel(t, db, owner.UUID, "Owner Videos")
+	otherChannel := seedVideoChannel(t, db, other.UUID, "Other Videos")
+	ownerCollection := model.Collection{ChannelID: ownerChannel.ID, Name: "Owner Collection"}
+	otherCollection := model.Collection{ChannelID: otherChannel.ID, Name: "Other Collection"}
+	require.NoError(t, db.Create(&ownerCollection).Error)
+	require.NoError(t, db.Create(&otherCollection).Error)
+
+	ownerPublic := seedVideoWithState(t, db, owner.UUID, "published", "public")
+	ownerDraft := seedVideoWithState(t, db, owner.UUID, "draft", "public")
+	ownerPrivate := seedVideoWithState(t, db, owner.UUID, "published", "private")
+	otherPublic := seedVideoWithState(t, db, other.UUID, "published", "public")
+	otherPrivate := seedVideoWithState(t, db, other.UUID, "published", "private")
+	for _, video := range []model.Video{ownerPublic, ownerDraft, ownerPrivate} {
+		require.NoError(t, db.Model(&video).Update("channel_id", ownerChannel.ID).Error)
+	}
+	for _, video := range []model.Video{otherPublic, otherPrivate} {
+		require.NoError(t, db.Model(&video).Update("channel_id", otherChannel.ID).Error)
+	}
+	for _, link := range []model.VideoCollection{
+		{VideoID: ownerPublic.ID, CollectionID: ownerCollection.ID},
+		{VideoID: ownerDraft.ID, CollectionID: ownerCollection.ID},
+		{VideoID: ownerPrivate.ID, CollectionID: ownerCollection.ID},
+		{VideoID: otherPublic.ID, CollectionID: otherCollection.ID},
+		{VideoID: otherPrivate.ID, CollectionID: otherCollection.ID},
+	} {
+		require.NoError(t, db.Create(&link).Error)
+	}
+
+	r := gin.New()
+	SetupVideoRoutes(r, db, nil)
+	requestIDs := func(collectionID uuid.UUID, authorization string) []uuid.UUID {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/videos?collection_id="+collectionID.String(), nil)
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var videos []model.Video
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &videos))
+		ids := make([]uuid.UUID, 0, len(videos))
+		for _, video := range videos {
+			ids = append(ids, video.ID)
+		}
+		return ids
+	}
+
+	require.ElementsMatch(t, []uuid.UUID{ownerPublic.ID}, requestIDs(ownerCollection.ID, ""))
+	require.ElementsMatch(t, []uuid.UUID{
+		ownerPublic.ID,
+		ownerDraft.ID,
+		ownerPrivate.ID,
+	}, requestIDs(ownerCollection.ID, "Bearer "+signedVideoListTokenForTest(t, owner)))
+	require.ElementsMatch(t, []uuid.UUID{otherPublic.ID}, requestIDs(
+		otherCollection.ID,
+		"Bearer "+signedVideoListTokenForTest(t, owner),
+	))
+	require.ElementsMatch(t, []uuid.UUID{ownerPublic.ID}, requestIDs(ownerCollection.ID, "Bearer invalid.token"))
+
+	requestChannelIDs := func(channelID uuid.UUID, authorization string) []uuid.UUID {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/videos?channel_id="+channelID.String(), nil)
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var videos []model.Video
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &videos))
+		ids := make([]uuid.UUID, 0, len(videos))
+		for _, video := range videos {
+			ids = append(ids, video.ID)
+		}
+		return ids
+	}
+
+	ownerAuthorization := "Bearer " + signedVideoListTokenForTest(t, owner)
+	require.ElementsMatch(t, []uuid.UUID{ownerPublic.ID}, requestChannelIDs(ownerChannel.ID, ""))
+	require.ElementsMatch(t, []uuid.UUID{
+		ownerPublic.ID,
+		ownerDraft.ID,
+		ownerPrivate.ID,
+	}, requestChannelIDs(ownerChannel.ID, ownerAuthorization))
+	require.ElementsMatch(t, []uuid.UUID{ownerPublic.ID}, requestChannelIDs(ownerChannel.ID, "Bearer invalid.token"))
+	require.ElementsMatch(t, []uuid.UUID{otherPublic.ID}, requestChannelIDs(otherChannel.ID, ownerAuthorization))
 }
 
 func TestGetVideosFiltersCurrentUsersSubscribedChannels(t *testing.T) {
