@@ -3,6 +3,7 @@ package forum
 import (
 	"net/http"
 
+	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -211,7 +212,7 @@ func (h *Handler) createReply(c *gin.Context) {
 	}
 	reply, err := h.service.CreateReply(user, req)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusCreated, reply)
@@ -235,7 +236,7 @@ func (h *Handler) updateReply(c *gin.Context) {
 	}
 	reply, err := h.service.UpdateReply(user, replyID, req)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, reply)
@@ -253,7 +254,7 @@ func (h *Handler) deleteReply(c *gin.Context) {
 		return
 	}
 	if err := h.service.DeleteReply(user, replyID); err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"ok": true})

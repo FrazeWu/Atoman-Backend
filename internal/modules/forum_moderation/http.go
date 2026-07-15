@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -121,6 +122,9 @@ func (h *Handler) createReport(c *gin.Context) {
 	}
 	targetID, err := parseUUIDParam(raw.TargetID, "target_id")
 	if err != nil {
+		if raw.TargetType == "reply" {
+			err = comment.AppError(err)
+		}
 		httpx.Error(c, err)
 		return
 	}
@@ -131,6 +135,9 @@ func (h *Handler) createReport(c *gin.Context) {
 		Note:       raw.Note,
 	})
 	if err != nil {
+		if raw.TargetType == "reply" {
+			err = comment.AppError(err)
+		}
 		httpx.Error(c, err)
 		return
 	}
@@ -408,7 +415,7 @@ func (h *Handler) handleReplyAction(c *gin.Context, fn func(authctx.CurrentUser,
 	}
 	result, err := fn(user, replyID)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, result)

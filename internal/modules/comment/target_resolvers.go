@@ -145,7 +145,9 @@ func (r *databaseTargetResolvers) resolveForumTopic(_ Viewer, resourceID uuid.UU
 	if err := r.db.First(&topic, "id = ?", resourceID).Error; err != nil {
 		return ResolvedTarget{}, targetLookupError(TargetKindForumTopic, resourceID, err)
 	}
-	return ownedTarget(TargetKindForumTopic, topic.ID, topic.UserID, true, 0, markLabelBestAnswer), nil
+	target := ownedTarget(TargetKindForumTopic, topic.ID, topic.UserID, true, 0, markLabelBestAnswer)
+	target.Locked = topic.Closed
+	return target, nil
 }
 
 func (r *databaseTargetResolvers) resolveDebate(_ Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {

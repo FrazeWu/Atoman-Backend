@@ -264,11 +264,26 @@ func (s *Service) applyCommentState(topics []model.ForumTopic) error {
 		targetByResource[target.ResourceID] = target
 		targetIDs[i] = target.ID
 	}
+	visibleStatuses := []string{comment.CommentStatusActive, comment.CommentStatusAutoFolded}
+	latestIDs := s.db.Table("comment_entries AS candidate").
+		Select("candidate.id").
+		Where("candidate.target_id IN ? AND candidate.deleted_at IS NULL AND candidate.status IN ?", targetIDs, visibleStatuses).
+		Where(`candidate.root_id IS NULL OR EXISTS (
+			SELECT 1 FROM comment_entries AS roots
+			WHERE roots.id = candidate.root_id AND roots.deleted_at IS NULL AND roots.status IN ?
+		)`, visibleStatuses).
+		Where(`candidate.id = (
+			SELECT latest.id FROM comment_entries AS latest
+			WHERE latest.target_id = candidate.target_id
+			  AND latest.deleted_at IS NULL AND latest.status IN ?
+			  AND (latest.root_id IS NULL OR EXISTS (
+				SELECT 1 FROM comment_entries AS latest_roots
+				WHERE latest_roots.id = latest.root_id AND latest_roots.deleted_at IS NULL AND latest_roots.status IN ?
+			  ))
+			ORDER BY latest.created_at DESC, latest.id DESC LIMIT 1
+		)`, visibleStatuses, visibleStatuses)
 	var latest []model.CommentEntry
-	if err := s.db.Model(&model.CommentEntry{}).
-		Select("target_id", "created_at").
-		Where("target_id IN ? AND status IN ?", targetIDs, []string{comment.CommentStatusActive, comment.CommentStatusAutoFolded}).
-		Order("created_at DESC, id DESC").Find(&latest).Error; err != nil {
+	if err := s.db.Where("id IN (?)", latestIDs).Find(&latest).Error; err != nil {
 		return err
 	}
 	latestByTarget := make(map[uuid.UUID]*time.Time, len(latest))

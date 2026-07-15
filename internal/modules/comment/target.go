@@ -42,6 +42,7 @@ type ResolvedTarget struct {
 	ResourceKey string
 	OwnerID     *uuid.UUID
 	Visible     bool
+	Locked      bool
 	DurationSec int
 	MarkLabel   string
 }

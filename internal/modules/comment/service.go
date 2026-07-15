@@ -21,6 +21,7 @@ import (
 var (
 	ErrAuthenticationRequired = errors.New("comment authentication required")
 	ErrTargetNotVisible       = errors.New("comment target not visible")
+	ErrTargetLocked           = errors.New("comment target locked")
 	ErrInvalidContent         = errors.New("invalid comment content")
 	ErrInvalidReply           = errors.New("invalid comment reply")
 	ErrInvalidAttachment      = errors.New("invalid comment attachment")
@@ -83,6 +84,9 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	resolved, err := s.resolveVisible(Viewer{UserID: &user.ID}, targetRef)
 	if err != nil {
 		return CommentDTO{}, err
+	}
+	if resolved.Locked {
+		return CommentDTO{}, ErrTargetLocked
 	}
 	normalized, rendered, err := validateCommentContent(input.Content, input.AttachmentIDs)
 	if err != nil {

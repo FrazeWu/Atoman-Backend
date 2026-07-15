@@ -9,6 +9,7 @@ import (
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -94,4 +95,59 @@ func TestGetTopicAggregatesReplyStateFromCommentCore(t *testing.T) {
 	require.Equal(t, &root.ID, loaded.SolvedReplyID)
 	require.NotNil(t, loaded.LastReplyAt)
 	require.WithinDuration(t, child.CreatedAt, *loaded.LastReplyAt, time.Second)
+}
+
+func TestLockedTopicRejectsNewRepliesButKeepsExistingReadable(t *testing.T) {
+	service, _, db, owner, participant := newForumCommentCoreTestService(t)
+	topic := createForumTestTopic(t, db, owner)
+	root, err := service.CreateReply(participant, CreateReplyRequest{TopicID: topic.ID, Content: "existing"})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&topic).Update("closed", true).Error)
+
+	_, err = service.CreateReply(owner, CreateReplyRequest{TopicID: topic.ID, Content: "blocked"})
+	require.ErrorIs(t, err, comment.ErrTargetLocked)
+	listed, err := service.ListReplies(topic.ID)
+	require.NoError(t, err)
+	require.Len(t, listed.Items, 1)
+	require.Equal(t, root.ID, listed.Items[0].ID)
+}
+
+func TestTopicLatestReplyIgnoresChildrenOfHiddenRoots(t *testing.T) {
+	service, _, db, owner, participant := newForumCommentCoreTestService(t)
+	topic := createForumTestTopic(t, db, owner)
+	visible, err := service.CreateReply(participant, CreateReplyRequest{TopicID: topic.ID, Content: "visible"})
+	require.NoError(t, err)
+	hidden, err := service.CreateReply(participant, CreateReplyRequest{TopicID: topic.ID, Content: "hidden root"})
+	require.NoError(t, err)
+	child, err := service.CreateReply(owner, CreateReplyRequest{TopicID: topic.ID, ParentReplyID: &hidden.ID, Content: "hidden child"})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", visible.ID).Update("created_at", time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC)).Error)
+	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", child.ID).Update("created_at", time.Date(2026, 1, 1, 3, 0, 0, 0, time.UTC)).Error)
+	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", hidden.ID).Update("status", comment.CommentStatusModeratorHidden).Error)
+
+	loaded, err := service.GetTopic(topic.ID)
+	require.NoError(t, err)
+	require.NotNil(t, loaded.LastReplyAt)
+	require.Equal(t, time.Date(2026, 1, 1, 1, 0, 0, 0, time.UTC), loaded.LastReplyAt.UTC())
+}
+
+func TestListTopicsSelectsOneLatestReplyPerTarget(t *testing.T) {
+	service, _, db, owner, participant := newForumCommentCoreTestService(t)
+	first := createForumTestTopic(t, db, owner)
+	second := model.ForumTopic{UserID: owner.ID, CategoryID: first.CategoryID, Title: "Second", Content: "Body"}
+	require.NoError(t, db.Create(&second).Error)
+	firstReply, err := service.CreateReply(participant, CreateReplyRequest{TopicID: first.ID, Content: "first"})
+	require.NoError(t, err)
+	secondReply, err := service.CreateReply(participant, CreateReplyRequest{TopicID: second.ID, Content: "second"})
+	require.NoError(t, err)
+	timestamp := time.Date(2026, 2, 1, 2, 0, 0, 0, time.UTC)
+	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id IN ?", []uuid.UUID{firstReply.ID, secondReply.ID}).Update("created_at", timestamp).Error)
+
+	topics, _, err := service.ListTopics(ListTopicsQuery{Page: 1, PageSize: 20})
+	require.NoError(t, err)
+	require.Len(t, topics, 2)
+	for _, topic := range topics {
+		require.NotNil(t, topic.LastReplyAt)
+		require.Equal(t, timestamp, topic.LastReplyAt.UTC())
+	}
 }

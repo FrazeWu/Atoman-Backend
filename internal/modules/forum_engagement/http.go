@@ -3,6 +3,7 @@ package forum_engagement
 import (
 	"net/http"
 
+	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -73,7 +74,7 @@ func (h *Handler) toggleReplyLike(c *gin.Context) {
 	}
 	state, err := h.service.ToggleReplyLike(user, replyID)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, state)
