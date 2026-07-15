@@ -387,12 +387,22 @@ func (s *Service) UnfoldArgument(user authctx.CurrentUser, argumentID uuid.UUID)
 	}).Error
 }
 
-func (s *Service) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
+func (s *Service) ListArguments(debateID uuid.UUID, pageAndSize ...int) ([]model.Argument, int64, error) {
 	if debateID == uuid.Nil {
-		return nil, apperr.BadRequest("validation.invalid_request", "debate_id is required")
+		return nil, 0, apperr.BadRequest("validation.invalid_request", "debate_id is required")
 	}
 	if _, err := s.GetDebate(debateID); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return s.repo.ListArguments(debateID)
+	page, pageSize := 1, 20
+	if len(pageAndSize) > 0 && pageAndSize[0] > 0 {
+		page = pageAndSize[0]
+	}
+	if len(pageAndSize) > 1 && pageAndSize[1] > 0 {
+		pageSize = pageAndSize[1]
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return s.repo.ListArguments(debateID, page, pageSize)
 }

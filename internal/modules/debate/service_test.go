@@ -66,7 +66,7 @@ func TestListArgumentsExcludesModerationHiddenComments(t *testing.T) {
 	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
 	require.NoError(t, err)
 	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Update("status", "hidden").Error)
-	arguments, err := svc.ListArguments(debate.ID)
+	arguments, _, err := svc.ListArguments(debate.ID)
 	require.NoError(t, err)
 	require.Empty(t, arguments)
 }
@@ -221,7 +221,7 @@ func TestListArgumentsLoadsAttachmentsInOneOrderedQuery(t *testing.T) {
 	}
 	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ArgumentType: "support", AttachmentIDs: []uuid.UUID{assets[1].ID, assets[0].ID}})
 	require.NoError(t, err)
-	arguments, err := svc.ListArguments(debate.ID)
+	arguments, _, err := svc.ListArguments(debate.ID)
 	require.NoError(t, err)
 	require.Equal(t, []uuid.UUID{assets[1].ID, assets[0].ID}, []uuid.UUID{arguments[0].Attachments[0].ID, arguments[0].Attachments[1].ID})
 }
@@ -282,9 +282,31 @@ func TestListArgumentsUsesBoundedQueryCount(t *testing.T) {
 		_ = db.Callback().Raw().Remove("count-debate-list-raw")
 		_ = db.Callback().Row().Remove("count-debate-list-row")
 	})
-	arguments, err := svc.ListArguments(debate.ID)
+	arguments, _, err := svc.ListArguments(debate.ID)
 	require.NoError(t, err)
 	require.Len(t, arguments, 5)
 	require.Positive(t, queries)
 	require.LessOrEqual(t, queries, 12)
+}
+
+func TestListArgumentsPaginatesAndKeepsCrossPageReferences(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	created := make([]model.Argument, 0, 6)
+	for index := 0; index < 6; index++ {
+		argument, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: fmt.Sprintf("page-%d", index), ArgumentType: "support"})
+		require.NoError(t, err)
+		created = append(created, argument)
+		require.NoError(t, db.Where("author_id = ?", user.ID).Delete(&model.CommentPublishRecord{}).Error)
+	}
+	require.NoError(t, svc.AddArgumentReference(user, created[5].ID, created[0].ID))
+	first, total, err := svc.ListArguments(debate.ID, 1, 5)
+	require.NoError(t, err)
+	require.Len(t, first, 5)
+	require.Equal(t, int64(6), total)
+	second, total, err := svc.ListArguments(debate.ID, 2, 5)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.Equal(t, int64(6), total)
+	require.Len(t, second[0].References, 1)
+	require.Equal(t, created[0].ID, second[0].References[0].ID)
 }

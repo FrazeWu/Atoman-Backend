@@ -88,12 +88,13 @@ func (h *Handler) listArguments(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateID must be a valid uuid"))
 		return
 	}
-	arguments, err := h.service.ListArguments(debateID)
+	page, pageSize := httpx.PageParams(c)
+	arguments, total, err := h.service.ListArguments(debateID, page, pageSize)
 	if err != nil {
 		httpx.Error(c, comment.AppError(err))
 		return
 	}
-	httpx.OK(c, http.StatusOK, arguments)
+	httpx.List(c, arguments, page, pageSize, total)
 }
 
 func (h *Handler) createDebate(c *gin.Context) {

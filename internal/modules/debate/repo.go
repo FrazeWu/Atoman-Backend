@@ -163,7 +163,7 @@ func (r *Repo) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error
 	return debates, total, err
 }
 
-func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
+func (r *Repo) ListArguments(debateID uuid.UUID, page, pageSize int) ([]model.Argument, int64, error) {
 	type row struct {
 		ID, AuthorID                                                                               uuid.UUID
 		ReplyToID                                                                                  *uuid.UUID
@@ -172,14 +172,19 @@ func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 		CreatedAt, UpdatedAt                                                                       time.Time
 	}
 	var rows []row
-	err := r.db.Table("comment_entries AS comments").
-		Select("comments.id, comments.author_id, comments.reply_to_id, comments.content, comments.status, comments.created_at, comments.updated_at, details.argument_type, details.source_url, details.source_title, details.source_excerpt, details.conclusion, details.is_folded, details.fold_note").
+	base := r.db.Table("comment_entries AS comments").
 		Joins("JOIN debate_argument_details AS details ON details.comment_id = comments.id").
 		Joins("JOIN discussion_targets AS targets ON targets.id = comments.target_id").
-		Where("targets.kind = ? AND targets.resource_id = ? AND comments.deleted_at IS NULL AND comments.status IN ?", "debate", debateID, []string{"active", "auto_folded"}).
-		Order("comments.created_at ASC").Limit(100).Scan(&rows).Error
+		Where("targets.kind = ? AND targets.resource_id = ? AND comments.deleted_at IS NULL AND comments.status IN ?", "debate", debateID, []string{"active", "auto_folded"})
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err := base.
+		Select("comments.id, comments.author_id, comments.reply_to_id, comments.content, comments.status, comments.created_at, comments.updated_at, details.argument_type, details.source_url, details.source_title, details.source_excerpt, details.conclusion, details.is_folded, details.fold_note").
+		Order("comments.created_at ASC").Offset((page - 1) * pageSize).Limit(pageSize).Scan(&rows).Error
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	ids, userIDs := make([]uuid.UUID, 0, len(rows)), make([]uuid.UUID, 0, len(rows))
 	for _, item := range rows {
@@ -189,7 +194,7 @@ func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 	var users []model.User
 	if len(userIDs) > 0 {
 		if err := r.db.Where("uuid IN ?", userIDs).Find(&users).Error; err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 	userMap := make(map[uuid.UUID]*model.User, len(users))
@@ -203,7 +208,7 @@ func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 	var votes []voteRow
 	if len(ids) > 0 {
 		if err := r.db.Model(&model.DebateVote{}).Select("argument_id, COALESCE(SUM(vote_type), 0) AS vote_count").Where("argument_id IN ?", ids).Group("argument_id").Scan(&votes).Error; err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 	voteMap := make(map[uuid.UUID]int, len(votes))
@@ -213,7 +218,7 @@ func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 	var mentionRows []model.CommentMention
 	if len(ids) > 0 {
 		if err := r.db.Where("comment_id IN ?", ids).Order("comment_id, start_offset").Find(&mentionRows).Error; err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 	mentionMap := make(map[uuid.UUID][]model.ArgumentMention)
@@ -222,7 +227,7 @@ func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 	}
 	attachments, err := r.loadArgumentAttachments(ids)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	arguments := make([]model.Argument, 0, len(rows))
 	indexByID := make(map[uuid.UUID]int, len(rows))
@@ -237,7 +242,46 @@ func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 	var refs []model.DebateArgumentReference
 	if len(ids) > 0 {
 		if err := r.db.Where("comment_id IN ?", ids).Find(&refs).Error; err != nil {
-			return nil, err
+			return nil, 0, err
+		}
+	}
+	missing := make([]uuid.UUID, 0)
+	seenMissing := map[uuid.UUID]bool{}
+	for _, ref := range refs {
+		if _, exists := indexByID[ref.ReferencedCommentID]; !exists && !seenMissing[ref.ReferencedCommentID] {
+			seenMissing[ref.ReferencedCommentID] = true
+			missing = append(missing, ref.ReferencedCommentID)
+		}
+	}
+	briefMap := make(map[uuid.UUID]model.Argument, len(missing))
+	if len(missing) > 0 {
+		var briefRows []row
+		if err := r.db.Table("comment_entries AS comments").Select("comments.id, comments.author_id, comments.reply_to_id, comments.content, comments.status, comments.created_at, comments.updated_at, details.argument_type, details.source_url, details.source_title, details.source_excerpt, details.conclusion, details.is_folded, details.fold_note").
+			Joins("JOIN debate_argument_details AS details ON details.comment_id = comments.id").Where("comments.id IN ? AND comments.deleted_at IS NULL AND comments.status IN ?", missing, []string{"active", "auto_folded"}).Scan(&briefRows).Error; err != nil {
+			return nil, 0, err
+		}
+		briefUserIDs := make([]uuid.UUID, 0, len(briefRows))
+		for _, item := range briefRows {
+			briefUserIDs = append(briefUserIDs, item.AuthorID)
+		}
+		var briefUsers []model.User
+		if err := r.db.Where("uuid IN ?", briefUserIDs).Find(&briefUsers).Error; err != nil {
+			return nil, 0, err
+		}
+		briefUsersMap := make(map[uuid.UUID]*model.User, len(briefUsers))
+		for index := range briefUsers {
+			briefUsersMap[briefUsers[index].UUID] = &briefUsers[index]
+		}
+		var briefVotes []voteRow
+		if err := r.db.Model(&model.DebateVote{}).Select("argument_id, COALESCE(SUM(vote_type), 0) AS vote_count").Where("argument_id IN ?", missing).Group("argument_id").Scan(&briefVotes).Error; err != nil {
+			return nil, 0, err
+		}
+		briefVoteMap := make(map[uuid.UUID]int, len(briefVotes))
+		for _, vote := range briefVotes {
+			briefVoteMap[vote.ArgumentID] = vote.VoteCount
+		}
+		for _, item := range briefRows {
+			briefMap[item.ID] = model.Argument{Base: model.Base{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, DebateID: debateID, ParentID: item.ReplyToID, UserID: item.AuthorID, User: briefUsersMap[item.AuthorID], Content: item.Content, ArgumentType: model.ArgumentType(item.ArgumentType), VoteCount: briefVoteMap[item.ID], SourceURL: item.SourceURL, SourceTitle: item.SourceTitle, SourceExcerpt: item.SourceExcerpt, Conclusion: item.Conclusion, IsConcluded: item.Conclusion != "", IsFolded: item.IsFolded || item.Status == "auto_folded", FoldNote: item.FoldNote}
 		}
 	}
 	for _, ref := range refs {
@@ -245,12 +289,16 @@ func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 		to, ok2 := indexByID[ref.ReferencedCommentID]
 		if ok1 && ok2 {
 			arguments[from].References = append(arguments[from].References, arguments[to])
+		} else if ok1 {
+			if brief, exists := briefMap[ref.ReferencedCommentID]; exists {
+				arguments[from].References = append(arguments[from].References, brief)
+			}
 		}
 	}
 	var debateRefs []model.DebateArgumentDebateRef
 	if len(ids) > 0 {
 		if err := r.db.Where("comment_id IN ?", ids).Find(&debateRefs).Error; err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 	debateIDs := make([]uuid.UUID, 0, len(debateRefs))
@@ -260,7 +308,7 @@ func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 	var debates []model.Debate
 	if len(debateIDs) > 0 {
 		if err := r.db.Where("id IN ?", debateIDs).Find(&debates).Error; err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 	debateMap := make(map[uuid.UUID]model.Debate, len(debates))
@@ -274,5 +322,5 @@ func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
 			}
 		}
 	}
-	return arguments, nil
+	return arguments, total, nil
 }
