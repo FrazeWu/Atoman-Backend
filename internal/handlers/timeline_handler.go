@@ -20,6 +20,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
@@ -44,8 +45,8 @@ func SetupTimelineRoutes(router *gin.Engine, db *gorm.DB) {
 		tl.GET("/persons", GetTimelinePersons(db))
 		tl.GET("/persons/:id", GetTimelinePerson(db))
 		tl.GET("/persons/:id/locations", GetPersonLocations(db))
-		tl.GET("/events/:id/revision-proposals", ListTimelineEventProposals(proposalService))
-		tl.GET("/persons/:id/revision-proposals", ListTimelinePersonProposals(proposalService))
+		tl.GET("/events/:id/revision-proposals", middleware.OptionalAuthMiddleware(), ListTimelineEventProposals(proposalService))
+		tl.GET("/persons/:id/revision-proposals", middleware.OptionalAuthMiddleware(), ListTimelinePersonProposals(proposalService))
 
 		// Protected routes
 		protected := tl.Group("")
@@ -203,7 +204,7 @@ func CreateTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 			Longitude:   input.Longitude,
 			Source:      input.Source,
 			Category:    input.Category,
-			Tags:        input.Tags,
+			Tags:        pq.StringArray(input.Tags),
 			IsPublic:    isPublic,
 		}
 
@@ -488,7 +489,7 @@ func CreateTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 			UserID:   userID.(uuid.UUID),
 			Name:     input.Name,
 			Bio:      input.Bio,
-			Tags:     input.Tags,
+			Tags:     pq.StringArray(input.Tags),
 			IsPublic: isPublic,
 		}
 
@@ -832,8 +833,11 @@ func saveEventRevision(db *gorm.DB, event model.TimelineEvent, editorID uuid.UUI
 		EventDate:   event.EventDate.Format("2006-01-02"),
 		EndDate:     endDate,
 		Location:    event.Location,
+		Latitude:    event.Latitude,
+		Longitude:   event.Longitude,
 		Source:      event.Source,
 		Category:    event.Category,
+		Tags:        append(pq.StringArray(nil), event.Tags...),
 		IsPublic:    event.IsPublic,
 	}
 	db.Create(&rev)

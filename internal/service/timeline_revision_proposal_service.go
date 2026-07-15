@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	timelinecore "atoman/internal/timeline"
 
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -239,6 +241,16 @@ func (s *TimelineRevisionProposalService) normalizePatch(db *gorm.DB, kind strin
 			normalized[field] = next
 			changed = changed || !reflect.DeepEqual(next, current)
 		}
+		latitude, longitude := target.Latitude, target.Longitude
+		if value, ok := normalized["latitude"]; ok {
+			latitude = optionalFloat(value)
+		}
+		if value, ok := normalized["longitude"]; ok {
+			longitude = optionalFloat(value)
+		}
+		if (latitude == nil) != (longitude == nil) {
+			return nil, ErrTimelineProposalInvalid
+		}
 	case comment.TargetKindTimelinePerson:
 		var target model.TimelinePerson
 		if err := query.First(&target, "id = ?", id).Error; err != nil {
@@ -276,15 +288,15 @@ func normalizeEventField(field string, value any, target model.TimelineEvent) (a
 	case "location":
 		return stringValue(value, true, target.Location)
 	case "latitude":
-		return floatValue(value, target.Latitude)
+		return coordinateValue(value, target.Latitude, -90, 90)
 	case "longitude":
-		return floatValue(value, target.Longitude)
+		return coordinateValue(value, target.Longitude, -180, 180)
 	case "source":
 		return stringValue(value, true, target.Source)
 	case "category":
 		return stringValue(value, false, target.Category)
 	case "tags":
-		return tagsValue(value, target.Tags)
+		return tagsValue(value, []string(target.Tags))
 	default:
 		return nil, nil, ErrTimelineProposalInvalid
 	}
@@ -301,7 +313,7 @@ func normalizePersonField(field string, value any, target model.TimelinePerson) 
 	case "death_date":
 		return dateValue(value, true, target.DeathDate)
 	case "tags":
-		return tagsValue(value, target.Tags)
+		return tagsValue(value, []string(target.Tags))
 	default:
 		return nil, nil, ErrTimelineProposalInvalid
 	}
@@ -318,12 +330,12 @@ func stringValue(value any, required bool, current string) (any, any, error) {
 	}
 	return next, current, nil
 }
-func floatValue(value any, current *float64) (any, any, error) {
+func coordinateValue(value any, current *float64, min, max float64) (any, any, error) {
 	if value == nil {
 		return nil, current, nil
 	}
 	next, ok := value.(float64)
-	if !ok {
+	if !ok || math.IsNaN(next) || math.IsInf(next, 0) || next < min || next > max {
 		return nil, nil, ErrTimelineProposalInvalid
 	}
 	if current == nil {
@@ -391,7 +403,9 @@ func (s *TimelineRevisionProposalService) applyPatch(tx *gorm.DB, kind string, i
 		if err := tx.First(&event, "id = ?", id).Error; err != nil {
 			return uuid.Nil, err
 		}
-		applyEventPatch(&event, patch)
+		if err := applyEventPatch(&event, patch); err != nil {
+			return uuid.Nil, err
+		}
 		if err := tx.Save(&event).Error; err != nil {
 			return uuid.Nil, err
 		}
@@ -405,7 +419,9 @@ func (s *TimelineRevisionProposalService) applyPatch(tx *gorm.DB, kind string, i
 		if err := tx.First(&person, "id = ?", id).Error; err != nil {
 			return uuid.Nil, err
 		}
-		applyPersonPatch(&person, patch)
+		if err := applyPersonPatch(&person, patch); err != nil {
+			return uuid.Nil, err
+		}
 		if err := tx.Save(&person).Error; err != nil {
 			return uuid.Nil, err
 		}
@@ -413,15 +429,22 @@ func (s *TimelineRevisionProposalService) applyPatch(tx *gorm.DB, kind string, i
 		if err != nil {
 			return uuid.Nil, err
 		}
-		var last int
-		if err := tx.Model(&model.Revision{}).Where("content_type = ? AND content_id = ?", "timeline_person", id).Select("COALESCE(MAX(version_number), 0)").Scan(&last).Error; err != nil {
-			return uuid.Nil, err
+		var previous model.Revision
+		previousResult := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("content_type = ? AND content_id = ?", "timeline_person", id).Order("version_number DESC").First(&previous)
+		if previousResult.Error != nil && !errors.Is(previousResult.Error, gorm.ErrRecordNotFound) {
+			return uuid.Nil, previousResult.Error
+		}
+		version := 1
+		var previousID *uuid.UUID
+		if previousResult.Error == nil {
+			version = previous.VersionNumber + 1
+			previousID = &previous.ID
 		}
 		if err := tx.Model(&model.Revision{}).Where("content_type = ? AND content_id = ? AND is_current = ?", "timeline_person", id, true).Update("is_current", false).Error; err != nil {
 			return uuid.Nil, err
 		}
 		now := time.Now()
-		revision := model.Revision{ContentType: "timeline_person", ContentID: id, VersionNumber: last + 1, ContentSnapshot: snapshot, EditorID: reviewerID, EditSummary: "Accepted revision proposal", EditType: "edit", Status: "approved", ReviewerID: &reviewerID, ReviewedAt: &now, IsCurrent: true}
+		revision := model.Revision{ContentType: "timeline_person", ContentID: id, VersionNumber: version, PreviousRevisionID: previousID, ContentSnapshot: snapshot, EditorID: reviewerID, EditSummary: "Accepted revision proposal", EditType: "edit", Status: "approved", ReviewerID: &reviewerID, ReviewedAt: &now, IsCurrent: true}
 		if err := tx.Create(&revision).Error; err != nil {
 			return uuid.Nil, err
 		}
@@ -431,7 +454,7 @@ func (s *TimelineRevisionProposalService) applyPatch(tx *gorm.DB, kind string, i
 	}
 }
 
-func applyEventPatch(target *model.TimelineEvent, patch map[string]any) {
+func applyEventPatch(target *model.TimelineEvent, patch map[string]any) error {
 	for field, value := range patch {
 		switch field {
 		case "title":
@@ -461,11 +484,16 @@ func applyEventPatch(target *model.TimelineEvent, patch map[string]any) {
 		case "category":
 			target.Category = value.(string)
 		case "tags":
-			target.Tags = toStrings(value)
+			tags, err := toStrings(value)
+			if err != nil {
+				return err
+			}
+			target.Tags = pq.StringArray(tags)
 		}
 	}
+	return nil
 }
-func applyPersonPatch(target *model.TimelinePerson, patch map[string]any) {
+func applyPersonPatch(target *model.TimelinePerson, patch map[string]any) error {
 	for field, value := range patch {
 		switch field {
 		case "name":
@@ -477,9 +505,14 @@ func applyPersonPatch(target *model.TimelinePerson, patch map[string]any) {
 		case "death_date":
 			target.DeathDate = optionalDate(value)
 		case "tags":
-			target.Tags = toStrings(value)
+			tags, err := toStrings(value)
+			if err != nil {
+				return err
+			}
+			target.Tags = pq.StringArray(tags)
 		}
 	}
+	return nil
 }
 func optionalFloat(value any) *float64 {
 	if value == nil {
@@ -495,20 +528,30 @@ func optionalDate(value any) *time.Time {
 	next, _ := timelinecore.ParseDateTime(value.(string))
 	return &next
 }
-func toStrings(value any) []string {
-	values, _ := value.([]any)
-	result := make([]string, 0, len(values))
-	for _, item := range values {
-		result = append(result, item.(string))
+func toStrings(value any) ([]string, error) {
+	switch values := value.(type) {
+	case []string:
+		return append([]string(nil), values...), nil
+	case []any:
+		result := make([]string, 0, len(values))
+		for _, item := range values {
+			text, ok := item.(string)
+			if !ok {
+				return nil, ErrTimelineProposalInvalid
+			}
+			result = append(result, text)
+		}
+		return result, nil
+	default:
+		return nil, ErrTimelineProposalInvalid
 	}
-	return result
 }
 func eventRevisionSnapshot(event model.TimelineEvent, editor uuid.UUID) model.TimelineRevision {
 	end := ""
 	if event.EndDate != nil {
 		end = event.EndDate.Format("2006-01-02")
 	}
-	return model.TimelineRevision{EventID: event.ID, EditorID: editor, Title: event.Title, Description: event.Description, Content: event.Content, EventDate: event.EventDate.Format("2006-01-02"), EndDate: end, Location: event.Location, Source: event.Source, Category: event.Category, IsPublic: event.IsPublic}
+	return model.TimelineRevision{EventID: event.ID, EditorID: editor, Title: event.Title, Description: event.Description, Content: event.Content, EventDate: event.EventDate.Format("2006-01-02"), EndDate: end, Location: event.Location, Latitude: event.Latitude, Longitude: event.Longitude, Source: event.Source, Category: event.Category, Tags: append(pq.StringArray(nil), event.Tags...), IsPublic: event.IsPublic}
 }
 
 func (s *TimelineRevisionProposalService) load(user authctx.CurrentUser, commentID uuid.UUID) (TimelineProposal, error) {

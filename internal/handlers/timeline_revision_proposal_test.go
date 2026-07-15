@@ -5,17 +5,21 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	proposalservice "atoman/internal/service"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
-func timelineProposalHandlerContext(t *testing.T) (*gin.Engine, *proposalservice.TimelineRevisionProposalService, authctx.CurrentUser, model.TimelineEvent) {
+func timelineProposalHandlerContext(t *testing.T) (*gin.Engine, *proposalservice.TimelineRevisionProposalService, *gorm.DB, authctx.CurrentUser, model.TimelineEvent) {
 	t.Helper()
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
@@ -37,11 +41,11 @@ func timelineProposalHandlerContext(t *testing.T) (*gin.Engine, *proposalservice
 	router.POST("/api/v1/timeline/events/:id/revision-proposals", CreateTimelineEventProposal(svc))
 	router.GET("/api/v1/timeline/events/:id/revision-proposals", ListTimelineEventProposals(svc))
 	router.PUT("/api/v1/timeline/revision-proposals/:comment_id/decision", DecideTimelineRevisionProposal(svc))
-	return router, svc, user, event
+	return router, svc, db, user, event
 }
 
 func TestTimelineProposalHandlerCreatesAndAcceptsEventProposal(t *testing.T) {
-	router, svc, _, event := timelineProposalHandlerContext(t)
+	router, svc, _, _, event := timelineProposalHandlerContext(t)
 	create := httptest.NewRequest(http.MethodPost, "/api/v1/timeline/events/"+event.ID.String()+"/revision-proposals", bytes.NewBufferString(`{"content":"change","evidence":"archive","patch":{"location":"Berlin"},"mentions":[],"attachment_ids":[]}`))
 	create.Header.Set("Content-Type", "application/json")
 	created := httptest.NewRecorder()
@@ -72,7 +76,7 @@ func TestTimelineProposalHandlerCreatesAndAcceptsEventProposal(t *testing.T) {
 }
 
 func TestTimelineProposalHandlerRejectsInvalidIDAndUnknownField(t *testing.T) {
-	router, _, _, event := timelineProposalHandlerContext(t)
+	router, _, _, _, event := timelineProposalHandlerContext(t)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/timeline/events/"+event.ID.String()+"/revision-proposals", bytes.NewBufferString(`{"content":"change","evidence":"archive","patch":{"user_id":"forbidden"}}`))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
@@ -84,4 +88,25 @@ func TestTimelineProposalHandlerRejectsInvalidIDAndUnknownField(t *testing.T) {
 	response = httptest.NewRecorder()
 	router.ServeHTTP(response, decision)
 	require.Equal(t, http.StatusBadRequest, response.Code)
+}
+
+func TestTimelineProposalRoutesUseOptionalAuthForLikedState(t *testing.T) {
+	t.Setenv("JWT_SECRET", "timeline-secret")
+	_, svc, db, user, event := timelineProposalHandlerContext(t)
+	created, err := svc.CreateEventProposal(user, event.ID, proposalservice.TimelineProposalInput{Content: "liked", Evidence: "archive", Patch: map[string]any{"location": "Berlin"}})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.CommentLike{CommentID: created.Comment.ID, UserID: user.ID}).Error)
+	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.Comment.ID).Update("like_count", 1).Error)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"user_id": user.ID.String(), "exp": time.Now().Add(time.Hour).Unix()}).SignedString([]byte("timeline-secret"))
+	require.NoError(t, err)
+	router := gin.New()
+	SetupTimelineRoutes(router, db)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/timeline/events/"+event.ID.String()+"/revision-proposals", nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"liked":true`)
 }

@@ -218,6 +218,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.CommentTimeAnchor{},
 		&model.CommentPublishRecord{},
 		&model.TimelineRevisionProposal{},
+		&model.TimelineRevision{},
 		&model.DebateArgumentDetail{},
 		&model.DebateArgumentReference{},
 		&model.DebateArgumentDebateRef{},

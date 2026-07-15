@@ -1,6 +1,7 @@
 package service
 
 import (
+	"math"
 	"testing"
 
 	"atoman/internal/model"
@@ -144,4 +145,66 @@ func TestTimelineProposalAcceptsBCEDateWithTimelinePrecision(t *testing.T) {
 	proposal, err := svc.CreateEventProposal(owner, event.ID, TimelineProposalInput{Content: "date", Evidence: "archive", Patch: map[string]any{"event_date": "-0044-03-15"}})
 	require.NoError(t, err)
 	require.Equal(t, "-0044-03-15T00:00:00Z", proposal.Patch["event_date"])
+}
+
+func TestTimelineProposalTagsRoundTripAndEventSnapshotIsComplete(t *testing.T) {
+	svc, db, owner, event, person := seededTimelineProposalService(t)
+	lat, lng := 52.52, 13.405
+	require.NoError(t, db.Model(&event).Updates(map[string]any{"latitude": lat, "longitude": lng}).Error)
+	eventProposal, err := svc.CreateEventProposal(owner, event.ID, TimelineProposalInput{Content: "tags", Evidence: "archive", Patch: map[string]any{"tags": []string{"history", "berlin"}}})
+	require.NoError(t, err)
+	_, err = svc.Decide(owner, eventProposal.Comment.ID, "accept")
+	require.NoError(t, err)
+	var storedEvent model.TimelineEvent
+	require.NoError(t, db.First(&storedEvent, "id = ?", event.ID).Error)
+	require.Equal(t, []string{"history", "berlin"}, []string(storedEvent.Tags))
+	var snapshot model.TimelineRevision
+	require.NoError(t, db.Where("event_id = ?", event.ID).First(&snapshot).Error)
+	require.Equal(t, []string{"history", "berlin"}, []string(snapshot.Tags))
+	require.Equal(t, &lat, snapshot.Latitude)
+	require.Equal(t, &lng, snapshot.Longitude)
+
+	personProposal, err := svc.CreatePersonProposal(owner, person.ID, TimelineProposalInput{Content: "tags", Evidence: "book", Patch: map[string]any{"tags": []any{"writer", "historian"}}})
+	require.NoError(t, err)
+	_, err = svc.Decide(owner, personProposal.Comment.ID, "accept")
+	require.NoError(t, err)
+	var storedPerson model.TimelinePerson
+	require.NoError(t, db.First(&storedPerson, "id = ?", person.ID).Error)
+	require.Equal(t, []string{"writer", "historian"}, []string(storedPerson.Tags))
+}
+
+func TestTimelinePersonRevisionsFormPreviousVersionChain(t *testing.T) {
+	svc, db, owner, _, person := seededTimelineProposalService(t)
+	first, err := svc.CreatePersonProposal(owner, person.ID, TimelineProposalInput{Content: "first", Evidence: "book", Patch: map[string]any{"bio": "first"}})
+	require.NoError(t, err)
+	_, err = svc.Decide(owner, first.Comment.ID, "accept")
+	require.NoError(t, err)
+	second, err := svc.CreatePersonProposal(owner, person.ID, TimelineProposalInput{Content: "second", Evidence: "archive", Patch: map[string]any{"bio": "second"}})
+	require.NoError(t, err)
+	_, err = svc.Decide(owner, second.Comment.ID, "accept")
+	require.NoError(t, err)
+	var revisions []model.Revision
+	require.NoError(t, db.Where("content_type = ? AND content_id = ?", "timeline_person", person.ID).Order("version_number").Find(&revisions).Error)
+	require.Len(t, revisions, 2)
+	require.Equal(t, 1, revisions[0].VersionNumber)
+	require.Equal(t, 2, revisions[1].VersionNumber)
+	require.Equal(t, &revisions[0].ID, revisions[1].PreviousRevisionID)
+	require.False(t, revisions[0].IsCurrent)
+	require.True(t, revisions[1].IsCurrent)
+}
+
+func TestTimelineProposalValidatesCoordinatesAndFinalPair(t *testing.T) {
+	svc, db, owner, event, _ := seededTimelineProposalService(t)
+	for _, patch := range []map[string]any{
+		{"latitude": 91.0}, {"longitude": -181.0}, {"latitude": math.NaN()}, {"longitude": math.Inf(1)}, {"latitude": 52.52},
+	} {
+		_, err := svc.CreateEventProposal(owner, event.ID, TimelineProposalInput{Content: "coords", Evidence: "map", Patch: patch})
+		require.ErrorIs(t, err, ErrTimelineProposalInvalid)
+	}
+	lat, lng := 48.85, 2.35
+	require.NoError(t, db.Model(&event).Updates(map[string]any{"latitude": lat, "longitude": lng}).Error)
+	proposal, err := svc.CreateEventProposal(owner, event.ID, TimelineProposalInput{Content: "coords", Evidence: "map", Patch: map[string]any{"latitude": 52.52}})
+	require.NoError(t, err)
+	_, err = svc.Decide(owner, proposal.Comment.ID, "accept")
+	require.NoError(t, err)
 }
