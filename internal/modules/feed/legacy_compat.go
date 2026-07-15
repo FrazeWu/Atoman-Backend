@@ -997,6 +997,7 @@ type feedReadEvent struct {
 // @Produce json
 // @Param page query int false "页码"
 // @Param limit query int false "每页数量"
+// @Param content_type query string false "内容类型" Enums(blog)
 // @Param source_type query string false "源类型"
 // @Param source_id query string false "订阅 UUID"
 // @Param group_id query string false "分组 UUID"

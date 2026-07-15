@@ -254,6 +254,42 @@ func TestRegisterRoutesMountsChannelArticleRSS(t *testing.T) {
 	}
 }
 
+func TestChannelArticleRSSExcludesFollowerAndPrivatePosts(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	for _, post := range []model.Post{
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Public RSS post", Content: "Body", Status: "published", Visibility: "public"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Followers RSS secret", Content: "Body", Status: "published", Visibility: "followers"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Private RSS secret", Content: "Body", Status: "published", Visibility: "private"},
+	} {
+		if err := db.Create(&post).Error; err != nil {
+			t.Fatalf("create post %q: %v", post.Title, err)
+		}
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/channels/slug/"+channel.Slug+"/rss/article", nil)
+	req.Host = "example.com"
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Public RSS post") {
+		t.Fatalf("expected public post in RSS: %s", body)
+	}
+	for _, secret := range []string{"Followers RSS secret", "Private RSS secret"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("expected %q to be excluded from RSS: %s", secret, body)
+		}
+	}
+}
+
 func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
@@ -356,6 +392,9 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 	first := payload.Data[0]
 	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType != "blog" {
 		t.Fatalf("expected recommendation dto fields, got %#v", first)
+	}
+	if first.TargetPath != "/posts/post/"+first.ID {
+		t.Fatalf("expected canonical post target path, got %q", first.TargetPath)
 	}
 }
 

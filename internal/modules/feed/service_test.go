@@ -199,6 +199,202 @@ func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 	}
 }
 
+func TestGetSubscribedBlogFeedExcludesExternalAndNonBlogContent(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	var author model.User
+	if err := db.First(&author, "uuid = ?", user.ID).Error; err != nil {
+		t.Fatalf("find author: %v", err)
+	}
+	videoChannel := model.Channel{Name: "Alice Video", Slug: "alice-video", UserID: &author.UUID, ContentType: model.ChannelContentTypeVideo}
+	if err := db.Create(&videoChannel).Error; err != nil {
+		t.Fatalf("create video channel: %v", err)
+	}
+	videoPost := model.Post{UserID: author.UUID, ChannelID: &videoChannel.ID, Title: "Video channel post", Content: "body", Status: "published", Visibility: "public"}
+	if err := db.Create(&videoPost).Error; err != nil {
+		t.Fatalf("create video post: %v", err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 2, ContentType: model.ChannelContentTypeBlog})
+	if err != nil {
+		t.Fatalf("get subscribed blog feed: %v", err)
+	}
+	if total < 3 || len(items) != 2 {
+		t.Fatalf("expected filtered total with paginated data, got total=%d len=%d", total, len(items))
+	}
+	seen := make(map[uuid.UUID]struct{})
+	allItems, allTotal, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 100, ContentType: model.ChannelContentTypeBlog})
+	if err != nil {
+		t.Fatalf("get all subscribed blog posts: %v", err)
+	}
+	if int64(len(allItems)) != allTotal {
+		t.Fatalf("expected total to reflect filtered results, got total=%d len=%d", allTotal, len(allItems))
+	}
+	for _, item := range allItems {
+		if item.Type != "post" || item.Post == nil {
+			t.Fatalf("expected blog mode to exclude external RSS, got %#v", item)
+		}
+		if item.Post.Title == videoPost.Title {
+			t.Fatalf("expected person subscription to exclude non-blog channel post")
+		}
+		if _, exists := seen[item.Post.ID]; exists {
+			t.Fatalf("expected post %s to be deduplicated", item.Post.ID)
+		}
+		seen[item.Post.ID] = struct{}{}
+	}
+}
+
+func TestSubscribedBlogFeedFollowerVisibilityRequiresAuthorOrChannelSubscription(t *testing.T) {
+	tests := []struct {
+		name             string
+		sourceType       string
+		wantFollowerPost bool
+	}{
+		{name: "author subscription grants access", sourceType: "internal_user", wantFollowerPost: true},
+		{name: "channel subscription grants access", sourceType: "internal_channel", wantFollowerPost: true},
+		{name: "collection subscription does not grant access", sourceType: "internal_collection", wantFollowerPost: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			service, db, user := newFeedTestService(t)
+			if err := db.Unscoped().Where("user_id = ?", user.ID).Delete(&model.Subscription{}).Error; err != nil {
+				t.Fatalf("clear subscriptions: %v", err)
+			}
+			var source model.FeedSource
+			if err := db.Where("source_type = ?", tc.sourceType).First(&source).Error; err != nil {
+				t.Fatalf("find %s source: %v", tc.sourceType, err)
+			}
+			if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+				t.Fatalf("create subscription: %v", err)
+			}
+
+			var channel model.Channel
+			if err := db.Where("content_type = ?", model.ChannelContentTypeBlog).First(&channel).Error; err != nil {
+				t.Fatalf("find blog channel: %v", err)
+			}
+			var collection model.Collection
+			if err := db.Where("channel_id = ?", channel.ID).First(&collection).Error; err != nil {
+				t.Fatalf("find collection: %v", err)
+			}
+			followerPost := model.Post{UserID: user.ID, ChannelID: &channel.ID, CollectionID: &collection.ID, Title: "Followers only", Content: "body", Status: "published", Visibility: "followers"}
+			privatePost := model.Post{UserID: user.ID, ChannelID: &channel.ID, CollectionID: &collection.ID, Title: "Private only", Content: "body", Status: "published", Visibility: "private"}
+			if err := db.Create(&followerPost).Error; err != nil {
+				t.Fatalf("create follower post: %v", err)
+			}
+			if err := db.Create(&privatePost).Error; err != nil {
+				t.Fatalf("create private post: %v", err)
+			}
+
+			items, _, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 100, ContentType: model.ChannelContentTypeBlog})
+			if err != nil {
+				t.Fatalf("get subscribed blog feed: %v", err)
+			}
+			foundFollower := false
+			for _, item := range items {
+				if item.Post == nil {
+					continue
+				}
+				if item.Post.ID == privatePost.ID {
+					t.Fatalf("private post must never appear in subscribed blog feed")
+				}
+				foundFollower = foundFollower || item.Post.ID == followerPost.ID
+			}
+			if foundFollower != tc.wantFollowerPost {
+				t.Fatalf("followers post visibility = %v, want %v", foundFollower, tc.wantFollowerPost)
+			}
+		})
+	}
+}
+
+func TestSubscribedBlogFeedCombinesSourceAndGroupFilters(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	group := model.SubscriptionGroup{UserID: user.ID, Name: "Blog authors"}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	var subscription model.Subscription
+	if err := db.Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+		Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", user.ID, "internal_user").
+		First(&subscription).Error; err != nil {
+		t.Fatalf("find author subscription: %v", err)
+	}
+	if err := db.Model(&subscription).Update("subscription_group_id", group.ID).Error; err != nil {
+		t.Fatalf("assign subscription group: %v", err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{
+		Page:        1,
+		PageSize:    100,
+		ContentType: model.ChannelContentTypeBlog,
+		SourceType:  "internal_user",
+		SourceID:    subscription.ID,
+		GroupID:     group.ID,
+	})
+	if err != nil {
+		t.Fatalf("get filtered blog feed: %v", err)
+	}
+	if total == 0 || len(items) == 0 {
+		t.Fatalf("expected matching source and group to return posts")
+	}
+	for _, item := range items {
+		if item.Post == nil || item.Post.UserID != user.ID {
+			t.Fatalf("expected only author subscription posts, got %#v", item)
+		}
+	}
+
+	items, total, err = service.GetSubscribedFeed(user, FeedQuery{
+		Page:        1,
+		PageSize:    100,
+		ContentType: model.ChannelContentTypeBlog,
+		SourceType:  "internal_user",
+		SourceID:    subscription.ID,
+		GroupID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("get mismatched group blog feed: %v", err)
+	}
+	if total != 0 || len(items) != 0 {
+		t.Fatalf("expected mismatched group to return no posts, got total=%d len=%d", total, len(items))
+	}
+}
+
+func TestSubscribedBlogFeedSortsByPublishedAt(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var channel model.Channel
+	if err := db.Where("content_type = ?", model.ChannelContentTypeBlog).First(&channel).Error; err != nil {
+		t.Fatalf("find blog channel: %v", err)
+	}
+	now := time.Now().UTC()
+	latePublishedAt := now
+	earlyPublishedAt := now.Add(-24 * time.Hour)
+	latePublished := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "publish-order late", Content: "body", Status: "published", Visibility: "public", PublishedAt: &latePublishedAt}
+	earlyPublished := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "publish-order early", Content: "body", Status: "published", Visibility: "public", PublishedAt: &earlyPublishedAt}
+	if err := db.Create(&latePublished).Error; err != nil {
+		t.Fatalf("create late-published post: %v", err)
+	}
+	if err := db.Create(&earlyPublished).Error; err != nil {
+		t.Fatalf("create early-published post: %v", err)
+	}
+	if err := db.Model(&latePublished).Update("created_at", now.Add(-48*time.Hour)).Error; err != nil {
+		t.Fatalf("backdate late-published post creation: %v", err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 10, ContentType: model.ChannelContentTypeBlog, Search: "publish-order"})
+	if err != nil {
+		t.Fatalf("get subscribed blog feed: %v", err)
+	}
+	if total != 2 || len(items) != 2 {
+		t.Fatalf("expected two matching posts, got total=%d len=%d", total, len(items))
+	}
+	if items[0].Post == nil || items[0].Post.ID != latePublished.ID {
+		t.Fatalf("expected most recently published post first, got %#v", items)
+	}
+	if !items[0].PublishedAt.Equal(latePublishedAt) {
+		t.Fatalf("expected timeline published_at %s, got %s", latePublishedAt, items[0].PublishedAt)
+	}
+}
+
 func TestGetSubscribedFeedSearchesTitleSummaryAndSource(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 

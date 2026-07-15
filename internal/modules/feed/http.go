@@ -365,6 +365,7 @@ func queryFromContext(c *gin.Context) (FeedQuery, error) {
 	query := FeedQuery{
 		Page:           normalizedPageFromQuery(c),
 		PageSize:       normalizedPageSizeFromQuery(c),
+		ContentType:    strings.TrimSpace(strings.ToLower(c.Query("content_type"))),
 		SourceType:     c.Query("source_type"),
 		HideDuplicates: c.Query("hide_duplicates") == "true",
 		Sort:           c.DefaultQuery("sort", "recent"),

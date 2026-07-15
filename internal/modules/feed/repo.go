@@ -67,39 +67,48 @@ func (r *Repo) ListVisibleFeedSources(query FeedQuery) ([]model.FeedSource, erro
 	return sources, err
 }
 
-func (r *Repo) ListPublishedPostsByUserIDs(userIDs []uuid.UUID) ([]model.Post, error) {
+func (r *Repo) ListPublishedPostsByUserIDs(userIDs []uuid.UUID, contentType string) ([]model.Post, error) {
 	if len(userIDs) == 0 {
 		return []model.Post{}, nil
 	}
 	var posts []model.Post
-	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
-		Where("status = ?", "published").
-		Where("user_id IN ?", userIDs).
-		Find(&posts).Error
+	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
+		Where("posts.status = ?", "published").
+		Where("posts.user_id IN ?", userIDs)
+	if contentType != "" {
+		db = db.Joins("JOIN channels ON channels.id = posts.channel_id").Where("channels.content_type = ?", contentType)
+	}
+	err := db.Find(&posts).Error
 	return posts, err
 }
 
-func (r *Repo) ListPublishedPostsByChannelIDs(channelIDs []uuid.UUID) ([]model.Post, error) {
+func (r *Repo) ListPublishedPostsByChannelIDs(channelIDs []uuid.UUID, contentType string) ([]model.Post, error) {
 	if len(channelIDs) == 0 {
 		return []model.Post{}, nil
 	}
 	var posts []model.Post
-	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
-		Where("status = ?", "published").
-		Where("channel_id IN ?", channelIDs).
-		Find(&posts).Error
+	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
+		Where("posts.status = ?", "published").
+		Where("posts.channel_id IN ?", channelIDs)
+	if contentType != "" {
+		db = db.Joins("JOIN channels ON channels.id = posts.channel_id").Where("channels.content_type = ?", contentType)
+	}
+	err := db.Find(&posts).Error
 	return posts, err
 }
 
-func (r *Repo) ListPublishedPostsByCollectionIDs(collectionIDs []uuid.UUID) ([]model.Post, error) {
+func (r *Repo) ListPublishedPostsByCollectionIDs(collectionIDs []uuid.UUID, contentType string) ([]model.Post, error) {
 	if len(collectionIDs) == 0 {
 		return []model.Post{}, nil
 	}
 	var posts []model.Post
-	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
+	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("posts.status = ?", "published").
-		Where("posts.collection_id IN ?", collectionIDs).
-		Find(&posts).Error
+		Where("posts.collection_id IN ?", collectionIDs)
+	if contentType != "" {
+		db = db.Joins("JOIN channels ON channels.id = posts.channel_id").Where("channels.content_type = ?", contentType)
+	}
+	err := db.Find(&posts).Error
 	return posts, err
 }
 

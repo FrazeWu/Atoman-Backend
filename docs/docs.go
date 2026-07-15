@@ -6496,6 +6496,15 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "blog"
+                        ],
+                        "type": "string",
+                        "description": "内容类型",
+                        "name": "content_type",
+                        "in": "query"
+                    },
+                    {
                         "type": "string",
                         "description": "源类型",
                         "name": "source_type",

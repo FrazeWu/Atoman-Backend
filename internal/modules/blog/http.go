@@ -274,6 +274,7 @@ func (h *Handler) getChannelArticleRSS(c *gin.Context) {
 
 	var posts []model.Post
 	if err := h.service.db.Where("channel_id = ? AND status = ?", channel.ID, "published").
+		Where("visibility = ? OR visibility = ?", "", "public").
 		Preload("User").
 		Order("created_at DESC").
 		Limit(50).

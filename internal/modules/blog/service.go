@@ -263,7 +263,7 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 			Summary:     post.Summary,
 			ContentType: "blog",
 			ImageURL:    post.CoverURL,
-			TargetPath:  "/post/" + post.ID.String(),
+			TargetPath:  "/posts/post/" + post.ID.String(),
 			ScoreLabel:  blogRecommendationLabel(mode, rankedItem.Score),
 		})
 	}

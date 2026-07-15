@@ -7226,6 +7226,12 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: 内容类型
+        enum:
+        - blog
+        in: query
+        name: content_type
+        type: string
       - description: 源类型
         in: query
         name: source_type
