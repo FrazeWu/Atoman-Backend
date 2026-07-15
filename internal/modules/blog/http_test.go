@@ -254,7 +254,7 @@ func TestRegisterRoutesMountsChannelArticleRSS(t *testing.T) {
 	}
 }
 
-func TestChannelArticleRSSExcludesFollowerAndPrivatePosts(t *testing.T) {
+func TestChannelArticleRSSIncludesOnlyPublishedPublicPosts(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
 	if err != nil {
@@ -262,12 +262,19 @@ func TestChannelArticleRSSExcludesFollowerAndPrivatePosts(t *testing.T) {
 	}
 	for _, post := range []model.Post{
 		{UserID: user.ID, ChannelID: &channel.ID, Title: "Public RSS post", Content: "Body", Status: "published", Visibility: "public"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Legacy empty visibility post", Content: "Body", Status: "published", Visibility: "public"},
 		{UserID: user.ID, ChannelID: &channel.ID, Title: "Followers RSS secret", Content: "Body", Status: "published", Visibility: "followers"},
 		{UserID: user.ID, ChannelID: &channel.ID, Title: "Private RSS secret", Content: "Body", Status: "published", Visibility: "private"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Draft RSS secret", Content: "Body", Status: "draft", Visibility: "public"},
 	} {
 		if err := db.Create(&post).Error; err != nil {
 			t.Fatalf("create post %q: %v", post.Title, err)
 		}
+	}
+	if err := db.Model(&model.Post{}).
+		Where("title = ?", "Legacy empty visibility post").
+		Update("visibility", "").Error; err != nil {
+		t.Fatalf("set legacy empty visibility: %v", err)
 	}
 
 	r := newBlogHTTPRouter(service, &user)
@@ -280,10 +287,12 @@ func TestChannelArticleRSSExcludesFollowerAndPrivatePosts(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	body := w.Body.String()
-	if !strings.Contains(body, "Public RSS post") {
-		t.Fatalf("expected public post in RSS: %s", body)
+	for _, visible := range []string{"Public RSS post", "Legacy empty visibility post"} {
+		if !strings.Contains(body, visible) {
+			t.Fatalf("expected %q in RSS: %s", visible, body)
+		}
 	}
-	for _, secret := range []string{"Followers RSS secret", "Private RSS secret"} {
+	for _, secret := range []string{"Followers RSS secret", "Private RSS secret", "Draft RSS secret"} {
 		if strings.Contains(body, secret) {
 			t.Fatalf("expected %q to be excluded from RSS: %s", secret, body)
 		}
