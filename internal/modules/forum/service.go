@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -14,11 +15,18 @@ import (
 )
 
 type Service struct {
-	db   *gorm.DB
-	repo *Repo
+	db       *gorm.DB
+	repo     *Repo
+	comments *comment.Service
 }
 
-func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
+func NewService(db *gorm.DB, services ...*comment.Service) *Service {
+	commentService := comment.NewService(db, comment.NewTargetRegistry(db))
+	if len(services) > 0 && services[0] != nil {
+		commentService = services[0]
+	}
+	return &Service{db: db, repo: NewRepo(db), comments: commentService}
+}
 
 func (s *Service) ListCategories() ([]model.ForumCategory, error) {
 	return s.repo.ListCategories()
@@ -36,7 +44,14 @@ func (s *Service) GetCategory(id uuid.UUID) (model.ForumCategory, error) {
 }
 
 func (s *Service) ListTopics(query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
-	return s.repo.ListTopics(query)
+	topics, total, err := s.repo.ListTopics(query)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.applyCommentState(topics); err != nil {
+		return nil, 0, err
+	}
+	return topics, total, nil
 }
 
 func (s *Service) GetTopic(id uuid.UUID) (model.ForumTopic, error) {
@@ -47,7 +62,14 @@ func (s *Service) GetTopic(id uuid.UUID) (model.ForumTopic, error) {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.ForumTopic{}, apperr.NotFound("forum.topic_not_found", "Forum topic not found")
 	}
-	return topic, err
+	if err != nil {
+		return model.ForumTopic{}, err
+	}
+	topics := []model.ForumTopic{topic}
+	if err := s.applyCommentState(topics); err != nil {
+		return model.ForumTopic{}, err
+	}
+	return topics[0], nil
 }
 
 func (s *Service) CreateTopic(user authctx.CurrentUser, req CreateTopicRequest) (model.ForumTopic, error) {
@@ -110,123 +132,35 @@ func (s *Service) DeleteTopic(user authctx.CurrentUser, topicID uuid.UUID) error
 	return s.repo.DeleteTopic(topicID)
 }
 
-func (s *Service) ListReplies(topicID uuid.UUID) ([]model.ForumReply, error) {
+func (s *Service) ListReplies(topicID uuid.UUID) (comment.CommentListDTO, error) {
 	if _, err := s.GetTopic(topicID); err != nil {
-		return nil, err
+		return comment.CommentListDTO{}, err
 	}
-	return s.repo.ListReplies(topicID)
+	return s.comments.List(authctx.CurrentUser{}, forumTopicTarget(topicID), comment.ListCommentsInput{Page: 1, PageSize: 20, Sort: comment.SortOldest})
 }
 
-func (s *Service) CreateReply(user authctx.CurrentUser, req CreateReplyRequest) (model.ForumReply, error) {
+func (s *Service) CreateReply(user authctx.CurrentUser, req CreateReplyRequest) (comment.CommentDTO, error) {
 	if user.ID == uuid.Nil {
-		return model.ForumReply{}, apperr.Unauthorized("Login required")
+		return comment.CommentDTO{}, apperr.Unauthorized("Login required")
 	}
 	if req.TopicID == uuid.Nil {
-		return model.ForumReply{}, apperr.BadRequest("validation.invalid_request", "topic_id is required")
+		return comment.CommentDTO{}, apperr.BadRequest("validation.invalid_request", "topic_id is required")
 	}
-	content := strings.TrimSpace(req.Content)
-	if content == "" {
-		return model.ForumReply{}, apperr.BadRequest("validation.invalid_request", "content is required")
+	if _, err := s.GetTopic(req.TopicID); err != nil {
+		return comment.CommentDTO{}, err
 	}
-
-	var createdID uuid.UUID
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		repo := NewRepo(tx)
-		topic, err := repo.GetTopicForUpdate(req.TopicID)
-		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.NotFound("forum.topic_not_found", "Forum topic not found")
-			}
-			return err
-		}
-		count, err := repo.CountReplies(topic.ID)
-		if err != nil {
-			return err
-		}
-		reply := model.ForumReply{
-			TopicID:       topic.ID,
-			UserID:        user.ID,
-			ParentReplyID: req.ParentReplyID,
-			Content:       content,
-			FloorNumber:   int(count) + 1,
-			Depth:         0,
-		}
-		if req.ParentReplyID != nil && *req.ParentReplyID != uuid.Nil {
-			parent, err := repo.GetReply(*req.ParentReplyID)
-			if err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return apperr.NotFound("forum.reply_not_found", "Forum reply not found")
-				}
-				return err
-			}
-			if parent.TopicID != topic.ID {
-				return apperr.BadRequest("validation.invalid_request", "parent reply must belong to the same topic")
-			}
-			reply.Depth = parent.Depth + 1
-		}
-		if err := repo.CreateReply(&reply); err != nil {
-			return err
-		}
-		now := time.Now().UTC()
-		topic.ReplyCount = int(count) + 1
-		topic.LastReplyAt = &now
-		if err := repo.SaveTopic(&topic); err != nil {
-			return err
-		}
-		createdID = reply.ID
-		return nil
+	return s.comments.Create(user, forumTopicTarget(req.TopicID), comment.CreateCommentInput{
+		Content:   req.Content,
+		ReplyToID: req.ParentReplyID,
 	})
-	if err != nil {
-		return model.ForumReply{}, err
-	}
-	return s.repo.GetReply(createdID)
 }
 
-func (s *Service) GetReply(id uuid.UUID) (model.ForumReply, error) {
-	if id == uuid.Nil {
-		return model.ForumReply{}, apperr.BadRequest("validation.invalid_request", "reply_id is required")
-	}
-	reply, err := s.repo.GetReply(id)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return model.ForumReply{}, apperr.NotFound("forum.reply_not_found", "Forum reply not found")
-	}
-	return reply, err
-}
-
-func (s *Service) UpdateReply(user authctx.CurrentUser, replyID uuid.UUID, req UpdateReplyRequest) (model.ForumReply, error) {
-	reply, err := s.GetReply(replyID)
-	if err != nil {
-		return model.ForumReply{}, err
-	}
-	if err := requireTopicOwner(user, reply.UserID); err != nil {
-		return model.ForumReply{}, err
-	}
-	content := strings.TrimSpace(req.Content)
-	if content == "" {
-		return model.ForumReply{}, apperr.BadRequest("validation.invalid_request", "content is required")
-	}
-	reply.Content = content
-	if err := s.repo.SaveReply(&reply); err != nil {
-		return model.ForumReply{}, err
-	}
-	return s.repo.GetReply(reply.ID)
+func (s *Service) UpdateReply(user authctx.CurrentUser, replyID uuid.UUID, req UpdateReplyRequest) (comment.CommentDTO, error) {
+	return s.comments.Edit(user, replyID, comment.EditCommentInput{Content: req.Content})
 }
 
 func (s *Service) DeleteReply(user authctx.CurrentUser, replyID uuid.UUID) error {
-	reply, err := s.GetReply(replyID)
-	if err != nil {
-		return err
-	}
-	if err := requireTopicOwner(user, reply.UserID); err != nil {
-		return err
-	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		repo := NewRepo(tx)
-		if err := repo.DeleteReply(replyID); err != nil {
-			return err
-		}
-		return s.recalculateTopicReplyState(tx, reply.TopicID)
-	})
+	return s.comments.Delete(user, replyID)
 }
 
 func (s *Service) ListDrafts(user authctx.CurrentUser) ([]model.ForumDraft, error) {
@@ -295,43 +229,58 @@ func requireTopicOwner(user authctx.CurrentUser, ownerID uuid.UUID) error {
 	return nil
 }
 
-func (s *Service) recalculateTopicReplyState(tx *gorm.DB, topicID uuid.UUID) error {
-	var replyCount int64
-	if err := tx.Model(&model.ForumReply{}).Where("topic_id = ?", topicID).Count(&replyCount).Error; err != nil {
+func forumTopicTarget(topicID uuid.UUID) comment.TargetRef {
+	return comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: topicID}
+}
+
+func (s *Service) applyCommentState(topics []model.ForumTopic) error {
+	if len(topics) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, len(topics))
+	for i := range topics {
+		ids[i] = topics[i].ID
+		topics[i].ReplyCount = 0
+		topics[i].LastReplyAt = nil
+		topics[i].IsSolved = false
+		topics[i].SolvedReplyID = nil
+	}
+	var targets []model.DiscussionTarget
+	if err := s.db.Where("kind = ? AND resource_id IN ?", comment.TargetKindForumTopic, ids).Find(&targets).Error; err != nil {
 		return err
 	}
-
-	updates := map[string]any{
-		"reply_count": int(replyCount),
+	if len(targets) == 0 {
+		return nil
 	}
-
-	if replyCount == 0 {
-		updates["last_reply_at"] = nil
-		updates["is_solved"] = false
-		updates["solved_reply_id"] = nil
-		return tx.Model(&model.ForumTopic{}).Where("id = ?", topicID).Updates(updates).Error
+	targetByResource := make(map[uuid.UUID]model.DiscussionTarget, len(targets))
+	targetIDs := make([]uuid.UUID, len(targets))
+	for i, target := range targets {
+		targetByResource[target.ResourceID] = target
+		targetIDs[i] = target.ID
 	}
-
-	var latestReply model.ForumReply
-	if err := tx.Select("id", "created_at").Where("topic_id = ?", topicID).Order("created_at DESC, id DESC").First(&latestReply).Error; err != nil {
+	var latest []model.CommentEntry
+	if err := s.db.Model(&model.CommentEntry{}).
+		Select("target_id", "created_at").
+		Where("target_id IN ? AND status IN ?", targetIDs, []string{comment.CommentStatusActive, comment.CommentStatusAutoFolded}).
+		Order("created_at DESC, id DESC").Find(&latest).Error; err != nil {
 		return err
 	}
-	lastReplyAt := latestReply.CreatedAt
-	updates["last_reply_at"] = &lastReplyAt
-
-	var solvedReply model.ForumReply
-	if err := tx.Select("id").Where("topic_id = ? AND is_solved = ?", topicID, true).Order("created_at DESC, id DESC").First(&solvedReply).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			updates["is_solved"] = false
-			updates["solved_reply_id"] = nil
-		} else {
-			return err
+	latestByTarget := make(map[uuid.UUID]*time.Time, len(latest))
+	for _, item := range latest {
+		if _, exists := latestByTarget[item.TargetID]; !exists {
+			createdAt := item.CreatedAt
+			latestByTarget[item.TargetID] = &createdAt
 		}
-	} else {
-		solvedReplyID := solvedReply.ID
-		updates["is_solved"] = true
-		updates["solved_reply_id"] = &solvedReplyID
 	}
-
-	return tx.Model(&model.ForumTopic{}).Where("id = ?", topicID).Updates(updates).Error
+	for i := range topics {
+		target, ok := targetByResource[topics[i].ID]
+		if !ok {
+			continue
+		}
+		topics[i].ReplyCount = target.CommentCount
+		topics[i].LastReplyAt = latestByTarget[target.ID]
+		topics[i].SolvedReplyID = target.PinnedCommentID
+		topics[i].IsSolved = target.PinnedCommentID != nil
+	}
+	return nil
 }

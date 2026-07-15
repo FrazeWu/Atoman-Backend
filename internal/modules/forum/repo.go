@@ -33,12 +33,6 @@ func (r *Repo) GetTopic(id uuid.UUID) (model.ForumTopic, error) {
 	return topic, err
 }
 
-func (r *Repo) GetTopicForUpdate(id uuid.UUID) (model.ForumTopic, error) {
-	var topic model.ForumTopic
-	err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("User").Preload("Category").First(&topic, "id = ?", id).Error
-	return topic, err
-}
-
 func (r *Repo) ListTopics(query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
 	db := r.db.Model(&model.ForumTopic{})
 	if query.CategoryID != uuid.Nil {
@@ -60,32 +54,6 @@ func (r *Repo) SaveTopic(topic *model.ForumTopic) error { return r.db.Save(topic
 
 func (r *Repo) DeleteTopic(id uuid.UUID) error {
 	return r.db.Delete(&model.ForumTopic{}, "id = ?", id).Error
-}
-
-func (r *Repo) CreateReply(reply *model.ForumReply) error { return r.db.Create(reply).Error }
-
-func (r *Repo) GetReply(id uuid.UUID) (model.ForumReply, error) {
-	var reply model.ForumReply
-	err := r.db.Preload("User").Preload("Topic").First(&reply, "id = ?", id).Error
-	return reply, err
-}
-
-func (r *Repo) ListReplies(topicID uuid.UUID) ([]model.ForumReply, error) {
-	var replies []model.ForumReply
-	err := r.db.Preload("User").Where("topic_id = ?", topicID).Order("floor_number ASC, created_at ASC").Find(&replies).Error
-	return replies, err
-}
-
-func (r *Repo) SaveReply(reply *model.ForumReply) error { return r.db.Save(reply).Error }
-
-func (r *Repo) DeleteReply(id uuid.UUID) error {
-	return r.db.Delete(&model.ForumReply{}, "id = ?", id).Error
-}
-
-func (r *Repo) CountReplies(topicID uuid.UUID) (int64, error) {
-	var count int64
-	err := r.db.Model(&model.ForumReply{}).Where("topic_id = ?", topicID).Count(&count).Error
-	return count, err
 }
 
 func (r *Repo) UpsertDraft(draft *model.ForumDraft) error {
