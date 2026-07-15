@@ -14,7 +14,6 @@ import (
 	// @Success 200 {object} TimelineEventListResponse
 	// @Failure 500 {object} ErrorResponse
 	// @Router /api/v1/timeline/events [get]
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -26,52 +25,13 @@ import (
 	"atoman/internal/middleware"
 	"atoman/internal/model"
 	proposalservice "atoman/internal/service"
+	timelinecore "atoman/internal/timeline"
 )
 
 // parseDateTime 尝试多种格式解析时间，支持精确到小时分钟，支持负年份（BCE）
 // 负年份格式示例："-0500-01-01"（公元前500年）
 func parseDateTime(s string) (time.Time, error) {
-	// Handle BCE dates: strings starting with '-' indicate negative year
-	if len(s) > 0 && s[0] == '-' {
-		// Extract year (everything up to the second '-')
-		rest := s[1:] // remove leading minus
-		yearEnd := len(rest)
-		for i, c := range rest {
-			if c == '-' {
-				yearEnd = i
-				break
-			}
-		}
-		yearStr := rest[:yearEnd]
-		suffix := ""
-		if yearEnd < len(rest) {
-			suffix = rest[yearEnd:] // e.g. "-01-01"
-		}
-		var year int
-		if _, err := fmt.Sscanf(yearStr, "%d", &year); err == nil {
-			// Rebuild as positive year date, parse, then adjust year
-			positive := fmt.Sprintf("%04d%s", year, suffix)
-			formats := []string{"2006-01-02", "2006-01-02T15:04", "2006-01-02T15:04:05", time.RFC3339}
-			for _, f := range formats {
-				if t, err := time.Parse(f, positive); err == nil {
-					return time.Date(-year, t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), 0, time.UTC), nil
-				}
-			}
-		}
-	}
-	formats := []string{
-		"2006-01-02T15:04",
-		"2006-01-02T15:04:05",
-		time.RFC3339,
-		"2006-01-02 15:04",
-		"2006-01-02",
-	}
-	for _, f := range formats {
-		if t, err := time.Parse(f, s); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, &time.ParseError{Value: s}
+	return timelinecore.ParseDateTime(s)
 }
 
 func SetupTimelineRoutes(router *gin.Engine, db *gorm.DB) {

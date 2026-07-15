@@ -11,6 +11,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/modules/comment"
 	"atoman/internal/platform/authctx"
+	timelinecore "atoman/internal/timeline"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -46,6 +47,8 @@ type TimelineProposal struct {
 type TimelineProposalList struct {
 	Items   []TimelineProposal `json:"items"`
 	Page    int                `json:"page"`
+	PerPage int                `json:"per_page"`
+	Total   int                `json:"total"`
 	HasMore bool               `json:"has_more"`
 }
 
@@ -66,14 +69,14 @@ func (s *TimelineRevisionProposalService) CreatePersonProposal(user authctx.Curr
 	return s.create(user, comment.TargetKindTimelinePerson, personID, input)
 }
 
-func (s *TimelineRevisionProposalService) List(user authctx.CurrentUser, kind string, targetID uuid.UUID, page int) (TimelineProposalList, error) {
+func (s *TimelineRevisionProposalService) List(user authctx.CurrentUser, kind string, targetID uuid.UUID, page, pageSize int) (TimelineProposalList, error) {
 	if kind != comment.TargetKindTimelineEvent && kind != comment.TargetKindTimelinePerson {
 		return TimelineProposalList{}, ErrTimelineProposalInvalid
 	}
 	if page < 1 {
 		page = 1
 	}
-	roots, err := s.comments.List(user, comment.TargetRef{Kind: kind, ResourceID: targetID}, comment.ListCommentsInput{Page: page, PageSize: 20, Sort: comment.SortNewest})
+	roots, err := s.comments.List(user, comment.TargetRef{Kind: kind, ResourceID: targetID}, comment.ListCommentsInput{Page: page, PageSize: pageSize, Sort: comment.SortNewest})
 	if err != nil {
 		return TimelineProposalList{}, err
 	}
@@ -103,7 +106,7 @@ func (s *TimelineRevisionProposalService) List(user authctx.CurrentUser, kind st
 		}
 		items = append(items, TimelineProposal{Comment: root, TargetKind: extension.TargetKind, TargetID: extension.TargetID, Patch: patch, Evidence: extension.Evidence, Status: extension.Status, ReviewerID: extension.ReviewerID, AppliedRevisionID: extension.AppliedRevisionID})
 	}
-	return TimelineProposalList{Items: items, Page: roots.Page, HasMore: roots.Page*roots.PerPage < roots.TotalRoots}, nil
+	return TimelineProposalList{Items: items, Page: roots.Page, PerPage: roots.PerPage, Total: roots.TotalRoots, HasMore: roots.Page*roots.PerPage < roots.TotalRoots}, nil
 }
 
 func (s *TimelineRevisionProposalService) create(user authctx.CurrentUser, kind string, targetID uuid.UUID, input TimelineProposalInput) (TimelineProposal, error) {
@@ -133,7 +136,7 @@ func (s *TimelineRevisionProposalService) create(user authctx.CurrentUser, kind 
 	if err != nil {
 		return TimelineProposal{}, err
 	}
-	proposal, err := s.load(created.ID)
+	proposal, err := s.load(user, created.ID)
 	proposal.Comment = created
 	return proposal, err
 }
@@ -193,7 +196,7 @@ func (s *TimelineRevisionProposalService) Decide(user authctx.CurrentUser, comme
 	if err != nil {
 		return TimelineProposal{}, err
 	}
-	return s.load(commentID)
+	return s.load(user, commentID)
 }
 
 func lockTimelineProposalTarget(tx *gorm.DB, kind string, id uuid.UUID) (uuid.UUID, error) {
@@ -282,8 +285,6 @@ func normalizeEventField(field string, value any, target model.TimelineEvent) (a
 		return stringValue(value, false, target.Category)
 	case "tags":
 		return tagsValue(value, target.Tags)
-	case "is_public":
-		return boolValue(value, target.IsPublic)
 	default:
 		return nil, nil, ErrTimelineProposalInvalid
 	}
@@ -301,8 +302,6 @@ func normalizePersonField(field string, value any, target model.TimelinePerson) 
 		return dateValue(value, true, target.DeathDate)
 	case "tags":
 		return tagsValue(value, target.Tags)
-	case "is_public":
-		return boolValue(value, target.IsPublic)
 	default:
 		return nil, nil, ErrTimelineProposalInvalid
 	}
@@ -315,13 +314,6 @@ func stringValue(value any, required bool, current string) (any, any, error) {
 	}
 	next = strings.TrimSpace(next)
 	if required && next == "" {
-		return nil, nil, ErrTimelineProposalInvalid
-	}
-	return next, current, nil
-}
-func boolValue(value any, current bool) (any, any, error) {
-	next, ok := value.(bool)
-	if !ok {
 		return nil, nil, ErrTimelineProposalInvalid
 	}
 	return next, current, nil
@@ -385,12 +377,7 @@ func formatCurrentDate(value any) any {
 	}
 }
 func parseTimelineProposalDate(value string) (time.Time, error) {
-	for _, layout := range []string{time.RFC3339, "2006-01-02"} {
-		if parsed, err := time.Parse(layout, value); err == nil {
-			return parsed, nil
-		}
-	}
-	return time.Time{}, ErrTimelineProposalInvalid
+	return timelinecore.ParseDateTime(value)
 }
 
 func (s *TimelineRevisionProposalService) applyPatch(tx *gorm.DB, kind string, id, reviewerID uuid.UUID, raw map[string]any) (uuid.UUID, error) {
@@ -454,13 +441,13 @@ func applyEventPatch(target *model.TimelineEvent, patch map[string]any) {
 		case "content":
 			target.Content = value.(string)
 		case "event_date":
-			parsed, _ := time.Parse(time.RFC3339, value.(string))
+			parsed, _ := timelinecore.ParseDateTime(value.(string))
 			target.EventDate = parsed
 		case "end_date":
 			if value == nil {
 				target.EndDate = nil
 			} else {
-				parsed, _ := time.Parse(time.RFC3339, value.(string))
+				parsed, _ := timelinecore.ParseDateTime(value.(string))
 				target.EndDate = &parsed
 			}
 		case "location":
@@ -475,8 +462,6 @@ func applyEventPatch(target *model.TimelineEvent, patch map[string]any) {
 			target.Category = value.(string)
 		case "tags":
 			target.Tags = toStrings(value)
-		case "is_public":
-			target.IsPublic = value.(bool)
 		}
 	}
 }
@@ -493,8 +478,6 @@ func applyPersonPatch(target *model.TimelinePerson, patch map[string]any) {
 			target.DeathDate = optionalDate(value)
 		case "tags":
 			target.Tags = toStrings(value)
-		case "is_public":
-			target.IsPublic = value.(bool)
 		}
 	}
 }
@@ -509,7 +492,7 @@ func optionalDate(value any) *time.Time {
 	if value == nil {
 		return nil
 	}
-	next, _ := time.Parse(time.RFC3339, value.(string))
+	next, _ := timelinecore.ParseDateTime(value.(string))
 	return &next
 }
 func toStrings(value any) []string {
@@ -528,7 +511,7 @@ func eventRevisionSnapshot(event model.TimelineEvent, editor uuid.UUID) model.Ti
 	return model.TimelineRevision{EventID: event.ID, EditorID: editor, Title: event.Title, Description: event.Description, Content: event.Content, EventDate: event.EventDate.Format("2006-01-02"), EndDate: end, Location: event.Location, Source: event.Source, Category: event.Category, IsPublic: event.IsPublic}
 }
 
-func (s *TimelineRevisionProposalService) load(commentID uuid.UUID) (TimelineProposal, error) {
+func (s *TimelineRevisionProposalService) load(user authctx.CurrentUser, commentID uuid.UUID) (TimelineProposal, error) {
 	var extension model.TimelineRevisionProposal
 	if err := s.db.First(&extension, "comment_id = ?", commentID).Error; err != nil {
 		return TimelineProposal{}, ErrTimelineProposalNotFound
@@ -537,5 +520,13 @@ func (s *TimelineRevisionProposalService) load(commentID uuid.UUID) (TimelinePro
 	if err := json.Unmarshal(extension.PatchJSON, &patch); err != nil {
 		return TimelineProposal{}, fmt.Errorf("decode proposal patch: %w", err)
 	}
-	return TimelineProposal{Comment: comment.CommentDTO{ID: commentID}, TargetKind: extension.TargetKind, TargetID: extension.TargetID, Patch: patch, Evidence: extension.Evidence, Status: extension.Status, ReviewerID: extension.ReviewerID, AppliedRevisionID: extension.AppliedRevisionID}, nil
+	viewer := comment.Viewer{}
+	if user.ID != uuid.Nil {
+		viewer.UserID = &user.ID
+	}
+	entry, err := s.comments.Get(viewer, commentID)
+	if err != nil {
+		return TimelineProposal{}, err
+	}
+	return TimelineProposal{Comment: entry, TargetKind: extension.TargetKind, TargetID: extension.TargetID, Patch: patch, Evidence: extension.Evidence, Status: extension.Status, ReviewerID: extension.ReviewerID, AppliedRevisionID: extension.AppliedRevisionID}, nil
 }

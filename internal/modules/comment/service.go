@@ -392,6 +392,44 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	}, nil
 }
 
+// Get returns one comment with the same visibility and relation hydration used by list responses.
+func (s *Service) Get(viewer Viewer, commentID uuid.UUID) (CommentDTO, error) {
+	entry, err := s.repo.findComment(s.db, commentID)
+	if err != nil {
+		return CommentDTO{}, ErrCommentNotFound
+	}
+	target, err := s.repo.findTargetByID(s.db, entry.TargetID)
+	if err != nil {
+		return CommentDTO{}, ErrCommentNotFound
+	}
+	if _, err := s.resolveStoredTarget(viewer, target); err != nil {
+		return CommentDTO{}, err
+	}
+	visible := []string{commentStatusActive, CommentStatusAutoFolded}
+	if entry.Status != commentStatusActive && entry.Status != CommentStatusAutoFolded {
+		return CommentDTO{}, ErrCommentNotFound
+	}
+	entries := []model.CommentEntry{entry}
+	var children []model.CommentEntry
+	if entry.RootID == nil {
+		children, err = s.previewChildren(s.db, []uuid.UUID{entry.ID}, visible)
+		if err != nil {
+			return CommentDTO{}, err
+		}
+		entries = append(entries, children...)
+	}
+	dtos, err := s.entryDTOs(s.db, entries, viewer.UserID)
+	if err != nil {
+		return CommentDTO{}, err
+	}
+	dto := dtos[entry.ID]
+	dto.Marked = target.PinnedCommentID != nil && *target.PinnedCommentID == entry.ID
+	for _, child := range children {
+		dto.Replies = append(dto.Replies, dtos[child.ID])
+	}
+	return dto, nil
+}
+
 func targetSummary(resolved ResolvedTarget, target model.DiscussionTarget, viewerID *uuid.UUID) TargetSummaryDTO {
 	canMark := viewerID != nil && resolved.OwnerID != nil && *viewerID == *resolved.OwnerID
 	return TargetSummaryDTO{

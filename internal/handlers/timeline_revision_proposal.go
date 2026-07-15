@@ -50,7 +50,12 @@ func listTimelineProposals(service *proposalservice.TimelineRevisionProposalServ
 			writeTimelineProposalError(c, proposalservice.ErrTimelineProposalInvalid)
 			return
 		}
-		proposals, err := service.List(user, kind, targetID, page)
+		pageSize := 20
+		if _, err := fmt.Sscanf(c.DefaultQuery("page_size", "20"), "%d", &pageSize); err != nil {
+			writeTimelineProposalError(c, proposalservice.ErrTimelineProposalInvalid)
+			return
+		}
+		proposals, err := service.List(user, kind, targetID, page, pageSize)
 		if err != nil {
 			writeTimelineProposalError(c, err)
 			return
@@ -124,6 +129,8 @@ func writeTimelineProposalError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, proposalservice.ErrTimelineProposalInvalid), errors.Is(err, comment.ErrInvalidContent), errors.Is(err, comment.ErrInvalidMention), errors.Is(err, comment.ErrInvalidAttachment):
 		status, code, message = http.StatusBadRequest, "timeline_proposal.invalid", "Invalid revision proposal"
+	case errors.Is(err, comment.ErrInvalidListOptions):
+		status, code, message = http.StatusBadRequest, "timeline_proposal.invalid_page", "Invalid pagination"
 	case errors.Is(err, proposalservice.ErrTimelineProposalForbidden), errors.Is(err, comment.ErrCommentForbidden):
 		status, code, message = http.StatusForbidden, "timeline_proposal.forbidden", "Not authorized"
 	case errors.Is(err, proposalservice.ErrTimelineProposalNotFound), errors.Is(err, comment.ErrTargetNotFound):

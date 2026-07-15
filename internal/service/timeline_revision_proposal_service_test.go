@@ -44,6 +44,12 @@ func TestAcceptTimelineProposalAppliesPatchAndRecordsRevision(t *testing.T) {
 	decided, err := svc.Decide(owner, proposal.Comment.ID, "accept")
 	require.NoError(t, err)
 	require.Equal(t, "accepted", decided.Status)
+	require.Equal(t, owner.ID, decided.Comment.AuthorID)
+	require.Equal(t, owner.Username, decided.Comment.Author.Username)
+	require.Equal(t, "Change the location", decided.Comment.Content)
+	require.NotNil(t, decided.Comment.Attachments)
+	require.NotNil(t, decided.Comment.Mentions)
+	require.NotNil(t, decided.Comment.Replies)
 	var stored model.TimelineEvent
 	require.NoError(t, db.First(&stored, "id = ?", event.ID).Error)
 	require.Equal(t, "Berlin", stored.Location)
@@ -123,10 +129,19 @@ func TestListTimelineProposalsIncludesTypedStateAndComments(t *testing.T) {
 	svc, _, owner, event, _ := seededTimelineProposalService(t)
 	created, err := svc.CreateEventProposal(owner, event.ID, TimelineProposalInput{Content: "change", Evidence: "source", Patch: map[string]any{"location": "Berlin"}})
 	require.NoError(t, err)
-	listed, err := svc.List(owner, comment.TargetKindTimelineEvent, event.ID, 1)
+	listed, err := svc.List(owner, comment.TargetKindTimelineEvent, event.ID, 1, 1)
 	require.NoError(t, err)
 	require.Len(t, listed.Items, 1)
 	require.Equal(t, created.Comment.ID, listed.Items[0].Comment.ID)
 	require.Equal(t, "pending", listed.Items[0].Status)
 	require.Equal(t, "source", listed.Items[0].Evidence)
+	require.Equal(t, 1, listed.PerPage)
+	require.False(t, listed.HasMore)
+}
+
+func TestTimelineProposalAcceptsBCEDateWithTimelinePrecision(t *testing.T) {
+	svc, _, owner, event, _ := seededTimelineProposalService(t)
+	proposal, err := svc.CreateEventProposal(owner, event.ID, TimelineProposalInput{Content: "date", Evidence: "archive", Patch: map[string]any{"event_date": "-0044-03-15"}})
+	require.NoError(t, err)
+	require.Equal(t, "-0044-03-15T00:00:00Z", proposal.Patch["event_date"])
 }

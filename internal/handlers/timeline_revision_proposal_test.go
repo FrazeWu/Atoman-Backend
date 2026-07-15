@@ -67,6 +67,8 @@ func TestTimelineProposalHandlerCreatesAndAcceptsEventProposal(t *testing.T) {
 	router.ServeHTTP(decided, decision)
 	require.Equal(t, http.StatusOK, decided.Code, decided.Body.String())
 	require.Contains(t, decided.Body.String(), `"status":"accepted"`)
+	require.Contains(t, decided.Body.String(), `"content":"change"`)
+	require.Contains(t, decided.Body.String(), `"username":"timeline-handler"`)
 }
 
 func TestTimelineProposalHandlerRejectsInvalidIDAndUnknownField(t *testing.T) {
