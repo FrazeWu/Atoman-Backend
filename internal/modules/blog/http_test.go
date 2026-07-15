@@ -303,6 +303,81 @@ func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 	}
 }
 
+func TestListBookmarksReturnsPostEngagementCounts(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	post := model.Post{
+		UserID: user.ID, Title: "Bookmarked", Content: "Body", Summary: "Bookmark summary",
+		CoverURL: "/covers/bookmarked.jpg", Status: "published", Visibility: "public",
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	folder := model.BookmarkFolder{UserID: user.ID, Name: "Favorites"}
+	if err := db.Create(&folder).Error; err != nil {
+		t.Fatalf("create bookmark folder: %v", err)
+	}
+	if err := db.Create(&model.Bookmark{UserID: user.ID, PostID: post.ID, BookmarkFolderID: &folder.ID}).Error; err != nil {
+		t.Fatalf("create bookmark: %v", err)
+	}
+	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
+		t.Fatalf("create like: %v", err)
+	}
+	for _, comment := range []model.Comment{
+		{TargetType: "post", TargetID: post.ID, UserID: model.NewNullableUserUUID(user.ID), Content: "Visible", Status: "visible"},
+		{TargetType: "post", TargetID: post.ID, UserID: model.NewNullableUserUUID(user.ID), Content: "Hidden", Status: "hidden"},
+	} {
+		if err := db.Create(&comment).Error; err != nil {
+			t.Fatalf("create %s comment: %v", comment.Status, err)
+		}
+	}
+	deletedComment := model.Comment{
+		TargetType: "post", TargetID: post.ID, UserID: model.NewNullableUserUUID(user.ID),
+		Content: "Deleted visible", Status: "visible",
+	}
+	if err := db.Create(&deletedComment).Error; err != nil {
+		t.Fatalf("create deleted comment: %v", err)
+	}
+	if err := db.Delete(&deletedComment).Error; err != nil {
+		t.Fatalf("soft delete comment: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/bookmarks", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			Post struct {
+				ID            uuid.UUID `json:"id"`
+				Title         string    `json:"title"`
+				Summary       string    `json:"summary"`
+				CoverURL      string    `json:"cover_url"`
+				LikesCount    int64     `json:"likes_count"`
+				CommentsCount int64     `json:"comments_count"`
+				User          struct {
+					Username string `json:"username"`
+				} `json:"user"`
+			} `json:"post"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].Post.ID != post.ID {
+		t.Fatalf("expected bookmarked post, got %s", w.Body.String())
+	}
+	if payload.Data[0].Post.Title != post.Title || payload.Data[0].Post.Summary != post.Summary || payload.Data[0].Post.CoverURL != post.CoverURL || payload.Data[0].Post.User.Username != user.Username {
+		t.Fatalf("expected original post fields and user, got %s", w.Body.String())
+	}
+	if payload.Data[0].Post.LikesCount != 1 || payload.Data[0].Post.CommentsCount != 1 {
+		t.Fatalf("expected bookmark engagement 1/1, got %d/%d: %s", payload.Data[0].Post.LikesCount, payload.Data[0].Post.CommentsCount, w.Body.String())
+	}
+}
+
 func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")

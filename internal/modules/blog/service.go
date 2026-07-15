@@ -538,6 +538,62 @@ func (s *Service) ListBookmarks(user authctx.CurrentUser, folderID *uuid.UUID, s
 	return s.repo.ListBookmarks(user.ID, folderID, sort)
 }
 
+func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUID, sort string) ([]BookmarkListItemDTO, error) {
+	bookmarks, err := s.ListBookmarks(user, folderID, sort)
+	if err != nil {
+		return nil, err
+	}
+
+	postIDs := make([]uuid.UUID, 0, len(bookmarks))
+	seen := make(map[uuid.UUID]struct{}, len(bookmarks))
+	for _, bookmark := range bookmarks {
+		if bookmark.Post == nil {
+			continue
+		}
+		if _, exists := seen[bookmark.PostID]; exists {
+			continue
+		}
+		seen[bookmark.PostID] = struct{}{}
+		postIDs = append(postIDs, bookmark.PostID)
+	}
+
+	type engagementCount struct {
+		PostID        uuid.UUID `gorm:"column:post_id"`
+		LikesCount    int64     `gorm:"column:likes_count"`
+		CommentsCount int64     `gorm:"column:comments_count"`
+	}
+	countsByPostID := make(map[uuid.UUID]engagementCount, len(postIDs))
+	if len(postIDs) > 0 {
+		var counts []engagementCount
+		if err := s.db.Model(&model.Post{}).Select(`posts.id AS post_id,
+			(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
+			(SELECT COUNT(*) FROM comments WHERE comments.target_type = 'post' AND comments.target_id = posts.id AND comments.status = 'visible' AND comments.deleted_at IS NULL) AS comments_count`).
+			Where("posts.id IN ?", postIDs).
+			Scan(&counts).Error; err != nil {
+			return nil, err
+		}
+		for _, count := range counts {
+			countsByPostID[count.PostID] = count
+		}
+	}
+
+	items := make([]BookmarkListItemDTO, 0, len(bookmarks))
+	for _, bookmark := range bookmarks {
+		item := BookmarkListItemDTO{Bookmark: bookmark}
+		if bookmark.Post != nil {
+			count := countsByPostID[bookmark.PostID]
+			item.Bookmark.Post = nil
+			item.Post = &BookmarkPostDTO{
+				Post:          *bookmark.Post,
+				LikesCount:    count.LikesCount,
+				CommentsCount: count.CommentsCount,
+			}
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
 func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, folderID *uuid.UUID) (model.Bookmark, error) {
 	if user.ID == uuid.Nil {
 		return model.Bookmark{}, apperr.Unauthorized("Login required")

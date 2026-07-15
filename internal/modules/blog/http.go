@@ -520,7 +520,7 @@ func (h *Handler) toggleLike(c *gin.Context, isLike bool) {
 // @Produce json
 // @Param folder_id query string false "收藏夹 UUID"
 // @Param sort query string false "排序" Enums(latest,popular)
-// @Success 200 {array} model.Bookmark
+// @Success 200 {object} map[string][]BookmarkListItemDTO
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/blog/bookmarks [get]
@@ -540,7 +540,7 @@ func (h *Handler) listBookmarks(c *gin.Context) {
 		folderID = &parsed
 	}
 	sort := strings.TrimSpace(c.DefaultQuery("sort", "latest"))
-	bookmarks, err := h.service.ListBookmarks(user, folderID, sort)
+	bookmarks, err := h.service.ListBookmarkItems(user, folderID, sort)
 	if err != nil {
 		httpx.Error(c, err)
 		return

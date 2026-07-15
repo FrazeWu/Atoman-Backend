@@ -37,3 +37,14 @@ type PostListItemDTO struct {
 	CommentsCount  int64 `json:"comments_count"`
 	BookmarksCount int64 `json:"bookmarks_count"`
 }
+
+type BookmarkPostDTO struct {
+	model.Post
+	LikesCount    int64 `json:"likes_count"`
+	CommentsCount int64 `json:"comments_count"`
+}
+
+type BookmarkListItemDTO struct {
+	model.Bookmark
+	Post *BookmarkPostDTO `json:"post,omitempty"`
+}
