@@ -3,10 +3,12 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -646,6 +648,129 @@ func TestGetVideoRejectsAnonymousAccessToNonPublicVideos(t *testing.T) {
 			require.NotContains(t, w.Body.String(), video.VideoURL)
 		})
 	}
+}
+
+func TestIncrementVideoViewReturnsUpdatedCountAndRejectsUnavailableVideos(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+
+	publicVideo := seedVideoWithState(t, db, user.UUID, "published", "public")
+	require.NoError(t, db.Model(&publicVideo).Update("view_count", 7).Error)
+
+	router := gin.New()
+	router.POST("/api/v1/videos/:id/view", IncrementVideoView(db))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+publicVideo.ID.String()+"/view", nil)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var payload struct {
+		OK        bool `json:"ok"`
+		ViewCount int  `json:"view_count"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.True(t, payload.OK)
+	require.Equal(t, 8, payload.ViewCount)
+	var stored model.Video
+	require.NoError(t, db.First(&stored, "id = ?", publicVideo.ID).Error)
+	require.Equal(t, 8, stored.ViewCount)
+
+	unavailable := []struct {
+		name  string
+		video model.Video
+	}{
+		{name: "private", video: seedVideoWithState(t, db, user.UUID, "published", "private")},
+		{name: "draft", video: seedVideoWithState(t, db, user.UUID, "draft", "public")},
+	}
+	deleted := seedVideoWithState(t, db, user.UUID, "published", "public")
+	require.NoError(t, db.Delete(&deleted).Error)
+	unavailable = append(unavailable, struct {
+		name  string
+		video model.Video
+	}{name: "deleted", video: deleted})
+
+	for _, tc := range unavailable {
+		t.Run(tc.name, func(t *testing.T) {
+			require.NoError(t, db.Unscoped().Model(&model.Video{}).Where("id = ?", tc.video.ID).Update("view_count", 7).Error)
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+tc.video.ID.String()+"/view", nil)
+			router.ServeHTTP(w, req)
+			require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+			require.NotContains(t, w.Body.String(), tc.video.ID.String())
+
+			var count int
+			require.NoError(t, db.Unscoped().Model(&model.Video{}).Select("view_count").Where("id = ?", tc.video.ID).Scan(&count).Error)
+			require.Equal(t, 7, count)
+		})
+	}
+}
+
+func TestIncrementVideoViewDoesNotLoseConcurrentUpdates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	user := seedVideoUser(t, db)
+	video := seedVideoWithState(t, db, user.UUID, "published", "public")
+
+	router := gin.New()
+	router.POST("/api/v1/videos/:id/view", IncrementVideoView(db))
+
+	const increments = 8
+	statuses := make(chan int, increments)
+	var wg sync.WaitGroup
+	for i := 0; i < increments; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/view", nil)
+			router.ServeHTTP(w, req)
+			statuses <- w.Code
+		}()
+	}
+	wg.Wait()
+	close(statuses)
+	for status := range statuses {
+		require.Equal(t, http.StatusOK, status)
+	}
+
+	var stored model.Video
+	require.NoError(t, db.First(&stored, "id = ?", video.ID).Error)
+	require.Equal(t, increments, stored.ViewCount)
+}
+
+func TestIncrementVideoViewReturnsNotFoundWhenVideoBecomesUnavailableBeforeCountRead(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	video := seedVideoWithState(t, db, user.UUID, "published", "public")
+	require.NoError(t, db.Model(&video).Update("view_count", 7).Error)
+
+	triggerName := "hide_video_after_view_increment"
+	triggerSQL := fmt.Sprintf(`CREATE TRIGGER %s
+		AFTER UPDATE OF view_count ON videos
+		WHEN NEW.id = '%s'
+		BEGIN
+			UPDATE videos SET visibility = 'private' WHERE id = NEW.id;
+		END`, triggerName, video.ID.String())
+	require.NoError(t, db.Exec(triggerSQL).Error)
+	defer db.Exec("DROP TRIGGER IF EXISTS " + triggerName)
+
+	router := gin.New()
+	router.POST("/api/v1/videos/:id/view", IncrementVideoView(db))
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/view", nil)
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
+	require.NotContains(t, w.Body.String(), video.ID.String())
+	var stored model.Video
+	require.NoError(t, db.First(&stored, "id = ?", video.ID).Error)
+	require.Equal(t, 8, stored.ViewCount)
+	require.Equal(t, "private", stored.Visibility)
 }
 
 func TestGetVideoCommentsReturnsMixedComments(t *testing.T) {

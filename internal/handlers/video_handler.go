@@ -492,6 +492,11 @@ func firstPublicVideo(db *gorm.DB, id uuid.UUID, video *model.Video) error {
 		First(video, "id = ?", id).Error
 }
 
+type VideoViewCountResponse struct {
+	OK        bool `json:"ok"`
+	ViewCount int  `json:"view_count"`
+}
+
 // IncrementVideoView adds 1 to view_count. No auth required.
 // IncrementVideoView godoc
 // @Summary 增加视频播放量
@@ -499,14 +504,38 @@ func firstPublicVideo(db *gorm.DB, id uuid.UUID, video *model.Video) error {
 // @Tags videos
 // @Produce json
 // @Param id path string true "视频 UUID"
-// @Success 200 {object} BoolStatusResponse
+// @Success 200 {object} VideoViewCountResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
 // @Router /api/v1/videos/{id}/view [post]
 func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		db.Model(&model.Video{}).Where("id = ?", id).
-			UpdateColumn("view_count", gorm.Expr("view_count + 1"))
-		c.JSON(http.StatusOK, gin.H{"ok": true})
+		publicVideo := func() *gorm.DB {
+			return db.Model(&model.Video{}).
+				Where("id = ? AND status = ? AND visibility = ?", id, "published", "public")
+		}
+		result := publicVideo().UpdateColumn("view_count", gorm.Expr("view_count + 1"))
+		if result.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to increment view count"})
+			return
+		}
+		if result.RowsAffected == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+
+		var viewCount int
+		readResult := publicVideo().Select("view_count").Scan(&viewCount)
+		if readResult.Error != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load view count"})
+			return
+		}
+		if readResult.RowsAffected == 0 {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		c.JSON(http.StatusOK, VideoViewCountResponse{OK: true, ViewCount: viewCount})
 	}
 }
 
