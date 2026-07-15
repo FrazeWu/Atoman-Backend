@@ -1,7 +1,7 @@
 package debate
 
 import (
-	"errors"
+	"net/url"
 	"strings"
 	"time"
 
@@ -19,6 +19,22 @@ type Service struct {
 	db       *gorm.DB
 	repo     *Repo
 	comments *comment.Service
+}
+
+var validArgumentTypes = map[string]bool{"support": true, "oppose": true, "neutral": true, "evidence": true, "question": true, "counter": true}
+
+func validateArgumentMetadata(argumentType, sourceURL string) error {
+	if !validArgumentTypes[argumentType] {
+		return apperr.BadRequest("debate.invalid_argument_type", "Invalid argument type")
+	}
+	if sourceURL == "" {
+		return nil
+	}
+	parsed, err := url.Parse(sourceURL)
+	if err != nil || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return apperr.BadRequest("debate.invalid_source_url", "Source URL must be HTTP or HTTPS")
+	}
+	return nil
 }
 
 func NewService(db *gorm.DB, services ...*comment.Service) *Service {
@@ -105,10 +121,7 @@ func (s *Service) DeleteDebate(user authctx.CurrentUser, debateID uuid.UUID) err
 	if debate.UserID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
 		return apperr.Forbidden("debate.forbidden", "Not authorized")
 	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("debate_id = ?", debateID).Delete(&model.Argument{}).Error; err != nil {
-			return err
-		}
+	return s.comments.DeleteTarget(comment.TargetRef{Kind: comment.TargetKindDebate, ResourceID: debateID}, func(tx *gorm.DB) error {
 		return tx.Delete(&model.Debate{}, "id = ?", debateID).Error
 	})
 }
@@ -177,8 +190,8 @@ func (s *Service) CreateArgument(user authctx.CurrentUser, req CreateArgumentReq
 	}
 	content := req.Content
 	argumentType := strings.TrimSpace(req.ArgumentType)
-	if argumentType == "" {
-		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "argument_type is required")
+	if err := validateArgumentMetadata(argumentType, strings.TrimSpace(req.SourceURL)); err != nil {
+		return model.Argument{}, err
 	}
 	if req.ParentID != nil {
 		parent, err := s.repo.GetArgument(*req.ParentID)
@@ -227,8 +240,8 @@ func (s *Service) UpdateArgument(user authctx.CurrentUser, argumentID uuid.UUID,
 	}
 	content := req.Content
 	argumentType := strings.TrimSpace(req.ArgumentType)
-	if argumentType == "" {
-		return model.Argument{}, apperr.BadRequest("validation.invalid_request", "argument_type is required")
+	if err := validateArgumentMetadata(argumentType, strings.TrimSpace(req.SourceURL)); err != nil {
+		return model.Argument{}, err
 	}
 	if _, err := s.comments.EditWithExtension(user, argumentID, comment.EditCommentInput{Content: content, Mentions: req.Mentions, AttachmentIDs: req.AttachmentIDs}, func(tx *gorm.DB, _ *model.CommentEntry) error {
 		result := tx.Model(&model.DebateArgumentDetail{}).Where("comment_id = ?", argumentID).Updates(map[string]any{
@@ -257,28 +270,14 @@ func (s *Service) GetArgument(argumentID uuid.UUID) (model.Argument, error) {
 }
 
 func (s *Service) DeleteArgument(user authctx.CurrentUser, argumentID uuid.UUID) error {
-	argument, err := s.repo.GetArgument(argumentID)
+	_, err := s.repo.GetArgument(argumentID)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return apperr.NotFound("debate.argument_not_found", "Argument not found")
 		}
 		return err
 	}
-	return s.comments.DeleteWithExtension(user, argumentID, func(tx *gorm.DB, ids []uuid.UUID) error {
-		var removed int64
-		if err := tx.Model(&model.DebateArgumentDetail{}).Where("comment_id IN ?", ids).Count(&removed).Error; err != nil {
-			return err
-		}
-		result := tx.Model(&model.Debate{}).Where("id = ? AND argument_count >= ?", argument.DebateID, removed).
-			UpdateColumn("argument_count", gorm.Expr("argument_count - ?", removed))
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return errors.New("debate argument count is inconsistent")
-		}
-		return nil
-	})
+	return s.comments.Delete(user, argumentID)
 }
 
 func (s *Service) AddArgumentReference(user authctx.CurrentUser, argumentID uuid.UUID, referenceID uuid.UUID) error {

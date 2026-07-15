@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -47,7 +48,7 @@ func (h *Handler) listDebates(c *gin.Context) {
 	}
 	debates, total, err := h.service.ListDebates(query)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.List(c, debates, query.Page, query.PageSize, total)
@@ -61,7 +62,7 @@ func (h *Handler) searchDebates(c *gin.Context) {
 	}
 	debates, total, err := h.service.ListDebates(query)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.List(c, debates, query.Page, query.PageSize, total)
@@ -75,7 +76,7 @@ func (h *Handler) getDebate(c *gin.Context) {
 	}
 	debate, err := h.service.GetDebate(debateID)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, debate)
@@ -89,7 +90,7 @@ func (h *Handler) listArguments(c *gin.Context) {
 	}
 	arguments, err := h.service.ListArguments(debateID)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, arguments)
@@ -108,7 +109,7 @@ func (h *Handler) createDebate(c *gin.Context) {
 	}
 	debate, err := h.service.CreateDebate(user, req)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusCreated, debate)
@@ -136,7 +137,7 @@ func (h *Handler) updateLegacyDebate(c *gin.Context) {
 	}
 	debate, err := h.service.UpdateDebate(user, debateID, req)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, debate)
@@ -154,7 +155,7 @@ func (h *Handler) deleteLegacyDebate(c *gin.Context) {
 		return
 	}
 	if err := h.service.DeleteDebate(user, debateID); err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Debate deleted"})
@@ -179,7 +180,7 @@ func (h *Handler) createLegacyArgument(c *gin.Context) {
 	req.DebateID = debateID
 	argument, err := h.service.CreateArgument(user, req)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusCreated, argument)
@@ -206,7 +207,7 @@ func (h *Handler) concludeLegacyDebate(c *gin.Context) {
 	}
 	debate, err := h.service.ConcludeDebate(user, debateID, req.ConclusionType, req.ConclusionSummary)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, debate)
@@ -225,7 +226,7 @@ func (h *Handler) reopenLegacyDebate(c *gin.Context) {
 	}
 	debate, err := h.service.ReopenDebate(user, debateID)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, debate)
@@ -249,7 +250,7 @@ func (h *Handler) updateLegacyArgument(c *gin.Context) {
 	}
 	argument, err := h.service.UpdateArgument(user, argumentID, req)
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, argument)
@@ -267,7 +268,7 @@ func (h *Handler) deleteLegacyArgument(c *gin.Context) {
 		return
 	}
 	if err := h.service.DeleteArgument(user, argumentID); err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Argument deleted"})
@@ -290,7 +291,7 @@ func (h *Handler) addArgumentReference(c *gin.Context) {
 		return
 	}
 	if err := h.service.AddArgumentReference(user, argumentID, req.ReferenceID); err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Reference added"})
@@ -313,7 +314,7 @@ func (h *Handler) removeArgumentReference(c *gin.Context) {
 		return
 	}
 	if err := h.service.RemoveArgumentReference(user, argumentID, referenceID); err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Reference removed"})
@@ -336,7 +337,7 @@ func (h *Handler) addDebateReference(c *gin.Context) {
 		return
 	}
 	if err := h.service.AddDebateReference(user, argumentID, req.DebateID); err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Debate reference added"})
@@ -359,7 +360,7 @@ func (h *Handler) removeDebateReference(c *gin.Context) {
 		return
 	}
 	if err := h.service.RemoveDebateReference(user, argumentID, debateID); err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Debate reference removed"})
@@ -381,7 +382,7 @@ func (h *Handler) foldArgument(c *gin.Context) {
 	}
 	_ = c.ShouldBindJSON(&req)
 	if err := h.service.FoldArgument(user, argumentID, req.FoldNote); err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "folded"})
@@ -399,7 +400,7 @@ func (h *Handler) unfoldArgument(c *gin.Context) {
 		return
 	}
 	if err := h.service.UnfoldArgument(user, argumentID); err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "unfolded"})

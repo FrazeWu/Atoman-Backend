@@ -3,6 +3,7 @@ package debate
 import (
 	"atoman/internal/model"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -61,7 +62,7 @@ func (r *Repo) getArgument(id uuid.UUID, includeReferences bool, includeAttachme
 		DebateID: target.ResourceID, ParentID: entry.ReplyToID, UserID: entry.AuthorID, User: &user,
 		Content: entry.Content, ArgumentType: model.ArgumentType(detail.ArgumentType), VoteCount: voteCount,
 		SourceURL: detail.SourceURL, SourceTitle: detail.SourceTitle, SourceExcerpt: detail.SourceExcerpt,
-		Conclusion: detail.Conclusion, IsConcluded: detail.Conclusion != "", IsFolded: detail.IsFolded, FoldNote: detail.FoldNote,
+		Conclusion: detail.Conclusion, IsConcluded: detail.Conclusion != "", IsFolded: detail.IsFolded || entry.Status == "auto_folded", FoldNote: detail.FoldNote,
 	}
 	var mentions []model.CommentMention
 	if err := r.db.Where("comment_id = ?", id).Order("start_offset ASC").Find(&mentions).Error; err != nil {
@@ -163,31 +164,114 @@ func (r *Repo) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error
 }
 
 func (r *Repo) ListArguments(debateID uuid.UUID) ([]model.Argument, error) {
-	var ids []uuid.UUID
+	type row struct {
+		ID, AuthorID                                                                               uuid.UUID
+		ReplyToID                                                                                  *uuid.UUID
+		Content, Status, ArgumentType, SourceURL, SourceTitle, SourceExcerpt, Conclusion, FoldNote string
+		IsFolded                                                                                   bool
+		CreatedAt, UpdatedAt                                                                       time.Time
+	}
+	var rows []row
 	err := r.db.Table("comment_entries AS comments").
+		Select("comments.id, comments.author_id, comments.reply_to_id, comments.content, comments.status, comments.created_at, comments.updated_at, details.argument_type, details.source_url, details.source_title, details.source_excerpt, details.conclusion, details.is_folded, details.fold_note").
 		Joins("JOIN debate_argument_details AS details ON details.comment_id = comments.id").
 		Joins("JOIN discussion_targets AS targets ON targets.id = comments.target_id").
 		Where("targets.kind = ? AND targets.resource_id = ? AND comments.deleted_at IS NULL AND comments.status IN ?", "debate", debateID, []string{"active", "auto_folded"}).
-		Order("comments.created_at ASC").Pluck("comments.id", &ids).Error
+		Order("comments.created_at ASC").Limit(100).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
-	arguments := make([]model.Argument, 0, len(ids))
-	for _, id := range ids {
-		argument, err := r.getArgument(id, true, false)
-		if err != nil {
+	ids, userIDs := make([]uuid.UUID, 0, len(rows)), make([]uuid.UUID, 0, len(rows))
+	for _, item := range rows {
+		ids = append(ids, item.ID)
+		userIDs = append(userIDs, item.AuthorID)
+	}
+	var users []model.User
+	if len(userIDs) > 0 {
+		if err := r.db.Where("uuid IN ?", userIDs).Find(&users).Error; err != nil {
 			return nil, err
 		}
-		arguments = append(arguments, argument)
+	}
+	userMap := make(map[uuid.UUID]*model.User, len(users))
+	for i := range users {
+		userMap[users[i].UUID] = &users[i]
+	}
+	type voteRow struct {
+		ArgumentID uuid.UUID
+		VoteCount  int
+	}
+	var votes []voteRow
+	if len(ids) > 0 {
+		if err := r.db.Model(&model.DebateVote{}).Select("argument_id, COALESCE(SUM(vote_type), 0) AS vote_count").Where("argument_id IN ?", ids).Group("argument_id").Scan(&votes).Error; err != nil {
+			return nil, err
+		}
+	}
+	voteMap := make(map[uuid.UUID]int, len(votes))
+	for _, vote := range votes {
+		voteMap[vote.ArgumentID] = vote.VoteCount
+	}
+	var mentionRows []model.CommentMention
+	if len(ids) > 0 {
+		if err := r.db.Where("comment_id IN ?", ids).Order("comment_id, start_offset").Find(&mentionRows).Error; err != nil {
+			return nil, err
+		}
+	}
+	mentionMap := make(map[uuid.UUID][]model.ArgumentMention)
+	for _, mention := range mentionRows {
+		mentionMap[mention.CommentID] = append(mentionMap[mention.CommentID], model.ArgumentMention{UserID: mention.UserID, Start: mention.StartOffset, End: mention.EndOffset})
 	}
 	attachments, err := r.loadArgumentAttachments(ids)
 	if err != nil {
 		return nil, err
 	}
-	for index := range arguments {
-		arguments[index].Attachments = attachments[arguments[index].ID]
-		for _, attachment := range arguments[index].Attachments {
-			arguments[index].AttachmentIDs = append(arguments[index].AttachmentIDs, attachment.ID)
+	arguments := make([]model.Argument, 0, len(rows))
+	indexByID := make(map[uuid.UUID]int, len(rows))
+	for _, item := range rows {
+		argument := model.Argument{Base: model.Base{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt}, DebateID: debateID, ParentID: item.ReplyToID, UserID: item.AuthorID, User: userMap[item.AuthorID], Content: item.Content, ArgumentType: model.ArgumentType(item.ArgumentType), VoteCount: voteMap[item.ID], SourceURL: item.SourceURL, SourceTitle: item.SourceTitle, SourceExcerpt: item.SourceExcerpt, Conclusion: item.Conclusion, IsConcluded: item.Conclusion != "", IsFolded: item.IsFolded || item.Status == "auto_folded", FoldNote: item.FoldNote, Mentions: mentionMap[item.ID], Attachments: attachments[item.ID]}
+		for _, attachment := range argument.Attachments {
+			argument.AttachmentIDs = append(argument.AttachmentIDs, attachment.ID)
+		}
+		indexByID[item.ID] = len(arguments)
+		arguments = append(arguments, argument)
+	}
+	var refs []model.DebateArgumentReference
+	if len(ids) > 0 {
+		if err := r.db.Where("comment_id IN ?", ids).Find(&refs).Error; err != nil {
+			return nil, err
+		}
+	}
+	for _, ref := range refs {
+		from, ok1 := indexByID[ref.CommentID]
+		to, ok2 := indexByID[ref.ReferencedCommentID]
+		if ok1 && ok2 {
+			arguments[from].References = append(arguments[from].References, arguments[to])
+		}
+	}
+	var debateRefs []model.DebateArgumentDebateRef
+	if len(ids) > 0 {
+		if err := r.db.Where("comment_id IN ?", ids).Find(&debateRefs).Error; err != nil {
+			return nil, err
+		}
+	}
+	debateIDs := make([]uuid.UUID, 0, len(debateRefs))
+	for _, ref := range debateRefs {
+		debateIDs = append(debateIDs, ref.DebateID)
+	}
+	var debates []model.Debate
+	if len(debateIDs) > 0 {
+		if err := r.db.Where("id IN ?", debateIDs).Find(&debates).Error; err != nil {
+			return nil, err
+		}
+	}
+	debateMap := make(map[uuid.UUID]model.Debate, len(debates))
+	for _, item := range debates {
+		debateMap[item.ID] = item
+	}
+	for _, ref := range debateRefs {
+		if index, ok := indexByID[ref.CommentID]; ok {
+			if referenced, exists := debateMap[ref.DebateID]; exists {
+				arguments[index].ReferencedDebates = append(arguments[index].ReferencedDebates, referenced)
+			}
 		}
 	}
 	return arguments, nil

@@ -561,6 +561,27 @@ func deleteCommentRelations(tx *gorm.DB, ids []uuid.UUID) error {
 }
 
 func deleteCommentExtensionRelations(tx *gorm.DB, ids []uuid.UUID) error {
+	type debateCount struct {
+		DebateID uuid.UUID
+		Count    int64
+	}
+	var counts []debateCount
+	if err := tx.Table("debate_argument_details AS details").Select("targets.resource_id AS debate_id, COUNT(*) AS count").
+		Joins("JOIN comment_entries AS comments ON comments.id = details.comment_id").
+		Joins("JOIN discussion_targets AS targets ON targets.id = comments.target_id AND targets.kind = ?", TargetKindDebate).
+		Where("details.comment_id IN ?", ids).Group("targets.resource_id").Scan(&counts).Error; err != nil {
+		return err
+	}
+	for _, item := range counts {
+		result := tx.Model(&model.Debate{}).Where("id = ? AND argument_count >= ?", item.DebateID, item.Count).
+			UpdateColumn("argument_count", gorm.Expr("argument_count - ?", item.Count))
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("debate argument count is inconsistent")
+		}
+	}
 	for _, relation := range []any{&model.DebateVote{}, &model.VoteHistory{}} {
 		if err := tx.Unscoped().Where("argument_id IN ?", ids).Delete(relation).Error; err != nil {
 			return err
@@ -575,6 +596,44 @@ func deleteCommentExtensionRelations(tx *gorm.DB, ids []uuid.UUID) error {
 		return fmt.Errorf("delete comment extension references: %w", err)
 	}
 	return nil
+}
+
+func (s *Service) DeleteTarget(targetRef TargetRef, deleteResource func(*gorm.DB) error) error {
+	resolved, err := s.registry.Resolve(Viewer{}, targetRef)
+	if err != nil {
+		return err
+	}
+	target, err := s.repo.findTarget(s.db, resolved)
+	if isNotFound(err) {
+		return s.db.Transaction(deleteResource)
+	}
+	if err != nil {
+		return err
+	}
+	return withCreateTransactionMutex(s.createMu, func() error {
+		return s.db.Transaction(func(tx *gorm.DB) error {
+			locked, err := s.repo.lockTargetByID(tx, target.ID)
+			if err != nil {
+				return err
+			}
+			var ids []uuid.UUID
+			if err := tx.Unscoped().Model(&model.CommentEntry{}).Where("target_id = ?", locked.ID).Order("id ASC").Pluck("id", &ids).Error; err != nil {
+				return err
+			}
+			if len(ids) > 0 {
+				if err := deleteCommentRelations(tx, ids); err != nil {
+					return err
+				}
+				if err := tx.Unscoped().Where("id IN ?", ids).Delete(&model.CommentEntry{}).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Unscoped().Delete(&model.DiscussionTarget{}, "id = ?", locked.ID).Error; err != nil {
+				return err
+			}
+			return deleteResource(tx)
+		})
+	})
 }
 
 func (s *Service) Like(user authctx.CurrentUser, commentID uuid.UUID) error {

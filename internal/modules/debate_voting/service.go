@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ConclusionVoteState struct {
@@ -24,6 +25,39 @@ type Service struct {
 
 func NewService(db *gorm.DB) *Service {
 	return &Service{db: db}
+}
+
+func validateArgumentVoteTarget(tx *gorm.DB, argumentID uuid.UUID) error {
+	var located model.CommentEntry
+	if err := tx.First(&located, "id = ?", argumentID).Error; err != nil {
+		return apperr.NotFound("debate.argument_not_found", "Argument not found")
+	}
+	var target model.DiscussionTarget
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&target, "id = ? AND kind = ?", located.TargetID, "debate").Error; err != nil {
+		return apperr.NotFound("debate.argument_not_found", "Argument not found")
+	}
+	var entry model.CommentEntry
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&entry, "id = ? AND status IN ?", argumentID, []string{"active", "auto_folded"}).Error; err != nil {
+		return apperr.NotFound("debate.argument_not_found", "Argument not found")
+	}
+	if entry.RootID != nil {
+		var root model.CommentEntry
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&root, "id = ? AND status IN ?", *entry.RootID, []string{"active", "auto_folded"}).Error; err != nil {
+			return apperr.NotFound("debate.argument_not_found", "Argument not found")
+		}
+	}
+	var debate model.Debate
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&debate, "id = ?", target.ResourceID).Error; err != nil {
+		return apperr.NotFound("debate.not_found", "Debate not found")
+	}
+	if debate.Status != "open" {
+		return apperr.BadRequest("debate.closed", "Debate is closed")
+	}
+	var detail model.DebateArgumentDetail
+	if err := tx.First(&detail, "comment_id = ?", argumentID).Error; err != nil {
+		return apperr.NotFound("debate.argument_not_found", "Argument not found")
+	}
+	return nil
 }
 
 func (s *Service) SetDebateVote(user authctx.CurrentUser, debateID uuid.UUID, voteType int) (model.DebateVote, error) {
@@ -47,11 +81,7 @@ func (s *Service) SetArgumentVote(user authctx.CurrentUser, argumentID uuid.UUID
 
 	var saved model.DebateVote
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var detail model.DebateArgumentDetail
-		if err := tx.First(&detail, "comment_id = ?", argumentID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.NotFound("debate.argument_not_found", "Argument not found")
-			}
+		if err := validateArgumentVoteTarget(tx, argumentID); err != nil {
 			return err
 		}
 
@@ -109,6 +139,9 @@ func (s *Service) RemoveArgumentVote(user authctx.CurrentUser, argumentID uuid.U
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := validateArgumentVoteTarget(tx, argumentID); err != nil {
+			return err
+		}
 		var vote model.DebateVote
 		if err := tx.Where("argument_id = ? AND user_id = ?", argumentID, user.ID).First(&vote).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

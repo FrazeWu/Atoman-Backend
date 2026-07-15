@@ -2,6 +2,7 @@ package debate
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"atoman/internal/model"
@@ -223,4 +224,67 @@ func TestListArgumentsLoadsAttachmentsInOneOrderedQuery(t *testing.T) {
 	arguments, err := svc.ListArguments(debate.ID)
 	require.NoError(t, err)
 	require.Equal(t, []uuid.UUID{assets[1].ID, assets[0].ID}, []uuid.UUID{arguments[0].Attachments[0].ID, arguments[0].Attachments[1].ID})
+}
+
+func TestArgumentMetadataValidationAndAutoFoldMapping(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "bad", ArgumentType: "unknown"})
+	require.Error(t, err)
+	_, err = svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "bad", ArgumentType: "evidence", SourceURL: "javascript:alert(1)"})
+	require.Error(t, err)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "ok", ArgumentType: "support"})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Update("status", "auto_folded").Error)
+	loaded, err := svc.GetArgument(created.ID)
+	require.NoError(t, err)
+	require.True(t, loaded.IsFolded)
+}
+
+func TestModerationDeleteDecrementsArgumentCount(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.NoError(t, err)
+	admin := user
+	admin.Role = authctx.RoleAdmin
+	require.NoError(t, svc.comments.Moderate(admin, created.ID, comment.ModerateInput{Action: comment.ModerationDelete, Reason: "remove"}))
+	var refreshed model.Debate
+	require.NoError(t, db.First(&refreshed, "id = ?", debate.ID).Error)
+	require.Zero(t, refreshed.ArgumentCount)
+}
+
+func TestDeleteDebateRemovesCommentTargetAndTypedRelations(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	root, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "root", ArgumentType: "support"})
+	require.NoError(t, err)
+	_, err = svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ParentID: &root.ID, Content: "child", ArgumentType: "counter"})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.DebateVote{ArgumentID: root.ID, UserID: user.ID, VoteType: 1}).Error)
+	require.NoError(t, svc.DeleteDebate(user, debate.ID))
+	for _, table := range []any{&model.Debate{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.DebateArgumentDetail{}, &model.DebateVote{}} {
+		var count int64
+		require.NoError(t, db.Model(table).Count(&count).Error)
+		require.Zero(t, count)
+	}
+}
+
+func TestListArgumentsUsesBoundedQueryCount(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	for index := 0; index < 5; index++ {
+		_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: fmt.Sprintf("claim-%d", index), ArgumentType: "support"})
+		require.NoError(t, err)
+	}
+	queries := 0
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register("count-debate-list-query", func(*gorm.DB) { queries++ }))
+	require.NoError(t, db.Callback().Raw().After("gorm:raw").Register("count-debate-list-raw", func(*gorm.DB) { queries++ }))
+	require.NoError(t, db.Callback().Row().After("gorm:row").Register("count-debate-list-row", func(*gorm.DB) { queries++ }))
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove("count-debate-list-query")
+		_ = db.Callback().Raw().Remove("count-debate-list-raw")
+		_ = db.Callback().Row().Remove("count-debate-list-row")
+	})
+	arguments, err := svc.ListArguments(debate.ID)
+	require.NoError(t, err)
+	require.Len(t, arguments, 5)
+	require.Positive(t, queries)
+	require.LessOrEqual(t, queries, 12)
 }

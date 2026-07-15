@@ -272,3 +272,59 @@ func TestRegisterRoutesDoesNotMountLegacyArgumentAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestArgumentHTTPMapsCommentFailures(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, user := newDebateHTTPTestService(t)
+	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Errors"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newDebateHTTPRouter(service, &user)
+	post := func(content string) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		body, _ := json.Marshal(map[string]any{"content": content, "argument_type": "support"})
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/debates/"+debate.ID.String()+"/arguments", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		return w
+	}
+	if got := post("").Code; got != http.StatusBadRequest {
+		t.Fatalf("empty status %d", got)
+	}
+	first := post("same")
+	if first.Code != http.StatusCreated {
+		t.Fatalf("create status %d: %s", first.Code, first.Body.String())
+	}
+	if got := post("same").Code; got != http.StatusConflict {
+		t.Fatalf("duplicate status %d", got)
+	}
+	for _, content := range []string{"two", "three", "four", "five"} {
+		if got := post(content).Code; got != http.StatusCreated {
+			t.Fatalf("create %s status %d", content, got)
+		}
+	}
+	if got := post("six").Code; got != http.StatusTooManyRequests {
+		t.Fatalf("rate status %d", got)
+	}
+
+	var created struct {
+		Data model.Argument `json:"data"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	other := model.User{Username: "other", Email: "other@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := service.db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	otherUser := authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: other.Role}
+	forbidden := newDebateHTTPRouter(service, &otherUser)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/debate-arguments/"+created.Data.ID.String(), bytes.NewBufferString(`{"content":"edit","argument_type":"support"}`))
+	req.Header.Set("Content-Type", "application/json")
+	forbidden.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("forbidden status %d: %s", w.Code, w.Body.String())
+	}
+}
