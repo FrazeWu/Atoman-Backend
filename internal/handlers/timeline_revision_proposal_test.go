@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
@@ -109,4 +110,43 @@ func TestTimelineProposalRoutesUseOptionalAuthForLikedState(t *testing.T) {
 	router.ServeHTTP(response, request)
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	require.Contains(t, response.Body.String(), `"liked":true`)
+}
+
+func TestRevertTimelineEventRestoresAcceptedCoordinatesAndTags(t *testing.T) {
+	_, svc, db, user, event := timelineProposalHandlerContext(t)
+	proposal, err := svc.CreateEventProposal(user, event.ID, proposalservice.TimelineProposalInput{
+		Content: "map", Evidence: "archive", Patch: map[string]any{"latitude": 52.52, "longitude": 13.405, "tags": []string{"berlin", "history"}},
+	})
+	require.NoError(t, err)
+	accepted, err := svc.Decide(user, proposal.Comment.ID, "accept")
+	require.NoError(t, err)
+	require.NotNil(t, accepted.AppliedRevisionID)
+	require.NoError(t, db.Model(&model.TimelineEvent{}).Where("id = ?", event.ID).Updates(map[string]any{"latitude": nil, "longitude": nil, "tags": pq.StringArray{}}).Error)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("role", "admin"); c.Next() })
+	router.POST("/events/:id/revert/:revision_id", RevertTimelineEvent(db))
+	request := httptest.NewRequest(http.MethodPost, "/events/"+event.ID.String()+"/revert/"+accepted.AppliedRevisionID.String(), nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var reverted model.TimelineEvent
+	require.NoError(t, db.First(&reverted, "id = ?", event.ID).Error)
+	require.NotNil(t, reverted.Latitude)
+	require.NotNil(t, reverted.Longitude)
+	require.Equal(t, 52.52, *reverted.Latitude)
+	require.Equal(t, 13.405, *reverted.Longitude)
+	require.Equal(t, []string{"berlin", "history"}, []string(reverted.Tags))
+
+	empty := model.TimelineRevision{EventID: event.ID, EditorID: user.ID, Title: event.Title, EventDate: event.EventDate.Format("2006-01-02"), Location: event.Location, Source: event.Source, Tags: pq.StringArray{}}
+	require.NoError(t, db.Create(&empty).Error)
+	request = httptest.NewRequest(http.MethodPost, "/events/"+event.ID.String()+"/revert/"+empty.ID.String(), nil)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	reverted = model.TimelineEvent{}
+	require.NoError(t, db.First(&reverted, "id = ?", event.ID).Error)
+	require.Nil(t, reverted.Latitude)
+	require.Nil(t, reverted.Longitude)
+	require.Empty(t, reverted.Tags)
 }

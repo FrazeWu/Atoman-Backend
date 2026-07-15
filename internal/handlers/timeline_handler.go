@@ -908,8 +908,11 @@ func RevertTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 			"content":     rev.Content,
 			"event_date":  eventDate,
 			"location":    rev.Location,
+			"latitude":    rev.Latitude,
+			"longitude":   rev.Longitude,
 			"source":      rev.Source,
 			"category":    rev.Category,
+			"tags":        rev.Tags,
 			"is_public":   rev.IsPublic,
 		}
 		if rev.EndDate != "" {
