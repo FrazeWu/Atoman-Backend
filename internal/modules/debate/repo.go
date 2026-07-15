@@ -12,11 +12,23 @@ type Repo struct{ db *gorm.DB }
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
+const debateWithVoteCountSelect = `debates.*,
+	(SELECT COUNT(*)
+	 FROM debate_votes
+	 JOIN arguments ON arguments.id = debate_votes.argument_id
+	 WHERE arguments.debate_id = debates.id
+	   AND arguments.deleted_at IS NULL
+	   AND debate_votes.deleted_at IS NULL) AS vote_count`
+
+func withDebateVoteCount(db *gorm.DB) *gorm.DB {
+	return db.Select(debateWithVoteCountSelect)
+}
+
 func (r *Repo) CreateDebate(debate *model.Debate) error { return r.db.Create(debate).Error }
 
 func (r *Repo) GetDebate(id uuid.UUID) (model.Debate, error) {
 	var debate model.Debate
-	err := r.db.Preload("User").First(&debate, "id = ?", id).Error
+	err := withDebateVoteCount(r.db).Preload("User").First(&debate, "debates.id = ?", id).Error
 	return debate, err
 }
 
@@ -74,7 +86,7 @@ func (r *Repo) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error
 	}
 
 	var debates []model.Debate
-	err := db.Preload("User").Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&debates).Error
+	err := withDebateVoteCount(db).Preload("User").Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&debates).Error
 	return debates, total, err
 }
 

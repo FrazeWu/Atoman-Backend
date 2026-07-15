@@ -135,6 +135,97 @@ func TestListDebatesFiltersByTag(t *testing.T) {
 	}
 }
 
+func TestListAndGetDebateReturnOnlyActiveArgumentVotes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, user := newDebateHTTPTestService(t)
+	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Vote totals", Description: "Body"})
+	if err != nil {
+		t.Fatalf("create debate: %v", err)
+	}
+	activeArgument, err := service.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "Active argument", ArgumentType: string(model.ArgumentTypeSupport)})
+	if err != nil {
+		t.Fatalf("create active argument: %v", err)
+	}
+	deletedArgument, err := service.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "Deleted argument", ArgumentType: string(model.ArgumentTypeOppose)})
+	if err != nil {
+		t.Fatalf("create argument to delete: %v", err)
+	}
+
+	voter := model.User{Username: "bob", Email: "bob@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := service.db.Create(&voter).Error; err != nil {
+		t.Fatalf("create voter: %v", err)
+	}
+	deletedVoter := model.User{Username: "carol", Email: "carol@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := service.db.Create(&deletedVoter).Error; err != nil {
+		t.Fatalf("create voter for deleted vote: %v", err)
+	}
+
+	if err := service.db.Create(&model.DebateVote{ArgumentID: activeArgument.ID, UserID: voter.UUID, VoteType: 1}).Error; err != nil {
+		t.Fatalf("create active vote: %v", err)
+	}
+	deletedVote := model.DebateVote{ArgumentID: activeArgument.ID, UserID: deletedVoter.UUID, VoteType: -1}
+	if err := service.db.Create(&deletedVote).Error; err != nil {
+		t.Fatalf("create vote to delete: %v", err)
+	}
+	if err := service.db.Delete(&deletedVote).Error; err != nil {
+		t.Fatalf("soft delete vote: %v", err)
+	}
+	if err := service.db.Create(&model.DebateVote{ArgumentID: deletedArgument.ID, UserID: voter.UUID, VoteType: 1}).Error; err != nil {
+		t.Fatalf("create vote for deleted argument: %v", err)
+	}
+	if err := service.db.Delete(&deletedArgument).Error; err != nil {
+		t.Fatalf("soft delete argument: %v", err)
+	}
+
+	router := newDebateHTTPRouter(service, nil)
+	listRecorder := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/debate/topics?page=1&limit=20", nil)
+	router.ServeHTTP(listRecorder, listRequest)
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("expected list status 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	var listPayload struct {
+		Data []model.Debate `json:"data"`
+		Meta struct {
+			Page     int   `json:"page"`
+			PageSize int   `json:"page_size"`
+			Total    int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listPayload.Data) != 1 || listPayload.Meta.Page != 1 || listPayload.Meta.PageSize != 20 || listPayload.Meta.Total != 1 {
+		t.Fatalf("expected unchanged list envelope, got %s", listRecorder.Body.String())
+	}
+	listed := listPayload.Data[0]
+	if listed.Title != debate.Title || listed.Status != "open" || listed.User == nil || listed.User.Username != user.Username {
+		t.Fatalf("expected original debate fields and user, got %#v", listed)
+	}
+	if listed.VoteCount != 1 {
+		t.Fatalf("expected list vote_count=1, got %d: %s", listed.VoteCount, listRecorder.Body.String())
+	}
+
+	detailRecorder := httptest.NewRecorder()
+	detailRequest := httptest.NewRequest(http.MethodGet, "/api/v1/debate/topics/"+debate.ID.String(), nil)
+	router.ServeHTTP(detailRecorder, detailRequest)
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("expected detail status 200, got %d: %s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+	var detailPayload struct {
+		Data model.Debate `json:"data"`
+	}
+	if err := json.Unmarshal(detailRecorder.Body.Bytes(), &detailPayload); err != nil {
+		t.Fatalf("decode detail response: %v", err)
+	}
+	if detailPayload.Data.Title != debate.Title || detailPayload.Data.Status != "open" || detailPayload.Data.User == nil || detailPayload.Data.User.Username != user.Username {
+		t.Fatalf("expected original detail fields and user, got %#v", detailPayload.Data)
+	}
+	if detailPayload.Data.VoteCount != 1 {
+		t.Fatalf("expected detail vote_count=1, got %d: %s", detailPayload.Data.VoteCount, detailRecorder.Body.String())
+	}
+}
+
 func TestRegisterRoutesMountsTopicMutationAndArgumentCreate(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, user := newDebateHTTPTestService(t)
