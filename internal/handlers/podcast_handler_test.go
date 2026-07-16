@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
@@ -17,6 +19,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
@@ -161,6 +164,66 @@ func TestGetPodcastEpisodesReturnsInternalServerErrorWhenQueryFails(t *testing.T
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
 	}
+}
+
+func TestGetPodcastEpisodesPaginatesLatestEpisodesWithStableOrdering(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	createdAt := time.Date(2026, time.July, 15, 12, 0, 0, 0, time.UTC)
+	ids := map[int]uuid.UUID{
+		1: uuid.MustParse("00000000-0000-4000-8000-000000000001"),
+		2: uuid.MustParse("00000000-0000-4000-8000-000000000002"),
+		3: uuid.MustParse("00000000-0000-4000-8000-000000000003"),
+		4: uuid.MustParse("00000000-0000-4000-8000-000000000004"),
+	}
+	for _, number := range []int{2, 4, 1, 3} {
+		post := model.Post{
+			UserID:    user.UUID,
+			ChannelID: &channel.ID,
+			Title:     fmt.Sprintf("paged episode %d", number),
+			Content:   "shownotes",
+			Status:    "published",
+		}
+		require.NoError(t, db.Create(&post).Error)
+		episode := model.PodcastEpisode{
+			Base:      model.Base{ID: ids[number], CreatedAt: createdAt},
+			PostID:    post.ID,
+			ChannelID: channel.ID,
+			AudioURL:  fmt.Sprintf("https://cdn.example.com/paged-%d.mp3", number),
+		}
+		require.NoError(t, db.Create(&episode).Error)
+	}
+
+	request := func(path string) (int, []model.PodcastEpisode) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		var episodes []model.PodcastEpisode
+		if w.Code == http.StatusOK {
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &episodes))
+		}
+		return w.Code, episodes
+	}
+
+	expected := []uuid.UUID{ids[4], ids[3], ids[2], ids[1]}
+	pageOneStatus, pageOne := request("/api/v1/podcast/episodes?sort=latest&page=1&limit=2")
+	pageTwoStatus, pageTwo := request("/api/v1/podcast/episodes?sort=latest&page=2&limit=2")
+	require.Equal(t, http.StatusOK, pageOneStatus)
+	require.Equal(t, http.StatusOK, pageTwoStatus)
+	require.Equal(t, expected[:2], []uuid.UUID{pageOne[0].ID, pageOne[1].ID})
+	require.Equal(t, expected[2:], []uuid.UUID{pageTwo[0].ID, pageTwo[1].ID})
+	require.Equal(t, expected, []uuid.UUID{pageOne[0].ID, pageOne[1].ID, pageTwo[0].ID, pageTwo[1].ID})
+
+	defaultStatus, defaultEpisodes := request("/api/v1/podcast/episodes")
+	require.Equal(t, http.StatusOK, defaultStatus)
+	require.Len(t, defaultEpisodes, 4)
+}
+
+func TestGetPodcastEpisodesRejectsRandomPaginationAfterFirstPage(t *testing.T) {
+	r, _, _, _ := newPodcastHandlerTestDB(t)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/podcast/episodes?sort=random&page=2&limit=20", nil))
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
 }
 
 func TestGetPodcastEpisodeAllowsPublishedOrAuthorDraftOnly(t *testing.T) {

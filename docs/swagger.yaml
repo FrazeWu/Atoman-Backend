@@ -7583,6 +7583,11 @@ paths:
         in: query
         name: sort
         type: string
+      - default: 1
+        description: 页码；random 排序仅支持第 1 页
+        in: query
+        name: page
+        type: integer
       - description: 返回数量上限
         in: query
         name: limit
@@ -7596,6 +7601,10 @@ paths:
             items:
               $ref: '#/definitions/model.PodcastEpisode'
             type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
       summary: 获取播客单集列表
       tags:
       - podcast

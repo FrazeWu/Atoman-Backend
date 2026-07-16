@@ -229,15 +229,22 @@ func firstNonEmpty(values ...string) string {
 // @Produce json
 // @Param channel_id query string false "频道 UUID"
 // @Param sort query string false "排序方式" Enums(latest,random)
+// @Param page query int false "页码；random 排序仅支持第 1 页" default(1)
 // @Param limit query int false "返回数量上限"
 // @Success 200 {array} model.PodcastEpisode
+// @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/podcast/episodes [get]
 func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		channelID := c.Query("channel_id")
 		sort := c.DefaultQuery("sort", "latest")
+		page, _ := httpx.PageParams(c)
 		limit := boundedListLimit(c.Query("limit"), 40, 40)
+		if sort == "random" && page > 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "random sorting only supports page 1"})
+			return
+		}
 
 		var episodes []model.PodcastEpisode
 		q := db.Preload("Post.Collection").Preload("Channel").
@@ -248,9 +255,9 @@ func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 		if sort == "random" {
 			q = q.Order("RANDOM()")
 		} else {
-			q = q.Order("podcast_episodes.created_at DESC")
+			q = q.Order("podcast_episodes.created_at DESC, podcast_episodes.id DESC")
 		}
-		if err := q.Limit(limit).Find(&episodes).Error; err != nil {
+		if err := q.Offset(httpx.Offset(page, limit)).Limit(limit).Find(&episodes).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load podcast episodes"})
 			return
 		}

@@ -7123,6 +7123,13 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
+                        "default": 1,
+                        "description": "页码；random 排序仅支持第 1 页",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
                         "description": "返回数量上限",
                         "name": "limit",
                         "in": "query"
@@ -7136,6 +7143,12 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/model.PodcastEpisode"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
