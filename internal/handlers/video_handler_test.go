@@ -194,6 +194,137 @@ func TestGetVideosFiltersCurrentUsersSubscribedChannels(t *testing.T) {
 	require.Equal(t, subscribedVideo.ID, videos[0].ID)
 }
 
+func TestGetVideosRequiresAuthenticationForSubscribedChannels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	r := gin.New()
+	r.GET("/api/v1/videos", GetVideos(db))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/videos?subscribed=true&page=1&limit=2", nil)
+	r.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+}
+
+func TestGetVideosPaginatesCurrentUsersSubscribedChannels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	viewer := seedVideoUser(t, db)
+	creator := seedVideoUser(t, db)
+	subscribedChannel := seedVideoChannel(t, db, creator.UUID, "Paged Subscribed Channel")
+	otherChannel := seedVideoChannel(t, db, creator.UUID, "Paged Other Channel")
+
+	createdAt := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
+	newest := seedVideo(t, db, creator.UUID)
+	middle := seedVideo(t, db, creator.UUID)
+	oldest := seedVideo(t, db, creator.UUID)
+	unsubscribed := seedVideo(t, db, creator.UUID)
+	for index, video := range []model.Video{newest, middle, oldest} {
+		require.NoError(t, db.Model(&video).Updates(map[string]any{
+			"channel_id": subscribedChannel.ID,
+			"created_at": createdAt.Add(-time.Duration(index) * time.Hour),
+		}).Error)
+	}
+	require.NoError(t, db.Model(&unsubscribed).Updates(map[string]any{
+		"channel_id": otherChannel.ID,
+		"created_at": createdAt.Add(time.Hour),
+	}).Error)
+
+	source := model.FeedSource{
+		SourceType: "internal_channel",
+		SourceID:   &subscribedChannel.ID,
+		Hash:       "paged-video-subscription-" + subscribedChannel.ID.String(),
+		Title:      subscribedChannel.Name,
+	}
+	require.NoError(t, db.Create(&source).Error)
+	require.NoError(t, db.Create(&model.Subscription{UserID: viewer.UUID, FeedSourceID: source.ID}).Error)
+
+	r := gin.New()
+	r.GET("/api/v1/videos", func(c *gin.Context) {
+		c.Set("user_id", viewer.UUID)
+		GetVideos(db)(c)
+	})
+
+	requestPage := func(page int) []model.Video {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/videos?subscribed=true&sort=latest&limit=2&page=%d", page), nil)
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var videos []model.Video
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &videos))
+		return videos
+	}
+
+	pageOne := requestPage(1)
+	pageTwo := requestPage(2)
+	require.Len(t, pageOne, 2)
+	require.Len(t, pageTwo, 1)
+	require.Equal(t, []uuid.UUID{newest.ID, middle.ID}, []uuid.UUID{pageOne[0].ID, pageOne[1].ID})
+	require.Equal(t, []uuid.UUID{oldest.ID}, []uuid.UUID{pageTwo[0].ID})
+	require.NotEqual(t, pageOne[0].ID, pageTwo[0].ID)
+	require.NotEqual(t, pageOne[1].ID, pageTwo[0].ID)
+	for _, video := range append(pageOne, pageTwo...) {
+		require.NotEqual(t, unsubscribed.ID, video.ID)
+	}
+}
+
+func TestGetVideosUsesStableUniqueOrderingAcrossPages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	creator := seedVideoUser(t, db)
+	createdAt := time.Date(2026, time.July, 14, 12, 0, 0, 0, time.UTC)
+
+	ids := map[int]uuid.UUID{
+		1: uuid.MustParse("00000000-0000-4000-8000-000000000001"),
+		2: uuid.MustParse("00000000-0000-4000-8000-000000000002"),
+		3: uuid.MustParse("00000000-0000-4000-8000-000000000003"),
+		4: uuid.MustParse("00000000-0000-4000-8000-000000000004"),
+	}
+	for _, number := range []int{2, 4, 1, 3} {
+		video := model.Video{
+			Base:        model.Base{ID: ids[number], CreatedAt: createdAt},
+			UserID:      creator.UUID,
+			Title:       fmt.Sprintf("stable video %d", number),
+			StorageType: "local",
+			VideoURL:    fmt.Sprintf("https://example.com/stable-%d.mp4", number),
+			Status:      "published",
+			Visibility:  "public",
+			ViewCount:   100,
+		}
+		require.NoError(t, db.Create(&video).Error)
+	}
+
+	r := gin.New()
+	r.GET("/api/v1/videos", GetVideos(db))
+	expected := []uuid.UUID{ids[4], ids[3], ids[2], ids[1]}
+	for _, sort := range []string{"popular", "latest"} {
+		t.Run(sort, func(t *testing.T) {
+			requestPage := func(page int) []uuid.UUID {
+				t.Helper()
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/videos?sort=%s&limit=2&page=%d", sort, page), nil)
+				r.ServeHTTP(w, req)
+				require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+				var videos []model.Video
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &videos))
+				result := make([]uuid.UUID, 0, len(videos))
+				for _, video := range videos {
+					result = append(result, video.ID)
+				}
+				return result
+			}
+
+			pageOne := requestPage(1)
+			pageTwo := requestPage(2)
+			require.Equal(t, expected[:2], pageOne)
+			require.Equal(t, expected[2:], pageTwo)
+			require.Equal(t, expected, append(pageOne, pageTwo...))
+		})
+	}
+}
+
 func seedVideoUser(t *testing.T, db *gorm.DB) model.User {
 	t.Helper()
 	u := model.User{Username: "vuser_" + uuid.NewString()[:8], Email: uuid.NewString() + "@test.com", Password: "x", IsActive: true}

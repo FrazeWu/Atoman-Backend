@@ -365,7 +365,7 @@ func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 	}
 }
 
-// GetVideos returns published videos. Supports ?channel_id=&tag=&sort=latest|popular&limit=40
+// GetVideos returns published videos. Supports ?channel_id=&tag=&sort=latest|popular&page=1&limit=40
 // GetVideos godoc
 // @Summary 获取视频列表
 // @Description 匿名返回公开已发布视频；有效认证按本人频道或合集筛选时也返回本人的非公开视频。
@@ -375,6 +375,7 @@ func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 // @Param collection_id query string false "合集 UUID"
 // @Param tag query string false "标签"
 // @Param sort query string false "排序方式" Enums(latest,popular)
+// @Param page query int false "页码" default(1)
 // @Param limit query int false "返回数量上限"
 // @Param subscribed query bool false "仅返回当前用户订阅频道的视频"
 // @Success 200 {array} model.Video
@@ -386,6 +387,7 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 		collectionID := c.Query("collection_id")
 		tag := c.Query("tag")
 		sort := c.DefaultQuery("sort", "latest")
+		page, _ := httpx.PageParams(c)
 		limit := boundedListLimit(c.Query("limit"), 40, 40)
 		subscribedOnly := c.Query("subscribed") == "true"
 
@@ -450,13 +452,13 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 				Joins("JOIN video_tags vt ON vt.id = vtr.tag_id AND vt.name = ?", tag)
 		}
 		if sort == "popular" {
-			q = q.Order("videos.view_count DESC")
+			q = q.Order("videos.view_count DESC, videos.id DESC")
 		} else {
-			q = q.Order("videos.created_at DESC")
+			q = q.Order("videos.created_at DESC, videos.id DESC")
 		}
 
 		var videos []model.Video
-		if err := q.Limit(limit).Find(&videos).Error; err != nil {
+		if err := q.Offset(httpx.Offset(page, limit)).Limit(limit).Find(&videos).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
