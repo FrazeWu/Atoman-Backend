@@ -34,7 +34,7 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		&model.Post{},
 		&model.PostCollection{},
 		&model.Like{},
-		&model.Comment{},
+		&model.DiscussionTarget{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},

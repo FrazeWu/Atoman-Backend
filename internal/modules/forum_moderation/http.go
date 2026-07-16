@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -30,10 +31,6 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/topics/:topicID/unpin", h.unpinTopic)
 	group.POST("/topics/:topicID/hide", h.hideTopic)
 	group.POST("/topics/:topicID/restore", h.restoreTopic)
-	group.POST("/replies/:replyID/solve", h.solveReply)
-	group.DELETE("/replies/:replyID/solve", h.unsolveReply)
-	group.POST("/replies/:replyID/hide", h.hideReply)
-	group.POST("/replies/:replyID/restore", h.restoreReply)
 	group.GET("/reports", h.listReports)
 	group.POST("/reports/:reportID/resolve", h.resolveReport)
 	group.POST("/category-requests/:requestID/approve", h.approveCategoryRequest)
@@ -66,22 +63,6 @@ func (h *Handler) hideTopic(c *gin.Context) {
 
 func (h *Handler) restoreTopic(c *gin.Context) {
 	h.handleTopicAction(c, h.service.RestoreTopic)
-}
-
-func (h *Handler) hideReply(c *gin.Context) {
-	h.handleReplyAction(c, h.service.HideReply)
-}
-
-func (h *Handler) restoreReply(c *gin.Context) {
-	h.handleReplyAction(c, h.service.RestoreReply)
-}
-
-func (h *Handler) solveReply(c *gin.Context) {
-	h.handleReplyAction(c, h.service.SolveReply)
-}
-
-func (h *Handler) unsolveReply(c *gin.Context) {
-	h.handleReplyAction(c, h.service.UnsolveReply)
 }
 
 func (h *Handler) listReports(c *gin.Context) {
@@ -121,7 +102,7 @@ func (h *Handler) createReport(c *gin.Context) {
 	}
 	targetID, err := parseUUIDParam(raw.TargetID, "target_id")
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	report, err := h.service.CreateReport(user, CreateReportRequest{
@@ -131,7 +112,7 @@ func (h *Handler) createReport(c *gin.Context) {
 		Note:       raw.Note,
 	})
 	if err != nil {
-		httpx.Error(c, err)
+		httpx.Error(c, comment.AppError(err))
 		return
 	}
 	httpx.OK(c, http.StatusCreated, report)
@@ -388,25 +369,6 @@ func (h *Handler) handleTopicAction(c *gin.Context, fn func(authctx.CurrentUser,
 		return
 	}
 	result, err := fn(user, topicID)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, result)
-}
-
-func (h *Handler) handleReplyAction(c *gin.Context, fn func(authctx.CurrentUser, uuid.UUID) (model.ForumReply, error)) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	replyID, err := parseUUIDParam(c.Param("replyID"), "replyID")
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	result, err := fn(user, replyID)
 	if err != nil {
 		httpx.Error(c, err)
 		return

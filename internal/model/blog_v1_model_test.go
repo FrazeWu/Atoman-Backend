@@ -69,14 +69,12 @@ func TestBlogV1ModelsMigrateWithoutRating(t *testing.T) {
 	}
 
 	post := Post{
-		UserID:        ownerID,
-		ChannelID:     &channel.ID,
-		CollectionID:  &collection.ID,
-		Title:         "A post",
-		Content:       "content",
-		Status:        "published",
-		Visibility:    "public",
-		AllowComments: true,
+		UserID:     ownerID,
+		ChannelID:  &channel.ID,
+		Title:      "A rated post",
+		Content:    "content",
+		Status:     "published",
+		Visibility: "public",
 	}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)

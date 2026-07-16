@@ -76,8 +76,8 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/admin/discussions/{id}": {
-            "delete": {
+        "/api/v1/admin/comment-reports": {
+            "get": {
                 "security": [
                     {
                         "BearerAuth": []
@@ -86,46 +86,154 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "管理员可软删除任意讨论。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "music-discussions"
+                    "comment-admin"
                 ],
-                "summary": "管理员删除讨论",
+                "summary": "获取评论举报队列",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "讨论 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
+                        "description": "状态：pending/upheld/rejected",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量，最多50",
+                        "name": "page_size",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
+                            "$ref": "#/definitions/comment.ReportQueueResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/comment.ErrorResponse"
                         }
                     },
-                    "404": {
-                        "description": "Not Found",
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/comments/{comment_id}/moderation": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comment-admin"
+                ],
+                "summary": "审核评论或举报",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "评论 UUID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "审核动作",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comment.ModerateInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
                         }
                     }
                 }
@@ -1336,379 +1444,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/albums/{id}/discussions": {
-            "get": {
-                "description": "分页返回专辑的顶层讨论及其已预加载的回复。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "获取专辑讨论列表",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "专辑 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "返回数量",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "偏移量",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "为专辑创建一条讨论，支持可选 parent_id 作为嵌套回复。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "创建专辑讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "专辑 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "讨论输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CreateDiscussionInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/albums/{id}/discussions/unread-count": {
-            "get": {
-                "description": "返回专辑下未读且未删除的讨论数量。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "获取专辑未读讨论数",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "专辑 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionUnreadCountResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/albums/{id}/discussions/{discussion_id}": {
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "讨论所有者或管理员可以更新专辑讨论内容。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "更新专辑讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "专辑 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "讨论 UUID",
-                        "name": "discussion_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "讨论内容",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionContentInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "讨论所有者或管理员可将专辑讨论软删除。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "删除专辑讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "专辑 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "讨论 UUID",
-                        "name": "discussion_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/albums/{id}/discussions/{discussion_id}/reply": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "为现有专辑或歌曲讨论创建一条回复。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "回复专辑或歌曲讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "内容 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "讨论 UUID",
-                        "name": "discussion_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "回复内容",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionContentInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/albums/{id}/entry-status": {
             "put": {
                 "security": [
@@ -2580,248 +2315,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/artists/{id}/discussions": {
-            "get": {
-                "description": "分页返回艺人条目的顶层讨论及其回复。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "获取艺人讨论列表",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "艺人 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "返回数量",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "偏移量",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "为艺人条目创建一条讨论，支持可选 parent_id 作为嵌套回复。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "创建艺人讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "艺人 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "讨论输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CreateDiscussionInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/artists/{id}/discussions/{discussion_id}": {
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "讨论所有者或管理员可将艺人讨论软删除。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "删除艺人讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "艺人 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "讨论 UUID",
-                        "name": "discussion_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/artists/{id}/discussions/{discussion_id}/reply": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "为艺人条目下的现有讨论创建一条回复。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "回复艺人讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "艺人 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "讨论 UUID",
-                        "name": "discussion_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "回复内容",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionContentInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/artists/{id}/edit": {
             "post": {
                 "security": [
@@ -3555,135 +3048,29 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/blog/bookmark-folders": {
+        "/api/v1/blog/explore": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "tags": [
-                    "blog"
-                ],
-                "summary": "获取收藏夹",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.BookmarkFolder"
-                            }
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "tags": [
-                    "blog"
-                ],
-                "summary": "新建收藏夹",
-                "parameters": [
-                    {
-                        "description": "收藏夹输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/blog.bookmarkFolderInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/model.BookmarkFolder"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/blog/bookmark-folders/{id}": {
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "收藏会迁移到默认收藏夹。",
-                "tags": [
-                    "blog"
-                ],
-                "summary": "删除收藏夹",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "收藏夹 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/blog/bookmarks": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
+                "description": "返回已发布文章的分页列表，并附带点赞数和评论数。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "blog"
+                    "users"
                 ],
-                "summary": "获取文章收藏",
+                "summary": "获取博客探索流",
                 "parameters": [
                     {
-                        "type": "string",
-                        "description": "收藏夹 UUID",
-                        "name": "folder_id",
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
                         "in": "query"
                     },
                     {
-                        "enum": [
-                            "latest",
-                            "popular"
-                        ],
-                        "type": "string",
-                        "description": "排序",
-                        "name": "sort",
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量",
+                        "name": "limit",
                         "in": "query"
                     }
                 ],
@@ -3691,82 +3078,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.Bookmark"
-                            }
+                            "$ref": "#/definitions/handlers.ExplorePostListResponse"
                         }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
                     },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "blog"
-                ],
-                "summary": "收藏文章到指定收藏夹",
-                "parameters": [
-                    {
-                        "description": "收藏输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
-                            "$ref": "#/definitions/blog.bookmarkInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/model.Bookmark"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/blog/bookmarks/{id}": {
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "tags": [
-                    "blog"
-                ],
-                "summary": "取消文章收藏",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "收藏 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -3975,46 +3293,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/blog/posts/{id}/versions": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "blog"
-                ],
-                "summary": "获取文章版本历史",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "文章 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.BlogPostVersion"
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/blog/posts/{id}/versions/{version}/restore": {
+        "/api/v1/blog/posts/{id}/collections": {
             "post": {
                 "security": [
                     {
@@ -4024,13 +3303,17 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
+                "description": "为当前用户拥有的文章增加一个同频道合集归属。",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "blog"
                 ],
-                "summary": "恢复文章版本",
+                "summary": "将文章加入合集",
                 "parameters": [
                     {
                         "type": "string",
@@ -4040,9 +3323,79 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "type": "integer",
-                        "description": "版本号",
-                        "name": "version",
+                        "description": "合集操作输入",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.collectionActionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{id}/collections/{collection_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "移除当前用户拥有文章与指定合集之间的关联。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "将文章移出合集",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文章 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "合集 UUID",
+                        "name": "collection_id",
                         "in": "path",
                         "required": true
                     }
@@ -4051,54 +3404,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.Post"
+                            "$ref": "#/definitions/handlers.MessageResponse"
                         }
-                    }
-                }
-            }
-        },
-        "/api/v1/blog/recommend/posts": {
-            "get": {
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "blog"
-                ],
-                "summary": "获取博客综合推荐",
-                "parameters": [
-                    {
-                        "enum": [
-                            "hot",
-                            "featured",
-                            "discover"
-                        ],
-                        "type": "string",
-                        "description": "推荐模式",
-                        "name": "mode",
-                        "in": "query"
                     },
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/blog.RecommendationItemDTO"
-                            }
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -4233,6 +3563,428 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/comments/{comment_id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "删除评论",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "评论 UUID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "编辑评论",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "评论 UUID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "评论内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comment.EditCommentInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.CommentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/comments/{comment_id}/like": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "点赞评论",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "评论 UUID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "取消点赞评论",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "评论 UUID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/comments/{comment_id}/report": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "举报评论",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "评论 UUID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "举报信息",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comment.ReportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/comments/{root_comment_id}/replies": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "获取楼中楼回复",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "父楼 UUID",
+                        "name": "root_comment_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量，最多50",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ReplyListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
                         }
                     }
                 }
@@ -4447,6 +4199,925 @@ const docTemplate = `{
                         "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate-arguments/{argumentID}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Delete a typed debate argument",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Argument ID",
+                        "name": "argumentID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Update a typed debate argument",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Argument ID",
+                        "name": "argumentID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Argument",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate.CreateArgumentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateArgumentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate-arguments/{argumentID}/debate-reference": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Add a debate reference",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Argument ID",
+                        "name": "argumentID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Debate reference",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate.DebateReferenceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate-arguments/{argumentID}/debate-reference/{debateRefID}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Remove a debate reference",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Argument ID",
+                        "name": "argumentID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Referenced debate ID",
+                        "name": "debateRefID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate-arguments/{argumentID}/fold": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Fold a debate argument",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Argument ID",
+                        "name": "argumentID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fold note",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.FoldArgumentInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Unfold a debate argument",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Argument ID",
+                        "name": "argumentID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate-arguments/{argumentID}/reference": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Add an argument reference",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Argument ID",
+                        "name": "argumentID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Reference",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate.ReferenceRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate-arguments/{argumentID}/reference/{referenceID}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Remove an argument reference",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Argument ID",
+                        "name": "argumentID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Referenced argument ID",
+                        "name": "referenceID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debates": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Create a debate",
+                "parameters": [
+                    {
+                        "description": "Debate",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate.CreateDebateRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debates/{debateID}/arguments": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "List typed debate arguments",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "debateID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateArgumentListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Create a typed debate argument",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "debateID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Argument",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate.CreateArgumentRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateArgumentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/discussions/{kind}/{resource_id}/comments": {
+            "get": {
+                "description": "按目标获取一级评论与前三条楼中楼回复。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "获取评论楼层",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "目标类型",
+                        "name": "kind",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "目标公开 UUID",
+                        "name": "resource_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "oldest",
+                        "description": "排序：oldest/newest/hot",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量，最多20",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.CommentListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "发表评论或回复",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "目标类型",
+                        "name": "kind",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "目标公开 UUID",
+                        "name": "resource_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "评论内容",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comment.CreateCommentInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/comment.CommentResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/discussions/{kind}/{resource_id}/pinned-comment": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "内容作者可置顶；论坛作者可标记最佳回答。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "标记父楼",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "目标类型",
+                        "name": "kind",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "目标公开 UUID",
+                        "name": "resource_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "父楼 UUID",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/comment.PinCommentInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "413": {
+                        "description": "Request Entity Too Large",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "415": {
+                        "description": "Unsupported Media Type",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "comments"
+                ],
+                "summary": "取消父楼标记",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "目标类型",
+                        "name": "kind",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "目标公开 UUID",
+                        "name": "resource_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ActionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/comment.ErrorResponse"
                         }
                     }
                 }
@@ -5176,13 +5847,14 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
+                "description": "分页返回当前用户的稍后读条目。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "feed"
                 ],
-                "summary": "获取统一稍后阅读列表",
+                "summary": "获取稍后读列表",
                 "parameters": [
                     {
                         "type": "integer",
@@ -5193,7 +5865,7 @@ const docTemplate = `{
                     {
                         "type": "integer",
                         "description": "每页数量",
-                        "name": "page_size",
+                        "name": "limit",
                         "in": "query"
                     }
                 ],
@@ -5201,10 +5873,13 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.ReadingListItem"
-                            }
+                            "$ref": "#/definitions/feed.ReadingListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
                         }
                     }
                 }
@@ -5218,6 +5893,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
+                "description": "为 feed item 添加或移除稍后读标记。",
                 "consumes": [
                     "application/json"
                 ],
@@ -5227,15 +5903,15 @@ const docTemplate = `{
                 "tags": [
                     "feed"
                 ],
-                "summary": "切换稍后阅读状态",
+                "summary": "切换稍后读条目",
                 "parameters": [
                     {
-                        "description": "稍后阅读目标",
+                        "description": "稍后读输入",
                         "name": "input",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/feed.ReadingListInput"
+                            "$ref": "#/definitions/feed.StarToggleInput"
                         }
                     }
                 ],
@@ -5243,16 +5919,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "boolean"
-                            }
+                            "$ref": "#/definitions/feed.SaveToggleResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
                         }
                     }
                 }
             }
         },
-        "/api/v1/feed/reading-list/{target_type}/{id}": {
+        "/api/v1/feed/reading-list/{id}": {
             "delete": {
                 "security": [
                     {
@@ -5262,7 +5953,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "删除当前用户稍后阅读列表中的指定 RSS 条目或站内文章。",
+                "description": "删除当前用户待读列表中的指定 feed item。",
                 "produces": [
                     "application/json"
                 ],
@@ -5272,19 +5963,8 @@ const docTemplate = `{
                 "summary": "从待读列表移除条目",
                 "parameters": [
                     {
-                        "enum": [
-                            "feed_item",
-                            "post"
-                        ],
                         "type": "string",
-                        "description": "目标类型",
-                        "name": "target_type",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "目标 UUID",
+                        "description": "Feed item UUID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -7123,13 +7803,6 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "default": 1,
-                        "description": "页码；random 排序仅支持第 1 页",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
                         "description": "返回数量上限",
                         "name": "limit",
                         "in": "query"
@@ -7143,12 +7816,6 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/model.PodcastEpisode"
                             }
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -7214,7 +7881,7 @@ const docTemplate = `{
         },
         "/api/v1/podcast/episodes/{id}": {
             "get": {
-                "description": "已发布单集可公开读取；作者可读取自己的草稿。",
+                "description": "按 UUID 返回单个播客单集。",
                 "produces": [
                     "application/json"
                 ],
@@ -8210,379 +8877,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/songs/{id}/discussions": {
-            "get": {
-                "description": "分页返回歌曲的顶层讨论及其已预加载的回复。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "获取歌曲讨论列表",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "description": "返回数量",
-                        "name": "limit",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "偏移量",
-                        "name": "offset",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "为歌曲创建一条讨论，支持可选 parent_id 作为嵌套回复。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "创建歌曲讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "讨论输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CreateDiscussionInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/songs/{id}/discussions/unread-count": {
-            "get": {
-                "description": "返回歌曲下未读且未删除的讨论数量。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "获取歌曲未读讨论数",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionUnreadCountResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/songs/{id}/discussions/{discussion_id}": {
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "讨论所有者或管理员可以更新歌曲讨论内容。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "更新歌曲讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "讨论 UUID",
-                        "name": "discussion_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "讨论内容",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionContentInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "讨论所有者或管理员可将歌曲讨论软删除。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "删除歌曲讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "讨论 UUID",
-                        "name": "discussion_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/songs/{id}/discussions/{discussion_id}/reply": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "为现有专辑或歌曲讨论创建一条回复。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discussions"
-                ],
-                "summary": "回复专辑或歌曲讨论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "内容 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "讨论 UUID",
-                        "name": "discussion_id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "回复内容",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionContentInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DiscussionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/songs/{id}/protection": {
             "get": {
                 "description": "返回歌曲当前的保护级别与保护元数据；未设置时返回 none。",
@@ -9342,6 +9636,125 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/timeline/events/{id}/revision-proposals": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Timeline"
+                ],
+                "summary": "List timeline event revision proposals",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Event ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TimelineProposalListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Timeline"
+                ],
+                "summary": "Create a timeline event revision proposal",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Event ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Revision proposal",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.timelineProposalRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TimelineProposalResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/timeline/locations/{id}": {
             "put": {
                 "security": [
@@ -9825,6 +10238,200 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/timeline/persons/{id}/revision-proposals": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Timeline"
+                ],
+                "summary": "List timeline person revision proposals",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Person ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TimelineProposalListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Timeline"
+                ],
+                "summary": "Create a timeline person revision proposal",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Person ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Revision proposal",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.timelineProposalRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TimelineProposalResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/timeline/revision-proposals/{comment_id}/decision": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Timeline"
+                ],
+                "summary": "Accept or reject a timeline revision proposal",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Proposal comment ID",
+                        "name": "comment_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Decision",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TimelineProposalDecisionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.TimelineProposalResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/uploads": {
             "post": {
                 "security": [
@@ -9835,7 +10442,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "上传音乐封面或音频资源。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。",
+                "description": "上传音乐封面、音频或评论图片。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -9856,7 +10463,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "用途：music.cover / music.audio",
+                        "description": "用途：music.cover / music.audio / comment.image",
                         "name": "purpose",
                         "in": "formData",
                         "required": true
@@ -10160,15 +10767,7 @@ const docTemplate = `{
         },
         "/api/v1/users/search": {
             "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "按用户名或显示名搜索用户；scope=mention 时仅返回当前用户关注的人。",
+                "description": "按用户名或显示名搜索活跃用户；scope=mention 时要求登录并搜索全部活跃用户。",
                 "produces": [
                     "application/json"
                 ],
@@ -10202,6 +10801,18 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.SearchUsersResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "500": {
@@ -10604,67 +11215,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/videos/comments/{commentID}": {
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "评论作者或视频作者可删除评论。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "videos"
-                ],
-                "summary": "删除视频评论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "评论 UUID",
-                        "name": "commentID",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/videos/upload-cover": {
             "post": {
                 "security": [
@@ -10934,118 +11484,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/videos/{id}/comments": {
-            "get": {
-                "description": "返回视频下所有可见评论。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "videos"
-                ],
-                "summary": "获取视频评论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "视频 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CommentListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "为指定视频创建评论，可附带时间戳。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "videos"
-                ],
-                "summary": "创建视频评论",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "视频 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "评论输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CommentInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CommentResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/videos/{id}/recommended": {
             "get": {
                 "description": "基于同频道和同标签返回推荐视频。",
@@ -11121,8 +11559,11 @@ const docTemplate = `{
                 "channel_id": {
                     "type": "string"
                 },
-                "collection_id": {
-                    "type": "string"
+                "collection_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "content": {
                     "type": "string"
@@ -11147,7 +11588,31 @@ const docTemplate = `{
                 }
             }
         },
-        "blog.RecommendationItemDTO": {
+        "blog.collectionActionInput": {
+            "type": "object",
+            "required": [
+                "collection_id"
+            ],
+            "properties": {
+                "collection_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "comment.ActionResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "ok": {
+                            "type": "boolean"
+                        }
+                    }
+                }
+            }
+        },
+        "comment.AttachmentDTO": {
             "type": "object",
             "properties": {
                 "content_type": {
@@ -11156,44 +11621,505 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
-                "image_url": {
+                "position": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "comment.CommentDTO": {
+            "type": "object",
+            "properties": {
+                "attachments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.AttachmentDTO"
+                    }
+                },
+                "author": {
+                    "$ref": "#/definitions/comment.UserSummaryDTO"
+                },
+                "author_id": {
                     "type": "string"
                 },
-                "score_label": {
+                "content": {
                     "type": "string"
                 },
-                "summary": {
+                "created_at": {
                     "type": "string"
                 },
-                "target_path": {
+                "edited_at": {
                     "type": "string"
+                },
+                "floor_number": {
+                    "type": "integer"
+                },
+                "hot_score": {
+                    "type": "number"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "like_count": {
+                    "type": "integer"
+                },
+                "liked": {
+                    "type": "boolean"
+                },
+                "marked": {
+                    "type": "boolean"
+                },
+                "mentions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.MentionDTO"
+                    }
+                },
+                "rendered_html": {
+                    "type": "string"
+                },
+                "replies": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.CommentDTO"
+                    }
+                },
+                "reply_count": {
+                    "type": "integer"
+                },
+                "reply_to_author": {
+                    "$ref": "#/definitions/comment.UserSummaryDTO"
+                },
+                "reply_to_id": {
+                    "type": "string"
+                },
+                "root_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "time_anchors": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.TimeAnchorDTO"
+                    }
+                }
+            }
+        },
+        "comment.CommentListDTO": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.CommentDTO"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "per_page": {
+                    "type": "integer"
+                },
+                "target": {
+                    "$ref": "#/definitions/comment.TargetSummaryDTO"
+                },
+                "total_comments": {
+                    "type": "integer"
+                },
+                "total_replies": {
+                    "type": "integer"
+                },
+                "total_roots": {
+                    "type": "integer"
+                }
+            }
+        },
+        "comment.CommentListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/comment.CommentListDTO"
+                }
+            }
+        },
+        "comment.CommentResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/comment.CommentDTO"
+                }
+            }
+        },
+        "comment.CreateCommentInput": {
+            "type": "object",
+            "properties": {
+                "attachment_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "mentions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.MentionInput"
+                    }
+                },
+                "reply_to_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "comment.EditCommentInput": {
+            "type": "object",
+            "properties": {
+                "attachment_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "mentions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.MentionInput"
+                    }
+                }
+            }
+        },
+        "comment.ErrorBodyDTO": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "details": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "comment.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/comment.ErrorBodyDTO"
+                }
+            }
+        },
+        "comment.MentionDTO": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "comment.MentionInput": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "comment.ModerateInput": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "report_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "comment.PinCommentInput": {
+            "type": "object",
+            "properties": {
+                "comment_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "comment.ReplyListDTO": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.CommentDTO"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "per_page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "comment.ReplyListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/comment.ReplyListDTO"
+                }
+            }
+        },
+        "comment.ReportInput": {
+            "type": "object",
+            "properties": {
+                "note": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "comment.ReportQueueDTO": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.ReportQueueItemDTO"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "per_page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "comment.ReportQueueItemDTO": {
+            "type": "object",
+            "properties": {
+                "comment_id": {
+                    "type": "string"
+                },
+                "comment_status": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "reporter_id": {
+                    "type": "string"
+                },
+                "resource_id": {
+                    "type": "string"
+                },
+                "reviewed_at": {
+                    "type": "string"
+                },
+                "reviewer_id": {
+                    "type": "string"
+                },
+                "root_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "target_kind": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "comment.ReportQueueResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/comment.ReportQueueDTO"
+                }
+            }
+        },
+        "comment.TargetSummaryDTO": {
+            "type": "object",
+            "properties": {
+                "can_mark": {
+                    "type": "boolean"
+                },
+                "comment_count": {
+                    "type": "integer"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "mark_label": {
+                    "type": "string"
+                },
+                "marked_comment_id": {
+                    "type": "string"
+                },
+                "resource_id": {
+                    "type": "string"
+                },
+                "root_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "comment.TimeAnchorDTO": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "integer"
+                },
+                "seconds": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "integer"
+                }
+            }
+        },
+        "comment.UserSummaryDTO": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "debate.CreateArgumentRequest": {
+            "type": "object",
+            "properties": {
+                "argument_type": {
+                    "type": "string"
+                },
+                "attachment_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "debate_id": {
+                    "type": "string"
+                },
+                "mentions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.MentionInput"
+                    }
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "source_excerpt": {
+                    "type": "string"
+                },
+                "source_title": {
+                    "type": "string"
+                },
+                "source_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "debate.CreateDebateRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "title": {
                     "type": "string"
                 }
             }
         },
-        "blog.bookmarkFolderInput": {
+        "debate.DebateReferenceRequest": {
             "type": "object",
-            "required": [
-                "name"
-            ],
             "properties": {
-                "name": {
+                "debate_id": {
                     "type": "string"
                 }
             }
         },
-        "blog.bookmarkInput": {
+        "debate.ReferenceRequest": {
             "type": "object",
-            "required": [
-                "post_id"
-            ],
             "properties": {
-                "bookmark_folder_id": {
-                    "type": "string"
-                },
-                "post_id": {
+                "reference_id": {
                     "type": "string"
                 }
             }
@@ -11535,21 +12461,6 @@ const docTemplate = `{
                 "reused": {
                     "type": "integer",
                     "example": 3
-                }
-            }
-        },
-        "feed.ReadingListInput": {
-            "type": "object",
-            "properties": {
-                "target_id": {
-                    "type": "string"
-                },
-                "target_type": {
-                    "type": "string",
-                    "enum": [
-                        "feed_item",
-                        "post"
-                    ]
                 }
             }
         },
@@ -12099,50 +13010,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.CommentInput": {
-            "type": "object",
-            "required": [
-                "content"
-            ],
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "guest_name": {
-                    "type": "string"
-                },
-                "timestamp_sec": {
-                    "type": "integer"
-                }
-            }
-        },
-        "handlers.CommentListResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.Comment"
-                    }
-                },
-                "message": {
-                    "type": "string",
-                    "example": "ok"
-                }
-            }
-        },
-        "handlers.CommentResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/model.Comment"
-                },
-                "message": {
-                    "type": "string",
-                    "example": "ok"
-                }
-            }
-        },
         "handlers.ConflictWithIDResponse": {
             "type": "object",
             "properties": {
@@ -12181,20 +13048,6 @@ const docTemplate = `{
                 "count": {
                     "type": "integer",
                     "example": 8
-                }
-            }
-        },
-        "handlers.CreateDiscussionInput": {
-            "type": "object",
-            "required": [
-                "content"
-            ],
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "parent_id": {
-                    "type": "string"
                 }
             }
         },
@@ -12413,55 +13266,36 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.DiscussionContentInput": {
-            "type": "object",
-            "required": [
-                "content"
-            ],
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "example": "这段内容需要补充来源。"
-                }
-            }
-        },
-        "handlers.DiscussionListResponse": {
+        "handlers.DebateArgumentListResponse": {
             "type": "object",
             "properties": {
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.Discussion"
+                        "$ref": "#/definitions/model.DebateArgumentDTO"
                     }
                 },
-                "total": {
-                    "type": "integer",
-                    "example": 12
+                "user_votes": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer"
+                    }
                 }
             }
         },
-        "handlers.DiscussionResponse": {
+        "handlers.DebateArgumentResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/model.Discussion"
+                    "$ref": "#/definitions/model.DebateArgumentDTO"
                 }
             }
         },
-        "handlers.DiscussionUnreadCountData": {
-            "type": "object",
-            "properties": {
-                "unread_count": {
-                    "type": "integer",
-                    "example": 3
-                }
-            }
-        },
-        "handlers.DiscussionUnreadCountResponse": {
+        "handlers.DebateResponse": {
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/handlers.DiscussionUnreadCountData"
+                    "$ref": "#/definitions/model.Debate"
                 }
             }
         },
@@ -12504,6 +13338,96 @@ const docTemplate = `{
                 "error": {
                     "type": "string",
                     "example": "用户名和密码不匹配"
+                }
+            }
+        },
+        "handlers.ExplorePostListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.ExplorePostResponse"
+                    }
+                },
+                "message": {
+                    "type": "string",
+                    "example": "ok"
+                }
+            }
+        },
+        "handlers.ExplorePostResponse": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "$ref": "#/definitions/model.Channel"
+                },
+                "channel_id": {
+                    "type": "string"
+                },
+                "collections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Collection"
+                    }
+                },
+                "comments_count": {
+                    "type": "integer"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "likes_count": {
+                    "type": "integer"
+                },
+                "pinned": {
+                    "type": "boolean"
+                },
+                "rating_average_score": {
+                    "type": "integer"
+                },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "status": {
+                    "description": "draft / published",
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "visibility": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.FoldArgumentInput": {
+            "type": "object",
+            "properties": {
+                "fold_note": {
+                    "type": "string",
+                    "example": "证据不足，暂时折叠。"
                 }
             }
         },
@@ -13167,6 +14091,34 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.TimelineProposalDecisionInput": {
+            "type": "object",
+            "properties": {
+                "decision": {
+                    "type": "string",
+                    "enum": [
+                        "accept",
+                        "reject"
+                    ]
+                }
+            }
+        },
+        "handlers.TimelineProposalListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/service.TimelineProposalList"
+                }
+            }
+        },
+        "handlers.TimelineProposalResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/service.TimelineProposal"
+                }
+            }
+        },
         "handlers.TimelineRevisionListResponse": {
             "type": "object",
             "properties": {
@@ -13562,10 +14514,40 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.timelineProposalRequest": {
+            "type": "object",
+            "properties": {
+                "attachment_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "evidence": {
+                    "type": "string"
+                },
+                "mentions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/comment.MentionInput"
+                    }
+                },
+                "patch": {
+                    "type": "object",
+                    "additionalProperties": {}
+                }
+            }
+        },
         "handlers.uploadAssetResponse": {
             "type": "object",
             "properties": {
                 "content_type": {
+                    "type": "string"
+                },
+                "id": {
                     "type": "string"
                 },
                 "key": {
@@ -13724,6 +14706,56 @@ const docTemplate = `{
                 }
             }
         },
+        "model.ArgumentAttachment": {
+            "type": "object",
+            "properties": {
+                "content_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ArgumentMention": {
+            "type": "object",
+            "properties": {
+                "end": {
+                    "type": "integer"
+                },
+                "start": {
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ArgumentType": {
+            "type": "string",
+            "enum": [
+                "support",
+                "oppose",
+                "neutral",
+                "evidence",
+                "question",
+                "counter"
+            ],
+            "x-enum-varnames": [
+                "ArgumentTypeSupport",
+                "ArgumentTypeOppose",
+                "ArgumentTypeNeutral",
+                "ArgumentTypeEvidence",
+                "ArgumentTypeQuestion",
+                "ArgumentTypeCounter"
+            ]
+        },
         "model.Artist": {
             "type": "object",
             "properties": {
@@ -13880,108 +14912,6 @@ const docTemplate = `{
                 }
             }
         },
-        "model.BlogPostVersion": {
-            "type": "object",
-            "properties": {
-                "allow_comments": {
-                    "type": "boolean"
-                },
-                "collection_id": {
-                    "type": "string"
-                },
-                "content": {
-                    "type": "string"
-                },
-                "cover_url": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "editor_id": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "post_id": {
-                    "type": "string"
-                },
-                "published_at": {
-                    "type": "string"
-                },
-                "summary": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "integer"
-                },
-                "visibility": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.Bookmark": {
-            "type": "object",
-            "properties": {
-                "bookmark_folder": {
-                    "$ref": "#/definitions/model.BookmarkFolder"
-                },
-                "bookmark_folder_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "post": {
-                    "$ref": "#/definitions/model.Post"
-                },
-                "post_id": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.BookmarkFolder": {
-            "type": "object",
-            "properties": {
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
-                    "type": "string"
-                }
-            }
-        },
         "model.Channel": {
             "type": "object",
             "properties": {
@@ -14064,44 +14994,6 @@ const docTemplate = `{
                 }
             }
         },
-        "model.Comment": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "guest_name": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "target_id": {
-                    "type": "string"
-                },
-                "target_type": {
-                    "type": "string"
-                },
-                "timestamp_sec": {
-                    "type": "integer"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
-                    "$ref": "#/definitions/model.NullableUserUUID"
-                }
-            }
-        },
         "model.ContentProtection": {
             "type": "object",
             "properties": {
@@ -14173,45 +15065,49 @@ const docTemplate = `{
                 }
             }
         },
-        "model.Discussion": {
+        "model.Debate": {
             "type": "object",
             "properties": {
+                "argument_count": {
+                    "type": "integer"
+                },
+                "conclude_threshold": {
+                    "type": "integer"
+                },
+                "conclude_vote_count": {
+                    "type": "integer"
+                },
+                "concluded_at": {
+                    "type": "string"
+                },
+                "conclusion_summary": {
+                    "type": "string"
+                },
+                "conclusion_type": {
+                    "type": "string"
+                },
                 "content": {
-                    "description": "Markdown format",
-                    "type": "string"
-                },
-                "content_id": {
-                    "type": "string"
-                },
-                "content_type": {
-                    "description": "'album' / 'song'",
                     "type": "string"
                 },
                 "created_at": {
                     "type": "string"
                 },
+                "description": {
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
-                "parent": {
-                    "$ref": "#/definitions/model.Discussion"
-                },
-                "parent_id": {
-                    "description": "For nested replies",
+                "status": {
                     "type": "string"
                 },
-                "read_at": {
-                    "description": "When user read this discussion (NULL = unread)",
-                    "type": "string"
-                },
-                "replies": {
+                "tags": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.Discussion"
+                        "type": "string"
                     }
                 },
-                "status": {
-                    "description": "'active' / 'resolved' / 'deleted'",
+                "title": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -14222,6 +15118,107 @@ const docTemplate = `{
                 },
                 "user_id": {
                     "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
+                },
+                "vote_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.DebateArgumentDTO": {
+            "type": "object",
+            "properties": {
+                "argument_type": {
+                    "$ref": "#/definitions/model.ArgumentType"
+                },
+                "attachment_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "attachments": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ArgumentAttachment"
+                    }
+                },
+                "conclusion": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "debate": {
+                    "$ref": "#/definitions/model.Debate"
+                },
+                "debate_id": {
+                    "type": "string"
+                },
+                "fold_note": {
+                    "description": "admin note for why folded",
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_concluded": {
+                    "type": "boolean"
+                },
+                "is_folded": {
+                    "description": "Admin moderation",
+                    "type": "boolean"
+                },
+                "mentions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ArgumentMention"
+                    }
+                },
+                "parent": {
+                    "$ref": "#/definitions/model.DebateArgumentDTO"
+                },
+                "parent_id": {
+                    "type": "string"
+                },
+                "referenced_debates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Debate"
+                    }
+                },
+                "references": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.DebateArgumentDTO"
+                    }
+                },
+                "source_excerpt": {
+                    "type": "string"
+                },
+                "source_title": {
+                    "type": "string"
+                },
+                "source_url": {
+                    "description": "Evidence source fields (only used when ArgumentType == \"evidence\")",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "vote_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -14567,17 +15564,6 @@ const docTemplate = `{
                 }
             }
         },
-        "model.NullableUserUUID": {
-            "type": "object",
-            "properties": {
-                "uuid.UUID": {
-                    "type": "string"
-                },
-                "valid": {
-                    "type": "boolean"
-                }
-            }
-        },
         "model.PersonLocation": {
             "type": "object",
             "properties": {
@@ -14667,23 +15653,17 @@ const docTemplate = `{
         "model.Post": {
             "type": "object",
             "properties": {
-                "allow_comments": {
-                    "type": "boolean"
-                },
                 "channel": {
                     "$ref": "#/definitions/model.Channel"
                 },
                 "channel_id": {
                     "type": "string"
                 },
-                "collection": {
-                    "$ref": "#/definitions/model.Collection"
-                },
-                "collection_id": {
-                    "type": "string"
-                },
-                "collection_position": {
-                    "type": "integer"
+                "collections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Collection"
+                    }
                 },
                 "content": {
                     "type": "string"
@@ -14700,8 +15680,11 @@ const docTemplate = `{
                 "pinned": {
                     "type": "boolean"
                 },
-                "published_at": {
-                    "type": "string"
+                "rating_average_score": {
+                    "type": "integer"
+                },
+                "rating_count": {
+                    "type": "integer"
                 },
                 "status": {
                     "description": "draft / published",
@@ -14722,9 +15705,6 @@ const docTemplate = `{
                 "user_id": {
                     "type": "string"
                 },
-                "view_count": {
-                    "type": "integer"
-                },
                 "visibility": {
                     "type": "string"
                 }
@@ -14739,13 +15719,7 @@ const docTemplate = `{
                 "feed_item": {
                     "$ref": "#/definitions/model.FeedItem"
                 },
-                "post": {
-                    "$ref": "#/definitions/model.Post"
-                },
-                "target_id": {
-                    "type": "string"
-                },
-                "target_type": {
+                "feed_item_id": {
                     "type": "string"
                 },
                 "user_id": {
@@ -14857,6 +15831,9 @@ const docTemplate = `{
                 },
                 "created_at": {
                     "type": "string"
+                },
+                "duration_sec": {
+                    "type": "integer"
                 },
                 "id": {
                     "type": "string"
@@ -15159,11 +16136,23 @@ const docTemplate = `{
                 "is_public": {
                     "type": "boolean"
                 },
+                "latitude": {
+                    "type": "number"
+                },
                 "location": {
                     "type": "string"
                 },
+                "longitude": {
+                    "type": "number"
+                },
                 "source": {
                     "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "title": {
                     "type": "string"
@@ -15532,9 +16521,6 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
-                "is_favorite": {
-                    "type": "boolean"
-                },
                 "is_public": {
                     "type": "boolean"
                 },
@@ -15545,22 +16531,6 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "user_id": {
-                    "type": "string"
-                }
-            }
-        },
-        "service.SiteAccessBlogSettings": {
-            "type": "object",
-            "properties": {
-                "comment_mode": {
-                    "type": "string"
-                }
-            }
-        },
-        "service.SiteAccessBlogSettingsInput": {
-            "type": "object",
-            "properties": {
-                "comment_mode": {
                     "type": "string"
                 }
             }
@@ -15723,9 +16693,6 @@ const docTemplate = `{
         "service.SiteAccessSettings": {
             "type": "object",
             "properties": {
-                "blog": {
-                    "$ref": "#/definitions/service.SiteAccessBlogSettings"
-                },
                 "feed": {
                     "$ref": "#/definitions/service.SiteAccessFeedSettings"
                 },
@@ -15737,14 +16704,64 @@ const docTemplate = `{
         "service.SiteAccessSettingsInput": {
             "type": "object",
             "properties": {
-                "blog": {
-                    "$ref": "#/definitions/service.SiteAccessBlogSettingsInput"
-                },
                 "feed": {
                     "$ref": "#/definitions/service.SiteAccessFeedSettingsInput"
                 },
                 "forum": {
                     "$ref": "#/definitions/service.SiteAccessForumSettingsInput"
+                }
+            }
+        },
+        "service.TimelineProposal": {
+            "type": "object",
+            "properties": {
+                "applied_revision_id": {
+                    "type": "string"
+                },
+                "comment": {
+                    "$ref": "#/definitions/comment.CommentDTO"
+                },
+                "evidence": {
+                    "type": "string"
+                },
+                "patch": {
+                    "type": "object",
+                    "additionalProperties": {}
+                },
+                "reviewer_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_kind": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.TimelineProposalList": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.TimelineProposal"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "per_page": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         }

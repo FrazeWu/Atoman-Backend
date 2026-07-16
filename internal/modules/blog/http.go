@@ -79,20 +79,19 @@ type blogDraftInput struct {
 }
 
 type blogDraftResponse struct {
-	ID            uuid.UUID `json:"id"`
-	UserID        uuid.UUID `json:"user_id"`
-	ContextKey    string    `json:"context_key"`
-	SourcePostID  *string   `json:"source_post_id,omitempty"`
-	Title         string    `json:"title"`
-	Content       string    `json:"content"`
-	Summary       string    `json:"summary"`
-	CoverURL      string    `json:"cover_url"`
-	Visibility    string    `json:"visibility"`
-	AllowComments bool      `json:"allow_comments"`
-	ChannelID     *string   `json:"channel_id,omitempty"`
-	CollectionID  *string   `json:"collection_id,omitempty"`
-	CreatedAt     any       `json:"created_at"`
-	UpdatedAt     any       `json:"updated_at"`
+	ID           uuid.UUID `json:"id"`
+	UserID       uuid.UUID `json:"user_id"`
+	ContextKey   string    `json:"context_key"`
+	SourcePostID *string   `json:"source_post_id,omitempty"`
+	Title        string    `json:"title"`
+	Content      string    `json:"content"`
+	Summary      string    `json:"summary"`
+	CoverURL     string    `json:"cover_url"`
+	Visibility   string    `json:"visibility"`
+	ChannelID    *string   `json:"channel_id,omitempty"`
+	CollectionID *string   `json:"collection_id,omitempty"`
+	CreatedAt    any       `json:"created_at"`
+	UpdatedAt    any       `json:"updated_at"`
 }
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
@@ -113,9 +112,6 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.PUT("/collections/:id", h.updateCollection)
 	group.DELETE("/collections/:id", h.deleteCollection)
 	group.GET("/posts/:id/likes/count", h.getPostLikesCount)
-	group.GET("/posts/:id/comments", h.listComments)
-	group.POST("/posts/:id/comments", h.createComment)
-	group.DELETE("/comments/:id", h.deleteComment)
 	group.POST("/likes", h.createLike)
 	group.DELETE("/likes", h.deleteLike)
 	group.GET("/bookmarks", h.listBookmarks)
@@ -417,69 +413,6 @@ func (h *Handler) getPostLikesCount(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"count": count})
 }
 
-func (h *Handler) listComments(c *gin.Context) {
-	postID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
-		return
-	}
-	var viewerID *uuid.UUID
-	if user, ok := authctx.Current(c); ok && user.ID != uuid.Nil {
-		viewerID = &user.ID
-	}
-	comments, err := h.service.ListComments(postID, viewerID)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, comments)
-}
-
-func (h *Handler) createComment(c *gin.Context) {
-	postID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
-		return
-	}
-	var req struct {
-		GuestName    string `json:"guest_name"`
-		Content      string `json:"content"`
-		TimestampSec *int   `json:"timestamp_sec"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
-	}
-	var current *authctx.CurrentUser
-	if user, ok := authctx.Current(c); ok {
-		current = &user
-	}
-	comment, err := h.service.CreateComment(current, postID, req.GuestName, req.Content, req.TimestampSec)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusCreated, comment)
-}
-
-func (h *Handler) deleteComment(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok || user.ID == uuid.Nil {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	commentID, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
-		return
-	}
-	if err := h.service.DeleteComment(user, commentID); err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
-}
-
 func (h *Handler) createLike(c *gin.Context) {
 	h.toggleLike(c, true)
 }
@@ -778,7 +711,10 @@ func (h *Handler) listPosts(c *gin.Context) {
 			return
 		}
 		var comments int64
-		if err := h.service.db.Model(&model.Comment{}).Where("target_type = ? AND target_id = ? AND status = ?", "post", post.ID, "visible").Count(&comments).Error; err != nil {
+		if err := h.service.db.Model(&model.DiscussionTarget{}).
+			Select("COALESCE(MAX(comment_count), 0)").
+			Where("kind = ? AND resource_id = ?", "blog_post", post.ID).
+			Scan(&comments).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -908,9 +844,10 @@ func (h *Handler) getPost(c *gin.Context) {
 		liked = likedCount > 0
 	}
 	var commentsCount int64
-	if err := h.service.db.Model(&model.Comment{}).
-		Where("target_type = ? AND target_id = ? AND status = ?", "post", post.ID, "visible").
-		Count(&commentsCount).Error; err != nil {
+	if err := h.service.db.Model(&model.DiscussionTarget{}).
+		Select("COALESCE(MAX(comment_count), 0)").
+		Where("kind = ? AND resource_id = ?", "blog_post", post.ID).
+		Scan(&commentsCount).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -1192,9 +1129,6 @@ func (h *Handler) updatePost(c *gin.Context) {
 	if req.Status == "published" || req.Status == "draft" {
 		updates["status"] = req.Status
 	}
-	if req.AllowComments != nil {
-		updates["allow_comments"] = *req.AllowComments
-	}
 	if req.Status == "published" && post.PublishedAt == nil {
 		now := time.Now().UTC()
 		updates["published_at"] = now
@@ -1332,26 +1266,21 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid collection_id"))
 		return
 	}
-	allowComments := true
-	if req.AllowComments != nil {
-		allowComments = *req.AllowComments
-	}
 	draft := model.BlogDraft{
-		UserID:        user.ID,
-		ContextKey:    strings.TrimSpace(req.ContextKey),
-		SourcePostID:  sourcePostID,
-		Title:         req.Title,
-		Content:       req.Content,
-		Summary:       req.Summary,
-		CoverURL:      req.CoverURL,
-		Visibility:    normalizeBlogVisibility(req.Visibility),
-		AllowComments: allowComments,
-		ChannelID:     channelID,
-		CollectionID:  collectionID,
+		UserID:       user.ID,
+		ContextKey:   strings.TrimSpace(req.ContextKey),
+		SourcePostID: sourcePostID,
+		Title:        req.Title,
+		Content:      req.Content,
+		Summary:      req.Summary,
+		CoverURL:     req.CoverURL,
+		Visibility:   normalizeBlogVisibility(req.Visibility),
+		ChannelID:    channelID,
+		CollectionID: collectionID,
 	}
 	if err := h.service.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "user_id"}, {Name: "context_key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"source_post_id", "title", "content", "summary", "cover_url", "visibility", "allow_comments", "channel_id", "collection_id", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"source_post_id", "title", "content", "summary", "cover_url", "visibility", "channel_id", "collection_id", "updated_at"}),
 	}).Create(&draft).Error; err != nil {
 		httpx.Error(c, err)
 		return
@@ -1575,20 +1504,19 @@ func buildBlogDraftResponse(draft model.BlogDraft) blogDraftResponse {
 	}
 
 	return blogDraftResponse{
-		ID:            draft.ID,
-		UserID:        draft.UserID,
-		ContextKey:    draft.ContextKey,
-		SourcePostID:  sourcePostID,
-		Title:         draft.Title,
-		Content:       draft.Content,
-		Summary:       draft.Summary,
-		CoverURL:      draft.CoverURL,
-		Visibility:    draft.Visibility,
-		AllowComments: draft.AllowComments,
-		ChannelID:     channelID,
-		CollectionID:  collectionID,
-		CreatedAt:     draft.CreatedAt,
-		UpdatedAt:     draft.UpdatedAt,
+		ID:           draft.ID,
+		UserID:       draft.UserID,
+		ContextKey:   draft.ContextKey,
+		SourcePostID: sourcePostID,
+		Title:        draft.Title,
+		Content:      draft.Content,
+		Summary:      draft.Summary,
+		CoverURL:     draft.CoverURL,
+		Visibility:   draft.Visibility,
+		ChannelID:    channelID,
+		CollectionID: collectionID,
+		CreatedAt:    draft.CreatedAt,
+		UpdatedAt:    draft.UpdatedAt,
 	}
 }
 

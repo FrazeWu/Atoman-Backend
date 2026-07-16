@@ -37,6 +37,52 @@ func TestCORSRejectsUnknownOriginWithCredentialsOutsideProduction(t *testing.T) 
 	}
 }
 
+func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T) {
+	db := testdb.Open(t)
+
+	if err := runUnifiedCommentStartupMigrations(db); err != nil {
+		t.Fatalf("run unified comment startup migrations: %v", err)
+	}
+
+	models := []any{
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
+		&model.CommentMention{},
+		&model.CommentAttachment{},
+		&model.CommentLike{},
+		&model.CommentReport{},
+		&model.CommentTimeAnchor{},
+		&model.CommentPublishRecord{},
+		&model.TimelineRevisionProposal{},
+		&model.DebateArgumentDetail{},
+		&model.DebateArgumentReference{},
+		&model.DebateArgumentDebateRef{},
+	}
+	for _, schemaModel := range models {
+		if !db.Migrator().HasTable(schemaModel) {
+			t.Fatalf("expected table for %T to exist", schemaModel)
+		}
+	}
+	if !db.Migrator().HasColumn(&model.DiscussionTarget{}, "resource_id") {
+		t.Fatal("expected discussion_targets.resource_id")
+	}
+	if !db.Migrator().HasColumn(&model.CommentEntry{}, "reply_to_author_id") {
+		t.Fatal("expected comment_entries.reply_to_author_id")
+	}
+
+	for table, index := range map[string]string{
+		"discussion_targets":      "uq_discussion_target_kind_key",
+		"comment_entries":         "uq_comment_root_floor",
+		"comment_likes":           "uq_comment_like_user",
+		"comment_reports":         "uq_comment_report_user",
+		"comment_publish_records": "idx_comment_publish_author_created",
+	} {
+		if !db.Migrator().HasIndex(table, index) {
+			t.Fatalf("expected index %s on %s to exist", index, table)
+		}
+	}
+}
+
 func TestCORSAllowsExplicitDevelopmentOriginsWithCredentials(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("ENV", "development")
@@ -176,6 +222,7 @@ func ownerBootstrapModels() []interface{} {
 		&model.Subscription{},
 		&model.BookmarkFolder{},
 		&model.Playlist{},
+		&model.UserDefaultChannel{},
 	}
 }
 

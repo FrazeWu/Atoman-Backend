@@ -24,10 +24,10 @@ type ResolveReportRequest struct {
 }
 
 type CreateReportRequest struct {
-	TargetType string `json:"target_type"`
+	TargetType string    `json:"target_type"`
 	TargetID   uuid.UUID `json:"target_id"`
-	Reason     string `json:"reason"`
-	Note       string `json:"note"`
+	Reason     string    `json:"reason"`
+	Note       string    `json:"note"`
 }
 
 type ReviewCategoryRequestInput struct {
@@ -73,22 +73,6 @@ func (s *Service) HideTopic(user authctx.CurrentUser, topicID uuid.UUID) (model.
 
 func (s *Service) RestoreTopic(user authctx.CurrentUser, topicID uuid.UUID) (model.ForumTopic, error) {
 	return s.setTopicHidden(user, topicID, false)
-}
-
-func (s *Service) HideReply(user authctx.CurrentUser, replyID uuid.UUID) (model.ForumReply, error) {
-	return s.setReplyHidden(user, replyID, true)
-}
-
-func (s *Service) RestoreReply(user authctx.CurrentUser, replyID uuid.UUID) (model.ForumReply, error) {
-	return s.setReplyHidden(user, replyID, false)
-}
-
-func (s *Service) SolveReply(user authctx.CurrentUser, replyID uuid.UUID) (model.ForumReply, error) {
-	return s.setReplySolved(user, replyID, true)
-}
-
-func (s *Service) UnsolveReply(user authctx.CurrentUser, replyID uuid.UUID) (model.ForumReply, error) {
-	return s.setReplySolved(user, replyID, false)
 }
 
 func (s *Service) ListReports(user authctx.CurrentUser, query ListReportsQuery) ([]model.ForumReport, int64, error) {
@@ -151,8 +135,8 @@ func (s *Service) CreateReport(user authctx.CurrentUser, req CreateReportRequest
 		return model.ForumReport{}, apperr.BadRequest("validation.invalid_request", "target_id is required")
 	}
 	targetType := strings.TrimSpace(req.TargetType)
-	if targetType != "topic" && targetType != "reply" {
-		return model.ForumReport{}, apperr.BadRequest("validation.invalid_request", "target_type must be topic or reply")
+	if targetType != "topic" {
+		return model.ForumReport{}, apperr.BadRequest("validation.invalid_request", "target_type must be topic")
 	}
 	reason := strings.TrimSpace(req.Reason)
 	switch reason {
@@ -160,7 +144,6 @@ func (s *Service) CreateReport(user authctx.CurrentUser, req CreateReportRequest
 	default:
 		return model.ForumReport{}, apperr.BadRequest("validation.invalid_request", "reason is invalid")
 	}
-
 	var existing model.ForumReport
 	if err := s.db.Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, targetType, req.TargetID).First(&existing).Error; err == nil {
 		return model.ForumReport{}, apperr.Conflict("forum.report_exists", "already reported")
@@ -435,22 +418,15 @@ func (s *Service) setTopicHidden(user authctx.CurrentUser, topicID uuid.UUID, hi
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if hidden {
 			deletedAt := time.Now().UTC()
-			if err := tx.Model(&model.ForumReply{}).Where("topic_id = ?", topicID).Update("deleted_at", deletedAt).Error; err != nil {
-				return err
-			}
 			if err := tx.Model(&model.ForumTopic{}).Where("id = ?", topicID).Update("deleted_at", deletedAt).Error; err != nil {
 				return err
 			}
 		} else {
-			deletedAt := topic.DeletedAt.Time
 			if err := tx.Unscoped().Model(&model.ForumTopic{}).Where("id = ?", topicID).Update("deleted_at", nil).Error; err != nil {
 				return err
 			}
-			if err := tx.Unscoped().Model(&model.ForumReply{}).Where("topic_id = ? AND deleted_at = ?", topicID, deletedAt).Update("deleted_at", nil).Error; err != nil {
-				return err
-			}
 		}
-		return s.recalculateTopicReplyState(tx, topicID)
+		return nil
 	}); err != nil {
 		return model.ForumTopic{}, err
 	}
@@ -458,131 +434,6 @@ func (s *Service) setTopicHidden(user authctx.CurrentUser, topicID uuid.UUID, hi
 		return model.ForumTopic{}, err
 	}
 	return topic, nil
-}
-
-func (s *Service) setReplyHidden(user authctx.CurrentUser, replyID uuid.UUID, hidden bool) (model.ForumReply, error) {
-	if replyID == uuid.Nil {
-		return model.ForumReply{}, apperr.BadRequest("validation.invalid_request", "reply_id is required")
-	}
-	var reply model.ForumReply
-	query := s.db.Model(&model.ForumReply{}).Preload("Topic")
-	if !hidden {
-		query = query.Unscoped()
-	}
-	if err := query.First(&reply, "id = ?", replyID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return model.ForumReply{}, apperr.NotFound("forum.reply_not_found", "Forum reply not found")
-		}
-		return model.ForumReply{}, err
-	}
-	categoryID := reply.Topic.CategoryID
-	if err := s.canModerateCategory(user, &categoryID, func(assignment model.ForumModeratorAssignment) bool {
-		return assignment.CanLockTopic
-	}); err != nil {
-		return model.ForumReply{}, err
-	}
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if hidden {
-			if err := tx.Delete(&reply).Error; err != nil {
-				return err
-			}
-		} else {
-			if err := tx.Unscoped().Model(&model.ForumReply{}).Where("id = ?", replyID).Update("deleted_at", nil).Error; err != nil {
-				return err
-			}
-		}
-		return s.recalculateTopicReplyState(tx, reply.TopicID)
-	}); err != nil {
-		return model.ForumReply{}, err
-	}
-	if err := s.db.Unscoped().Preload("Topic").First(&reply, "id = ?", replyID).Error; err != nil {
-		return model.ForumReply{}, err
-	}
-	return reply, nil
-}
-
-func (s *Service) setReplySolved(user authctx.CurrentUser, replyID uuid.UUID, solved bool) (model.ForumReply, error) {
-	if replyID == uuid.Nil {
-		return model.ForumReply{}, apperr.BadRequest("validation.invalid_request", "reply_id is required")
-	}
-	var reply model.ForumReply
-	if err := s.db.Preload("Topic").First(&reply, "id = ?", replyID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return model.ForumReply{}, apperr.NotFound("forum.reply_not_found", "Forum reply not found")
-		}
-		return model.ForumReply{}, err
-	}
-
-	if reply.Topic.UserID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
-		return model.ForumReply{}, apperr.Forbidden("auth.forbidden", "Only topic owner or admin can update solution")
-	}
-
-	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if solved {
-			if err := tx.Model(&model.ForumReply{}).Where("topic_id = ?", reply.TopicID).Update("is_solved", false).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&model.ForumReply{}).Where("id = ?", replyID).Update("is_solved", true).Error; err != nil {
-				return err
-			}
-			return tx.Model(&model.ForumTopic{}).Where("id = ?", reply.TopicID).Updates(map[string]any{
-				"is_solved":       true,
-				"solved_reply_id": reply.ID,
-			}).Error
-		}
-
-		if err := tx.Model(&model.ForumReply{}).Where("id = ?", replyID).Update("is_solved", false).Error; err != nil {
-			return err
-		}
-		return s.recalculateTopicReplyState(tx, reply.TopicID)
-	}); err != nil {
-		return model.ForumReply{}, err
-	}
-
-	if err := s.db.Preload("Topic").First(&reply, "id = ?", replyID).Error; err != nil {
-		return model.ForumReply{}, err
-	}
-	return reply, nil
-}
-
-func (s *Service) recalculateTopicReplyState(tx *gorm.DB, topicID uuid.UUID) error {
-	var replyCount int64
-	if err := tx.Model(&model.ForumReply{}).Where("topic_id = ?", topicID).Count(&replyCount).Error; err != nil {
-		return err
-	}
-
-	updates := map[string]any{
-		"reply_count": int(replyCount),
-	}
-
-	if replyCount == 0 {
-		updates["last_reply_at"] = nil
-		updates["is_solved"] = false
-		updates["solved_reply_id"] = nil
-	} else {
-		var latestReply model.ForumReply
-		if err := tx.Select("id", "created_at").Where("topic_id = ?", topicID).Order("created_at DESC, id DESC").First(&latestReply).Error; err != nil {
-			return err
-		}
-		lastReplyAt := latestReply.CreatedAt
-		updates["last_reply_at"] = &lastReplyAt
-
-		var solvedReply model.ForumReply
-		if err := tx.Select("id").Where("topic_id = ? AND is_solved = ?", topicID, true).Order("created_at DESC, id DESC").First(&solvedReply).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				updates["is_solved"] = false
-				updates["solved_reply_id"] = nil
-			} else {
-				return err
-			}
-		} else {
-			solvedReplyID := solvedReply.ID
-			updates["is_solved"] = true
-			updates["solved_reply_id"] = &solvedReplyID
-		}
-	}
-
-	return tx.Unscoped().Model(&model.ForumTopic{}).Where("id = ?", topicID).Updates(updates).Error
 }
 
 func (s *Service) requireAdminOrOwner(user authctx.CurrentUser) error {

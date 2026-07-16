@@ -7,6 +7,7 @@ import (
 	"atoman/internal/handlers"
 	"atoman/internal/middleware"
 	"atoman/internal/modules/blog"
+	"atoman/internal/modules/comment"
 	"atoman/internal/modules/debate"
 	"atoman/internal/modules/debate_voting"
 	"atoman/internal/modules/feed"
@@ -32,14 +33,17 @@ func RegisterV1Routes(
 	collabHub *collab.Hub,
 ) {
 	group := r.Group("/api/v1")
+	commentService := comment.NewService(db, comment.NewTargetRegistry(db))
+	comment.RegisterRoutes(group, commentService)
 	blog.RegisterRoutes(group.Group("/blog"), blog.NewService(db))
 	feed.RegisterRoutes(group.Group("/feed"), feed.NewService(db))
 	notification.RegisterRoutes(group, notification.NewService(db))
 	forum.RegisterRoutes(group.Group("/forum"), forum.NewService(db))
 	forum_engagement.RegisterRoutes(group.Group("/forum"), forum_engagement.NewService(db))
-	forum_moderation.RegisterRoutes(group.Group("/forum"), forum_moderation.NewService(db))
-	forum_moderation.RegisterRoutes(group.Group("/forum/moderation"), forum_moderation.NewService(db))
-	debate.RegisterRoutes(group, debate.NewService(db))
+	forumModerationService := forum_moderation.NewService(db)
+	forum_moderation.RegisterRoutes(group.Group("/forum"), forumModerationService)
+	forum_moderation.RegisterRoutes(group.Group("/forum/moderation"), forumModerationService)
+	debate.RegisterRoutes(group, debate.NewService(db, commentService))
 	debate_voting.RegisterRoutes(group, debate_voting.NewService(db))
 	musicGroup := group.Group("/music")
 	musicGroup.Use(middleware.OptionalAuthMiddleware())
@@ -63,7 +67,6 @@ func RegisterV1Routes(
 	handlers.SetupTimelineRoutes(r, db)
 	handlers.SetupVideoRoutes(r, db, s3Client)
 	handlers.SetupRevisionRoutes(r, db)
-	handlers.SetupDiscussionRoutes(r, db)
 	handlers.SetupProtectionRoutes(r, db)
 	handlers.SetupPodcastRoutes(r, db, s3Client)
 	handlers.SetupAdminRoutes(r, db, s3Client)

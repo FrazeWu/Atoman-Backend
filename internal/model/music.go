@@ -104,6 +104,7 @@ type Song struct {
 	UploadedBy  *uuid.UUID `json:"uploaded_by" gorm:"type:uuid"`
 	User        *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
 	PlayCount   int64      `json:"play_count" gorm:"default:0"`
+	DurationSec int        `json:"duration_sec" gorm:"default:0"`
 }
 
 func (Song) TableName() string {

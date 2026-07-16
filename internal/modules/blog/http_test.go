@@ -33,7 +33,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.PostCollection{},
 		&model.BlogPostVersion{},
 		&model.BlogDraft{},
-		&model.Comment{},
+		&model.DiscussionTarget{},
 		&model.Like{},
 		&model.Bookmark{},
 		&model.BookmarkFolder{},
@@ -322,23 +322,10 @@ func TestListBookmarksReturnsPostEngagementCounts(t *testing.T) {
 	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
 		t.Fatalf("create like: %v", err)
 	}
-	for _, comment := range []model.Comment{
-		{TargetType: "post", TargetID: post.ID, UserID: model.NewNullableUserUUID(user.ID), Content: "Visible", Status: "visible"},
-		{TargetType: "post", TargetID: post.ID, UserID: model.NewNullableUserUUID(user.ID), Content: "Hidden", Status: "hidden"},
-	} {
-		if err := db.Create(&comment).Error; err != nil {
-			t.Fatalf("create %s comment: %v", comment.Status, err)
-		}
-	}
-	deletedComment := model.Comment{
-		TargetType: "post", TargetID: post.ID, UserID: model.NewNullableUserUUID(user.ID),
-		Content: "Deleted visible", Status: "visible",
-	}
-	if err := db.Create(&deletedComment).Error; err != nil {
-		t.Fatalf("create deleted comment: %v", err)
-	}
-	if err := db.Delete(&deletedComment).Error; err != nil {
-		t.Fatalf("soft delete comment: %v", err)
+	if err := db.Create(&model.DiscussionTarget{
+		Kind: "blog_post", ResourceID: post.ID, ResourceKey: post.ID.String(), CommentCount: 1, RootCount: 1,
+	}).Error; err != nil {
+		t.Fatalf("create discussion target: %v", err)
 	}
 
 	r := newBlogHTTPRouter(service, &user)
@@ -401,14 +388,10 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
 		t.Fatalf("create like: %v", err)
 	}
-	if err := db.Create(&model.Comment{
-		TargetType: "post",
-		TargetID:   post.ID,
-		UserID:     model.NewNullableUserUUID(user.ID),
-		Content:    "推荐评论",
-		Status:     "visible",
+	if err := db.Create(&model.DiscussionTarget{
+		Kind: "blog_post", ResourceID: post.ID, ResourceKey: post.ID.String(), CommentCount: 1, RootCount: 1,
 	}).Error; err != nil {
-		t.Fatalf("create comment: %v", err)
+		t.Fatalf("create discussion target: %v", err)
 	}
 
 	r := newBlogHTTPRouter(service, &user)
@@ -621,70 +604,21 @@ func TestCreateBookmarkMovesExistingBookmarkToSelectedFolder(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesMountsCommentAndLikeMutationEndpoints(t *testing.T) {
-	service, db, user := newBlogHTTPTestService(t)
-	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
-	if err != nil {
-		t.Fatalf("create default channel: %v", err)
-	}
-	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Published", Content: "Body", Status: "published", Visibility: "public", AllowComments: true}
-	if err := db.Create(&post).Error; err != nil {
-		t.Fatalf("create post: %v", err)
-	}
-
+func TestRegisterRoutesRemovesLegacyCommentsAndKeepsPostLikes(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
 	r := newBlogHTTPRouter(service, &user)
 
-	for _, path := range []string{
-		"/api/v1/blog/posts/" + post.ID.String() + "/comments",
-		"/api/v1/blog/posts/" + post.ID.String() + "/likes/count",
+	for _, request := range []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/blog/posts/" + uuid.NewString() + "/comments", ""},
+		{http.MethodPost, "/api/v1/blog/posts/" + uuid.NewString() + "/comments", `{"content":"legacy"}`},
+		{http.MethodDelete, "/api/v1/blog/comments/" + uuid.NewString(), ""},
 	} {
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req := httptest.NewRequest(request.method, request.path, strings.NewReader(request.body))
 		r.ServeHTTP(w, req)
-		if w.Code == http.StatusNotFound {
-			t.Fatalf("expected route %s to be mounted, got 404: %s", path, w.Body.String())
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("expected legacy route %s to return 404, got %d", request.path, w.Code)
 		}
-	}
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/comments", bytes.NewBufferString(`{"content":"Nice post"}`))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected create comment route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	var createdComment struct {
-		Data model.Comment `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &createdComment); err != nil {
-		t.Fatalf("decode comment response: %v", err)
-	}
-	if createdComment.Data.ID == uuid.Nil {
-		t.Fatalf("expected comment id, got %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/blog/likes", bytes.NewBufferString(`{"target_type":"post","target_id":"`+post.ID.String()+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected like route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/blog/likes", bytes.NewBufferString(`{"target_type":"post","target_id":"`+post.ID.String()+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected unlike route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/blog/comments/"+createdComment.Data.ID.String(), nil)
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected delete comment route to be mounted, got 404: %s", w.Body.String())
 	}
 }
 
@@ -1000,8 +934,8 @@ func TestRegisterRoutesListPostsReturnsPagedFlatDTOWithInteractionCounts(t *test
 	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: newest.ID}).Error; err != nil {
 		t.Fatalf("create like: %v", err)
 	}
-	if err := db.Create(&model.Comment{TargetType: "post", TargetID: newest.ID, UserID: model.NullableUserUUID{UUID: user.ID, Valid: true}, Content: "comment", Status: "visible"}).Error; err != nil {
-		t.Fatalf("create comment: %v", err)
+	if err := db.Create(&model.DiscussionTarget{Kind: "blog_post", ResourceID: newest.ID, ResourceKey: newest.ID.String(), CommentCount: 1, RootCount: 1}).Error; err != nil {
+		t.Fatalf("create discussion target: %v", err)
 	}
 
 	r := newBlogHTTPRouter(service, nil)
@@ -1147,8 +1081,8 @@ func TestRegisterRoutesGetPostReturnsPublicStatsAndCountsReaderView(t *testing.T
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
-	if err := db.Create(&model.Comment{TargetType: "post", TargetID: post.ID, UserID: model.NullableUserUUID{UUID: owner.ID, Valid: true}, Content: "comment", Status: "visible"}).Error; err != nil {
-		t.Fatalf("create comment: %v", err)
+	if err := db.Create(&model.DiscussionTarget{Kind: "blog_post", ResourceID: post.ID, ResourceKey: post.ID.String(), CommentCount: 1, RootCount: 1}).Error; err != nil {
+		t.Fatalf("create discussion target: %v", err)
 	}
 	if err := db.Create(&model.Bookmark{UserID: owner.ID, PostID: post.ID}).Error; err != nil {
 		t.Fatalf("create bookmark: %v", err)
@@ -1214,7 +1148,7 @@ func createOwnedChannelAndCollection(t *testing.T, service *Service, user authct
 func createPostRecord(t *testing.T, db *gorm.DB, userID uuid.UUID, channelID *uuid.UUID, title, status string) model.Post {
 	t.Helper()
 
-	post := model.Post{UserID: userID, ChannelID: channelID, Title: title, Content: "content", Status: status, Visibility: "public", AllowComments: true}
+	post := model.Post{UserID: userID, ChannelID: channelID, Title: title, Content: "content", Status: status, Visibility: "public"}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
@@ -1222,10 +1156,9 @@ func createPostRecord(t *testing.T, db *gorm.DB, userID uuid.UUID, channelID *uu
 }
 
 type testBlogDraftResponse struct {
-	ContextKey    string  `json:"context_key"`
-	Visibility    string  `json:"visibility"`
-	AllowComments bool    `json:"allow_comments"`
-	CollectionID  *string `json:"collection_id"`
+	ContextKey   string  `json:"context_key"`
+	Visibility   string  `json:"visibility"`
+	CollectionID *string `json:"collection_id"`
 }
 
 func decodePostResponse(t *testing.T, body []byte) model.Post {
@@ -1275,7 +1208,7 @@ func TestRegisterRoutesUpdatePostUpdatesOwnedPost(t *testing.T) {
 	}
 
 	updated := decodePostResponse(t, w.Body.Bytes())
-	if updated.Title != "After" || updated.Status != "published" || updated.Visibility != "followers" || updated.AllowComments {
+	if updated.Title != "After" || updated.Status != "published" || updated.Visibility != "followers" {
 		t.Fatalf("unexpected updated response: %#v", updated)
 	}
 	if updated.CollectionID == nil || *updated.CollectionID != secondary.ID {
@@ -1580,7 +1513,7 @@ func TestRegisterRoutesGetDraftsReturnsUserDrafts(t *testing.T) {
 
 func TestRegisterRoutesGetBlogDraftReturnsSavedDraft(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
-	draft := model.BlogDraft{UserID: user.ID, ContextKey: "editor:1", Title: "Saved", Content: "body", Visibility: "followers", AllowComments: false}
+	draft := model.BlogDraft{UserID: user.ID, ContextKey: "editor:1", Title: "Saved", Content: "body", Visibility: "followers"}
 	if err := db.Create(&draft).Error; err != nil {
 		t.Fatalf("create draft: %v", err)
 	}

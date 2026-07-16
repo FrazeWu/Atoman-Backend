@@ -35,14 +35,9 @@ func (r *Repo) GetTopic(id uuid.UUID) (model.ForumTopic, error) {
 	return topic, err
 }
 
-func (r *Repo) GetTopicForUpdate(id uuid.UUID) (model.ForumTopic, error) {
-	var topic model.ForumTopic
-	err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("User").Preload("Category").First(&topic, "id = ?", id).Error
-	return topic, err
-}
-
 func (r *Repo) ListTopics(query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
-	db := r.db.Model(&model.ForumTopic{})
+	db := r.db.Model(&model.ForumTopic{}).
+		Joins("LEFT JOIN discussion_targets ON discussion_targets.kind = ? AND discussion_targets.resource_id = forum_topics.id AND discussion_targets.deleted_at IS NULL", "forum_topic")
 	if query.CategoryID != uuid.Nil {
 		db = db.Where("category_id = ?", query.CategoryID)
 	}
@@ -58,7 +53,7 @@ func (r *Repo) ListTopics(query ListTopicsQuery) ([]model.ForumTopic, int64, err
 		return nil, 0, err
 	}
 	var topics []model.ForumTopic
-	err := db.Preload("User").Preload("Category").Order(topicOrder(query.Sort)).Offset(offset(query.Page, query.PageSize)).Limit(normalizedPageSize(query.PageSize)).Find(&topics).Error
+	err := db.Select("forum_topics.*").Preload("User").Preload("Category").Order(topicOrder(query.Sort)).Offset(offset(query.Page, query.PageSize)).Limit(normalizedPageSize(query.PageSize)).Find(&topics).Error
 	return topics, total, err
 }
 
@@ -66,36 +61,6 @@ func (r *Repo) SaveTopic(topic *model.ForumTopic) error { return r.db.Save(topic
 
 func (r *Repo) DeleteTopic(id uuid.UUID) error {
 	return r.db.Delete(&model.ForumTopic{}, "id = ?", id).Error
-}
-
-func (r *Repo) CreateReply(reply *model.ForumReply) error { return r.db.Create(reply).Error }
-
-func (r *Repo) GetReply(id uuid.UUID) (model.ForumReply, error) {
-	var reply model.ForumReply
-	err := r.db.Preload("User").Preload("Topic").First(&reply, "id = ?", id).Error
-	return reply, err
-}
-
-func (r *Repo) ListReplies(topicID uuid.UUID, sort string) ([]model.ForumReply, error) {
-	var replies []model.ForumReply
-	order := "floor_number ASC, created_at ASC"
-	if sort == "best" {
-		order = "like_count DESC, floor_number ASC"
-	}
-	err := r.db.Preload("User").Where("topic_id = ?", topicID).Order(order).Find(&replies).Error
-	return replies, err
-}
-
-func (r *Repo) SaveReply(reply *model.ForumReply) error { return r.db.Save(reply).Error }
-
-func (r *Repo) DeleteReply(id uuid.UUID) error {
-	return r.db.Delete(&model.ForumReply{}, "id = ?", id).Error
-}
-
-func (r *Repo) CountReplies(topicID uuid.UUID) (int64, error) {
-	var count int64
-	err := r.db.Model(&model.ForumReply{}).Where("topic_id = ?", topicID).Count(&count).Error
-	return count, err
 }
 
 func (r *Repo) UpsertDraft(draft *model.ForumDraft) error {
@@ -173,13 +138,13 @@ func (r *Repo) TagExists(tag string) (bool, error) {
 func topicOrder(sort string) string {
 	switch sort {
 	case "top":
-		return "like_count DESC, reply_count DESC, created_at DESC"
+		return "forum_topics.like_count DESC, COALESCE(discussion_targets.comment_count, 0) DESC, forum_topics.created_at DESC"
 	case "active":
-		return "COALESCE(last_reply_at, created_at) DESC"
+		return "COALESCE((SELECT MAX(comment_entries.created_at) FROM comment_entries WHERE comment_entries.target_id = discussion_targets.id AND comment_entries.deleted_at IS NULL), forum_topics.created_at) DESC"
 	case "featured":
-		return "featured DESC, created_at DESC"
+		return "forum_topics.featured DESC, forum_topics.created_at DESC"
 	default:
-		return "created_at DESC"
+		return "forum_topics.created_at DESC"
 	}
 }
 

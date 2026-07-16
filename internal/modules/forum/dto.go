@@ -24,16 +24,6 @@ type UpdateTopicRequest struct {
 	Tags    *[]string `json:"tags"`
 }
 
-type CreateReplyRequest struct {
-	TopicID       uuid.UUID  `json:"topic_id"`
-	ParentReplyID *uuid.UUID `json:"parent_reply_id"`
-	Content       string     `json:"content"`
-}
-
-type UpdateReplyRequest struct {
-	Content string `json:"content"`
-}
-
 type SaveDraftRequest struct {
 	ContextKey string `json:"context_key"`
 	Title      string `json:"title"`

@@ -58,10 +58,6 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("deduplicate subscription groups: %w", err)
 	}
 
-	if err := migrations.RunBlogGuestCommentsMigration(db); err != nil {
-		return fmt.Errorf("blog guest comments migration: %w", err)
-	}
-
 	if err := migrations.Migrate20260603FeedSourceManagementMVP(db); err != nil {
 		return fmt.Errorf("feed source management mvp migration: %w", err)
 	}
@@ -88,6 +84,10 @@ func runMigrations(db *gorm.DB) error {
 	}
 	if err := migrations.RunBlogBookmarkFolderMigration(db); err != nil {
 		return fmt.Errorf("blog bookmark folder migration: %w", err)
+	}
+
+	if err := migrations.RunUnifiedCommentIndexes(db); err != nil {
+		return fmt.Errorf("unified comment indexes migration: %w", err)
 	}
 
 	if err := migrations.RunChannelDefaultSelectionMigration(db); err != nil {
@@ -189,7 +189,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.Collection{},
 		&model.Post{},
 		&model.BlogPostVersion{},
-		&model.Comment{},
+		&model.PostCollection{},
 		&model.AuditLog{},
 		&model.MediaAsset{},
 		&model.MusicEdit{},
@@ -220,11 +220,8 @@ func migrateSchema(db *gorm.DB) error {
 		&model.Revision{},
 		&model.EditConflict{},
 		&model.ContentProtection{},
-		&model.Discussion{},
-		&model.DiscussionReadState{},
 		&model.ForumCategory{},
 		&model.ForumTopic{},
-		&model.ForumReply{},
 		&model.ForumLike{},
 		&model.ForumBookmark{},
 		&model.ForumFollow{},
@@ -240,10 +237,22 @@ func migrateSchema(db *gorm.DB) error {
 		&model.PodcastEpisode{},
 		&model.PodcastEpisodeBookmark{},
 		&model.Debate{},
-		&model.Argument{},
 		&model.DebateVote{},
 		&model.VoteHistory{},
 		&model.DebateConcludeVote{},
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
+		&model.CommentMention{},
+		&model.CommentAttachment{},
+		&model.CommentLike{},
+		&model.CommentReport{},
+		&model.CommentTimeAnchor{},
+		&model.CommentPublishRecord{},
+		&model.TimelineRevisionProposal{},
+		&model.TimelineRevision{},
+		&model.DebateArgumentDetail{},
+		&model.DebateArgumentReference{},
+		&model.DebateArgumentDebateRef{},
 	}
 	if !db.Migrator().HasTable(&model.ForumDraft{}) {
 		models = append(models, &model.ForumDraft{})
@@ -255,10 +264,6 @@ func migrateSchema(db *gorm.DB) error {
 
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {
 		return fmt.Errorf("notification/dm index migration: %w", err)
-	}
-
-	if err := migrations.RunDiscussionReadStateMigration(db); err != nil {
-		return fmt.Errorf("discussion read state migration: %w", err)
 	}
 
 	return nil

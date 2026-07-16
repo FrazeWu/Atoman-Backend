@@ -15,7 +15,7 @@ func TestBlogLikeAndBookmarkAreUniquePerUserTarget(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
-	post := Post{UserID: user.UUID, Title: "Post", Content: "Body", Status: "published", Visibility: "public", AllowComments: true}
+	post := Post{UserID: user.UUID, Title: "Post", Content: "Body", Status: "published", Visibility: "public"}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}

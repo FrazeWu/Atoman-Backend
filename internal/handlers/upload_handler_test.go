@@ -134,6 +134,7 @@ func TestUploadMusicAssetStoresInS3AndPersistsMediaAsset(t *testing.T) {
 	}
 	var resp struct {
 		Data struct {
+			ID          string `json:"id"`
 			URL         string `json:"url"`
 			Key         string `json:"key"`
 			ContentType string `json:"content_type"`
@@ -142,6 +143,9 @@ func TestUploadMusicAssetStoresInS3AndPersistsMediaAsset(t *testing.T) {
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.ID == "" {
+		t.Fatalf("expected persisted media asset id: %s", w.Body.String())
 	}
 	if strings.HasPrefix(resp.Data.URL, "/uploads/") {
 		t.Fatalf("upload returned local uploads URL: %s", resp.Data.URL)
@@ -172,6 +176,64 @@ func TestUploadMusicAssetStoresInS3AndPersistsMediaAsset(t *testing.T) {
 	}
 	if asset.UserID == nil || *asset.UserID != user.UUID || asset.Purpose != "music.cover" || asset.URL != resp.Data.URL {
 		t.Fatalf("unexpected persisted media asset: %#v", asset)
+	}
+}
+
+func TestUploadCommentImageStoresCommentPurposeAndReturnsAssetID(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	t.Setenv("S3_BUCKET", "atoman-test")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{})
+	user := model.User{Username: "commenter", Email: "commenter@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	var path, contentType string
+	r := gin.New()
+	SetupUploadRoutes(r, db, fakeS3ClientForUploadTest(t, &path, &contentType))
+	body, multipartType := multipartUploadBody(t, "comment.image", "comment.png", "image/png", validPNGBytes())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
+	req.Header.Set("Authorization", "Bearer "+signedUploadTokenForTest(t, user))
+	req.Header.Set("Content-Type", multipartType)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data struct {
+			ID  string `json:"id"`
+			Key string `json:"key"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Data.ID == "" || !strings.HasPrefix(response.Data.Key, "comments/") {
+		t.Fatalf("unexpected comment image response: %s", w.Body.String())
+	}
+	var asset model.MediaAsset
+	if err := db.First(&asset, "id = ?", response.Data.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if asset.Purpose != "comment.image" || asset.UserID == nil || *asset.UserID != user.UUID {
+		t.Fatalf("unexpected asset: %#v", asset)
+	}
+}
+
+func TestUniqueUploadFilenameUsesVerifiedImageContentTypeExtension(t *testing.T) {
+	if got := uniqueUploadFilename("spoofed.jpg", "image/png"); !strings.HasSuffix(got, ".png") {
+		t.Fatalf("expected verified PNG extension, got %q", got)
+	}
+	if got := uniqueUploadFilename("photo.png", "image/jpeg"); !strings.HasSuffix(got, ".jpg") {
+		t.Fatalf("expected verified JPEG extension, got %q", got)
+	}
+	if got := uniqueUploadFilename("track.custom", "audio/mpeg"); !strings.HasSuffix(got, ".custom") {
+		t.Fatalf("expected audio extension preservation, got %q", got)
 	}
 }
 

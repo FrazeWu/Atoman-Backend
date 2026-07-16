@@ -65,13 +65,12 @@ func main() {
 	content := string(contentBytes)
 
 	post := model.Post{
-		UserID:        user.UUID,
-		Title:         "构建现代极简主义设计系统 (Building a Modern Minimalist Design System)",
-		Content:       content,
-		Summary:       "深入探讨如何构建一个现代、优雅且响应迅速的极简主义设计系统，并在本次重构中实现真正的视觉平衡。",
-		Status:        "published",
-		Visibility:    "public",
-		AllowComments: true,
+		UserID:     user.UUID,
+		Title:      "构建现代极简主义设计系统 (Building a Modern Minimalist Design System)",
+		Content:    content,
+		Summary:    "深入探讨如何构建一个现代、优雅且响应迅速的极简主义设计系统，并在本次重构中实现真正的视觉平衡。",
+		Status:     "published",
+		Visibility: "public",
 	}
 
 	post.ID, _ = uuid.NewV7()

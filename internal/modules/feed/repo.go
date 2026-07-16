@@ -116,7 +116,7 @@ func (r *Repo) ListPostEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCo
 	var counts []PostEngagementCount
 	err := r.db.Model(&model.Post{}).Select(`posts.id AS post_id,
 		(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
-		(SELECT COUNT(*) FROM comments WHERE comments.target_type = 'post' AND comments.target_id = posts.id AND comments.status = 'visible' AND comments.deleted_at IS NULL) AS comments_count`).
+		COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count`).
 		Where("posts.id IN ?", postIDs).
 		Scan(&counts).Error
 	return counts, err

@@ -94,7 +94,7 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 	var rows []blogRecommendationRow
 	if err := s.db.Model(&model.Post{}).Select(`posts.*,
 		(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
-		(SELECT COUNT(*) FROM comments WHERE comments.target_type = 'post' AND comments.target_id = posts.id AND comments.status = 'visible' AND comments.deleted_at IS NULL) AS comments_count,
+		COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count,
 		(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count,
 		(SELECT COUNT(*) FROM subscriptions JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id
 		 WHERE feed_sources.source_type = 'internal_channel' AND feed_sources.source_id = posts.channel_id
@@ -567,7 +567,7 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 		var counts []engagementCount
 		if err := s.db.Model(&model.Post{}).Select(`posts.id AS post_id,
 			(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
-			(SELECT COUNT(*) FROM comments WHERE comments.target_type = 'post' AND comments.target_id = posts.id AND comments.status = 'visible' AND comments.deleted_at IS NULL) AS comments_count`).
+			COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count`).
 			Where("posts.id IN ?", postIDs).
 			Scan(&counts).Error; err != nil {
 			return nil, err
@@ -685,111 +685,6 @@ func (s *Service) DeleteBookmarkFolder(user authctx.CurrentUser, folderID uuid.U
 	return s.repo.DeleteBookmarkFolder(folderID, user.ID)
 }
 
-func (s *Service) ListComments(postID uuid.UUID, viewerID *uuid.UUID) ([]model.Comment, error) {
-	post, err := s.repo.GetPost(postID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, apperr.NotFound("blog.post_not_found", "Post not found")
-		}
-		return nil, err
-	}
-	if post.Status == "draft" {
-		if viewerID == nil || post.UserID != *viewerID {
-			return nil, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
-		}
-	} else {
-		allowed, err := canViewPublishedPost(s.db, viewerID, post)
-		if err != nil {
-			return nil, err
-		}
-		if !allowed {
-			return nil, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
-		}
-	}
-
-	var comments []model.Comment
-	if err := s.db.Preload("User").Where("target_type = ? AND target_id = ? AND status = ?", "post", postID, "visible").Order("created_at ASC").Find(&comments).Error; err != nil {
-		return nil, err
-	}
-	return comments, nil
-}
-
-func (s *Service) CreateComment(user *authctx.CurrentUser, postID uuid.UUID, guestName string, content string, timestampSec *int) (model.Comment, error) {
-	post, err := s.repo.GetPost(postID)
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return model.Comment{}, apperr.NotFound("blog.post_not_found", "Post not found")
-		}
-		return model.Comment{}, err
-	}
-	if !post.AllowComments {
-		return model.Comment{}, apperr.Forbidden("blog.comments_disabled", "Comments are disabled for this post")
-	}
-
-	var viewerID *uuid.UUID
-	if user != nil && user.ID != uuid.Nil {
-		viewerID = &user.ID
-	}
-	if post.Status == "draft" {
-		if viewerID == nil || post.UserID != *viewerID {
-			return model.Comment{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
-		}
-	} else {
-		allowed, err := canViewPublishedPost(s.db, viewerID, post)
-		if err != nil {
-			return model.Comment{}, err
-		}
-		if !allowed {
-			return model.Comment{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
-		}
-	}
-
-	comment := model.Comment{
-		TargetType:   "post",
-		TargetID:     post.ID,
-		UserID:       model.NullableUserUUID{},
-		GuestName:    strings.TrimSpace(guestName),
-		Content:      strings.TrimSpace(content),
-		TimestampSec: timestampSec,
-		Status:       "visible",
-	}
-	if user != nil && user.ID != uuid.Nil {
-		comment.UserID = model.NewNullableUserUUID(user.ID)
-	}
-	if err := s.db.Create(&comment).Error; err != nil {
-		return model.Comment{}, err
-	}
-	return comment, nil
-}
-
-func (s *Service) DeleteComment(user authctx.CurrentUser, commentID uuid.UUID) error {
-	if user.ID == uuid.Nil {
-		return apperr.Unauthorized("Login required")
-	}
-	var comment model.Comment
-	if err := s.db.First(&comment, "id = ?", commentID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return apperr.NotFound("blog.comment_not_found", "Comment not found")
-		}
-		return err
-	}
-	isPostOwner := false
-	if comment.TargetType == "post" {
-		var post model.Post
-		if err := s.db.Select("user_id").Where("id = ?", comment.TargetID).First(&post).Error; err == nil {
-			isPostOwner = post.UserID == user.ID
-		}
-	}
-	if !comment.UserID.Valid {
-		if !isPostOwner {
-			return apperr.Forbidden("blog.comment_forbidden", "You don't have permission to delete this comment")
-		}
-	} else if comment.UserID.UUID != user.ID && !isPostOwner {
-		return apperr.Forbidden("blog.comment_forbidden", "You don't have permission to delete this comment")
-	}
-	return s.db.Delete(&comment).Error
-}
-
 func (s *Service) ToggleLike(user authctx.CurrentUser, targetType string, targetID uuid.UUID, isLike bool) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
@@ -815,14 +710,6 @@ func (s *Service) ToggleLike(user authctx.CurrentUser, targetType string, target
 			if !allowed {
 				return apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
 			}
-		}
-	case "comment":
-		var comment model.Comment
-		if err := s.db.First(&comment, targetID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.NotFound("blog.comment_not_found", "Comment not found")
-			}
-			return err
 		}
 	default:
 		return apperr.BadRequest("validation.invalid_request", "target_type is invalid")
@@ -999,17 +886,16 @@ func saveBlogPostVersion(tx *gorm.DB, post model.Post, editorID uuid.UUID) error
 		return err
 	}
 	version := model.BlogPostVersion{
-		PostID:        post.ID,
-		Version:       maxVersion + 1,
-		EditorID:      editorID,
-		Title:         post.Title,
-		Content:       post.Content,
-		Summary:       post.Summary,
-		CoverURL:      post.CoverURL,
-		Visibility:    post.Visibility,
-		AllowComments: post.AllowComments,
-		CollectionID:  *post.CollectionID,
-		PublishedAt:   post.PublishedAt,
+		PostID:       post.ID,
+		Version:      maxVersion + 1,
+		EditorID:     editorID,
+		Title:        post.Title,
+		Content:      post.Content,
+		Summary:      post.Summary,
+		CoverURL:     post.CoverURL,
+		Visibility:   post.Visibility,
+		CollectionID: *post.CollectionID,
+		PublishedAt:  post.PublishedAt,
 	}
 	return tx.Create(&version).Error
 }
@@ -1059,8 +945,8 @@ func (s *Service) RestorePostVersion(user authctx.CurrentUser, postID uuid.UUID,
 		updates := map[string]any{
 			"title": version.Title, "content": version.Content, "summary": version.Summary,
 			"cover_url": version.CoverURL, "visibility": version.Visibility,
-			"allow_comments": version.AllowComments, "collection_id": version.CollectionID,
-			"channel_id": collection.ChannelID,
+			"collection_id": version.CollectionID,
+			"channel_id":    collection.ChannelID,
 		}
 		if err := tx.Model(&post).Updates(updates).Error; err != nil {
 			return err

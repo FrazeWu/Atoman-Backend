@@ -2,141 +2,308 @@ package debate
 
 import (
 	"errors"
-	"strings"
+	"fmt"
 	"testing"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/comment"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
 
-func TestCreateArgumentRollsBackWhenDebateCountUpdateFails(t *testing.T) {
-	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Debate{}, &model.Argument{})
-
-	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", IsActive: true}
-	if err := db.Create(&user).Error; err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	debate := model.Debate{UserID: user.UUID, Title: "Topic", Status: "open"}
-	if err := db.Create(&debate).Error; err != nil {
-		t.Fatalf("create debate: %v", err)
-	}
-
-	callbackName := "fail_debate_count_" + strings.ReplaceAll(t.Name(), "/", "_")
-	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
-		if tx.Statement.Table == "debates" {
-			tx.AddError(errors.New("count update failed"))
-		}
-	}); err != nil {
-		t.Fatalf("register update callback: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = db.Callback().Update().Remove(callbackName)
-	})
-
-	_, err := NewService(db).CreateArgument(authctx.CurrentUser{
-		ID:       user.UUID,
-		Username: user.Username,
-		Role:     authctx.RoleUser,
-	}, CreateArgumentRequest{
-		DebateID:     debate.ID,
-		Content:      "Argument",
-		ArgumentType: string(model.ArgumentTypeSupport),
-	})
-	if err == nil {
-		t.Fatal("expected count update failure to be returned")
-	}
-
-	var count int64
-	if err := db.Model(&model.Argument{}).Where("debate_id = ?", debate.ID).Count(&count).Error; err != nil {
-		t.Fatalf("count arguments: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("expected argument insert to roll back, got %d rows", count)
-	}
-}
-
-func TestCreateArgumentRejectsQuotedArgumentFromAnotherDebate(t *testing.T) {
-	service, db, author, firstDebate := newDebateServiceTest(t)
-	secondDebate := model.Debate{UserID: author.ID, Title: "Other topic", Status: "open"}
-	if err := db.Create(&secondDebate).Error; err != nil {
-		t.Fatalf("create second debate: %v", err)
-	}
-	quoted := model.Argument{
-		DebateID:     secondDebate.ID,
-		UserID:       author.ID,
-		Content:      "Other argument",
-		ArgumentType: model.ArgumentTypeSupport,
-	}
-	if err := db.Create(&quoted).Error; err != nil {
-		t.Fatalf("create quoted argument: %v", err)
-	}
-
-	_, err := service.CreateArgument(author, CreateArgumentRequest{
-		DebateID:     firstDebate.ID,
-		ParentID:     &quoted.ID,
-		Content:      "Cross-debate quote",
-		ArgumentType: string(model.ArgumentTypeCounter),
-	})
-	if err == nil {
-		t.Fatal("expected cross-debate quoted argument to be rejected")
-	}
-}
-
-func TestCreateArgumentRejectsInvalidArgumentType(t *testing.T) {
-	service, _, author, debate := newDebateServiceTest(t)
-
-	_, err := service.CreateArgument(author, CreateArgumentRequest{
-		DebateID:     debate.ID,
-		Content:      "Invalid type",
-		ArgumentType: "invalid",
-	})
-	if err == nil {
-		t.Fatal("expected invalid argument type to be rejected")
-	}
-}
-
-func TestAddArgumentReferenceRejectsUnrelatedUser(t *testing.T) {
-	service, db, author, debate := newDebateServiceTest(t)
-	argument := model.Argument{DebateID: debate.ID, UserID: author.ID, Content: "Owned", ArgumentType: model.ArgumentTypeSupport}
-	reference := model.Argument{DebateID: debate.ID, UserID: author.ID, Content: "Reference", ArgumentType: model.ArgumentTypeEvidence}
-	if err := db.Create(&argument).Error; err != nil {
-		t.Fatalf("create argument: %v", err)
-	}
-	if err := db.Create(&reference).Error; err != nil {
-		t.Fatalf("create reference: %v", err)
-	}
-	attacker := model.User{Username: "mallory", Email: "mallory@example.com", Password: "hash", IsActive: true}
-	if err := db.Create(&attacker).Error; err != nil {
-		t.Fatalf("create unrelated user: %v", err)
-	}
-
-	err := service.AddArgumentReference(authctx.CurrentUser{
-		ID:       attacker.UUID,
-		Username: attacker.Username,
-		Role:     authctx.RoleUser,
-	}, argument.ID, reference.ID)
-	if err == nil {
-		t.Fatal("expected unrelated user to be forbidden")
-	}
-}
-
-func newDebateServiceTest(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, model.Debate) {
+func seededDebateCommentService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, model.Debate) {
 	t.Helper()
-
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Debate{}, &model.Argument{})
-	user := model.User{Username: "author", Email: "author@example.com", Password: "hash", IsActive: true}
-	if err := db.Create(&user).Error; err != nil {
-		t.Fatalf("create user: %v", err)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.MediaAsset{}, &model.Debate{}, &model.DiscussionTarget{}, &model.CommentEntry{},
+		&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentTimeAnchor{},
+		&model.CommentLike{}, &model.CommentReport{}, &model.CommentPublishRecord{}, &model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{},
+		&model.DebateArgumentReference{}, &model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{},
+	)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_comment_root_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_notification_dedup ON notifications (recipient_id, source_type, source_id) WHERE aggregation_key = '' AND deleted_at IS NULL`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_notification_unread_aggregate ON notifications (recipient_id, aggregation_key) WHERE aggregation_key <> '' AND read_at IS NULL AND deleted_at IS NULL`).Error)
+	owner := model.User{Username: "owner", Email: "owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	require.NoError(t, db.Create(&owner).Error)
+	user := authctx.CurrentUser{ID: owner.UUID, Username: owner.Username, Role: owner.Role}
+	debate := model.Debate{UserID: owner.UUID, Title: "Typed debate", Status: "open"}
+	require.NoError(t, db.Create(&debate).Error)
+	comments := comment.NewService(db, comment.NewTargetRegistry(db))
+	return NewService(db, comments), db, user, debate
+}
+
+func TestCreateArgumentWritesCommentAndTypedDetail(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	mentioned := model.User{Username: "bob", Email: "bob@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	require.NoError(t, db.Create(&mentioned).Error)
+	got, err := svc.CreateArgument(user, CreateArgumentRequest{
+		DebateID: debate.ID, Content: "@bob evidence", ArgumentType: "evidence", SourceURL: "https://example.com",
+		Mentions: []comment.MentionInput{{UserID: mentioned.UUID, Start: 0, End: 4}},
+	})
+	require.NoError(t, err)
+
+	var entry model.CommentEntry
+	require.NoError(t, db.First(&entry, "id = ?", got.ID).Error)
+	var detail model.DebateArgumentDetail
+	require.NoError(t, db.First(&detail, "comment_id = ?", got.ID).Error)
+	require.Equal(t, "evidence", detail.ArgumentType)
+	require.Equal(t, got.ID, detail.CommentID)
+	var mention model.CommentMention
+	require.NoError(t, db.First(&mention, "comment_id = ?", got.ID).Error)
+	require.Equal(t, mentioned.UUID, mention.UserID)
+}
+
+func TestListArgumentsExcludesModerationHiddenComments(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Update("status", "hidden").Error)
+	arguments, _, err := svc.ListArguments(debate.ID)
+	require.NoError(t, err)
+	require.Empty(t, arguments)
+}
+
+func TestCreateArgumentRollsBackCommentWhenDetailFails(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("reject_argument_detail", func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "debate_argument_details" {
+			tx.AddError(errors.New("detail failed"))
+		}
+	}))
+	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.ErrorContains(t, err, "detail failed")
+	var count int64
+	require.NoError(t, db.Model(&model.CommentEntry{}).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestArgumentRepliesReferencesAndFoldingUseCommentIDs(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	root, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "root", ArgumentType: "support"})
+	require.NoError(t, err)
+	child, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ParentID: &root.ID, Content: "child", ArgumentType: "counter"})
+	require.NoError(t, err)
+	grandchild, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ParentID: &child.ID, Content: "nested reply", ArgumentType: "question"})
+	require.NoError(t, err)
+	var childEntry, grandchildEntry model.CommentEntry
+	require.NoError(t, db.First(&childEntry, "id = ?", child.ID).Error)
+	require.NoError(t, db.First(&grandchildEntry, "id = ?", grandchild.ID).Error)
+	require.Equal(t, root.ID, *childEntry.RootID)
+	require.Equal(t, root.ID, *grandchildEntry.RootID)
+	require.NoError(t, svc.AddArgumentReference(user, child.ID, root.ID))
+	var relation model.DebateArgumentReference
+	require.NoError(t, db.First(&relation, "comment_id = ? AND referenced_comment_id = ?", child.ID, root.ID).Error)
+
+	admin := user
+	admin.Role = authctx.RoleAdmin
+	require.NoError(t, svc.FoldArgument(admin, root.ID, "duplicate"))
+	loaded, err := svc.GetArgument(root.ID)
+	require.NoError(t, err)
+	require.True(t, loaded.IsFolded)
+	require.Equal(t, "duplicate", loaded.FoldNote)
+}
+
+func TestCreateArgumentRejectsConcludedDebate(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	require.NoError(t, db.Model(&debate).Update("status", "concluded").Error)
+	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "late", ArgumentType: "support"})
+	require.Error(t, err)
+	var count int64
+	require.NoError(t, db.Model(&model.CommentEntry{}).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestUpdateArgumentPreservesConclusion(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&model.DebateArgumentDetail{}).Where("comment_id = ?", created.ID).Update("conclusion", "accepted").Error)
+	updated, err := svc.UpdateArgument(user, created.ID, CreateArgumentRequest{Content: "updated", ArgumentType: "evidence"})
+	require.NoError(t, err)
+	require.Equal(t, "accepted", updated.Conclusion)
+	require.NotEqual(t, uuid.Nil, updated.ID)
+}
+
+func TestDeleteArgumentRemovesTypedVotesAndReferences(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	root, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "root", ArgumentType: "support"})
+	require.NoError(t, err)
+	child, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ParentID: &root.ID, Content: "child", ArgumentType: "counter"})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.DebateVote{ArgumentID: child.ID, UserID: user.ID, VoteType: 1}).Error)
+	require.NoError(t, db.Create(&model.DebateArgumentReference{CommentID: child.ID, ReferencedCommentID: root.ID}).Error)
+	require.NoError(t, svc.DeleteArgument(user, root.ID))
+	var votes, references int64
+	require.NoError(t, db.Model(&model.DebateVote{}).Where("argument_id IN ?", []uuid.UUID{root.ID, child.ID}).Count(&votes).Error)
+	require.NoError(t, db.Model(&model.DebateArgumentReference{}).Where("comment_id IN ? OR referenced_comment_id IN ?", []uuid.UUID{root.ID, child.ID}, []uuid.UUID{root.ID, child.ID}).Count(&references).Error)
+	require.Zero(t, votes)
+	require.Zero(t, references)
+	var refreshed model.Debate
+	require.NoError(t, db.First(&refreshed, "id = ?", debate.ID).Error)
+	require.Zero(t, refreshed.ArgumentCount)
+}
+
+func TestUpdateArgumentRollsBackCoreEditWhenDetailUpdateFails(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "before", ArgumentType: "support"})
+	require.NoError(t, err)
+	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("reject_argument_detail_update", func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "debate_argument_details" {
+			tx.AddError(errors.New("detail update failed"))
+		}
+	}))
+	_, err = svc.UpdateArgument(user, created.ID, CreateArgumentRequest{Content: "after", ArgumentType: "evidence"})
+	require.ErrorContains(t, err, "detail update failed")
+	var stored model.CommentEntry
+	require.NoError(t, db.First(&stored, "id = ?", created.ID).Error)
+	require.Equal(t, "before", stored.Content)
+}
+
+func TestDebateCreatorCanDeleteAnotherUsersArgument(t *testing.T) {
+	svc, db, owner, debate := seededDebateCommentService(t)
+	authorModel := model.User{Username: "author", Email: "author@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	require.NoError(t, db.Create(&authorModel).Error)
+	author := authctx.CurrentUser{ID: authorModel.UUID, Username: authorModel.Username, Role: authorModel.Role}
+	created, err := svc.CreateArgument(author, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.NoError(t, err)
+	require.NoError(t, svc.DeleteArgument(owner, created.ID))
+}
+
+func TestDeleteArgumentRollsBackWhenArgumentCountIsInconsistent(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&model.Debate{}).Where("id = ?", debate.ID).Update("argument_count", 0).Error)
+	require.Error(t, svc.DeleteArgument(user, created.ID))
+	var count int64
+	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Count(&count).Error)
+	require.Equal(t, int64(1), count)
+}
+
+func TestCreateAndEditImageOnlyArgument(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	asset := model.MediaAsset{UserID: &user.ID, Purpose: "comment.image", URL: "https://cdn.example/image.png", Key: "comments/image.png", ContentType: "image/png", Size: 10}
+	require.NoError(t, db.Create(&asset).Error)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ArgumentType: "evidence", AttachmentIDs: []uuid.UUID{asset.ID}})
+	require.NoError(t, err)
+	require.Empty(t, created.Content)
+	require.Len(t, created.Attachments, 1)
+	updated, err := svc.UpdateArgument(user, created.ID, CreateArgumentRequest{ArgumentType: "support", AttachmentIDs: []uuid.UUID{asset.ID}})
+	require.NoError(t, err)
+	require.Empty(t, updated.Content)
+	require.Equal(t, asset.ID, updated.Attachments[0].ID)
+}
+
+func TestCreateAndEditArgumentRejectEmptyContentAndAttachments(t *testing.T) {
+	svc, _, user, debate := seededDebateCommentService(t)
+	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ArgumentType: "support"})
+	require.Error(t, err)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.NoError(t, err)
+	_, err = svc.UpdateArgument(user, created.ID, CreateArgumentRequest{ArgumentType: "support"})
+	require.Error(t, err)
+}
+
+func TestListArgumentsLoadsAttachmentsInOneOrderedQuery(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	assets := make([]model.MediaAsset, 2)
+	for index := range assets {
+		assets[index] = model.MediaAsset{UserID: &user.ID, Purpose: "comment.image", URL: "https://cdn.example/" + string(rune('a'+index)), Key: "comments/" + string(rune('a'+index)), ContentType: "image/png", Size: 10}
+		require.NoError(t, db.Create(&assets[index]).Error)
 	}
-	author := authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser}
-	debate := model.Debate{UserID: user.UUID, Title: "Topic", Status: "open"}
-	if err := db.Create(&debate).Error; err != nil {
-		t.Fatalf("create debate: %v", err)
+	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ArgumentType: "support", AttachmentIDs: []uuid.UUID{assets[1].ID, assets[0].ID}})
+	require.NoError(t, err)
+	arguments, _, err := svc.ListArguments(debate.ID)
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{assets[1].ID, assets[0].ID}, []uuid.UUID{arguments[0].Attachments[0].ID, arguments[0].Attachments[1].ID})
+}
+
+func TestArgumentMetadataValidationAndAutoFoldMapping(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "bad", ArgumentType: "unknown"})
+	require.Error(t, err)
+	_, err = svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "bad", ArgumentType: "evidence", SourceURL: "javascript:alert(1)"})
+	require.Error(t, err)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "ok", ArgumentType: "support"})
+	require.NoError(t, err)
+	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Update("status", "auto_folded").Error)
+	loaded, err := svc.GetArgument(created.ID)
+	require.NoError(t, err)
+	require.True(t, loaded.IsFolded)
+}
+
+func TestModerationDeleteDecrementsArgumentCount(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+	require.NoError(t, err)
+	admin := user
+	admin.Role = authctx.RoleAdmin
+	require.NoError(t, svc.comments.Moderate(admin, created.ID, comment.ModerateInput{Action: comment.ModerationDelete, Reason: "remove"}))
+	var refreshed model.Debate
+	require.NoError(t, db.First(&refreshed, "id = ?", debate.ID).Error)
+	require.Zero(t, refreshed.ArgumentCount)
+}
+
+func TestDeleteDebateRemovesCommentTargetAndTypedRelations(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	root, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "root", ArgumentType: "support"})
+	require.NoError(t, err)
+	_, err = svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ParentID: &root.ID, Content: "child", ArgumentType: "counter"})
+	require.NoError(t, err)
+	require.NoError(t, db.Create(&model.DebateVote{ArgumentID: root.ID, UserID: user.ID, VoteType: 1}).Error)
+	require.NoError(t, svc.DeleteDebate(user, debate.ID))
+	for _, table := range []any{&model.Debate{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.DebateArgumentDetail{}, &model.DebateVote{}} {
+		var count int64
+		require.NoError(t, db.Model(table).Count(&count).Error)
+		require.Zero(t, count)
 	}
-	return NewService(db), db, author, debate
+}
+
+func TestListArgumentsUsesBoundedQueryCount(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	for index := 0; index < 5; index++ {
+		_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: fmt.Sprintf("claim-%d", index), ArgumentType: "support"})
+		require.NoError(t, err)
+	}
+	queries := 0
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register("count-debate-list-query", func(*gorm.DB) { queries++ }))
+	require.NoError(t, db.Callback().Raw().After("gorm:raw").Register("count-debate-list-raw", func(*gorm.DB) { queries++ }))
+	require.NoError(t, db.Callback().Row().After("gorm:row").Register("count-debate-list-row", func(*gorm.DB) { queries++ }))
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove("count-debate-list-query")
+		_ = db.Callback().Raw().Remove("count-debate-list-raw")
+		_ = db.Callback().Row().Remove("count-debate-list-row")
+	})
+	arguments, _, err := svc.ListArguments(debate.ID)
+	require.NoError(t, err)
+	require.Len(t, arguments, 5)
+	require.Positive(t, queries)
+	require.LessOrEqual(t, queries, 12)
+}
+
+func TestListArgumentsPaginatesAndKeepsCrossPageReferences(t *testing.T) {
+	svc, db, user, debate := seededDebateCommentService(t)
+	created := make([]model.DebateArgumentDTO, 0, 6)
+	for index := 0; index < 6; index++ {
+		argument, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: fmt.Sprintf("page-%d", index), ArgumentType: "support"})
+		require.NoError(t, err)
+		created = append(created, argument)
+		require.NoError(t, db.Where("author_id = ?", user.ID).Delete(&model.CommentPublishRecord{}).Error)
+	}
+	require.NoError(t, svc.AddArgumentReference(user, created[5].ID, created[0].ID))
+	first, total, err := svc.ListArguments(debate.ID, 1, 5)
+	require.NoError(t, err)
+	require.Len(t, first, 5)
+	require.Equal(t, int64(6), total)
+	second, total, err := svc.ListArguments(debate.ID, 2, 5)
+	require.NoError(t, err)
+	require.Len(t, second, 1)
+	require.Equal(t, int64(6), total)
+	require.Len(t, second[0].References, 1)
+	require.Equal(t, created[0].ID, second[0].References[0].ID)
 }

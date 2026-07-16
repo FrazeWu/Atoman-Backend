@@ -20,6 +20,8 @@ func newForumFollowTestService(t *testing.T) (*Service, authctx.CurrentUser, mod
 		&model.ForumCategory{},
 		&model.ForumTopic{},
 		&model.ForumFollow{},
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
 	)
 	user := model.User{Username: "follower", Email: "follower@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {

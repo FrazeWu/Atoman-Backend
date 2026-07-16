@@ -3,8 +3,8 @@ package forum
 import (
 	"testing"
 
+	"atoman/internal/migrations"
 	"atoman/internal/model"
-	"atoman/internal/service"
 	"atoman/internal/testdb"
 
 	"github.com/google/uuid"
@@ -13,8 +13,8 @@ import (
 func TestUpsertDraftOverwritesExistingDraftForSameUserAndContext(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.ForumDraft{})
-	if err := service.RunForumMigrations(db); err != nil {
-		t.Fatalf("run forum migrations: %v", err)
+	if err := migrations.RunForumDraftUniqueIndex(db); err != nil {
+		t.Fatalf("run forum draft index migration: %v", err)
 	}
 
 	repo := NewRepo(db)

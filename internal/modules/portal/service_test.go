@@ -15,7 +15,7 @@ func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 		&model.User{},
 		&model.Post{},
 		&model.Like{},
-		&model.Comment{},
+		&model.DiscussionTarget{},
 	)
 
 	userID := uuid.Must(uuid.NewV7())
@@ -55,14 +55,10 @@ func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 	if err := db.Create(&model.Like{UserID: userID, TargetType: "post", TargetID: lively.ID}).Error; err != nil {
 		t.Fatalf("create like: %v", err)
 	}
-	if err := db.Create(&model.Comment{
-		TargetType: "post",
-		TargetID:   lively.ID,
-		UserID:     model.NewNullableUserUUID(userID),
-		Content:    "Great",
-		Status:     "visible",
+	if err := db.Create(&model.DiscussionTarget{
+		Kind: "blog_post", ResourceID: lively.ID, ResourceKey: lively.ID.String(), CommentCount: 1, RootCount: 1,
 	}).Error; err != nil {
-		t.Fatalf("create comment: %v", err)
+		t.Fatalf("create discussion target: %v", err)
 	}
 
 	response, err := NewService(db).HotContent(4)

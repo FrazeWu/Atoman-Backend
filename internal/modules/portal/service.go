@@ -70,12 +70,12 @@ type blogHotRow struct {
 func (s *Service) hotBlogPosts(limit int) ([]HotItem, error) {
 	var rows []blogHotRow
 	err := s.db.Model(&model.Post{}).
-		Select("posts.*, COUNT(DISTINCT likes.id) AS likes_count, COUNT(DISTINCT comments.id) AS comments_count").
+		Select("posts.*, COUNT(DISTINCT likes.id) AS likes_count, COALESCE(MAX(discussion_targets.comment_count), 0) AS comments_count").
 		Joins("LEFT JOIN likes ON likes.target_id = posts.id AND likes.target_type = ?", "post").
-		Joins("LEFT JOIN comments ON comments.target_id = posts.id AND comments.target_type = ? AND comments.status = ?", "post", "visible").
+		Joins("LEFT JOIN discussion_targets ON discussion_targets.resource_id = posts.id AND discussion_targets.kind = ?", "blog_post").
 		Where("posts.status = ? AND posts.visibility = ?", "published", "public").
 		Group("posts.id").
-		Order("(COUNT(DISTINCT likes.id) * 3 + COUNT(DISTINCT comments.id) * 2) DESC").
+		Order("(COUNT(DISTINCT likes.id) * 3 + COALESCE(MAX(discussion_targets.comment_count), 0) * 2) DESC").
 		Order("posts.updated_at DESC").
 		Limit(limit).
 		Find(&rows).Error

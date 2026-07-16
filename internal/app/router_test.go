@@ -81,6 +81,21 @@ func TestRegisterV1RoutesMountsMusicSubmitEdit(t *testing.T) {
 	}
 }
 
+func TestRegisterV1RoutesMountsUnifiedCommentHTTP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	r := gin.New()
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/discussions/unknown/"+uuid.NewString()+"/comments", nil))
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected mounted unified comment route to return 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"comment.invalid_target"`) {
+		t.Fatalf("expected stable comment error, got %s", w.Body.String())
+	}
+}
+
 func TestRegisterV1RoutesMusicBookmarksAcceptBearerAuthWithoutExplicitRouteMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("JWT_SECRET", "test-secret")
@@ -370,7 +385,6 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 		&model.Notification{},
 		&model.ForumCategory{},
 		&model.ForumTopic{},
-		&model.ForumReply{},
 		&model.ForumDraft{},
 		&model.ForumLike{},
 		&model.ForumBookmark{},
@@ -571,16 +585,11 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 		t.Fatalf("expected forum engagement route to be mounted, got 404: %s", w.Body.String())
 	}
 
-	reply := model.ForumReply{TopicID: topic.ID, UserID: user.UUID, Content: "Reply"}
-	if err := db.Create(&reply).Error; err != nil {
-		t.Fatalf("create forum reply: %v", err)
-	}
-
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/replies/"+reply.ID.String()+"/like", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/replies/"+uuid.NewString()+"/like", nil)
 	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected forum reply like route to be mounted, got 404: %s", w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy forum reply like route to be removed, got %d: %s", w.Code, w.Body.String())
 	}
 
 	w = httptest.NewRecorder()
@@ -605,17 +614,17 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/replies/"+reply.ID.String()+"/solve", nil)
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/forum/replies/"+uuid.NewString()+"/solve", nil)
 	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected forum solve route to be mounted, got 404: %s", w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy forum solve route to be removed, got %d: %s", w.Code, w.Body.String())
 	}
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/forum/replies/"+reply.ID.String()+"/solve", nil)
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/forum/replies/"+uuid.NewString()+"/solve", nil)
 	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected forum unsolve route to be mounted, got 404: %s", w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy forum unsolve route to be removed, got %d: %s", w.Code, w.Body.String())
 	}
 
 	w = httptest.NewRecorder()
@@ -661,10 +670,12 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Debate{},
-		&model.Argument{},
 		&model.DebateVote{},
 		&model.VoteHistory{},
 		&model.DebateConcludeVote{},
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
+		&model.DebateArgumentDetail{},
 	)
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -744,6 +755,43 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound && !bytes.Contains(w.Body.Bytes(), []byte("debate.not_found")) {
 		t.Fatalf("expected module debate conclusion vote route to be mounted, got router 404: %s", w.Body.String())
+	}
+}
+
+func TestRegisterV1RoutesDoesNotMountLegacyInteractionRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterV1Routes(router, testdb.Open(t), nil, nil, collab.NewUserHub(), collab.NewHub())
+
+	id := uuid.NewString()
+	requests := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/blog/posts/" + id + "/comments"},
+		{http.MethodPost, "/api/v1/blog/posts/" + id + "/comments"},
+		{http.MethodGet, "/api/v1/videos/" + id + "/comments"},
+		{http.MethodPost, "/api/v1/videos/" + id + "/comments"},
+		{http.MethodGet, "/api/v1/albums/" + id + "/discussions"},
+		{http.MethodPost, "/api/v1/albums/" + id + "/discussions"},
+		{http.MethodGet, "/api/v1/forum/topics/" + id + "/replies"},
+		{http.MethodPost, "/api/v1/forum/replies"},
+		{http.MethodPut, "/api/v1/forum/replies/" + id},
+		{http.MethodDelete, "/api/v1/forum/replies/" + id},
+		{http.MethodPost, "/api/v1/forum/replies/" + id + "/like"},
+		{http.MethodPost, "/api/v1/forum/replies/" + id + "/solve"},
+		{http.MethodDelete, "/api/v1/forum/replies/" + id + "/solve"},
+		{http.MethodGet, "/api/v1/debate/topics/" + id + "/arguments"},
+		{http.MethodPost, "/api/v1/debate/topics/" + id + "/arguments"},
+		{http.MethodPut, "/api/v1/debate/arguments/" + id},
+		{http.MethodDelete, "/api/v1/debate/arguments/" + id},
+	}
+	for _, request := range requests {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(request.method, request.path, nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("legacy route %s %s returned %d: %s", request.method, request.path, response.Code, response.Body.String())
+		}
 	}
 }
 

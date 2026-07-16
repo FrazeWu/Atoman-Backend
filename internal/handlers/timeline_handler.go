@@ -14,67 +14,30 @@ import (
 	// @Success 200 {object} TimelineEventListResponse
 	// @Failure 500 {object} ErrorResponse
 	// @Router /api/v1/timeline/events [get]
-	"fmt"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	proposalservice "atoman/internal/service"
+	timelinecore "atoman/internal/timeline"
 )
 
 // parseDateTime 尝试多种格式解析时间，支持精确到小时分钟，支持负年份（BCE）
 // 负年份格式示例："-0500-01-01"（公元前500年）
 func parseDateTime(s string) (time.Time, error) {
-	// Handle BCE dates: strings starting with '-' indicate negative year
-	if len(s) > 0 && s[0] == '-' {
-		// Extract year (everything up to the second '-')
-		rest := s[1:] // remove leading minus
-		yearEnd := len(rest)
-		for i, c := range rest {
-			if c == '-' {
-				yearEnd = i
-				break
-			}
-		}
-		yearStr := rest[:yearEnd]
-		suffix := ""
-		if yearEnd < len(rest) {
-			suffix = rest[yearEnd:] // e.g. "-01-01"
-		}
-		var year int
-		if _, err := fmt.Sscanf(yearStr, "%d", &year); err == nil {
-			// Rebuild as positive year date, parse, then adjust year
-			positive := fmt.Sprintf("%04d%s", year, suffix)
-			formats := []string{"2006-01-02", "2006-01-02T15:04", "2006-01-02T15:04:05", time.RFC3339}
-			for _, f := range formats {
-				if t, err := time.Parse(f, positive); err == nil {
-					return time.Date(-year, t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), 0, time.UTC), nil
-				}
-			}
-		}
-	}
-	formats := []string{
-		"2006-01-02T15:04",
-		"2006-01-02T15:04:05",
-		time.RFC3339,
-		"2006-01-02 15:04",
-		"2006-01-02",
-	}
-	for _, f := range formats {
-		if t, err := time.Parse(f, s); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, &time.ParseError{Value: s}
+	return timelinecore.ParseDateTime(s)
 }
 
 func SetupTimelineRoutes(router *gin.Engine, db *gorm.DB) {
 	tl := router.Group("/api/v1/timeline")
+	proposalService := proposalservice.NewTimelineRevisionProposalService(db)
 	{
 		// Public routes
 		tl.GET("/events", GetTimelineEvents(db))
@@ -82,20 +45,25 @@ func SetupTimelineRoutes(router *gin.Engine, db *gorm.DB) {
 		tl.GET("/persons", GetTimelinePersons(db))
 		tl.GET("/persons/:id", GetTimelinePerson(db))
 		tl.GET("/persons/:id/locations", GetPersonLocations(db))
+		tl.GET("/events/:id/revision-proposals", middleware.OptionalAuthMiddleware(), ListTimelineEventProposals(proposalService))
+		tl.GET("/persons/:id/revision-proposals", middleware.OptionalAuthMiddleware(), ListTimelinePersonProposals(proposalService))
 
 		// Protected routes
 		protected := tl.Group("")
 		protected.Use(middleware.AuthMiddleware())
 		{
 			protected.POST("/events", CreateTimelineEvent(db))
+			protected.POST("/events/:id/revision-proposals", CreateTimelineEventProposal(proposalService))
 			protected.PUT("/events/:id", UpdateTimelineEvent(db))
 			protected.DELETE("/events/:id", DeleteTimelineEvent(db))
 			protected.GET("/events/:id/history", GetTimelineEventHistory(db))
 			protected.POST("/events/:id/revert/:revision_id", RevertTimelineEvent(db))
 
 			protected.POST("/persons", CreateTimelinePerson(db))
+			protected.POST("/persons/:id/revision-proposals", CreateTimelinePersonProposal(proposalService))
 			protected.PUT("/persons/:id", UpdateTimelinePerson(db))
 			protected.DELETE("/persons/:id", DeleteTimelinePerson(db))
+			protected.PUT("/revision-proposals/:comment_id/decision", DecideTimelineRevisionProposal(proposalService))
 
 			protected.POST("/persons/:id/locations", AddPersonLocation(db))
 			protected.PUT("/locations/:id", UpdatePersonLocation(db))
@@ -236,7 +204,7 @@ func CreateTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 			Longitude:   input.Longitude,
 			Source:      input.Source,
 			Category:    input.Category,
-			Tags:        input.Tags,
+			Tags:        pq.StringArray(input.Tags),
 			IsPublic:    isPublic,
 		}
 
@@ -521,7 +489,7 @@ func CreateTimelinePerson(db *gorm.DB) gin.HandlerFunc {
 			UserID:   userID.(uuid.UUID),
 			Name:     input.Name,
 			Bio:      input.Bio,
-			Tags:     input.Tags,
+			Tags:     pq.StringArray(input.Tags),
 			IsPublic: isPublic,
 		}
 
@@ -865,8 +833,11 @@ func saveEventRevision(db *gorm.DB, event model.TimelineEvent, editorID uuid.UUI
 		EventDate:   event.EventDate.Format("2006-01-02"),
 		EndDate:     endDate,
 		Location:    event.Location,
+		Latitude:    event.Latitude,
+		Longitude:   event.Longitude,
 		Source:      event.Source,
 		Category:    event.Category,
+		Tags:        append(pq.StringArray(nil), event.Tags...),
 		IsPublic:    event.IsPublic,
 	}
 	db.Create(&rev)
@@ -937,8 +908,11 @@ func RevertTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 			"content":     rev.Content,
 			"event_date":  eventDate,
 			"location":    rev.Location,
+			"latitude":    rev.Latitude,
+			"longitude":   rev.Longitude,
 			"source":      rev.Source,
 			"category":    rev.Category,
+			"tags":        rev.Tags,
 			"is_public":   rev.IsPublic,
 		}
 		if rev.EndDate != "" {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
@@ -213,7 +214,7 @@ func TestUpdateUserProfileCanClearOptionalFields(t *testing.T) {
 	}
 }
 
-func TestSearchUsersMentionScopeReturnsUsersCurrentUserFollows(t *testing.T) {
+func TestSearchUsersMentionScopeReturnsAllActiveUsersWithPrefixFirst(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.User{}, &model.Follow{})
@@ -221,7 +222,9 @@ func TestSearchUsersMentionScopeReturnsUsersCurrentUserFollows(t *testing.T) {
 	currentUser := model.User{Username: "current", Email: "current@example.com", Password: "hash", Role: "user", IsActive: true}
 	followedUser := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
 	followerUser := model.User{Username: "bob", Email: "bob@example.com", Password: "hash", Role: "user", IsActive: true}
-	for _, user := range []*model.User{&currentUser, &followedUser, &followerUser} {
+	inactiveUser := model.User{Username: "adam-inactive", Email: "inactive@example.com", Password: "hash", Role: "user", IsActive: false}
+	containsUser := model.User{Username: "z-alice", Email: "contains@example.com", Password: "hash", Role: "user", IsActive: true}
+	for _, user := range []*model.User{&currentUser, &followedUser, &followerUser, &inactiveUser, &containsUser} {
 		if err := db.Create(user).Error; err != nil {
 			t.Fatalf("create user %s: %v", user.Username, err)
 		}
@@ -236,12 +239,12 @@ func TestSearchUsersMentionScopeReturnsUsersCurrentUserFollows(t *testing.T) {
 
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
-		c.Set("user_id", currentUser.UUID)
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: currentUser.UUID, Username: currentUser.Username, Role: authctx.RoleUser})
 		c.Next()
 	})
 	r.GET("/users/search", SearchUsers(db))
 
-	req := httptest.NewRequest(http.MethodGet, "/users/search?scope=mention&q=&limit=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/users/search?scope=mention&q=ali&limit=10", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -253,11 +256,58 @@ func TestSearchUsersMentionScopeReturnsUsersCurrentUserFollows(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("expected 1 mention result, got %d: %s", len(resp.Data), w.Body.String())
+	if len(resp.Data) != 2 {
+		t.Fatalf("expected 2 active mention results, got %d: %s", len(resp.Data), w.Body.String())
 	}
 	if resp.Data[0].UUID != followedUser.UUID.String() {
-		t.Fatalf("expected followed user %s, got %s: %s", followedUser.UUID, resp.Data[0].UUID, w.Body.String())
+		t.Fatalf("expected username prefix result %s first, got %s: %s", followedUser.UUID, resp.Data[0].UUID, w.Body.String())
+	}
+	if resp.Data[1].UUID != containsUser.UUID.String() {
+		t.Fatalf("expected non-followed contains result %s, got %s: %s", containsUser.UUID, resp.Data[1].UUID, w.Body.String())
+	}
+}
+
+func TestSearchUsersMentionRequiresAuthentication(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{})
+	r := gin.New()
+	r.GET("/users/search", SearchUsers(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/search?scope=mention", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"code":"auth.unauthorized"`) {
+		t.Fatalf("expected stable auth error, got %s", w.Body.String())
+	}
+}
+
+func TestSearchUsersMentionRejectsInvalidLimitWhilePublicSearchKeepsFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{})
+	user := model.User{Username: "searcher", Email: "searcher@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser})
+		c.Next()
+	})
+	r.GET("/users/search", SearchUsers(db))
+	for _, limit := range []string{"0", "-1", "abc"} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/search?scope=mention&limit="+limit, nil))
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), `"code":"user.invalid_limit"`) {
+			t.Fatalf("limit %s: expected stable 400, got %d: %s", limit, w.Code, w.Body.String())
+		}
+	}
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/search?limit=abc", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("public fallback changed: %d: %s", w.Code, w.Body.String())
 	}
 }
 

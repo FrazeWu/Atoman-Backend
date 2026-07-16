@@ -157,7 +157,6 @@ type Post struct {
 	CoverURL           string      `json:"cover_url" gorm:"type:text"`
 	Status             string      `json:"status" gorm:"default:'draft'"` // draft / published
 	Visibility         string      `json:"visibility" gorm:"not null;default:'public'"`
-	AllowComments      bool        `json:"allow_comments" gorm:"default:true"`
 	Pinned             bool        `json:"pinned" gorm:"default:false"`
 	PublishedAt        *time.Time  `json:"published_at,omitempty" gorm:"index"`
 	ViewCount          int64       `json:"view_count" gorm:"not null;default:0"`
@@ -167,17 +166,16 @@ func (Post) TableName() string { return "posts" }
 
 type BlogPostVersion struct {
 	Base
-	PostID        uuid.UUID  `json:"post_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_blog_post_version,priority:1"`
-	Version       int        `json:"version" gorm:"not null;uniqueIndex:idx_blog_post_version,priority:2"`
-	EditorID      uuid.UUID  `json:"editor_id" gorm:"type:uuid;not null;index"`
-	Title         string     `json:"title" gorm:"not null"`
-	Content       string     `json:"content" gorm:"type:text;not null"`
-	Summary       string     `json:"summary" gorm:"type:text"`
-	CoverURL      string     `json:"cover_url" gorm:"type:text"`
-	Visibility    string     `json:"visibility" gorm:"not null"`
-	AllowComments bool       `json:"allow_comments"`
-	CollectionID  uuid.UUID  `json:"collection_id" gorm:"type:uuid;not null;index"`
-	PublishedAt   *time.Time `json:"published_at,omitempty"`
+	PostID       uuid.UUID  `json:"post_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_blog_post_version,priority:1"`
+	Version      int        `json:"version" gorm:"not null;uniqueIndex:idx_blog_post_version,priority:2"`
+	EditorID     uuid.UUID  `json:"editor_id" gorm:"type:uuid;not null;index"`
+	Title        string     `json:"title" gorm:"not null"`
+	Content      string     `json:"content" gorm:"type:text;not null"`
+	Summary      string     `json:"summary" gorm:"type:text"`
+	CoverURL     string     `json:"cover_url" gorm:"type:text"`
+	Visibility   string     `json:"visibility" gorm:"not null"`
+	CollectionID uuid.UUID  `json:"collection_id" gorm:"type:uuid;not null;index"`
+	PublishedAt  *time.Time `json:"published_at,omitempty"`
 }
 
 func (BlogPostVersion) TableName() string { return "blog_post_versions" }
@@ -192,7 +190,6 @@ type BlogDraft struct {
 	Summary       string     `json:"summary" gorm:"type:text"`
 	CoverURL      string     `json:"cover_url" gorm:"type:text"`
 	Visibility    string     `json:"visibility" gorm:"not null;default:'public'"`
-	AllowComments bool       `json:"allow_comments" gorm:"default:true"`
 	ChannelID     *uuid.UUID `json:"channel_id,omitempty" gorm:"type:uuid;index"`
 	CollectionID  *uuid.UUID `json:"collection_id,omitempty" gorm:"type:uuid;index"`
 	CollectionIDs string     `json:"-" gorm:"type:text"`
@@ -207,20 +204,6 @@ type PostCollection struct {
 }
 
 func (PostCollection) TableName() string { return "post_collections" }
-
-type Comment struct {
-	Base
-	TargetType   string           `json:"target_type" gorm:"type:varchar(16);not null;index:idx_comments_target,priority:1"`
-	TargetID     uuid.UUID        `json:"target_id" gorm:"type:uuid;not null;index:idx_comments_target,priority:2"`
-	UserID       NullableUserUUID `json:"user_id,omitempty" gorm:"type:uuid;index"`
-	User         *User            `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	GuestName    string           `json:"guest_name" gorm:"type:varchar(80)"`
-	Content      string           `json:"content" gorm:"type:text;not null"`
-	TimestampSec *int             `json:"timestamp_sec,omitempty"`
-	Status       string           `json:"status" gorm:"type:varchar(16);not null;default:'visible'"`
-}
-
-func (Comment) TableName() string { return "comments" }
 
 type Like struct {
 	Base

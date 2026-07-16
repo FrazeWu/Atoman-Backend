@@ -212,18 +212,10 @@ func TestGetSubscribedFeedHandlerReturnsPostEngagementCounts(t *testing.T) {
 	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
 		t.Fatalf("create post like: %v", err)
 	}
-	if err := db.Create(&model.Comment{TargetType: "post", TargetID: post.ID, Content: "Visible comment", Status: "visible"}).Error; err != nil {
-		t.Fatalf("create visible comment: %v", err)
-	}
-	if err := db.Create(&model.Comment{TargetType: "post", TargetID: post.ID, Content: "Hidden comment", Status: "hidden"}).Error; err != nil {
-		t.Fatalf("create hidden comment: %v", err)
-	}
-	deletedComment := model.Comment{TargetType: "post", TargetID: post.ID, Content: "Deleted comment", Status: "visible"}
-	if err := db.Create(&deletedComment).Error; err != nil {
-		t.Fatalf("create comment to delete: %v", err)
-	}
-	if err := db.Delete(&deletedComment).Error; err != nil {
-		t.Fatalf("soft delete comment: %v", err)
+	if err := db.Create(&model.DiscussionTarget{
+		Kind: "blog_post", ResourceID: post.ID, ResourceKey: post.ID.String(), CommentCount: 1, RootCount: 1,
+	}).Error; err != nil {
+		t.Fatalf("create discussion target: %v", err)
 	}
 
 	router := gin.New()

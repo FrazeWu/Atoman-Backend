@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -38,7 +37,6 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.VideoTag{},
 		&model.VideoCollection{},
 		&model.VideoTagRelation{},
-		&model.Comment{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
@@ -895,263 +893,19 @@ func TestGetVideoRejectsAnonymousAccessToNonPublicVideos(t *testing.T) {
 	}
 }
 
-func TestIncrementVideoViewReturnsUpdatedCountAndRejectsUnavailableVideos(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+func TestLegacyVideoCommentRoutesAreRemoved(t *testing.T) {
 	db := newVideoTestDB(t)
-	user := seedVideoUser(t, db)
-
-	publicVideo := seedVideoWithState(t, db, user.UUID, "published", "public")
-	require.NoError(t, db.Model(&publicVideo).Update("view_count", 7).Error)
-
-	router := gin.New()
-	router.POST("/api/v1/videos/:id/view", IncrementVideoView(db))
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+publicVideo.ID.String()+"/view", nil)
-	router.ServeHTTP(w, req)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	var payload struct {
-		OK        bool `json:"ok"`
-		ViewCount int  `json:"view_count"`
-	}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
-	require.True(t, payload.OK)
-	require.Equal(t, 8, payload.ViewCount)
-	var stored model.Video
-	require.NoError(t, db.First(&stored, "id = ?", publicVideo.ID).Error)
-	require.Equal(t, 8, stored.ViewCount)
-
-	unavailable := []struct {
-		name  string
-		video model.Video
-	}{
-		{name: "private", video: seedVideoWithState(t, db, user.UUID, "published", "private")},
-		{name: "draft", video: seedVideoWithState(t, db, user.UUID, "draft", "public")},
-	}
-	deleted := seedVideoWithState(t, db, user.UUID, "published", "public")
-	require.NoError(t, db.Delete(&deleted).Error)
-	unavailable = append(unavailable, struct {
-		name  string
-		video model.Video
-	}{name: "deleted", video: deleted})
-
-	for _, tc := range unavailable {
-		t.Run(tc.name, func(t *testing.T) {
-			require.NoError(t, db.Unscoped().Model(&model.Video{}).Where("id = ?", tc.video.ID).Update("view_count", 7).Error)
-			w := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+tc.video.ID.String()+"/view", nil)
-			router.ServeHTTP(w, req)
-			require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
-			require.NotContains(t, w.Body.String(), tc.video.ID.String())
-
-			var count int
-			require.NoError(t, db.Unscoped().Model(&model.Video{}).Select("view_count").Where("id = ?", tc.video.ID).Scan(&count).Error)
-			require.Equal(t, 7, count)
-		})
-	}
-}
-
-func TestIncrementVideoViewDoesNotLoseConcurrentUpdates(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := newVideoTestDB(t)
-	sqlDB, err := db.DB()
-	require.NoError(t, err)
-	sqlDB.SetMaxOpenConns(1)
-	user := seedVideoUser(t, db)
-	video := seedVideoWithState(t, db, user.UUID, "published", "public")
-
-	router := gin.New()
-	router.POST("/api/v1/videos/:id/view", IncrementVideoView(db))
-
-	const increments = 8
-	statuses := make(chan int, increments)
-	var wg sync.WaitGroup
-	for i := 0; i < increments; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			w := httptest.NewRecorder()
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/view", nil)
-			router.ServeHTTP(w, req)
-			statuses <- w.Code
-		}()
-	}
-	wg.Wait()
-	close(statuses)
-	for status := range statuses {
-		require.Equal(t, http.StatusOK, status)
-	}
-
-	var stored model.Video
-	require.NoError(t, db.First(&stored, "id = ?", video.ID).Error)
-	require.Equal(t, increments, stored.ViewCount)
-}
-
-func TestIncrementVideoViewReturnsNotFoundWhenVideoBecomesUnavailableBeforeCountRead(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := newVideoTestDB(t)
-	user := seedVideoUser(t, db)
-	video := seedVideoWithState(t, db, user.UUID, "published", "public")
-	require.NoError(t, db.Model(&video).Update("view_count", 7).Error)
-
-	triggerName := "hide_video_after_view_increment"
-	triggerSQL := fmt.Sprintf(`CREATE TRIGGER %s
-		AFTER UPDATE OF view_count ON videos
-		WHEN NEW.id = '%s'
-		BEGIN
-			UPDATE videos SET visibility = 'private' WHERE id = NEW.id;
-		END`, triggerName, video.ID.String())
-	require.NoError(t, db.Exec(triggerSQL).Error)
-	defer db.Exec("DROP TRIGGER IF EXISTS " + triggerName)
-
-	router := gin.New()
-	router.POST("/api/v1/videos/:id/view", IncrementVideoView(db))
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/view", nil)
-	router.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
-	require.NotContains(t, w.Body.String(), video.ID.String())
-	var stored model.Video
-	require.NoError(t, db.First(&stored, "id = ?", video.ID).Error)
-	require.Equal(t, 8, stored.ViewCount)
-	require.Equal(t, "private", stored.Visibility)
-}
-
-func TestGetVideoCommentsReturnsMixedComments(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := newVideoTestDB(t)
-	user := seedVideoUser(t, db)
-	video := seedVideo(t, db, user.UUID)
-
-	// 普通评论
-	c1 := model.Comment{TargetType: "video", TargetID: video.ID, UserID: model.NewNullableUserUUID(user.UUID), Content: "great video", Status: "visible"}
-	// 时间点评论
-	ts := 92
-	c2 := model.Comment{TargetType: "video", TargetID: video.ID, UserID: model.NewNullableUserUUID(user.UUID), Content: "this part!", TimestampSec: &ts, Status: "visible"}
-	require.NoError(t, db.Create(&c1).Error)
-	require.NoError(t, db.Create(&c2).Error)
-
 	r := gin.New()
-	r.GET("/api/v1/videos/:id/comments", GetVideoComments(db))
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/videos/"+video.ID.String()+"/comments", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusOK, w.Code)
-	require.Contains(t, w.Body.String(), "great video")
-	require.Contains(t, w.Body.String(), "this part!")
-}
-
-func TestGetVideoCommentsRejectsNonPublicVideos(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := newVideoTestDB(t)
-	user := seedVideoUser(t, db)
-
-	cases := []struct {
-		name       string
-		status     string
-		visibility string
-	}{
-		{name: "draft", status: "draft", visibility: "public"},
-		{name: "private", status: "published", visibility: "private"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			video := seedVideoWithState(t, db, user.UUID, tc.status, tc.visibility)
-			comment := model.Comment{TargetType: "video", TargetID: video.ID, UserID: model.NewNullableUserUUID(user.UUID), Content: "hidden comment", Status: "visible"}
-			require.NoError(t, db.Create(&comment).Error)
-
-			r := gin.New()
-			r.GET("/api/v1/videos/:id/comments", GetVideoComments(db))
-
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/videos/"+video.ID.String()+"/comments", nil)
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, req)
-
-			require.Equal(t, http.StatusNotFound, w.Code)
-			require.NotContains(t, w.Body.String(), "hidden comment")
-		})
-	}
-}
-
-func TestCreateVideoCommentWithTimestamp(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := newVideoTestDB(t)
-	user := seedVideoUser(t, db)
-	video := seedVideo(t, db, user.UUID)
-
-	r := gin.New()
-	r.POST("/api/v1/videos/:id/comments", withVideoAuth(user.UUID, CreateVideoComment(db)))
-
-	body := strings.NewReader(`{"content":"这一段很强","timestamp_sec":92}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/comments", body)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusCreated, w.Code)
-
-	var comment model.Comment
-	require.NoError(t, db.First(&comment).Error)
-	require.Equal(t, "video", comment.TargetType)
-	require.Equal(t, video.ID, comment.TargetID)
-	require.NotNil(t, comment.TimestampSec)
-	require.Equal(t, 92, *comment.TimestampSec)
-}
-
-func TestCreateVideoCommentRejectsNegativeTimestamp(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := newVideoTestDB(t)
-	user := seedVideoUser(t, db)
-	video := seedVideo(t, db, user.UUID)
-
-	r := gin.New()
-	r.POST("/api/v1/videos/:id/comments", withVideoAuth(user.UUID, CreateVideoComment(db)))
-
-	body := strings.NewReader(`{"content":"bad timestamp","timestamp_sec":-1}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/comments", body)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	require.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestCreateVideoCommentRejectsNonPublicVideos(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := newVideoTestDB(t)
-	user := seedVideoUser(t, db)
-
-	cases := []struct {
-		name       string
-		status     string
-		visibility string
-	}{
-		{name: "draft", status: "draft", visibility: "public"},
-		{name: "private", status: "published", visibility: "private"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			video := seedVideoWithState(t, db, user.UUID, tc.status, tc.visibility)
-
-			r := gin.New()
-			r.POST("/api/v1/videos/:id/comments", withVideoAuth(user.UUID, CreateVideoComment(db)))
-
-			body := strings.NewReader(`{"content":"should not write"}`)
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/comments", body)
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, req)
-
-			require.Equal(t, http.StatusNotFound, w.Code)
-
-			var count int64
-			require.NoError(t, db.Model(&model.Comment{}).Where("target_type = ? AND target_id = ?", "video", video.ID).Count(&count).Error)
-			require.Zero(t, count)
-		})
+	SetupVideoRoutes(r, db, nil)
+	for _, request := range []struct{ method, path string }{
+		{http.MethodGet, "/api/v1/videos/" + uuid.NewString() + "/comments"},
+		{http.MethodPost, "/api/v1/videos/" + uuid.NewString() + "/comments"},
+		{http.MethodDelete, "/api/v1/videos/comments/" + uuid.NewString()},
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(request.method, request.path, nil))
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("expected legacy route %s to return 404, got %d", request.path, w.Code)
+		}
 	}
 }

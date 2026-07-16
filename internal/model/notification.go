@@ -48,15 +48,16 @@ func (m *NotificationMeta) Scan(value interface{}) error {
 
 type Notification struct {
 	Base
-	RecipientID uuid.UUID        `json:"recipient_id" gorm:"type:uuid;not null;index"`
-	Recipient   *User            `json:"recipient,omitempty" gorm:"foreignKey:RecipientID;references:UUID"`
-	ActorID     *uuid.UUID       `json:"actor_id" gorm:"type:uuid;index"`
-	Actor       *User            `json:"actor,omitempty" gorm:"foreignKey:ActorID;references:UUID"`
-	Type        string           `json:"type" gorm:"not null"`
-	SourceType  string           `json:"source_type" gorm:"not null"`
-	SourceID    uuid.UUID        `json:"source_id" gorm:"type:uuid;not null"`
-	Meta        NotificationMeta `json:"meta" gorm:"type:jsonb;default:'{}'"`
-	ReadAt      *time.Time       `json:"read_at"`
+	RecipientID    uuid.UUID        `json:"recipient_id" gorm:"type:uuid;not null;index"`
+	Recipient      *User            `json:"recipient,omitempty" gorm:"foreignKey:RecipientID;references:UUID"`
+	ActorID        *uuid.UUID       `json:"actor_id" gorm:"type:uuid;index"`
+	Actor          *User            `json:"actor,omitempty" gorm:"foreignKey:ActorID;references:UUID"`
+	Type           string           `json:"type" gorm:"not null"`
+	SourceType     string           `json:"source_type" gorm:"not null"`
+	SourceID       uuid.UUID        `json:"source_id" gorm:"type:uuid;not null"`
+	AggregationKey string           `json:"aggregation_key" gorm:"not null;default:'';index"`
+	Meta           NotificationMeta `json:"meta" gorm:"type:jsonb;default:'{}'"`
+	ReadAt         *time.Time       `json:"read_at"`
 }
 
 func (Notification) TableName() string {

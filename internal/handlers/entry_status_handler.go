@@ -166,7 +166,8 @@ func ListMusicEntriesHandler(db *gorm.DB) gin.HandlerFunc {
 			q.Offset(offset).Limit(pageSize).Order("updated_at DESC").Find(&albums)
 			for _, a := range albums {
 				var discCount int64
-				db.Model(&model.Discussion{}).Where("content_id = ? AND content_type = ?", a.ID, "album").Count(&discCount)
+				db.Model(&model.DiscussionTarget{}).Select("COALESCE(MAX(comment_count), 0)").
+					Where("kind = ? AND resource_id = ?", "music_album", a.ID).Scan(&discCount)
 				var latestRev model.Revision
 				lastEditor := ""
 				if err := db.Where("content_id = ? AND content_type = ?", a.ID, "album").
@@ -198,7 +199,8 @@ func ListMusicEntriesHandler(db *gorm.DB) gin.HandlerFunc {
 			q.Offset(offset).Limit(pageSize).Order("updated_at DESC").Find(&artists)
 			for _, a := range artists {
 				var discCount int64
-				db.Model(&model.Discussion{}).Where("content_id = ? AND content_type = ?", a.ID, "artist").Count(&discCount)
+				db.Model(&model.DiscussionTarget{}).Select("COALESCE(MAX(comment_count), 0)").
+					Where("kind = ? AND resource_id = ?", "music_artist", a.ID).Scan(&discCount)
 				results = append(results, MusicEntryItem{
 					ID:                  a.ID.String(),
 					Name:                a.Name,

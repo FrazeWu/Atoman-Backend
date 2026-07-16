@@ -33,8 +33,9 @@ func newForumHTTPTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, model.User, mo
 		&model.User{},
 		&model.ForumCategory{},
 		&model.ForumTopic{},
-		&model.ForumReply{},
 		&model.ForumDraft{},
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
 	)
 	user := model.User{Username: "forum-owner", Email: "forum-owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -83,23 +84,6 @@ func decodeForumData[T any](t *testing.T, response *httptest.ResponseRecorder) (
 		t.Fatalf("decode response data: %v: %s", err, response.Body.String())
 	}
 	return data, envelope
-}
-
-func TestNestedReplyRouteUsesTopicIDFromPath(t *testing.T) {
-	router, db, user, category := newForumHTTPTestRouter(t)
-	topic := model.ForumTopic{UserID: user.UUID, CategoryID: category.ID, Title: "Topic", Content: "Body"}
-	if err := db.Create(&topic).Error; err != nil {
-		t.Fatalf("create topic: %v", err)
-	}
-
-	response := performForumRequest(t, router, http.MethodPost, "/api/v1/forum/topics/"+topic.ID.String()+"/replies", map[string]any{"content": "Nested reply"})
-	if response.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body.String())
-	}
-	reply, _ := decodeForumData[model.ForumReply](t, response)
-	if reply.TopicID != topic.ID || reply.Content != "Nested reply" {
-		t.Fatalf("unexpected reply: %#v", reply)
-	}
 }
 
 func TestCreateAndUpdateTopicPersistNormalizedTags(t *testing.T) {
@@ -198,6 +182,20 @@ func TestListTopicsSupportsFiltersSortAndPagination(t *testing.T) {
 			t.Fatalf("create topic %d: %v", index, err)
 		}
 	}
+	topTarget := model.DiscussionTarget{Kind: "forum_topic", ResourceID: topics[1].ID, ResourceKey: topics[1].ID.String(), CommentCount: 2, RootCount: 2}
+	activeTarget := model.DiscussionTarget{Kind: "forum_topic", ResourceID: topics[2].ID, ResourceKey: topics[2].ID.String(), CommentCount: 1, RootCount: 1}
+	if err := db.Create(&topTarget).Error; err != nil {
+		t.Fatalf("create top discussion target: %v", err)
+	}
+	if err := db.Create(&activeTarget).Error; err != nil {
+		t.Fatalf("create active discussion target: %v", err)
+	}
+	if err := db.Create(&model.CommentEntry{
+		Base: model.Base{CreatedAt: activeAt}, TargetID: activeTarget.ID, AuthorID: user.UUID,
+		Content: "latest", ContentHash: "latest", Status: "active", FloorNumber: new(int),
+	}).Error; err != nil {
+		t.Fatalf("create active comment: %v", err)
+	}
 
 	response := performForumRequest(t, router, http.MethodGet, "/api/v1/forum/topics?sort=top&tag=go&search=Go&page=1&page_size=1", nil)
 	if response.Code != http.StatusOK {
@@ -218,29 +216,6 @@ func TestListTopicsSupportsFiltersSortAndPagination(t *testing.T) {
 	listed, _ = decodeForumData[[]model.ForumTopic](t, response)
 	if len(listed) != 3 || listed[0].Title != "Other" {
 		t.Fatalf("unexpected featured result: %#v", listed)
-	}
-}
-
-func TestListRepliesSupportsBestSort(t *testing.T) {
-	router, db, user, category := newForumHTTPTestRouter(t)
-	topic := model.ForumTopic{UserID: user.UUID, CategoryID: category.ID, Title: "Topic", Content: "Body"}
-	if err := db.Create(&topic).Error; err != nil {
-		t.Fatalf("create topic: %v", err)
-	}
-	replies := []model.ForumReply{
-		{TopicID: topic.ID, UserID: user.UUID, Content: "first", FloorNumber: 1, LikeCount: 2},
-		{TopicID: topic.ID, UserID: user.UUID, Content: "best", FloorNumber: 2, LikeCount: 8},
-		{TopicID: topic.ID, UserID: user.UUID, Content: "tie", FloorNumber: 3, LikeCount: 8},
-	}
-	for index := range replies {
-		if err := db.Create(&replies[index]).Error; err != nil {
-			t.Fatalf("create reply %d: %v", index, err)
-		}
-	}
-	response := performForumRequest(t, router, http.MethodGet, "/api/v1/forum/topics/"+topic.ID.String()+"/replies?sort=best", nil)
-	listed, _ := decodeForumData[[]model.ForumReply](t, response)
-	if len(listed) != 3 || listed[0].FloorNumber != 2 || listed[1].FloorNumber != 3 || listed[2].FloorNumber != 1 {
-		t.Fatalf("unexpected best order: %#v", listed)
 	}
 }
 

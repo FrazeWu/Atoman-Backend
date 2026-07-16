@@ -69,44 +69,24 @@ type ForumTopic struct {
 	Tags          StringSlice    `json:"tags" gorm:"type:text;default:'[]'"`
 	Pinned        bool           `json:"pinned" gorm:"default:false"`
 	Featured      bool           `json:"featured" gorm:"default:false"`
-	IsSolved      bool           `json:"is_solved" gorm:"default:false"`
-	SolvedReplyID *uuid.UUID     `json:"solved_reply_id" gorm:"type:uuid"`
+	IsSolved      bool           `json:"is_solved" gorm:"-"`
+	SolvedReplyID *uuid.UUID     `json:"solved_reply_id" gorm:"-"`
 	Closed        bool           `json:"closed" gorm:"default:false"`
-	ReplyCount    int            `json:"reply_count" gorm:"default:0"`
+	ReplyCount    int            `json:"reply_count" gorm:"-"`
 	LikeCount     int            `json:"like_count" gorm:"default:0"`
 	ViewCount     int            `json:"view_count" gorm:"default:0"`
-	LastReplyAt   *time.Time     `json:"last_reply_at"`
+	LastReplyAt   *time.Time     `json:"last_reply_at" gorm:"-"`
 	IsLiked       bool           `json:"is_liked" gorm:"-"`      // computed per-user
 	IsBookmarked  bool           `json:"is_bookmarked" gorm:"-"` // computed per-user
 }
 
 func (ForumTopic) TableName() string { return "forum_topics" }
 
-// ForumReply represents a reply within a topic.
-// ParentReplyID stores the quoted reply rather than a nested parent.
-type ForumReply struct {
-	Base
-	TopicID       uuid.UUID   `json:"topic_id" gorm:"type:uuid;not null;index"`
-	Topic         *ForumTopic `json:"topic,omitempty" gorm:"foreignKey:TopicID"`
-	UserID        uuid.UUID   `json:"user_id" gorm:"type:uuid;not null;index"`
-	User          *User       `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	ParentReplyID *uuid.UUID  `json:"parent_reply_id" gorm:"type:uuid;index"`
-	Content       string      `json:"content" gorm:"type:text;not null"` // raw Markdown
-	Path          string      `json:"path" gorm:"type:ltree"`            // ltree path (Postgres) / text prefix (SQLite)
-	FloorNumber   int         `json:"floor_number" gorm:"default:0"`
-	Depth         int         `json:"depth" gorm:"default:0"`
-	IsSolved      bool        `json:"is_solved" gorm:"default:false"`
-	LikeCount     int         `json:"like_count" gorm:"default:0"`
-	IsLiked       bool        `json:"is_liked" gorm:"-"` // computed per-user
-}
-
-func (ForumReply) TableName() string { return "forum_replies" }
-
-// ForumLike tracks likes on topics and replies
+// ForumLike tracks likes on forum topics.
 type ForumLike struct {
 	Base
 	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_forum_likes_user_target,priority:1"`
-	TargetType string    `json:"target_type" gorm:"not null;uniqueIndex:idx_forum_likes_user_target,priority:2"` // "topic" / "reply"
+	TargetType string    `json:"target_type" gorm:"not null;uniqueIndex:idx_forum_likes_user_target,priority:2"` // "topic"
 	TargetID   uuid.UUID `json:"target_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_forum_likes_user_target,priority:3"`
 }
 
@@ -145,11 +125,11 @@ type ForumDraft struct {
 
 func (ForumDraft) TableName() string { return "forum_drafts" }
 
-// ForumReport represents a user's report on a topic or reply.
+// ForumReport represents a user's report on a topic.
 type ForumReport struct {
 	Base
 	UserID     uuid.UUID  `json:"user_id" gorm:"type:uuid;not null;index"`
-	TargetType string     `json:"target_type" gorm:"not null"` // "topic" | "reply"
+	TargetType string     `json:"target_type" gorm:"not null"` // "topic"
 	TargetID   uuid.UUID  `json:"target_id" gorm:"type:uuid;not null;index"`
 	Reason     string     `json:"reason" gorm:"not null"` // spam | off-topic | harassment | other
 	Note       string     `json:"note" gorm:"type:text"`

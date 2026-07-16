@@ -472,23 +472,6 @@ func GetPendingRevisionsCount(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
-// GetPendingDiscussionsCount returns count of discussions
-func GetPendingDiscussionsCount(db *gorm.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var total, active, resolved int64
-
-		db.Model(&model.Discussion{}).Count(&total)
-		db.Model(&model.Discussion{}).Where("status = ?", "active").Count(&active)
-		db.Model(&model.Discussion{}).Where("status = ?", "resolved").Count(&resolved)
-
-		c.JSON(http.StatusOK, gin.H{
-			"total":    total,
-			"active":   active,
-			"resolved": resolved,
-		})
-	}
-}
-
 // SetupStatusRoutes registers status management routes
 func SetupStatusRoutes(router *gin.Engine, db *gorm.DB) {
 	status := router.Group("/api/v1")

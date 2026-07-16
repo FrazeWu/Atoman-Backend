@@ -120,73 +120,11 @@ func (s *Service) ToggleTopicBookmark(user authctx.CurrentUser, topicID uuid.UUI
 	return state, nil
 }
 
-func (s *Service) ToggleReplyLike(user authctx.CurrentUser, replyID uuid.UUID) (ToggleState, error) {
-	if user.ID == uuid.Nil {
-		return ToggleState{}, apperr.Unauthorized("Login required")
-	}
-	if replyID == uuid.Nil {
-		return ToggleState{}, apperr.BadRequest("validation.invalid_request", "reply_id is required")
-	}
-	if err := s.ensureReplyExists(replyID); err != nil {
-		return ToggleState{}, err
-	}
-
-	state := ToggleState{}
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var like model.ForumLike
-		result := tx.Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, "reply", replyID).Limit(1).Find(&like)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected > 0 {
-			if err := tx.Delete(&like).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&model.ForumReply{}).Where("id = ?", replyID).UpdateColumn("like_count", gorm.Expr("like_count - 1")).Error; err != nil {
-				return err
-			}
-			state.Liked = false
-			return nil
-		}
-
-		like = model.ForumLike{UserID: user.ID, TargetType: "reply", TargetID: replyID}
-		if err := tx.Create(&like).Error; err != nil {
-			var existing model.ForumLike
-			lookup := tx.Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, "reply", replyID).Limit(1).Find(&existing)
-			if lookup.Error == nil && lookup.RowsAffected > 0 {
-				state.Liked = true
-				return nil
-			}
-			return err
-		}
-		if err := tx.Model(&model.ForumReply{}).Where("id = ?", replyID).UpdateColumn("like_count", gorm.Expr("like_count + 1")).Error; err != nil {
-			return err
-		}
-		state.Liked = true
-		return nil
-	})
-	if err != nil {
-		return ToggleState{}, err
-	}
-	return state, nil
-}
-
 func (s *Service) ensureTopicExists(topicID uuid.UUID) error {
 	var topic model.ForumTopic
 	if err := s.db.Select("id").First(&topic, "id = ?", topicID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return apperr.NotFound("forum.topic_not_found", "Forum topic not found")
-		}
-		return err
-	}
-	return nil
-}
-
-func (s *Service) ensureReplyExists(replyID uuid.UUID) error {
-	var reply model.ForumReply
-	if err := s.db.Select("id").First(&reply, "id = ?", replyID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return apperr.NotFound("forum.reply_not_found", "Forum reply not found")
 		}
 		return err
 	}

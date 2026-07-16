@@ -9,7 +9,9 @@ import (
 	"sync"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/httpx"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -122,6 +124,22 @@ func AuthMiddleware() gin.HandlerFunc {
 		}
 		if _, ok := resolveAuthClaims(c); !ok {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+func StableAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if len(authTokenCandidatesFromRequest(c)) == 0 {
+			httpx.Error(c, apperr.Unauthorized("Authorization header required"))
+			c.Abort()
+			return
+		}
+		if _, ok := resolveAuthClaims(c); !ok {
+			httpx.Error(c, apperr.Unauthorized("Invalid token"))
 			c.Abort()
 			return
 		}
