@@ -21,6 +21,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -135,6 +136,227 @@ func TestListConversationsReturnsServerErrorWhenUnreadCountFails(t *testing.T) {
 
 	if resp.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500 when unread count fails, got %d: %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestGetMessagesWithoutExistingConversationDoesNotCreateEmptyConversation(t *testing.T) {
+	r, db, sender, recipient := newDMTestRouter(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations/"+recipient.Username, nil)
+	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected empty message list to return 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var payload struct {
+		Data     []model.DMMessage `json:"data"`
+		Total    int64             `json:"total"`
+		Page     int               `json:"page"`
+		PageSize int               `json:"page_size"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 0 || payload.Total != 0 || payload.Page != 1 || payload.PageSize != 30 {
+		t.Fatalf("expected empty first page, got %+v", payload)
+	}
+
+	var count int64
+	if err := db.Model(&model.DMConversation{}).Count(&count).Error; err != nil {
+		t.Fatalf("count conversations: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("GET messages must not create an empty conversation, got %d conversation(s)", count)
+	}
+}
+
+func TestGetMessagesTreatsSoftDeletedConversationAsMissingWithoutWriting(t *testing.T) {
+	r, db, sender, recipient := newDMTestRouter(t)
+	participantA, participantB := normalizeConversationParticipants(sender.UUID, recipient.UUID)
+	conversation := model.DMConversation{ParticipantA: participantA, ParticipantB: participantB}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := db.Delete(&conversation).Error; err != nil {
+		t.Fatalf("soft delete conversation: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations/"+recipient.Username, nil)
+	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected soft-deleted conversation to return 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var payload struct {
+		Data     []model.DMMessage `json:"data"`
+		Total    int64             `json:"total"`
+		Page     int               `json:"page"`
+		PageSize int               `json:"page_size"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 0 || payload.Total != 0 || payload.Page != 1 || payload.PageSize != 30 {
+		t.Fatalf("expected empty first page, got %+v", payload)
+	}
+
+	var stored []model.DMConversation
+	if err := db.Unscoped().Find(&stored).Error; err != nil {
+		t.Fatalf("load conversations including soft-deleted: %v", err)
+	}
+	if len(stored) != 1 || stored[0].ID != conversation.ID || !stored[0].DeletedAt.Valid {
+		t.Fatalf("GET must preserve the one soft-deleted conversation, got %+v", stored)
+	}
+}
+
+func TestGetMessagesReadsNormalizedConversationInBothDirectionsWithPagination(t *testing.T) {
+	r, db, sender, recipient := newDMTestRouter(t)
+	participantA, participantB := normalizeConversationParticipants(sender.UUID, recipient.UUID)
+	conversation := model.DMConversation{ParticipantA: participantA, ParticipantB: participantB}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	createdAt := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
+	for i := 30; i >= 0; i-- {
+		senderID := sender.UUID
+		if i%2 == 1 {
+			senderID = recipient.UUID
+		}
+		message := model.DMMessage{
+			ConversationID: conversation.ID,
+			SenderID:       senderID,
+			Content:        fmt.Sprintf("message-%02d", i),
+		}
+		message.ID = uuid.MustParse(fmt.Sprintf("00000000-0000-0000-0000-%012x", i+1))
+		message.CreatedAt = createdAt
+		if err := db.Create(&message).Error; err != nil {
+			t.Fatalf("create message %d: %v", i, err)
+		}
+	}
+
+	assertPage := func(current model.User, otherUsername string, page int, wantContents ...string) {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/dm/conversations/%s?page=%d", otherUsername, page), nil)
+		req.Header.Set("Authorization", dmAuthHeader(t, current))
+		resp := httptest.NewRecorder()
+		r.ServeHTTP(resp, req)
+		if resp.Code != http.StatusOK {
+			t.Fatalf("expected page %d to return 200, got %d: %s", page, resp.Code, resp.Body.String())
+		}
+		var payload struct {
+			Data     []model.DMMessage `json:"data"`
+			Total    int64             `json:"total"`
+			Page     int               `json:"page"`
+			PageSize int               `json:"page_size"`
+		}
+		if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode page %d: %v", page, err)
+		}
+		if payload.Total != 31 || payload.Page != page || payload.PageSize != 30 || len(payload.Data) != len(wantContents) {
+			t.Fatalf("unexpected page metadata: %+v", payload)
+		}
+		for i, want := range wantContents {
+			if payload.Data[i].Content != want {
+				t.Fatalf("page %d item %d: expected %q, got %q", page, i, want, payload.Data[i].Content)
+			}
+		}
+	}
+
+	pageOneContents := make([]string, 30)
+	for i := range pageOneContents {
+		pageOneContents[i] = fmt.Sprintf("message-%02d", i)
+	}
+	assertPage(sender, recipient.Username, 1, pageOneContents...)
+	assertPage(recipient, sender.Username, 2, "message-30")
+}
+
+func TestGetMessagesReturnsServerErrorWhenCountFails(t *testing.T) {
+	r, db, sender, recipient := newDMTestRouter(t)
+	participantA, participantB := normalizeConversationParticipants(sender.UUID, recipient.UUID)
+	conversation := model.DMConversation{ParticipantA: participantA, ParticipantB: participantB}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := db.Create(&model.DMMessage{ConversationID: conversation.ID, SenderID: sender.UUID, Content: "message"}).Error; err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	callbackName := "test:fail_dm_message_count"
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Dest.(*int64); ok && tx.Statement.Table == "dm_messages" {
+			tx.AddError(errors.New("forced message count failure"))
+		}
+	}); err != nil {
+		t.Fatalf("register message count failure callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove(callbackName)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations/"+recipient.Username, nil)
+	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("expected count failure to return 500, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if payload["error"] != "failed to count messages" {
+		t.Fatalf("expected count error to be handled before fetching messages, got %s", resp.Body.String())
+	}
+}
+
+func TestGetMessagesCannotReadConversationBetweenOtherUsers(t *testing.T) {
+	r, db, sender, recipient := newDMTestRouter(t)
+	participantA, participantB := normalizeConversationParticipants(sender.UUID, recipient.UUID)
+	conversation := model.DMConversation{ParticipantA: participantA, ParticipantB: participantB}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := db.Create(&model.DMMessage{ConversationID: conversation.ID, SenderID: sender.UUID, Content: "private"}).Error; err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+	third := model.User{Username: "charlie", Email: "charlie@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&third).Error; err != nil {
+		t.Fatalf("create third user: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations/"+sender.Username, nil)
+	req.Header.Set("Authorization", dmAuthHeader(t, third))
+	resp := httptest.NewRecorder()
+	r.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected unrelated conversation lookup to return empty 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+	var payload struct {
+		Data     []model.DMMessage `json:"data"`
+		Total    int64             `json:"total"`
+		Page     int               `json:"page"`
+		PageSize int               `json:"page_size"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 0 || payload.Total != 0 || payload.Page != 1 || payload.PageSize != 30 {
+		t.Fatalf("expected no access to other users' messages, got %+v", payload)
+	}
+
+	var count int64
+	if err := db.Model(&model.DMConversation{}).Count(&count).Error; err != nil {
+		t.Fatalf("count conversations: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("GET must not create a third-party conversation, got %d records", count)
 	}
 }
 

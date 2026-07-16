@@ -5167,7 +5167,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "按对方用户名获取私信会话消息，支持分页。",
+                "description": "按对方用户名获取私信会话消息，支持分页并返回固定 page_size。",
                 "produces": [
                     "application/json"
                 ],
@@ -13238,6 +13238,10 @@ const docTemplate = `{
                 "page": {
                     "type": "integer",
                     "example": 1
+                },
+                "page_size": {
+                    "type": "integer",
+                    "example": 30
                 },
                 "total": {
                     "type": "integer",

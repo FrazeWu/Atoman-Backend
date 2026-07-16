@@ -384,9 +384,10 @@ type DMConversationListResponse struct {
 }
 
 type DMMessageListResponse struct {
-	Data  []model.DMMessage `json:"data"`
-	Total int64             `json:"total" example:"30"`
-	Page  int               `json:"page" example:"1"`
+	Data     []model.DMMessage `json:"data"`
+	Total    int64             `json:"total" example:"30"`
+	Page     int               `json:"page" example:"1"`
+	PageSize int               `json:"page_size" example:"30"`
 }
 
 type DMMessageResponse struct {

@@ -1133,6 +1133,9 @@ definitions:
       page:
         example: 1
         type: integer
+      page_size:
+        example: 30
+        type: integer
       total:
         example: 30
         type: integer
@@ -6776,7 +6779,7 @@ paths:
       - dm
   /api/v1/dm/conversations/{username}:
     get:
-      description: 按对方用户名获取私信会话消息，支持分页。
+      description: 按对方用户名获取私信会话消息，支持分页并返回固定 page_size。
       parameters:
       - description: 对方用户名
         in: path

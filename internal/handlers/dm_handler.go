@@ -128,7 +128,7 @@ func (h *dmHandler) listConversations(c *gin.Context) {
 
 // getMessages godoc
 // @Summary 获取会话消息列表
-// @Description 按对方用户名获取私信会话消息，支持分页。
+// @Description 按对方用户名获取私信会话消息，支持分页并返回固定 page_size。
 // @Tags dm
 // @Produce json
 // @Param username path string true "对方用户名"
@@ -151,28 +151,35 @@ func (h *dmHandler) getMessages(c *gin.Context) {
 		return
 	}
 
-	conversation, err := h.getOrCreateConversation(userID, other.UUID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get conversation"})
-		return
-	}
-
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	if page < 1 {
 		page = 1
 	}
 	const pageSize = 30
 
+	conversation, err := h.findConversation(userID, other.UUID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusOK, gin.H{"data": []model.DMMessage{}, "total": 0, "page": page, "page_size": pageSize})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get conversation"})
+		return
+	}
+
 	var messages []model.DMMessage
 	var total int64
 	query := h.db.Model(&model.DMMessage{}).Where("conversation_id = ?", conversation.ID)
-	query.Count(&total)
-	if err := query.Preload("Sender").Order("created_at ASC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&messages).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count messages"})
+		return
+	}
+	if err := query.Preload("Sender").Order("dm_messages.created_at ASC, dm_messages.id ASC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&messages).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch messages"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"data": messages, "total": total, "page": page})
+	c.JSON(http.StatusOK, gin.H{"data": messages, "total": total, "page": page, "page_size": pageSize})
 }
 
 // sendMessage godoc
