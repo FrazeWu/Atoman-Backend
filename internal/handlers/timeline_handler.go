@@ -142,7 +142,7 @@ func GetTimelineEvents(db *gorm.DB) gin.HandlerFunc {
 		query.Count(&total)
 
 		var events []model.TimelineEvent
-		if err := query.Order("event_date ASC").Limit(limit).Offset(offset).Find(&events).Error; err != nil {
+		if err := query.Order("event_date ASC, timeline_events.id ASC").Limit(limit).Offset(offset).Find(&events).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch events"})
 			return
 		}

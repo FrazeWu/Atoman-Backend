@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -138,4 +140,55 @@ func TestTimelinePublicRoutesReturnPublicRecords(t *testing.T) {
 			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		})
 	}
+}
+
+func TestGetTimelineEventsPaginatesSameDateWithStableOrdering(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newTimelineTestDB(t)
+	user := seedTimelineUser(t, db)
+	eventDate := time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)
+	ids := map[int]uuid.UUID{
+		1: uuid.MustParse("00000000-0000-4000-8000-000000000001"),
+		2: uuid.MustParse("00000000-0000-4000-8000-000000000002"),
+		3: uuid.MustParse("00000000-0000-4000-8000-000000000003"),
+		4: uuid.MustParse("00000000-0000-4000-8000-000000000004"),
+	}
+	for _, number := range []int{2, 4, 1, 3} {
+		event := model.TimelineEvent{
+			Base:      model.Base{ID: ids[number]},
+			UserID:    user.UUID,
+			Title:     "stable event",
+			EventDate: eventDate,
+			Location:  "stable place",
+			Source:    "stable source",
+			IsPublic:  true,
+		}
+		require.NoError(t, db.Create(&event).Error)
+	}
+
+	r := gin.New()
+	r.GET("/api/v1/timeline/events", GetTimelineEvents(db))
+	requestPage := func(page int) []uuid.UUID {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/timeline/events?page=%d&limit=2", page), nil)
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var response struct {
+			Data []model.TimelineEvent `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		result := make([]uuid.UUID, 0, len(response.Data))
+		for _, event := range response.Data {
+			result = append(result, event.ID)
+		}
+		return result
+	}
+
+	expected := []uuid.UUID{ids[1], ids[2], ids[3], ids[4]}
+	pageOne := requestPage(1)
+	pageTwo := requestPage(2)
+	require.Equal(t, expected[:2], pageOne)
+	require.Equal(t, expected[2:], pageTwo)
+	require.Equal(t, expected, append(pageOne, pageTwo...))
 }
