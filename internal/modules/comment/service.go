@@ -94,7 +94,8 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	if resolved.Locked {
 		return CommentDTO{}, ErrTargetLocked
 	}
-	if input.ReplyToID == nil && write == nil && (resolved.Kind == TargetKindTimelineEvent || resolved.Kind == TargetKindTimelinePerson) {
+	if write == nil && (resolved.Kind == TargetKindDebate ||
+		input.ReplyToID == nil && (resolved.Kind == TargetKindTimelineEvent || resolved.Kind == TargetKindTimelinePerson)) {
 		return CommentDTO{}, ErrInvalidContent
 	}
 	normalized, rendered, err := validateCommentContent(input.Content, input.AttachmentIDs)
