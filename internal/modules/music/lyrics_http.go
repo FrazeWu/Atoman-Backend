@@ -50,6 +50,16 @@ type DeleteLyricAnnotationResponse struct {
 	} `json:"data"`
 }
 
+type MusicLyricsErrorResponse struct {
+	Error MusicLyricsErrorBody `json:"error"`
+}
+
+type MusicLyricsErrorBody struct {
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details"`
+}
+
 // getSongLyrics godoc
 // @Summary 获取歌曲歌词
 // @Description 匿名用户可读取当前歌词、逐行翻译和公开注释。
@@ -57,9 +67,9 @@ type DeleteLyricAnnotationResponse struct {
 // @Produce json
 // @Param songId path string true "歌曲 UUID"
 // @Success 200 {object} MusicLyricsResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Failure 500 {object} handlers.ErrorResponse
+// @Failure 400 {object} MusicLyricsErrorResponse
+// @Failure 404 {object} MusicLyricsErrorResponse
+// @Failure 500 {object} MusicLyricsErrorResponse
 // @Router /api/v1/music/songs/{songId}/lyrics [get]
 func (h *Handler) getSongLyrics(c *gin.Context) {
 	songID, err := parseMusicID(c.Param("songId"), "songId")
@@ -85,11 +95,11 @@ func (h *Handler) getSongLyrics(c *gin.Context) {
 // @Param songId path string true "歌曲 UUID"
 // @Param input body SaveLyricsRequest true "歌词内容"
 // @Success 200 {object} MusicLyricsResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Failure 409 {object} handlers.ErrorResponse
-// @Failure 500 {object} handlers.ErrorResponse
+// @Failure 400 {object} MusicLyricsErrorResponse
+// @Failure 401 {object} MusicLyricsErrorResponse
+// @Failure 404 {object} MusicLyricsErrorResponse
+// @Failure 409 {object} MusicLyricsErrorResponse
+// @Failure 500 {object} MusicLyricsErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/music/songs/{songId}/lyrics [put]
@@ -126,10 +136,10 @@ func (h *Handler) saveSongLyrics(c *gin.Context) {
 // @Param songId path string true "歌曲 UUID"
 // @Param input body CreateLyricAnnotationRequest true "歌词注释"
 // @Success 201 {object} MusicLyricAnnotationResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Failure 500 {object} handlers.ErrorResponse
+// @Failure 400 {object} MusicLyricsErrorResponse
+// @Failure 401 {object} MusicLyricsErrorResponse
+// @Failure 404 {object} MusicLyricsErrorResponse
+// @Failure 500 {object} MusicLyricsErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/music/songs/{songId}/lyrics/annotations [post]
@@ -160,11 +170,11 @@ func (h *Handler) createLyricAnnotation(c *gin.Context) {
 // @Param annotationId path string true "注释 UUID"
 // @Param input body UpdateLyricAnnotationRequest true "注释正文"
 // @Success 200 {object} MusicLyricAnnotationResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 403 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Failure 500 {object} handlers.ErrorResponse
+// @Failure 400 {object} MusicLyricsErrorResponse
+// @Failure 401 {object} MusicLyricsErrorResponse
+// @Failure 403 {object} MusicLyricsErrorResponse
+// @Failure 404 {object} MusicLyricsErrorResponse
+// @Failure 500 {object} MusicLyricsErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/music/songs/{songId}/lyrics/annotations/{annotationId} [patch]
@@ -193,11 +203,11 @@ func (h *Handler) updateLyricAnnotation(c *gin.Context) {
 // @Param songId path string true "歌曲 UUID"
 // @Param annotationId path string true "注释 UUID"
 // @Success 200 {object} DeleteLyricAnnotationResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 403 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Failure 500 {object} handlers.ErrorResponse
+// @Failure 400 {object} MusicLyricsErrorResponse
+// @Failure 401 {object} MusicLyricsErrorResponse
+// @Failure 403 {object} MusicLyricsErrorResponse
+// @Failure 404 {object} MusicLyricsErrorResponse
+// @Failure 500 {object} MusicLyricsErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/music/songs/{songId}/lyrics/annotations/{annotationId} [delete]
@@ -223,10 +233,10 @@ func (h *Handler) deleteLyricAnnotation(c *gin.Context) {
 // @Param annotationId path string true "注释 UUID"
 // @Param input body LyricAnnotationVoteRequest true "投票"
 // @Success 200 {object} MusicLyricAnnotationResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Failure 500 {object} handlers.ErrorResponse
+// @Failure 400 {object} MusicLyricsErrorResponse
+// @Failure 401 {object} MusicLyricsErrorResponse
+// @Failure 404 {object} MusicLyricsErrorResponse
+// @Failure 500 {object} MusicLyricsErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/music/songs/{songId}/lyrics/annotations/{annotationId}/votes [post]

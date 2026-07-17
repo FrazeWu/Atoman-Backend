@@ -39,6 +39,36 @@ func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
 				}
 			}
 		}
+
+		lyricsPath := paths["/api/v1/music/songs/{songId}/lyrics"].(map[string]any)
+		put := lyricsPath["put"].(map[string]any)
+		responses := put["responses"].(map[string]any)
+		for _, status := range []string{"400", "401", "404", "409"} {
+			response := responses[status].(map[string]any)
+			schema := response["schema"].(map[string]any)
+			if schema["$ref"] != "#/definitions/music.MusicLyricsErrorResponse" {
+				t.Fatalf("lyrics PUT %s must use structured error response, got %#v", status, schema)
+			}
+		}
+
+		errorResponse, exists := definitions["music.MusicLyricsErrorResponse"].(map[string]any)
+		if !exists {
+			t.Fatal("music.MusicLyricsErrorResponse definition is missing")
+		}
+		errorProperties := errorResponse["properties"].(map[string]any)
+		errorSchema := errorProperties["error"].(map[string]any)
+		bodyRef, _ := errorSchema["$ref"].(string)
+		bodyName := strings.TrimPrefix(bodyRef, "#/definitions/")
+		errorBody, exists := definitions[bodyName].(map[string]any)
+		if !exists {
+			t.Fatalf("lyrics error body definition is missing: %q", bodyName)
+		}
+		bodyProperties := errorBody["properties"].(map[string]any)
+		for _, field := range []string{"code", "message", "details"} {
+			if _, exists := bodyProperties[field]; !exists {
+				t.Fatalf("lyrics error body field is missing: %s", field)
+			}
+		}
 	}
 
 	jsonBytes, err := os.ReadFile("swagger.json")
