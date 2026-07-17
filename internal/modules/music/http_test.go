@@ -1372,6 +1372,57 @@ func TestMusicRecommendationModeValidation(t *testing.T) {
 	}
 }
 
+func TestMusicRecommendationLatestModeReturnsNewestAlbumFirst(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	older := model.Album{Title: "Older Album", EntryStatus: "open", Status: "open", HotScore: 10}
+	newer := model.Album{Title: "Newer Album", EntryStatus: "open", Status: "open", HotScore: 1}
+	if err := db.Create(&older).Error; err != nil {
+		t.Fatalf("create older album: %v", err)
+	}
+	if err := db.Create(&newer).Error; err != nil {
+		t.Fatalf("create newer album: %v", err)
+	}
+	if err := db.Model(&older).Update("created_at", time.Now().Add(-24*time.Hour)).Error; err != nil {
+		t.Fatalf("age older album: %v", err)
+	}
+
+	r := newMusicHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/recommend/albums?mode=latest", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data []struct {
+			ID         string `json:"id"`
+			ScoreLabel string `json:"score_label"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(resp.Data) < 2 || resp.Data[0].ID != newer.ID.String() {
+		t.Fatalf("expected newest album first, got %#v", resp.Data)
+	}
+	if resp.Data[0].ScoreLabel != "最新" {
+		t.Fatalf("expected latest score label, got %q", resp.Data[0].ScoreLabel)
+	}
+}
+
+func TestRegisterRoutesDiscoverAcceptsLatestMode(t *testing.T) {
+	service, _, _ := newMusicHTTPTestService(t)
+	r := newMusicHTTPRouter(service, nil)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/discover?mode=latest&page_size=10", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestMusicRecommendationAlbumsReturnsData(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	album := model.Album{

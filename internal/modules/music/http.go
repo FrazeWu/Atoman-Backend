@@ -819,12 +819,22 @@ func (h *Handler) listPublicPlaylists(c *gin.Context) {
 // @Description 返回混合发现流，按专辑、艺人、公开歌单的简单规则混排。
 // @Tags music-discovery
 // @Produce json
+// @Param mode query string false "排序模式" Enums(hot,featured,latest) default(hot)
 // @Success 200 {object} DiscoverListResponse
 // @Failure 500 {object} handlers.ErrorResponse
 // @Router /api/v1/music/discover [get]
 func (h *Handler) discover(c *gin.Context) {
+	mode := recommendation.ModeHot
+	if rawMode := strings.TrimSpace(c.Query("mode")); rawMode != "" {
+		parsedMode, err := parseMusicRecommendationMode(rawMode)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		mode = parsedMode
+	}
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.Discover(page, pageSize)
+	items, total, err := h.service.Discover(mode, page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -1112,8 +1122,10 @@ func parseMusicRecommendationMode(raw string) (recommendation.Mode, error) {
 		return recommendation.ModeFeatured, nil
 	case recommendation.ModeDiscover:
 		return recommendation.ModeDiscover, nil
+	case recommendation.ModeLatest:
+		return recommendation.ModeLatest, nil
 	default:
-		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover")
+		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover, latest")
 	}
 }
 

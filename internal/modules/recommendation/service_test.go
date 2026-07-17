@@ -17,6 +17,19 @@ func TestModeConstants(t *testing.T) {
 	if ModeDiscover != "discover" {
 		t.Fatalf("expected ModeDiscover to be discover, got %q", ModeDiscover)
 	}
+
+	if ModeLatest != "latest" {
+		t.Fatalf("expected ModeLatest to be latest, got %q", ModeLatest)
+	}
+}
+
+func TestScoreLatestUsesPublishedTime(t *testing.T) {
+	older := Candidate{PublishedAtUnix: 100}
+	newer := Candidate{PublishedAtUnix: 200}
+
+	if scoreCandidate(ModeLatest, newer) <= scoreCandidate(ModeLatest, older) {
+		t.Fatal("expected latest mode to rank newer candidates higher")
+	}
 }
 
 func TestScoreHotPrioritizesTrend(t *testing.T) {

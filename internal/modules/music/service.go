@@ -105,7 +105,7 @@ func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, page
 			Summary:    "",
 			ImageURL:   album.CoverURL,
 			TargetPath: "/music/album/" + album.ID.String(),
-			ScoreLabel: fmt.Sprintf("%s %.0f", musicRecommendationLabel(mode), math.Round(item.FinalScore*100)),
+			ScoreLabel: musicRecommendationScoreLabel(mode, item.FinalScore),
 			PlayCount: func() int64 {
 				var total int64
 				for _, song := range album.Songs {
@@ -224,7 +224,7 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 			Summary:       art.Bio,
 			ImageURL:      art.ImageURL,
 			TargetPath:    "/music/artist/" + art.ID.String(),
-			ScoreLabel:    fmt.Sprintf("%s %.0f", musicRecommendationLabel(mode), math.Round(item.FinalScore*100)),
+			ScoreLabel:    musicRecommendationScoreLabel(mode, item.FinalScore),
 			PlayCount:     artistPlayCounts[art.ID],
 			BookmarkCount: artistBookmarkCounts[art.ID],
 		})
@@ -288,9 +288,18 @@ func musicRecommendationLabel(mode recommendation.Mode) string {
 		return "精选"
 	case recommendation.ModeDiscover:
 		return "探索"
+	case recommendation.ModeLatest:
+		return "最新"
 	default:
 		return "推荐"
 	}
+}
+
+func musicRecommendationScoreLabel(mode recommendation.Mode, score float64) string {
+	if mode == recommendation.ModeLatest {
+		return musicRecommendationLabel(mode)
+	}
+	return fmt.Sprintf("%s %.0f", musicRecommendationLabel(mode), math.Round(score*100))
 }
 
 func (s *Service) RecordSongPlay(userID *uuid.UUID, songID uuid.UUID) error {
@@ -1022,15 +1031,15 @@ func (s *Service) ListPublicPlaylists(page int, pageSize int) ([]model.Playlist,
 	return playlists, songCounts, total, nil
 }
 
-func (s *Service) Discover(page int, pageSize int) ([]DiscoverItemResponse, int64, error) {
+func (s *Service) Discover(mode recommendation.Mode, page int, pageSize int) ([]DiscoverItemResponse, int64, error) {
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
 	seedSize := page * pageSize
 
-	albumItems, albumTotal, err := s.RecommendAlbumsByMode(recommendation.ModeDiscover, 1, seedSize)
+	albumItems, albumTotal, err := s.RecommendAlbumsByMode(mode, 1, seedSize)
 	if err != nil {
 		return nil, 0, err
 	}
-	artistItems, artistTotal, err := s.RecommendArtistsByMode(recommendation.ModeDiscover, 1, seedSize)
+	artistItems, artistTotal, err := s.RecommendArtistsByMode(mode, 1, seedSize)
 	if err != nil {
 		return nil, 0, err
 	}

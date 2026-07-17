@@ -6,6 +6,7 @@ const (
 	ModeHot      Mode = "hot"
 	ModeFeatured Mode = "featured"
 	ModeDiscover Mode = "discover"
+	ModeLatest   Mode = "latest"
 )
 
 type EntityType string
@@ -21,17 +22,17 @@ const (
 )
 
 type Candidate struct {
-	Module           string
-	EntityType       EntityType
-	EntityID         string
-	SourceKey        string
-	QualityScore     float64
-	TrendScore       float64
-	FreshnessScore   float64
-	AuthorityScore   float64
-	ExposureScore    float64
-	EditorialScore   float64
-	PublishedAtUnix  int64
+	Module          string
+	EntityType      EntityType
+	EntityID        string
+	SourceKey       string
+	QualityScore    float64
+	TrendScore      float64
+	FreshnessScore  float64
+	AuthorityScore  float64
+	ExposureScore   float64
+	EditorialScore  float64
+	PublishedAtUnix int64
 }
 
 type RankedItem struct {

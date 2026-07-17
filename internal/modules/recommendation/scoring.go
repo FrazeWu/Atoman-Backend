@@ -21,6 +21,8 @@ func scoreCandidate(mode Mode, c Candidate) float64 {
 		return 0.45*c.QualityScore +
 			0.30*underexposedBonus +
 			0.15*c.FreshnessScore
+	case ModeLatest:
+		return float64(c.PublishedAtUnix)
 	default:
 		return 0
 	}
