@@ -151,6 +151,9 @@ func runMigrations(db *gorm.DB) error {
 	if err := migrations.RunMusicPlayCountsMigration(db); err != nil {
 		return fmt.Errorf("music play counts migration: %w", err)
 	}
+	if err := migrations.RunMusicListeningMigration(db); err != nil {
+		return fmt.Errorf("music listening migration: %w", err)
+	}
 	if err := backfillUserDefaultResources(db); err != nil {
 		return fmt.Errorf("user default resources migration: %w", err)
 	}
@@ -208,6 +211,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.SongBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
+		&model.MusicListeningHistory{},
 		&model.Bookmark{},
 		&model.BookmarkFolder{},
 		&model.ChannelBookmark{},

@@ -37,6 +37,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.SongBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
+		&model.MusicListeningHistory{},
 		&model.AlbumImportSession{},
 		&model.MusicEdit{},
 		&model.MusicEditVote{},
@@ -618,6 +619,136 @@ func TestRegisterRoutesRecordSongPlayIncrementsCount(t *testing.T) {
 	}
 	if updated.PlayCount != 1 {
 		t.Fatalf("expected play_count=1, got %d", updated.PlayCount)
+	}
+
+	second := httptest.NewRecorder()
+	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/plays", bytes.NewBufferString(`{"song_id":"`+song.ID.String()+`"}`))
+	secondReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(second, secondReq)
+	if second.Code != http.StatusOK {
+		t.Fatalf("expected second play 200, got %d: %s", second.Code, second.Body.String())
+	}
+
+	var history model.MusicListeningHistory
+	if err := db.Where("user_id = ? AND song_id = ?", user.ID, song.ID).First(&history).Error; err != nil {
+		t.Fatalf("load listening history: %v", err)
+	}
+	if history.PlayCount != 2 {
+		t.Fatalf("expected one history row with play_count=2, got %#v", history)
+	}
+}
+
+func TestRegisterRoutesReordersPlaylistSongs(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	playlist := model.Playlist{UserID: user.ID, Name: "Ordered Playlist"}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	songs := []model.Song{
+		{Title: "First", AudioURL: "/audio/first.mp3", Status: "open"},
+		{Title: "Second", AudioURL: "/audio/second.mp3", Status: "open"},
+		{Title: "Third", AudioURL: "/audio/third.mp3", Status: "open"},
+	}
+	if err := db.Create(&songs).Error; err != nil {
+		t.Fatalf("create songs: %v", err)
+	}
+	for _, song := range songs {
+		if _, err := service.AddPlaylistSong(user, playlist.ID, song.ID); err != nil {
+			t.Fatalf("add playlist song: %v", err)
+		}
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	body, _ := json.Marshal(map[string]any{"song_ids": []string{
+		songs[2].ID.String(),
+		songs[0].ID.String(),
+		songs[1].ID.String(),
+	}})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/music/playlists/"+playlist.ID.String()+"/songs/order", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected reorder 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	listW := httptest.NewRecorder()
+	r.ServeHTTP(listW, httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/"+playlist.ID.String()+"/songs?page_size=20", nil))
+	if listW.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", listW.Code, listW.Body.String())
+	}
+	var response struct {
+		Data []struct {
+			Position int `json:"position"`
+			Song     struct {
+				ID string `json:"id"`
+			} `json:"song"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(listW.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode playlist songs: %v", err)
+	}
+	if len(response.Data) != 3 || response.Data[0].Song.ID != songs[2].ID.String() || response.Data[0].Position != 1 || response.Data[2].Position != 3 {
+		t.Fatalf("unexpected reordered songs: %#v", response.Data)
+	}
+}
+
+func TestRegisterRoutesRecordSongPlayWithoutUserDoesNotCreateHistory(t *testing.T) {
+	service, db, _ := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Anonymous Play", AudioURL: "/audio/anonymous.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	r := newMusicHTTPRouter(service, nil)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/plays", bytes.NewBufferString(`{"song_id":"`+song.ID.String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var histories int64
+	if err := db.Model(&model.MusicListeningHistory{}).Count(&histories).Error; err != nil {
+		t.Fatalf("count histories: %v", err)
+	}
+	if histories != 0 {
+		t.Fatalf("expected no anonymous history, got %d", histories)
+	}
+}
+
+func TestRegisterRoutesListsCurrentUserListeningHistory(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Recent Song", AudioURL: "/audio/recent.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := service.RecordSongPlay(&user.ID, song.ID); err != nil {
+		t.Fatalf("record play: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/music/history?page_size=20", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data []struct {
+			Song struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"song"`
+			PlayCount int64 `json:"play_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode history: %v", err)
+	}
+	if len(response.Data) != 1 || response.Data[0].Song.ID != song.ID.String() || response.Data[0].PlayCount != 1 {
+		t.Fatalf("unexpected history response: %#v", response.Data)
 	}
 }
 

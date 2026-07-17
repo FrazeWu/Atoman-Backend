@@ -293,7 +293,7 @@ func musicRecommendationLabel(mode recommendation.Mode) string {
 	}
 }
 
-func (s *Service) RecordSongPlay(songID uuid.UUID) error {
+func (s *Service) RecordSongPlay(userID *uuid.UUID, songID uuid.UUID) error {
 	if songID == uuid.Nil {
 		return apperr.BadRequest("validation.invalid_request", "song_id is required")
 	}
@@ -307,7 +307,23 @@ func (s *Service) RecordSongPlay(songID uuid.UUID) error {
 		return apperr.NotFound("music.song_not_found", "Song not found")
 	}
 
-	return s.repo.IncrementSongPlayCount(songID)
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		repo := NewRepo(tx)
+		if err := repo.IncrementSongPlayCount(songID); err != nil {
+			return err
+		}
+		if userID == nil || *userID == uuid.Nil {
+			return nil
+		}
+		return repo.RecordListeningHistory(*userID, songID, time.Now())
+	})
+}
+
+func (s *Service) ListListeningHistory(user authctx.CurrentUser, page, pageSize int) ([]model.MusicListeningHistory, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	return s.repo.ListListeningHistory(user.ID, page, pageSize)
 }
 
 func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUID, targetArtistID uuid.UUID) error {
@@ -953,6 +969,37 @@ func (s *Service) DeletePlaylistSong(user authctx.CurrentUser, playlistID uuid.U
 		return err
 	}
 	return s.repo.DeletePlaylistSong(playlistID, songID)
+}
+
+func (s *Service) ReorderPlaylistSongs(user authctx.CurrentUser, playlistID uuid.UUID, songIDs []uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	if _, err := s.repo.GetPlaylistForUser(user.ID, playlistID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.NotFound("music.playlist_not_found", "Playlist not found")
+		}
+		return err
+	}
+	var rows []model.PlaylistSong
+	if err := s.db.Where("playlist_id = ?", playlistID).Find(&rows).Error; err != nil {
+		return err
+	}
+	if len(rows) != len(songIDs) {
+		return apperr.BadRequest("validation.invalid_request", "song_ids must contain every playlist song")
+	}
+	existing := make(map[uuid.UUID]bool, len(rows))
+	for _, row := range rows {
+		existing[row.SongID] = true
+	}
+	seen := make(map[uuid.UUID]bool, len(songIDs))
+	for _, songID := range songIDs {
+		if songID == uuid.Nil || !existing[songID] || seen[songID] {
+			return apperr.BadRequest("validation.invalid_request", "song_ids must contain every playlist song once")
+		}
+		seen[songID] = true
+	}
+	return s.repo.ReorderPlaylistSongs(playlistID, songIDs)
 }
 
 func (s *Service) ListPublicPlaylists(page int, pageSize int) ([]model.Playlist, map[uuid.UUID]int64, int64, error) {

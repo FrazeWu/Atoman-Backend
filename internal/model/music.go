@@ -288,11 +288,25 @@ func (Playlist) TableName() string {
 
 type PlaylistSong struct {
 	Base
-	PlaylistID uuid.UUID `json:"playlist_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_playlist_songs_playlist_song,priority:1,where:deleted_at IS NULL"`
+	PlaylistID uuid.UUID `json:"playlist_id" gorm:"type:uuid;not null;index;index:idx_music_playlist_songs_playlist_position,priority:1;uniqueIndex:idx_music_playlist_songs_playlist_song,priority:1,where:deleted_at IS NULL"`
 	SongID     uuid.UUID `json:"song_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_playlist_songs_playlist_song,priority:2,where:deleted_at IS NULL"`
 	Song       *Song     `json:"song,omitempty" gorm:"foreignKey:SongID"`
+	Position   int       `json:"position" gorm:"not null;default:0;index:idx_music_playlist_songs_playlist_position,priority:2"`
 }
 
 func (PlaylistSong) TableName() string {
 	return "music_playlist_songs"
+}
+
+type MusicListeningHistory struct {
+	Base
+	UserID       uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index:idx_music_listening_history_user_last_played,priority:1;uniqueIndex:idx_music_listening_history_user_song,priority:1,where:deleted_at IS NULL"`
+	SongID       uuid.UUID `json:"song_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_listening_history_user_song,priority:2,where:deleted_at IS NULL"`
+	Song         *Song     `json:"song,omitempty" gorm:"foreignKey:SongID"`
+	PlayCount    int64     `json:"play_count" gorm:"not null;default:1"`
+	LastPlayedAt time.Time `json:"last_played_at" gorm:"not null;index:idx_music_listening_history_user_last_played,priority:2,sort:desc"`
+}
+
+func (MusicListeningHistory) TableName() string {
+	return "music_listening_histories"
 }

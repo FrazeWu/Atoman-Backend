@@ -193,8 +193,10 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.DELETE("/playlists/:id", h.deletePlaylist)
 	group.GET("/playlists/:id/songs", h.listPlaylistSongs)
 	group.POST("/playlists/:id/songs", h.addPlaylistSong)
+	group.PUT("/playlists/:id/songs/order", h.reorderPlaylistSongs)
 	group.DELETE("/playlists/:id/songs/:songId", h.deletePlaylistSong)
 	group.POST("/plays", h.recordSongPlay)
+	group.GET("/history", h.listListeningHistory)
 	group.GET("/recommend/albums", h.getRecommendedAlbums)
 	group.GET("/recommend/artists", h.getRecommendedArtists)
 	group.POST("/edits", h.submitEdit)
@@ -475,17 +477,68 @@ func (h *Handler) getAlbum(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, album)
 }
 
+// recordSongPlay godoc
+// @Summary 记录有效播放
+// @Description 播放器在实际播放满 5 秒后调用。匿名用户增加总播放次数，登录用户同时更新个人播放历史。
+// @Tags music
+// @Accept json
+// @Produce json
+// @Param input body RecordSongPlayRequest true "播放记录"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/music/plays [post]
 func (h *Handler) recordSongPlay(c *gin.Context) {
 	var req RecordSongPlayRequest
 	if err := bindJSON(c, &req); err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	if err := h.service.RecordSongPlay(req.SongID); err != nil {
+	var userID *uuid.UUID
+	if user, ok := authctx.Current(c); ok {
+		userID = &user.ID
+	}
+	if err := h.service.RecordSongPlay(userID, req.SongID); err != nil {
 		httpx.Error(c, err)
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"recorded": true})
+}
+
+// listListeningHistory godoc
+// @Summary 获取最近播放
+// @Description 返回当前用户最近播放的歌曲，每首歌曲保留最近时间和累计播放次数。
+// @Tags music
+// @Produce json
+// @Success 200 {object} ListeningHistoryListResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/music/history [get]
+func (h *Handler) listListeningHistory(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	rows, total, err := h.service.ListListeningHistory(user, page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	for index := range rows {
+		if rows[index].Song != nil {
+			rows[index].Song.AudioURL = resolveMusicMediaURL(rows[index].Song.AudioURL)
+			rows[index].Song.CoverURL = resolveMusicMediaURL(rows[index].Song.CoverURL)
+			if rows[index].Song.Album != nil {
+				rows[index].Song.Album.CoverURL = resolveMusicMediaURL(rows[index].Song.Album.CoverURL)
+			}
+		}
+	}
+	httpx.List(c, rows, page, pageSize, total)
 }
 
 func (h *Handler) getRecommendedAlbums(c *gin.Context) {
@@ -945,6 +998,45 @@ func (h *Handler) addPlaylistSong(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusCreated, playlistSong)
+}
+
+// reorderPlaylistSongs godoc
+// @Summary 调整歌单歌曲顺序
+// @Description 使用完整歌曲 ID 列表更新歌单顺序，支持普通歌单和最爱歌单。
+// @Tags music-playlists
+// @Accept json
+// @Produce json
+// @Param id path string true "歌单 ID"
+// @Param input body ReorderPlaylistSongsRequest true "完整歌曲顺序"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/music/playlists/{id}/songs/order [put]
+func (h *Handler) reorderPlaylistSongs(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	playlistID, err := parseMusicID(c.Param("id"), "id")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var req ReorderPlaylistSongsRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.ReorderPlaylistSongs(user, playlistID, req.SongIDs); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"reordered": true})
 }
 
 func (h *Handler) deletePlaylistSong(c *gin.Context) {

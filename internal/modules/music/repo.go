@@ -3,6 +3,7 @@ package music
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"atoman/internal/model"
 
@@ -297,8 +298,21 @@ func (r *Repo) UpdatePlaylist(playlist *model.Playlist, updates map[string]any) 
 }
 
 func (r *Repo) UpsertPlaylistSong(playlistID uuid.UUID, songID uuid.UUID) (model.PlaylistSong, error) {
-	playlistSong := model.PlaylistSong{PlaylistID: playlistID, SongID: songID}
-	err := r.db.Where("playlist_id = ? AND song_id = ?", playlistID, songID).FirstOrCreate(&playlistSong).Error
+	var playlistSong model.PlaylistSong
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("playlist_id = ? AND song_id = ?", playlistID, songID).First(&playlistSong).Error; err == nil {
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		var maxPosition int
+		if err := tx.Model(&model.PlaylistSong{}).Where("playlist_id = ?", playlistID).
+			Select("COALESCE(MAX(position), 0)").Scan(&maxPosition).Error; err != nil {
+			return err
+		}
+		playlistSong = model.PlaylistSong{PlaylistID: playlistID, SongID: songID, Position: maxPosition + 1}
+		return tx.Create(&playlistSong).Error
+	})
 	return playlistSong, err
 }
 
@@ -309,8 +323,25 @@ func (r *Repo) ListPlaylistSongs(playlistID uuid.UUID, page int, pageSize int) (
 		return nil, 0, err
 	}
 	var songs []model.PlaylistSong
-	err := db.Preload("Song.Artists").Preload("Song.Album").Order("created_at DESC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&songs).Error
+	err := db.Preload("Song.Artists").Preload("Song.Album").Order("position ASC, created_at ASC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&songs).Error
 	return songs, total, err
+}
+
+func (r *Repo) ReorderPlaylistSongs(playlistID uuid.UUID, songIDs []uuid.UUID) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		for index, songID := range songIDs {
+			result := tx.Model(&model.PlaylistSong{}).
+				Where("playlist_id = ? AND song_id = ?", playlistID, songID).
+				Update("position", index+1)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+		return nil
+	})
 }
 
 func (r *Repo) DeletePlaylistSong(playlistID uuid.UUID, songID uuid.UUID) error {
@@ -322,4 +353,38 @@ func (r *Repo) IncrementSongPlayCount(songID uuid.UUID) error {
 		Where("id = ?", songID).
 		UpdateColumn("play_count", gorm.Expr("play_count + 1")).
 		Error
+}
+
+func (r *Repo) RecordListeningHistory(userID, songID uuid.UUID, playedAt time.Time) error {
+	var history model.MusicListeningHistory
+	err := r.db.Where("user_id = ? AND song_id = ?", userID, songID).First(&history).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return r.db.Create(&model.MusicListeningHistory{
+			UserID:       userID,
+			SongID:       songID,
+			PlayCount:    1,
+			LastPlayedAt: playedAt,
+		}).Error
+	}
+	if err != nil {
+		return err
+	}
+	return r.db.Model(&history).Updates(map[string]any{
+		"play_count":     gorm.Expr("play_count + 1"),
+		"last_played_at": playedAt,
+	}).Error
+}
+
+func (r *Repo) ListListeningHistory(userID uuid.UUID, page, pageSize int) ([]model.MusicListeningHistory, int64, error) {
+	db := r.db.Model(&model.MusicListeningHistory{}).Where("user_id = ?", userID)
+	var total int64
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []model.MusicListeningHistory
+	err := db.Preload("Song.Artists").Preload("Song.Album").
+		Order("last_played_at DESC").
+		Limit(pageSize).Offset((page - 1) * pageSize).
+		Find(&rows).Error
+	return rows, total, err
 }

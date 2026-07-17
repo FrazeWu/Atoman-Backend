@@ -1,6 +1,10 @@
 package music
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type Source struct {
 	Type  string `json:"type"`
@@ -77,6 +81,10 @@ type AddPlaylistSongRequest struct {
 	SongID uuid.UUID `json:"song_id"`
 }
 
+type ReorderPlaylistSongsRequest struct {
+	SongIDs []uuid.UUID `json:"song_ids"`
+}
+
 type RecordSongPlayRequest struct {
 	SongID uuid.UUID `json:"song_id"`
 }
@@ -143,6 +151,19 @@ type PlaylistSongResponse struct {
 	PlaylistID uuid.UUID           `json:"playlist_id"`
 	SongID     uuid.UUID           `json:"song_id"`
 	Song       *PlaylistSongDetail `json:"song,omitempty"`
+	Position   int                 `json:"position"`
+}
+
+type ListeningHistoryItemResponse struct {
+	ID           uuid.UUID           `json:"id"`
+	Song         *PlaylistSongDetail `json:"song"`
+	PlayCount    int64               `json:"play_count"`
+	LastPlayedAt time.Time           `json:"last_played_at"`
+}
+
+type ListeningHistoryListResponse struct {
+	Data []ListeningHistoryItemResponse `json:"data"`
+	Meta PaginationMetaResponse         `json:"meta"`
 }
 
 type PlaylistSongDetail struct {
