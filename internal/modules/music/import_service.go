@@ -5,7 +5,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
+	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -513,6 +516,8 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 	}
 
 	var out model.AlbumImportSession
+	oldObjectKeys := []string{}
+	newObjectKeys := []string{}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var session model.AlbumImportSession
 		if err := tx.First(&session, "id = ?", id).Error; err != nil {
@@ -582,6 +587,25 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if err := createAlbumImportAlbum(tx, &album); err != nil {
 			return err
 		}
+		promotedCoverURL, oldCoverKey, newCoverKey, err := s.promoteAlbumImportAsset(
+			album.CoverURL,
+			storage.BuildMusicAlbumCoverKey(album.ID.String(), path.Ext(album.CoverURL)),
+		)
+		if err != nil {
+			return err
+		}
+		if newCoverKey != "" {
+			album.CoverURL = promotedCoverURL
+			album.CoverSource = "s3"
+			oldObjectKeys = append(oldObjectKeys, oldCoverKey)
+			newObjectKeys = append(newObjectKeys, newCoverKey)
+			if err := tx.Model(&album).Updates(map[string]any{
+				"cover_url":    album.CoverURL,
+				"cover_source": album.CoverSource,
+			}).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Model(&album).Association("Artists").Append(artists); err != nil {
 			return err
 		}
@@ -608,6 +632,25 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			if err := tx.Create(&song).Error; err != nil {
 				return err
 			}
+			promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteAlbumImportAsset(
+				song.AudioURL,
+				storage.BuildMusicAlbumTrackKey(album.ID.String(), song.ID.String(), path.Ext(song.AudioURL)),
+			)
+			if err != nil {
+				return err
+			}
+			if newAudioKey != "" {
+				song.AudioURL = promotedAudioURL
+				song.AudioSource = "s3"
+				oldObjectKeys = append(oldObjectKeys, oldAudioKey)
+				newObjectKeys = append(newObjectKeys, newAudioKey)
+				if err := tx.Model(&song).Updates(map[string]any{
+					"audio_url":    song.AudioURL,
+					"audio_source": song.AudioSource,
+				}).Error; err != nil {
+					return err
+				}
+			}
 			if err := tx.Model(&song).Association("Artists").Append(artists); err != nil {
 				return err
 			}
@@ -624,9 +667,58 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		return nil
 	})
 	if err != nil {
+		s.deleteAlbumImportObjects(newObjectKeys)
 		return model.AlbumImportSession{}, err
 	}
+	s.deleteAlbumImportObjects(oldObjectKeys)
 	return out, nil
+}
+
+func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string) (string, string, string, error) {
+	if s.s3 == nil || !strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_TYPE")), "s3") {
+		return rawURL, "", "", nil
+	}
+	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	urlPrefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
+	sourceKey, ok := musicAlbumImportObjectKey(rawURL, urlPrefix)
+	if bucket == "" || urlPrefix == "" || !ok || !strings.Contains(sourceKey, "/uploads/") {
+		return rawURL, "", "", nil
+	}
+	escapedSource := strings.ReplaceAll(url.PathEscape(bucket+"/"+sourceKey), "%2F", "/")
+	if _, err := s.s3.CopyObject(&s3.CopyObjectInput{
+		Bucket:     aws.String(bucket),
+		CopySource: aws.String(escapedSource),
+		Key:        aws.String(destinationKey),
+	}); err != nil {
+		return "", "", "", err
+	}
+	return urlPrefix + "/" + destinationKey, sourceKey, destinationKey, nil
+}
+
+func musicAlbumImportObjectKey(rawURL, urlPrefix string) (string, bool) {
+	prefix := strings.TrimRight(strings.TrimSpace(urlPrefix), "/")
+	if prefix == "" || !strings.HasPrefix(strings.TrimSpace(rawURL), prefix+"/") {
+		return "", false
+	}
+	key, err := url.PathUnescape(strings.TrimPrefix(strings.TrimSpace(rawURL), prefix+"/"))
+	return strings.TrimLeft(key, "/"), err == nil && key != ""
+}
+
+func (s *Service) deleteAlbumImportObjects(keys []string) {
+	if s.s3 == nil || len(keys) == 0 {
+		return
+	}
+	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	seen := map[string]bool{}
+	for _, key := range keys {
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		if _, err := s.s3.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)}); err != nil {
+			log.Printf("delete album import object %s: %v", key, err)
+		}
+	}
 }
 
 func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayload, index int, used map[int]bool) string {

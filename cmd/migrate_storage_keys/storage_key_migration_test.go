@@ -40,7 +40,7 @@ func TestBuildLegacyVideoKey(t *testing.T) {
 func TestBuildMusicAudioKey(t *testing.T) {
 	next := buildMusicAudioKey("music/kanye_west/2049/01 INTRO.wav", "album-1", "song-1")
 
-	if next != "music/audio/albums/album-1/song-1.wav" {
+	if next != "music/albums/album-1/tracks/song-1.wav" {
 		t.Fatalf("unexpected key: %s", next)
 	}
 }
@@ -48,8 +48,17 @@ func TestBuildMusicAudioKey(t *testing.T) {
 func TestBuildMusicCoverKey(t *testing.T) {
 	next := buildMusicCoverKey("music/kanye_west/2049/cover.jpg", "album-1")
 
-	if next != "music/covers/albums/album-1/cover.jpg" {
+	if next != "music/albums/album-1/cover.jpg" {
 		t.Fatalf("unexpected key: %s", next)
+	}
+}
+
+func TestShouldMigrateMusicKey(t *testing.T) {
+	if !shouldMigrateMusicKey("music/audio/uploads/users/user-1/2026/07/song.mp3") {
+		t.Fatal("expected upload object to require migration")
+	}
+	if shouldMigrateMusicKey("music/albums/album-1/tracks/song-1.mp3") {
+		t.Fatal("expected album object to be current")
 	}
 }
 

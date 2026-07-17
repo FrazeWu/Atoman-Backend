@@ -24,3 +24,19 @@ func TestBuildMusicUploadKey(t *testing.T) {
 		t.Fatalf("unexpected key: %s", key)
 	}
 }
+
+func TestBuildMusicAlbumCoverKey(t *testing.T) {
+	key := BuildMusicAlbumCoverKey("album-123", ".jpg")
+
+	if key != "music/albums/album-123/cover.jpg" {
+		t.Fatalf("unexpected key: %s", key)
+	}
+}
+
+func TestBuildMusicAlbumTrackKey(t *testing.T) {
+	key := BuildMusicAlbumTrackKey("album-123", "song-456", ".mp3")
+
+	if key != "music/albums/album-123/tracks/song-456.mp3" {
+		t.Fatalf("unexpected key: %s", key)
+	}
+}

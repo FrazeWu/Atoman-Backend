@@ -66,11 +66,15 @@ func buildLegacyVideoKey(oldKey, userID, kind string, createdAt time.Time) (stri
 }
 
 func buildMusicAudioKey(oldKey, albumID, songID string) string {
-	return "music/audio/albums/" + albumID + "/" + songID + path.Ext(oldKey)
+	return storage.BuildMusicAlbumTrackKey(albumID, songID, path.Ext(oldKey))
 }
 
 func buildMusicCoverKey(oldKey, albumID string) string {
-	return "music/covers/albums/" + albumID + "/cover" + path.Ext(oldKey)
+	return storage.BuildMusicAlbumCoverKey(albumID, path.Ext(oldKey))
+}
+
+func shouldMigrateMusicKey(key string) bool {
+	return strings.HasPrefix(key, "music/") && !strings.HasPrefix(key, "music/albums/")
 }
 
 func makeURL(prefix, key string) string {
@@ -88,6 +92,53 @@ func copyObject(s3Client *s3.S3, bucket, oldKey, newKey string) error {
 		Key:        aws.String(newKey),
 	})
 	return err
+}
+
+func copyAndVerifyObject(s3Client *s3.S3, bucket, oldKey, newKey string) error {
+	source, err := s3Client.HeadObject(&s3.HeadObjectInput{Bucket: aws.String(bucket), Key: aws.String(oldKey)})
+	if err != nil {
+		return err
+	}
+	if err := copyObject(s3Client, bucket, oldKey, newKey); err != nil {
+		return err
+	}
+	destination, err := s3Client.HeadObject(&s3.HeadObjectInput{Bucket: aws.String(bucket), Key: aws.String(newKey)})
+	if err != nil {
+		return err
+	}
+	if aws.Int64Value(source.ContentLength) != aws.Int64Value(destination.ContentLength) {
+		return fmt.Errorf("copied object size mismatch: %s -> %s", oldKey, newKey)
+	}
+	return nil
+}
+
+func updateMigrationURLs(db *gorm.DB, migrations []migration) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		for _, item := range migrations {
+			if err := tx.Exec(item.updateSQL, item.newURL, item.updateArg).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func deleteMigrationObjects(s3Client *s3.S3, bucket string, migrations []migration, useNewKey bool) error {
+	seen := map[string]bool{}
+	for _, item := range migrations {
+		key := item.oldKey
+		if useNewKey {
+			key = item.newKey
+		}
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		if _, err := s3Client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func collectVideoMigrations(db *gorm.DB, s3Prefix string) ([]migration, error) {
@@ -140,13 +191,12 @@ func collectMusicMigrations(db *gorm.DB, s3Prefix string) ([]migration, error) {
 	}
 
 	var migrations []migration
-	seenAlbumCovers := map[string]bool{}
 	for _, song := range songs {
 		if song.AlbumID == nil {
 			continue
 		}
 		albumID := song.AlbumID.String()
-		if oldKey, ok := parseObjectURL(song.AudioURL, s3Prefix); ok && strings.HasPrefix(oldKey, "music/") && !strings.HasPrefix(oldKey, "music/audio/albums/") && !strings.HasPrefix(oldKey, "music/audio/uploads/") {
+		if oldKey, ok := parseObjectURL(song.AudioURL, s3Prefix); ok && shouldMigrateMusicKey(oldKey) {
 			newKey := buildMusicAudioKey(oldKey, albumID, song.ID.String())
 			migrations = append(migrations, migration{
 				table:     "Songs",
@@ -160,7 +210,7 @@ func collectMusicMigrations(db *gorm.DB, s3Prefix string) ([]migration, error) {
 				updateArg: song.ID,
 			})
 		}
-		if oldKey, ok := parseObjectURL(song.CoverURL, s3Prefix); ok && strings.HasPrefix(oldKey, "music/") && !strings.HasPrefix(oldKey, "music/covers/albums/") && !strings.HasPrefix(oldKey, "music/covers/uploads/") {
+		if oldKey, ok := parseObjectURL(song.CoverURL, s3Prefix); ok && shouldMigrateMusicKey(oldKey) {
 			newKey := buildMusicCoverKey(oldKey, albumID)
 			migrations = append(migrations, migration{
 				table:     "Songs",
@@ -174,32 +224,33 @@ func collectMusicMigrations(db *gorm.DB, s3Prefix string) ([]migration, error) {
 				updateArg: song.ID,
 			})
 		}
-		if song.Album != nil {
-			if oldKey, ok := parseObjectURL(song.Album.CoverURL, s3Prefix); ok && strings.HasPrefix(oldKey, "music/") && !strings.HasPrefix(oldKey, "music/covers/albums/") && !strings.HasPrefix(oldKey, "music/covers/uploads/") {
-				if seenAlbumCovers[albumID] {
-					continue
-				}
-				seenAlbumCovers[albumID] = true
-				newKey := buildMusicCoverKey(oldKey, albumID)
-				migrations = append(migrations, migration{
-					table:     "Albums",
-					column:    "cover_url",
-					id:        albumID,
-					oldURL:    song.Album.CoverURL,
-					oldKey:    oldKey,
-					newKey:    newKey,
-					newURL:    makeURL(s3Prefix, newKey),
-					updateSQL: `update "Albums" set cover_url = ? where id = ?`,
-					updateArg: *song.AlbumID,
-				})
-			}
+	}
+
+	var albums []model.Album
+	if err := db.Find(&albums).Error; err != nil {
+		return nil, err
+	}
+	for _, album := range albums {
+		if oldKey, ok := parseObjectURL(album.CoverURL, s3Prefix); ok && shouldMigrateMusicKey(oldKey) {
+			newKey := buildMusicCoverKey(oldKey, album.ID.String())
+			migrations = append(migrations, migration{
+				table:     "Albums",
+				column:    "cover_url",
+				id:        album.ID.String(),
+				oldURL:    album.CoverURL,
+				oldKey:    oldKey,
+				newKey:    newKey,
+				newURL:    makeURL(s3Prefix, newKey),
+				updateSQL: `update "Albums" set cover_url = ? where id = ?`,
+				updateArg: album.ID,
+			})
 		}
 	}
 	return migrations, nil
 }
 
 func main() {
-	apply := flag.Bool("apply", false, "copy objects and update database")
+	apply := flag.Bool("apply", false, "copy and verify objects, update database, and delete old objects")
 	envFile := flag.String("env", ".env.dev", "env file to load")
 	flag.Parse()
 
@@ -237,12 +288,16 @@ func main() {
 	}
 
 	for _, m := range migrations {
-		if err := copyObject(s3Client, bucket, m.oldKey, m.newKey); err != nil {
+		if err := copyAndVerifyObject(s3Client, bucket, m.oldKey, m.newKey); err != nil {
 			log.Fatalf("copy %s -> %s: %v", m.oldKey, m.newKey, err)
 		}
-		if err := db.Exec(m.updateSQL, m.newURL, m.updateArg).Error; err != nil {
-			log.Fatalf("update %s.%s %s: %v", m.table, m.column, m.id, err)
-		}
+	}
+	if err := updateMigrationURLs(db, migrations); err != nil {
+		_ = deleteMigrationObjects(s3Client, bucket, migrations, true)
+		log.Fatalf("update database URLs: %v", err)
+	}
+	if err := deleteMigrationObjects(s3Client, bucket, migrations, false); err != nil {
+		log.Fatalf("delete old objects: %v", err)
 	}
 	log.Printf("applied migrations: %d", len(migrations))
 }

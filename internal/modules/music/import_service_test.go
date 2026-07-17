@@ -640,6 +640,72 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	}
 }
 
+func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	var copiedSources []string
+	var copiedDestinations []string
+	var deletedKeys []string
+	svc.s3 = fakeMusicPromotionS3Client(t, &copiedSources, &copiedDestinations, &deletedKeys)
+	t.Setenv("STORAGE_TYPE", "s3")
+	t.Setenv("S3_BUCKET", "atoman-test")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.atoman.test")
+
+	coverKey := "music/covers/uploads/users/user-1/2026/07/cover.jpg"
+	audioKey := "music/audio/uploads/users/user-1/2026/07/audio.mp3"
+	payloadJSON, err := json.Marshal(map[string]any{
+		"derived_cover": "https://cdn.atoman.test/" + coverKey,
+		"derived_tracks": []map[string]any{{
+			"title":        "Archangel",
+			"track_number": 1,
+			"audio_key":    audioKey,
+			"audio_url":    "https://cdn.atoman.test/" + audioKey,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	session := model.AlbumImportSession{Status: AlbumImportStatusReady, PayloadJSON: string(payloadJSON)}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	if _, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artist: AlbumImportArtistPayload{Name: "Burial"},
+		Album: AlbumImportAlbumPayload{
+			Title:  "Untrue",
+			Tracks: []AlbumImportTrackPayload{{Title: "Archangel", TrackNumber: 1}},
+		},
+	}); err != nil {
+		t.Fatalf("commit session: %v", err)
+	}
+
+	var album model.Album
+	if err := db.Where("title = ?", "Untrue").First(&album).Error; err != nil {
+		t.Fatalf("load album: %v", err)
+	}
+	var song model.Song
+	if err := db.Where("album_id = ?", album.ID).First(&song).Error; err != nil {
+		t.Fatalf("load song: %v", err)
+	}
+	wantCoverKey := "music/albums/" + album.ID.String() + "/cover.jpg"
+	wantAudioKey := "music/albums/" + album.ID.String() + "/tracks/" + song.ID.String() + ".mp3"
+	if album.CoverURL != "https://cdn.atoman.test/"+wantCoverKey {
+		t.Fatalf("unexpected album cover URL: %s", album.CoverURL)
+	}
+	if song.AudioURL != "https://cdn.atoman.test/"+wantAudioKey {
+		t.Fatalf("unexpected song audio URL: %s", song.AudioURL)
+	}
+	if len(copiedSources) != 2 || len(copiedDestinations) != 2 {
+		t.Fatalf("expected 2 copied objects, got sources=%#v destinations=%#v", copiedSources, copiedDestinations)
+	}
+	if !containsString(copiedDestinations, wantCoverKey) || !containsString(copiedDestinations, wantAudioKey) {
+		t.Fatalf("unexpected copy destinations: %#v", copiedDestinations)
+	}
+	if !containsString(deletedKeys, coverKey) || !containsString(deletedKeys, audioKey) {
+		t.Fatalf("expected upload objects deleted, got %#v", deletedKeys)
+	}
+}
+
 func TestCommitAlbumImportSessionRejectsNonReadyStatus(t *testing.T) {
 	svc, _, user := newMusicTestService(t)
 
@@ -1040,7 +1106,7 @@ func TestUploadAlbumImportArchiveStoresDerivedAudioInS3AndCommitPersistsSongURLs
 		if song.AudioURL == "" {
 			t.Fatalf("expected persisted song audio url, got %#v", song)
 		}
-		if !strings.HasPrefix(song.AudioURL, "http://localhost:9100/atoman-dev/music/audio/uploads/users/") {
+		if !strings.HasPrefix(song.AudioURL, "http://localhost:9100/atoman-dev/music/albums/") {
 			t.Fatalf("unexpected persisted song audio url %q", song.AudioURL)
 		}
 	}
@@ -1134,12 +1200,21 @@ func assertDerivedTrackPresent(t *testing.T, tracks []any, title string, trackNu
 func fakeMusicImportS3Client(t *testing.T, capturedPath *string, capturedContentType *string) *s3.S3 {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.Method != http.MethodPut {
-			t.Fatalf("expected S3 PUT, got %s", r.Method)
+			t.Fatalf("expected S3 PUT or DELETE, got %s", r.Method)
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		if r.Header.Get("X-Amz-Copy-Source") != "" {
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = io.WriteString(w, `<CopyObjectResult><ETag>"etag"</ETag><LastModified>2026-07-15T00:00:00Z</LastModified></CopyObjectResult>`)
+			return
 		}
 		*capturedPath = r.URL.EscapedPath()
 		*capturedContentType = r.Header.Get("Content-Type")
-		_, _ = io.Copy(io.Discard, r.Body)
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(server.Close)
@@ -1154,6 +1229,46 @@ func fakeMusicImportS3Client(t *testing.T, capturedPath *string, capturedContent
 		t.Fatalf("new s3 session: %v", err)
 	}
 	return s3.New(sess)
+}
+
+func fakeMusicPromotionS3Client(t *testing.T, sources, destinations, deleted *[]string) *s3.S3 {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.URL.Path, "/atoman-test/")
+		switch r.Method {
+		case http.MethodPut:
+			*sources = append(*sources, r.Header.Get("X-Amz-Copy-Source"))
+			*destinations = append(*destinations, key)
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = io.WriteString(w, `<CopyObjectResult><ETag>"etag"</ETag><LastModified>2026-07-15T00:00:00Z</LastModified></CopyObjectResult>`)
+		case http.MethodDelete:
+			*deleted = append(*deleted, key)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			t.Fatalf("unexpected S3 method %s", r.Method)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	sess, err := session.NewSession(&aws.Config{
+		Region:           aws.String("us-test-1"),
+		Endpoint:         aws.String(server.URL),
+		Credentials:      credentials.NewStaticCredentials("access", "secret", ""),
+		S3ForcePathStyle: aws.Bool(true),
+	})
+	if err != nil {
+		t.Fatalf("new s3 session: %v", err)
+	}
+	return s3.New(sess)
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 type fakeAlbumImportMultipartStore struct {
