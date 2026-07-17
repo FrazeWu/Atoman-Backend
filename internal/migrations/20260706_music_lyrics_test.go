@@ -44,7 +44,9 @@ func TestRunMusicLyricsMigrationCreatesSchema(t *testing.T) {
 	}
 
 	assertIndexExists(t, db, "music_song_lyrics", "idx_music_song_lyrics_song")
+	assertIndexExists(t, db, "music_song_lyric_lines", "idx_music_song_lyric_lines_line_key")
 	assertIndexExists(t, db, "music_song_lyric_versions", "idx_music_song_lyric_versions_song_version")
+	assertIndexExists(t, db, "music_lyric_annotations", "idx_music_lyric_annotations_status")
 	assertIndexExists(t, db, "music_lyric_annotation_votes", "idx_music_lyric_annotation_votes_annotation_user")
 }
 

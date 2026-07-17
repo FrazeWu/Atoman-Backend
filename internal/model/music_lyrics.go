@@ -5,6 +5,7 @@ import "github.com/google/uuid"
 type MusicSongLyric struct {
 	Base
 	SongID      uuid.UUID `json:"song_id" gorm:"type:uuid;not null;uniqueIndex:idx_music_song_lyrics_song"`
+	Song        *Song     `json:"song,omitempty" gorm:"foreignKey:SongID"`
 	Content     string    `json:"content" gorm:"type:text;not null;default:''"`
 	Translation string    `json:"translation" gorm:"type:text;not null;default:''"`
 	Format      string    `json:"format" gorm:"not null;default:'plain';check:chk_music_song_lyrics_format,format IN ('plain','lrc')"`
@@ -17,12 +18,13 @@ func (MusicSongLyric) TableName() string { return "music_song_lyrics" }
 
 type MusicSongLyricLine struct {
 	Base
-	LyricID     uuid.UUID `json:"lyric_id" gorm:"type:uuid;not null;index"`
-	LineKey     string    `json:"line_key" gorm:"not null"`
-	LineIndex   int       `json:"line_index" gorm:"not null"`
-	TimeMS      *int      `json:"time_ms,omitempty"`
-	Text        string    `json:"text" gorm:"type:text;not null"`
-	Translation string    `json:"translation" gorm:"type:text;not null;default:''"`
+	LyricID     uuid.UUID       `json:"lyric_id" gorm:"type:uuid;not null;index"`
+	Lyric       *MusicSongLyric `json:"lyric,omitempty" gorm:"foreignKey:LyricID"`
+	LineKey     string          `json:"line_key" gorm:"not null;index"`
+	LineIndex   int             `json:"line_index" gorm:"not null"`
+	TimeMS      *int            `json:"time_ms,omitempty"`
+	Text        string          `json:"text" gorm:"type:text;not null"`
+	Translation string          `json:"translation" gorm:"type:text;not null;default:''"`
 }
 
 func (MusicSongLyricLine) TableName() string { return "music_song_lyric_lines" }
@@ -49,7 +51,7 @@ type MusicLyricAnnotation struct {
 	EndOffset    int       `json:"end_offset" gorm:"not null"`
 	Body         string    `json:"body" gorm:"type:text;not null"`
 	CreatedBy    uuid.UUID `json:"created_by" gorm:"type:uuid;not null;index"`
-	Status       string    `json:"status" gorm:"not null;default:'active';check:chk_music_lyric_annotations_status,status IN ('active','needs_rebind','deleted')"`
+	Status       string    `json:"status" gorm:"not null;default:'active';index;check:chk_music_lyric_annotations_status,status IN ('active','needs_rebind','deleted')"`
 }
 
 func (MusicLyricAnnotation) TableName() string { return "music_lyric_annotations" }
