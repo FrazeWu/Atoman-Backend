@@ -4,6 +4,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -123,7 +124,7 @@ func TestSaveAndRevertNotifyOnlyFirstNeedsRebindTransition(t *testing.T) {
 		t.Fatalf("expected one notification, got %#v", notifications)
 	}
 	n := notifications[0]
-	if n.RecipientID != owner.ID || n.ActorID == nil || *n.ActorID != editor.ID || n.Type != "collaboration.required" || n.SourceType != "music_lyrics" || n.SourceID == uuid.Nil {
+	if n.RecipientID != owner.ID || n.ActorID == nil || *n.ActorID != editor.ID || n.Type != "collaboration.required" || n.SourceType != "music_lyrics" || n.SourceID != annotation.ID {
 		t.Fatalf("unexpected notification identity: %#v", n)
 	}
 	if n.Meta["song_id"] != song.ID.String() || n.Meta["annotation_id"] != annotation.ID.String() || n.Meta["title"] != "歌词修改影响了你的注释绑定" || n.Meta["body"] == "" || n.Meta["source_label"] == "" {
@@ -135,6 +136,45 @@ func TestSaveAndRevertNotifyOnlyFirstNeedsRebindTransition(t *testing.T) {
 	var count int64
 	if err := db.Model(&model.Notification{}).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("needs_rebind was notified repeatedly: %d, %v", count, err)
+	}
+
+	readAt := time.Now()
+	if err := db.Model(&model.Notification{}).Where("id = ?", n.ID).Update("read_at", readAt).Error; err != nil {
+		t.Fatal(err)
+	}
+	reboundLines, err := ParseLyricLines("restored", "", "plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{
+		Content: "restored", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{
+			AnnotationID: annotation.ID, Action: "rebind", LineKey: reboundLines[0].LineKey,
+			SelectedText: "restored", StartOffset: 0, EndOffset: 8,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secondEditorModel := model.User{Username: "second-editor", Email: "second-editor@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&secondEditorModel).Error; err != nil {
+		t.Fatal(err)
+	}
+	secondEditor := authctx.CurrentUser{ID: secondEditorModel.UUID, Username: secondEditorModel.Username, Role: authctx.RoleUser}
+	if _, err := svc.SaveSongLyrics(secondEditor, song.ID, SaveLyricsInput{
+		Content: "broken", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{AnnotationID: annotation.ID, Action: "needs_rebind"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var repeated model.Notification
+	if err := db.Where("recipient_id = ? AND source_type = ? AND source_id = ?", owner.ID, "music_lyrics", annotation.ID).First(&repeated).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.Notification{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("repeated transition should reuse one notification: %d, %v", count, err)
+	}
+	if repeated.ID != n.ID || repeated.SourceID != annotation.ID || repeated.ActorID == nil || *repeated.ActorID != secondEditor.ID || repeated.ReadAt != nil || repeated.Type != "collaboration.required" || repeated.Meta["annotation_id"] != annotation.ID.String() {
+		t.Fatalf("notification was not refreshed: %#v", repeated)
 	}
 
 	secondSong := model.Song{Title: "Revert Notification", AudioURL: "/revert.mp3", Status: "open"}
@@ -171,10 +211,69 @@ func TestSaveAndRevertNotifyOnlyFirstNeedsRebindTransition(t *testing.T) {
 	}
 }
 
+func TestSaveSongLyricsDoesNotNotifyAnnotationCreatorAboutOwnEdit(t *testing.T) {
+	svc, db, user, song := newLyricsTestService(t)
+	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation, err := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Content: "changed", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{AnnotationID: annotation.ID, Action: "needs_rebind"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&model.Notification{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("self edit created notification: %d, %v", count, err)
+	}
+}
+
+func TestSaveSongLyricsDoesNotReuseAggregateNotification(t *testing.T) {
+	svc, db, editor, song := newLyricsTestService(t)
+	ownerModel := model.User{Username: "aggregate-owner", Email: "aggregate-owner@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&ownerModel).Error; err != nil {
+		t.Fatal(err)
+	}
+	owner := authctx.CurrentUser{ID: ownerModel.UUID, Username: ownerModel.Username, Role: authctx.RoleUser}
+	lyrics, _ := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	annotation, _ := svc.CreateLyricAnnotation(owner, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note"})
+	readAt := time.Now()
+	aggregated := model.Notification{
+		RecipientID: owner.ID, Type: "aggregate.type", SourceType: "music_lyrics", SourceID: annotation.ID,
+		AggregationKey: "aggregate-key", ReadAt: &readAt,
+	}
+	if err := db.Create(&aggregated).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{
+		Content: "changed", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{AnnotationID: annotation.ID, Action: "needs_rebind"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var notifications []model.Notification
+	if err := db.Order("aggregation_key").Find(&notifications).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 2 || notifications[0].AggregationKey != "" || notifications[1].AggregationKey != "aggregate-key" || notifications[1].Type != "aggregate.type" || notifications[1].ReadAt == nil {
+		t.Fatalf("aggregate notification was reused: %#v", notifications)
+	}
+}
+
 func TestFailedSaveRollsBackVersionAndNeedsRebindNotification(t *testing.T) {
 	svc, db, editor, song := newLyricsTestService(t)
+	ownerModel := model.User{Username: "rollback-owner", Email: "rollback-owner@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&ownerModel).Error; err != nil {
+		t.Fatal(err)
+	}
+	owner := authctx.CurrentUser{ID: ownerModel.UUID, Username: ownerModel.Username, Role: authctx.RoleUser}
 	lyrics, _ := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
-	annotation, _ := svc.CreateLyricAnnotation(editor, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note"})
+	annotation, _ := svc.CreateLyricAnnotation(owner, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note"})
 
 	_, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{Content: "broken", Format: "plain"})
 	assertAppErrorCode(t, err, "music.annotation_anchor_conflict")

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 
@@ -47,10 +48,59 @@ func openLyricsPostgresTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.User{}, &model.Song{}, &model.MusicSongLyric{}, &model.MusicSongLyricLine{},
 		&model.MusicSongLyricVersion{}, &model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
+		&model.Notification{},
 	); err != nil {
 		t.Fatalf("migrate isolated schema: %v", err)
 	}
+	if err := migrations.RunNotificationDMIndexes(db); err != nil {
+		t.Fatalf("create notification indexes: %v", err)
+	}
 	return db
+}
+
+func TestPostgresNeedsRebindNotificationUsesStableUniqueSource(t *testing.T) {
+	db := openLyricsPostgresTestDB(t)
+	editor, song := createLyricsPostgresFixture(t, db)
+	ownerModel := model.User{Username: "pg-owner-" + uuid.NewString(), Email: uuid.NewString() + "@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&ownerModel).Error; err != nil {
+		t.Fatal(err)
+	}
+	owner := authctx.CurrentUser{ID: ownerModel.UUID, Username: ownerModel.Username, Role: authctx.RoleUser}
+	svc := NewService(db)
+	lyrics, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation, err := svc.CreateLyricAnnotation(owner, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{
+		Content: "changed", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{AnnotationID: annotation.ID, Action: "needs_rebind"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rebound, _ := ParseLyricLines("hello again", "", "plain")
+	if _, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{
+		Content: "hello again", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{AnnotationID: annotation.ID, Action: "rebind", LineKey: rebound[0].LineKey, SelectedText: "hello", StartOffset: 0, EndOffset: 5}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{
+		Content: "broken", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{AnnotationID: annotation.ID, Action: "needs_rebind"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var notifications []model.Notification
+	if err := db.Where("recipient_id = ? AND source_type = ? AND source_id = ?", owner.ID, "music_lyrics", annotation.ID).Find(&notifications).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 1 || notifications[0].SourceID != annotation.ID {
+		t.Fatalf("expected one stable notification source, got %#v", notifications)
+	}
 }
 
 func createLyricsPostgresFixture(t *testing.T, db *gorm.DB) (authctx.CurrentUser, model.Song) {
