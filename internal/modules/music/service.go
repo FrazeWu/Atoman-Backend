@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"atoman/internal/model"
@@ -25,6 +26,8 @@ type Service struct {
 	repo                 *Repo
 	s3                   *s3.S3
 	albumImportMultipart albumImportMultipartStore
+	lyricsSaveMu         sync.Mutex
+	lyricsVoteMu         sync.Mutex
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
