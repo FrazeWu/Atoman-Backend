@@ -2,6 +2,8 @@ package migrations
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 
 	"github.com/google/uuid"
@@ -73,15 +75,43 @@ func MigrateToRevisionSystem(db *gorm.DB) error {
 }
 
 func ensureRevisionMigrationSystemUser(tx *gorm.DB) (uuid.UUID, error) {
-	user := model.User{
-		Username:    "system-migration",
-		Email:       "system-migration@atoman.local",
-		Password:    "migration-only",
-		Role:        "admin",
-		DisplayName: "System Migration",
-		IsActive:    true,
+	const systemEmail = "system-migration@atoman.local"
+	var existing model.User
+	err := tx.Unscoped().Where("email = ?", systemEmail).First(&existing).Error
+	if err == nil {
+		if err := tx.Unscoped().Model(&existing).Updates(map[string]any{
+			"password": "migration-only", "role": "admin", "display_name": "System Migration",
+			"is_active": true, "deleted_at": nil,
+		}).Error; err != nil {
+			return uuid.Nil, err
+		}
+		return existing.UUID, nil
 	}
-	if err := tx.Where("username = ?", user.Username).FirstOrCreate(&user).Error; err != nil {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return uuid.Nil, err
+	}
+
+	username := "system-migration"
+	var count int64
+	if err := tx.Unscoped().Model(&model.User{}).Where("username = ?", username).Count(&count).Error; err != nil {
+		return uuid.Nil, err
+	}
+	if count > 0 {
+		for suffix := 1; ; suffix++ {
+			username = fmt.Sprintf("system-migration-internal-%d", suffix)
+			if err := tx.Unscoped().Model(&model.User{}).Where("username = ?", username).Count(&count).Error; err != nil {
+				return uuid.Nil, err
+			}
+			if count == 0 {
+				break
+			}
+		}
+	}
+	user := model.User{
+		Username: username, Email: systemEmail, Password: "migration-only",
+		Role: "admin", DisplayName: "System Migration", IsActive: true,
+	}
+	if err := tx.Create(&user).Error; err != nil {
 		log.Printf("Failed to ensure revision migration system user: %v", err)
 		return uuid.Nil, err
 	}

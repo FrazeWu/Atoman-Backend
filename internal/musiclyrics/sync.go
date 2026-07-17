@@ -12,6 +12,7 @@ import (
 )
 
 // SyncLegacySongLyrics routes legacy writes through current lyrics, parsed lines, and history.
+// Callers must pass a transaction because this function performs multiple dependent writes.
 func SyncLegacySongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, content, editSummary string) error {
 	var lyric model.MusicSongLyric
 	findErr := tx.First(&lyric, "song_id = ?", songID).Error
@@ -47,7 +48,7 @@ func SyncLegacySongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, content, editS
 	if err != nil {
 		return err
 	}
-	if err := markInvalidAnchorsForRebind(tx, songID, lines); err != nil {
+	if err := markInvalidAnchorsForRebind(tx, actorID, songID, lines); err != nil {
 		return err
 	}
 	version := model.MusicSongLyricVersion{
@@ -99,7 +100,7 @@ func replacePlainLines(tx *gorm.DB, lyricID uuid.UUID, parsed []PlainLine) ([]mo
 	return current, nil
 }
 
-func markInvalidAnchorsForRebind(tx *gorm.DB, songID uuid.UUID, lines []model.MusicSongLyricLine) error {
+func markInvalidAnchorsForRebind(tx *gorm.DB, actorID, songID uuid.UUID, lines []model.MusicSongLyricLine) error {
 	lineByID := make(map[uuid.UUID]model.MusicSongLyricLine, len(lines))
 	for _, line := range lines {
 		lineByID[line.ID] = line
@@ -114,6 +115,9 @@ func markInvalidAnchorsForRebind(tx *gorm.DB, songID uuid.UUID, lines []model.Mu
 			continue
 		}
 		if err := tx.Model(&annotation).Update("status", "needs_rebind").Error; err != nil {
+			return err
+		}
+		if err := UpsertRebindNotification(tx, actorID, songID, annotation); err != nil {
 			return err
 		}
 	}
