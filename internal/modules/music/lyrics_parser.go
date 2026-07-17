@@ -24,8 +24,8 @@ func ParseLyricLines(content, translation, format string) ([]ParsedLyricLine, er
 }
 
 func parsePlainLyricLines(content, translation string) []ParsedLyricLine {
-	contentLines := readableLyricLines(content)
-	translationLines := readableLyricLines(translation)
+	contentLines := plainLyricLines(content)
+	translationLines := plainLyricLines(translation)
 	lines := make([]ParsedLyricLine, 0, len(contentLines))
 
 	for index, text := range contentLines {
@@ -92,13 +92,17 @@ func parseTimedLRCLines(content string) ([]ParsedLyricLine, error) {
 	return lines, nil
 }
 
-func readableLyricLines(content string) []string {
-	lines := make([]string, 0)
-	for _, rawLine := range splitLyricLines(content) {
-		line := strings.TrimSpace(rawLine)
-		if line != "" {
-			lines = append(lines, line)
-		}
+func plainLyricLines(content string) []string {
+	if content == "" {
+		return []string{}
+	}
+
+	lines := splitLyricLines(content)
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	for index := range lines {
+		lines[index] = strings.TrimSpace(lines[index])
 	}
 	return lines
 }

@@ -36,6 +36,65 @@ func TestParseLyricLinesPlainMergesTranslationByLine(t *testing.T) {
 	}
 }
 
+func TestParseLyricLinesPlainKeepsEmptyTranslationPosition(t *testing.T) {
+	lines, err := ParseLyricLines("Hello\nWorld", "你好\n\n世界", "plain")
+	if err != nil {
+		t.Fatalf("parse plain lyrics: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected 2 lines, got %#v", lines)
+	}
+	if lines[0].Translation != "你好" || lines[1].Translation != "" {
+		t.Fatalf("expected translations to stay aligned by physical line, got %#v", lines)
+	}
+}
+
+func TestParseLyricLinesPlainPreservesInternalEmptyContentLine(t *testing.T) {
+	lines, err := ParseLyricLines("Hello\n\nWorld\n", "你好\n\n世界\n", "plain")
+	if err != nil {
+		t.Fatalf("parse plain lyrics: %v", err)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("expected trailing empty item removed and internal empty line kept, got %#v", lines)
+	}
+	if lines[1].LineIndex != 1 || lines[1].Text != "" || lines[1].Translation != "" {
+		t.Fatalf("unexpected internal empty line: %#v", lines[1])
+	}
+	if lines[2].LineIndex != 2 || lines[2].Text != "World" || lines[2].Translation != "世界" {
+		t.Fatalf("unexpected line after internal empty line: %#v", lines[2])
+	}
+}
+
+func TestParseLyricLinesProducesStableLineKeys(t *testing.T) {
+	tests := []struct {
+		name, content, translation, format string
+	}{
+		{name: "plain", content: "Hello\n\nWorld", translation: "你好\n\n世界", format: "plain"},
+		{name: "lrc", content: "[00:01.20]Hello\n[00:02.00]World", translation: "[00:02.00]世界", format: "lrc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			first, err := ParseLyricLines(tt.content, tt.translation, tt.format)
+			if err != nil {
+				t.Fatalf("first parse: %v", err)
+			}
+			second, err := ParseLyricLines(tt.content, tt.translation, tt.format)
+			if err != nil {
+				t.Fatalf("second parse: %v", err)
+			}
+			if len(first) != len(second) {
+				t.Fatalf("line counts differ: %d != %d", len(first), len(second))
+			}
+			for i := range first {
+				if first[i].LineKey != second[i].LineKey {
+					t.Fatalf("line %d key is unstable: %q != %q", i, first[i].LineKey, second[i].LineKey)
+				}
+			}
+		})
+	}
+}
+
 func TestParseLyricLinesLRCParsesMillisecondsAndMergesTranslationByTime(t *testing.T) {
 	lines, err := ParseLyricLines("[00:01.20]Hello", "[00:01.20]你好", "lrc")
 	if err != nil {
