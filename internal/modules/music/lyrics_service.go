@@ -2,6 +2,7 @@ package music
 
 import (
 	"errors"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -287,11 +288,14 @@ func resolveInvalidAnnotationAnchors(tx *gorm.DB, actorID, songID uuid.UUID, lin
 	if err := tx.Where("song_id = ? AND status <> ?", songID, "deleted").Find(&annotations).Error; err != nil {
 		return err
 	}
+	invalid := make([]model.MusicLyricAnnotation, 0)
+	unresolvedIDs := make([]string, 0)
 	for _, annotation := range annotations {
 		line, exists := lineByID[annotation.LineID]
 		if exists && ValidateAnnotationAnchor(line.Text, annotation.StartOffset, annotation.EndOffset, annotation.SelectedText) == nil {
 			continue
 		}
+		invalid = append(invalid, annotation)
 		resolution, ok := resolutionByID[annotation.ID]
 		if annotation.Status == "needs_rebind" && !ok {
 			continue
@@ -299,9 +303,23 @@ func resolveInvalidAnnotationAnchors(tx *gorm.DB, actorID, songID uuid.UUID, lin
 		if autoNeedsRebind && annotation.Status == "active" && !ok {
 			resolution = AnnotationResolutionInput{AnnotationID: annotation.ID, Action: "needs_rebind"}
 			ok = true
+			resolutionByID[annotation.ID] = resolution
 		}
 		if !ok {
-			return apperr.Conflict("music.annotation_anchor_conflict", "Annotation anchor must be resolved")
+			unresolvedIDs = append(unresolvedIDs, annotation.ID.String())
+		}
+	}
+	if len(unresolvedIDs) > 0 {
+		sort.Strings(unresolvedIDs)
+		conflict := apperr.Conflict("music.annotation_anchor_conflict", "Annotation anchor must be resolved")
+		conflict.Details["annotation_ids"] = unresolvedIDs
+		return conflict
+	}
+
+	for _, annotation := range invalid {
+		resolution, ok := resolutionByID[annotation.ID]
+		if annotation.Status == "needs_rebind" && !ok {
+			continue
 		}
 		switch resolution.Action {
 		case "needs_rebind":

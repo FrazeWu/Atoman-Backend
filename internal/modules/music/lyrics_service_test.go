@@ -2,6 +2,7 @@ package music
 
 import (
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -435,6 +436,56 @@ func TestSaveSongLyricsAnchorConflictRollsBackAndRebindSucceeds(t *testing.T) {
 	}
 	if rebound.Status != "active" || rebound.SelectedText != "😀" || rebound.StartOffset != 12 || rebound.EndOffset != 14 {
 		t.Fatalf("unexpected rebound annotation: %#v", rebound)
+	}
+}
+
+func TestSaveSongLyricsAnchorConflictReportsAllUnresolvedAnnotationsBeforeResolving(t *testing.T) {
+	svc, db, user, song := newLyricsTestService(t)
+	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "alpha beta", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+		LineID: lyrics.Lines[0].ID, SelectedText: "alpha", StartOffset: 0, EndOffset: 5, Body: "first",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+		LineID: lyrics.Lines[0].ID, SelectedText: "beta", StartOffset: 6, EndOffset: 10, Body: "second",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Content: "changed", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{AnnotationID: first.ID, Action: "needs_rebind"}},
+	})
+	var appErr *apperr.AppError
+	if !errors.As(err, &appErr) || appErr.Code != "music.annotation_anchor_conflict" {
+		t.Fatalf("expected annotation conflict, got %v", err)
+	}
+	wantIDs := []string{second.ID.String()}
+	if got, ok := appErr.Details["annotation_ids"].([]string); !ok || !slices.Equal(got, wantIDs) {
+		t.Fatalf("unexpected unresolved IDs: %#v", appErr.Details)
+	}
+	var stored model.MusicLyricAnnotation
+	if err := db.First(&stored, "id = ?", first.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "active" {
+		t.Fatalf("resolution ran before unresolved anchors were reported: %#v", stored)
+	}
+
+	_, err = svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "changed", Format: "plain"})
+	if !errors.As(err, &appErr) {
+		t.Fatalf("expected annotation conflict, got %v", err)
+	}
+	wantIDs = []string{first.ID.String(), second.ID.String()}
+	slices.Sort(wantIDs)
+	if got, ok := appErr.Details["annotation_ids"].([]string); !ok || !slices.Equal(got, wantIDs) {
+		t.Fatalf("unexpected complete conflict IDs: got %#v want %#v", appErr.Details, wantIDs)
 	}
 }
 

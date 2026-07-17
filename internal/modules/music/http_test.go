@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -213,12 +214,22 @@ func TestRegisterRoutesMusicLyricsRejectsInvalidRequestsAndCrossSongAccess(t *te
 	if err := json.Unmarshal(create.Body.Bytes(), &annotation); err != nil {
 		t.Fatalf("decode annotation: %v", err)
 	}
+	createSecond := performMusicJSONRequest(t, r, http.MethodPost, basePath+"/annotations", `{"line_id":"`+lyrics.Data.Lines[0].ID.String()+`","selected_text":"world","start_offset":6,"end_offset":11,"body":"second note"}`)
+	if createSecond.Code != http.StatusCreated {
+		t.Fatalf("create second annotation: %d: %s", createSecond.Code, createSecond.Body.String())
+	}
+	var secondAnnotation struct {
+		Data MusicLyricAnnotationDTO `json:"data"`
+	}
+	if err := json.Unmarshal(createSecond.Body.Bytes(), &secondAnnotation); err != nil {
+		t.Fatalf("decode second annotation: %v", err)
+	}
 	otherItemPath := "/api/v1/music/songs/" + otherSong.ID.String() + "/lyrics/annotations/" + annotation.Data.ID.String()
 	assertMusicHTTPError(t, performMusicJSONRequest(t, r, http.MethodPatch, otherItemPath, `{"body":"cross song"}`), http.StatusNotFound, "music.annotation_not_found")
 	assertMusicHTTPError(t, performMusicJSONRequest(t, r, http.MethodPost, otherItemPath+"/votes", `{"vote":"up"}`), http.StatusNotFound, "music.annotation_not_found")
 	assertMusicHTTPError(t, performMusicJSONRequest(t, r, http.MethodDelete, otherItemPath, ""), http.StatusNotFound, "music.annotation_not_found")
 
-	conflict := performMusicJSONRequest(t, r, http.MethodPut, basePath, `{"content":"goodbye world","format":"plain","annotation_resolutions":[]}`)
+	conflict := performMusicJSONRequest(t, r, http.MethodPut, basePath, `{"content":"goodbye earth","format":"plain","annotation_resolutions":[]}`)
 	assertMusicHTTPError(t, conflict, http.StatusConflict, "music.annotation_anchor_conflict")
 	var conflictBody struct {
 		Error struct {
@@ -227,6 +238,17 @@ func TestRegisterRoutesMusicLyricsRejectsInvalidRequestsAndCrossSongAccess(t *te
 	}
 	if err := json.Unmarshal(conflict.Body.Bytes(), &conflictBody); err != nil || conflictBody.Error.Details == nil {
 		t.Fatalf("expected recognizable conflict details object: %s, %v", conflict.Body.String(), err)
+	}
+	wantAnnotationIDs := []string{annotation.Data.ID.String(), secondAnnotation.Data.ID.String()}
+	slices.Sort(wantAnnotationIDs)
+	gotAnnotationIDs, ok := conflictBody.Error.Details["annotation_ids"].([]any)
+	if !ok || len(gotAnnotationIDs) != len(wantAnnotationIDs) {
+		t.Fatalf("unexpected conflict annotation IDs: %#v", conflictBody.Error.Details)
+	}
+	for index, wantID := range wantAnnotationIDs {
+		if gotAnnotationIDs[index] != wantID {
+			t.Fatalf("unexpected conflict annotation IDs: got %#v want %#v", gotAnnotationIDs, wantAnnotationIDs)
+		}
 	}
 
 	badAnnotationID := performMusicJSONRequest(t, r, http.MethodPatch, basePath+"/annotations/not-a-uuid", `{"body":"x"}`)
