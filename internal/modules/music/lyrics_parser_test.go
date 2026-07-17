@@ -2,6 +2,7 @@ package music
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"atoman/internal/platform/apperr"
@@ -95,6 +96,37 @@ func TestParseLyricLinesProducesStableLineKeys(t *testing.T) {
 	}
 }
 
+func TestParseLyricLinesPlainKeysSurviveDifferentLineInsertion(t *testing.T) {
+	original, err := ParseLyricLines("A\nB", "", "plain")
+	if err != nil {
+		t.Fatalf("parse original lyrics: %v", err)
+	}
+	inserted, err := ParseLyricLines("X\nA\nB", "", "plain")
+	if err != nil {
+		t.Fatalf("parse lyrics with inserted line: %v", err)
+	}
+	if original[0].LineKey != inserted[1].LineKey || original[1].LineKey != inserted[2].LineKey {
+		t.Fatalf("expected A/B keys to survive insertion: original=%#v inserted=%#v", original, inserted)
+	}
+}
+
+func TestParseLyricLinesPlainRepeatedTextGetsDistinctStableKeys(t *testing.T) {
+	first, err := ParseLyricLines("A\nA", "", "plain")
+	if err != nil {
+		t.Fatalf("first parse: %v", err)
+	}
+	second, err := ParseLyricLines("A\nA", "", "plain")
+	if err != nil {
+		t.Fatalf("second parse: %v", err)
+	}
+	if first[0].LineKey == first[1].LineKey {
+		t.Fatalf("expected repeated text to have distinct keys, got %#v", first)
+	}
+	if first[0].LineKey != second[0].LineKey || first[1].LineKey != second[1].LineKey {
+		t.Fatalf("expected repeated text keys to be stable: first=%#v second=%#v", first, second)
+	}
+}
+
 func TestParseLyricLinesLRCParsesMillisecondsAndMergesTranslationByTime(t *testing.T) {
 	lines, err := ParseLyricLines("[00:01.20]Hello", "[00:01.20]你好", "lrc")
 	if err != nil {
@@ -139,6 +171,24 @@ func TestParseLyricLinesHandlesCRLF(t *testing.T) {
 	}
 }
 
+func TestParseLyricLinesHandlesBareCarriageReturns(t *testing.T) {
+	plain, err := ParseLyricLines("Hello\rWorld\r", "你好\r世界\r", "plain")
+	if err != nil {
+		t.Fatalf("parse bare CR plain lyrics: %v", err)
+	}
+	if len(plain) != 2 || plain[1].Text != "World" || plain[1].Translation != "世界" {
+		t.Fatalf("unexpected bare CR plain lines: %#v", plain)
+	}
+
+	lrc, err := ParseLyricLines("[00:01.00]Hello\r[00:02.00]World\r", "", "lrc")
+	if err != nil {
+		t.Fatalf("parse bare CR LRC lyrics: %v", err)
+	}
+	if len(lrc) != 2 || lrc[1].Text != "World" {
+		t.Fatalf("unexpected bare CR LRC lines: %#v", lrc)
+	}
+}
+
 func TestParseLyricLinesEmptyContent(t *testing.T) {
 	for _, format := range []string{"plain", "lrc"} {
 		lines, err := ParseLyricLines("", "", format)
@@ -158,6 +208,12 @@ func TestParseLyricLinesRejectsInvalidNonEmptyLRCLine(t *testing.T) {
 
 func TestParseLyricLinesRejectsInvalidLRCSeconds(t *testing.T) {
 	_, err := ParseLyricLines("[00:60.00]Invalid", "", "lrc")
+	assertValidationError(t, err)
+}
+
+func TestParseLyricLinesRejectsLRCMinutesOutsideIntegerRange(t *testing.T) {
+	minutes := strings.Repeat("9", 100)
+	_, err := ParseLyricLines("["+minutes+":01.00]Invalid", "", "lrc")
 	assertValidationError(t, err)
 }
 

@@ -27,10 +27,14 @@ func parsePlainLyricLines(content, translation string) []ParsedLyricLine {
 	contentLines := plainLyricLines(content)
 	translationLines := plainLyricLines(translation)
 	lines := make([]ParsedLyricLine, 0, len(contentLines))
+	fingerprintOccurrences := make(map[string]int)
 
 	for index, text := range contentLines {
+		fingerprint := lyricTextFingerprint(text)
+		occurrence := fingerprintOccurrences[fingerprint]
+		fingerprintOccurrences[fingerprint] = occurrence + 1
 		line := ParsedLyricLine{
-			LineKey:   fmt.Sprintf("plain:%d:%s", index, lyricTextFingerprint(text)),
+			LineKey:   fmt.Sprintf("plain:%s:%d", fingerprint, occurrence),
 			LineIndex: index,
 			Text:      text,
 		}
@@ -75,13 +79,24 @@ func parseTimedLRCLines(content string) ([]ParsedLyricLine, error) {
 		if matches == nil {
 			return nil, lyricValidationError("each LRC line must contain a valid timestamp")
 		}
-		minutes, _ := strconv.Atoi(matches[1])
-		seconds, _ := strconv.Atoi(matches[2])
+		minutes, err := strconv.Atoi(matches[1])
+		if err != nil {
+			return nil, lyricValidationError("LRC minutes are invalid")
+		}
+		seconds, err := strconv.Atoi(matches[2])
+		if err != nil {
+			return nil, lyricValidationError("LRC seconds are invalid")
+		}
 		if seconds >= 60 {
 			return nil, lyricValidationError("LRC seconds must be less than 60")
 		}
 		milliseconds := fractionMilliseconds(matches[3])
-		timeMS := (minutes*60+seconds)*1000 + milliseconds
+		maxInt := int(^uint(0) >> 1)
+		remainingMS := seconds*1000 + milliseconds
+		if minutes > (maxInt-remainingMS)/60000 {
+			return nil, lyricValidationError("LRC timestamp is too large")
+		}
+		timeMS := minutes*60000 + remainingMS
 		text := strings.TrimSpace(matches[4])
 		lines = append(lines, ParsedLyricLine{
 			LineKey: fmt.Sprintf("lrc:%d:%s", timeMS, lyricTextFingerprint(text)),
@@ -108,7 +123,8 @@ func plainLyricLines(content string) []string {
 }
 
 func splitLyricLines(content string) []string {
-	return strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
+	normalized := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(content)
+	return strings.Split(normalized, "\n")
 }
 
 func fractionMilliseconds(fraction string) int {
