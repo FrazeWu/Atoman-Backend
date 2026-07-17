@@ -222,10 +222,20 @@ func TestParseLyricLinesRejectsUnknownFormat(t *testing.T) {
 	assertValidationError(t, err)
 }
 
-func TestValidateAnnotationAnchorUsesRuneOffsets(t *testing.T) {
+func TestValidateAnnotationAnchorUsesUTF16OffsetsForChinese(t *testing.T) {
 	if err := ValidateAnnotationAnchor("你好吗 world", 1, 3, "好吗"); err != nil {
 		t.Fatalf("validate Unicode anchor: %v", err)
 	}
+}
+
+func TestValidateAnnotationAnchorUsesUTF16OffsetsForEmoji(t *testing.T) {
+	if err := ValidateAnnotationAnchor("a😀b", 1, 3, "😀"); err != nil {
+		t.Fatalf("validate emoji anchor: %v", err)
+	}
+}
+
+func TestValidateAnnotationAnchorRejectsSplitSurrogatePair(t *testing.T) {
+	assertValidationError(t, ValidateAnnotationAnchor("a😀b", 1, 2, "😀"))
 }
 
 func TestValidateAnnotationAnchorRejectsInvalidAnchors(t *testing.T) {

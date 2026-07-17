@@ -123,15 +123,15 @@ func TestSaveSongLyricsAnchorConflictRollsBackAndRebindSucceeds(t *testing.T) {
 		t.Fatalf("save was not rolled back: %#v, %v", current, err)
 	}
 
-	reboundLines, err := ParseLyricLines("goodbye\nreplacement world", "", "plain")
+	reboundLines, err := ParseLyricLines("goodbye\nreplacement 😀", "", "plain")
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
-		Content: "goodbye\nreplacement world", Format: "plain",
+		Content: "goodbye\nreplacement 😀", Format: "plain",
 		AnnotationResolutions: []AnnotationResolutionInput{{
 			AnnotationID: annotation.ID, Action: "rebind", LineKey: reboundLines[1].LineKey,
-			SelectedText: "world", StartOffset: 12, EndOffset: 17,
+			SelectedText: "😀", StartOffset: 12, EndOffset: 14,
 		}},
 	})
 	if err != nil {
@@ -141,7 +141,7 @@ func TestSaveSongLyricsAnchorConflictRollsBackAndRebindSucceeds(t *testing.T) {
 	if err := db.First(&rebound, "id = ?", annotation.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if rebound.Status != "active" || rebound.SelectedText != "world" || rebound.StartOffset != 12 {
+	if rebound.Status != "active" || rebound.SelectedText != "😀" || rebound.StartOffset != 12 || rebound.EndOffset != 14 {
 		t.Fatalf("unexpected rebound annotation: %#v", rebound)
 	}
 }
@@ -167,7 +167,7 @@ func TestSaveSongLyricsDoesNotReopenResolvedNeedsRebindConflict(t *testing.T) {
 
 func TestCreateLyricAnnotationValidatesAnchorAndCurrentSongLine(t *testing.T) {
 	svc, _, user, song := newLyricsTestService(t)
-	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "你好吗", Format: "plain"})
+	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "你好吗\na😀b", Format: "plain"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,6 +176,12 @@ func TestCreateLyricAnnotationValidatesAnchorAndCurrentSongLine(t *testing.T) {
 	})
 	if err != nil || created.LineID != lyrics.Lines[0].ID {
 		t.Fatalf("create unicode annotation: %#v, %v", created, err)
+	}
+	emoji, err := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+		LineID: lyrics.Lines[1].ID, SelectedText: "😀", StartOffset: 1, EndOffset: 3, Body: "emoji",
+	})
+	if err != nil || emoji.LineID != lyrics.Lines[1].ID {
+		t.Fatalf("create emoji annotation: %#v, %v", emoji, err)
 	}
 	_, err = svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
 		LineID: lyrics.Lines[0].ID, SelectedText: "吗", StartOffset: 1, EndOffset: 2, Body: "bad",

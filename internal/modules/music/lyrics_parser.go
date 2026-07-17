@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	"atoman/internal/platform/apperr"
 )
@@ -146,14 +147,28 @@ func lyricTextFingerprint(text string) string {
 }
 
 func ValidateAnnotationAnchor(text string, startOffset, endOffset int, selectedText string) error {
-	runes := []rune(text)
-	if startOffset < 0 || startOffset >= endOffset || endOffset > len(runes) {
+	units := utf16.Encode([]rune(text))
+	if startOffset < 0 || startOffset >= endOffset || endOffset > len(units) ||
+		splitsUTF16SurrogatePair(units, startOffset) || splitsUTF16SurrogatePair(units, endOffset) {
 		return lyricValidationError("annotation offsets are invalid")
 	}
-	if string(runes[startOffset:endOffset]) != selectedText {
+	selectedUnits := utf16.Encode([]rune(selectedText))
+	anchorUnits := units[startOffset:endOffset]
+	if len(anchorUnits) != len(selectedUnits) {
 		return lyricValidationError("selected_text does not match the lyric text")
 	}
+	for index := range anchorUnits {
+		if anchorUnits[index] != selectedUnits[index] {
+			return lyricValidationError("selected_text does not match the lyric text")
+		}
+	}
 	return nil
+}
+
+func splitsUTF16SurrogatePair(units []uint16, offset int) bool {
+	return offset > 0 && offset < len(units) &&
+		units[offset-1] >= 0xD800 && units[offset-1] <= 0xDBFF &&
+		units[offset] >= 0xDC00 && units[offset] <= 0xDFFF
 }
 
 func lyricValidationError(message string) error {
