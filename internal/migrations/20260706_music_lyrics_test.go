@@ -6,7 +6,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/testdb"
 
-	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func TestRunMusicLyricsMigrationCreatesSchema(t *testing.T) {
@@ -15,6 +15,9 @@ func TestRunMusicLyricsMigrationCreatesSchema(t *testing.T) {
 
 	if err := RunMusicLyricsMigration(db); err != nil {
 		t.Fatalf("run music lyrics migration: %v", err)
+	}
+	if err := RunMusicLyricsMigration(db); err != nil {
+		t.Fatalf("rerun music lyrics migration: %v", err)
 	}
 
 	for _, table := range []string{
@@ -58,15 +61,78 @@ func TestRunMusicLyricsMigrationEnforcesEnums(t *testing.T) {
 		t.Fatalf("run music lyrics migration: %v", err)
 	}
 
-	songID := uuid.New()
-	userID := uuid.New()
-	if err := db.Create(&model.MusicSongLyric{SongID: songID, Format: "invalid", UpdatedBy: userID}).Error; err == nil {
+	_, _, lyric, _, annotation := createMusicLyricTestFixture(t, db)
+	vote := model.MusicLyricAnnotationVote{AnnotationID: annotation.ID, UserID: annotation.CreatedBy, Vote: "up"}
+	if err := db.Create(&vote).Error; err != nil {
+		t.Fatalf("create annotation vote: %v", err)
+	}
+
+	if err := db.Model(&lyric).Update("format", "invalid").Error; err == nil {
 		t.Fatal("expected invalid lyric format to be rejected")
 	}
-	if err := db.Create(&model.MusicLyricAnnotation{SongID: songID, LineID: uuid.New(), CreatedBy: userID, Status: "invalid"}).Error; err == nil {
+	if err := db.Model(&annotation).Update("status", "invalid").Error; err == nil {
 		t.Fatal("expected invalid annotation status to be rejected")
 	}
-	if err := db.Create(&model.MusicLyricAnnotationVote{AnnotationID: uuid.New(), UserID: userID, Vote: "invalid"}).Error; err == nil {
+	if err := db.Model(&vote).Update("vote", "invalid").Error; err == nil {
 		t.Fatal("expected invalid annotation vote to be rejected")
 	}
+}
+
+func TestRunMusicLyricsMigrationAllowsVoteAfterSoftDelete(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Song{})
+
+	if err := RunMusicLyricsMigration(db); err != nil {
+		t.Fatalf("run music lyrics migration: %v", err)
+	}
+
+	user, _, _, _, annotation := createMusicLyricTestFixture(t, db)
+	first := model.MusicLyricAnnotationVote{AnnotationID: annotation.ID, UserID: user.UUID, Vote: "up"}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("create initial annotation vote: %v", err)
+	}
+	if err := db.Delete(&first).Error; err != nil {
+		t.Fatalf("soft delete annotation vote: %v", err)
+	}
+
+	second := model.MusicLyricAnnotationVote{AnnotationID: annotation.ID, UserID: user.UUID, Vote: "down"}
+	if err := db.Create(&second).Error; err != nil {
+		t.Fatalf("recreate annotation vote after soft delete: %v", err)
+	}
+}
+
+func createMusicLyricTestFixture(t *testing.T, db *gorm.DB) (model.User, model.Song, model.MusicSongLyric, model.MusicSongLyricLine, model.MusicLyricAnnotation) {
+	t.Helper()
+
+	user := model.User{Username: "lyrics-migration-user", Email: "lyrics-migration@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	song := model.Song{Title: "Lyrics Migration Song", AudioURL: "https://example.com/song.mp3"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	lyric := model.MusicSongLyric{SongID: song.ID, Content: "line", Format: "plain", UpdatedBy: user.UUID}
+	if err := db.Create(&lyric).Error; err != nil {
+		t.Fatalf("create lyric: %v", err)
+	}
+	line := model.MusicSongLyricLine{LyricID: lyric.ID, LineKey: "line-1", LineIndex: 0, Text: "line"}
+	if err := db.Create(&line).Error; err != nil {
+		t.Fatalf("create lyric line: %v", err)
+	}
+	annotation := model.MusicLyricAnnotation{
+		SongID:       song.ID,
+		LineID:       line.ID,
+		SelectedText: "line",
+		StartOffset:  0,
+		EndOffset:    4,
+		Body:         "annotation",
+		CreatedBy:    user.UUID,
+		Status:       "active",
+	}
+	if err := db.Create(&annotation).Error; err != nil {
+		t.Fatalf("create annotation: %v", err)
+	}
+
+	return user, song, lyric, line, annotation
 }
