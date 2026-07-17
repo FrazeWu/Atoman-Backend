@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -223,6 +226,54 @@ func TestListTopicsSupportsFiltersSortAndPagination(t *testing.T) {
 	listed, _ = decodeForumData[[]model.ForumTopic](t, response)
 	if len(listed) != 3 || listed[0].Title != "Other" {
 		t.Fatalf("unexpected featured result: %#v", listed)
+	}
+}
+
+func TestListTopicsUsesStableIDTieBreakerAcrossPages(t *testing.T) {
+	router, db, user, category := newForumHTTPTestRouter(t)
+	createdAt := time.Date(2026, 7, 1, 10, 0, 0, 0, time.UTC)
+	ids := []uuid.UUID{
+		uuid.MustParse("00000000-0000-0000-0000-000000000001"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000002"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000003"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000004"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000005"),
+		uuid.MustParse("00000000-0000-0000-0000-000000000006"),
+	}
+	for index, id := range ids {
+		topic := model.ForumTopic{
+			Base: model.Base{ID: id, CreatedAt: createdAt}, UserID: user.UUID, CategoryID: category.ID,
+			Title: "same rank " + id.String(), Content: "body", LikeCount: 1, Featured: true,
+		}
+		if err := db.Create(&topic).Error; err != nil {
+			t.Fatalf("create tied topic %d: %v", index, err)
+		}
+	}
+
+	for _, sortName := range []string{"latest", "top", "active", "featured"} {
+		t.Run(sortName, func(t *testing.T) {
+			got := make([]uuid.UUID, 0, len(ids))
+			seen := make(map[uuid.UUID]struct{}, len(ids))
+			for page := 1; page <= 3; page++ {
+				response := performForumRequest(t, router, http.MethodGet, "/api/v1/forum/topics?sort="+sortName+"&page="+strconv.Itoa(page)+"&page_size=2", nil)
+				listed, envelope := decodeForumData[[]model.ForumTopic](t, response)
+				if envelope.Meta.Total != int64(len(ids)) || envelope.Meta.Page != page || envelope.Meta.PageSize != 2 || len(listed) != 2 {
+					t.Fatalf("unexpected page %d: data=%#v meta=%#v", page, listed, envelope.Meta)
+				}
+				for _, topic := range listed {
+					if _, exists := seen[topic.ID]; exists {
+						t.Fatalf("topic %s overlaps pages", topic.ID)
+					}
+					seen[topic.ID] = struct{}{}
+					got = append(got, topic.ID)
+				}
+			}
+
+			expected := []uuid.UUID{ids[5], ids[4], ids[3], ids[2], ids[1], ids[0]}
+			if !slices.Equal(got, expected) {
+				t.Fatalf("expected complete stable id-desc pages %v, got %v", expected, got)
+			}
+		})
 	}
 }
 

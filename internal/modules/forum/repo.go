@@ -212,13 +212,13 @@ func (r *Repo) TagExists(user authctx.CurrentUser, tag string) (bool, error) {
 func topicOrder(sort string) string {
 	switch sort {
 	case "top":
-		return "like_count DESC, " + forumCommentCountExpr + " DESC, forum_topics.created_at DESC"
+		return "like_count DESC, " + forumCommentCountExpr + " DESC, forum_topics.created_at DESC, forum_topics.id DESC"
 	case "active":
-		return forumLastCommentAtExpr + " DESC"
+		return forumLastCommentAtExpr + " DESC, forum_topics.created_at DESC, forum_topics.id DESC"
 	case "featured":
-		return "featured DESC, created_at DESC"
+		return "featured DESC, forum_topics.created_at DESC, forum_topics.id DESC"
 	default:
-		return "created_at DESC"
+		return "forum_topics.created_at DESC, forum_topics.id DESC"
 	}
 }
 
