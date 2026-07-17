@@ -89,6 +89,9 @@ func runMigrations(db *gorm.DB) error {
 	if err := migrations.RunUnifiedCommentIndexes(db); err != nil {
 		return fmt.Errorf("unified comment indexes migration: %w", err)
 	}
+	if err := migrations.MigrateLegacyForumReplies(db); err != nil {
+		return fmt.Errorf("legacy forum replies migration: %w", err)
+	}
 
 	if err := migrations.RunChannelDefaultSelectionMigration(db); err != nil {
 		return fmt.Errorf("channel default selection migration: %w", err)
@@ -120,6 +123,10 @@ func runMigrations(db *gorm.DB) error {
 
 	if err := migrations.RunForumDraftUniqueIndex(db); err != nil {
 		return fmt.Errorf("forum draft unique index migration: %w", err)
+	}
+
+	if err := migrations.RunForumSearchIndexes(db); err != nil {
+		return fmt.Errorf("forum search indexes migration: %w", err)
 	}
 
 	if err := migrations.RunRevisionUniqueIndexes(db); err != nil {
@@ -226,8 +233,13 @@ func migrateSchema(db *gorm.DB) error {
 		&model.ForumBookmark{},
 		&model.ForumFollow{},
 		&model.ForumReport{},
+		&model.ForumUserModerationAction{},
+		&model.ForumUserTrust{},
 		&model.CategoryRequest{},
 		&model.ForumModeratorAssignment{},
+		&model.ForumGroup{},
+		&model.ForumGroupMember{},
+		&model.ForumCategoryPermission{},
 		&model.Video{},
 		&model.VideoBookmark{},
 		&model.VideoProcessingJob{},
@@ -256,6 +268,9 @@ func migrateSchema(db *gorm.DB) error {
 	}
 	if !db.Migrator().HasTable(&model.ForumDraft{}) {
 		models = append(models, &model.ForumDraft{})
+	}
+	if err := migrations.RunForumReportUniqueIndex(db); err != nil {
+		return fmt.Errorf("forum report unique index: %w", err)
 	}
 
 	if err := db.AutoMigrate(models...); err != nil {

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/forum_moderation"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 	"github.com/gin-gonic/gin"
@@ -127,6 +128,34 @@ func TestAuthMiddlewareRejectsInactiveJWTUser(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "Invalid token") {
 		t.Fatalf("expected invalid token response, got %s", w.Body.String())
+	}
+}
+
+func TestForumBanImmediatelyInvalidatesExistingJWT(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Notification{}, &model.AuditLog{}, &model.ForumUserModerationAction{})
+	admin := model.User{Username: "ban-admin", Email: "ban-admin@example.com", Password: "hash", Role: authctx.RoleAdmin, IsActive: true}
+	target := model.User{Username: "ban-target", Email: "ban-target@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&admin).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatal(err)
+	}
+	token := signedMiddlewareAuthTokenForTest(t, target)
+	SetAuthDB(db)
+	t.Cleanup(func() { SetAuthDB(nil) })
+	if w := performAuthRequest("Bearer " + token); w.Code != http.StatusOK {
+		t.Fatalf("expected token valid before ban, got %d", w.Code)
+	}
+	svc := forum_moderation.NewService(db)
+	actor := authctx.CurrentUser{ID: admin.UUID, Username: admin.Username, Role: admin.Role}
+	if _, err := svc.ApplyUserAction(actor, target.UUID, forum_moderation.UserActionRequest{Action: "ban", Reason: "违规"}); err != nil {
+		t.Fatal(err)
+	}
+	if w := performAuthRequest("Bearer " + token); w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 after ban, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

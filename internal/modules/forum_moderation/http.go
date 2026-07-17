@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"atoman/internal/model"
-	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -19,6 +18,51 @@ type Handler struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
+	registerLegacyRoutes(group, h)
+	group.GET("/user-actions", h.listUserActions)
+	group.GET("/users", h.listUsers)
+	group.POST("/users/:userID/actions", h.applyUserAction)
+	group.GET("/moderators", h.listModeratorAssignments)
+	group.POST("/moderators", h.createModeratorAssignment)
+	group.PUT("/moderators/:assignmentID", h.updateModeratorAssignment)
+	group.DELETE("/moderators/:assignmentID", h.deleteModeratorAssignment)
+}
+
+// listUsers godoc
+// @Summary 搜索论坛管理用户
+// @Description 搜索可执行论坛管理操作的用户列表，仅管理员和站点所有者可访问。
+// @Tags forum-moderation
+// @Produce json
+// @Param q query string false "用户名或显示名称"
+// @Param page query int false "页码" default(1)
+// @Param page_size query int false "每页数量" default(20)
+// @Success 200 {object} handlers.ForumModerationUserListResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/forum/moderation/users [get]
+func (h *Handler) listUsers(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	users, total, err := h.service.ListUsers(user, c.Query("q"), page, pageSize)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, users, page, pageSize, total)
+}
+
+func RegisterLegacyRoutes(group *gin.RouterGroup, service *Service) {
+	registerLegacyRoutes(group, &Handler{service: service})
+}
+
+func registerLegacyRoutes(group *gin.RouterGroup, h *Handler) {
 	group.POST("/topics/:topicID/close", h.lockTopic)
 	group.POST("/topics/:topicID/feature", h.pinTopic)
 	group.DELETE("/topics/:topicID/feature", h.unpinTopic)
@@ -35,10 +79,84 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/reports/:reportID/resolve", h.resolveReport)
 	group.POST("/category-requests/:requestID/approve", h.approveCategoryRequest)
 	group.POST("/category-requests/:requestID/reject", h.rejectCategoryRequest)
-	group.GET("/moderators", h.listModeratorAssignments)
-	group.POST("/moderators", h.createModeratorAssignment)
-	group.PUT("/moderators/:assignmentID", h.updateModeratorAssignment)
-	group.DELETE("/moderators/:assignmentID", h.deleteModeratorAssignment)
+}
+
+// listUserActions godoc
+// @Summary 获取论坛用户管理记录
+// @Description 返回指定用户的警告、禁言和封禁操作记录，仅管理员和站点所有者可访问。
+// @Tags forum-moderation
+// @Produce json
+// @Param user_id query string true "用户 UUID"
+// @Param page query int false "页码" default(1)
+// @Param page_size query int false "每页数量" default(20)
+// @Success 200 {object} handlers.ForumUserActionListResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/forum/moderation/user-actions [get]
+func (h *Handler) listUserActions(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	userID, err := parseUUIDParam(c.Query("user_id"), "user_id")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	actions, total, err := h.service.ListUserActions(user, userID, ListUserActionsQuery{Page: page, PageSize: pageSize})
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, actions, page, pageSize, total)
+}
+
+// applyUserAction godoc
+// @Summary 执行论坛用户管理操作
+// @Description 对指定用户执行警告、禁言、解除禁言、封禁或解除封禁，仅管理员和站点所有者可访问。
+// @Tags forum-moderation
+// @Accept json
+// @Produce json
+// @Param userID path string true "用户 UUID"
+// @Param input body handlers.ForumUserActionInput true "管理操作"
+// @Success 201 {object} handlers.ForumUserActionResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 409 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/forum/moderation/users/{userID}/actions [post]
+func (h *Handler) applyUserAction(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	userID, err := parseUUIDParam(c.Param("userID"), "userID")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var req UserActionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	action, err := h.service.ApplyUserAction(user, userID, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, action)
 }
 
 func (h *Handler) lockTopic(c *gin.Context) {
@@ -65,6 +183,21 @@ func (h *Handler) restoreTopic(c *gin.Context) {
 	h.handleTopicAction(c, h.service.RestoreTopic)
 }
 
+// listReports godoc
+// @Summary 获取论坛举报列表
+// @Description 按状态分页返回论坛举报，仅管理员和站点所有者可访问。
+// @Tags forum-moderation
+// @Produce json
+// @Param status query string false "举报状态" Enums(open,resolved,all) default(open)
+// @Param page query int false "页码" default(1)
+// @Param page_size query int false "每页数量" default(20)
+// @Success 200 {object} handlers.ForumReportListResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/forum/moderation/reports [get]
 func (h *Handler) listReports(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -102,7 +235,7 @@ func (h *Handler) createReport(c *gin.Context) {
 	}
 	targetID, err := parseUUIDParam(raw.TargetID, "target_id")
 	if err != nil {
-		httpx.Error(c, comment.AppError(err))
+		httpx.Error(c, err)
 		return
 	}
 	report, err := h.service.CreateReport(user, CreateReportRequest{
@@ -112,7 +245,7 @@ func (h *Handler) createReport(c *gin.Context) {
 		Note:       raw.Note,
 	})
 	if err != nil {
-		httpx.Error(c, comment.AppError(err))
+		httpx.Error(c, err)
 		return
 	}
 	httpx.OK(c, http.StatusCreated, report)
@@ -152,6 +285,24 @@ func (h *Handler) reviewCategoryRequestLegacy(c *gin.Context) {
 	}
 }
 
+// resolveReport godoc
+// @Summary 处理论坛举报
+// @Description 标记举报为已处理并记录处理备注。
+// @Tags forum-moderation
+// @Accept json
+// @Produce json
+// @Param reportID path string true "举报 UUID"
+// @Param input body handlers.ForumResolveReportInput false "处理备注"
+// @Success 200 {object} handlers.ForumReportResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/forum/reports/{reportID}/resolve [post]
+// @Router /api/v1/forum/moderation/reports/{reportID}/resolve [post]
 func (h *Handler) resolveReport(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {

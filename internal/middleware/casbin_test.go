@@ -121,3 +121,50 @@ func TestCasbinMiddlewareLetsUserWebSocketReachRouteAuth(t *testing.T) {
 		t.Fatalf("expected user websocket route to pass Casbin and handle its own token, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestCasbinMiddlewareModeratorInheritsUserButNotAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	policyFile := t.TempDir() + "/policy.csv"
+	if err := os.WriteFile(policyFile, nil, 0o600); err != nil {
+		t.Fatalf("create policy file: %v", err)
+	}
+	var err error
+	Enforcer, err = casbin.NewEnforcer(testCasbinModel(t), fileadapter.NewAdapter(policyFile))
+	if err != nil {
+		t.Fatalf("create enforcer: %v", err)
+	}
+	initDefaultPolicies()
+	if _, err := Enforcer.AddPolicy("admin", "/admin-only", "POST"); err != nil {
+		t.Fatalf("add admin-only policy: %v", err)
+	}
+
+	routerFor := func(role string) *gin.Engine {
+		r := gin.New()
+		r.Use(func(c *gin.Context) {
+			c.Set("role", role)
+			c.Next()
+		})
+		r.Use(CasbinMiddleware())
+		r.POST("/api/v1/forum/topics", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+		r.POST("/admin-only", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+		return r
+	}
+
+	w := httptest.NewRecorder()
+	routerFor("moderator").ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/forum/topics", nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected moderator to inherit user API access, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	routerFor("moderator").ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/admin-only", nil))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected moderator not to inherit admin access, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	routerFor("owner").ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/admin-only", nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected owner to retain admin access, got %d: %s", w.Code, w.Body.String())
+	}
+}

@@ -75,6 +75,93 @@ func TestModeratorAssignmentRoutesRejectNonAdminUser(t *testing.T) {
 	}
 }
 
+func TestUserModerationActionRoutes(t *testing.T) {
+	service, admin, normalUser, _, _ := seedForumModerationHTTPUsers(t)
+	router := newForumModerationHTTPRouter(service, &admin)
+
+	body := bytes.NewBufferString(`{"action":"silence","reason":"刷屏","duration_hours":24}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/forum/moderation/users/"+normalUser.ID.String()+"/actions", body)
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/forum/moderation/user-actions?user_id="+normalUser.ID.String()+"&page=1&page_size=1", nil)
+	listRR := httptest.NewRecorder()
+	router.ServeHTTP(listRR, listReq)
+	if listRR.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", listRR.Code, listRR.Body.String())
+	}
+	var payload struct {
+		Data []model.ForumUserModerationAction `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(listRR.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Data) != 1 || payload.Meta.Total != 1 {
+		t.Fatalf("unexpected payload: %s", listRR.Body.String())
+	}
+}
+
+func TestModerationUsersRouteIncludesInactiveAndRejectsNonAdmin(t *testing.T) {
+	service, db, admin := newForumModerationTestService(t)
+	banned := model.User{Username: "banned-http", Email: "banned-http@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&banned).Error; err != nil {
+		t.Fatal(err)
+	}
+	router := newForumModerationHTTPRouter(service, &admin)
+	ban := httptest.NewRecorder()
+	banBody := bytes.NewBufferString(`{"action":"ban","reason":"违规"}`)
+	banReq := httptest.NewRequest(http.MethodPost, "/api/v1/forum/moderation/users/"+banned.UUID.String()+"/actions", banBody)
+	banReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(ban, banReq)
+	if ban.Code != http.StatusCreated {
+		t.Fatalf("expected ban 201, got %d: %s", ban.Code, ban.Body.String())
+	}
+
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/forum/moderation/users?q=banned&page_size=20", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Data []ModerationUser `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].UUID != banned.UUID || payload.Data[0].IsActive {
+		t.Fatalf("unexpected payload: %s", rr.Body.String())
+	}
+	unban := httptest.NewRecorder()
+	unbanBody := bytes.NewBufferString(`{"action":"unban"}`)
+	unbanReq := httptest.NewRequest(http.MethodPost, "/api/v1/forum/moderation/users/"+banned.UUID.String()+"/actions", unbanBody)
+	unbanReq.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(unban, unbanReq)
+	if unban.Code != http.StatusCreated {
+		t.Fatalf("expected unban 201, got %d: %s", unban.Code, unban.Body.String())
+	}
+	var restored model.User
+	if err := db.First(&restored, "uuid = ?", banned.UUID).Error; err != nil || !restored.IsActive {
+		t.Fatalf("expected active after unban: active=%v err=%v", restored.IsActive, err)
+	}
+
+	normal := authctx.CurrentUser{ID: banned.UUID, Username: banned.Username, Role: authctx.RoleUser}
+	denied := httptest.NewRecorder()
+	newForumModerationHTTPRouter(service, &normal).ServeHTTP(denied, httptest.NewRequest(http.MethodGet, "/api/v1/forum/moderation/users", nil))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", denied.Code)
+	}
+}
+
 func TestModeratorAssignmentRoutesAllowAdminCRUD(t *testing.T) {
 	service, admin, _, category, moderator := seedForumModerationHTTPUsers(t)
 	router := newForumModerationHTTPRouter(service, &admin)

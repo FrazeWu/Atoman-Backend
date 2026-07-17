@@ -12,10 +12,11 @@ import (
 )
 
 const (
-	NotificationTypeReply   = "comment_reply"
-	NotificationTypeMention = "comment_mention"
-	NotificationTypeMarked  = "comment_marked"
-	NotificationTypeLike    = "comment_like"
+	NotificationTypeReply             = "comment_reply"
+	NotificationTypeMention           = "comment_mention"
+	NotificationTypeMarked            = "comment_marked"
+	NotificationTypeLike              = "comment_like"
+	NotificationTypeForumTopicComment = "forum_topic_comment"
 )
 
 func notificationMeta(entry model.CommentEntry, target ResolvedTarget) model.NotificationMeta {
@@ -34,6 +35,7 @@ func notificationMeta(entry model.CommentEntry, target ResolvedTarget) model.Not
 func (s *Service) notifyCreatedComment(tx *gorm.DB, entry model.CommentEntry, target ResolvedTarget, replyAuthorID *uuid.UUID, mentions []MentionInput) error {
 	recipients := make([]uuid.UUID, 0, len(mentions)+1)
 	types := make(map[uuid.UUID]string, len(mentions)+1)
+	metas := make(map[uuid.UUID]model.NotificationMeta, len(mentions)+1)
 	if replyAuthorID != nil && *replyAuthorID != entry.AuthorID {
 		recipients = append(recipients, *replyAuthorID)
 		types[*replyAuthorID] = NotificationTypeReply
@@ -48,8 +50,32 @@ func (s *Service) notifyCreatedComment(tx *gorm.DB, entry model.CommentEntry, ta
 		recipients = append(recipients, mention.UserID)
 		types[mention.UserID] = NotificationTypeMention
 	}
+	if target.Kind == TargetKindForumTopic && s.forumPolicy != nil {
+		topicTitle, audienceIDs, err := s.forumPolicy.CommentNotificationAudience(tx, target.ResourceID, entry.AuthorID)
+		if err != nil {
+			return err
+		}
+		for _, recipientID := range audienceIDs {
+			if recipientID == entry.AuthorID {
+				continue
+			}
+			if _, exists := types[recipientID]; exists {
+				continue
+			}
+			recipients = append(recipients, recipientID)
+			types[recipientID] = NotificationTypeForumTopicComment
+			meta := notificationMeta(entry, target)
+			meta["topic_id"] = target.ResourceID.String()
+			meta["topic_title"] = topicTitle
+			metas[recipientID] = meta
+		}
+	}
 	for _, recipientID := range recipients {
-		if err := createImmediateNotification(tx, recipientID, entry.AuthorID, types[recipientID], entry.ID, notificationMeta(entry, target)); err != nil {
+		meta := metas[recipientID]
+		if meta == nil {
+			meta = notificationMeta(entry, target)
+		}
+		if err := createImmediateNotification(tx, recipientID, entry.AuthorID, types[recipientID], entry.ID, meta); err != nil {
 			return err
 		}
 	}

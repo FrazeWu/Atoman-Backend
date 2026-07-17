@@ -36,3 +36,16 @@ type CreateCategoryRequestRequest struct {
 	Description string `json:"description"`
 	Reason      string `json:"reason"`
 }
+
+type UpsertForumGroupRequest struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
+type PutCategoryPermissionRequest struct {
+	CategoryID     uuid.UUID `json:"category_id"`
+	GroupID        uuid.UUID `json:"group_id"`
+	CanView        bool      `json:"can_view"`
+	CanCreateTopic bool      `json:"can_create_topic"`
+	CanComment     bool      `json:"can_comment"`
+}

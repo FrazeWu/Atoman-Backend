@@ -46,12 +46,17 @@ type ExtensionWriter func(tx *gorm.DB, comment *model.CommentEntry) error
 type DeleteExtensionWriter func(tx *gorm.DB, commentIDs []uuid.UUID) error
 
 type Service struct {
-	db         *gorm.DB
-	registry   *TargetRegistry
-	repo       repository
-	createMu   *sync.Mutex
-	now        func() time.Time
-	checkAbuse bool
+	db          *gorm.DB
+	registry    *TargetRegistry
+	repo        repository
+	createMu    *sync.Mutex
+	now         func() time.Time
+	checkAbuse  bool
+	forumPolicy ForumPolicy
+}
+
+func (s *Service) SetForumPolicy(policy ForumPolicy) {
+	s.forumPolicy = policy
 }
 
 func NewService(db *gorm.DB, registry *TargetRegistry) *Service {
@@ -82,7 +87,7 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	if err := s.validateAuthor(user); err != nil {
 		return CommentDTO{}, err
 	}
-	resolved, err := s.resolveVisible(Viewer{UserID: &user.ID}, targetRef)
+	resolved, err := s.resolveVisible(viewerFromUser(user), targetRef)
 	if err != nil {
 		return CommentDTO{}, err
 	}
@@ -117,6 +122,11 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 			}
 			if err := s.validateCreateTargetTx(tx, resolved); err != nil {
 				return err
+			}
+			if resolved.Kind == TargetKindForumTopic && s.forumPolicy != nil {
+				if err := s.forumPolicy.CheckCreateComment(tx, user, resolved.ResourceID, normalized); err != nil {
+					return err
+				}
 			}
 			createNow := s.now()
 			if s.checkAbuse {
@@ -208,6 +218,9 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	if err != nil {
 		return CommentDTO{}, err
 	}
+	if resolved.Kind == TargetKindForumTopic && s.forumPolicy != nil {
+		s.forumPolicy.EvaluateTrust(user.ID)
+	}
 	dto, err := s.loadCommentDTO(s.db, created.ID)
 	if err != nil {
 		return CommentDTO{}, err
@@ -275,10 +288,7 @@ func (s *Service) List(user authctx.CurrentUser, targetRef TargetRef, input List
 	if input.Sort != SortOldest && input.Sort != SortNewest && input.Sort != SortHot {
 		return CommentListDTO{}, ErrInvalidListOptions
 	}
-	viewer := Viewer{}
-	if user.ID != uuid.Nil {
-		viewer.UserID = &user.ID
-	}
+	viewer := viewerFromUser(user)
 	resolved, err := s.resolveVisible(viewer, targetRef)
 	if err != nil {
 		return CommentListDTO{}, err
@@ -524,6 +534,11 @@ func (s *Service) resolveVisible(viewer Viewer, target TargetRef) (ResolvedTarge
 	}
 	if !resolved.Visible {
 		return ResolvedTarget{}, ErrTargetNotVisible
+	}
+	if resolved.Kind == TargetKindForumTopic && s.forumPolicy != nil {
+		if err := s.forumPolicy.CanViewTopic(viewer, resolved.ResourceID); err != nil {
+			return ResolvedTarget{}, err
+		}
 	}
 	return resolved, nil
 }

@@ -109,13 +109,18 @@ func (s *Service) EditWithExtension(user authctx.CurrentUser, commentID uuid.UUI
 	if err := s.validateMentions(s.db, normalized, input.Mentions); err != nil {
 		return CommentDTO{}, err
 	}
-	located, _, resolved, err := s.resolveCommentMutation(Viewer{UserID: &user.ID}, commentID)
+	located, _, resolved, err := s.resolveCommentMutation(viewerFromUser(user), commentID)
 	if err != nil {
 		return CommentDTO{}, err
 	}
 
 	err = withCreateTransactionMutex(s.createMu, func() error {
 		return s.db.Transaction(func(tx *gorm.DB) error {
+			if resolved.Kind == TargetKindForumTopic {
+				if err := s.repo.lockUser(tx, user.ID); err != nil {
+					return ErrAuthenticationRequired
+				}
+			}
 			hierarchy, err := s.repo.lockCommentHierarchy(tx, located)
 			if isNotFound(err) || errors.Is(err, ErrCommentNotFound) {
 				return ErrCommentNotFound
@@ -132,6 +137,11 @@ func (s *Service) EditWithExtension(user authctx.CurrentUser, commentID uuid.UUI
 			}
 			if entry.AuthorID != user.ID {
 				return ErrCommentForbidden
+			}
+			if resolved.Kind == TargetKindForumTopic && s.forumPolicy != nil {
+				if err := s.forumPolicy.CheckUpdateComment(tx, entry.AuthorID, entry.ID, normalized); err != nil {
+					return err
+				}
 			}
 			assets, err := s.validateAttachments(tx, user.ID, input.AttachmentIDs)
 			if err != nil {
@@ -217,7 +227,7 @@ func (s *Service) DeleteWithExtension(user authctx.CurrentUser, commentID uuid.U
 	if err := s.validateAuthor(user); err != nil {
 		return err
 	}
-	located, _, resolved, err := s.resolveCommentMutation(Viewer{UserID: &user.ID}, commentID)
+	located, _, resolved, err := s.resolveCommentMutation(viewerFromUser(user), commentID)
 	if err != nil {
 		return err
 	}
@@ -323,7 +333,7 @@ func (s *Service) Report(user authctx.CurrentUser, commentID uuid.UUID, input Re
 	if !validReportReasons[input.Reason] || input.Reason == ReportReasonOther && input.Note == "" {
 		return ErrInvalidReport
 	}
-	located, _, resolved, err := s.resolveCommentMutation(Viewer{UserID: &user.ID}, commentID)
+	located, _, resolved, err := s.resolveCommentMutation(viewerFromUser(user), commentID)
 	if err != nil {
 		return err
 	}
@@ -648,7 +658,7 @@ func (s *Service) setLiked(user authctx.CurrentUser, commentID uuid.UUID, liked 
 	if err := s.validateAuthor(user); err != nil {
 		return err
 	}
-	located, _, resolved, err := s.resolveCommentMutation(Viewer{UserID: &user.ID}, commentID)
+	located, _, resolved, err := s.resolveCommentMutation(viewerFromUser(user), commentID)
 	if err != nil {
 		return err
 	}
@@ -714,7 +724,7 @@ func (s *Service) Mark(user authctx.CurrentUser, targetRef TargetRef, commentID 
 	if err := s.validateAuthor(user); err != nil {
 		return err
 	}
-	resolved, err := s.resolveVisible(Viewer{UserID: &user.ID}, targetRef)
+	resolved, err := s.resolveVisible(viewerFromUser(user), targetRef)
 	if err != nil {
 		return err
 	}
@@ -756,7 +766,7 @@ func (s *Service) Unmark(user authctx.CurrentUser, targetRef TargetRef) error {
 	if err := s.validateAuthor(user); err != nil {
 		return err
 	}
-	resolved, err := s.resolveVisible(Viewer{UserID: &user.ID}, targetRef)
+	resolved, err := s.resolveVisible(viewerFromUser(user), targetRef)
 	if err != nil {
 		return err
 	}
@@ -767,7 +777,7 @@ func (s *Service) Unmark(user authctx.CurrentUser, targetRef TargetRef) error {
 	if err != nil {
 		return err
 	}
-	storedResolved, err := s.resolveStoredTarget(Viewer{UserID: &user.ID}, target)
+	storedResolved, err := s.resolveStoredTarget(viewerFromUser(user), target)
 	if err != nil {
 		return err
 	}

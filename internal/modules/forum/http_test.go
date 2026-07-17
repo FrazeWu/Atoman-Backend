@@ -36,6 +36,13 @@ func newForumHTTPTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, model.User, mo
 		&model.ForumDraft{},
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
+		&model.CommentLike{},
+		&model.ForumLike{},
+		&model.ForumUserTrust{},
+		&model.ForumGroup{},
+		&model.ForumGroupMember{},
+		&model.ForumCategoryPermission{},
+		&model.ForumUserModerationAction{},
 	)
 	user := model.User{Username: "forum-owner", Email: "forum-owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {

@@ -14,7 +14,7 @@ import (
 func newForumModerationTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) {
 	t.Helper()
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.ForumCategory{}, &model.ForumModeratorAssignment{})
+	testdb.Migrate(t, db, &model.User{}, &model.ForumCategory{}, &model.ForumModeratorAssignment{}, &model.ForumUserModerationAction{}, &model.Notification{}, &model.AuditLog{})
 	admin := createModerationUser(t, db, "admin", authctx.RoleAdmin)
 	return NewService(db), db, admin
 }

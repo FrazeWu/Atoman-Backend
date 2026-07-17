@@ -128,9 +128,10 @@ func (ForumDraft) TableName() string { return "forum_drafts" }
 // ForumReport represents a user's report on a topic.
 type ForumReport struct {
 	Base
-	UserID     uuid.UUID  `json:"user_id" gorm:"type:uuid;not null;index"`
-	TargetType string     `json:"target_type" gorm:"not null"` // "topic"
-	TargetID   uuid.UUID  `json:"target_id" gorm:"type:uuid;not null;index"`
+	UserID     uuid.UUID  `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_forum_reports_user_target,priority:1"`
+	TargetType string     `json:"target_type" gorm:"not null;uniqueIndex:idx_forum_reports_user_target,priority:2"` // "topic"
+	TargetID   uuid.UUID  `json:"target_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_forum_reports_user_target,priority:3"`
+	TopicID    *uuid.UUID `json:"topic_id,omitempty" gorm:"-"`
 	Reason     string     `json:"reason" gorm:"not null"` // spam | off-topic | harassment | other
 	Note       string     `json:"note" gorm:"type:text"`
 	Status     string     `json:"status" gorm:"not null;default:'open';index"`

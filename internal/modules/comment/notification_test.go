@@ -310,6 +310,85 @@ func TestNotificationReplyMentionEditMarkAndDelete(t *testing.T) {
 	require.Empty(t, notifications)
 }
 
+func TestForumRootCommentNotifiesTopicAuthorAndFollowersOnce(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindForumTopic, 0)
+	ctx.service.SetForumPolicy(&forumPolicyStub{
+		audienceTitle: "Forum topic",
+		audienceIDs:   []uuid.UUID{ctx.users[0].ID, ctx.users[2].ID, ctx.users[0].ID, ctx.users[1].ID},
+	})
+
+	created, err := ctx.service.Create(ctx.users[1], ctx.target, CreateCommentInput{Content: "new answer"})
+	require.NoError(t, err)
+
+	var notifications []model.Notification
+	require.NoError(t, ctx.db.Where("source_id = ?", created.ID).Order("recipient_id").Find(&notifications).Error)
+	require.Len(t, notifications, 2)
+	for _, notification := range notifications {
+		require.Equal(t, NotificationTypeForumTopicComment, notification.Type)
+		require.NotEqual(t, ctx.users[1].ID, notification.RecipientID)
+		require.Equal(t, "Forum topic", notification.Meta["topic_title"])
+		require.Equal(t, ctx.target.ResourceID.String(), notification.Meta["topic_id"])
+		require.Equal(t, created.ID.String(), notification.Meta["comment_id"])
+	}
+}
+
+func TestForumCommentNotificationPrioritizesReplyThenMentionThenFollow(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindForumTopic, 0)
+	root := ctx.create(t, 1, "root", nil)
+	ctx.service.SetForumPolicy(&forumPolicyStub{
+		audienceTitle: "Forum topic",
+		audienceIDs:   []uuid.UUID{ctx.users[0].ID, ctx.users[1].ID, ctx.users[2].ID},
+	})
+	content := "hi @" + ctx.users[0].Username
+	mentionEnd := len([]rune(content))
+	child, err := ctx.service.Create(ctx.users[3], ctx.target, CreateCommentInput{
+		Content: content, ReplyToID: &root.ID,
+		Mentions: []MentionInput{{UserID: ctx.users[0].ID, Start: len([]rune("hi ")), End: mentionEnd}},
+	})
+	require.NoError(t, err)
+
+	var notifications []model.Notification
+	require.NoError(t, ctx.db.Where("source_id = ?", child.ID).Find(&notifications).Error)
+	require.Len(t, notifications, 3)
+	types := make(map[uuid.UUID]string, len(notifications))
+	for _, notification := range notifications {
+		types[notification.RecipientID] = notification.Type
+	}
+	require.Equal(t, NotificationTypeReply, types[ctx.users[1].ID])
+	require.Equal(t, NotificationTypeMention, types[ctx.users[0].ID])
+	require.Equal(t, NotificationTypeForumTopicComment, types[ctx.users[2].ID])
+}
+
+func TestForumAudienceOrNotificationFailureRollsBackComment(t *testing.T) {
+	t.Run("audience", func(t *testing.T) {
+		ctx := newCommentTestContext(t, TargetKindForumTopic, 0)
+		ctx.service.SetForumPolicy(&forumPolicyStub{audienceErr: errors.New("audience unavailable")})
+		_, err := ctx.service.Create(ctx.users[1], ctx.target, CreateCommentInput{Content: "rollback audience"})
+		require.ErrorContains(t, err, "audience unavailable")
+		var count int64
+		require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("content = ?", "rollback audience").Count(&count).Error)
+		require.Zero(t, count)
+	})
+
+	t.Run("notification", func(t *testing.T) {
+		ctx := newCommentTestContext(t, TargetKindForumTopic, 0)
+		ctx.service.SetForumPolicy(&forumPolicyStub{audienceTitle: "Forum topic", audienceIDs: []uuid.UUID{ctx.users[2].ID}})
+		callback := "test:forum-comment-notification-failure"
+		require.NoError(t, ctx.db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+			if tx.Statement.Table == "notifications" {
+				tx.AddError(errors.New("notification unavailable"))
+			}
+		}))
+		t.Cleanup(func() { _ = ctx.db.Callback().Create().Remove(callback) })
+
+		_, err := ctx.service.Create(ctx.users[1], ctx.target, CreateCommentInput{Content: "rollback notification"})
+		require.ErrorContains(t, err, "notification unavailable")
+		var count int64
+		require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Where("content = ?", "rollback notification").Count(&count).Error)
+		require.Zero(t, count)
+	})
+}
+
 func TestConcurrentRateLimitAcrossTargetsAllowsOnlyOneOfFifthAndSixth(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	secondID := uuid.New()

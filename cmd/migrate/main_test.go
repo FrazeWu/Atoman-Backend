@@ -29,9 +29,44 @@ func TestMigrateSchemaCreatesDMTablesAndUnreadCountIndexes(t *testing.T) {
 	if !db.Migrator().HasTable(&model.CommentPublishRecord{}) {
 		t.Fatal("expected comment_publish_records table to exist")
 	}
+	if !db.Migrator().HasTable(&model.ForumUserModerationAction{}) {
+		t.Fatal("expected forum_user_moderation_actions table to exist")
+	}
+	if !db.Migrator().HasTable(&model.ForumUserTrust{}) {
+		t.Fatal("expected forum_user_trust table to exist")
+	}
 
 	assertIndexExists(t, db, "notifications", "idx_notification_recipient_read")
 	assertIndexExists(t, db, "dm_messages", "idx_dm_message_conv_sender_read")
+}
+
+func TestRunMigrationsBackfillsLegacyForumReplies(t *testing.T) {
+	db := testdb.Open(t)
+	if err := migrateSchema(db); err != nil {
+		t.Fatalf("migrate initial schema: %v", err)
+	}
+	if err := db.Exec(`ALTER TABLE forum_topics ADD COLUMN solved_reply_id TEXT`).Error; err != nil {
+		t.Fatalf("add legacy solved reply column: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE forum_replies (id TEXT PRIMARY KEY, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME, topic_id TEXT NOT NULL, user_id TEXT NOT NULL, parent_reply_id TEXT, content TEXT NOT NULL, floor_number INTEGER, is_solved NUMERIC)`).Error; err != nil {
+		t.Fatalf("create legacy forum replies table: %v", err)
+	}
+	topicID, ownerID, categoryID, replyID, authorID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	topic := model.ForumTopic{Base: model.Base{ID: topicID}, UserID: ownerID, CategoryID: categoryID, Title: "legacy", Content: "legacy"}
+	if err := db.Create(&topic).Error; err != nil {
+		t.Fatalf("seed legacy topic: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO forum_replies (id, topic_id, user_id, content, floor_number) VALUES (?, ?, ?, ?, ?)`, replyID, topicID, authorID, "legacy reply", 1).Error; err != nil {
+		t.Fatalf("seed legacy reply: %v", err)
+	}
+
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+	var entry model.CommentEntry
+	if err := db.First(&entry, "id = ?", replyID).Error; err != nil {
+		t.Fatalf("expected legacy reply to be migrated: %v", err)
+	}
 }
 
 func TestRunMigrationsBackfillsUserDefaultResources(t *testing.T) {
@@ -142,6 +177,22 @@ func TestMigrateSchemaCreatesForumFollows(t *testing.T) {
 	}
 	if !db.Migrator().HasTable(&model.ForumFollow{}) {
 		t.Fatal("expected forum_follows table")
+	}
+}
+
+func TestMigrateSchemaCreatesForumGroupPermissionTables(t *testing.T) {
+	db := testdb.Open(t)
+	if err := migrateSchema(db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+	for _, table := range []any{
+		&model.ForumGroup{},
+		&model.ForumGroupMember{},
+		&model.ForumCategoryPermission{},
+	} {
+		if !db.Migrator().HasTable(table) {
+			t.Fatalf("expected table for %T", table)
+		}
 	}
 }
 

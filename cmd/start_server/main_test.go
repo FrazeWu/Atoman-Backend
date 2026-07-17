@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
@@ -45,6 +46,11 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 	}
 
 	models := []any{
+		&model.ForumGroup{},
+		&model.ForumGroupMember{},
+		&model.ForumCategoryPermission{},
+		&model.ForumUserModerationAction{},
+		&model.ForumUserTrust{},
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
 		&model.CommentMention{},
@@ -79,6 +85,41 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 	} {
 		if !db.Migrator().HasIndex(table, index) {
 			t.Fatalf("expected index %s on %s to exist", index, table)
+		}
+	}
+}
+
+func TestRunUnifiedCommentStartupMigrationsBackfillsLegacyForumReplies(t *testing.T) {
+	db := testdb.Open(t)
+	requireLegacyForumTables(t, db)
+	topicID, ownerID, replyID, authorID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	if err := db.Exec(`INSERT INTO forum_topics (id, user_id) VALUES (?, ?)`, topicID, ownerID).Error; err != nil {
+		t.Fatalf("seed legacy topic: %v", err)
+	}
+	if err := db.Exec(`INSERT INTO forum_replies (id, topic_id, user_id, content, floor_number) VALUES (?, ?, ?, ?, ?)`, replyID, topicID, authorID, "legacy", 1).Error; err != nil {
+		t.Fatalf("seed legacy reply: %v", err)
+	}
+
+	if err := runUnifiedCommentStartupMigrations(db); err != nil {
+		t.Fatalf("run unified comment startup migrations: %v", err)
+	}
+	var entry model.CommentEntry
+	if err := db.First(&entry, "id = ?", replyID).Error; err != nil {
+		t.Fatalf("expected legacy reply to be migrated: %v", err)
+	}
+}
+
+func requireLegacyForumTables(t *testing.T, db interface {
+	Exec(string, ...interface{}) *gorm.DB
+}) {
+	t.Helper()
+	for _, statement := range []string{
+		`CREATE TABLE forum_topics (id TEXT PRIMARY KEY, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME, user_id TEXT NOT NULL, solved_reply_id TEXT)`,
+		`CREATE TABLE forum_replies (id TEXT PRIMARY KEY, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME, topic_id TEXT NOT NULL, user_id TEXT NOT NULL, parent_reply_id TEXT, content TEXT NOT NULL, floor_number INTEGER, is_solved NUMERIC)`,
+		`CREATE TABLE forum_likes (id TEXT PRIMARY KEY, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME, user_id TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL)`,
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatalf("create legacy forum table: %v", err)
 		}
 	}
 }

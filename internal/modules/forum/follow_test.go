@@ -20,8 +20,13 @@ func newForumFollowTestService(t *testing.T) (*Service, authctx.CurrentUser, mod
 		&model.ForumCategory{},
 		&model.ForumTopic{},
 		&model.ForumFollow{},
+		&model.Notification{},
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
+		&model.ForumGroup{},
+		&model.ForumGroupMember{},
+		&model.ForumCategoryPermission{},
+		&model.ForumUserTrust{},
 	)
 	user := model.User{Username: "follower", Email: "follower@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -129,6 +134,38 @@ func TestListForumFollowerIDsReturnsDistinctTargetFollowers(t *testing.T) {
 	}
 	if len(ids) != 2 || ids[0] != firstUser.ID || ids[1] != secondUser.ID {
 		t.Fatalf("unexpected follower ids: %#v", ids)
+	}
+}
+
+func TestTopicFollowerNotificationUsesTopicTitleMeta(t *testing.T) {
+	service, _, category, _ := newForumFollowTestService(t)
+	follower := model.User{Username: "category-follower", Email: "category-follower@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := service.db.Create(&follower).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := service.db.Create(&model.ForumFollow{UserID: follower.UUID, TargetType: model.ForumFollowTargetCategory, TargetKey: category.ID.String()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	actor := model.User{Username: "topic-actor", Email: "topic-actor@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := service.db.Create(&actor).Error; err != nil {
+		t.Fatal(err)
+	}
+	topic := model.ForumTopic{UserID: actor.UUID, CategoryID: category.ID, Title: "Canonical title", Content: "Body"}
+	if err := service.db.Create(&topic).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := service.notifyTopicFollowers(topic); err != nil {
+		t.Fatal(err)
+	}
+	var notification model.Notification
+	if err := service.db.Where("recipient_id = ? AND type = ?", follower.UUID, "forum_follow").First(&notification).Error; err != nil {
+		t.Fatal(err)
+	}
+	if notification.Meta["topic_title"] != topic.Title {
+		t.Fatalf("unexpected meta: %#v", notification.Meta)
+	}
+	if _, exists := notification.Meta["title"]; exists {
+		t.Fatalf("legacy title should not be written: %#v", notification.Meta)
 	}
 }
 

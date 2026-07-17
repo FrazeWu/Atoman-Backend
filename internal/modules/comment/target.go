@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 
+	"atoman/internal/platform/authctx"
+
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const (
@@ -34,6 +37,26 @@ type TargetRef struct {
 
 type Viewer struct {
 	UserID *uuid.UUID
+	Role   string
+}
+
+type ForumPolicy interface {
+	CanViewTopic(viewer Viewer, topicID uuid.UUID) error
+	CheckCreateComment(tx *gorm.DB, user authctx.CurrentUser, topicID uuid.UUID, content string) error
+	CheckUpdateComment(tx *gorm.DB, authorID, commentID uuid.UUID, content string) error
+	CommentNotificationAudience(tx *gorm.DB, topicID, actorID uuid.UUID) (string, []uuid.UUID, error)
+	EvaluateTrust(userID uuid.UUID)
+}
+
+func viewerFromUser(user authctx.CurrentUser) Viewer {
+	viewer := Viewer{Role: user.Role}
+	if user.ID != uuid.Nil {
+		viewer.UserID = &user.ID
+	}
+	if viewer.Role == "" {
+		viewer.Role = authctx.RoleAnonymous
+	}
+	return viewer
 }
 
 type ResolvedTarget struct {

@@ -2,45 +2,50 @@ package forum
 
 import (
 	"errors"
+	"log"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"atoman/internal/model"
 	"atoman/internal/modules/comment"
+	"atoman/internal/modules/forum_moderation"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	coreservice "atoman/internal/service"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Service struct {
-	db   *gorm.DB
-	repo *Repo
+	db    *gorm.DB
+	repo  *Repo
+	trust *coreservice.ForumTrustService
 }
 
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db, repo: NewRepo(db)}
+	return &Service{db: db, repo: NewRepo(db), trust: coreservice.NewForumTrustService(db)}
 }
 
-func (s *Service) ListCategories() ([]model.ForumCategory, error) {
-	return s.repo.ListCategories()
+func (s *Service) ListCategories(user authctx.CurrentUser) ([]model.ForumCategory, error) {
+	return s.repo.ListCategories(user)
 }
 
-func (s *Service) GetCategory(id uuid.UUID) (model.ForumCategory, error) {
+func (s *Service) GetCategory(user authctx.CurrentUser, id uuid.UUID) (model.ForumCategory, error) {
 	if id == uuid.Nil {
 		return model.ForumCategory{}, apperr.BadRequest("validation.invalid_request", "category_id is required")
 	}
-	category, err := s.repo.GetCategory(id)
+	category, err := s.repo.GetCategory(user, id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.ForumCategory{}, apperr.NotFound("forum.category_not_found", "Forum category not found")
 	}
 	return category, err
 }
 
-func (s *Service) ListTopics(query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
-	topics, total, err := s.repo.ListTopics(query)
+func (s *Service) ListTopics(user authctx.CurrentUser, query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
+	topics, total, err := s.repo.ListTopics(user, query)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -50,11 +55,15 @@ func (s *Service) ListTopics(query ListTopicsQuery) ([]model.ForumTopic, int64, 
 	return topics, total, nil
 }
 
-func (s *Service) GetTopic(id uuid.UUID) (model.ForumTopic, error) {
+func (s *Service) SearchTopics(user authctx.CurrentUser, query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
+	return s.repo.SearchTopics(user, query)
+}
+
+func (s *Service) GetTopic(user authctx.CurrentUser, id uuid.UUID) (model.ForumTopic, error) {
 	if id == uuid.Nil {
 		return model.ForumTopic{}, apperr.BadRequest("validation.invalid_request", "topic_id is required")
 	}
-	topic, err := s.repo.GetTopic(id)
+	topic, err := s.repo.GetTopic(user, id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.ForumTopic{}, apperr.NotFound("forum.topic_not_found", "Forum topic not found")
 	}
@@ -66,6 +75,17 @@ func (s *Service) GetTopic(id uuid.UUID) (model.ForumTopic, error) {
 		return model.ForumTopic{}, err
 	}
 	return topics[0], nil
+}
+
+func lockForumUser(tx *gorm.DB, userID uuid.UUID) error {
+	var user model.User
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("uuid").First(&user, "uuid = ?", userID).Error
+}
+
+func (s *Service) evaluateTrustAfterWrite(userID uuid.UUID) {
+	if _, err := s.trust.Evaluate(userID); err != nil {
+		log.Printf("forum trust evaluation failed for user %s: %v", userID, err)
+	}
 }
 
 func (s *Service) CreateTopic(user authctx.CurrentUser, req CreateTopicRequest) (model.ForumTopic, error) {
@@ -80,14 +100,18 @@ func (s *Service) CreateTopic(user authctx.CurrentUser, req CreateTopicRequest) 
 	if title == "" || content == "" {
 		return model.ForumTopic{}, apperr.BadRequest("validation.invalid_request", "title and content are required")
 	}
-	if _, err := s.GetCategory(req.CategoryID); err != nil {
+	if err := s.CanCreateTopic(user, req.CategoryID); err != nil {
 		return model.ForumTopic{}, err
+	}
+	if silenced, err := forum_moderation.IsUserSilenced(s.db, user.ID, time.Now().UTC()); err != nil {
+		return model.ForumTopic{}, err
+	} else if silenced {
+		return model.ForumTopic{}, apperr.Forbidden("forum.user_silenced", "You are temporarily silenced")
 	}
 	tags, err := normalizeTags(req.Tags)
 	if err != nil {
 		return model.ForumTopic{}, err
 	}
-
 	topic := model.ForumTopic{
 		UserID:     user.ID,
 		CategoryID: req.CategoryID,
@@ -95,14 +119,76 @@ func (s *Service) CreateTopic(user authctx.CurrentUser, req CreateTopicRequest) 
 		Content:    content,
 		Tags:       tags,
 	}
-	if err := s.repo.CreateTopic(&topic); err != nil {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockForumUser(tx, user.ID); err != nil {
+			return err
+		}
+		if err := s.trust.WithDB(tx).CheckCreateTopic(user, title, content); err != nil {
+			return err
+		}
+		return NewRepo(tx).CreateTopic(&topic)
+	})
+	if err != nil {
 		return model.ForumTopic{}, err
 	}
-	return s.repo.GetTopic(topic.ID)
+	if err := s.notifyTopicFollowers(topic); err != nil {
+		log.Printf("forum follow notification failed for topic %s: %v", topic.ID, err)
+	}
+	s.evaluateTrustAfterWrite(user.ID)
+	return s.repo.GetTopic(user, topic.ID)
+}
+
+func (s *Service) notifyTopicFollowers(topic model.ForumTopic) error {
+	query := s.db.Model(&model.ForumFollow{}).
+		Where("target_type = ? AND target_key = ?", model.ForumFollowTargetCategory, topic.CategoryID.String())
+	if len(topic.Tags) > 0 {
+		query = query.Or("target_type = ? AND target_key IN ?", model.ForumFollowTargetTag, []string(topic.Tags))
+	}
+	var follows []model.ForumFollow
+	if err := query.Find(&follows).Error; err != nil {
+		return err
+	}
+	matchedByUser := make(map[uuid.UUID][]string)
+	for _, follow := range follows {
+		if follow.UserID == topic.UserID {
+			continue
+		}
+		target := follow.TargetType + ":" + follow.TargetKey
+		matchedByUser[follow.UserID] = append(matchedByUser[follow.UserID], target)
+	}
+	candidateIDs := make([]uuid.UUID, 0, len(matchedByUser))
+	for userID := range matchedByUser {
+		candidateIDs = append(candidateIDs, userID)
+	}
+	allowedIDs, err := s.repo.FilterUsersWhoCanViewCategory(candidateIDs, topic.CategoryID)
+	if err != nil {
+		return err
+	}
+	actorID := topic.UserID
+	var notificationErrors []error
+	for _, recipientID := range allowedIDs {
+		matchedTargets := matchedByUser[recipientID]
+		notification := model.Notification{
+			RecipientID: recipientID,
+			ActorID:     &actorID,
+			Type:        "forum_follow",
+			SourceType:  "forum_topic",
+			SourceID:    topic.ID,
+			Meta: model.NotificationMeta{
+				"topic_id":        topic.ID.String(),
+				"topic_title":     topic.Title,
+				"matched_targets": matchedTargets,
+			},
+		}
+		if err := s.db.Create(&notification).Error; err != nil {
+			notificationErrors = append(notificationErrors, err)
+		}
+	}
+	return errors.Join(notificationErrors...)
 }
 
 func (s *Service) UpdateTopic(user authctx.CurrentUser, topicID uuid.UUID, req UpdateTopicRequest) (model.ForumTopic, error) {
-	topic, err := s.GetTopic(topicID)
+	topic, err := s.GetTopic(user, topicID)
 	if err != nil {
 		return model.ForumTopic{}, err
 	}
@@ -114,23 +200,43 @@ func (s *Service) UpdateTopic(user authctx.CurrentUser, topicID uuid.UUID, req U
 	if title == "" || content == "" {
 		return model.ForumTopic{}, apperr.BadRequest("validation.invalid_request", "title and content are required")
 	}
-	topic.Title = title
-	topic.Content = content
+	var tags *model.StringSlice
 	if req.Tags != nil {
-		tags, err := normalizeTags(*req.Tags)
+		normalized, err := normalizeTags(*req.Tags)
 		if err != nil {
 			return model.ForumTopic{}, err
 		}
-		topic.Tags = tags
+		tags = &normalized
 	}
-	if err := s.repo.SaveTopic(&topic); err != nil {
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockForumUser(tx, topic.UserID); err != nil {
+			return err
+		}
+		locked, err := NewRepo(tx).GetTopicForUpdate(topicID)
+		if err != nil {
+			return err
+		}
+		if err := requireTopicOwner(user, locked.UserID); err != nil {
+			return err
+		}
+		if err := s.trust.WithDB(tx).CheckUpdateTopic(locked.UserID, locked.ID, title, content); err != nil {
+			return err
+		}
+		locked.Title = title
+		locked.Content = content
+		if tags != nil {
+			locked.Tags = *tags
+		}
+		return NewRepo(tx).SaveTopic(&locked)
+	})
+	if err != nil {
 		return model.ForumTopic{}, err
 	}
-	return s.repo.GetTopic(topic.ID)
+	return s.repo.GetTopic(user, topic.ID)
 }
 
 func (s *Service) DeleteTopic(user authctx.CurrentUser, topicID uuid.UUID) error {
-	topic, err := s.GetTopic(topicID)
+	topic, err := s.GetTopic(user, topicID)
 	if err != nil {
 		return err
 	}
@@ -208,7 +314,7 @@ func (s *Service) Follow(user authctx.CurrentUser, targetType, targetKey string)
 	if user.ID == uuid.Nil {
 		return model.ForumFollow{}, apperr.Unauthorized("Login required")
 	}
-	key, err := s.normalizeFollowTarget(targetType, targetKey, true)
+	key, err := s.normalizeFollowTarget(user, targetType, targetKey, true)
 	if err != nil {
 		return model.ForumFollow{}, err
 	}
@@ -230,7 +336,7 @@ func (s *Service) Unfollow(user authctx.CurrentUser, targetType, targetKey strin
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
 	}
-	key, err := s.normalizeFollowTarget(targetType, targetKey, false)
+	key, err := s.normalizeFollowTarget(user, targetType, targetKey, false)
 	if err != nil {
 		return err
 	}
@@ -238,14 +344,14 @@ func (s *Service) Unfollow(user authctx.CurrentUser, targetType, targetKey strin
 }
 
 func (s *Service) ListFollowerIDs(targetType, targetKey string) ([]uuid.UUID, error) {
-	key, err := s.normalizeFollowTarget(targetType, targetKey, false)
+	key, err := s.normalizeFollowTarget(authctx.CurrentUser{Role: authctx.RoleAnonymous}, targetType, targetKey, false)
 	if err != nil {
 		return nil, err
 	}
 	return s.repo.ListFollowerIDs(targetType, key)
 }
 
-func (s *Service) normalizeFollowTarget(targetType, targetKey string, requireExists bool) (string, error) {
+func (s *Service) normalizeFollowTarget(user authctx.CurrentUser, targetType, targetKey string, requireExists bool) (string, error) {
 	switch targetType {
 	case model.ForumFollowTargetTopic:
 		id, err := uuid.Parse(targetKey)
@@ -253,7 +359,7 @@ func (s *Service) normalizeFollowTarget(targetType, targetKey string, requireExi
 			return "", apperr.BadRequest("validation.invalid_request", "targetKey must be a valid uuid")
 		}
 		if requireExists {
-			if _, err := s.GetTopic(id); err != nil {
+			if _, err := s.GetTopic(user, id); err != nil {
 				return "", err
 			}
 		}
@@ -264,7 +370,7 @@ func (s *Service) normalizeFollowTarget(targetType, targetKey string, requireExi
 			return "", apperr.BadRequest("validation.invalid_request", "targetKey must be a valid uuid")
 		}
 		if requireExists {
-			if _, err := s.GetCategory(id); err != nil {
+			if _, err := s.GetCategory(user, id); err != nil {
 				return "", err
 			}
 		}
@@ -275,7 +381,7 @@ func (s *Service) normalizeFollowTarget(targetType, targetKey string, requireExi
 			return "", apperr.BadRequest("validation.invalid_request", "tag must be 1 to 30 characters")
 		}
 		if requireExists {
-			exists, err := s.repo.TagExists(key)
+			exists, err := s.repo.TagExists(user, key)
 			if err != nil {
 				return "", err
 			}

@@ -52,6 +52,11 @@ import (
 
 func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 	models = append(models,
+		&model.ForumGroup{},
+		&model.ForumGroupMember{},
+		&model.ForumCategoryPermission{},
+		&model.ForumUserModerationAction{},
+		&model.ForumUserTrust{},
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
 		&model.CommentMention{},
@@ -70,6 +75,9 @@ func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 	}
 	if err := migrations.RunUnifiedCommentIndexes(db); err != nil {
 		return fmt.Errorf("create unified comment indexes: %w", err)
+	}
+	if err := migrations.MigrateLegacyForumReplies(db); err != nil {
+		return fmt.Errorf("migrate legacy forum replies: %w", err)
 	}
 	return nil
 }
@@ -524,6 +532,11 @@ func main() {
 			fatalLogger.Fatal("Failed to run unified reading list migration: ", err)
 		}
 		log.Println("Migration step completed: unified reading list")
+		log.Println("Migration step: forum report unique index")
+		if err := migrations.RunForumReportUniqueIndex(db); err != nil {
+			fatalLogger.Fatal("Failed to prepare forum report unique index: ", err)
+		}
+		log.Println("Migration step completed: forum report unique index")
 		log.Println("Migration step: auto migrate models")
 		models := []any{
 			&model.User{},

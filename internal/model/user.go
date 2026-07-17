@@ -8,22 +8,24 @@ import (
 )
 
 type User struct {
-	UUID        uuid.UUID      `json:"uuid" gorm:"type:uuid;primaryKey"`
-	ID          uint           `json:"id" gorm:"unique;autoIncrement"` // Frontend identifier
-	Username    string         `json:"username" gorm:"unique;not null;column:username"`
-	Email       string         `json:"email" gorm:"unique;not null;column:email"`
-	Password    string         `json:"-" gorm:"not null;column:password"`
-	Role        string         `json:"role" gorm:"default:'user';column:role"` // user / moderator / admin
-	DisplayName string         `json:"display_name" gorm:"column:display_name"`
-	AvatarURL   string         `json:"avatar_url" gorm:"column:avatar_url"`
-	Bio         string         `json:"bio" gorm:"type:text;column:bio"`
-	Website     string         `json:"website" gorm:"column:website"`
-	Location    string         `json:"location" gorm:"column:location"`
-	IsActive    bool           `json:"is_active" gorm:"default:true;column:is_active"`
-	OnboardingCompletedAt *time.Time     `json:"onboarding_completed_at" gorm:"column:onboarding_completed_at"`
-	CreatedAt   time.Time      `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt   time.Time      `json:"updated_at" gorm:"column:updated_at"`
-	DeletedAt   gorm.DeletedAt `json:"-" gorm:"index"`
+	UUID                  uuid.UUID       `json:"uuid" gorm:"type:uuid;primaryKey"`
+	ID                    uint            `json:"id" gorm:"unique;autoIncrement"` // Frontend identifier
+	Username              string          `json:"username" gorm:"unique;not null;column:username"`
+	Email                 string          `json:"email" gorm:"unique;not null;column:email"`
+	Password              string          `json:"-" gorm:"not null;column:password"`
+	Role                  string          `json:"role" gorm:"default:'user';column:role"` // user / moderator / admin
+	DisplayName           string          `json:"display_name" gorm:"column:display_name"`
+	AvatarURL             string          `json:"avatar_url" gorm:"column:avatar_url"`
+	Bio                   string          `json:"bio" gorm:"type:text;column:bio"`
+	Website               string          `json:"website" gorm:"column:website"`
+	Location              string          `json:"location" gorm:"column:location"`
+	IsActive              bool            `json:"is_active" gorm:"default:true;column:is_active"`
+	OnboardingCompletedAt *time.Time      `json:"onboarding_completed_at" gorm:"column:onboarding_completed_at"`
+	CreatedAt             time.Time       `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt             time.Time       `json:"updated_at" gorm:"column:updated_at"`
+	DeletedAt             gorm.DeletedAt  `json:"-" gorm:"index"`
+	ForumTrust            *ForumUserTrust `json:"-" gorm:"foreignKey:UserID;references:UUID"`
+	ForumTrustLevel       int             `json:"forum_trust_level" gorm:"-"`
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) error {

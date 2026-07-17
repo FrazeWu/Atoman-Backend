@@ -96,6 +96,80 @@ func TestRegisterV1RoutesMountsUnifiedCommentHTTP(t *testing.T) {
 	}
 }
 
+func TestRegisterV1RoutesEnforcesForumACLForUnifiedCommentHTTP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{},
+		&model.MediaAsset{},
+		&model.ForumCategory{},
+		&model.ForumTopic{},
+		&model.ForumGroup{},
+		&model.ForumGroupMember{},
+		&model.ForumCategoryPermission{},
+		&model.ForumUserTrust{},
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
+		&model.CommentMention{},
+		&model.CommentAttachment{},
+		&model.CommentLike{},
+		&model.CommentTimeAnchor{},
+	)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+
+	admin := model.User{Username: "comment-admin", Email: "comment-admin@example.com", Password: "hash", Role: authctx.RoleAdmin, IsActive: true}
+	outsider := model.User{Username: "comment-outsider", Email: "comment-outsider@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	for _, user := range []*model.User{&admin, &outsider} {
+		if err := db.Create(user).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	category := model.ForumCategory{Name: "HTTP private"}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatal(err)
+	}
+	group := model.ForumGroup{Name: "HTTP readers"}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ForumCategoryPermission{CategoryID: category.ID, GroupID: group.ID, CanView: true, CanComment: true}).Error; err != nil {
+		t.Fatal(err)
+	}
+	topic := model.ForumTopic{UserID: admin.UUID, CategoryID: category.ID, Title: "Private topic", Content: "Body"}
+	if err := db.Create(&topic).Error; err != nil {
+		t.Fatal(err)
+	}
+	target := model.DiscussionTarget{Kind: "forum_topic", ResourceID: topic.ID, ResourceKey: topic.ID.String(), OwnerID: &admin.UUID, CommentCount: 1, RootCount: 1, NextFloor: 2}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatal(err)
+	}
+	floor := 1
+	entry := model.CommentEntry{TargetID: target.ID, AuthorID: admin.UUID, Content: "private answer", Status: "active", FloorNumber: &floor}
+	if err := db.Create(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	router := gin.New()
+	RegisterV1Routes(router, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+	request := func(user model.User) *httptest.ResponseRecorder {
+		t.Helper()
+		response := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/comments/"+entry.ID.String()+"/replies", nil)
+		req.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
+		router.ServeHTTP(response, req)
+		return response
+	}
+
+	if response := request(outsider); response.Code != http.StatusNotFound {
+		t.Fatalf("expected outsider to be denied with 404, got %d: %s", response.Code, response.Body.String())
+	}
+	if response := request(admin); response.Code != http.StatusOK {
+		t.Fatalf("expected admin access, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestRegisterV1RoutesMusicBookmarksAcceptBearerAuthWithoutExplicitRouteMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("JWT_SECRET", "test-secret")
@@ -143,6 +217,79 @@ func TestRegisterV1RoutesMusicBookmarksAcceptBearerAuthWithoutExplicitRouteMiddl
 	}
 	if len(resp.Data) != 1 || resp.Data[0].ArtistID != artist.ID.String() {
 		t.Fatalf("unexpected bookmark payload: %s", w.Body.String())
+	}
+}
+
+func TestRegisterV1RoutesForumSearchUsesOptionalAuthForPrivateCategoryMembership(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{},
+		&model.ForumCategory{},
+		&model.ForumTopic{},
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
+		&model.ForumGroup{},
+		&model.ForumGroupMember{},
+		&model.ForumCategoryPermission{},
+		&model.ForumUserTrust{},
+	)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+
+	member := model.User{Username: "private-member", Email: "private-member@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&member).Error; err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	category := model.ForumCategory{Name: "Private", Description: "members only"}
+	if err := db.Create(&category).Error; err != nil {
+		t.Fatalf("create category: %v", err)
+	}
+	group := model.ForumGroup{Name: "private-search-members"}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+	if err := db.Create(&model.ForumGroupMember{GroupID: group.ID, UserID: member.UUID}).Error; err != nil {
+		t.Fatalf("create group member: %v", err)
+	}
+	if err := db.Create(&model.ForumCategoryPermission{CategoryID: category.ID, GroupID: group.ID, CanView: true}).Error; err != nil {
+		t.Fatalf("create category permission: %v", err)
+	}
+	topic := model.ForumTopic{UserID: member.UUID, CategoryID: category.ID, Title: "Private heliotrope", Content: "members only"}
+	if err := db.Create(&topic).Error; err != nil {
+		t.Fatalf("create private topic: %v", err)
+	}
+
+	r := gin.New()
+	r.Use(middleware.OptionalAuthMiddleware())
+	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+
+	search := func(token string) (int, int64) {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/forum/search?q=heliotrope", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		r.ServeHTTP(w, req)
+		var response struct {
+			Meta struct {
+				Total int64 `json:"total"`
+			} `json:"meta"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode search response: %v: %s", err, w.Body.String())
+		}
+		return w.Code, response.Meta.Total
+	}
+
+	if code, total := search(signedRouterTokenForTest(t, member)); code != http.StatusOK || total != 1 {
+		t.Fatalf("expected private category member to find one topic, got status=%d total=%d", code, total)
+	}
+	if code, total := search(""); code != http.StatusOK || total != 0 {
+		t.Fatalf("expected anonymous search to hide private category, got status=%d total=%d", code, total)
 	}
 }
 
@@ -390,6 +537,11 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 		&model.ForumBookmark{},
 		&model.ForumReport{},
 		&model.CategoryRequest{},
+		&model.ForumUserTrust{},
+		&model.ForumGroup{},
+		&model.ForumGroupMember{},
+		&model.ForumCategoryPermission{},
+		&model.ForumModeratorAssignment{},
 	)
 	t.Setenv("JWT_SECRET", "test-secret")
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}

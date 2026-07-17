@@ -50,11 +50,8 @@ func currentUser(c *gin.Context) authctx.CurrentUser {
 }
 
 func currentViewer(c *gin.Context) Viewer {
-	user, ok := authctx.Current(c)
-	if !ok || user.ID == uuid.Nil {
-		return Viewer{}
-	}
-	return Viewer{UserID: &user.ID}
+	user, _ := authctx.Current(c)
+	return viewerFromUser(user)
 }
 
 func parseTarget(c *gin.Context) (TargetRef, error) {

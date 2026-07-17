@@ -339,6 +339,77 @@ type ForumSearchResponse struct {
 	Q     string             `json:"q" example:"music"`
 }
 
+type ForumTrustResponse struct {
+	Data model.ForumUserTrust `json:"data"`
+}
+
+type ForumFollowListResponse struct {
+	Data []model.ForumFollow `json:"data"`
+}
+
+type ForumFollowResponse struct {
+	Data model.ForumFollow `json:"data"`
+}
+
+type ForumGroupInput struct {
+	Name        string `json:"name" example:"Writers"`
+	Description string `json:"description" example:"可发布论坛内容"`
+}
+
+type ForumGroupResponse struct {
+	Data model.ForumGroup `json:"data"`
+}
+
+type ForumGroupListResponse struct {
+	Data []model.ForumGroup `json:"data"`
+}
+
+type ForumCategoryPermissionInput struct {
+	CategoryID     string `json:"category_id" format:"uuid"`
+	GroupID        string `json:"group_id" format:"uuid"`
+	CanView        bool   `json:"can_view"`
+	CanCreateTopic bool   `json:"can_create_topic"`
+	CanComment     bool   `json:"can_comment"`
+}
+
+type ForumCategoryPermissionResponse struct {
+	Data model.ForumCategoryPermission `json:"data"`
+}
+
+type ForumCategoryPermissionListResponse struct {
+	Data []model.ForumCategoryPermission `json:"data"`
+}
+
+type ForumModerationUserListResponse struct {
+	Data []model.User `json:"data"`
+}
+
+type ForumUserActionInput struct {
+	Action    string `json:"action" example:"silence"`
+	Reason    string `json:"reason" example:"刷屏"`
+	ExpiresAt string `json:"expires_at,omitempty" format:"date-time"`
+}
+
+type ForumUserActionResponse struct {
+	Data model.ForumUserModerationAction `json:"data"`
+}
+
+type ForumUserActionListResponse struct {
+	Data []model.ForumUserModerationAction `json:"data"`
+}
+
+type ForumResolveReportInput struct {
+	ReviewNote string `json:"review_note" example:"已处理"`
+}
+
+type ForumReportResponse struct {
+	Data model.ForumReport `json:"data"`
+}
+
+type ForumReportListResponse struct {
+	Data []model.ForumReport `json:"data"`
+}
+
 type BoolStatusResponse struct {
 	Liked      bool `json:"liked,omitempty" example:"true"`
 	Bookmarked bool `json:"bookmarked,omitempty" example:"true"`

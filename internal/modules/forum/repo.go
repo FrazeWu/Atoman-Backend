@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -13,31 +14,54 @@ import (
 
 type Repo struct{ db *gorm.DB }
 
+const forumCommentCountExpr = `COALESCE((
+	SELECT dt.comment_count FROM discussion_targets dt
+	WHERE dt.kind = 'forum_topic' AND dt.resource_id = forum_topics.id AND dt.deleted_at IS NULL
+	LIMIT 1
+), 0)`
+
+const forumLastCommentAtExpr = `COALESCE((
+	SELECT MAX(ce.created_at)
+	FROM discussion_targets dt
+	JOIN comment_entries ce ON ce.target_id = dt.id
+		AND ce.deleted_at IS NULL AND ce.status IN ('active', 'auto_folded')
+	WHERE dt.kind = 'forum_topic' AND dt.resource_id = forum_topics.id AND dt.deleted_at IS NULL
+), forum_topics.created_at)`
+
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
-func (r *Repo) ListCategories() ([]model.ForumCategory, error) {
+func (r *Repo) ListCategories(user authctx.CurrentUser) ([]model.ForumCategory, error) {
 	var categories []model.ForumCategory
-	err := r.db.Order("name ASC").Find(&categories).Error
+	db := r.visibleCategories(r.db.Model(&model.ForumCategory{}), user, "forum_categories.id")
+	err := db.Order("name ASC").Find(&categories).Error
 	return categories, err
 }
 
-func (r *Repo) GetCategory(id uuid.UUID) (model.ForumCategory, error) {
+func (r *Repo) GetCategory(user authctx.CurrentUser, id uuid.UUID) (model.ForumCategory, error) {
 	var category model.ForumCategory
-	err := r.db.First(&category, "id = ?", id).Error
+	db := r.visibleCategories(r.db.Model(&model.ForumCategory{}), user, "forum_categories.id")
+	err := db.First(&category, "forum_categories.id = ?", id).Error
 	return category, err
 }
 
 func (r *Repo) CreateTopic(topic *model.ForumTopic) error { return r.db.Create(topic).Error }
 
-func (r *Repo) GetTopic(id uuid.UUID) (model.ForumTopic, error) {
+func (r *Repo) GetTopic(user authctx.CurrentUser, id uuid.UUID) (model.ForumTopic, error) {
 	var topic model.ForumTopic
-	err := r.db.Preload("User").Preload("Category").First(&topic, "id = ?", id).Error
+	db := r.visibleCategories(r.db.Model(&model.ForumTopic{}), user, "forum_topics.category_id")
+	err := db.Preload("User.ForumTrust").Preload("Category").First(&topic, "forum_topics.id = ?", id).Error
+	attachForumTrustLevel(topic.User)
 	return topic, err
 }
 
-func (r *Repo) ListTopics(query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
-	db := r.db.Model(&model.ForumTopic{}).
-		Joins("LEFT JOIN discussion_targets ON discussion_targets.kind = ? AND discussion_targets.resource_id = forum_topics.id AND discussion_targets.deleted_at IS NULL", "forum_topic")
+func (r *Repo) GetTopicForUpdate(id uuid.UUID) (model.ForumTopic, error) {
+	var topic model.ForumTopic
+	err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("User").Preload("Category").First(&topic, "id = ?", id).Error
+	return topic, err
+}
+
+func (r *Repo) ListTopics(user authctx.CurrentUser, query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
+	db := r.visibleCategories(r.db.Model(&model.ForumTopic{}), user, "forum_topics.category_id")
 	if query.CategoryID != uuid.Nil {
 		db = db.Where("category_id = ?", query.CategoryID)
 	}
@@ -53,14 +77,43 @@ func (r *Repo) ListTopics(query ListTopicsQuery) ([]model.ForumTopic, int64, err
 		return nil, 0, err
 	}
 	var topics []model.ForumTopic
-	err := db.Select("forum_topics.*").Preload("User").Preload("Category").Order(topicOrder(query.Sort)).Offset(offset(query.Page, query.PageSize)).Limit(normalizedPageSize(query.PageSize)).Find(&topics).Error
+	err := db.Preload("User.ForumTrust").Preload("Category").Order(topicOrder(query.Sort)).Offset(offset(query.Page, query.PageSize)).Limit(normalizedPageSize(query.PageSize)).Find(&topics).Error
+	attachTopicTrustLevels(topics)
 	return topics, total, err
+}
+
+func (r *Repo) visibleCategories(db *gorm.DB, user authctx.CurrentUser, categoryColumn string) *gorm.DB {
+	if authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		return db
+	}
+	base := "NOT EXISTS (SELECT 1 FROM forum_category_permissions fcp WHERE fcp.category_id = " + categoryColumn + " AND fcp.deleted_at IS NULL)"
+	if user.ID == uuid.Nil {
+		return db.Where(base)
+	}
+	allowed := `EXISTS (
+		SELECT 1 FROM forum_category_permissions fcp
+		JOIN forum_group_members fgm ON fgm.group_id = fcp.group_id AND fgm.deleted_at IS NULL
+		WHERE fcp.category_id = ` + categoryColumn + ` AND fcp.can_view = ? AND fcp.deleted_at IS NULL AND fgm.user_id = ?
+	)`
+	return db.Where("("+base+" OR "+allowed+")", true, user.ID)
 }
 
 func (r *Repo) SaveTopic(topic *model.ForumTopic) error { return r.db.Save(topic).Error }
 
 func (r *Repo) DeleteTopic(id uuid.UUID) error {
 	return r.db.Delete(&model.ForumTopic{}, "id = ?", id).Error
+}
+
+func attachForumTrustLevel(user *model.User) {
+	if user != nil && user.ForumTrust != nil {
+		user.ForumTrustLevel = user.ForumTrust.Level
+	}
+}
+
+func attachTopicTrustLevels(topics []model.ForumTopic) {
+	for index := range topics {
+		attachForumTrustLevel(topics[index].User)
+	}
 }
 
 func (r *Repo) UpsertDraft(draft *model.ForumDraft) error {
@@ -128,23 +181,44 @@ func (r *Repo) ListFollowerIDs(targetType, targetKey string) ([]uuid.UUID, error
 	return ids, err
 }
 
-func (r *Repo) TagExists(tag string) (bool, error) {
+func (r *Repo) FilterUsersWhoCanViewCategory(userIDs []uuid.UUID, categoryID uuid.UUID) ([]uuid.UUID, error) {
+	if len(userIDs) == 0 {
+		return nil, nil
+	}
+	var allowed []uuid.UUID
+	err := r.db.Model(&model.User{}).
+		Where("uuid IN ? AND is_active = ?", userIDs, true).
+		Where(`role IN ? OR
+			NOT EXISTS (
+				SELECT 1 FROM forum_category_permissions fcp
+				WHERE fcp.category_id = ? AND fcp.deleted_at IS NULL
+			) OR EXISTS (
+				SELECT 1 FROM forum_category_permissions fcp
+				JOIN forum_group_members fgm ON fgm.group_id = fcp.group_id AND fgm.deleted_at IS NULL
+				WHERE fcp.category_id = ? AND fcp.can_view = ? AND fcp.deleted_at IS NULL AND fgm.user_id = uuid
+			)`, []string{authctx.RoleAdmin, authctx.RoleOwner}, categoryID, categoryID, true).
+		Pluck("uuid", &allowed).Error
+	return allowed, err
+}
+
+func (r *Repo) TagExists(user authctx.CurrentUser, tag string) (bool, error) {
 	encoded, _ := json.Marshal(tag)
 	var count int64
-	err := r.db.Model(&model.ForumTopic{}).Where("tags LIKE ? ESCAPE '\\'", "%"+escapeLike(string(encoded))+"%").Count(&count).Error
+	db := r.visibleCategories(r.db.Model(&model.ForumTopic{}), user, "forum_topics.category_id")
+	err := db.Where("tags LIKE ? ESCAPE '\\'", "%"+escapeLike(string(encoded))+"%").Count(&count).Error
 	return count > 0, err
 }
 
 func topicOrder(sort string) string {
 	switch sort {
 	case "top":
-		return "forum_topics.like_count DESC, COALESCE(discussion_targets.comment_count, 0) DESC, forum_topics.created_at DESC"
+		return "like_count DESC, " + forumCommentCountExpr + " DESC, forum_topics.created_at DESC"
 	case "active":
-		return "COALESCE((SELECT MAX(comment_entries.created_at) FROM comment_entries WHERE comment_entries.target_id = discussion_targets.id AND comment_entries.deleted_at IS NULL), forum_topics.created_at) DESC"
+		return forumLastCommentAtExpr + " DESC"
 	case "featured":
-		return "forum_topics.featured DESC, forum_topics.created_at DESC"
+		return "featured DESC, created_at DESC"
 	default:
-		return "forum_topics.created_at DESC"
+		return "created_at DESC"
 	}
 }
 

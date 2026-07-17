@@ -113,6 +113,9 @@ func initDefaultPolicies() {
 	if ok, _ := Enforcer.AddGroupingPolicy("owner", "admin"); ok {
 		groupingAdded = true
 	}
+	if ok, _ := Enforcer.AddGroupingPolicy("moderator", "user"); ok {
+		groupingAdded = true
+	}
 
 	if policyAdded {
 		if err := Enforcer.SavePolicy(); err != nil {
