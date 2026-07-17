@@ -57,6 +57,13 @@ func TestListAndRevertSongLyricVersionsPreserveHistory(t *testing.T) {
 	if versions[1].Content != "first" || versions[1].Translation != "one" || versions[1].CreatedBy != user.ID || versions[1].ID == uuid.Nil || versions[1].CreatedAt.IsZero() {
 		t.Fatalf("unstable version DTO: %#v", versions[1])
 	}
+	var legacy model.Song
+	if err := db.First(&legacy, "id = ?", song.ID).Error; err != nil {
+		t.Fatalf("reload legacy song: %v", err)
+	}
+	if legacy.Lyrics != "second" {
+		t.Fatalf("legacy lyrics = %q, want mirrored wiki content", legacy.Lyrics)
+	}
 
 	reverted, err := svc.RevertSongLyrics(user, song.ID, 1, "")
 	if err != nil {

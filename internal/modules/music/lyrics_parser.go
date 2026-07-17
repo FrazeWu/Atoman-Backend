@@ -1,13 +1,13 @@
 package music
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf16"
 
+	"atoman/internal/musiclyrics"
 	"atoman/internal/platform/apperr"
 )
 
@@ -25,24 +25,13 @@ func ParseLyricLines(content, translation, format string) ([]ParsedLyricLine, er
 }
 
 func parsePlainLyricLines(content, translation string) []ParsedLyricLine {
-	contentLines := plainLyricLines(content)
-	translationLines := plainLyricLines(translation)
-	lines := make([]ParsedLyricLine, 0, len(contentLines))
-	fingerprintOccurrences := make(map[string]int)
-
-	for index, text := range contentLines {
-		fingerprint := lyricTextFingerprint(text)
-		occurrence := fingerprintOccurrences[fingerprint]
-		fingerprintOccurrences[fingerprint] = occurrence + 1
-		line := ParsedLyricLine{
-			LineKey:   fmt.Sprintf("plain:%s:%d", fingerprint, occurrence),
-			LineIndex: index,
-			Text:      text,
-		}
-		if index < len(translationLines) {
-			line.Translation = translationLines[index]
-		}
-		lines = append(lines, line)
+	parsed := musiclyrics.ParsePlain(content, translation)
+	lines := make([]ParsedLyricLine, 0, len(parsed))
+	for _, line := range parsed {
+		lines = append(lines, ParsedLyricLine{
+			LineKey: line.LineKey, LineIndex: line.LineIndex,
+			Text: line.Text, Translation: line.Translation,
+		})
 	}
 	return lines
 }
@@ -113,23 +102,11 @@ func parseTimedLRCLines(content string) ([]ParsedLyricLine, error) {
 }
 
 func plainLyricLines(content string) []string {
-	if content == "" {
-		return []string{}
-	}
-
-	lines := splitLyricLines(content)
-	if len(lines) > 0 && lines[len(lines)-1] == "" {
-		lines = lines[:len(lines)-1]
-	}
-	for index := range lines {
-		lines[index] = strings.TrimSpace(lines[index])
-	}
-	return lines
+	return musiclyrics.PlainLines(content)
 }
 
 func splitLyricLines(content string) []string {
-	normalized := strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(content)
-	return strings.Split(normalized, "\n")
+	return musiclyrics.SplitLines(content)
 }
 
 func fractionMilliseconds(fraction string) int {
@@ -146,8 +123,7 @@ func fractionMilliseconds(fraction string) int {
 }
 
 func lyricTextFingerprint(text string) string {
-	normalized := strings.Join(strings.Fields(text), " ")
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(normalized)))
+	return musiclyrics.TextFingerprint(text)
 }
 
 func ValidateAnnotationAnchor(text string, startOffset, endOffset int, selectedText string) error {

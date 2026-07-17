@@ -9,6 +9,64 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestRunMusicLyricsMigrationBackfillsLegacyLyricsWithoutOverwritingWiki(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Song{}, &model.MusicSongLyric{},
+		&model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
+		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
+	)
+	user := model.User{Username: "legacy-lyrics", Email: "legacy-lyrics@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	legacy := model.Song{Title: "Legacy", AudioURL: "/legacy.mp3", Lyrics: "first line\nsecond line", UploadedBy: &user.UUID}
+	existing := model.Song{Title: "Existing Wiki", AudioURL: "/existing.mp3", Lyrics: "stale legacy", UploadedBy: &user.UUID}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("create legacy song: %v", err)
+	}
+	if err := db.Create(&existing).Error; err != nil {
+		t.Fatalf("create existing song: %v", err)
+	}
+	current := model.MusicSongLyric{SongID: existing.ID, Content: "canonical wiki", Format: "plain", Version: 1, UpdatedBy: user.UUID, EditSummary: "existing"}
+	if err := db.Create(&current).Error; err != nil {
+		t.Fatalf("create existing wiki: %v", err)
+	}
+
+	if err := RunMusicLyricsMigration(db); err != nil {
+		t.Fatalf("run migration: %v", err)
+	}
+	if err := RunMusicLyricsMigration(db); err != nil {
+		t.Fatalf("rerun migration: %v", err)
+	}
+
+	var lyric model.MusicSongLyric
+	if err := db.First(&lyric, "song_id = ?", legacy.ID).Error; err != nil {
+		t.Fatalf("load migrated lyric: %v", err)
+	}
+	if lyric.Content != legacy.Lyrics || lyric.Version != 1 || lyric.UpdatedBy != user.UUID || lyric.EditSummary != "从旧歌词字段迁移" {
+		t.Fatalf("unexpected migrated lyric: %#v", lyric)
+	}
+	var lineCount, versionCount int64
+	db.Model(&model.MusicSongLyricLine{}).Where("lyric_id = ?", lyric.ID).Count(&lineCount)
+	db.Model(&model.MusicSongLyricVersion{}).Where("song_id = ?", legacy.ID).Count(&versionCount)
+	if lineCount != 2 || versionCount != 1 {
+		t.Fatalf("expected 2 parsed lines and 1 version, got %d lines and %d versions", lineCount, versionCount)
+	}
+	if err := db.First(&current, "song_id = ?", existing.ID).Error; err != nil {
+		t.Fatalf("reload existing wiki: %v", err)
+	}
+	if current.Content != "canonical wiki" || current.Version != 1 {
+		t.Fatalf("existing wiki was overwritten: %#v", current)
+	}
+	if err := db.First(&existing, "id = ?", existing.ID).Error; err != nil {
+		t.Fatalf("reload existing legacy song: %v", err)
+	}
+	if existing.Lyrics != "canonical wiki" {
+		t.Fatalf("legacy mirror = %q, want canonical wiki content", existing.Lyrics)
+	}
+}
+
 func TestRunMusicLyricsMigrationCreatesSchema(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.User{}, &model.Song{})

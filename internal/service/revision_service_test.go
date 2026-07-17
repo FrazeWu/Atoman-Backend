@@ -262,10 +262,22 @@ func assertSingleCurrentAndUniqueVersions(t *testing.T, db *gorm.DB, contentID u
 
 func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{})
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Album{}, &model.Song{}, &model.Revision{},
+		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
+		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
+	)
 
 	editorID := uuid.New()
 	reviewerID := uuid.New()
+	for _, user := range []model.User{
+		{UUID: editorID, Username: "revision-editor", Email: "revision-editor@example.com", Password: "hash", IsActive: true},
+		{UUID: reviewerID, Username: "revision-reviewer", Email: "revision-reviewer@example.com", Password: "hash", IsActive: true},
+	} {
+		if err := db.Create(&user).Error; err != nil {
+			t.Fatalf("create revision user: %v", err)
+		}
+	}
 	albumID := uuid.New()
 	existingSongID := uuid.New()
 	releaseDate := time.Date(2024, 9, 13, 0, 0, 0, 0, time.UTC)
@@ -437,6 +449,13 @@ func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 	if renamed.Lyrics != "new words" {
 		t.Fatalf("expected song lyrics updated, got %q", renamed.Lyrics)
 	}
+	var renamedLyrics model.MusicSongLyric
+	if err := db.First(&renamedLyrics, "song_id = ?", renamed.ID).Error; err != nil {
+		t.Fatalf("load renamed song wiki lyrics: %v", err)
+	}
+	if renamedLyrics.Content != "new words" || renamedLyrics.UpdatedBy != editorID || renamedLyrics.EditSummary != "通过专辑版本更新歌词" {
+		t.Fatalf("unexpected renamed song wiki lyrics: %#v", renamedLyrics)
+	}
 
 	var createdSongs []model.Song
 	if err := db.Where("album_id = ? AND title = ?", albumID, "Brand New Track").Find(&createdSongs).Error; err != nil {
@@ -447,6 +466,13 @@ func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 	}
 	if createdSongs[0].TrackNumber != 4 || createdSongs[0].AudioURL != "https://cdn.example.com/new.mp3" {
 		t.Fatalf("expected new song fields saved, got %+v", createdSongs[0])
+	}
+	var createdLyrics model.MusicSongLyric
+	if err := db.First(&createdLyrics, "song_id = ?", createdSongs[0].ID).Error; err != nil {
+		t.Fatalf("load created song wiki lyrics: %v", err)
+	}
+	if createdLyrics.Content != "brand new lyrics" || createdLyrics.UpdatedBy != editorID {
+		t.Fatalf("unexpected created song wiki lyrics: %#v", createdLyrics)
 	}
 
 	var closedSong model.Song

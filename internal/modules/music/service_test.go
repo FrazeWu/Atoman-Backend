@@ -39,6 +39,11 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.MusicEditVote{},
 		&model.MusicEditDecision{},
 		&model.MusicEditChange{},
+		&model.MusicSongLyric{},
+		&model.MusicSongLyricLine{},
+		&model.MusicSongLyricVersion{},
+		&model.MusicLyricAnnotation{},
+		&model.MusicLyricAnnotationVote{},
 		&model.AuditLog{},
 	)
 
@@ -743,6 +748,13 @@ func TestSubmitEditAutoAppliesUpdateAlbumTracksForMainWikiFlow(t *testing.T) {
 	if updatedSong.Title != "Keep Me Better" || updatedSong.TrackNumber != 3 || updatedSong.AudioURL != "https://cdn.example.com/new.mp3" || updatedSong.Lyrics != "new lyrics" {
 		t.Fatalf("expected existing song updated, got %#v", updatedSong)
 	}
+	var updatedLyrics model.MusicSongLyric
+	if err := db.First(&updatedLyrics, "song_id = ?", existingSong.ID).Error; err != nil {
+		t.Fatalf("load updated wiki lyrics: %v", err)
+	}
+	if updatedLyrics.Content != "new lyrics" || updatedLyrics.UpdatedBy != user.ID || updatedLyrics.EditSummary != "通过专辑编辑更新歌词" {
+		t.Fatalf("unexpected updated wiki lyrics: %#v", updatedLyrics)
+	}
 
 	var createdSongs []model.Song
 	if err := db.Where("album_id = ? AND title = ?", album.ID, "Brand New Song").Find(&createdSongs).Error; err != nil {
@@ -753,6 +765,13 @@ func TestSubmitEditAutoAppliesUpdateAlbumTracksForMainWikiFlow(t *testing.T) {
 	}
 	if createdSongs[0].TrackNumber != 4 || createdSongs[0].AudioURL != "https://cdn.example.com/brand-new.mp3" {
 		t.Fatalf("expected created song fields, got %#v", createdSongs[0])
+	}
+	var createdLyrics model.MusicSongLyric
+	if err := db.First(&createdLyrics, "song_id = ?", createdSongs[0].ID).Error; err != nil {
+		t.Fatalf("load created wiki lyrics: %v", err)
+	}
+	if createdLyrics.Content != "brand new lyrics" || createdLyrics.EditSummary != "通过专辑编辑创建歌词" {
+		t.Fatalf("unexpected created wiki lyrics: %#v", createdLyrics)
 	}
 
 	var closedSong model.Song

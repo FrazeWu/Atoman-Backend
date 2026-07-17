@@ -79,6 +79,9 @@ func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 	if err := migrations.MigrateLegacyForumReplies(db); err != nil {
 		return fmt.Errorf("migrate legacy forum replies: %w", err)
 	}
+	if err := migrations.RunMusicLyricsMigration(db); err != nil {
+		return fmt.Errorf("migrate music lyrics: %w", err)
+	}
 	return nil
 }
 

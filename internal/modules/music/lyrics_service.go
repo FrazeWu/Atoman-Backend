@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/musiclyrics"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -230,7 +231,15 @@ func persistSongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, input SaveLyricsI
 		Translation: input.Translation, Format: input.Format,
 		EditSummary: input.EditSummary, CreatedBy: actorID,
 	}
-	return tx.Create(&created).Error
+	if err := tx.Create(&created).Error; err != nil {
+		return err
+	}
+	return tx.Model(&model.Song{}).Where("id = ?", songID).Update("lyrics", input.Content).Error
+}
+
+// SyncLegacySongLyrics routes legacy song writes through the Wiki version and line model.
+func SyncLegacySongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, content, editSummary string) error {
+	return musiclyrics.SyncLegacySongLyrics(tx, actorID, songID, content, editSummary)
 }
 
 func replaceCurrentLyricLines(tx *gorm.DB, lyricID uuid.UUID, parsed []ParsedLyricLine) ([]model.MusicSongLyricLine, error) {

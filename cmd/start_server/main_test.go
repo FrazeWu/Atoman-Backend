@@ -44,6 +44,17 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 	if err := runUnifiedCommentStartupMigrations(db); err != nil {
 		t.Fatalf("run unified comment startup migrations: %v", err)
 	}
+	for _, table := range []string{
+		"music_song_lyrics",
+		"music_song_lyric_lines",
+		"music_song_lyric_versions",
+		"music_lyric_annotations",
+		"music_lyric_annotation_votes",
+	} {
+		if !db.Migrator().HasTable(table) {
+			t.Fatalf("expected startup migration to create %s", table)
+		}
+	}
 
 	models := []any{
 		&model.ForumGroup{},
