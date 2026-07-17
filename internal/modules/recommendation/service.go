@@ -22,6 +22,14 @@ func rankCandidates(mode Mode, candidates []Candidate, limit int) []RankedItem {
 	}
 
 	sort.Slice(ranked, func(i, j int) bool {
+		leftPublishedAt := candidatePublishedAtUnixNano(ranked[i].Candidate)
+		rightPublishedAt := candidatePublishedAtUnixNano(ranked[j].Candidate)
+		if mode == ModeLatest && leftPublishedAt != rightPublishedAt {
+			return leftPublishedAt > rightPublishedAt
+		}
+		if mode == ModeLatest {
+			return ranked[i].EntityID > ranked[j].EntityID
+		}
 		return ranked[i].FinalScore > ranked[j].FinalScore
 	})
 

@@ -7,12 +7,33 @@ import (
 	"testing"
 	"time"
 
+	"atoman/internal/model"
+	"atoman/internal/testdb"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/request"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 )
+
+func newMigrationTestS3(t *testing.T, onDelete func(*s3.DeleteObjectInput)) *s3.S3 {
+	t.Helper()
+	sess := session.Must(session.NewSession(&aws.Config{
+		Credentials:      credentials.NewStaticCredentials("key", "secret", ""),
+		DisableSSL:       aws.Bool(true),
+		Endpoint:         aws.String("http://localhost"),
+		Region:           aws.String("us-east-1"),
+		S3ForcePathStyle: aws.Bool(true),
+	}))
+	client := s3.New(sess)
+	client.Handlers.Send.Clear()
+	client.Handlers.Send.PushBack(func(r *request.Request) {
+		onDelete(r.Params.(*s3.DeleteObjectInput))
+		r.HTTPResponse = &http.Response{StatusCode: http.StatusNoContent, Body: io.NopCloser(strings.NewReader(""))}
+	})
+	return client
+}
 
 func TestParseObjectURL(t *testing.T) {
 	key, ok := parseObjectURL("http://localhost:9100/atoman-assets/video/files/u1/file.mp4", "http://localhost:9100/atoman-assets")
@@ -59,6 +80,42 @@ func TestShouldMigrateMusicKey(t *testing.T) {
 	}
 	if shouldMigrateMusicKey("music/albums/album-1/tracks/song-1.mp3") {
 		t.Fatal("expected album object to be current")
+	}
+}
+
+func TestMusicMigrationKeepsLegacyObjectReferencedBySongWithoutAlbum(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Album{}, &model.Song{})
+
+	const prefix = "http://localhost:9100/atoman-assets"
+	const legacyKey = "music/shared/song.mp3"
+	album := model.Album{Title: "Migrated Album"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	songs := []model.Song{
+		{Title: "Migrated", AlbumID: &album.ID, AudioURL: prefix + "/" + legacyKey},
+		{Title: "Skipped", AudioURL: prefix + "/" + legacyKey},
+	}
+	if err := db.Create(&songs).Error; err != nil {
+		t.Fatalf("create songs: %v", err)
+	}
+
+	migrations, err := collectMusicMigrations(db, prefix)
+	if err != nil {
+		t.Fatalf("collect migrations: %v", err)
+	}
+	deletes := 0
+	client := newMigrationTestS3(t, func(input *s3.DeleteObjectInput) {
+		if aws.StringValue(input.Key) == legacyKey {
+			deletes++
+		}
+	})
+	if err := deleteMigrationObjects(client, "bucket", migrations, false); err != nil {
+		t.Fatalf("delete migration objects: %v", err)
+	}
+	if deletes != 0 {
+		t.Fatalf("expected shared legacy object to be kept, got %d delete requests", deletes)
 	}
 }
 

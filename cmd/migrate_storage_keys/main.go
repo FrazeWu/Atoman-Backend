@@ -31,6 +31,7 @@ type migration struct {
 	newURL    string
 	updateSQL string
 	updateArg any
+	keepOld   bool
 }
 
 func parseObjectURL(rawURL, prefix string) (string, bool) {
@@ -129,6 +130,8 @@ func deleteMigrationObjects(s3Client *s3.S3, bucket string, migrations []migrati
 		key := item.oldKey
 		if useNewKey {
 			key = item.newKey
+		} else if item.keepOld {
+			continue
 		}
 		if key == "" || seen[key] {
 			continue
@@ -191,8 +194,14 @@ func collectMusicMigrations(db *gorm.DB, s3Prefix string) ([]migration, error) {
 	}
 
 	var migrations []migration
+	retainedKeys := map[string]bool{}
 	for _, song := range songs {
 		if song.AlbumID == nil {
+			for _, rawURL := range []string{song.AudioURL, song.CoverURL} {
+				if oldKey, ok := parseObjectURL(rawURL, s3Prefix); ok && shouldMigrateMusicKey(oldKey) {
+					retainedKeys[oldKey] = true
+				}
+			}
 			continue
 		}
 		albumID := song.AlbumID.String()
@@ -245,6 +254,9 @@ func collectMusicMigrations(db *gorm.DB, s3Prefix string) ([]migration, error) {
 				updateArg: album.ID,
 			})
 		}
+	}
+	for index := range migrations {
+		migrations[index].keepOld = retainedKeys[migrations[index].oldKey]
 	}
 	return migrations, nil
 }

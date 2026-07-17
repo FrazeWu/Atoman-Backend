@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Repo struct{ db *gorm.DB }
@@ -300,6 +301,10 @@ func (r *Repo) UpdatePlaylist(playlist *model.Playlist, updates map[string]any) 
 func (r *Repo) UpsertPlaylistSong(playlistID uuid.UUID, songID uuid.UUID) (model.PlaylistSong, error) {
 	var playlistSong model.PlaylistSong
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id").First(&model.Playlist{}, "id = ?", playlistID).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("playlist_id = ? AND song_id = ?", playlistID, songID).First(&playlistSong).Error; err == nil {
 			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {

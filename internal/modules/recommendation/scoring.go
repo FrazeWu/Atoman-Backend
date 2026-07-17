@@ -22,8 +22,15 @@ func scoreCandidate(mode Mode, c Candidate) float64 {
 			0.30*underexposedBonus +
 			0.15*c.FreshnessScore
 	case ModeLatest:
-		return float64(c.PublishedAtUnix)
+		return float64(candidatePublishedAtUnixNano(c))
 	default:
 		return 0
 	}
+}
+
+func candidatePublishedAtUnixNano(candidate Candidate) int64 {
+	if candidate.PublishedAtUnixNano != 0 {
+		return candidate.PublishedAtUnixNano
+	}
+	return candidate.PublishedAtUnix * 1_000_000_000
 }

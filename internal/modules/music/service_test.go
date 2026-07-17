@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -82,6 +84,59 @@ func TestDeletePlaylistSoftDeletesPlaylistSongs(t *testing.T) {
 	}
 	if remaining != 0 {
 		t.Fatalf("expected playlist songs to be soft deleted, got %d", remaining)
+	}
+}
+
+func TestUpsertPlaylistSongLocksPlaylistBeforeAssigningPosition(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	playlist := model.Playlist{UserID: user.ID, Name: "Serialized Positions"}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	song := model.Song{Title: "Concurrent Add", AudioURL: "/audio/concurrent.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	lockedPlaylist := false
+	const callbackName = "test:observe_playlist_position_lock"
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Table != "music_playlists" {
+			return
+		}
+		_, lockedPlaylist = tx.Statement.Clauses["FOR"]
+	}); err != nil {
+		t.Fatalf("register query callback: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+
+	if _, err := svc.repo.UpsertPlaylistSong(playlist.ID, song.ID); err != nil {
+		t.Fatalf("upsert playlist song: %v", err)
+	}
+	if !lockedPlaylist {
+		t.Fatal("expected playlist row to be locked before assigning the next position")
+	}
+}
+
+func TestRecommendAlbumsLatestUsesSubsecondCreatedAtBeforeStableID(t *testing.T) {
+	svc, db, _ := newMusicTestService(t)
+	second := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	newerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	olderID := uuid.MustParse("ffffffff-ffff-ffff-ffff-ffffffffffff")
+	albums := []model.Album{
+		{Base: model.Base{ID: newerID, CreatedAt: second.Add(900 * time.Millisecond)}, Title: "Newer", EntryStatus: "open", Status: "open"},
+		{Base: model.Base{ID: olderID, CreatedAt: second.Add(100 * time.Millisecond)}, Title: "Older", EntryStatus: "open", Status: "open"},
+	}
+	if err := db.Create(&albums).Error; err != nil {
+		t.Fatalf("create albums: %v", err)
+	}
+
+	items, _, err := svc.RecommendAlbumsByMode(recommendation.ModeLatest, 1, 20)
+	if err != nil {
+		t.Fatalf("recommend latest albums: %v", err)
+	}
+	if len(items) != 2 || items[0].ID != newerID.String() {
+		t.Fatalf("expected subsecond-newer album first, got %#v", items)
 	}
 }
 

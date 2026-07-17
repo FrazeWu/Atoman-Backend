@@ -77,17 +77,17 @@ func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, page
 	for _, album := range albums {
 		qualityScore := normalizeMusicDiscoverQuality(album.HotScore)
 		candidates = append(candidates, recommendation.Candidate{
-			Module:          "music",
-			EntityType:      recommendation.EntityAlbum,
-			EntityID:        album.ID.String(),
-			SourceKey:       album.ID.String(),
-			QualityScore:    qualityScore,
-			TrendScore:      clampMusicRecommendation(album.HotScore / 10),
-			FreshnessScore:  normalizeMusicAlbumFreshness(album.CreatedAt, 30*24*time.Hour),
-			AuthorityScore:  0.5,
-			ExposureScore:   0,
-			EditorialScore:  0,
-			PublishedAtUnix: album.CreatedAt.Unix(),
+			Module:              "music",
+			EntityType:          recommendation.EntityAlbum,
+			EntityID:            album.ID.String(),
+			SourceKey:           album.ID.String(),
+			QualityScore:        qualityScore,
+			TrendScore:          clampMusicRecommendation(album.HotScore / 10),
+			FreshnessScore:      normalizeMusicAlbumFreshness(album.CreatedAt, 30*24*time.Hour),
+			AuthorityScore:      0.5,
+			ExposureScore:       0,
+			EditorialScore:      0,
+			PublishedAtUnixNano: album.CreatedAt.UnixNano(),
 		})
 		albumByID[album.ID.String()] = album
 	}
@@ -196,17 +196,17 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 	for _, art := range dbArtists {
 		qualityScore := normalizeMusicDiscoverQuality(art.MaxHotScore)
 		candidates = append(candidates, recommendation.Candidate{
-			Module:          "music",
-			EntityType:      recommendation.EntityArtist,
-			EntityID:        art.ID.String(),
-			SourceKey:       art.ID.String(),
-			QualityScore:    qualityScore,
-			TrendScore:      clampMusicRecommendation(art.MaxHotScore / 10),
-			FreshnessScore:  normalizeMusicAlbumFreshness(art.CreatedAt, 30*24*time.Hour),
-			AuthorityScore:  math.Min(1.0, 0.5+0.1*float64(art.AlbumCount)),
-			ExposureScore:   0,
-			EditorialScore:  0,
-			PublishedAtUnix: art.CreatedAt.Unix(),
+			Module:              "music",
+			EntityType:          recommendation.EntityArtist,
+			EntityID:            art.ID.String(),
+			SourceKey:           art.ID.String(),
+			QualityScore:        qualityScore,
+			TrendScore:          clampMusicRecommendation(art.MaxHotScore / 10),
+			FreshnessScore:      normalizeMusicAlbumFreshness(art.CreatedAt, 30*24*time.Hour),
+			AuthorityScore:      math.Min(1.0, 0.5+0.1*float64(art.AlbumCount)),
+			ExposureScore:       0,
+			EditorialScore:      0,
+			PublishedAtUnixNano: art.CreatedAt.UnixNano(),
 		})
 		artistByID[art.ID.String()] = art
 	}

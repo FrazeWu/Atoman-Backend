@@ -24,11 +24,27 @@ func TestModeConstants(t *testing.T) {
 }
 
 func TestScoreLatestUsesPublishedTime(t *testing.T) {
-	older := Candidate{PublishedAtUnix: 100}
-	newer := Candidate{PublishedAtUnix: 200}
+	older := Candidate{PublishedAtUnixNano: 100}
+	newer := Candidate{PublishedAtUnixNano: 200}
 
 	if scoreCandidate(ModeLatest, newer) <= scoreCandidate(ModeLatest, older) {
 		t.Fatal("expected latest mode to rank newer candidates higher")
+	}
+}
+
+func TestRankCandidatesLatestUsesStableEntityIDTieBreaker(t *testing.T) {
+	candidates := []Candidate{
+		{EntityID: "album-a", SourceKey: "album-a", PublishedAtUnixNano: 100},
+		{EntityID: "album-c", SourceKey: "album-c", PublishedAtUnixNano: 100},
+		{EntityID: "album-b", SourceKey: "album-b", PublishedAtUnixNano: 100},
+	}
+
+	got := RankCandidates(ModeLatest, candidates, 0)
+	want := []string{"album-c", "album-b", "album-a"}
+	for index, entityID := range want {
+		if got[index].EntityID != entityID {
+			t.Fatalf("expected stable latest order %v, got %#v", want, got)
+		}
 	}
 }
 
