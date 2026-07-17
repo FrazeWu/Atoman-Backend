@@ -559,23 +559,6 @@ type RevisionRevertInput struct {
 	EditSummary string `json:"edit_summary" example:"回滚到稳定版本"`
 }
 
-type SongAnnotationInput struct {
-	LineNumber int    `json:"line_number" binding:"required" example:"12"`
-	Content    string `json:"content" binding:"required" example:"这一句在致敬某段旋律。"`
-}
-
-type SongAnnotationUpdateInput struct {
-	Content string `json:"content" binding:"required" example:"更新后的注释内容。"`
-}
-
-type SongAnnotationGroupListResponse struct {
-	Data []AnnotationGroup `json:"data"`
-}
-
-type SongAnnotationResponse struct {
-	Data model.LyricAnnotation `json:"data"`
-}
-
 type EntryStatusInput struct {
 	Status string `json:"status" binding:"required" example:"confirmed"`
 	Reason string `json:"reason" example:"资料已核实"`

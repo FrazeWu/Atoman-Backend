@@ -593,7 +593,6 @@ func main() {
 			// Music wiki extensions
 			&model.ArtistAlias{},
 			&model.ArtistMerge{},
-			&model.LyricAnnotation{},
 			&model.MusicEdit{},
 			&model.MusicEditVote{},
 			&model.MusicEditDecision{},

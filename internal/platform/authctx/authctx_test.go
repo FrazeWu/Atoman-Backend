@@ -57,7 +57,6 @@ func TestCurrentUserIDStringReturnsUUIDStringAfterSetCurrentUser(t *testing.T) {
 
 func TestNamedLegacyHandlersDoNotReadUserIDWithGetString(t *testing.T) {
 	files := []string{
-		"lyric_annotation_handler.go",
 		"artist_wiki_handler.go",
 		"revision_handler.go",
 		"protection_handler.go",

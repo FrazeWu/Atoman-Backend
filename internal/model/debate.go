@@ -16,7 +16,7 @@ type Debate struct {
 	Description       string         `json:"description" gorm:"type:text"`
 	Content           string         `json:"content" gorm:"type:text"`
 	Status            string         `json:"status" gorm:"default:'open'"`
-	Tags              pq.StringArray `json:"tags" gorm:"type:text[]"`
+	Tags              pq.StringArray `json:"tags" gorm:"type:text[]" swaggertype:"array,string"`
 	ViewCount         int            `json:"view_count" gorm:"default:0"`
 	ArgumentCount     int            `json:"argument_count" gorm:"default:0"`
 	VoteCount         int            `json:"vote_count" gorm:"default:0"`

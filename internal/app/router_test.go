@@ -947,6 +947,18 @@ func TestRegisterV1RoutesDoesNotMountLegacyInteractionRoutes(t *testing.T) {
 	}
 }
 
+func TestRegisterV1RoutesDoesNotMountLegacyLyricAnnotationRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterV1Routes(router, testdb.Open(t), nil, nil, collab.NewUserHub(), collab.NewHub())
+
+	for _, route := range router.Routes() {
+		if strings.HasPrefix(route.Path, "/api/v1/songs/:id/annotations") {
+			t.Fatalf("legacy lyric annotation route is still mounted: %s %s", route.Method, route.Path)
+		}
+	}
+}
+
 func TestRegisterV1RoutesOnlyExposeApprovedNonAPIRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)

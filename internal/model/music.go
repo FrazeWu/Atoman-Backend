@@ -224,21 +224,6 @@ func (ArtistMerge) TableName() string {
 	return "artist_merges"
 }
 
-// LyricAnnotation is a user annotation on a specific line of song lyrics
-type LyricAnnotation struct {
-	Base
-	SongID     uuid.UUID `json:"song_id" gorm:"type:uuid;index;not null"`
-	Song       *Song     `json:"song,omitempty" gorm:"foreignKey:SongID"`
-	LineNumber int       `json:"line_number" gorm:"not null"`
-	Content    string    `json:"content" gorm:"type:text;not null"`
-	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null"`
-	User       *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-}
-
-func (LyricAnnotation) TableName() string {
-	return "lyric_annotations"
-}
-
 type ArtistBookmark struct {
 	Base
 	UserID   uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_artist_bookmarks_user_artist,priority:1,where:deleted_at IS NULL"`

@@ -9270,11 +9270,65 @@
                     "music-discovery"
                 ],
                 "summary": "获取音乐发现流",
+                "parameters": [
+                    {
+                        "enum": [
+                            "hot",
+                            "featured",
+                            "latest"
+                        ],
+                        "type": "string",
+                        "default": "hot",
+                        "description": "排序模式",
+                        "name": "mode",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/music.DiscoverListResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/history": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回当前用户最近播放的歌曲，每首歌曲保留最近时间和累计播放次数。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "获取最近播放",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.ListeningHistoryListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "500": {
@@ -9443,6 +9497,137 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/music.PlaylistSongsListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/playlists/{id}/songs/order": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "使用完整歌曲 ID 列表更新歌单顺序，支持普通歌单和最爱歌单。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-playlists"
+                ],
+                "summary": "调整歌单歌曲顺序",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌单 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "完整歌曲顺序",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.ReorderPlaylistSongsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/plays": {
+            "post": {
+                "description": "播放器在实际播放满 5 秒后调用。匿名用户增加总播放次数，登录用户同时更新个人播放历史。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "记录有效播放",
+                "parameters": [
+                    {
+                        "description": "播放记录",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.RecordSongPlayRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
                         }
                     },
                     "400": {
@@ -10325,252 +10510,6 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/songs/{id}/annotations": {
-            "get": {
-                "description": "按行号分组返回某首歌曲的歌词注释。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-annotations"
-                ],
-                "summary": "获取歌曲逐行注释",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SongAnnotationGroupListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "为指定歌曲的某一行歌词创建注释。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-annotations"
-                ],
-                "summary": "创建歌词注释",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "歌词注释输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SongAnnotationInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SongAnnotationResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/songs/{id}/annotations/{annotationId}": {
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "更新当前用户创建的歌词注释内容。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-annotations"
-                ],
-                "summary": "更新歌词注释",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "注释 UUID",
-                        "name": "annotationId",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "歌词注释更新输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SongAnnotationUpdateInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SongAnnotationResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "删除当前用户自己的注释，管理员也可删除任意注释。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-annotations"
-                ],
-                "summary": "删除歌词注释",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "注释 UUID",
-                        "name": "annotationId",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "404": {
@@ -14837,20 +14776,6 @@
                 }
             }
         },
-        "handlers.AnnotationGroup": {
-            "type": "object",
-            "properties": {
-                "annotations": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.LyricAnnotation"
-                    }
-                },
-                "line_number": {
-                    "type": "integer"
-                }
-            }
-        },
         "handlers.ArtistAliasInput": {
             "type": "object",
             "required": [
@@ -16113,54 +16038,6 @@
                     "items": {
                         "$ref": "#/definitions/model.PodcastEpisode"
                     }
-                }
-            }
-        },
-        "handlers.SongAnnotationGroupListResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.AnnotationGroup"
-                    }
-                }
-            }
-        },
-        "handlers.SongAnnotationInput": {
-            "type": "object",
-            "required": [
-                "content",
-                "line_number"
-            ],
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "example": "这一句在致敬某段旋律。"
-                },
-                "line_number": {
-                    "type": "integer",
-                    "example": 12
-                }
-            }
-        },
-        "handlers.SongAnnotationResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/model.LyricAnnotation"
-                }
-            }
-        },
-        "handlers.SongAnnotationUpdateInput": {
-            "type": "object",
-            "required": [
-                "content"
-            ],
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "example": "更新后的注释内容。"
                 }
             }
         },
@@ -18114,38 +17991,6 @@
                 }
             }
         },
-        "model.LyricAnnotation": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "line_number": {
-                    "type": "integer"
-                },
-                "song": {
-                    "$ref": "#/definitions/model.Song"
-                },
-                "song_id": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
-                    "type": "string"
-                }
-            }
-        },
         "model.PersonLocation": {
             "type": "object",
             "properties": {
@@ -19018,6 +18863,37 @@
                 }
             }
         },
+        "music.ListeningHistoryItemResponse": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "last_played_at": {
+                    "type": "string"
+                },
+                "play_count": {
+                    "type": "integer"
+                },
+                "song": {
+                    "$ref": "#/definitions/music.PlaylistSongDetail"
+                }
+            }
+        },
+        "music.ListeningHistoryListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.ListeningHistoryItemResponse"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/music.PaginationMetaResponse"
+                }
+            }
+        },
         "music.PaginationMetaResponse": {
             "type": "object",
             "properties": {
@@ -19066,6 +18942,9 @@
                 },
                 "playlist_id": {
                     "type": "string"
+                },
+                "position": {
+                    "type": "integer"
                 },
                 "song": {
                     "$ref": "#/definitions/music.PlaylistSongDetail"
@@ -19129,6 +19008,25 @@
                 },
                 "user_id": {
                     "type": "string"
+                }
+            }
+        },
+        "music.RecordSongPlayRequest": {
+            "type": "object",
+            "properties": {
+                "song_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.ReorderPlaylistSongsRequest": {
+            "type": "object",
+            "properties": {
+                "song_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 }
             }
         },
