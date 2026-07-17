@@ -103,6 +103,27 @@ func TestSaveSongLyricsPreservesMatchingLineIDsAcrossInsert(t *testing.T) {
 	}
 }
 
+func TestSaveSongLyricsPreservesRepeatedLRCLinesIDs(t *testing.T) {
+	svc, _, user, song := newLyricsTestService(t)
+	input := SaveLyricsInput{Content: "[00:01.00]A\n[00:01.00]A", Format: "lrc"}
+	first, err := svc.SaveSongLyrics(user, song.ID, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := svc.SaveSongLyrics(user, song.ID, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Lines) != 2 || first.Lines[0].ID == first.Lines[1].ID {
+		t.Fatalf("expected two distinct persisted lines: %#v", first.Lines)
+	}
+	for index := range first.Lines {
+		if first.Lines[index].LineKey != second.Lines[index].LineKey || first.Lines[index].ID != second.Lines[index].ID {
+			t.Fatalf("line %d identity changed: first=%#v second=%#v", index, first.Lines, second.Lines)
+		}
+	}
+}
+
 func TestSaveSongLyricsAnchorConflictRollsBackAndRebindSucceeds(t *testing.T) {
 	svc, db, user, song := newLyricsTestService(t)
 	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello world\nreplacement", Format: "plain"})
@@ -245,6 +266,41 @@ func TestUpdateLyricAnnotationKeepsNeedsRebindStatus(t *testing.T) {
 	}
 	if updated.Body != "after" || updated.Status != "needs_rebind" {
 		t.Fatalf("unexpected updated annotation: %#v", updated)
+	}
+}
+
+func TestUpdateAndDeleteLyricAnnotationLockSongBeforeAnnotation(t *testing.T) {
+	for _, action := range []string{"update", "delete"} {
+		t.Run(action, func(t *testing.T) {
+			svc, db, user, song := newLyricsTestService(t)
+			lyrics, _ := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+			annotation, _ := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+				LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "before",
+			})
+
+			var lockedTables []string
+			callbackName := "test:lyrics_annotation_lock_order:" + action
+			if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+				if _, locked := tx.Statement.Clauses["FOR"]; locked {
+					lockedTables = append(lockedTables, tx.Statement.Table)
+				}
+			}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+
+			if action == "update" {
+				_, err := svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, "after")
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err := svc.DeleteLyricAnnotation(user, song.ID, annotation.ID); err != nil {
+				t.Fatal(err)
+			}
+			if len(lockedTables) < 2 || lockedTables[0] != "Songs" || lockedTables[1] != "music_lyric_annotations" {
+				t.Fatalf("expected Song then annotation locks, got %#v", lockedTables)
+			}
+		})
 	}
 }
 

@@ -70,6 +70,7 @@ func parseLRCLyricLines(content, translation string) ([]ParsedLyricLine, error) 
 
 func parseTimedLRCLines(content string) ([]ParsedLyricLine, error) {
 	lines := make([]ParsedLyricLine, 0)
+	keyOccurrences := make(map[string]int)
 	for _, rawLine := range splitLyricLines(content) {
 		line := strings.TrimSpace(rawLine)
 		if line == "" {
@@ -99,8 +100,11 @@ func parseTimedLRCLines(content string) ([]ParsedLyricLine, error) {
 		}
 		timeMS := minutes*60000 + remainingMS
 		text := strings.TrimSpace(matches[4])
+		baseKey := fmt.Sprintf("lrc:%d:%s", timeMS, lyricTextFingerprint(text))
+		occurrence := keyOccurrences[baseKey]
+		keyOccurrences[baseKey] = occurrence + 1
 		lines = append(lines, ParsedLyricLine{
-			LineKey: fmt.Sprintf("lrc:%d:%s", timeMS, lyricTextFingerprint(text)),
+			LineKey: fmt.Sprintf("%s:%d", baseKey, occurrence),
 			TimeMS:  &timeMS,
 			Text:    text,
 		})

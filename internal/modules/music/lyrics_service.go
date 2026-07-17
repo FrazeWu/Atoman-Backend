@@ -101,16 +101,11 @@ func (s *Service) SaveSongLyrics(user authctx.CurrentUser, songID uuid.UUID, inp
 		input.EditSummary = "更新歌词"
 	}
 
-	// PostgreSQL serializes by Song row lock. The mutex gives SQLite tests the same behavior.
-	s.lyricsSaveMu.Lock()
-	defer s.lyricsSaveMu.Unlock()
+	unlock := s.serializeLyricsSaveForSQLite()
+	defer unlock()
 
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		var song model.Song
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&song, "id = ?", songID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.NotFound("music.song_not_found", "Song not found")
-			}
+		if err := lockLyricsSong(tx, songID); err != nil {
 			return err
 		}
 
@@ -227,8 +222,14 @@ func resolveInvalidAnnotationAnchors(tx *gorm.DB, songID uuid.UUID, lines []mode
 		}
 		switch resolution.Action {
 		case "needs_rebind":
-			if err := tx.Model(&annotation).Update("status", "needs_rebind").Error; err != nil {
-				return err
+			result := tx.Model(&model.MusicLyricAnnotation{}).
+				Where("id = ? AND status <> ?", annotation.ID, "deleted").
+				Update("status", "needs_rebind")
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return apperr.Conflict("music.annotation_anchor_conflict", "Annotation was deleted while resolving its anchor")
 			}
 		case "rebind":
 			target, ok := lineByID[resolution.LineID]
@@ -242,8 +243,14 @@ func resolveInvalidAnnotationAnchors(tx *gorm.DB, songID uuid.UUID, lines []mode
 				"line_id": target.ID, "selected_text": resolution.SelectedText,
 				"start_offset": resolution.StartOffset, "end_offset": resolution.EndOffset, "status": "active",
 			}
-			if err := tx.Model(&annotation).Updates(updates).Error; err != nil {
-				return err
+			result := tx.Model(&model.MusicLyricAnnotation{}).
+				Where("id = ? AND status <> ?", annotation.ID, "deleted").
+				Updates(updates)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return apperr.Conflict("music.annotation_anchor_conflict", "Annotation was deleted while resolving its anchor")
 			}
 		default:
 			return lyricValidationError("annotation resolution action is invalid")
@@ -296,16 +303,12 @@ func (s *Service) CreateLyricAnnotation(user authctx.CurrentUser, songID uuid.UU
 	if strings.TrimSpace(input.Body) == "" {
 		return MusicLyricAnnotationDTO{}, lyricValidationError("annotation body is required")
 	}
-	s.lyricsSaveMu.Lock()
-	defer s.lyricsSaveMu.Unlock()
+	unlock := s.serializeLyricsSaveForSQLite()
+	defer unlock()
 
 	var annotation model.MusicLyricAnnotation
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var song model.Song
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&song, "id = ?", songID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.NotFound("music.song_not_found", "Song not found")
-			}
+		if err := lockLyricsSong(tx, songID); err != nil {
 			return err
 		}
 		line, err := findCurrentLyricLine(tx, songID, input.LineID, input.LineKey)
@@ -357,11 +360,27 @@ func (s *Service) UpdateLyricAnnotation(user authctx.CurrentUser, songID, annota
 	if body == "" {
 		return MusicLyricAnnotationDTO{}, lyricValidationError("annotation body is required")
 	}
-	annotation, err := s.findEditableLyricAnnotation(user, songID, annotationID)
+	unlock := s.serializeLyricsSaveForSQLite()
+	defer unlock()
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockLyricsSong(tx, songID); err != nil {
+			return err
+		}
+		annotation, err := findEditableLyricAnnotation(tx, user, songID, annotationID)
+		if err != nil {
+			return err
+		}
+		result := tx.Model(&model.MusicLyricAnnotation{}).
+			Where("id = ? AND status <> ?", annotation.ID, "deleted").Update("body", body)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return apperr.NotFound("music.annotation_not_found", "Annotation not found")
+		}
+		return nil
+	})
 	if err != nil {
-		return MusicLyricAnnotationDTO{}, err
-	}
-	if err := s.db.Model(&annotation).Update("body", body).Error; err != nil {
 		return MusicLyricAnnotationDTO{}, err
 	}
 	return s.getLyricAnnotationDTO(user, songID, annotationID)
@@ -371,16 +390,32 @@ func (s *Service) DeleteLyricAnnotation(user authctx.CurrentUser, songID, annota
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
 	}
-	annotation, err := s.findEditableLyricAnnotation(user, songID, annotationID)
-	if err != nil {
-		return err
-	}
-	return s.db.Model(&annotation).Update("status", "deleted").Error
+	unlock := s.serializeLyricsSaveForSQLite()
+	defer unlock()
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockLyricsSong(tx, songID); err != nil {
+			return err
+		}
+		annotation, err := findEditableLyricAnnotation(tx, user, songID, annotationID)
+		if err != nil {
+			return err
+		}
+		result := tx.Model(&model.MusicLyricAnnotation{}).
+			Where("id = ? AND status <> ?", annotation.ID, "deleted").Update("status", "deleted")
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return apperr.NotFound("music.annotation_not_found", "Annotation not found")
+		}
+		return nil
+	})
 }
 
-func (s *Service) findEditableLyricAnnotation(user authctx.CurrentUser, songID, annotationID uuid.UUID) (model.MusicLyricAnnotation, error) {
+func findEditableLyricAnnotation(tx *gorm.DB, user authctx.CurrentUser, songID, annotationID uuid.UUID) (model.MusicLyricAnnotation, error) {
 	var annotation model.MusicLyricAnnotation
-	if err := s.db.Where("id = ? AND song_id = ? AND status <> ?", annotationID, songID, "deleted").First(&annotation).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND song_id = ? AND status <> ?", annotationID, songID, "deleted").First(&annotation).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return annotation, apperr.NotFound("music.annotation_not_found", "Annotation not found")
 		}
@@ -402,8 +437,8 @@ func (s *Service) SetLyricAnnotationVote(user authctx.CurrentUser, songID, annot
 	if vote != "up" && vote != "down" && vote != "none" {
 		return MusicLyricAnnotationDTO{}, lyricValidationError("vote must be up, down, or none")
 	}
-	s.lyricsVoteMu.Lock()
-	defer s.lyricsVoteMu.Unlock()
+	unlock := s.serializeLyricsVoteForSQLite()
+	defer unlock()
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var annotation model.MusicLyricAnnotation
@@ -432,6 +467,33 @@ func (s *Service) SetLyricAnnotationVote(user authctx.CurrentUser, songID, annot
 	return s.getLyricAnnotationDTO(user, songID, annotationID)
 }
 
+func (s *Service) serializeLyricsSaveForSQLite() func() {
+	if s.db.Dialector.Name() != "sqlite" {
+		return func() {}
+	}
+	s.lyricsSaveMu.Lock()
+	return s.lyricsSaveMu.Unlock
+}
+
+func (s *Service) serializeLyricsVoteForSQLite() func() {
+	if s.db.Dialector.Name() != "sqlite" {
+		return func() {}
+	}
+	s.lyricsVoteMu.Lock()
+	return s.lyricsVoteMu.Unlock
+}
+
+func lockLyricsSong(tx *gorm.DB, songID uuid.UUID) error {
+	var song model.Song
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&song, "id = ?", songID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.NotFound("music.song_not_found", "Song not found")
+		}
+		return err
+	}
+	return nil
+}
+
 type lyricAnnotationRow struct {
 	ID           uuid.UUID
 	SongID       uuid.UUID
@@ -451,8 +513,12 @@ type lyricAnnotationRow struct {
 }
 
 func (s *Service) listLyricAnnotationDTOs(user authctx.CurrentUser, songID uuid.UUID) ([]MusicLyricAnnotationDTO, error) {
+	return s.queryLyricAnnotationDTOs(user, songID, nil)
+}
+
+func (s *Service) queryLyricAnnotationDTOs(user authctx.CurrentUser, songID uuid.UUID, annotationID *uuid.UUID) ([]MusicLyricAnnotationDTO, error) {
 	var rows []lyricAnnotationRow
-	err := s.db.Table("music_lyric_annotations AS a").
+	query := s.db.Table("music_lyric_annotations AS a").
 		Select(`a.id, a.song_id, a.line_id, l.line_key, a.selected_text, a.start_offset, a.end_offset,
 			a.body, a.created_by, u.username, a.status, a.created_at, a.updated_at,
 			COALESCE(SUM(CASE WHEN v.vote = 'up' AND v.deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS upvotes,
@@ -460,7 +526,11 @@ func (s *Service) listLyricAnnotationDTOs(user authctx.CurrentUser, songID uuid.
 		Joins("JOIN music_song_lyric_lines l ON l.id = a.line_id").
 		Joins(`JOIN "Users" u ON u.uuid = a.created_by`).
 		Joins("LEFT JOIN music_lyric_annotation_votes v ON v.annotation_id = a.id").
-		Where("a.song_id = ? AND a.status <> ? AND a.deleted_at IS NULL", songID, "deleted").
+		Where("a.song_id = ? AND a.status <> ? AND a.deleted_at IS NULL", songID, "deleted")
+	if annotationID != nil {
+		query = query.Where("a.id = ?", *annotationID)
+	}
+	err := query.
 		Group("a.id, l.line_key, u.uuid, u.username").
 		Order("(COALESCE(SUM(CASE WHEN v.vote = 'up' AND v.deleted_at IS NULL THEN 1 ELSE 0 END), 0) - COALESCE(SUM(CASE WHEN v.vote = 'down' AND v.deleted_at IS NULL THEN 1 ELSE 0 END), 0)) DESC").
 		Order("upvotes DESC").Order("a.updated_at DESC").Order("a.created_at DESC").Scan(&rows).Error
@@ -500,7 +570,7 @@ func (s *Service) listLyricAnnotationDTOs(user authctx.CurrentUser, songID uuid.
 }
 
 func (s *Service) getLyricAnnotationDTO(user authctx.CurrentUser, songID, annotationID uuid.UUID) (MusicLyricAnnotationDTO, error) {
-	annotations, err := s.listLyricAnnotationDTOs(user, songID)
+	annotations, err := s.queryLyricAnnotationDTOs(user, songID, &annotationID)
 	if err != nil {
 		return MusicLyricAnnotationDTO{}, err
 	}

@@ -153,6 +153,24 @@ func TestParseLyricLinesLRCAcceptsOneTwoAndThreeFractionDigits(t *testing.T) {
 	}
 }
 
+func TestParseLyricLinesLRCRepeatedTimeAndTextGetsDistinctStableKeys(t *testing.T) {
+	content := "[00:01.00]A\n[00:01.00]A"
+	first, err := ParseLyricLines(content, "", "lrc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := ParseLyricLines(content, "", "lrc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first[0].LineKey == first[1].LineKey {
+		t.Fatalf("repeated LRC lines must have distinct keys: %#v", first)
+	}
+	if first[0].LineKey != second[0].LineKey || first[1].LineKey != second[1].LineKey {
+		t.Fatalf("repeated LRC keys must be stable: first=%#v second=%#v", first, second)
+	}
+}
+
 func TestParseLyricLinesHandlesCRLF(t *testing.T) {
 	plain, err := ParseLyricLines("Hello\r\nWorld\r\n", "你好\r\n世界\r\n", "plain")
 	if err != nil {
