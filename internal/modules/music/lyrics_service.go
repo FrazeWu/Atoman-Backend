@@ -2,6 +2,7 @@ package music
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,9 +46,21 @@ type MusicLyricLineDTO struct {
 	ID          uuid.UUID `json:"id"`
 	LineKey     string    `json:"line_key"`
 	LineIndex   int       `json:"line_index"`
-	TimeMS      *int      `json:"time_ms"`
+	TimeMS      *int      `json:"time_ms" extensions:"x-nullable"`
 	Text        string    `json:"text"`
 	Translation string    `json:"translation"`
+}
+
+type MusicSongLyricsVersionDTO struct {
+	ID          uuid.UUID `json:"id"`
+	SongID      uuid.UUID `json:"song_id"`
+	Version     int       `json:"version"`
+	Content     string    `json:"content"`
+	Translation string    `json:"translation"`
+	Format      string    `json:"format"`
+	EditSummary string    `json:"edit_summary"`
+	CreatedBy   uuid.UUID `json:"created_by"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type MusicLyricCreatorDTO struct {
@@ -108,49 +121,115 @@ func (s *Service) SaveSongLyrics(user authctx.CurrentUser, songID uuid.UUID, inp
 		if err := lockLyricsSong(tx, songID); err != nil {
 			return err
 		}
-
-		var lyric model.MusicSongLyric
-		findErr := tx.First(&lyric, "song_id = ?", songID).Error
-		if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
-			return findErr
-		}
-		isNew := errors.Is(findErr, gorm.ErrRecordNotFound)
-		if isNew {
-			lyric = model.MusicSongLyric{SongID: songID, Version: 1}
-		} else {
-			lyric.Version++
-		}
-		lyric.Content = input.Content
-		lyric.Translation = input.Translation
-		lyric.Format = input.Format
-		lyric.UpdatedBy = user.ID
-		lyric.EditSummary = input.EditSummary
-		if isNew {
-			if err := tx.Create(&lyric).Error; err != nil {
-				return err
-			}
-		} else if err := tx.Save(&lyric).Error; err != nil {
-			return err
-		}
-
-		currentLines, err := replaceCurrentLyricLines(tx, lyric.ID, lines)
-		if err != nil {
-			return err
-		}
-		if err := resolveInvalidAnnotationAnchors(tx, songID, currentLines, input.AnnotationResolutions); err != nil {
-			return err
-		}
-		version := model.MusicSongLyricVersion{
-			SongID: songID, Version: lyric.Version, Content: input.Content,
-			Translation: input.Translation, Format: input.Format,
-			EditSummary: input.EditSummary, CreatedBy: user.ID,
-		}
-		return tx.Create(&version).Error
+		return persistSongLyrics(tx, user.ID, songID, input, lines, false)
 	})
 	if err != nil {
 		return MusicLyricsDTO{}, err
 	}
 	return s.GetSongLyrics(user, songID)
+}
+
+func (s *Service) ListSongLyricVersions(songID uuid.UUID) ([]MusicSongLyricsVersionDTO, error) {
+	var song model.Song
+	if err := s.db.First(&song, "id = ?", songID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperr.NotFound("music.song_not_found", "Song not found")
+		}
+		return nil, err
+	}
+	var versions []model.MusicSongLyricVersion
+	if err := s.db.Where("song_id = ?", songID).Order("version DESC").Find(&versions).Error; err != nil {
+		return nil, err
+	}
+	dtos := make([]MusicSongLyricsVersionDTO, 0, len(versions))
+	for _, version := range versions {
+		dtos = append(dtos, MusicSongLyricsVersionDTO{
+			ID: version.ID, SongID: version.SongID, Version: version.Version,
+			Content: version.Content, Translation: version.Translation, Format: version.Format,
+			EditSummary: version.EditSummary, CreatedBy: version.CreatedBy, CreatedAt: version.CreatedAt,
+		})
+	}
+	return dtos, nil
+}
+
+func (s *Service) RevertSongLyrics(user authctx.CurrentUser, songID uuid.UUID, version int, editSummary string) (MusicLyricsDTO, error) {
+	if user.ID == uuid.Nil {
+		return MusicLyricsDTO{}, apperr.Unauthorized("Login required")
+	}
+	if version <= 0 {
+		return MusicLyricsDTO{}, lyricValidationError("version must be a positive integer")
+	}
+	if strings.TrimSpace(editSummary) == "" {
+		editSummary = "恢复到第 " + strconv.Itoa(version) + " 版"
+	}
+
+	unlock := s.serializeLyricsSaveForSQLite()
+	defer unlock()
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockLyricsSong(tx, songID); err != nil {
+			return err
+		}
+		var target model.MusicSongLyricVersion
+		if err := tx.Where("song_id = ? AND version = ?", songID, version).First(&target).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("music.lyrics_version_not_found", "Lyrics version not found")
+			}
+			return err
+		}
+		input := SaveLyricsInput{
+			Content: target.Content, Translation: target.Translation, Format: target.Format,
+			EditSummary: strings.TrimSpace(editSummary),
+		}
+		lines, err := ParseLyricLines(input.Content, input.Translation, input.Format)
+		if err != nil {
+			return err
+		}
+		return persistSongLyrics(tx, user.ID, songID, input, lines, true)
+	})
+	if err != nil {
+		return MusicLyricsDTO{}, err
+	}
+	return s.GetSongLyrics(user, songID)
+}
+
+func persistSongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, input SaveLyricsInput, lines []ParsedLyricLine, autoNeedsRebind bool) error {
+	var lyric model.MusicSongLyric
+	findErr := tx.First(&lyric, "song_id = ?", songID).Error
+	if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+		return findErr
+	}
+	isNew := errors.Is(findErr, gorm.ErrRecordNotFound)
+	if isNew {
+		lyric = model.MusicSongLyric{SongID: songID, Version: 1}
+	} else {
+		lyric.Version++
+	}
+	lyric.Content = input.Content
+	lyric.Translation = input.Translation
+	lyric.Format = input.Format
+	lyric.UpdatedBy = actorID
+	lyric.EditSummary = input.EditSummary
+	if isNew {
+		if err := tx.Create(&lyric).Error; err != nil {
+			return err
+		}
+	} else if err := tx.Save(&lyric).Error; err != nil {
+		return err
+	}
+
+	currentLines, err := replaceCurrentLyricLines(tx, lyric.ID, lines)
+	if err != nil {
+		return err
+	}
+	if err := resolveInvalidAnnotationAnchors(tx, actorID, songID, currentLines, input.AnnotationResolutions, autoNeedsRebind); err != nil {
+		return err
+	}
+	created := model.MusicSongLyricVersion{
+		SongID: songID, Version: lyric.Version, Content: input.Content,
+		Translation: input.Translation, Format: input.Format,
+		EditSummary: input.EditSummary, CreatedBy: actorID,
+	}
+	return tx.Create(&created).Error
 }
 
 func replaceCurrentLyricLines(tx *gorm.DB, lyricID uuid.UUID, parsed []ParsedLyricLine) ([]model.MusicSongLyricLine, error) {
@@ -193,7 +272,7 @@ func replaceCurrentLyricLines(tx *gorm.DB, lyricID uuid.UUID, parsed []ParsedLyr
 	return current, nil
 }
 
-func resolveInvalidAnnotationAnchors(tx *gorm.DB, songID uuid.UUID, lines []model.MusicSongLyricLine, resolutions []AnnotationResolutionInput) error {
+func resolveInvalidAnnotationAnchors(tx *gorm.DB, actorID, songID uuid.UUID, lines []model.MusicSongLyricLine, resolutions []AnnotationResolutionInput, autoNeedsRebind bool) error {
 	lineByID := make(map[uuid.UUID]model.MusicSongLyricLine, len(lines))
 	lineByKey := make(map[string]model.MusicSongLyricLine, len(lines))
 	for _, line := range lines {
@@ -217,19 +296,28 @@ func resolveInvalidAnnotationAnchors(tx *gorm.DB, songID uuid.UUID, lines []mode
 		if annotation.Status == "needs_rebind" && !ok {
 			continue
 		}
+		if autoNeedsRebind && annotation.Status == "active" && !ok {
+			resolution = AnnotationResolutionInput{AnnotationID: annotation.ID, Action: "needs_rebind"}
+			ok = true
+		}
 		if !ok {
 			return apperr.Conflict("music.annotation_anchor_conflict", "Annotation anchor must be resolved")
 		}
 		switch resolution.Action {
 		case "needs_rebind":
 			result := tx.Model(&model.MusicLyricAnnotation{}).
-				Where("id = ? AND status <> ?", annotation.ID, "deleted").
+				Where("id = ? AND status = ?", annotation.ID, "active").
 				Update("status", "needs_rebind")
 			if result.Error != nil {
 				return result.Error
 			}
-			if result.RowsAffected != 1 {
+			if result.RowsAffected == 0 && annotation.Status == "active" {
 				return apperr.Conflict("music.annotation_anchor_conflict", "Annotation was deleted while resolving its anchor")
+			}
+			if result.RowsAffected == 1 {
+				if err := createLyricsRebindNotification(tx, actorID, songID, annotation); err != nil {
+					return err
+				}
 			}
 		case "rebind":
 			target, ok := lineByID[resolution.LineID]
@@ -257,6 +345,22 @@ func resolveInvalidAnnotationAnchors(tx *gorm.DB, songID uuid.UUID, lines []mode
 		}
 	}
 	return nil
+}
+
+func createLyricsRebindNotification(tx *gorm.DB, actorID, songID uuid.UUID, annotation model.MusicLyricAnnotation) error {
+	notification := model.Notification{
+		RecipientID: annotation.CreatedBy,
+		ActorID:     &actorID,
+		Type:        "collaboration.required",
+		SourceType:  "music_lyrics",
+		SourceID:    uuid.New(),
+		Meta: model.NotificationMeta{
+			"song_id": songID.String(), "annotation_id": annotation.ID.String(),
+			"title": "歌词修改影响了你的注释绑定",
+			"body":  "请重新选择注释对应的歌词片段。", "source_label": "歌词注释",
+		},
+	}
+	return tx.Create(&notification).Error
 }
 
 func (s *Service) GetSongLyrics(user authctx.CurrentUser, songID uuid.UUID) (MusicLyricsDTO, error) {
@@ -430,9 +534,6 @@ func findEditableLyricAnnotation(tx *gorm.DB, user authctx.CurrentUser, songID, 
 func (s *Service) SetLyricAnnotationVote(user authctx.CurrentUser, songID, annotationID uuid.UUID, vote string) (MusicLyricAnnotationDTO, error) {
 	if user.ID == uuid.Nil {
 		return MusicLyricAnnotationDTO{}, apperr.Unauthorized("Login required")
-	}
-	if vote == "" {
-		vote = "none"
 	}
 	if vote != "up" && vote != "down" && vote != "none" {
 		return MusicLyricAnnotationDTO{}, lyricValidationError("vote must be up, down, or none")

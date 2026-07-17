@@ -24,6 +24,8 @@ func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
 		}
 		expected := map[string][]string{
 			"/api/v1/music/songs/{songId}/lyrics":                                  {"get", "put"},
+			"/api/v1/music/songs/{songId}/lyrics/versions":                         {"get"},
+			"/api/v1/music/songs/{songId}/lyrics/versions/{version}/revert":        {"post"},
 			"/api/v1/music/songs/{songId}/lyrics/annotations":                      {"post"},
 			"/api/v1/music/songs/{songId}/lyrics/annotations/{annotationId}":       {"patch", "delete"},
 			"/api/v1/music/songs/{songId}/lyrics/annotations/{annotationId}/votes": {"post"},
@@ -68,6 +70,29 @@ func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
 			if _, exists := bodyProperties[field]; !exists {
 				t.Fatalf("lyrics error body field is missing: %s", field)
 			}
+		}
+
+		versionDefinition, exists := definitions["music.MusicSongLyricsVersionDTO"].(map[string]any)
+		if !exists {
+			t.Fatal("music.MusicSongLyricsVersionDTO definition is missing")
+		}
+		versionProperties := versionDefinition["properties"].(map[string]any)
+		for _, field := range []string{"id", "song_id", "version", "content", "translation", "format", "edit_summary", "created_by", "created_at"} {
+			if _, exists := versionProperties[field]; !exists {
+				t.Fatalf("lyrics version DTO field is missing: %s", field)
+			}
+		}
+
+		lineDefinition := definitions["music.MusicLyricLineDTO"].(map[string]any)
+		timeMS := lineDefinition["properties"].(map[string]any)["time_ms"].(map[string]any)
+		if nullable, _ := timeMS["x-nullable"].(bool); !nullable {
+			t.Fatalf("music.MusicLyricLineDTO.time_ms must be nullable, got %#v", timeMS)
+		}
+
+		voteDefinition := definitions["music.LyricAnnotationVoteRequest"].(map[string]any)
+		required, _ := voteDefinition["required"].([]any)
+		if len(required) != 1 || required[0] != "vote" {
+			t.Fatalf("vote request must require vote, got %#v", required)
 		}
 	}
 

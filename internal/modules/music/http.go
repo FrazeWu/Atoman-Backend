@@ -201,6 +201,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/recommend/artists", h.getRecommendedArtists)
 	group.GET("/songs/:songId/lyrics", h.getSongLyrics)
 	group.PUT("/songs/:songId/lyrics", h.saveSongLyrics)
+	group.GET("/songs/:songId/lyrics/versions", h.listSongLyricVersions)
+	group.POST("/songs/:songId/lyrics/versions/:version/revert", h.revertSongLyrics)
 	group.POST("/songs/:songId/lyrics/annotations", h.createLyricAnnotation)
 	group.PATCH("/songs/:songId/lyrics/annotations/:annotationId", h.updateLyricAnnotation)
 	group.DELETE("/songs/:songId/lyrics/annotations/:annotationId", h.deleteLyricAnnotation)

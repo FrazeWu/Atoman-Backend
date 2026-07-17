@@ -3855,6 +3855,8 @@ definitions:
     properties:
       vote:
         type: string
+    required:
+    - vote
     type: object
   music.MusicLyricAnnotationDTO:
     properties:
@@ -3917,6 +3919,7 @@ definitions:
         type: string
       time_ms:
         type: integer
+        x-nullable: true
       translation:
         type: string
     type: object
@@ -3968,6 +3971,34 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/music.MusicLyricsDTO'
+    type: object
+  music.MusicSongLyricsVersionDTO:
+    properties:
+      content:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      edit_summary:
+        type: string
+      format:
+        type: string
+      id:
+        type: string
+      song_id:
+        type: string
+      translation:
+        type: string
+      version:
+        type: integer
+    type: object
+  music.MusicSongLyricsVersionsResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/music.MusicSongLyricsVersionDTO'
+        type: array
     type: object
   music.PaginationMetaResponse:
     properties:
@@ -4056,6 +4087,11 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  music.RevertSongLyricsRequest:
+    properties:
+      edit_summary:
+        type: string
     type: object
   music.SaveLyricsRequest:
     properties:
@@ -10560,6 +10596,87 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 设置歌词注释投票
+      tags:
+      - music-lyrics
+  /api/v1/music/songs/{songId}/lyrics/versions:
+    get:
+      description: 匿名用户可按版本号倒序读取歌曲歌词历史。
+      parameters:
+      - description: 歌曲 UUID
+        in: path
+        name: songId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicSongLyricsVersionsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/music.MusicLyricsErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/music.MusicLyricsErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/music.MusicLyricsErrorResponse'
+      summary: 获取歌词历史版本
+      tags:
+      - music-lyrics
+  /api/v1/music/songs/{songId}/lyrics/versions/{version}/revert:
+    post:
+      consumes:
+      - application/json
+      description: 将指定历史内容保存为一个新的当前版本，不覆盖历史记录。
+      parameters:
+      - description: 歌曲 UUID
+        in: path
+        name: songId
+        required: true
+        type: string
+      - description: 正整数版本号
+        in: path
+        name: version
+        required: true
+        type: integer
+      - description: 恢复摘要
+        in: body
+        name: input
+        schema:
+          $ref: '#/definitions/music.RevertSongLyricsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicLyricsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/music.MusicLyricsErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/music.MusicLyricsErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/music.MusicLyricsErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/music.MusicLyricsErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 恢复歌词历史版本
       tags:
       - music-lyrics
   /api/v1/podcast/episodes:

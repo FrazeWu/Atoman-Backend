@@ -25,6 +25,7 @@ func newLyricsTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser
 		&model.MusicSongLyricVersion{},
 		&model.MusicLyricAnnotation{},
 		&model.MusicLyricAnnotationVote{},
+		&model.Notification{},
 	)
 	userModel := model.User{Username: "lyric-owner", Email: "lyric-owner@example.com", Password: "hash", IsActive: true}
 	if err := db.Create(&userModel).Error; err != nil {
@@ -36,6 +37,177 @@ func newLyricsTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser
 	}
 	user := authctx.CurrentUser{ID: userModel.UUID, Username: userModel.Username, Role: authctx.RoleUser}
 	return NewService(db), db, user, song
+}
+
+func TestListAndRevertSongLyricVersionsPreserveHistory(t *testing.T) {
+	svc, db, user, song := newLyricsTestService(t)
+	if _, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "first", Translation: "one", Format: "plain", EditSummary: "v1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "second", Translation: "two", Format: "plain", EditSummary: "v2"}); err != nil {
+		t.Fatal(err)
+	}
+
+	versions, err := svc.ListSongLyricVersions(song.ID)
+	if err != nil || len(versions) != 2 || versions[0].Version != 2 || versions[1].Version != 1 {
+		t.Fatalf("unexpected versions: %#v, %v", versions, err)
+	}
+	if versions[1].Content != "first" || versions[1].Translation != "one" || versions[1].CreatedBy != user.ID || versions[1].ID == uuid.Nil || versions[1].CreatedAt.IsZero() {
+		t.Fatalf("unstable version DTO: %#v", versions[1])
+	}
+
+	reverted, err := svc.RevertSongLyrics(user, song.ID, 1, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reverted.Version != 3 || reverted.Content != "first" || reverted.Translation != "one" || reverted.EditSummary != "恢复到第 1 版" {
+		t.Fatalf("unexpected reverted lyrics: %#v", reverted)
+	}
+	versions, err = svc.ListSongLyricVersions(song.ID)
+	if err != nil || len(versions) != 3 || versions[0].Version != 3 || versions[1].Version != 2 || versions[2].Version != 1 {
+		t.Fatalf("history was not appended: %#v, %v", versions, err)
+	}
+	var original model.MusicSongLyricVersion
+	if err := db.Where("song_id = ? AND version = ?", song.ID, 1).First(&original).Error; err != nil {
+		t.Fatal(err)
+	}
+	if original.Content != "first" || original.EditSummary != "v1" {
+		t.Fatalf("target version was modified: %#v", original)
+	}
+
+	emptySong := model.Song{Title: "No Versions", AudioURL: "/none.mp3", Status: "open"}
+	if err := db.Create(&emptySong).Error; err != nil {
+		t.Fatal(err)
+	}
+	empty, err := svc.ListSongLyricVersions(emptySong.ID)
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("expected empty version array, got %#v, %v", empty, err)
+	}
+	_, err = svc.ListSongLyricVersions(uuid.New())
+	assertAppErrorCode(t, err, "music.song_not_found")
+	_, err = svc.RevertSongLyrics(authctx.CurrentUser{}, song.ID, 1, "")
+	assertAppErrorCode(t, err, "auth.unauthorized")
+	_, err = svc.RevertSongLyrics(user, song.ID, 0, "")
+	assertAppErrorCode(t, err, "validation.invalid_request")
+	_, err = svc.RevertSongLyrics(user, song.ID, 99, "")
+	assertAppErrorCode(t, err, "music.lyrics_version_not_found")
+}
+
+func TestSaveAndRevertNotifyOnlyFirstNeedsRebindTransition(t *testing.T) {
+	svc, db, editor, song := newLyricsTestService(t)
+	ownerModel := model.User{Username: "annotation-owner", Email: "annotation-owner@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&ownerModel).Error; err != nil {
+		t.Fatal(err)
+	}
+	owner := authctx.CurrentUser{ID: ownerModel.UUID, Username: ownerModel.Username, Role: authctx.RoleUser}
+	lyrics, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation, err := svc.CreateLyricAnnotation(owner, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{
+		Content: "changed", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{AnnotationID: annotation.ID, Action: "needs_rebind"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var notifications []model.Notification
+	if err := db.Find(&notifications).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 1 {
+		t.Fatalf("expected one notification, got %#v", notifications)
+	}
+	n := notifications[0]
+	if n.RecipientID != owner.ID || n.ActorID == nil || *n.ActorID != editor.ID || n.Type != "collaboration.required" || n.SourceType != "music_lyrics" || n.SourceID == uuid.Nil {
+		t.Fatalf("unexpected notification identity: %#v", n)
+	}
+	if n.Meta["song_id"] != song.ID.String() || n.Meta["annotation_id"] != annotation.ID.String() || n.Meta["title"] != "歌词修改影响了你的注释绑定" || n.Meta["body"] == "" || n.Meta["source_label"] == "" {
+		t.Fatalf("unexpected notification meta: %#v", n.Meta)
+	}
+	if _, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{Content: "changed again", Format: "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&model.Notification{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("needs_rebind was notified repeatedly: %d, %v", count, err)
+	}
+
+	secondSong := model.Song{Title: "Revert Notification", AudioURL: "/revert.mp3", Status: "open"}
+	if err := db.Create(&secondSong).Error; err != nil {
+		t.Fatal(err)
+	}
+	first, _ := svc.SaveSongLyrics(editor, secondSong.ID, SaveLyricsInput{Content: "anchor", Format: "plain"})
+	secondAnnotation, _ := svc.CreateLyricAnnotation(owner, secondSong.ID, CreateAnnotationInput{LineID: first.Lines[0].ID, SelectedText: "anchor", StartOffset: 0, EndOffset: 6, Body: "note"})
+	_, _ = svc.SaveSongLyrics(editor, secondSong.ID, SaveLyricsInput{Content: "anchor changed", Format: "plain"})
+	reverted, err := svc.RevertSongLyrics(editor, secondSong.ID, 1, "restore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reverted.Annotations) != 1 || reverted.Annotations[0].ID != secondAnnotation.ID || reverted.Annotations[0].Status != "active" {
+		t.Fatalf("valid restored anchor should remain active: %#v", reverted.Annotations)
+	}
+
+	thirdSong := model.Song{Title: "Broken Revert Anchor", AudioURL: "/broken-revert.mp3", Status: "open"}
+	if err := db.Create(&thirdSong).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, _ = svc.SaveSongLyrics(editor, thirdSong.ID, SaveLyricsInput{Content: "old", Format: "plain"})
+	current, _ := svc.SaveSongLyrics(editor, thirdSong.ID, SaveLyricsInput{Content: "new anchor", Format: "plain"})
+	brokenAnnotation, _ := svc.CreateLyricAnnotation(owner, thirdSong.ID, CreateAnnotationInput{LineID: current.Lines[0].ID, SelectedText: "anchor", StartOffset: 4, EndOffset: 10, Body: "note"})
+	reverted, err = svc.RevertSongLyrics(editor, thirdSong.ID, 1, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reverted.Annotations) != 1 || reverted.Annotations[0].ID != brokenAnnotation.ID || reverted.Annotations[0].Status != "needs_rebind" {
+		t.Fatalf("broken restored anchor should need rebind: %#v", reverted.Annotations)
+	}
+	if err := db.Model(&model.Notification{}).Count(&count).Error; err != nil || count != 2 {
+		t.Fatalf("revert should add one notification: %d, %v", count, err)
+	}
+}
+
+func TestFailedSaveRollsBackVersionAndNeedsRebindNotification(t *testing.T) {
+	svc, db, editor, song := newLyricsTestService(t)
+	lyrics, _ := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	annotation, _ := svc.CreateLyricAnnotation(editor, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note"})
+
+	_, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{Content: "broken", Format: "plain"})
+	assertAppErrorCode(t, err, "music.annotation_anchor_conflict")
+	var versions, notifications int64
+	_ = db.Model(&model.MusicSongLyricVersion{}).Count(&versions).Error
+	_ = db.Model(&model.Notification{}).Count(&notifications).Error
+	if versions != 1 || notifications != 0 {
+		t.Fatalf("conflict appended state: versions=%d notifications=%d", versions, notifications)
+	}
+
+	callback := "test:fail-lyric-version-create"
+	if err := db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "music_song_lyric_versions" {
+			tx.AddError(errors.New("forced version failure"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callback) })
+	_, err = svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{
+		Content: "broken", Format: "plain",
+		AnnotationResolutions: []AnnotationResolutionInput{{AnnotationID: annotation.ID, Action: "needs_rebind"}},
+	})
+	if err == nil {
+		t.Fatal("expected forced version failure")
+	}
+	_ = db.Model(&model.MusicSongLyricVersion{}).Count(&versions).Error
+	_ = db.Model(&model.Notification{}).Count(&notifications).Error
+	var stored model.MusicLyricAnnotation
+	_ = db.First(&stored, "id = ?", annotation.ID).Error
+	if versions != 1 || notifications != 0 || stored.Status != "active" {
+		t.Fatalf("transaction leaked state: versions=%d notifications=%d annotation=%#v", versions, notifications, stored)
+	}
 }
 
 func assertAppErrorCode(t *testing.T, err error, code string) {

@@ -10087,6 +10087,132 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/songs/{songId}/lyrics/versions": {
+            "get": {
+                "description": "匿名用户可按版本号倒序读取歌曲歌词历史。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-lyrics"
+                ],
+                "summary": "获取歌词历史版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 UUID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicSongLyricsVersionsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/songs/{songId}/lyrics/versions/{version}/revert": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "将指定历史内容保存为一个新的当前版本，不覆盖历史记录。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-lyrics"
+                ],
+                "summary": "恢复歌词历史版本",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 UUID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "正整数版本号",
+                        "name": "version",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "恢复摘要",
+                        "name": "input",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/music.RevertSongLyricsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/podcast/episodes": {
             "get": {
                 "description": "返回所有已发布的播客单集。",
@@ -19394,6 +19520,9 @@ const docTemplate = `{
         },
         "music.LyricAnnotationVoteRequest": {
             "type": "object",
+            "required": [
+                "vote"
+            ],
             "properties": {
                 "vote": {
                     "type": "string"
@@ -19491,7 +19620,8 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "time_ms": {
-                    "type": "integer"
+                    "type": "integer",
+                    "x-nullable": true
                 },
                 "translation": {
                     "type": "string"
@@ -19570,6 +19700,49 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/music.MusicLyricsDTO"
+                }
+            }
+        },
+        "music.MusicSongLyricsVersionDTO": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "edit_summary": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "song_id": {
+                    "type": "string"
+                },
+                "translation": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "music.MusicSongLyricsVersionsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.MusicSongLyricsVersionDTO"
+                    }
                 }
             }
         },
@@ -19706,6 +19879,14 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "music.RevertSongLyricsRequest": {
+            "type": "object",
+            "properties": {
+                "edit_summary": {
+                    "type": "string"
                 }
             }
         },

@@ -2,6 +2,7 @@ package music
 
 import (
 	"net/http"
+	"strconv"
 
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
@@ -33,7 +34,11 @@ type UpdateLyricAnnotationRequest struct {
 }
 
 type LyricAnnotationVoteRequest struct {
-	Vote string `json:"vote"`
+	Vote *string `json:"vote" binding:"required"`
+}
+
+type RevertSongLyricsRequest struct {
+	EditSummary string `json:"edit_summary"`
 }
 
 type MusicLyricsResponse struct {
@@ -42,6 +47,10 @@ type MusicLyricsResponse struct {
 
 type MusicLyricAnnotationResponse struct {
 	Data MusicLyricAnnotationDTO `json:"data"`
+}
+
+type MusicSongLyricsVersionsResponse struct {
+	Data []MusicSongLyricsVersionDTO `json:"data"`
 }
 
 type DeleteLyricAnnotationResponse struct {
@@ -120,6 +129,71 @@ func (h *Handler) saveSongLyrics(c *gin.Context) {
 		return
 	}
 	lyrics, err := h.service.SaveSongLyrics(user, songID, SaveLyricsInput(req))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, lyrics)
+}
+
+// listSongLyricVersions godoc
+// @Summary 获取歌词历史版本
+// @Description 匿名用户可按版本号倒序读取歌曲歌词历史。
+// @Tags music-lyrics
+// @Produce json
+// @Param songId path string true "歌曲 UUID"
+// @Success 200 {object} MusicSongLyricsVersionsResponse
+// @Failure 400 {object} MusicLyricsErrorResponse
+// @Failure 404 {object} MusicLyricsErrorResponse
+// @Failure 500 {object} MusicLyricsErrorResponse
+// @Router /api/v1/music/songs/{songId}/lyrics/versions [get]
+func (h *Handler) listSongLyricVersions(c *gin.Context) {
+	songID, err := parseMusicID(c.Param("songId"), "songId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	versions, err := h.service.ListSongLyricVersions(songID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, versions)
+}
+
+// revertSongLyrics godoc
+// @Summary 恢复歌词历史版本
+// @Description 将指定历史内容保存为一个新的当前版本，不覆盖历史记录。
+// @Tags music-lyrics
+// @Accept json
+// @Produce json
+// @Param songId path string true "歌曲 UUID"
+// @Param version path int true "正整数版本号"
+// @Param input body RevertSongLyricsRequest false "恢复摘要"
+// @Success 200 {object} MusicLyricsResponse
+// @Failure 400 {object} MusicLyricsErrorResponse
+// @Failure 401 {object} MusicLyricsErrorResponse
+// @Failure 404 {object} MusicLyricsErrorResponse
+// @Failure 500 {object} MusicLyricsErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/music/songs/{songId}/lyrics/versions/{version}/revert [post]
+func (h *Handler) revertSongLyrics(c *gin.Context) {
+	user, songID, ok := musicLyricsWriteContext(c)
+	if !ok {
+		return
+	}
+	version, err := strconv.Atoi(c.Param("version"))
+	if err != nil || version <= 0 {
+		httpx.Error(c, lyricValidationError("version must be a positive integer"))
+		return
+	}
+	var req RevertSongLyricsRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	lyrics, err := h.service.RevertSongLyrics(user, songID, version, req.EditSummary)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -250,7 +324,11 @@ func (h *Handler) voteLyricAnnotation(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	annotation, err := h.service.SetLyricAnnotationVote(user, songID, annotationID, req.Vote)
+	if req.Vote == nil {
+		httpx.Error(c, lyricValidationError("vote is required"))
+		return
+	}
+	annotation, err := h.service.SetLyricAnnotationVote(user, songID, annotationID, *req.Vote)
 	if err != nil {
 		httpx.Error(c, err)
 		return

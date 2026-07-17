@@ -48,6 +48,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.MusicSongLyricVersion{},
 		&model.MusicLyricAnnotation{},
 		&model.MusicLyricAnnotationVote{},
+		&model.Notification{},
 		&model.AuditLog{},
 	)
 
@@ -230,6 +231,67 @@ func TestRegisterRoutesMusicLyricsRejectsInvalidRequestsAndCrossSongAccess(t *te
 
 	badAnnotationID := performMusicJSONRequest(t, r, http.MethodPatch, basePath+"/annotations/not-a-uuid", `{"body":"x"}`)
 	assertMusicHTTPError(t, badAnnotationID, http.StatusBadRequest, "validation.invalid_request")
+}
+
+func TestRegisterRoutesMusicLyricsVersionsAndRevert(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Version HTTP", AudioURL: "/versions.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	userRouter := newMusicHTTPRouter(service, &user)
+	anonRouter := newMusicHTTPRouter(service, nil)
+	basePath := "/api/v1/music/songs/" + song.ID.String() + "/lyrics"
+	for _, content := range []string{"first", "second"} {
+		response := performMusicJSONRequest(t, userRouter, http.MethodPut, basePath, `{"content":"`+content+`","format":"plain"}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("save %s: %d %s", content, response.Code, response.Body.String())
+		}
+	}
+
+	list := performMusicJSONRequest(t, anonRouter, http.MethodGet, basePath+"/versions", "")
+	if list.Code != http.StatusOK {
+		t.Fatalf("anonymous list: %d %s", list.Code, list.Body.String())
+	}
+	var listed struct {
+		Data []MusicSongLyricsVersionDTO `json:"data"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil || len(listed.Data) != 2 || listed.Data[0].Version != 2 {
+		t.Fatalf("unexpected list: %#v, %v", listed.Data, err)
+	}
+
+	assertMusicHTTPError(t, performMusicJSONRequest(t, anonRouter, http.MethodPost, basePath+"/versions/1/revert", `{}`), http.StatusUnauthorized, "auth.unauthorized")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, userRouter, http.MethodPost, basePath+"/versions/zero/revert", `{}`), http.StatusBadRequest, "validation.invalid_request")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, userRouter, http.MethodPost, basePath+"/versions/0/revert", `{}`), http.StatusBadRequest, "validation.invalid_request")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, userRouter, http.MethodPost, basePath+"/versions/99/revert", `{}`), http.StatusNotFound, "music.lyrics_version_not_found")
+	revert := performMusicJSONRequest(t, userRouter, http.MethodPost, basePath+"/versions/1/revert", `{"edit_summary":"back"}`)
+	if revert.Code != http.StatusOK {
+		t.Fatalf("revert: %d %s", revert.Code, revert.Body.String())
+	}
+	var reverted struct {
+		Data MusicLyricsDTO `json:"data"`
+	}
+	if err := json.Unmarshal(revert.Body.Bytes(), &reverted); err != nil || reverted.Data.Version != 3 || reverted.Data.Content != "first" || reverted.Data.EditSummary != "back" {
+		t.Fatalf("unexpected revert: %#v, %v", reverted.Data, err)
+	}
+}
+
+func TestRegisterRoutesMusicLyricsVoteRequiresVoteField(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Vote HTTP", AudioURL: "/vote.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	lyrics, _ := service.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	annotation, _ := service.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note"})
+	router := newMusicHTTPRouter(service, &user)
+	path := "/api/v1/music/songs/" + song.ID.String() + "/lyrics/annotations/" + annotation.ID.String() + "/votes"
+	assertMusicHTTPError(t, performMusicJSONRequest(t, router, http.MethodPost, path, ""), http.StatusBadRequest, "validation.invalid_request")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, router, http.MethodPost, path, `{}`), http.StatusBadRequest, "validation.invalid_request")
+	clear := performMusicJSONRequest(t, router, http.MethodPost, path, `{"vote":"none"}`)
+	if clear.Code != http.StatusOK {
+		t.Fatalf("explicit none should clear vote: %d %s", clear.Code, clear.Body.String())
+	}
 }
 
 func performMusicJSONRequest(t *testing.T, r http.Handler, method, path, body string) *httptest.ResponseRecorder {
