@@ -44,8 +44,19 @@ func TestRunMusicLyricsMigrationBackfillsLegacyLyricsWithoutOverwritingWiki(t *t
 	if err := db.First(&lyric, "song_id = ?", legacy.ID).Error; err != nil {
 		t.Fatalf("load migrated lyric: %v", err)
 	}
-	if lyric.Content != legacy.Lyrics || lyric.Version != 1 || lyric.UpdatedBy != user.UUID || lyric.EditSummary != "从旧歌词字段迁移" {
+	var migrationUser model.User
+	if err := db.First(&migrationUser, "username = ?", "system-migration").Error; err != nil {
+		t.Fatalf("load migration user: %v", err)
+	}
+	if lyric.Content != legacy.Lyrics || lyric.Version != 1 || lyric.UpdatedBy != migrationUser.UUID || lyric.EditSummary != "从旧歌词字段迁移" {
 		t.Fatalf("unexpected migrated lyric: %#v", lyric)
+	}
+	var initialVersion model.MusicSongLyricVersion
+	if err := db.First(&initialVersion, "song_id = ? AND version = ?", legacy.ID, 1).Error; err != nil {
+		t.Fatalf("load initial migrated version: %v", err)
+	}
+	if initialVersion.CreatedBy != migrationUser.UUID {
+		t.Fatalf("initial version actor = %s, want stable migration user %s", initialVersion.CreatedBy, migrationUser.UUID)
 	}
 	var lineCount, versionCount int64
 	db.Model(&model.MusicSongLyricLine{}).Where("lyric_id = ?", lyric.ID).Count(&lineCount)

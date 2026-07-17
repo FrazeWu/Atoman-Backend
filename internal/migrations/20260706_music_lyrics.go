@@ -42,11 +42,7 @@ func RunMusicLyricsMigration(db *gorm.DB) error {
 				if count > 0 {
 					continue
 				}
-				actorID := systemUserID
-				if song.UploadedBy != nil {
-					actorID = *song.UploadedBy
-				}
-				if err := musiclyrics.SyncLegacySongLyrics(tx, actorID, song.ID, song.Lyrics, "从旧歌词字段迁移"); err != nil {
+				if err := musiclyrics.SyncLegacySongLyrics(tx, systemUserID, song.ID, song.Lyrics, "从旧歌词字段迁移"); err != nil {
 					return err
 				}
 			}
