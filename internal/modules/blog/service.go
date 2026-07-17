@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	stdhtml "html"
 	"math"
 	"regexp"
 	"sort"
@@ -17,11 +18,18 @@ import (
 	"atoman/internal/platform/sitehandle"
 
 	"github.com/google/uuid"
+	"golang.org/x/net/html"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 var slugInvalidChars = regexp.MustCompile(`[^a-z0-9一-龥]+`)
+
+var (
+	markdownImagePattern      = regexp.MustCompile(`!\[([^\]]*)\]\([^)]+\)`)
+	markdownLinkPattern       = regexp.MustCompile(`\[([^\]]+)\]\([^)]+\)`)
+	markdownLinePrefixPattern = regexp.MustCompile(`(?m)^\s{0,3}(?:#{1,6}|>|[-+*])\s*`)
+)
 
 var allowedPostStatuses = map[string]struct{}{
 	"draft":     {},
@@ -40,6 +48,100 @@ type Service struct {
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
+
+func (s *Service) GetSEOPost(id uuid.UUID) (SEOPostDTO, error) {
+	post, err := s.repo.GetPublicPublishedPost(id)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return SEOPostDTO{}, apperr.NotFound("blog.post_not_found", "Post not found")
+		}
+		return SEOPostDTO{}, err
+	}
+	return buildSEOPostDTO(post), nil
+}
+
+func (s *Service) ListSEOSitemap() ([]SEOSitemapItemDTO, error) {
+	posts, err := s.repo.ListPublicPublishedPosts()
+	if err != nil {
+		return nil, err
+	}
+	items := make([]SEOSitemapItemDTO, 0, len(posts))
+	for _, post := range posts {
+		items = append(items, SEOSitemapItemDTO{
+			Path:         seoPostPath(post.ID),
+			LastModified: post.UpdatedAt,
+		})
+	}
+	return items, nil
+}
+
+func buildSEOPostDTO(post model.Post) SEOPostDTO {
+	authorName := ""
+	if post.User != nil {
+		authorName = strings.TrimSpace(post.User.DisplayName)
+		if authorName == "" {
+			authorName = post.User.Username
+		}
+	}
+	return SEOPostDTO{
+		ID:          post.ID,
+		Title:       post.Title,
+		Description: seoPostDescription(post),
+		ImageURL:    post.CoverURL,
+		AuthorName:  authorName,
+		PublishedAt: post.PublishedAt,
+		UpdatedAt:   post.UpdatedAt,
+		Path:        seoPostPath(post.ID),
+	}
+}
+
+func seoPostPath(id uuid.UUID) string {
+	return "/posts/post/" + id.String()
+}
+
+func seoPostDescription(post model.Post) string {
+	if summary := strings.TrimSpace(post.Summary); summary != "" {
+		return summary
+	}
+
+	plain := markdownImagePattern.ReplaceAllString(post.Content, "$1")
+	plain = markdownLinkPattern.ReplaceAllString(plain, "$1")
+	plain = stripHTMLTags(plain)
+	plain = markdownLinePrefixPattern.ReplaceAllString(plain, "")
+	plain = strings.NewReplacer("**", "", "__", "", "~~", "", "`", "", "*", "", "_", "").Replace(plain)
+	plain = stdhtml.UnescapeString(strings.Join(strings.Fields(plain), " "))
+	runes := []rune(plain)
+	if len(runes) > 160 {
+		return string(runes[:160])
+	}
+	return plain
+}
+
+func stripHTMLTags(value string) string {
+	tokenizer := html.NewTokenizer(strings.NewReader(value))
+	parts := make([]string, 0)
+	skippedTag := ""
+	for {
+		switch tokenizer.Next() {
+		case html.ErrorToken:
+			return strings.Join(parts, " ")
+		case html.TextToken:
+			if skippedTag == "" {
+				parts = append(parts, string(tokenizer.Text()))
+			}
+		case html.StartTagToken:
+			name, _ := tokenizer.TagName()
+			if string(name) == "script" || string(name) == "style" {
+				skippedTag = string(name)
+			}
+		case html.EndTagToken:
+			name, _ := tokenizer.TagName()
+			if string(name) == skippedTag {
+				skippedTag = ""
+			}
+		}
+	}
+}
 
 func parseRecommendationMode(raw string) (recommendation.Mode, error) {
 	switch recommendation.Mode(strings.TrimSpace(strings.ToLower(raw))) {

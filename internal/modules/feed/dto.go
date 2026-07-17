@@ -12,6 +12,7 @@ import (
 type FeedQuery struct {
 	Page           int       `json:"page" form:"page"`
 	PageSize       int       `json:"page_size" form:"page_size"`
+	ContentType    string    `json:"content_type" form:"content_type"`
 	SourceType     string    `json:"source_type" form:"source_type"`
 	SourceID       uuid.UUID `json:"source_id" form:"source_id"`
 	GroupID        uuid.UUID `json:"group_id" form:"group_id"`

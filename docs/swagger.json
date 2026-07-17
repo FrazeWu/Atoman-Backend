@@ -3045,29 +3045,135 @@
                 }
             }
         },
-        "/api/v1/blog/explore": {
+        "/api/v1/blog/bookmark-folders": {
             "get": {
-                "description": "返回已发布文章的分页列表，并附带点赞数和评论数。",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "获取收藏夹",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.BookmarkFolder"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "新建收藏夹",
+                "parameters": [
+                    {
+                        "description": "收藏夹输入",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.bookmarkFolderInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.BookmarkFolder"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/bookmark-folders/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "收藏会迁移到默认收藏夹。",
+                "tags": [
+                    "blog"
+                ],
+                "summary": "删除收藏夹",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "收藏夹 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/bookmarks": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
-                    "users"
+                    "blog"
                 ],
-                "summary": "获取博客探索流",
+                "summary": "获取文章收藏",
                 "parameters": [
                     {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "页码",
-                        "name": "page",
+                        "type": "string",
+                        "description": "收藏夹 UUID",
+                        "name": "folder_id",
                         "in": "query"
                     },
                     {
-                        "type": "integer",
-                        "default": 20,
-                        "description": "每页数量",
-                        "name": "limit",
+                        "enum": [
+                            "latest",
+                            "popular"
+                        ],
+                        "type": "string",
+                        "description": "排序",
+                        "name": "sort",
                         "in": "query"
                     }
                 ],
@@ -3075,13 +3181,85 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ExplorePostListResponse"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "array",
+                                "items": {
+                                    "$ref": "#/definitions/blog.BookmarkListItemDTO"
+                                }
+                            }
                         }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "收藏文章到指定收藏夹",
+                "parameters": [
+                    {
+                        "description": "收藏输入",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/blog.bookmarkInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.Bookmark"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/bookmarks/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "取消文章收藏",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "收藏 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
                         }
                     }
                 }
@@ -3290,7 +3468,46 @@
                 }
             }
         },
-        "/api/v1/blog/posts/{id}/collections": {
+        "/api/v1/blog/posts/{id}/versions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "获取文章版本历史",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文章 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.BlogPostVersion"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{id}/versions/{version}/restore": {
             "post": {
                 "security": [
                     {
@@ -3300,17 +3517,13 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "为当前用户拥有的文章增加一个同频道合集归属。",
-                "consumes": [
-                    "application/json"
-                ],
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "blog"
                 ],
-                "summary": "将文章加入合集",
+                "summary": "恢复文章版本",
                 "parameters": [
                     {
                         "type": "string",
@@ -3320,20 +3533,94 @@
                         "required": true
                     },
                     {
-                        "description": "合集操作输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/blog.collectionActionInput"
-                        }
+                        "type": "integer",
+                        "description": "版本号",
+                        "name": "version",
+                        "in": "path",
+                        "required": true
                     }
                 ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
+                            "$ref": "#/definitions/model.Post"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/recommend/posts": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "获取博客综合推荐",
+                "parameters": [
+                    {
+                        "enum": [
+                            "hot",
+                            "featured",
+                            "discover"
+                        ],
+                        "type": "string",
+                        "description": "推荐模式",
+                        "name": "mode",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/blog.RecommendationItemDTO"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/seo/posts/{id}": {
+            "get": {
+                "description": "仅返回已发布且公开的文章元数据，不计入阅读数。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "获取公开文章 SEO 元数据",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文章 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.SEOPostResponse"
                         }
                     },
                     "400": {
@@ -3342,20 +3629,14 @@
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -3363,67 +3644,25 @@
                 }
             }
         },
-        "/api/v1/blog/posts/{id}/collections/{collection_id}": {
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "移除当前用户拥有文章与指定合集之间的关联。",
+        "/api/v1/blog/seo/sitemap": {
+            "get": {
+                "description": "返回全部已发布且公开的文章路径及最后修改时间。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "blog"
                 ],
-                "summary": "将文章移出合集",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "文章 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "合集 UUID",
-                        "name": "collection_id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
+                "summary": "获取公开文章站点地图数据",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
+                            "$ref": "#/definitions/blog.SEOSitemapResponse"
                         }
                     },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -5844,14 +6083,13 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "分页返回当前用户的稍后读条目。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "feed"
                 ],
-                "summary": "获取稍后读列表",
+                "summary": "获取统一稍后阅读列表",
                 "parameters": [
                     {
                         "type": "integer",
@@ -5862,7 +6100,7 @@
                     {
                         "type": "integer",
                         "description": "每页数量",
-                        "name": "limit",
+                        "name": "page_size",
                         "in": "query"
                     }
                 ],
@@ -5870,13 +6108,10 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/feed.ReadingListResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/feed.ErrorResponse"
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.ReadingListItem"
+                            }
                         }
                     }
                 }
@@ -5890,7 +6125,6 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "为 feed item 添加或移除稍后读标记。",
                 "consumes": [
                     "application/json"
                 ],
@@ -5900,15 +6134,15 @@
                 "tags": [
                     "feed"
                 ],
-                "summary": "切换稍后读条目",
+                "summary": "切换稍后阅读状态",
                 "parameters": [
                     {
-                        "description": "稍后读输入",
+                        "description": "稍后阅读目标",
                         "name": "input",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/feed.StarToggleInput"
+                            "$ref": "#/definitions/feed.ReadingListInput"
                         }
                     }
                 ],
@@ -5916,31 +6150,16 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/feed.SaveToggleResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/feed.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/feed.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/feed.ErrorResponse"
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
                         }
                     }
                 }
             }
         },
-        "/api/v1/feed/reading-list/{id}": {
+        "/api/v1/feed/reading-list/{target_type}/{id}": {
             "delete": {
                 "security": [
                     {
@@ -5950,7 +6169,7 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "删除当前用户待读列表中的指定 feed item。",
+                "description": "删除当前用户稍后阅读列表中的指定 RSS 条目或站内文章。",
                 "produces": [
                     "application/json"
                 ],
@@ -5960,8 +6179,19 @@
                 "summary": "从待读列表移除条目",
                 "parameters": [
                     {
+                        "enum": [
+                            "feed_item",
+                            "post"
+                        ],
                         "type": "string",
-                        "description": "Feed item UUID",
+                        "description": "目标类型",
+                        "name": "target_type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "目标 UUID",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -7100,6 +7330,15 @@
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "blog"
+                        ],
+                        "type": "string",
+                        "description": "内容类型",
+                        "name": "content_type",
+                        "in": "query"
+                    },
+                    {
                         "type": "string",
                         "description": "源类型",
                         "name": "source_type",
@@ -7309,6 +7548,781 @@
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/category-permissions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回论坛分类与用户组的权限关系，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "获取论坛分类权限",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "分类 UUID",
+                        "name": "category_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumCategoryPermissionListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "创建或更新分类与用户组的权限关系，仅管理员可访问。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "设置论坛分类权限",
+                "parameters": [
+                    {
+                        "description": "分类权限",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumCategoryPermissionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumCategoryPermissionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/category-permissions/{permissionID}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "删除指定分类权限关系，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "删除论坛分类权限",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "分类权限 UUID",
+                        "name": "permissionID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/follows": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回当前用户关注的帖子、分类和标签。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "获取论坛关注列表",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumFollowListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/follows/{targetType}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "关注指定帖子、分类或标签。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "关注论坛对象",
+                "parameters": [
+                    {
+                        "enum": [
+                            "topic",
+                            "category",
+                            "tag"
+                        ],
+                        "type": "string",
+                        "description": "关注类型",
+                        "name": "targetType",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "帖子 UUID、分类 UUID 或标签名",
+                        "name": "target_key",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumFollowResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "取消关注指定帖子、分类或标签。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "取消关注论坛对象",
+                "parameters": [
+                    {
+                        "enum": [
+                            "topic",
+                            "category",
+                            "tag"
+                        ],
+                        "type": "string",
+                        "description": "关注类型",
+                        "name": "targetType",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "帖子 UUID、分类 UUID 或标签名",
+                        "name": "target_key",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/groups": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回论坛用户组及成员，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "获取论坛用户组",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumGroupListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "创建论坛权限用户组，仅管理员可访问。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "创建论坛用户组",
+                "parameters": [
+                    {
+                        "description": "用户组信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumGroupInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumGroupResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/groups/{groupID}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "更新指定论坛用户组，仅管理员可访问。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "更新论坛用户组",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户组 UUID",
+                        "name": "groupID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "用户组信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumGroupInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumGroupResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "删除指定论坛用户组及其权限关系，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "删除论坛用户组",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户组 UUID",
+                        "name": "groupID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/groups/{groupID}/members/{userID}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "将用户加入指定论坛用户组，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "添加论坛用户组成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户组 UUID",
+                        "name": "groupID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "用户 UUID",
+                        "name": "userID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "将用户从指定论坛用户组移除，仅管理员可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "移除论坛用户组成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户组 UUID",
+                        "name": "groupID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "用户 UUID",
+                        "name": "userID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -7536,6 +8550,687 @@
                         "description": "No Content",
                         "schema": {
                             "type": "string"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/moderation/reports": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "按状态分页返回论坛举报，仅管理员和站点所有者可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum-moderation"
+                ],
+                "summary": "获取论坛举报列表",
+                "parameters": [
+                    {
+                        "enum": [
+                            "open",
+                            "resolved",
+                            "all"
+                        ],
+                        "type": "string",
+                        "default": "open",
+                        "description": "举报状态",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumReportListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/moderation/reports/{reportID}/resolve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "标记举报为已处理并记录处理备注。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum-moderation"
+                ],
+                "summary": "处理论坛举报",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "举报 UUID",
+                        "name": "reportID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "处理备注",
+                        "name": "input",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumResolveReportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumReportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/moderation/user-actions": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回指定用户的警告、禁言和封禁操作记录，仅管理员和站点所有者可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum-moderation"
+                ],
+                "summary": "获取论坛用户管理记录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 UUID",
+                        "name": "user_id",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumUserActionListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/moderation/users": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "搜索可执行论坛管理操作的用户列表，仅管理员和站点所有者可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum-moderation"
+                ],
+                "summary": "搜索论坛管理用户",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户名或显示名称",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumModerationUserListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/moderation/users/{userID}/actions": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "对指定用户执行警告、禁言、解除禁言、封禁或解除封禁，仅管理员和站点所有者可访问。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum-moderation"
+                ],
+                "summary": "执行论坛用户管理操作",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 UUID",
+                        "name": "userID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "管理操作",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumUserActionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumUserActionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/reports/{reportID}/resolve": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "标记举报为已处理并记录处理备注。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum-moderation"
+                ],
+                "summary": "处理论坛举报",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "举报 UUID",
+                        "name": "reportID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "处理备注",
+                        "name": "input",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumResolveReportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumReportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/search": {
+            "get": {
+                "description": "按关键词搜索当前用户可见的论坛帖子。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "搜索论坛帖子",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "搜索关键词",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumSearchResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/trust/me": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "重新评估并返回当前登录用户的论坛信任等级。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "获取我的论坛信任等级",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumTrustResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/trust/users/{userID}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回指定用户的论坛信任等级，仅管理员和站点所有者可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "获取用户论坛信任等级",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 UUID",
+                        "name": "userID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumTrustResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/forum/trust/users/{userID}/evaluate": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "根据当前论坛贡献和获赞数据重新评估指定用户，仅管理员和站点所有者可访问。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "forum"
+                ],
+                "summary": "重新评估用户论坛信任等级",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 UUID",
+                        "name": "userID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ForumTrustResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     },
                     "401": {
@@ -7800,6 +9495,13 @@
                     },
                     {
                         "type": "integer",
+                        "default": 1,
+                        "description": "页码；random 排序仅支持第 1 页",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
                         "description": "返回数量上限",
                         "name": "limit",
                         "in": "query"
@@ -7813,6 +9515,18 @@
                             "items": {
                                 "$ref": "#/definitions/model.PodcastEpisode"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -7878,7 +9592,7 @@
         },
         "/api/v1/podcast/episodes/{id}": {
             "get": {
-                "description": "按 UUID 返回单个播客单集。",
+                "description": "已发布单集可公开读取；作者可读取自己的草稿。",
                 "produces": [
                     "application/json"
                 ],
@@ -11097,7 +12811,7 @@
         },
         "/api/v1/videos": {
             "get": {
-                "description": "返回公开已发布的视频列表，可按频道、标签和排序方式筛选。",
+                "description": "匿名返回公开已发布视频；有效认证按本人频道或合集筛选时也返回本人的非公开视频。",
                 "produces": [
                     "application/json"
                 ],
@@ -11110,6 +12824,12 @@
                         "type": "string",
                         "description": "频道 UUID",
                         "name": "channel_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "合集 UUID",
+                        "name": "collection_id",
                         "in": "query"
                     },
                     {
@@ -11130,8 +12850,21 @@
                     },
                     {
                         "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
                         "description": "返回数量上限",
                         "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "仅返回当前用户订阅频道的视频",
+                        "name": "subscribed",
                         "in": "query"
                     }
                 ],
@@ -11542,7 +13275,19 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                            "$ref": "#/definitions/handlers.VideoViewCountResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -11550,17 +13295,115 @@
         }
     },
     "definitions": {
+        "blog.BookmarkListItemDTO": {
+            "type": "object",
+            "properties": {
+                "bookmark_folder": {
+                    "$ref": "#/definitions/model.BookmarkFolder"
+                },
+                "bookmark_folder_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "post": {
+                    "$ref": "#/definitions/blog.BookmarkPostDTO"
+                },
+                "post_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.BookmarkPostDTO": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "$ref": "#/definitions/model.Channel"
+                },
+                "channel_id": {
+                    "type": "string"
+                },
+                "collection": {
+                    "$ref": "#/definitions/model.Collection"
+                },
+                "collection_id": {
+                    "type": "string"
+                },
+                "collection_position": {
+                    "type": "integer"
+                },
+                "comments_count": {
+                    "type": "integer"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "likes_count": {
+                    "type": "integer"
+                },
+                "pinned": {
+                    "type": "boolean"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "draft / published",
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
+                },
+                "visibility": {
+                    "type": "string"
+                }
+            }
+        },
         "blog.CreatePostRequest": {
             "type": "object",
             "properties": {
                 "channel_id": {
                     "type": "string"
                 },
-                "collection_ids": {
-                    "type": "array",
-                    "items": {
-                        "type": "string"
-                    }
+                "collection_id": {
+                    "type": "string"
                 },
                 "content": {
                     "type": "string"
@@ -11585,13 +13428,118 @@
                 }
             }
         },
-        "blog.collectionActionInput": {
+        "blog.RecommendationItemDTO": {
+            "type": "object",
+            "properties": {
+                "comments_count": {
+                    "type": "integer"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "likes_count": {
+                    "type": "integer"
+                },
+                "score_label": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "target_path": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.SEOPostDTO": {
+            "type": "object",
+            "properties": {
+                "author_name": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.SEOPostResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/blog.SEOPostDTO"
+                }
+            }
+        },
+        "blog.SEOSitemapItemDTO": {
+            "type": "object",
+            "properties": {
+                "last_modified": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.SEOSitemapResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/blog.SEOSitemapItemDTO"
+                    }
+                }
+            }
+        },
+        "blog.bookmarkFolderInput": {
             "type": "object",
             "required": [
-                "collection_id"
+                "name"
             ],
             "properties": {
-                "collection_id": {
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.bookmarkInput": {
+            "type": "object",
+            "required": [
+                "post_id"
+            ],
+            "properties": {
+                "bookmark_folder_id": {
+                    "type": "string"
+                },
+                "post_id": {
                     "type": "string"
                 }
             }
@@ -12461,6 +14409,21 @@
                 }
             }
         },
+        "feed.ReadingListInput": {
+            "type": "object",
+            "properties": {
+                "target_id": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "type": "string",
+                    "enum": [
+                        "feed_item",
+                        "post"
+                    ]
+                }
+            }
+        },
         "feed.ReadingListResponse": {
             "type": "object",
             "properties": {
@@ -12720,6 +14683,109 @@
                     "type": "string"
                 },
                 "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "feed.TimelineItemDTO": {
+            "type": "object",
+            "properties": {
+                "feed_item": {
+                    "$ref": "#/definitions/model.FeedItem"
+                },
+                "is_read": {
+                    "type": "boolean"
+                },
+                "post": {
+                    "$ref": "#/definitions/feed.TimelinePostDTO"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "feed.TimelineListResponseDTO": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/feed.TimelineItemDTO"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/httpx.PageMeta"
+                }
+            }
+        },
+        "feed.TimelinePostDTO": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "$ref": "#/definitions/model.Channel"
+                },
+                "channel_id": {
+                    "type": "string"
+                },
+                "collection": {
+                    "$ref": "#/definitions/model.Collection"
+                },
+                "collection_id": {
+                    "type": "string"
+                },
+                "collection_position": {
+                    "type": "integer"
+                },
+                "comments_count": {
+                    "type": "integer"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "likes_count": {
+                    "type": "integer"
+                },
+                "pinned": {
+                    "type": "boolean"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "draft / published",
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
+                },
+                "visibility": {
                     "type": "string"
                 }
             }
@@ -13342,93 +15408,214 @@
                 }
             }
         },
-        "handlers.ExplorePostListResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.ExplorePostResponse"
-                    }
-                },
-                "message": {
-                    "type": "string",
-                    "example": "ok"
-                }
-            }
-        },
-        "handlers.ExplorePostResponse": {
-            "type": "object",
-            "properties": {
-                "channel": {
-                    "$ref": "#/definitions/model.Channel"
-                },
-                "channel_id": {
-                    "type": "string"
-                },
-                "collections": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.Collection"
-                    }
-                },
-                "comments_count": {
-                    "type": "integer"
-                },
-                "content": {
-                    "type": "string"
-                },
-                "cover_url": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "likes_count": {
-                    "type": "integer"
-                },
-                "pinned": {
-                    "type": "boolean"
-                },
-                "rating_average_score": {
-                    "type": "integer"
-                },
-                "rating_count": {
-                    "type": "integer"
-                },
-                "status": {
-                    "description": "draft / published",
-                    "type": "string"
-                },
-                "summary": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
-                    "type": "string"
-                },
-                "visibility": {
-                    "type": "string"
-                }
-            }
-        },
         "handlers.FoldArgumentInput": {
             "type": "object",
             "properties": {
                 "fold_note": {
                     "type": "string",
                     "example": "证据不足，暂时折叠。"
+                }
+            }
+        },
+        "handlers.ForumCategoryPermissionInput": {
+            "type": "object",
+            "properties": {
+                "can_comment": {
+                    "type": "boolean"
+                },
+                "can_create_topic": {
+                    "type": "boolean"
+                },
+                "can_view": {
+                    "type": "boolean"
+                },
+                "category_id": {
+                    "type": "string",
+                    "format": "uuid"
+                },
+                "group_id": {
+                    "type": "string",
+                    "format": "uuid"
+                }
+            }
+        },
+        "handlers.ForumCategoryPermissionListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ForumCategoryPermission"
+                    }
+                }
+            }
+        },
+        "handlers.ForumCategoryPermissionResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.ForumCategoryPermission"
+                }
+            }
+        },
+        "handlers.ForumFollowListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ForumFollow"
+                    }
+                }
+            }
+        },
+        "handlers.ForumFollowResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.ForumFollow"
+                }
+            }
+        },
+        "handlers.ForumGroupInput": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "example": "可发布论坛内容"
+                },
+                "name": {
+                    "type": "string",
+                    "example": "Writers"
+                }
+            }
+        },
+        "handlers.ForumGroupListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ForumGroup"
+                    }
+                }
+            }
+        },
+        "handlers.ForumGroupResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.ForumGroup"
+                }
+            }
+        },
+        "handlers.ForumModerationUserListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.User"
+                    }
+                }
+            }
+        },
+        "handlers.ForumReportListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ForumReport"
+                    }
+                }
+            }
+        },
+        "handlers.ForumReportResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.ForumReport"
+                }
+            }
+        },
+        "handlers.ForumResolveReportInput": {
+            "type": "object",
+            "properties": {
+                "review_note": {
+                    "type": "string",
+                    "example": "已处理"
+                }
+            }
+        },
+        "handlers.ForumSearchResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ForumTopic"
+                    }
+                },
+                "limit": {
+                    "type": "integer",
+                    "example": 20
+                },
+                "page": {
+                    "type": "integer",
+                    "example": 1
+                },
+                "q": {
+                    "type": "string",
+                    "example": "music"
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 12
+                }
+            }
+        },
+        "handlers.ForumTrustResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.ForumUserTrust"
+                }
+            }
+        },
+        "handlers.ForumUserActionInput": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "example": "silence"
+                },
+                "expires_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "reason": {
+                    "type": "string",
+                    "example": "刷屏"
+                }
+            }
+        },
+        "handlers.ForumUserActionListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ForumUserModerationAction"
+                    }
+                }
+            }
+        },
+        "handlers.ForumUserActionResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.ForumUserModerationAction"
                 }
             }
         },
@@ -14515,6 +16702,17 @@
                 }
             }
         },
+        "handlers.VideoViewCountResponse": {
+            "type": "object",
+            "properties": {
+                "ok": {
+                    "type": "boolean"
+                },
+                "view_count": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.timelineProposalRequest": {
             "type": "object",
             "properties": {
@@ -14559,6 +16757,23 @@
                 },
                 "url": {
                     "type": "string"
+                }
+            }
+        },
+        "httpx.PageMeta": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "boolean"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -14900,6 +17115,105 @@
                 },
                 "status": {
                     "description": "pending|approved|rejected",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.BlogPostVersion": {
+            "type": "object",
+            "properties": {
+                "collection_id": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "editor_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "post_id": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "visibility": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.Bookmark": {
+            "type": "object",
+            "properties": {
+                "bookmark_folder": {
+                    "$ref": "#/definitions/model.BookmarkFolder"
+                },
+                "bookmark_folder_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "post": {
+                    "$ref": "#/definitions/model.Post"
+                },
+                "post_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.BookmarkFolder": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -15498,6 +17812,113 @@
                 }
             }
         },
+        "model.ForumCategoryPermission": {
+            "type": "object",
+            "properties": {
+                "can_comment": {
+                    "type": "boolean"
+                },
+                "can_create_topic": {
+                    "type": "boolean"
+                },
+                "can_view": {
+                    "type": "boolean"
+                },
+                "category": {
+                    "$ref": "#/definitions/model.ForumCategory"
+                },
+                "category_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "group": {
+                    "$ref": "#/definitions/model.ForumGroup"
+                },
+                "group_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ForumFollow": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "target_key": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ForumGroup": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.ForumGroupMember"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ForumGroupMember": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "group_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "model.ForumModeratorAssignment": {
             "type": "object",
             "properties": {
@@ -15527,6 +17948,166 @@
                 },
                 "user": {
                     "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ForumReport": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "note": {
+                    "type": "string"
+                },
+                "reason": {
+                    "description": "spam | off-topic | harassment | other",
+                    "type": "string"
+                },
+                "review_note": {
+                    "type": "string"
+                },
+                "reviewed_by": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "description": "\"topic\"",
+                    "type": "string"
+                },
+                "topic_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ForumTopic": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "$ref": "#/definitions/model.ForumCategory"
+                },
+                "category_id": {
+                    "type": "string"
+                },
+                "closed": {
+                    "type": "boolean"
+                },
+                "content": {
+                    "description": "raw Markdown",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "featured": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_bookmarked": {
+                    "description": "computed per-user",
+                    "type": "boolean"
+                },
+                "is_liked": {
+                    "description": "computed per-user",
+                    "type": "boolean"
+                },
+                "is_solved": {
+                    "type": "boolean"
+                },
+                "last_reply_at": {
+                    "type": "string"
+                },
+                "like_count": {
+                    "type": "integer"
+                },
+                "pinned": {
+                    "type": "boolean"
+                },
+                "reply_count": {
+                    "type": "integer"
+                },
+                "solved_reply_id": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
+                }
+            }
+        },
+        "model.ForumUserModerationAction": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "actor_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.ForumUserTrust": {
+            "type": "object",
+            "properties": {
+                "evaluated_at": {
+                    "type": "string"
+                },
+                "level": {
+                    "type": "integer"
                 },
                 "user_id": {
                     "type": "string"
@@ -15660,11 +18241,14 @@
                 "channel_id": {
                     "type": "string"
                 },
-                "collections": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.Collection"
-                    }
+                "collection": {
+                    "$ref": "#/definitions/model.Collection"
+                },
+                "collection_id": {
+                    "type": "string"
+                },
+                "collection_position": {
+                    "type": "integer"
                 },
                 "content": {
                     "type": "string"
@@ -15681,11 +18265,8 @@
                 "pinned": {
                     "type": "boolean"
                 },
-                "rating_average_score": {
-                    "type": "integer"
-                },
-                "rating_count": {
-                    "type": "integer"
+                "published_at": {
+                    "type": "string"
                 },
                 "status": {
                     "description": "draft / published",
@@ -15706,6 +18287,9 @@
                 "user_id": {
                     "type": "string"
                 },
+                "view_count": {
+                    "type": "integer"
+                },
                 "visibility": {
                     "type": "string"
                 }
@@ -15720,7 +18304,13 @@
                 "feed_item": {
                     "$ref": "#/definitions/model.FeedItem"
                 },
-                "feed_item_id": {
+                "post": {
+                    "$ref": "#/definitions/model.Post"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_type": {
                     "type": "string"
                 },
                 "user_id": {
@@ -16181,6 +18771,9 @@
                 "email": {
                     "type": "string"
                 },
+                "forum_trust_level": {
+                    "type": "integer"
+                },
                 "id": {
                     "description": "Frontend identifier",
                     "type": "integer"
@@ -16521,6 +19114,9 @@
                 },
                 "id": {
                     "type": "string"
+                },
+                "is_favorite": {
+                    "type": "boolean"
                 },
                 "is_public": {
                     "type": "boolean"

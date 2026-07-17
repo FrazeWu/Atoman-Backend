@@ -271,6 +271,36 @@ func TestGetSubscribedFeedHandlerReturnsPostEngagementCounts(t *testing.T) {
 	}
 }
 
+func TestGetSubscribedBlogFeedRejectsExternalFeedSourceID(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?content_type=blog&feed_source_id="+source.ID.String(), nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Data  []TimelineItemDTO `json:"data"`
+		Total int64             `json:"total"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Total != 0 || len(payload.Data) != 0 {
+		t.Fatalf("expected blog mode to exclude external feed source, got %s", rr.Body.String())
+	}
+}
+
 func TestTimelineWriteHandlersRequireAndAcceptRealAuthMiddleware(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
@@ -549,6 +579,36 @@ func TestGetSubscribedFeedHandlerRejectsInvalidSourceAndGroupIDs(t *testing.T) {
 
 		if rr.Code != http.StatusBadRequest {
 			t.Fatalf("expected 400 for %s, got %d with body %s", rawURL, rr.Code, rr.Body.String())
+		}
+	}
+}
+
+func TestQueryFromContextIncludesContentType(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?content_type=blog", nil)
+
+	query, err := queryFromContext(c)
+	if err != nil {
+		t.Fatalf("parse query: %v", err)
+	}
+	if query.ContentType != "blog" {
+		t.Fatalf("expected blog content type, got %q", query.ContentType)
+	}
+}
+
+func TestGetSubscribedFeedHandlerRejectsUnsupportedContentType(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, _, _ := newFeedTestService(t)
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	for _, contentType := range []string{"video", "bolg"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?content_type="+contentType, nil)
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for content_type=%s, got %d with body %s", contentType, rr.Code, rr.Body.String())
 		}
 	}
 }

@@ -36,6 +36,9 @@ func (s *Service) RecommendChannelsByMode(mode recommendation.Mode, category str
 }
 
 func (s *Service) GetPublicFeedBySourceID(feedSourceID uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {
+	if query.ContentType == model.ChannelContentTypeBlog {
+		return []TimelineItemDTO{}, 0, nil
+	}
 	page := normalizedPage(query.Page)
 	limit := normalizedPageSize(query.PageSize)
 	offset := (page - 1) * limit
@@ -64,6 +67,9 @@ func (s *Service) GetPublicFeedBySourceID(feedSourceID uuid.UUID, query FeedQuer
 
 func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) ([]TimelineItemDTO, int64, error) {
 	if user.ID == uuid.Nil {
+		if query.ContentType == model.ChannelContentTypeBlog {
+			return []TimelineItemDTO{}, 0, nil
+		}
 		return s.GetPublicFeed(query)
 	}
 
@@ -97,7 +103,9 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 				collectionIDs = append(collectionIDs, *sub.FeedSource.SourceID)
 			}
 		case "external_rss":
-			feedSourceIDs = append(feedSourceIDs, sub.FeedSource.ID)
+			if query.ContentType != model.ChannelContentTypeBlog {
+				feedSourceIDs = append(feedSourceIDs, sub.FeedSource.ID)
+			}
 		}
 	}
 
@@ -105,22 +113,25 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	channelIDs = dedupeUUIDs(channelIDs)
 	collectionIDs = dedupeUUIDs(collectionIDs)
 	feedSourceIDs = dedupeUUIDs(feedSourceIDs)
+	if query.ContentType == model.ChannelContentTypeBlog {
+		return s.getSubscribedBlogFeed(user.ID, userIDs, channelIDs, collectionIDs, query)
+	}
 	if len(userIDs) == 0 && len(channelIDs) == 0 && len(collectionIDs) == 0 && !query.HideDuplicates && strings.TrimSpace(query.Search) == "" {
 		return s.getSubscribedExternalFeed(user.ID, feedSourceIDs, query)
 	}
 
 	posts := make([]model.Post, 0)
-	userPosts, err := s.repo.ListPublishedPostsByUserIDs(userIDs)
+	userPosts, err := s.repo.ListPublishedPostsByUserIDs(userIDs, query.ContentType)
 	if err != nil {
 		return nil, 0, err
 	}
 	posts = append(posts, userPosts...)
-	channelPosts, err := s.repo.ListPublishedPostsByChannelIDs(channelIDs)
+	channelPosts, err := s.repo.ListPublishedPostsByChannelIDs(channelIDs, query.ContentType)
 	if err != nil {
 		return nil, 0, err
 	}
 	posts = append(posts, channelPosts...)
-	collectionPosts, err := s.repo.ListPublishedPostsByCollectionIDs(collectionIDs)
+	collectionPosts, err := s.repo.ListPublishedPostsByCollectionIDs(collectionIDs, query.ContentType)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -155,7 +166,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 		items = append(items, TimelineItemDTO{
 			Type:        "post",
 			Post:        timelinePostDTO(posts[i], engagementByPostID[posts[i].ID]),
-			PublishedAt: posts[i].CreatedAt,
+			PublishedAt: postTimelinePublishedAt(posts[i]),
 			IsRead:      false,
 		})
 	}
@@ -172,6 +183,75 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	sortTimeline(items)
 	paged, total := paginateTimeline(items, normalizedPage(query.Page), normalizedPageSize(query.PageSize))
 	return paged, total, nil
+}
+
+func (s *Service) getSubscribedBlogFeed(
+	userID uuid.UUID,
+	userIDs []uuid.UUID,
+	channelIDs []uuid.UUID,
+	collectionIDs []uuid.UUID,
+	query FeedQuery,
+) ([]TimelineItemDTO, int64, error) {
+	if query.IsRead != nil && *query.IsRead {
+		return []TimelineItemDTO{}, 0, nil
+	}
+	allSubscriptions, err := s.repo.ListSubscriptionsWithSources(userID, FeedQuery{})
+	if err != nil {
+		return nil, 0, err
+	}
+	followedUserIDs := make([]uuid.UUID, 0)
+	followedChannelIDs := make([]uuid.UUID, 0)
+	for _, subscription := range allSubscriptions {
+		if subscription.FeedSource == nil || subscription.FeedSource.SourceID == nil {
+			continue
+		}
+		switch subscription.FeedSource.SourceType {
+		case "internal_user":
+			followedUserIDs = append(followedUserIDs, *subscription.FeedSource.SourceID)
+		case "internal_channel":
+			followedChannelIDs = append(followedChannelIDs, *subscription.FeedSource.SourceID)
+		}
+	}
+	posts, total, err := s.repo.ListSubscribedBlogPosts(
+		userIDs,
+		channelIDs,
+		collectionIDs,
+		dedupeUUIDs(followedUserIDs),
+		dedupeUUIDs(followedChannelIDs),
+		query,
+	)
+	if err != nil {
+		return nil, 0, err
+	}
+	postIDs := make([]uuid.UUID, 0, len(posts))
+	for i := range posts {
+		postIDs = append(postIDs, posts[i].ID)
+	}
+	engagementCounts, err := s.repo.ListPostEngagementCounts(postIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	engagementByPostID := make(map[uuid.UUID]PostEngagementCount, len(engagementCounts))
+	for _, count := range engagementCounts {
+		engagementByPostID[count.PostID] = count
+	}
+	items := make([]TimelineItemDTO, 0, len(posts))
+	for i := range posts {
+		items = append(items, TimelineItemDTO{
+			Type:        "post",
+			Post:        timelinePostDTO(posts[i], engagementByPostID[posts[i].ID]),
+			PublishedAt: postTimelinePublishedAt(posts[i]),
+			IsRead:      false,
+		})
+	}
+	return items, total, nil
+}
+
+func postTimelinePublishedAt(post model.Post) time.Time {
+	if post.PublishedAt != nil {
+		return *post.PublishedAt
+	}
+	return post.CreatedAt
 }
 
 func (s *Service) getSubscribedExternalFeed(userID uuid.UUID, feedSourceIDs []uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {

@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	apidocs "atoman/docs"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
@@ -253,6 +254,80 @@ func TestRegisterRoutesMountsChannelArticleRSS(t *testing.T) {
 	}
 }
 
+func TestChannelArticleRSSIncludesOnlyPublishedPublicPosts(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	for _, post := range []model.Post{
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Public RSS post", Content: "Body", Status: "published", Visibility: "public"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Legacy empty visibility post", Content: "Body", Status: "published", Visibility: "public"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Early created late published", Content: "Body", Status: "published", Visibility: "public"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Late created early published", Content: "Body", Status: "published", Visibility: "public"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Followers RSS secret", Content: "Body", Status: "published", Visibility: "followers"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Private RSS secret", Content: "Body", Status: "published", Visibility: "private"},
+		{UserID: user.ID, ChannelID: &channel.ID, Title: "Draft RSS secret", Content: "Body", Status: "draft", Visibility: "public"},
+	} {
+		if err := db.Create(&post).Error; err != nil {
+			t.Fatalf("create post %q: %v", post.Title, err)
+		}
+	}
+	if err := db.Model(&model.Post{}).
+		Where("title = ?", "Legacy empty visibility post").
+		Update("visibility", "").Error; err != nil {
+		t.Fatalf("set legacy empty visibility: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	latePublishedAt := now
+	earlyPublishedAt := now.Add(-24 * time.Hour)
+	if err := db.Model(&model.Post{}).Where("title = ?", "Early created late published").Updates(map[string]any{
+		"created_at": now.Add(-48 * time.Hour), "published_at": latePublishedAt,
+	}).Error; err != nil {
+		t.Fatalf("set late publication timestamps: %v", err)
+	}
+	if err := db.Model(&model.Post{}).Where("title = ?", "Late created early published").Update("published_at", earlyPublishedAt).Error; err != nil {
+		t.Fatalf("set early publication timestamp: %v", err)
+	}
+	var latePublished model.Post
+	if err := db.Where("title = ?", "Early created late published").First(&latePublished).Error; err != nil {
+		t.Fatalf("find late-published post: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/channels/slug/"+channel.Slug+"/rss/article", nil)
+	req.Host = "example.com"
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	for _, visible := range []string{"Public RSS post", "Legacy empty visibility post"} {
+		if !strings.Contains(body, visible) {
+			t.Fatalf("expected %q in RSS: %s", visible, body)
+		}
+	}
+	for _, secret := range []string{"Followers RSS secret", "Private RSS secret", "Draft RSS secret"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("expected %q to be excluded from RSS: %s", secret, body)
+		}
+	}
+	lateIndex := strings.Index(body, "Early created late published")
+	earlyIndex := strings.Index(body, "Late created early published")
+	if lateIndex == -1 || earlyIndex == -1 || lateIndex > earlyIndex {
+		t.Fatalf("expected posts ordered by effective publication time: %s", body)
+	}
+	if !strings.Contains(body, "<pubDate>"+latePublishedAt.Format(time.RFC1123Z)+"</pubDate>") {
+		t.Fatalf("expected effective publication date in RSS: %s", body)
+	}
+	canonicalLink := "<link>https://example.com/posts/post/" + latePublished.ID.String() + "</link>"
+	if !strings.Contains(body, canonicalLink) {
+		t.Fatalf("expected canonical post link %q in RSS: %s", canonicalLink, body)
+	}
+}
+
 func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
@@ -430,6 +505,9 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 	}
 	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType != "blog" {
 		t.Fatalf("expected recommendation dto fields, got %#v", first)
+	}
+	if first.TargetPath != "/post/"+first.ID {
+		t.Fatalf("expected canonical post target path, got %q", first.TargetPath)
 	}
 }
 
@@ -1126,6 +1204,259 @@ func TestRegisterRoutesGetPostReturnsPublicStatsAndCountsReaderView(t *testing.T
 	}
 	if reloaded.ViewCount != 4 {
 		t.Fatalf("expected owner view not to increment, got %d", reloaded.ViewCount)
+	}
+}
+
+func TestSEOGetPostReturnsPublicMetadataWithoutIncrementingViewCount(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	publishedAt := time.Date(2026, time.July, 10, 8, 30, 0, 0, time.UTC)
+	post := model.Post{
+		UserID: owner.ID, Title: "Public post", Content: "Body", Summary: "  Concise summary  ",
+		CoverURL: "https://cdn.example.com/cover.jpg", Status: "published", Visibility: "public",
+		PublishedAt: &publishedAt, ViewCount: 41,
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/blog/seo/posts/"+post.ID.String(), nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data struct {
+			ID          uuid.UUID  `json:"id"`
+			Title       string     `json:"title"`
+			Description string     `json:"description"`
+			ImageURL    string     `json:"image_url"`
+			AuthorName  string     `json:"author_name"`
+			PublishedAt *time.Time `json:"published_at"`
+			UpdatedAt   time.Time  `json:"updated_at"`
+			Path        string     `json:"path"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Data.ID != post.ID || response.Data.Title != post.Title {
+		t.Fatalf("unexpected identity metadata: %#v", response.Data)
+	}
+	if response.Data.Description != "Concise summary" || response.Data.ImageURL != post.CoverURL {
+		t.Fatalf("unexpected description or image: %#v", response.Data)
+	}
+	if response.Data.AuthorName != "Alice" || response.Data.Path != "/posts/post/"+post.ID.String() {
+		t.Fatalf("unexpected author or path: %#v", response.Data)
+	}
+	if response.Data.PublishedAt == nil || !response.Data.PublishedAt.Equal(publishedAt) || response.Data.UpdatedAt.IsZero() {
+		t.Fatalf("unexpected timestamps: %#v", response.Data)
+	}
+
+	var reloaded model.Post
+	if err := db.First(&reloaded, "id = ?", post.ID).Error; err != nil {
+		t.Fatalf("reload post: %v", err)
+	}
+	if reloaded.ViewCount != 41 {
+		t.Fatalf("expected SEO read not to increment view count, got %d", reloaded.ViewCount)
+	}
+}
+
+func TestSEOGetPostBuildsUnicodeSafeDescriptionFromMarkdown(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	content := "# Heading\n\n**bold** [link](https://example.com)\n\n" + strings.Repeat("界", 170)
+	post := model.Post{UserID: owner.ID, Title: "Fallback", Content: content, Status: "published", Visibility: "public"}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/blog/seo/posts/"+post.ID.String(), nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Description string `json:"description"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if strings.ContainsAny(response.Data.Description, "#*[]()") {
+		t.Fatalf("expected plain-text markdown fallback, got %q", response.Data.Description)
+	}
+	if !strings.HasPrefix(response.Data.Description, "Heading bold link ") {
+		t.Fatalf("unexpected markdown fallback: %q", response.Data.Description)
+	}
+	if got := len([]rune(response.Data.Description)); got != 160 {
+		t.Fatalf("expected 160 Unicode characters, got %d: %q", got, response.Data.Description)
+	}
+}
+
+func TestSEOGetPostMarkdownFallbackPreservesComparisonOperators(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	post := model.Post{
+		UserID: owner.ID, Title: "Comparison",
+		Content: "Use 2 < 3 and 5 > 4 with <strong>bold</strong> text.",
+		Status:  "published", Visibility: "public",
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/blog/seo/posts/"+post.ID.String(), nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Description string `json:"description"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	want := "Use 2 < 3 and 5 > 4 with bold text."
+	if response.Data.Description != want {
+		t.Fatalf("expected %q, got %q", want, response.Data.Description)
+	}
+}
+
+func TestSEOGetPostHidesNonPublicAndMissingPosts(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	posts := []model.Post{
+		{UserID: owner.ID, Title: "Draft", Content: "Body", Status: "draft", Visibility: "public"},
+		{UserID: owner.ID, Title: "Followers", Content: "Body", Status: "published", Visibility: "followers"},
+		{UserID: owner.ID, Title: "Private", Content: "Body", Status: "published", Visibility: "private"},
+	}
+	for i := range posts {
+		if err := db.Create(&posts[i]).Error; err != nil {
+			t.Fatalf("create post %d: %v", i, err)
+		}
+	}
+
+	r := newBlogHTTPRouter(service, nil)
+	ids := []uuid.UUID{posts[0].ID, posts[1].ID, posts[2].ID, uuid.New()}
+	for _, id := range ids {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/blog/seo/posts/"+id.String(), nil))
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("expected hidden post %s to return 404, got %d: %s", id, w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "blog.post_not_found") {
+			t.Fatalf("expected uniform not-found error for %s, got %s", id, w.Body.String())
+		}
+	}
+}
+
+func TestSEOSitemapFiltersAndOrdersPublicPublishedPosts(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	publishedNew := time.Date(2026, time.July, 12, 10, 0, 0, 0, time.UTC)
+	publishedOld := time.Date(2026, time.July, 11, 10, 0, 0, 0, time.UTC)
+	createdEarlier := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
+	createdLater := createdEarlier.Add(time.Hour)
+	legacyCreated := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
+	posts := []model.Post{
+		{Base: model.Base{CreatedAt: createdEarlier}, UserID: owner.ID, Title: "Newest A", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedNew},
+		{Base: model.Base{CreatedAt: createdLater}, UserID: owner.ID, Title: "Newest B", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedNew},
+		{UserID: owner.ID, Title: "Older", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedOld},
+		{Base: model.Base{CreatedAt: legacyCreated}, UserID: owner.ID, Title: "Legacy", Content: "Body", Status: "published", Visibility: "public"},
+		{UserID: owner.ID, Title: "Draft", Content: "Body", Status: "draft", Visibility: "public"},
+		{UserID: owner.ID, Title: "Private", Content: "Body", Status: "published", Visibility: "private", PublishedAt: &publishedNew},
+	}
+	for i := range posts {
+		if err := db.Create(&posts[i]).Error; err != nil {
+			t.Fatalf("create post %d: %v", i, err)
+		}
+	}
+
+	r := newBlogHTTPRouter(service, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/blog/seo/sitemap", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data []struct {
+			Path         string    `json:"path"`
+			LastModified time.Time `json:"last_modified"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response.Data) != 4 {
+		t.Fatalf("expected four public published posts, got %d: %s", len(response.Data), w.Body.String())
+	}
+	want := []model.Post{posts[1], posts[0], posts[3], posts[2]}
+	for i, item := range response.Data {
+		if item.Path != "/posts/post/"+want[i].ID.String() || !item.LastModified.Equal(want[i].UpdatedAt) {
+			t.Fatalf("unexpected sitemap item %d: %#v", i, item)
+		}
+	}
+}
+
+func TestSEOSitemapQuerySelectsOnlyRequiredColumns(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	post := model.Post{
+		UserID: owner.ID, Title: "Large title", Content: strings.Repeat("large content ", 100),
+		Summary: "large summary", Status: "published", Visibility: "public",
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+
+	posts, err := service.repo.ListPublicPublishedPosts()
+	if err != nil {
+		t.Fatalf("list sitemap posts: %v", err)
+	}
+	if len(posts) != 1 {
+		t.Fatalf("expected one post, got %d", len(posts))
+	}
+	if posts[0].ID != post.ID || posts[0].UpdatedAt.IsZero() {
+		t.Fatalf("expected sitemap fields, got %#v", posts[0])
+	}
+	if posts[0].Title != "" || posts[0].Content != "" || posts[0].Summary != "" {
+		t.Fatalf("expected large content fields not to be selected, got %#v", posts[0])
+	}
+}
+
+func TestSEOSwaggerSuccessResponsesUseDataEnvelope(t *testing.T) {
+	var spec struct {
+		Paths map[string]struct {
+			Get struct {
+				Responses map[string]struct {
+					Schema struct {
+						Ref string `json:"$ref"`
+					} `json:"schema"`
+				} `json:"responses"`
+			} `json:"get"`
+		} `json:"paths"`
+		Definitions map[string]struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		} `json:"definitions"`
+	}
+	if err := json.Unmarshal([]byte(apidocs.SwaggerInfo.ReadDoc()), &spec); err != nil {
+		t.Fatalf("decode swagger document: %v", err)
+	}
+
+	cases := map[string]string{
+		"/api/v1/blog/seo/posts/{id}": "#/definitions/blog.SEOPostResponse",
+		"/api/v1/blog/seo/sitemap":    "#/definitions/blog.SEOSitemapResponse",
+	}
+	for path, wantRef := range cases {
+		gotRef := spec.Paths[path].Get.Responses["200"].Schema.Ref
+		if gotRef != wantRef {
+			t.Fatalf("expected %s success schema %q, got %q", path, wantRef, gotRef)
+		}
+		definition := strings.TrimPrefix(wantRef, "#/definitions/")
+		if _, ok := spec.Definitions[definition].Properties["data"]; !ok {
+			t.Fatalf("expected %s definition to contain data envelope", definition)
+		}
 	}
 }
 

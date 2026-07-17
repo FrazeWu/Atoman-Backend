@@ -1,10 +1,36 @@
 package blog
 
 import (
+	"time"
+
 	"atoman/internal/model"
 
 	"github.com/google/uuid"
 )
+
+type SEOPostDTO struct {
+	ID          uuid.UUID  `json:"id"`
+	Title       string     `json:"title"`
+	Description string     `json:"description"`
+	ImageURL    string     `json:"image_url"`
+	AuthorName  string     `json:"author_name"`
+	PublishedAt *time.Time `json:"published_at"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+	Path        string     `json:"path"`
+}
+
+type SEOSitemapItemDTO struct {
+	Path         string    `json:"path"`
+	LastModified time.Time `json:"last_modified"`
+}
+
+type SEOPostResponse struct {
+	Data SEOPostDTO `json:"data"`
+}
+
+type SEOSitemapResponse struct {
+	Data []SEOSitemapItemDTO `json:"data"`
+}
 
 type CreatePostRequest struct {
 	Title         string      `json:"title"`

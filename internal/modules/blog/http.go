@@ -96,6 +96,8 @@ type blogDraftResponse struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
+	group.GET("/seo/posts/:id", h.getSEOPost)
+	group.GET("/seo/sitemap", h.listSEOSitemap)
 	group.GET("/channels", h.listChannels)
 	group.GET("/channels/:id", h.getChannel)
 	group.GET("/channels/:id/collections", h.getChannelCollections)
@@ -137,6 +139,48 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/drafts", h.getBlogDraft)
 	group.PUT("/drafts", h.putBlogDraft)
 	group.DELETE("/drafts", h.deleteBlogDraft)
+}
+
+// getSEOPost godoc
+// @Summary 获取公开文章 SEO 元数据
+// @Description 仅返回已发布且公开的文章元数据，不计入阅读数。
+// @Tags blog
+// @Produce json
+// @Param id path string true "文章 UUID"
+// @Success 200 {object} SEOPostResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/blog/seo/posts/{id} [get]
+func (h *Handler) getSEOPost(c *gin.Context) {
+	postID, err := parsePostID(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	post, err := h.service.GetSEOPost(postID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, post)
+}
+
+// listSEOSitemap godoc
+// @Summary 获取公开文章站点地图数据
+// @Description 返回全部已发布且公开的文章路径及最后修改时间。
+// @Tags blog
+// @Produce json
+// @Success 200 {object} SEOSitemapResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/blog/seo/sitemap [get]
+func (h *Handler) listSEOSitemap(c *gin.Context) {
+	items, err := h.service.ListSEOSitemap()
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, items)
 }
 
 func (h *Handler) listChannels(c *gin.Context) {
@@ -226,8 +270,11 @@ func (h *Handler) getChannelArticleRSS(c *gin.Context) {
 
 	var posts []model.Post
 	if err := h.service.db.Where("channel_id = ? AND status = ?", channel.ID, "published").
+		Where("visibility = ? OR visibility = ?", "", "public").
 		Preload("User").
+		Order("COALESCE(published_at, created_at) DESC").
 		Order("created_at DESC").
+		Order("id DESC").
 		Limit(50).
 		Find(&posts).Error; err != nil {
 		httpx.Error(c, err)
@@ -615,7 +662,11 @@ func (h *Handler) deleteBookmarkFolder(c *gin.Context) {
 func buildArticleRSS(ch model.Channel, posts []model.Post, siteURL string) string {
 	var items strings.Builder
 	for _, p := range posts {
-		pubDate := p.CreatedAt.Format(time.RFC1123Z)
+		publishedAt := p.CreatedAt
+		if p.PublishedAt != nil {
+			publishedAt = *p.PublishedAt
+		}
+		pubDate := publishedAt.Format(time.RFC1123Z)
 		summary := p.Summary
 		if summary == "" && len(p.Content) > 280 {
 			summary = p.Content[:280] + "…"
@@ -632,8 +683,8 @@ func buildArticleRSS(ch model.Channel, posts []model.Post, siteURL string) strin
 		items.WriteString(fmt.Sprintf(`
     <item>
       <title><![CDATA[%s]]></title>
-      <link>%s/post/%s</link>
-      <guid isPermaLink="true">%s/post/%s</guid>
+      <link>%s/posts/post/%s</link>
+      <guid isPermaLink="true">%s/posts/post/%s</guid>
       <pubDate>%s</pubDate>
       <description><![CDATA[%s]]></description>
       <author>%s</author>

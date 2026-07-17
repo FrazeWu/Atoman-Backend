@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"atoman/internal/middleware"
+	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -379,9 +380,14 @@ func (h *Handler) removeReadingListItem(c *gin.Context) {
 }
 
 func queryFromContext(c *gin.Context) (FeedQuery, error) {
+	contentType := strings.TrimSpace(strings.ToLower(c.Query("content_type")))
+	if contentType != "" && contentType != model.ChannelContentTypeBlog {
+		return FeedQuery{}, apperr.BadRequest("validation.invalid_request", "content_type must be blog")
+	}
 	query := FeedQuery{
 		Page:           normalizedPageFromQuery(c),
 		PageSize:       normalizedPageSizeFromQuery(c),
+		ContentType:    contentType,
 		SourceType:     c.Query("source_type"),
 		HideDuplicates: c.Query("hide_duplicates") == "true",
 		Sort:           c.DefaultQuery("sort", "recent"),
