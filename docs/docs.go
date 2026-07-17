@@ -9654,6 +9654,439 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/songs/{songId}/lyrics": {
+            "get": {
+                "description": "匿名用户可读取当前歌词、逐行翻译和公开注释。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-lyrics"
+                ],
+                "summary": "获取歌曲歌词",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 UUID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "保存 LRC 或纯文本歌词、逐行翻译，并处理失效注释锚点。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-lyrics"
+                ],
+                "summary": "保存歌曲歌词",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 UUID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "歌词内容",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.SaveLyricsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/songs/{songId}/lyrics/annotations": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "使用当前歌词行的 line_key 或可选 line_id 创建文本锚点注释。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-lyrics"
+                ],
+                "summary": "创建歌词注释",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 UUID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "歌词注释",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.CreateLyricAnnotationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricAnnotationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/songs/{songId}/lyrics/annotations/{annotationId}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-lyrics"
+                ],
+                "summary": "删除歌词注释",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 UUID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "注释 UUID",
+                        "name": "annotationId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.DeleteLyricAnnotationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-lyrics"
+                ],
+                "summary": "修改歌词注释",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 UUID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "注释 UUID",
+                        "name": "annotationId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "注释正文",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.UpdateLyricAnnotationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricAnnotationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/songs/{songId}/lyrics/annotations/{annotationId}/votes": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "vote 可为 up、down 或 none；none 表示撤销投票。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-lyrics"
+                ],
+                "summary": "设置歌词注释投票",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 UUID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "注释 UUID",
+                        "name": "annotationId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "投票",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.LyricAnnotationVoteRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricAnnotationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/podcast/episodes": {
             "get": {
                 "description": "返回所有已发布的播客单集。",
@@ -18765,6 +19198,55 @@ const docTemplate = `{
                 }
             }
         },
+        "music.AnnotationResolutionInput": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "annotation_id": {
+                    "type": "string"
+                },
+                "end_offset": {
+                    "type": "integer"
+                },
+                "line_id": {
+                    "type": "string"
+                },
+                "line_key": {
+                    "type": "string"
+                },
+                "selected_text": {
+                    "type": "string"
+                },
+                "start_offset": {
+                    "type": "integer"
+                }
+            }
+        },
+        "music.CreateLyricAnnotationRequest": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string"
+                },
+                "end_offset": {
+                    "type": "integer"
+                },
+                "line_id": {
+                    "type": "string"
+                },
+                "line_key": {
+                    "type": "string"
+                },
+                "selected_text": {
+                    "type": "string"
+                },
+                "start_offset": {
+                    "type": "integer"
+                }
+            }
+        },
         "music.CreatePlaylistRequest": {
             "type": "object",
             "properties": {
@@ -18779,6 +19261,19 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                }
+            }
+        },
+        "music.DeleteLyricAnnotationResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "deleted": {
+                            "type": "boolean"
+                        }
+                    }
                 }
             }
         },
@@ -18894,6 +19389,164 @@ const docTemplate = `{
                 },
                 "meta": {
                     "$ref": "#/definitions/music.PaginationMetaResponse"
+                }
+            }
+        },
+        "music.LyricAnnotationVoteRequest": {
+            "type": "object",
+            "properties": {
+                "vote": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.MusicLyricAnnotationDTO": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string"
+                },
+                "can_edit": {
+                    "type": "boolean"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "creator": {
+                    "$ref": "#/definitions/music.MusicLyricCreatorDTO"
+                },
+                "downvotes": {
+                    "type": "integer"
+                },
+                "end_offset": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "line_id": {
+                    "type": "string"
+                },
+                "line_key": {
+                    "type": "string"
+                },
+                "net_score": {
+                    "type": "integer"
+                },
+                "selected_text": {
+                    "type": "string"
+                },
+                "song_id": {
+                    "type": "string"
+                },
+                "start_offset": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "upvotes": {
+                    "type": "integer"
+                },
+                "viewer_vote": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.MusicLyricAnnotationResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/music.MusicLyricAnnotationDTO"
+                }
+            }
+        },
+        "music.MusicLyricCreatorDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.MusicLyricLineDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "line_index": {
+                    "type": "integer"
+                },
+                "line_key": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "time_ms": {
+                    "type": "integer"
+                },
+                "translation": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.MusicLyricsDTO": {
+            "type": "object",
+            "properties": {
+                "annotations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.MusicLyricAnnotationDTO"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "edit_summary": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.MusicLyricLineDTO"
+                    }
+                },
+                "song_id": {
+                    "type": "string"
+                },
+                "translation": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "updated_by": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
+        "music.MusicLyricsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/music.MusicLyricsDTO"
                 }
             }
         },
@@ -19030,6 +19683,37 @@ const docTemplate = `{
                     "items": {
                         "type": "string"
                     }
+                }
+            }
+        },
+        "music.SaveLyricsRequest": {
+            "type": "object",
+            "properties": {
+                "annotation_resolutions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AnnotationResolutionInput"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "edit_summary": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "translation": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.UpdateLyricAnnotationRequest": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "type": "string"
                 }
             }
         },

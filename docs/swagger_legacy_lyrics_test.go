@@ -10,7 +10,7 @@ import (
 )
 
 func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
-	assertNoLegacyLyrics := func(t *testing.T, document map[string]any) {
+	assertLyricsContract := func(t *testing.T, document map[string]any) {
 		t.Helper()
 		paths, _ := document["paths"].(map[string]any)
 		for path := range paths {
@@ -22,6 +22,23 @@ func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
 		if _, exists := definitions["model.LyricAnnotation"]; exists {
 			t.Fatal("legacy model.LyricAnnotation definition remains in Swagger")
 		}
+		expected := map[string][]string{
+			"/api/v1/music/songs/{songId}/lyrics":                                  {"get", "put"},
+			"/api/v1/music/songs/{songId}/lyrics/annotations":                      {"post"},
+			"/api/v1/music/songs/{songId}/lyrics/annotations/{annotationId}":       {"patch", "delete"},
+			"/api/v1/music/songs/{songId}/lyrics/annotations/{annotationId}/votes": {"post"},
+		}
+		for path, methods := range expected {
+			operations, exists := paths[path].(map[string]any)
+			if !exists {
+				t.Fatalf("music lyrics path missing from Swagger: %s", path)
+			}
+			for _, method := range methods {
+				if _, exists := operations[method]; !exists {
+					t.Fatalf("music lyrics operation missing from Swagger: %s %s", method, path)
+				}
+			}
+		}
 	}
 
 	jsonBytes, err := os.ReadFile("swagger.json")
@@ -32,7 +49,7 @@ func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
 	if err := json.Unmarshal(jsonBytes, &jsonDocument); err != nil {
 		t.Fatalf("parse swagger.json: %v", err)
 	}
-	assertNoLegacyLyrics(t, jsonDocument)
+	assertLyricsContract(t, jsonDocument)
 
 	yamlBytes, err := os.ReadFile("swagger.yaml")
 	if err != nil {
@@ -42,7 +59,7 @@ func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
 	if err := yaml.Unmarshal(yamlBytes, &yamlDocument); err != nil {
 		t.Fatalf("parse swagger.yaml: %v", err)
 	}
-	assertNoLegacyLyrics(t, yamlDocument)
+	assertLyricsContract(t, yamlDocument)
 
 	docsGo, err := os.ReadFile("docs.go")
 	if err != nil {
