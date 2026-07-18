@@ -10,7 +10,8 @@ import (
 // EmailVerificationCode represents an email verification code stored in database
 type EmailVerificationCode struct {
 	UUID      uuid.UUID      `json:"uuid" gorm:"type:uuid;primaryKey"`
-	Email     string         `json:"email" gorm:"uniqueIndex;not null"`
+	Email     string         `json:"email" gorm:"uniqueIndex:idx_email_verification_email_purpose;not null"`
+	Purpose   string         `json:"purpose" gorm:"uniqueIndex:idx_email_verification_email_purpose;not null;default:registration"`
 	Code      string         `json:"-" gorm:"not null"`
 	ExpiresAt time.Time      `json:"expires_at" gorm:"not null"`
 	Used      bool           `json:"used" gorm:"default:false"`

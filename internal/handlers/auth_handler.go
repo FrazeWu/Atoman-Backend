@@ -64,10 +64,11 @@ func generateAuthToken(user model.User) (string, error) {
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.UUID.String(),
-		"username": user.Username,
-		"role":     role,
-		"exp":      time.Now().Add(authTokenTTL).Unix(),
+		"user_id":      user.UUID.String(),
+		"username":     user.Username,
+		"role":         role,
+		"auth_version": user.AuthVersion,
+		"exp":          time.Now().Add(authTokenTTL).Unix(),
 	})
 
 	return token.SignedString([]byte(secret))
@@ -157,6 +158,18 @@ type CheckUsernameInput struct {
 	Username string `json:"username" binding:"required"`
 }
 
+type PasswordResetSendCodeInput struct {
+	Email          string `json:"email" binding:"required,email"`
+	TurnstileToken string `json:"turnstile_token"`
+}
+
+type PasswordResetInput struct {
+	Email           string `json:"email" binding:"required,email"`
+	Code            string `json:"code" binding:"required,len=6"`
+	Password        string `json:"password" binding:"required,min=6"`
+	PasswordConfirm string `json:"password_confirm" binding:"required,eqfield=Password"`
+}
+
 // SetupAuthRoutes configures authentication routes
 func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.EmailService) {
 	middleware.SetAuthDB(db)
@@ -171,6 +184,8 @@ func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.Emai
 		auth.POST("/check-username", CheckUsernameHandler(db))
 		auth.POST("/send-verification", SendVerificationHandler(emailService))
 		auth.POST("/verify-email", VerifyEmailHandler(emailService))
+		auth.POST("/password-reset/send-code", PasswordResetSendCodeHandler(db, emailService))
+		auth.POST("/password-reset", PasswordResetHandler(db))
 	}
 }
 
@@ -324,6 +339,11 @@ func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 		var user model.User
 		if err := db.Where("uuid = ? AND is_active = ?", userID, true).First(&user).Error; err != nil {
 			clearSessionAndAuthError(c, authUserNotFound, "账号不存在或已被移除，请重新登录")
+			return
+		}
+		authVersion, validVersion := middleware.ClaimsAuthVersion(claims)
+		if !validVersion || authVersion != user.AuthVersion {
+			clearSessionAndAuthError(c, authInvalidToken, "登录状态已失效，请重新登录")
 			return
 		}
 		if user.Role == "" {
@@ -505,5 +525,112 @@ func VerifyEmailHandler(emailService *service.EmailService) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "Email verified successfully"})
+	}
+}
+
+// PasswordResetSendCodeHandler godoc
+// @Summary 发送密码重置验证码
+// @Description 若邮箱对应有效账号，则发送密码重置验证码；响应不暴露账号是否存在。
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param input body PasswordResetSendCodeInput true "密码重置验证码请求"
+// @Success 200 {object} MessageResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/auth/password-reset/send-code [post]
+func PasswordResetSendCodeHandler(db *gorm.DB, emailService *service.EmailService) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input PasswordResetSendCodeInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if err := verifyTurnstileToken(input.TurnstileToken, c.ClientIP()); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+			return
+		}
+
+		email := strings.ToLower(strings.TrimSpace(input.Email))
+		var count int64
+		if err := db.Model(&model.User{}).Where("LOWER(email) = ? AND is_active = ?", email, true).Count(&count).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "发送验证码失败"})
+			return
+		}
+		if count > 0 {
+			if _, err := emailService.SendVerificationCodeForPurpose(email, service.VerificationPurposePasswordReset); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "发送验证码失败"})
+				return
+			}
+		}
+
+		c.JSON(http.StatusOK, gin.H{"message": "如果该邮箱已注册，验证码将发送至邮箱"})
+	}
+}
+
+// PasswordResetHandler godoc
+// @Summary 重置密码
+// @Description 使用邮箱验证码设置新密码，并使该账号的既有登录全部失效。
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param input body PasswordResetInput true "密码重置请求"
+// @Success 200 {object} MessageResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/auth/password-reset [post]
+func PasswordResetHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input PasswordResetInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		email := strings.ToLower(strings.TrimSpace(input.Email))
+		hashedPassword, err := HashPassword(input.Password)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "重置密码失败"})
+			return
+		}
+
+		err = db.Transaction(func(tx *gorm.DB) error {
+			now := time.Now().UTC()
+			consumed := tx.Model(&model.EmailVerificationCode{}).
+				Where("email = ? AND code = ? AND purpose = ? AND used = ? AND expires_at > ?", email, input.Code, service.VerificationPurposePasswordReset, false, now).
+				Update("used", true)
+			if consumed.Error != nil {
+				return consumed.Error
+			}
+			if consumed.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+
+			updated := tx.Model(&model.User{}).
+				Where("LOWER(email) = ? AND is_active = ?", email, true).
+				Updates(map[string]any{
+					"password":     hashedPassword,
+					"auth_version": gorm.Expr("auth_version + 1"),
+				})
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+			return nil
+		})
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "验证码无效或已过期"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "重置密码失败"})
+			return
+		}
+
+		clearAuthTokenCookie(c)
+		c.JSON(http.StatusOK, gin.H{"message": "密码已重置，请重新登录"})
 	}
 }

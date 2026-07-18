@@ -48,6 +48,29 @@ func parseAuthToken(tokenString string) (*jwt.Token, error) {
 	})
 }
 
+func ClaimsAuthVersion(claims jwt.MapClaims) (uint, bool) {
+	raw, exists := claims["auth_version"]
+	if !exists {
+		return 0, true
+	}
+	switch value := raw.(type) {
+	case float64:
+		if value < 0 || value != float64(uint(value)) {
+			return 0, false
+		}
+		return uint(value), true
+	case uint:
+		return value, true
+	case int:
+		if value < 0 {
+			return 0, false
+		}
+		return uint(value), true
+	default:
+		return 0, false
+	}
+}
+
 func authTokenCandidatesFromRequest(c *gin.Context) []string {
 	candidates := make([]string, 0, 2)
 	tokenString := c.GetHeader("Authorization")
@@ -102,6 +125,10 @@ func setAuthContext(c *gin.Context, claims jwt.MapClaims) bool {
 
 	var user model.User
 	if err := db.Where("uuid = ? AND is_active = ?", userID, true).First(&user).Error; err != nil {
+		return false
+	}
+	authVersion, ok := ClaimsAuthVersion(claims)
+	if !ok || authVersion != user.AuthVersion {
 		return false
 	}
 	username := user.Username

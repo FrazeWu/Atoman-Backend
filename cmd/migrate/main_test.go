@@ -10,6 +10,18 @@ import (
 	"gorm.io/gorm"
 )
 
+type legacyEmailVerificationCode struct {
+	UUID      uuid.UUID `gorm:"type:uuid;primaryKey"`
+	Email     string    `gorm:"uniqueIndex;not null"`
+	Code      string    `gorm:"not null"`
+	ExpiresAt time.Time `gorm:"not null"`
+	Used      bool      `gorm:"default:false"`
+	CreatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
+}
+
+func (legacyEmailVerificationCode) TableName() string { return "email_verification_codes" }
+
 func TestMigrateSchemaCreatesDMTablesAndUnreadCountIndexes(t *testing.T) {
 	db := testdb.Open(t)
 
@@ -38,6 +50,43 @@ func TestMigrateSchemaCreatesDMTablesAndUnreadCountIndexes(t *testing.T) {
 
 	assertIndexExists(t, db, "notifications", "idx_notification_recipient_read")
 	assertIndexExists(t, db, "dm_messages", "idx_dm_message_conv_sender_read")
+}
+
+func TestRunMigrationsAddsPasswordResetAuthSchema(t *testing.T) {
+	db := testdb.Open(t)
+	if err := db.AutoMigrate(&legacyEmailVerificationCode{}); err != nil {
+		t.Fatalf("create legacy verification table: %v", err)
+	}
+	if err := db.Create(&legacyEmailVerificationCode{
+		UUID: uuid.New(), Email: "legacy@example.com", Code: "123456",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}).Error; err != nil {
+		t.Fatalf("seed legacy verification code: %v", err)
+	}
+
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	if !db.Migrator().HasColumn(&model.User{}, "auth_version") {
+		t.Fatal("expected users.auth_version column")
+	}
+	var legacy model.EmailVerificationCode
+	if err := db.First(&legacy, "email = ?", "legacy@example.com").Error; err != nil {
+		t.Fatalf("load legacy verification code: %v", err)
+	}
+	if legacy.Purpose != "registration" {
+		t.Fatalf("expected legacy purpose registration, got %q", legacy.Purpose)
+	}
+	resetCode := model.EmailVerificationCode{
+		Email:     legacy.Email,
+		Purpose:   "password_reset",
+		Code:      "654321",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}
+	if err := db.Create(&resetCode).Error; err != nil {
+		t.Fatalf("create password reset code beside registration code: %v", err)
+	}
 }
 
 func TestRunMigrationsBackfillsLegacyForumReplies(t *testing.T) {

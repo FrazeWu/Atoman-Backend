@@ -1609,6 +1609,32 @@ definitions:
         format: date-time
         type: string
     type: object
+  handlers.PasswordResetInput:
+    properties:
+      code:
+        type: string
+      email:
+        type: string
+      password:
+        minLength: 6
+        type: string
+      password_confirm:
+        type: string
+    required:
+    - code
+    - email
+    - password
+    - password_confirm
+    type: object
+  handlers.PasswordResetSendCodeInput:
+    properties:
+      email:
+        type: string
+      turnstile_token:
+        type: string
+    required:
+    - email
+    type: object
   handlers.PersonLocationListResponse:
     properties:
       data:
@@ -5858,6 +5884,70 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 完成首次登录引导
+      tags:
+      - auth
+  /api/v1/auth/password-reset:
+    post:
+      consumes:
+      - application/json
+      description: 使用邮箱验证码设置新密码，并使该账号的既有登录全部失效。
+      parameters:
+      - description: 密码重置请求
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.PasswordResetInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 重置密码
+      tags:
+      - auth
+  /api/v1/auth/password-reset/send-code:
+    post:
+      consumes:
+      - application/json
+      description: 若邮箱对应有效账号，则发送密码重置验证码；响应不暴露账号是否存在。
+      parameters:
+      - description: 密码重置验证码请求
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.PasswordResetSendCodeInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 发送密码重置验证码
       tags:
       - auth
   /api/v1/auth/register:

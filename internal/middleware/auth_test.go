@@ -29,10 +29,11 @@ func newMiddlewareAuthTestDB(t *testing.T) *gorm.DB {
 func signedMiddlewareAuthTokenForTest(t *testing.T, user model.User) string {
 	t.Helper()
 	claims := jwt.MapClaims{
-		"user_id":  user.UUID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
+		"user_id":      user.UUID.String(),
+		"username":     user.Username,
+		"role":         user.Role,
+		"auth_version": user.AuthVersion,
+		"exp":          time.Now().Add(time.Hour).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString([]byte("test-secret"))
@@ -128,6 +129,24 @@ func TestAuthMiddlewareRejectsInactiveJWTUser(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "Invalid token") {
 		t.Fatalf("expected invalid token response, got %s", w.Body.String())
+	}
+}
+
+func TestAuthMiddlewareRejectsOutdatedAuthVersion(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newMiddlewareAuthTestDB(t)
+	user := seedMiddlewareAuthUser(t, db, model.User{
+		Username: "reset-user", Email: "reset@example.com", Password: "hash", Role: "user", IsActive: true, AuthVersion: 2,
+	})
+	SetAuthDB(db)
+	t.Cleanup(func() { SetAuthDB(nil) })
+
+	outdated := user
+	outdated.AuthVersion = 1
+	w := performAuthRequest("Bearer " + signedMiddlewareAuthTokenForTest(t, outdated))
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status 401 for outdated auth version, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

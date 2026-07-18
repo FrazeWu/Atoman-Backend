@@ -24,6 +24,11 @@ type EmailService struct {
 	fromEmail    string
 }
 
+const (
+	VerificationPurposeRegistration  = "registration"
+	VerificationPurposePasswordReset = "password_reset"
+)
+
 // NewEmailService creates a new email service instance
 func NewEmailService(redisClient interface{}, db *gorm.DB) *EmailService {
 	// redisClient parameter kept for compatibility but not used
@@ -59,6 +64,10 @@ func generateVerificationCode() (string, error) {
 
 // SendVerificationCode sends a verification code to the given email
 func (s *EmailService) SendVerificationCode(email string) (string, error) {
+	return s.SendVerificationCodeForPurpose(email, VerificationPurposeRegistration)
+}
+
+func (s *EmailService) SendVerificationCodeForPurpose(email, purpose string) (string, error) {
 	// Generate verification code
 	code, err := generateVerificationCode()
 	if err != nil {
@@ -70,6 +79,7 @@ func (s *EmailService) SendVerificationCode(email string) (string, error) {
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
 	verificationCode := model.EmailVerificationCode{
 		Email:     email,
+		Purpose:   purpose,
 		Code:      code,
 		ExpiresAt: expiresAt,
 		Used:      false,
@@ -77,14 +87,18 @@ func (s *EmailService) SendVerificationCode(email string) (string, error) {
 
 	// Upsert: insert new record, or update existing unused code for this email
 	if err := s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "email"}},
+		Columns:   []clause.Column{{Name: "email"}, {Name: "purpose"}},
 		DoUpdates: clause.AssignmentColumns([]string{"code", "expires_at", "used"}),
 	}).Create(&verificationCode).Error; err != nil {
 		return "", fmt.Errorf("failed to store code: %w", err)
 	}
 
 	// Send email
-	err = s.sendEmail(email, "Atoman邮箱验证", s.buildVerificationEmail(code))
+	subject := "Atoman邮箱验证"
+	if purpose == VerificationPurposePasswordReset {
+		subject = "Atoman密码重置"
+	}
+	err = s.sendEmail(email, subject, s.buildVerificationEmail(code, purpose))
 	if err != nil {
 		return "", fmt.Errorf("failed to send email: %w", err)
 	}
@@ -94,12 +108,16 @@ func (s *EmailService) SendVerificationCode(email string) (string, error) {
 
 // VerifyCode verifies the code for the given email
 func (s *EmailService) VerifyCode(email, code string) (bool, error) {
+	return s.VerifyCodeForPurpose(email, code, VerificationPurposeRegistration)
+}
+
+func (s *EmailService) VerifyCodeForPurpose(email, code, purpose string) (bool, error) {
 	// Atomically consume an unused, non-expired verification code.
 	// The conditional update closes the race where two requests could both
 	// read the same row before either one marks it as used.
 	now := time.Now().UTC()
 	result := s.db.Model(&model.EmailVerificationCode{}).
-		Where("email = ? AND code = ? AND used = ? AND expires_at > ?", email, code, false, now).
+		Where("email = ? AND code = ? AND purpose = ? AND used = ? AND expires_at > ?", email, code, purpose, false, now).
 		Update("used", true)
 	if result.Error != nil {
 		return false, result.Error
@@ -177,7 +195,16 @@ func maskEmailForLog(email string) string {
 }
 
 // buildVerificationEmail builds the HTML email content
-func (s *EmailService) buildVerificationEmail(code string) string {
+
+func (s *EmailService) buildVerificationEmail(code, purpose string) string {
+	title := "邮箱验证"
+	description := "请使用以下验证码完成邮箱验证："
+	ignoreMessage := "如果您没有请求注册，请忽略此邮件。"
+	if purpose == VerificationPurposePasswordReset {
+		title = "重置密码"
+		description = "请使用以下验证码重置密码："
+		ignoreMessage = "如果您没有请求重置密码，请忽略此邮件。"
+	}
 	return fmt.Sprintf(`
 <!DOCTYPE html>
 <html>
@@ -200,15 +227,15 @@ func (s *EmailService) buildVerificationEmail(code string) string {
       <h1>Atoman</h1>
     </div>
     <div class="content">
-      <h2>邮箱验证</h2>
-      <p>感谢您注册Atoman！请使用以下验证码完成邮箱验证：</p>
+	      <h2>%s</h2>
+	      <p>%s</p>
       
       <div class="code-box">
         <div class="code">%s</div>
       </div>
       
       <p>验证码有效期为 <strong>10 分钟</strong>。请勿将此验证码分享给他人。</p>
-      <p>如果您没有请求注册，请忽略此邮件。</p>
+	      <p>%s</p>
       
       <div class="footer">
         <p>此邮件由 Atoman系统自动发送，请勿回复。</p>
@@ -218,7 +245,7 @@ func (s *EmailService) buildVerificationEmail(code string) string {
   </div>
 </body>
 </html>
-`, code)
+	`, title, description, code, ignoreMessage)
 }
 
 // Resend Setup:

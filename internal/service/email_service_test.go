@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"log"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,69 @@ import (
 	"atoman/internal/testdb"
 	"github.com/google/uuid"
 )
+
+type purposeVerificationService interface {
+	SendVerificationCodeForPurpose(email, purpose string) (string, error)
+	VerifyCodeForPurpose(email, code, purpose string) (bool, error)
+}
+
+func TestEmailVerificationCodeModelHasPurposeField(t *testing.T) {
+	field, ok := reflect.TypeOf(model.EmailVerificationCode{}).FieldByName("Purpose")
+	if !ok {
+		t.Fatal("expected EmailVerificationCode to have Purpose field")
+	}
+	if field.Type.Kind() != reflect.String {
+		t.Fatalf("expected Purpose to be string, got %s", field.Type)
+	}
+}
+
+func TestVerificationCodesAreIsolatedByPurpose(t *testing.T) {
+	t.Setenv("RESEND_API_KEY", "")
+	t.Setenv("FROM_EMAIL", "")
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.EmailVerificationCode{})
+
+	service := NewEmailServiceWithoutRedis(db)
+	purposeService, ok := any(service).(purposeVerificationService)
+	if !ok {
+		t.Fatal("expected EmailService to support purpose-specific verification codes")
+	}
+
+	email := uuid.NewString() + "@example.com"
+	registerCode, err := purposeService.SendVerificationCodeForPurpose(email, "registration")
+	if err != nil {
+		t.Fatalf("send registration code: %v", err)
+	}
+	resetCode, err := purposeService.SendVerificationCodeForPurpose(email, "password_reset")
+	if err != nil {
+		t.Fatalf("send password reset code: %v", err)
+	}
+
+	var count int64
+	if err := db.Model(&model.EmailVerificationCode{}).Where("email = ?", email).Count(&count).Error; err != nil {
+		t.Fatalf("count verification codes: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected two purpose-specific codes, got %d", count)
+	}
+
+	valid, err := purposeService.VerifyCodeForPurpose(email, resetCode, "registration")
+	if err != nil {
+		t.Fatalf("verify reset code as registration code: %v", err)
+	}
+	if valid {
+		t.Fatal("expected password reset code to be rejected for registration")
+	}
+
+	valid, err = purposeService.VerifyCodeForPurpose(email, registerCode, "registration")
+	if err != nil || !valid {
+		t.Fatalf("verify registration code: valid=%v err=%v", valid, err)
+	}
+	valid, err = purposeService.VerifyCodeForPurpose(email, resetCode, "password_reset")
+	if err != nil || !valid {
+		t.Fatalf("verify password reset code: valid=%v err=%v", valid, err)
+	}
+}
 
 func captureEmailServiceLogs(t *testing.T, fn func()) string {
 	t.Helper()

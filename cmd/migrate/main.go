@@ -69,6 +69,9 @@ func runMigrations(db *gorm.DB) error {
 	if err := migrations.DeduplicateBlogInteractions(db); err != nil {
 		return fmt.Errorf("deduplicate blog interactions: %w", err)
 	}
+	if err := migrations.RunAuthPasswordResetMigration(db); err != nil {
+		return fmt.Errorf("auth password reset migration: %w", err)
+	}
 	if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
 		return fmt.Errorf("unified reading list migration: %w", err)
 	}

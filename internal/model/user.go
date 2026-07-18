@@ -13,6 +13,7 @@ type User struct {
 	Username              string          `json:"username" gorm:"unique;not null;column:username"`
 	Email                 string          `json:"email" gorm:"unique;not null;column:email"`
 	Password              string          `json:"-" gorm:"not null;column:password"`
+	AuthVersion           uint            `json:"-" gorm:"not null;default:0"`
 	Role                  string          `json:"role" gorm:"default:'user';column:role"` // user / moderator / admin
 	DisplayName           string          `json:"display_name" gorm:"column:display_name"`
 	AvatarURL             string          `json:"avatar_url" gorm:"column:avatar_url"`
