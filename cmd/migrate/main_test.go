@@ -168,6 +168,44 @@ func TestRunMigrationsBackfillsUserDefaultResources(t *testing.T) {
 	}
 }
 
+func TestRunMigrationsCreatesUnifiedStudioStateAndTypedCollections(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{})
+	user := model.User{Username: "studio-user", Email: "studio-user@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	var state model.UserStudioState
+	if err := db.First(&state, "user_id = ?", user.UUID).Error; err != nil {
+		t.Fatalf("load studio state: %v", err)
+	}
+	if state.ChannelID == nil {
+		t.Fatal("expected a current studio channel")
+	}
+
+	for _, contentType := range []string{
+		model.ChannelContentTypeBlog,
+		model.ChannelContentTypePodcast,
+		model.ChannelContentTypeVideo,
+	} {
+		var count int64
+		if err := db.Model(&model.Collection{}).
+			Joins("JOIN channels ON channels.id = collections.channel_id").
+			Where("channels.user_id = ? AND collections.content_type = ? AND collections.is_default = ?", user.UUID, contentType, true).
+			Count(&count).Error; err != nil {
+			t.Fatalf("count %s collections: %v", contentType, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected one %s default collection, got %d", contentType, count)
+		}
+	}
+}
+
 func TestRunMigrationsDeduplicatesLegacyForumDrafts(t *testing.T) {
 	db := testdb.Open(t)
 	if err := db.Exec(`

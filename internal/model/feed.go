@@ -131,10 +131,11 @@ func (UserDefaultChannel) TableName() string { return "user_default_channels" }
 
 type Collection struct {
 	Base
-	ChannelID   uuid.UUID  `json:"channel_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_collection_channel_name,priority:1"`
+	ChannelID   uuid.UUID  `json:"channel_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_collection_channel_type_name,priority:1"`
 	Channel     *Channel   `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
+	ContentType string     `json:"content_type" gorm:"type:varchar(16);not null;default:'blog';index;uniqueIndex:idx_collection_channel_type_name,priority:2"`
 	CreatedBy   *uuid.UUID `json:"created_by,omitempty" gorm:"type:uuid;index"`
-	Name        string     `json:"name" gorm:"not null;uniqueIndex:idx_collection_channel_name,priority:2"`
+	Name        string     `json:"name" gorm:"not null;uniqueIndex:idx_collection_channel_type_name,priority:3"`
 	Description string     `json:"description" gorm:"type:text"`
 	CoverURL    string     `json:"cover_url" gorm:"type:text"`
 	IsDefault   bool       `json:"is_default" gorm:"default:false;index"`

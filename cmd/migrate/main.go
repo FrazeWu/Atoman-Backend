@@ -160,6 +160,9 @@ func runMigrations(db *gorm.DB) error {
 	if err := backfillUserDefaultResources(db); err != nil {
 		return fmt.Errorf("user default resources migration: %w", err)
 	}
+	if err := migrations.RunUnifiedStudioMigration(db); err != nil {
+		return fmt.Errorf("unified studio migration: %w", err)
+	}
 
 	return nil
 }
