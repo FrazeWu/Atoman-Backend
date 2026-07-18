@@ -37,6 +37,7 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		&model.Post{},
 		&model.PostCollection{},
 		&model.PodcastEpisode{},
+		&model.ContentPublicationEvent{},
 		&model.StudioMetricEvent{},
 		&model.PodcastEpisodeBookmark{},
 		&model.ChannelBookmark{},
@@ -781,6 +782,13 @@ func TestCreatePodcastEpisodePersistsVisibility(t *testing.T) {
 	}
 	if post.Visibility != "private" {
 		t.Fatalf("expected private visibility, got %q", post.Visibility)
+	}
+	var publicationCount int64
+	if err := db.Model(&model.ContentPublicationEvent{}).Where("content_type = ?", "podcast").Count(&publicationCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if publicationCount != 1 {
+		t.Fatalf("expected one podcast publication event, got %d", publicationCount)
 	}
 }
 

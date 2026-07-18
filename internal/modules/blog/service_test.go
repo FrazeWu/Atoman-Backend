@@ -14,7 +14,7 @@ import (
 func newBlogScopeTest(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, model.Channel) {
 	t.Helper()
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.BlogPostVersion{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.ContentPublicationEvent{}, &model.BlogPostVersion{})
 	user := model.User{Username: "blog-scope", Email: "blog-scope@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)

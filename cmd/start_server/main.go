@@ -30,6 +30,7 @@ import (
 	"atoman/internal/middleware"
 	"atoman/internal/migrations"
 	"atoman/internal/model"
+	"atoman/internal/modules/lifecycle"
 	"atoman/internal/service"
 	"atoman/internal/storage"
 )
@@ -687,6 +688,7 @@ ON CONFLICT (key) DO NOTHING`)
 
 	service.StartRSSCron(db)
 	service.StartFullTextWorker(db)
+	lifecycle.StartWorker(db)
 
 	log.Println("Initializing Casbin Enforcer...")
 	if err := middleware.InitCasbin(db); err != nil {

@@ -12,6 +12,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/modules/lifecycle"
 	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
@@ -1131,6 +1132,7 @@ func (h *Handler) updatePost(c *gin.Context) {
 		httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to update this post"))
 		return
 	}
+	wasPublished := post.Status == "published"
 
 	updates := map[string]any{
 		"title":      req.Title,
@@ -1217,7 +1219,12 @@ func (h *Handler) updatePost(c *gin.Context) {
 			return err
 		}
 		if post.Status == "published" {
-			return saveBlogPostVersion(tx, post, user.ID)
+			if err := saveBlogPostVersion(tx, post, user.ID); err != nil {
+				return err
+			}
+			if !wasPublished {
+				return lifecycle.NewService(tx).EnqueuePublication("blog", post.ID)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -1482,7 +1489,10 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 		if err := tx.Preload("Channel").Preload("Collection").First(&post, "id = ?", post.ID).Error; err != nil {
 			return err
 		}
-		return saveBlogPostVersion(tx, post, user.ID)
+		if err := saveBlogPostVersion(tx, post, user.ID); err != nil {
+			return err
+		}
+		return lifecycle.NewService(tx).EnqueuePublication("blog", post.ID)
 	}); err != nil {
 		httpx.Error(c, err)
 		return

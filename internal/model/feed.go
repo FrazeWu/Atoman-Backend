@@ -127,6 +127,7 @@ type Post struct {
 	Status             string       `json:"status" gorm:"default:'draft'"` // draft / published
 	Visibility         string       `json:"visibility" gorm:"not null;default:'public'"`
 	Pinned             bool         `json:"pinned" gorm:"default:false"`
+	ScheduledAt        *time.Time   `json:"scheduled_at,omitempty" gorm:"index"`
 	PublishedAt        *time.Time   `json:"published_at,omitempty" gorm:"index"`
 	ViewCount          int64        `json:"view_count" gorm:"not null;default:0"`
 }
