@@ -188,6 +188,7 @@ func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.Emai
 		auth.POST("/password-reset/send-code", PasswordResetSendCodeHandler(db, emailService))
 		auth.POST("/password-reset", PasswordResetHandler(db))
 	}
+	RegisterOAuthRoutes(auth, service.NewOAuthService(db, configuredOAuthRegistry()), configuredOAuthFrontendURL())
 }
 
 // RegisterHandler godoc

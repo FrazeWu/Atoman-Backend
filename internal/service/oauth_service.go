@@ -74,8 +74,19 @@ type OAuthCompletionResult struct {
 	ReturnTo string
 }
 
+type OAuthPendingInfo struct {
+	Provider string
+	Stage    string
+	Email    string
+	ReturnTo string
+}
+
 func NewOAuthService(db *gorm.DB, providers *oauthprovider.Registry) *OAuthService {
 	return &OAuthService{db: db, providers: providers, now: time.Now}
+}
+
+func (s *OAuthService) ProviderNames() []string {
+	return s.providers.Names()
 }
 
 func (s *OAuthService) Begin(ctx context.Context, input OAuthBeginInput) (OAuthBeginResult, error) {
@@ -475,6 +486,33 @@ func (s *OAuthService) ListIdentities(ctx context.Context, userID uuid.UUID) ([]
 		return nil, apperr.Internal(err)
 	}
 	return identities, nil
+}
+
+func (s *OAuthService) PendingInfo(ctx context.Context, token string) (OAuthPendingInfo, error) {
+	if strings.TrimSpace(token) == "" {
+		return OAuthPendingInfo{}, apperr.BadRequest("oauth.invalid_flow", "OAuth session is invalid or expired")
+	}
+	var flow model.OAuthFlow
+	err := s.db.WithContext(ctx).
+		Where("secret_hash = ? AND stage IN ? AND consumed_at IS NULL AND expires_at > ?",
+			hashOAuthSecret(token), []string{model.OAuthStageCompleteProfile, model.OAuthStageConfirmAccount}, s.now().UTC()).
+		First(&flow).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return OAuthPendingInfo{}, apperr.BadRequest("oauth.invalid_flow", "OAuth session is invalid or expired")
+	}
+	if err != nil {
+		return OAuthPendingInfo{}, apperr.Internal(err)
+	}
+	return OAuthPendingInfo{Provider: flow.Provider, Stage: flow.Stage, Email: flow.Email, ReturnTo: flow.ReturnTo}, nil
+}
+
+func (s *OAuthService) CancelPending(ctx context.Context, token string) error {
+	if strings.TrimSpace(token) == "" {
+		return nil
+	}
+	return s.db.WithContext(ctx).Model(&model.OAuthFlow{}).
+		Where("secret_hash = ? AND consumed_at IS NULL", hashOAuthSecret(token)).
+		Update("consumed_at", s.now().UTC()).Error
 }
 
 func (s *OAuthService) Unlink(ctx context.Context, userID uuid.UUID, provider string) error {
