@@ -70,6 +70,8 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 	}
 
 	models := []any{
+		&model.ExternalIdentity{},
+		&model.OAuthFlow{},
 		&model.ForumGroup{},
 		&model.ForumGroupMember{},
 		&model.ForumCategoryPermission{},

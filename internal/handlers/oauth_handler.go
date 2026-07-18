@@ -100,11 +100,28 @@ func RegisterOAuthRoutes(group *gin.RouterGroup, oauthService *service.OAuthServ
 	group.DELETE("/oauth/:provider", middleware.StableAuthMiddleware(), handler.unlink)
 }
 
+// providers godoc
+// @Summary 获取可用第三方登录平台
+// @Tags auth-oauth
+// @Produce json
+// @Success 200 {object} OAuthProvidersResponse
+// @Router /api/v1/auth/oauth/providers [get]
 func (h *OAuthHandler) providers(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
-	c.JSON(http.StatusOK, gin.H{"providers": h.service.ProviderNames()})
+	c.JSON(http.StatusOK, OAuthProvidersResponse{Providers: h.service.ProviderNames()})
 }
 
+// start godoc
+// @Summary 开始第三方登录或绑定
+// @Tags auth-oauth
+// @Produce json
+// @Param provider path string true "平台" Enums(google,apple,github,microsoft)
+// @Param purpose query string false "用途" Enums(login,link)
+// @Param return_to query string false "站内返回路径"
+// @Success 302
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Router /api/v1/auth/oauth/{provider}/start [get]
 func (h *OAuthHandler) start(c *gin.Context) {
 	purpose := strings.TrimSpace(c.Query("purpose"))
 	if purpose == "" {
@@ -132,6 +149,15 @@ func (h *OAuthHandler) start(c *gin.Context) {
 	c.Redirect(http.StatusFound, result.AuthorizationURL)
 }
 
+// callback godoc
+// @Summary 接收第三方登录回调
+// @Tags auth-oauth
+// @Param provider path string true "平台" Enums(google,apple,github,microsoft)
+// @Param state query string false "OAuth state"
+// @Param code query string false "Authorization code"
+// @Success 302
+// @Router /api/v1/auth/oauth/{provider}/callback [get]
+// @Router /api/v1/auth/oauth/{provider}/callback [post]
 func (h *OAuthHandler) callback(c *gin.Context) {
 	if c.Request.FormValue("error") != "" {
 		h.redirectFailure(c)
@@ -179,6 +205,13 @@ func (h *OAuthHandler) callback(c *gin.Context) {
 	h.redirect(c, target)
 }
 
+// pending godoc
+// @Summary 获取待完成的第三方登录
+// @Tags auth-oauth
+// @Produce json
+// @Success 200 {object} OAuthPendingResponse
+// @Failure 400 {object} ErrorResponse
+// @Router /api/v1/auth/oauth/pending [get]
 func (h *OAuthHandler) pending(c *gin.Context) {
 	token, err := c.Cookie(oauthFlowCookieName)
 	if err != nil {
@@ -203,6 +236,16 @@ type oauthCompleteProfileRequest struct {
 	Username string `json:"username" binding:"required"`
 }
 
+// completeProfile godoc
+// @Summary 完成第三方新账号资料
+// @Tags auth-oauth
+// @Accept json
+// @Produce json
+// @Param input body OAuthCompleteProfileRequest true "用户名"
+// @Success 200 {object} OAuthCompletionResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Router /api/v1/auth/oauth/pending/complete-profile [post]
 func (h *OAuthHandler) completeProfile(c *gin.Context) {
 	var input oauthCompleteProfileRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -228,6 +271,16 @@ type oauthConfirmAccountRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+// confirmAccount godoc
+// @Summary 验证原密码并绑定第三方身份
+// @Tags auth-oauth
+// @Accept json
+// @Produce json
+// @Param input body OAuthConfirmAccountRequest true "原账号密码"
+// @Success 200 {object} OAuthCompletionResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Router /api/v1/auth/oauth/pending/confirm-account [post]
 func (h *OAuthHandler) confirmAccount(c *gin.Context) {
 	var input oauthConfirmAccountRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -249,6 +302,11 @@ func (h *OAuthHandler) confirmAccount(c *gin.Context) {
 	h.writeCompletion(c, result)
 }
 
+// cancelPending godoc
+// @Summary 取消待完成的第三方登录
+// @Tags auth-oauth
+// @Success 204
+// @Router /api/v1/auth/oauth/pending [delete]
 func (h *OAuthHandler) cancelPending(c *gin.Context) {
 	token, _ := c.Cookie(oauthFlowCookieName)
 	if err := h.service.CancelPending(c.Request.Context(), token); err != nil {
@@ -259,6 +317,15 @@ func (h *OAuthHandler) cancelPending(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// identities godoc
+// @Summary 获取当前账号的第三方登录方式
+// @Tags auth-oauth
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Success 200 {object} OAuthIdentitiesResponse
+// @Failure 401 {object} ErrorResponse
+// @Router /api/v1/auth/oauth/identities [get]
 func (h *OAuthHandler) identities(c *gin.Context) {
 	current, ok := authctx.Current(c)
 	if !ok {
@@ -285,6 +352,16 @@ func (h *OAuthHandler) identities(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"identities": items})
 }
 
+// unlink godoc
+// @Summary 取消绑定第三方登录方式
+// @Tags auth-oauth
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param provider path string true "平台" Enums(google,apple,github,microsoft)
+// @Success 204
+// @Failure 401 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Router /api/v1/auth/oauth/{provider} [delete]
 func (h *OAuthHandler) unlink(c *gin.Context) {
 	current, ok := authctx.Current(c)
 	if !ok {

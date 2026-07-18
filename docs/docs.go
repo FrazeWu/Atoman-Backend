@@ -2839,6 +2839,369 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/auth/oauth/identities": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "获取当前账号的第三方登录方式",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OAuthIdentitiesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/oauth/pending": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "获取待完成的第三方登录",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OAuthPendingResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "取消待完成的第三方登录",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/oauth/pending/complete-profile": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "完成第三方新账号资料",
+                "parameters": [
+                    {
+                        "description": "用户名",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OAuthCompleteProfileRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OAuthCompletionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/oauth/pending/confirm-account": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "验证原密码并绑定第三方身份",
+                "parameters": [
+                    {
+                        "description": "原账号密码",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OAuthConfirmAccountRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OAuthCompletionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/oauth/providers": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "获取可用第三方登录平台",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OAuthProvidersResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/oauth/{provider}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "取消绑定第三方登录方式",
+                "parameters": [
+                    {
+                        "enum": [
+                            "google",
+                            "apple",
+                            "github",
+                            "microsoft"
+                        ],
+                        "type": "string",
+                        "description": "平台",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/oauth/{provider}/callback": {
+            "get": {
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "接收第三方登录回调",
+                "parameters": [
+                    {
+                        "enum": [
+                            "google",
+                            "apple",
+                            "github",
+                            "microsoft"
+                        ],
+                        "type": "string",
+                        "description": "平台",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "OAuth state",
+                        "name": "state",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Authorization code",
+                        "name": "code",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "接收第三方登录回调",
+                "parameters": [
+                    {
+                        "enum": [
+                            "google",
+                            "apple",
+                            "github",
+                            "microsoft"
+                        ],
+                        "type": "string",
+                        "description": "平台",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "OAuth state",
+                        "name": "state",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Authorization code",
+                        "name": "code",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/oauth/{provider}/start": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "开始第三方登录或绑定",
+                "parameters": [
+                    {
+                        "enum": [
+                            "google",
+                            "apple",
+                            "github",
+                            "microsoft"
+                        ],
+                        "type": "string",
+                        "description": "平台",
+                        "name": "provider",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "enum": [
+                            "login",
+                            "link"
+                        ],
+                        "type": "string",
+                        "description": "用途",
+                        "name": "purpose",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "站内返回路径",
+                        "name": "return_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "302": {
+                        "description": "Found"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/auth/onboarding/complete": {
             "post": {
                 "security": [
@@ -17607,6 +17970,101 @@ const docTemplate = `{
                 "total": {
                     "type": "integer",
                     "example": 42
+                }
+            }
+        },
+        "handlers.OAuthCompleteProfileRequest": {
+            "type": "object",
+            "properties": {
+                "username": {
+                    "type": "string",
+                    "example": "fafa"
+                }
+            }
+        },
+        "handlers.OAuthCompletionResponse": {
+            "type": "object",
+            "properties": {
+                "return_to": {
+                    "type": "string",
+                    "example": "/forum"
+                },
+                "token": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/handlers.AuthUserResponse"
+                }
+            }
+        },
+        "handlers.OAuthConfirmAccountRequest": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "example": "secret123"
+                }
+            }
+        },
+        "handlers.OAuthIdentitiesResponse": {
+            "type": "object",
+            "properties": {
+                "identities": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handlers.OAuthIdentityResponse"
+                    }
+                }
+            }
+        },
+        "handlers.OAuthIdentityResponse": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "example": "fafa@example.com"
+                },
+                "last_login_at": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "github"
+                }
+            }
+        },
+        "handlers.OAuthPendingResponse": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "example": "f***@example.com"
+                },
+                "provider": {
+                    "type": "string",
+                    "example": "google"
+                },
+                "stage": {
+                    "type": "string",
+                    "example": "complete_profile"
+                }
+            }
+        },
+        "handlers.OAuthProvidersResponse": {
+            "type": "object",
+            "properties": {
+                "providers": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "example": [
+                        "google",
+                        "apple",
+                        "github",
+                        "microsoft"
+                    ]
                 }
             }
         },

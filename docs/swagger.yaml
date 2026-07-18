@@ -1614,6 +1614,71 @@ definitions:
         example: 42
         type: integer
     type: object
+  handlers.OAuthCompleteProfileRequest:
+    properties:
+      username:
+        example: fafa
+        type: string
+    type: object
+  handlers.OAuthCompletionResponse:
+    properties:
+      return_to:
+        example: /forum
+        type: string
+      token:
+        type: string
+      user:
+        $ref: '#/definitions/handlers.AuthUserResponse'
+    type: object
+  handlers.OAuthConfirmAccountRequest:
+    properties:
+      password:
+        example: secret123
+        type: string
+    type: object
+  handlers.OAuthIdentitiesResponse:
+    properties:
+      identities:
+        items:
+          $ref: '#/definitions/handlers.OAuthIdentityResponse'
+        type: array
+    type: object
+  handlers.OAuthIdentityResponse:
+    properties:
+      email:
+        example: fafa@example.com
+        type: string
+      last_login_at:
+        format: date-time
+        type: string
+      provider:
+        example: github
+        type: string
+    type: object
+  handlers.OAuthPendingResponse:
+    properties:
+      email:
+        example: f***@example.com
+        type: string
+      provider:
+        example: google
+        type: string
+      stage:
+        example: complete_profile
+        type: string
+    type: object
+  handlers.OAuthProvidersResponse:
+    properties:
+      providers:
+        example:
+        - google
+        - apple
+        - github
+        - microsoft
+        items:
+          type: string
+        type: array
+    type: object
   handlers.OnboardingCompleteResponse:
     properties:
       onboarding_completed_at:
@@ -6455,6 +6520,241 @@ paths:
       summary: 退出登录
       tags:
       - auth
+  /api/v1/auth/oauth/{provider}:
+    delete:
+      parameters:
+      - description: 平台
+        enum:
+        - google
+        - apple
+        - github
+        - microsoft
+        in: path
+        name: provider
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 取消绑定第三方登录方式
+      tags:
+      - auth-oauth
+  /api/v1/auth/oauth/{provider}/callback:
+    get:
+      parameters:
+      - description: 平台
+        enum:
+        - google
+        - apple
+        - github
+        - microsoft
+        in: path
+        name: provider
+        required: true
+        type: string
+      - description: OAuth state
+        in: query
+        name: state
+        type: string
+      - description: Authorization code
+        in: query
+        name: code
+        type: string
+      responses:
+        "302":
+          description: Found
+      summary: 接收第三方登录回调
+      tags:
+      - auth-oauth
+    post:
+      parameters:
+      - description: 平台
+        enum:
+        - google
+        - apple
+        - github
+        - microsoft
+        in: path
+        name: provider
+        required: true
+        type: string
+      - description: OAuth state
+        in: query
+        name: state
+        type: string
+      - description: Authorization code
+        in: query
+        name: code
+        type: string
+      responses:
+        "302":
+          description: Found
+      summary: 接收第三方登录回调
+      tags:
+      - auth-oauth
+  /api/v1/auth/oauth/{provider}/start:
+    get:
+      parameters:
+      - description: 平台
+        enum:
+        - google
+        - apple
+        - github
+        - microsoft
+        in: path
+        name: provider
+        required: true
+        type: string
+      - description: 用途
+        enum:
+        - login
+        - link
+        in: query
+        name: purpose
+        type: string
+      - description: 站内返回路径
+        in: query
+        name: return_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "302":
+          description: Found
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 开始第三方登录或绑定
+      tags:
+      - auth-oauth
+  /api/v1/auth/oauth/identities:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.OAuthIdentitiesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取当前账号的第三方登录方式
+      tags:
+      - auth-oauth
+  /api/v1/auth/oauth/pending:
+    delete:
+      responses:
+        "204":
+          description: No Content
+      summary: 取消待完成的第三方登录
+      tags:
+      - auth-oauth
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.OAuthPendingResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取待完成的第三方登录
+      tags:
+      - auth-oauth
+  /api/v1/auth/oauth/pending/complete-profile:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 用户名
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.OAuthCompleteProfileRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.OAuthCompletionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 完成第三方新账号资料
+      tags:
+      - auth-oauth
+  /api/v1/auth/oauth/pending/confirm-account:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 原账号密码
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.OAuthConfirmAccountRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.OAuthCompletionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 验证原密码并绑定第三方身份
+      tags:
+      - auth-oauth
+  /api/v1/auth/oauth/providers:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.OAuthProvidersResponse'
+      summary: 获取可用第三方登录平台
+      tags:
+      - auth-oauth
   /api/v1/auth/onboarding/complete:
     post:
       description: 将当前登录用户的 onboarding_completed_at 设置为当前 UTC 时间。

@@ -36,6 +36,40 @@ type AuthSuccessResponse struct {
 	User  AuthUserResponse `json:"user"`
 }
 
+type OAuthProvidersResponse struct {
+	Providers []string `json:"providers" example:"google,apple,github,microsoft"`
+}
+
+type OAuthPendingResponse struct {
+	Provider string `json:"provider" example:"google"`
+	Stage    string `json:"stage" example:"complete_profile"`
+	Email    string `json:"email" example:"f***@example.com"`
+}
+
+type OAuthCompleteProfileRequest struct {
+	Username string `json:"username" example:"fafa"`
+}
+
+type OAuthConfirmAccountRequest struct {
+	Password string `json:"password" example:"secret123"`
+}
+
+type OAuthCompletionResponse struct {
+	Token    string           `json:"token"`
+	User     AuthUserResponse `json:"user"`
+	ReturnTo string           `json:"return_to" example:"/forum"`
+}
+
+type OAuthIdentityResponse struct {
+	Provider    string  `json:"provider" example:"github"`
+	Email       string  `json:"email" example:"fafa@example.com"`
+	LastLoginAt *string `json:"last_login_at" format:"date-time"`
+}
+
+type OAuthIdentitiesResponse struct {
+	Identities []OAuthIdentityResponse `json:"identities"`
+}
+
 type UserResponse struct {
 	Data    model.User `json:"data"`
 	Message string     `json:"message" example:"ok"`

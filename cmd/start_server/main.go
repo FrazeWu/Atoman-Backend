@@ -54,6 +54,9 @@ func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 	if err := migrations.RunAuthPasswordResetMigration(db); err != nil {
 		return fmt.Errorf("migrate password reset auth schema: %w", err)
 	}
+	if err := migrations.RunAuthOAuthMigration(db); err != nil {
+		return fmt.Errorf("migrate oauth auth schema: %w", err)
+	}
 	models = append(models,
 		&model.ForumGroup{},
 		&model.ForumGroupMember{},
