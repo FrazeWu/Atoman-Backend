@@ -130,7 +130,7 @@ func (s *Service) shareableContent(userID, channelID uuid.UUID, module Module, c
 		if episodeCount > 0 {
 			return "", "", "", apperr.BadRequest("studio.content_module_mismatch", "Content does not belong to this module")
 		}
-		return post.Visibility, post.Status, "/post/" + post.ID.String(), nil
+		return post.Visibility, post.Status, "/posts/post/" + post.ID.String(), nil
 	case ModulePodcast:
 		var episode model.PodcastEpisode
 		if err := s.db.Preload("Post").First(&episode, "id = ?", contentID).Error; err != nil {

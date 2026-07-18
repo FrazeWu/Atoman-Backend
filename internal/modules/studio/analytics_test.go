@@ -66,7 +66,7 @@ func TestStudioShareRecordsEventAndRejectsPrivateContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("share public post: %v", err)
 	}
-	if shared.Path != "/post/"+publicPost.ID.String() {
+	if shared.Path != "/posts/post/"+publicPost.ID.String() {
 		t.Fatalf("unexpected share path: %#v", shared)
 	}
 	var count int64

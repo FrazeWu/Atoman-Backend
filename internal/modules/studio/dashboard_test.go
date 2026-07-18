@@ -145,6 +145,11 @@ func TestDashboardReturnsThreeIndependentModuleSections(t *testing.T) {
 		t.Fatalf("expected one top-level subscriber count of 2, got %d", dashboard.ChannelSubscriberCount)
 	}
 	wantContents := []int64{4, 1, 1}
+	wantMetrics := map[Module][]string{
+		ModuleBlog:    {"view", "comment", "like", "bookmark", "share"},
+		ModulePodcast: {"play", "complete", "comment", "bookmark", "share"},
+		ModuleVideo:   {"play", "comment", "like", "bookmark", "share"},
+	}
 	for index, module := range []Module{ModuleBlog, ModulePodcast, ModuleVideo} {
 		section := dashboard.Sections[index]
 		if section.Module != module || section.Error != "" {
@@ -155,6 +160,63 @@ func TestDashboardReturnsThreeIndependentModuleSections(t *testing.T) {
 		}
 		if section.Metrics["contents"] != wantContents[index] {
 			t.Fatalf("expected independent %s content count %d, got %#v", module, wantContents[index], section.Metrics)
+		}
+		for _, metric := range wantMetrics[module] {
+			if _, ok := section.Metrics[metric]; !ok {
+				t.Fatalf("expected %s dashboard metric %q, got %#v", module, metric, section.Metrics)
+			}
+		}
+	}
+}
+
+func TestDashboardReportsUnrepliedPodcastComments(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	seedStudioDashboardContent(t, fixture)
+	var episode model.PodcastEpisode
+	if err := fixture.db.First(&episode).Error; err != nil {
+		t.Fatal(err)
+	}
+	target := model.DiscussionTarget{Kind: "podcast_episode", ResourceID: episode.ID, ResourceKey: episode.ID.String(), OwnerID: &fixture.user.ID}
+	if err := fixture.db.Create(&target).Error; err != nil {
+		t.Fatal(err)
+	}
+	comment := model.CommentEntry{TargetID: target.ID, AuthorID: fixture.foreignUser.UUID, Content: "请回复", ContentHash: uuid.NewString(), Status: "active"}
+	if err := fixture.db.Create(&comment).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	dashboard, err := fixture.service.GetDashboard(fixture.user, fixture.channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range dashboard.Sections[1].Issues {
+		if issue.Code == "unreplied_comment" && issue.Count == 1 {
+			return
+		}
+	}
+	t.Fatalf("expected unreplied podcast issue, got %#v", dashboard.Sections[1].Issues)
+}
+
+func TestDashboardDoesNotReportBlogWithManyToManyCollectionAsMissing(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	post := model.Post{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID,
+		Title: "Collected blog", Content: "body", Status: "draft", Visibility: "public",
+	}
+	if err := fixture.db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Model(&post).Association("Collections").Replace([]model.Collection{fixture.collections[ModuleBlog]}); err != nil {
+		t.Fatal(err)
+	}
+
+	dashboard, err := fixture.service.GetDashboard(fixture.user, fixture.channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range dashboard.Sections[0].Issues {
+		if issue.Code == "missing_collection" {
+			t.Fatalf("did not expect missing collection issue, got %#v", dashboard.Sections[0].Issues)
 		}
 	}
 }

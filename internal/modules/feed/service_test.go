@@ -149,7 +149,7 @@ func newUnifiedSubscriptionFixture(t *testing.T) (*Service, *gorm.DB, authctx.Cu
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PostCollection{},
 		&model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
 		&model.FeedSource{}, &model.Subscription{}, &model.FeedItem{}, &model.FeedItemRead{},
-		&model.Like{}, &model.DiscussionTarget{},
+		&model.Like{}, &model.DiscussionTarget{}, &model.Follow{},
 	)
 	viewer := model.User{Username: "unified-viewer", Email: "unified-viewer@example.com", Password: "hash", IsActive: true}
 	creator := model.User{Username: "unified-creator", Email: "unified-creator@example.com", Password: "hash", IsActive: true}
@@ -240,11 +240,7 @@ func TestFollowingUserIncludesUpdatesFromAllOwnedChannels(t *testing.T) {
 	if err := db.Create(&model.VideoCollection{VideoID: video.ID, CollectionID: videoCollection.ID}).Error; err != nil {
 		t.Fatal(err)
 	}
-	source := model.FeedSource{SourceType: "internal_user", SourceID: &creator.UUID, Hash: "unified-user-source", Title: creator.Username}
-	if err := db.Create(&source).Error; err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+	if err := db.Create(&model.Follow{FollowerID: viewer.ID, FollowingID: creator.UUID}).Error; err != nil {
 		t.Fatal(err)
 	}
 

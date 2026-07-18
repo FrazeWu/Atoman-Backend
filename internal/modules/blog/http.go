@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"atoman/internal/middleware"
 	"atoman/internal/model"
 	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
@@ -96,6 +97,7 @@ type blogDraftResponse struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
+	canPublish := middleware.RequireSiteFeature(service.db, "blog", "post.create")
 	group.GET("/seo/posts/:id", h.getSEOPost)
 	group.GET("/seo/sitemap", h.listSEOSitemap)
 	group.GET("/channels", h.listChannels)
@@ -128,17 +130,17 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/posts/:id/versions", h.listPostVersions)
 	group.POST("/posts/:id/versions/:version/restore", h.restorePostVersion)
 	group.GET("/posts/:id", h.getPost)
-	group.POST("/posts", h.createPost)
-	group.PUT("/posts/:id", h.updatePost)
-	group.DELETE("/posts/:id", h.deletePost)
-	group.POST("/posts/:id/publish", h.publishPost)
-	group.POST("/posts/:id/unpublish", h.unpublishPost)
+	group.POST("/posts", canPublish, h.createPost)
+	group.PUT("/posts/:id", canPublish, h.updatePost)
+	group.DELETE("/posts/:id", canPublish, h.deletePost)
+	group.POST("/posts/:id/publish", canPublish, h.publishPost)
+	group.POST("/posts/:id/unpublish", canPublish, h.unpublishPost)
 	group.POST("/posts/:id/pin", h.pinPost)
 	group.POST("/posts/:id/unpin", h.unpinPost)
 	group.PUT("/collections/:id/posts/order", h.reorderCollectionPosts)
 	group.GET("/drafts", h.getBlogDraft)
-	group.PUT("/drafts", h.putBlogDraft)
-	group.DELETE("/drafts", h.deleteBlogDraft)
+	group.PUT("/drafts", canPublish, h.putBlogDraft)
+	group.DELETE("/drafts", canPublish, h.deleteBlogDraft)
 }
 
 // getSEOPost godoc

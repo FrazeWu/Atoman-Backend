@@ -77,6 +77,7 @@ type ContentQuery struct {
 	Status       string
 	Visibility   string
 	CollectionID uuid.UUID
+	Issue        string
 	Page         int
 	PageSize     int
 }
@@ -98,6 +99,7 @@ type StudioContentItem struct {
 	Collections      []StudioCollectionSummary `json:"collections"`
 	DurationSec      int                       `json:"duration_sec,omitempty"`
 	ViewCount        int64                     `json:"view_count"`
+	Metrics          map[string]int64          `json:"metrics"`
 	ProcessingStatus string                    `json:"processing_status,omitempty"`
 	PublishedAt      *time.Time                `json:"published_at,omitempty"`
 	CreatedAt        time.Time                 `json:"created_at"`

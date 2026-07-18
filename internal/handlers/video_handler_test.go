@@ -62,6 +62,31 @@ func TestStudioVideoViewRecordsPlayMetric(t *testing.T) {
 	require.NoError(t, db.First(&event, "channel_id = ? AND content_type = ? AND content_id = ? AND metric = ?", channel.ID, "video", video.ID, "play").Error)
 }
 
+func TestReprocessVideoCreatesPreviewJobForOwner(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newVideoTestDB(t)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	owner := seedVideoUser(t, db)
+	video := seedVideoWithState(t, db, owner.UUID, "draft", "public")
+	if err := db.Model(&video).Updates(map[string]any{"storage_type": "local", "processing_status": "failed"}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	router := gin.New()
+	SetupVideoRoutes(router, db, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/reprocess", nil)
+	req.Header.Set("Authorization", "Bearer "+signedVideoListTokenForTest(t, owner))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var job model.VideoProcessingJob
+	require.NoError(t, db.Where("video_id = ?", video.ID).Order("created_at DESC").First(&job).Error)
+	require.Equal(t, "pending", job.Status)
+}
+
 func signedVideoListTokenForTest(t *testing.T, user model.User) string {
 	t.Helper()
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{

@@ -52,6 +52,16 @@ func (s *Service) validateContentQuery(userID uuid.UUID, module Module, query Co
 	if _, err := studioVisibilityToDB(query.Visibility); err != nil {
 		return err
 	}
+	if issue := strings.TrimSpace(query.Issue); issue != "" {
+		allowed := map[Module]map[string]bool{
+			ModuleBlog:    {"draft": true, "missing_cover": true, "missing_collection": true},
+			ModulePodcast: {"draft": true, "missing_cover": true, "missing_collection": true, "missing_audio": true},
+			ModuleVideo:   {"draft": true, "missing_cover": true, "missing_collection": true, "processing_failed": true, "external_unplayable": true},
+		}
+		if !allowed[module][issue] {
+			return apperr.BadRequest("studio.invalid_issue", "issue is not supported for this module")
+		}
+	}
 	if query.CollectionID == uuid.Nil {
 		return nil
 	}
@@ -93,15 +103,23 @@ func (s *Service) listBlogContents(userID uuid.UUID, query ContentQuery) ([]Stud
 		Where("posts.user_id = ? AND posts.channel_id = ?", userID, query.ChannelID).
 		Where("NOT EXISTS (SELECT 1 FROM podcast_episodes WHERE podcast_episodes.post_id = posts.id AND podcast_episodes.deleted_at IS NULL)")
 	db = applyPostContentFilters(db, query)
+	switch strings.TrimSpace(query.Issue) {
+	case "draft":
+		db = db.Where("posts.status = ?", "draft")
+	case "missing_cover":
+		db = db.Where("TRIM(COALESCE(posts.cover_url, '')) = ''")
+	case "missing_collection":
+		db = db.Where("posts.collection_id IS NULL AND NOT EXISTS (SELECT 1 FROM post_collections WHERE post_collections.post_id = posts.id)")
+	}
 	if query.CollectionID != uuid.Nil {
-		db = db.Where("posts.collection_id = ?", query.CollectionID)
+		db = db.Where("posts.collection_id = ? OR EXISTS (SELECT 1 FROM post_collections WHERE post_collections.post_id = posts.id AND post_collections.collection_id = ?)", query.CollectionID, query.CollectionID)
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var posts []model.Post
-	if err := db.Preload("Collection").
+	if err := db.Preload("Collection").Preload("Collections", "content_type = ?", string(ModuleBlog)).
 		Order("posts.updated_at DESC").Order("posts.id DESC").
 		Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).
 		Find(&posts).Error; err != nil {
@@ -109,11 +127,14 @@ func (s *Service) listBlogContents(userID uuid.UUID, query ContentQuery) ([]Stud
 	}
 	items := make([]StudioContentItem, 0, len(posts))
 	for _, post := range posts {
-		collections := make([]model.Collection, 0, 1)
+		collections := append([]model.Collection{}, post.Collections...)
 		if post.Collection != nil {
 			collections = append(collections, *post.Collection)
 		}
 		items = append(items, studioPostItem(ModuleBlog, post.ID, post, collections))
+	}
+	if err := s.enrichContentMetrics(ModuleBlog, items); err != nil {
+		return nil, 0, err
 	}
 	return items, total, nil
 }
@@ -123,6 +144,16 @@ func (s *Service) listPodcastContents(userID uuid.UUID, query ContentQuery) ([]S
 		Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL").
 		Where("posts.user_id = ? AND podcast_episodes.channel_id = ?", userID, query.ChannelID)
 	db = applyPostContentFilters(db, query)
+	switch strings.TrimSpace(query.Issue) {
+	case "draft":
+		db = db.Where("posts.status = ?", "draft")
+	case "missing_cover":
+		db = db.Where("TRIM(COALESCE(podcast_episodes.episode_cover_url, '')) = ''")
+	case "missing_collection":
+		db = db.Where("posts.collection_id IS NULL AND NOT EXISTS (SELECT 1 FROM post_collections WHERE post_collections.post_id = posts.id)")
+	case "missing_audio":
+		db = db.Where("TRIM(COALESCE(podcast_episodes.audio_url, '')) = ''")
+	}
 	if query.CollectionID != uuid.Nil {
 		db = db.Where("posts.collection_id = ? OR EXISTS (SELECT 1 FROM post_collections WHERE post_collections.post_id = posts.id AND post_collections.collection_id = ?)", query.CollectionID, query.CollectionID)
 	}
@@ -155,6 +186,9 @@ func (s *Service) listPodcastContents(userID uuid.UUID, query ContentQuery) ([]S
 		item.UpdatedAt = laterTime(post.UpdatedAt, episode.UpdatedAt)
 		items = append(items, item)
 	}
+	if err := s.enrichContentMetrics(ModulePodcast, items); err != nil {
+		return nil, 0, err
+	}
 	return items, total, nil
 }
 
@@ -169,6 +203,18 @@ func (s *Service) listVideoContents(userID uuid.UUID, query ContentQuery) ([]Stu
 	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
 		like := "%" + search + "%"
 		db = db.Where("LOWER(videos.title) LIKE ? OR LOWER(videos.description) LIKE ?", like, like)
+	}
+	switch strings.TrimSpace(query.Issue) {
+	case "draft":
+		db = db.Where("videos.status = ?", "draft")
+	case "missing_cover":
+		db = db.Where("TRIM(COALESCE(videos.thumbnail_url, '')) = ''")
+	case "missing_collection":
+		db = db.Where("NOT EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id)")
+	case "processing_failed":
+		db = db.Where("videos.processing_status = ?", "failed")
+	case "external_unplayable":
+		db = db.Where("videos.storage_type = ? AND TRIM(COALESCE(videos.video_url, '')) = ''", "external")
 	}
 	if query.CollectionID != uuid.Nil {
 		db = db.Where("EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id AND video_collections.collection_id = ?)", query.CollectionID)
@@ -199,7 +245,97 @@ func (s *Service) listVideoContents(userID uuid.UUID, query ContentQuery) ([]Stu
 			CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt,
 		})
 	}
+	if err := s.enrichContentMetrics(ModuleVideo, items); err != nil {
+		return nil, 0, err
+	}
 	return items, total, nil
+}
+
+type contentMetricRow struct {
+	ContentID uuid.UUID `gorm:"column:content_id"`
+	Metric    string
+	Count     int64
+}
+
+func (s *Service) enrichContentMetrics(module Module, items []StudioContentItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(items))
+	index := make(map[uuid.UUID]int, len(items))
+	primary := map[Module]string{ModuleBlog: "view", ModulePodcast: "play", ModuleVideo: "play"}[module]
+	for itemIndex := range items {
+		ids = append(ids, items[itemIndex].ID)
+		index[items[itemIndex].ID] = itemIndex
+		items[itemIndex].Metrics = emptyMetricMap(metricNamesByModule[module])
+		items[itemIndex].Metrics[primary] = items[itemIndex].ViewCount
+	}
+	apply := func(rows []contentMetricRow) {
+		for _, row := range rows {
+			itemIndex, ok := index[row.ContentID]
+			if !ok {
+				continue
+			}
+			if row.Metric == primary && row.Count < items[itemIndex].Metrics[primary] {
+				continue
+			}
+			items[itemIndex].Metrics[row.Metric] = row.Count
+		}
+	}
+
+	var rows []contentMetricRow
+	if err := s.db.Model(&model.StudioMetricEvent{}).
+		Select("content_id, metric, COUNT(*) AS count").
+		Where("content_type = ? AND content_id IN ?", module, ids).
+		Group("content_id, metric").Scan(&rows).Error; err != nil {
+		return err
+	}
+	apply(rows)
+
+	targetKind := map[Module]string{ModuleBlog: "blog_post", ModulePodcast: "podcast_episode", ModuleVideo: "video"}[module]
+	rows = nil
+	if err := s.db.Model(&model.CommentEntry{}).
+		Select("discussion_targets.resource_id AS content_id, 'comment' AS metric, COUNT(*) AS count").
+		Joins("JOIN discussion_targets ON discussion_targets.id = comment_entries.target_id").
+		Where("discussion_targets.kind = ? AND discussion_targets.resource_id IN ? AND comment_entries.status = ?", targetKind, ids, "active").
+		Group("discussion_targets.resource_id").Scan(&rows).Error; err != nil {
+		return err
+	}
+	apply(rows)
+
+	switch module {
+	case ModuleBlog, ModuleVideo:
+		targetType := "post"
+		if module == ModuleVideo {
+			targetType = "video"
+		}
+		rows = nil
+		if err := s.db.Model(&model.Like{}).
+			Select("target_id AS content_id, 'like' AS metric, COUNT(*) AS count").
+			Where("target_type = ? AND target_id IN ?", targetType, ids).
+			Group("target_id").Scan(&rows).Error; err != nil {
+			return err
+		}
+		apply(rows)
+	}
+
+	rows = nil
+	switch module {
+	case ModuleBlog:
+		if err := s.db.Model(&model.Bookmark{}).Select("post_id AS content_id, 'bookmark' AS metric, COUNT(*) AS count").Where("post_id IN ?", ids).Group("post_id").Scan(&rows).Error; err != nil {
+			return err
+		}
+	case ModulePodcast:
+		if err := s.db.Model(&model.PodcastEpisodeBookmark{}).Select("episode_id AS content_id, 'bookmark' AS metric, COUNT(*) AS count").Where("episode_id IN ?", ids).Group("episode_id").Scan(&rows).Error; err != nil {
+			return err
+		}
+	case ModuleVideo:
+		if err := s.db.Model(&model.VideoBookmark{}).Select("video_id AS content_id, 'bookmark' AS metric, COUNT(*) AS count").Where("video_id IN ?", ids).Group("video_id").Scan(&rows).Error; err != nil {
+			return err
+		}
+	}
+	apply(rows)
+	return nil
 }
 
 func applyPostContentFilters(db *gorm.DB, query ContentQuery) *gorm.DB {

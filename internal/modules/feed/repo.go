@@ -60,6 +60,17 @@ func (r *Repo) ListSubscriptionsWithSources(userID uuid.UUID, query FeedQuery) (
 	return subscriptions, err
 }
 
+func (r *Repo) ListFollowedUserIDs(userID uuid.UUID) ([]uuid.UUID, error) {
+	if !r.db.Migrator().HasTable(&model.Follow{}) {
+		return []uuid.UUID{}, nil
+	}
+	var ids []uuid.UUID
+	err := r.db.Model(&model.Follow{}).
+		Where("follower_id = ?", userID).
+		Pluck("following_id", &ids).Error
+	return ids, err
+}
+
 func (r *Repo) ListVisibleFeedSources(query FeedQuery) ([]model.FeedSource, error) {
 	db := r.db.Model(&model.FeedSource{}).Where("hidden = ?", false)
 	if query.SourceType != "" {

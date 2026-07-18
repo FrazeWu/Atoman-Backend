@@ -77,11 +77,18 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	if err != nil {
 		return nil, 0, err
 	}
-	if len(subscriptions) == 0 {
+	followedUserIDs := make([]uuid.UUID, 0)
+	if query.SourceID == uuid.Nil && query.GroupID == uuid.Nil && (query.SourceType == "" || query.SourceType == "internal_user") {
+		followedUserIDs, err = s.repo.ListFollowedUserIDs(user.ID)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+	if len(subscriptions) == 0 && len(followedUserIDs) == 0 {
 		return []TimelineItemDTO{}, 0, nil
 	}
 
-	userIDs := make([]uuid.UUID, 0)
+	userIDs := append([]uuid.UUID(nil), followedUserIDs...)
 	channelIDs := make([]uuid.UUID, 0)
 	collectionIDs := make([]uuid.UUID, 0)
 	feedSourceIDs := make([]uuid.UUID, 0)
@@ -232,6 +239,12 @@ func (s *Service) getSubscribedBlogFeed(
 	}
 	followedUserIDs := make([]uuid.UUID, 0)
 	followedChannelIDs := make([]uuid.UUID, 0)
+	if query.SourceID == uuid.Nil && query.GroupID == uuid.Nil && (query.SourceType == "" || query.SourceType == "internal_user") {
+		followedUserIDs, err = s.repo.ListFollowedUserIDs(userID)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
 	for _, subscription := range allSubscriptions {
 		if subscription.FeedSource == nil || subscription.FeedSource.SourceID == nil {
 			continue

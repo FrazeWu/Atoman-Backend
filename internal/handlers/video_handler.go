@@ -31,12 +31,13 @@ func SetupVideoRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	{
 		v.GET("", middleware.OptionalAuthMiddleware(), GetVideos(db))
 		v.GET("/recommend/items", GetRecommendedVideoItems(db))
+		v.POST("/:id/reprocess", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), ReprocessVideo(db))
 		v.GET("/:id", GetVideo(db))
 		v.GET("/:id/recommended", GetRecommendedVideos(db))
 		v.POST("/:id/view", IncrementVideoView(db))
-		v.POST("", middleware.AuthMiddleware(), CreateVideo(db))
-		v.PUT("/:id", middleware.AuthMiddleware(), UpdateVideo(db))
-		v.DELETE("/:id", middleware.AuthMiddleware(), DeleteVideo(db))
+		v.POST("", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), CreateVideo(db))
+		v.PUT("/:id", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), UpdateVideo(db))
+		v.DELETE("/:id", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), DeleteVideo(db))
 		v.GET("/bookmarks", middleware.AuthMiddleware(), GetVideoBookmarks(db))
 		v.POST("/bookmarks", middleware.AuthMiddleware(), CreateVideoBookmark(db))
 		v.DELETE("/bookmarks/:id", middleware.AuthMiddleware(), DeleteVideoBookmark(db))
@@ -44,11 +45,42 @@ func SetupVideoRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		v.POST("/channel-bookmarks", middleware.AuthMiddleware(), CreateChannelBookmark(db))
 		v.DELETE("/channel-bookmarks/:id", middleware.AuthMiddleware(), DeleteChannelBookmark(db))
 		// File upload endpoints
-		v.POST("/upload-video", middleware.AuthMiddleware(), UploadVideoFile(s3Client))
-		v.POST("/upload-cover", middleware.AuthMiddleware(), UploadVideoCover(s3Client))
+		v.POST("/upload-video", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), UploadVideoFile(s3Client))
+		v.POST("/upload-cover", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), UploadVideoCover(s3Client))
 	}
 	// Per-channel Video RSS feed
 	router.GET("/api/v1/channels/slug/:slug/rss/video", GetVideoRSS(db))
+}
+
+// ReprocessVideo godoc
+// @Summary 重新处理视频预览
+// @Tags videos
+// @Produce json
+// @Param id path string true "视频 UUID"
+// @Success 200 {object} map[string]bool
+// @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/videos/{id}/reprocess [post]
+func ReprocessVideo(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("userID").(uuid.UUID)
+		var video model.Video
+		if err := db.First(&video, "id = ?", c.Param("id")).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		if video.UserID != userID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		if err := service.EnsureVideoPreviewJob(db, &video); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reprocess video"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	}
 }
 
 func GetRecommendedVideoItems(db *gorm.DB) gin.HandlerFunc {

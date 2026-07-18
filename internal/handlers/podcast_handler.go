@@ -41,14 +41,13 @@ func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		p.GET("/show-bookmarks", middleware.AuthMiddleware(), GetPodcastShowBookmarks(db))
 		p.POST("/show-bookmarks", middleware.AuthMiddleware(), CreatePodcastShowBookmark(db))
 		p.DELETE("/show-bookmarks/:id", middleware.AuthMiddleware(), DeletePodcastShowBookmark(db))
-		p.POST("/episodes", middleware.AuthMiddleware(), CreatePodcastEpisode(db))
-		p.PUT("/episodes/:id", middleware.AuthMiddleware(), UpdatePodcastEpisode(db))
-		p.DELETE("/episodes/:id", middleware.AuthMiddleware(), DeletePodcastEpisode(db))
+		p.POST("/episodes", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "podcast", "podcast.publish"), CreatePodcastEpisode(db))
+		p.PUT("/episodes/:id", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "podcast", "podcast.publish"), UpdatePodcastEpisode(db))
+		p.DELETE("/episodes/:id", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "podcast", "podcast.publish"), DeletePodcastEpisode(db))
 		// File upload endpoints
-		p.POST("/upload-audio", middleware.AuthMiddleware(), UploadPodcastAudio(s3Client))
-		p.POST("/upload-cover", middleware.AuthMiddleware(), UploadPodcastCover(s3Client))
+		p.POST("/upload-audio", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "podcast", "podcast.publish"), UploadPodcastAudio(s3Client))
+		p.POST("/upload-cover", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "podcast", "podcast.publish"), UploadPodcastCover(s3Client))
 	}
-	SetupPodcastCreatorRoutes(p, db)
 	router.GET("/api/v1/channels/:slug/rss/podcast", GetPodcastRSS(db))
 }
 
@@ -404,6 +403,7 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			SeasonNumber    int         `json:"season_number"`
 			EpisodeNumber   int         `json:"episode_number"`
 			Status          string      `json:"status"`
+			Visibility      string      `json:"visibility"`
 			CollectionIDs   []uuid.UUID `json:"collection_ids"`
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
@@ -430,6 +430,14 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		if status == "" {
 			status = "draft"
 		}
+		visibility := input.Visibility
+		if visibility == "" {
+			visibility = "public"
+		}
+		if visibility != "public" && visibility != "followers" && visibility != "private" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid visibility"})
+			return
+		}
 		if err := studioapi.NewService(db).ValidateContentScope(userID, chID, studioapi.ModulePodcast, input.CollectionIDs, status == "published"); err != nil {
 			httpx.Error(c, err)
 			return
@@ -442,11 +450,12 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		var ep model.PodcastEpisode
 		txErr := db.Transaction(func(tx *gorm.DB) error {
 			post := model.Post{
-				UserID:    userID,
-				ChannelID: &chID,
-				Title:     strings.TrimSpace(input.Title),
-				Content:   input.Shownotes,
-				Status:    status,
+				UserID:     userID,
+				ChannelID:  &chID,
+				Title:      strings.TrimSpace(input.Title),
+				Content:    input.Shownotes,
+				Status:     status,
+				Visibility: visibility,
 			}
 			if err := tx.Create(&post).Error; err != nil {
 				return err
@@ -523,6 +532,7 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			SeasonNumber    *int        `json:"season_number"`
 			EpisodeNumber   *int        `json:"episode_number"`
 			Status          *string     `json:"status"`
+			Visibility      *string     `json:"visibility"`
 			CollectionIDs   []uuid.UUID `json:"collection_ids"`
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
@@ -557,6 +567,13 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		}
 		if input.Status != nil {
 			postUpdates["status"] = *input.Status
+		}
+		if input.Visibility != nil {
+			if *input.Visibility != "public" && *input.Visibility != "followers" && *input.Visibility != "private" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid visibility"})
+				return
+			}
+			postUpdates["visibility"] = *input.Visibility
 		}
 		epUpdates := map[string]interface{}{}
 		if input.AudioURL != nil {

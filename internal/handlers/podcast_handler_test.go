@@ -61,6 +61,15 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 	return r, db, user, channel
 }
 
+func TestSetupPodcastRoutesDoesNotMountLegacyCreatorRoutes(t *testing.T) {
+	r, _, _, _ := newPodcastHandlerTestDB(t)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/podcast/creator/dashboard", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy creator route to return 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestStudioPodcastPlaybackRecordsPlayAndCompleteMetrics(t *testing.T) {
 	r, db, user, channel := newPodcastHandlerTestDB(t)
 	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
@@ -748,6 +757,30 @@ func TestCreatePodcastEpisodeAcceptsOwnedGlobalChannel(t *testing.T) {
 				t.Fatalf("expected %d, got %d: %s", tc.want, w.Code, w.Body.String())
 			}
 		})
+	}
+}
+
+func TestCreatePodcastEpisodePersistsVisibility(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	collection := model.Collection{ChannelID: channel.ID, ContentType: "podcast", Name: "Private episodes"}
+	if err := db.Create(&collection).Error; err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`{"channel_id":"` + channel.ID.String() + `","title":"Private","audio_url":"episode.mp3","status":"published","visibility":"private","collection_ids":["` + collection.ID.String() + `"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/episodes", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var post model.Post
+	if err := db.Where("title = ?", "Private").First(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	if post.Visibility != "private" {
+		t.Fatalf("expected private visibility, got %q", post.Visibility)
 	}
 }
 

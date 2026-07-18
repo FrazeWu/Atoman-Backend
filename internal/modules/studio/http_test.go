@@ -46,6 +46,14 @@ func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
+		&model.Like{},
+		&model.BookmarkFolder{},
+		&model.Bookmark{},
+		&model.PodcastEpisodeBookmark{},
+		&model.VideoBookmark{},
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
+		&model.CommentTimeAnchor{},
 	)
 	middleware.SetAuthDB(db)
 	t.Cleanup(func() { middleware.SetAuthDB(nil) })

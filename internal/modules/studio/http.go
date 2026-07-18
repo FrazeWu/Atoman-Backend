@@ -258,7 +258,8 @@ func (h *Handler) listContents(c *gin.Context) {
 	items, total, err := h.service.ListContents(user, module, ContentQuery{
 		ChannelID: channelID, Search: c.Query("q"), Status: c.Query("status"),
 		Visibility: c.Query("visibility"), CollectionID: collectionID,
-		Page: page, PageSize: pageSize,
+		Issue: c.Query("issue"),
+		Page:  page, PageSize: pageSize,
 	})
 	if err != nil {
 		httpx.Error(c, err)
