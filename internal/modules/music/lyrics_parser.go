@@ -46,13 +46,21 @@ func parseLRCLyricLines(content, translation string) ([]ParsedLyricLine, error) 
 		return nil, err
 	}
 
-	translationsByTime := make(map[int]string, len(translationLines))
+	translationsByTime := make(map[int][]string, len(translationLines))
 	for _, line := range translationLines {
-		translationsByTime[*line.TimeMS] = line.Text
+		timeMS := *line.TimeMS
+		translationsByTime[timeMS] = append(translationsByTime[timeMS], line.Text)
 	}
+	translationOccurrences := make(map[int]int, len(translationsByTime))
 	for index := range contentLines {
 		contentLines[index].LineIndex = index
-		contentLines[index].Translation = translationsByTime[*contentLines[index].TimeMS]
+		timeMS := *contentLines[index].TimeMS
+		occurrence := translationOccurrences[timeMS]
+		translations := translationsByTime[timeMS]
+		if occurrence < len(translations) {
+			contentLines[index].Translation = translations[occurrence]
+			translationOccurrences[timeMS] = occurrence + 1
+		}
 	}
 	return contentLines, nil
 }

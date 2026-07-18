@@ -140,6 +140,51 @@ func TestParseLyricLinesLRCParsesMillisecondsAndMergesTranslationByTime(t *testi
 	}
 }
 
+func TestParseLyricLinesLRCPairsRepeatedTimeTranslationsByOccurrence(t *testing.T) {
+	lines, err := ParseLyricLines(
+		"[00:01.00]One A\n[00:01.00]One B\n[00:02.00]Two",
+		"[00:01.00]一甲\n[00:01.00]一乙\n[00:02.00]二",
+		"lrc",
+	)
+	if err != nil {
+		t.Fatalf("parse LRC lyrics: %v", err)
+	}
+	want := []string{"一甲", "一乙", "二"}
+	for index, translation := range want {
+		if lines[index].Translation != translation {
+			t.Fatalf("line %d: expected translation %q, got %q", index, translation, lines[index].Translation)
+		}
+	}
+}
+
+func TestParseLyricLinesLRCLeavesUnmatchedRepeatedTimeContentWithoutTranslation(t *testing.T) {
+	lines, err := ParseLyricLines(
+		"[00:01.00]One A\n[00:01.00]One B",
+		"[00:01.00]一甲",
+		"lrc",
+	)
+	if err != nil {
+		t.Fatalf("parse LRC lyrics: %v", err)
+	}
+	if lines[0].Translation != "一甲" || lines[1].Translation != "" {
+		t.Fatalf("expected the unmatched content occurrence to stay untranslated, got %#v", lines)
+	}
+}
+
+func TestParseLyricLinesLRCDoesNotReuseExtraRepeatedTimeTranslation(t *testing.T) {
+	lines, err := ParseLyricLines(
+		"[00:01.00]One\n[00:02.00]Two",
+		"[00:01.00]一甲\n[00:01.00]一乙\n[00:02.00]二",
+		"lrc",
+	)
+	if err != nil {
+		t.Fatalf("parse LRC lyrics: %v", err)
+	}
+	if lines[0].Translation != "一甲" || lines[1].Translation != "二" {
+		t.Fatalf("expected extra translation occurrence not to affect other lines, got %#v", lines)
+	}
+}
+
 func TestParseLyricLinesLRCAcceptsOneTwoAndThreeFractionDigits(t *testing.T) {
 	lines, err := ParseLyricLines("[00:01.2]one\n[00:02.25]two\n[00:03.375]three", "", "lrc")
 	if err != nil {
