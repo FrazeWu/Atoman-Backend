@@ -96,6 +96,37 @@ func TestRegisterV1RoutesMountsUnifiedCommentHTTP(t *testing.T) {
 	}
 }
 
+func TestRegisterV1RoutesMountsStudioState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.UserStudioState{})
+	user := model.User{Username: "studio-router", Email: "studio-router@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	channel := model.Channel{UserID: &user.UUID, Name: "Studio Router", Slug: "studio-router"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := db.Create(&model.UserStudioState{UserID: user.UUID, ChannelID: &channel.ID}).Error; err != nil {
+		t.Fatalf("create studio state: %v", err)
+	}
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+
+	router := gin.New()
+	RegisterV1Routes(router, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/studio/state", nil)
+	request.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected mounted studio state route to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestRegisterV1RoutesEnforcesForumACLForUnifiedCommentHTTP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("JWT_SECRET", "test-secret")
@@ -356,11 +387,11 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	channel := model.Channel{UserID: &user.UUID, Name: "Alice", Slug: "alice", IsDefault: true}
+	channel := model.Channel{UserID: &user.UUID, Name: "Alice", Slug: "alice"}
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
-	collection := model.Collection{ChannelID: channel.ID, Name: "默认专栏", IsDefault: true}
+	collection := model.Collection{ChannelID: channel.ID, ContentType: "blog", Name: "默认专栏", IsDefault: true}
 	if err := db.Create(&collection).Error; err != nil {
 		t.Fatalf("create default collection: %v", err)
 	}

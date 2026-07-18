@@ -29,7 +29,6 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.User{},
 		&model.Channel{},
 		&model.Collection{},
-		&model.UserDefaultChannel{},
 		&model.Video{},
 		&model.VideoBookmark{},
 		&model.ChannelBookmark{},
@@ -37,11 +36,30 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.VideoTag{},
 		&model.VideoCollection{},
 		&model.VideoTagRelation{},
+		&model.StudioMetricEvent{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 	)
 	return db
+}
+
+func TestStudioVideoViewRecordsPlayMetric(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, user.UUID, "Metric Channel")
+	video := seedVideo(t, db, user.UUID)
+	require.NoError(t, db.Model(&video).Update("channel_id", channel.ID).Error)
+
+	r := gin.New()
+	r.POST("/api/v1/videos/:id/view", IncrementVideoView(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/view", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var event model.StudioMetricEvent
+	require.NoError(t, db.First(&event, "channel_id = ? AND content_type = ? AND content_id = ? AND metric = ?", channel.ID, "video", video.ID, "play").Error)
 }
 
 func signedVideoListTokenForTest(t *testing.T, user model.User) string {
@@ -368,10 +386,9 @@ func withVideoAuth(userID uuid.UUID, h gin.HandlerFunc) gin.HandlerFunc {
 func seedVideoChannel(t *testing.T, db *gorm.DB, userID uuid.UUID, name string) model.Channel {
 	t.Helper()
 	channel := model.Channel{
-		UserID:      &userID,
-		Name:        name,
-		Slug:        strings.ToLower(strings.ReplaceAll(name, " ", "-")) + "-" + uuid.NewString()[:8],
-		ContentType: "video",
+		UserID: &userID,
+		Name:   name,
+		Slug:   strings.ToLower(strings.ReplaceAll(name, " ", "-")) + "-" + uuid.NewString()[:8],
 	}
 	require.NoError(t, db.Create(&channel).Error)
 	return channel
@@ -380,8 +397,9 @@ func seedVideoChannel(t *testing.T, db *gorm.DB, userID uuid.UUID, name string) 
 func seedVideoCollection(t *testing.T, db *gorm.DB, channelID uuid.UUID, name string) model.Collection {
 	t.Helper()
 	collection := model.Collection{
-		ChannelID: channelID,
-		Name:      name,
+		ChannelID:   channelID,
+		ContentType: "video",
+		Name:        name,
 	}
 	require.NoError(t, db.Create(&collection).Error)
 	return collection
@@ -688,6 +706,22 @@ func TestCreateVideoRollsBackWhenCollectionAssignmentFails(t *testing.T) {
 	require.Zero(t, tagCount)
 }
 
+func TestCreateVideoPublishRequiresCollection(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, user.UUID, "Publish Channel")
+	router := gin.New()
+	router.POST("/api/v1/videos", withVideoAuth(user.UUID, CreateVideo(db)))
+	body := strings.NewReader(`{"channel_id":"` + channel.ID.String() + `","title":"Published","video_url":"https://example.com/video.mp4","status":"published"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/videos", body)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+}
+
 func TestUpdateVideoUsesNewChannelWhenAssigningCollections(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newVideoTestDB(t)
@@ -752,7 +786,7 @@ func TestUpdateVideoRollsBackWhenCollectionAssignmentFails(t *testing.T) {
 	require.Zero(t, tagCount)
 }
 
-func TestCreateVideoRequiresOwnedVideoChannel(t *testing.T) {
+func TestCreateVideoAcceptsOwnedGlobalChannel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newVideoTestDB(t)
 	user := seedVideoUser(t, db)
@@ -760,10 +794,9 @@ func TestCreateVideoRequiresOwnedVideoChannel(t *testing.T) {
 	ownedVideoChannel := seedVideoChannel(t, db, user.UUID, "Owned Video Channel")
 	otherUsersVideoChannel := seedVideoChannel(t, db, otherUser.UUID, "Other Users Video Channel")
 	mismatchedChannel := model.Channel{
-		UserID:      &user.UUID,
-		Name:        "Users Blog Channel",
-		Slug:        "users-blog-channel-" + uuid.NewString()[:8],
-		ContentType: "blog",
+		UserID: &user.UUID,
+		Name:   "Users Blog Channel",
+		Slug:   "users-blog-channel-" + uuid.NewString()[:8],
 	}
 	require.NoError(t, db.Create(&mismatchedChannel).Error)
 
@@ -777,7 +810,7 @@ func TestCreateVideoRequiresOwnedVideoChannel(t *testing.T) {
 	}{
 		{name: "owned video channel succeeds", channelID: ownedVideoChannel.ID.String(), want: http.StatusCreated},
 		{name: "other users channel is forbidden", channelID: otherUsersVideoChannel.ID.String(), want: http.StatusForbidden},
-		{name: "content type mismatch is rejected", channelID: mismatchedChannel.ID.String(), want: http.StatusBadRequest},
+		{name: "owned global channel succeeds", channelID: mismatchedChannel.ID.String(), want: http.StatusCreated},
 		{name: "missing channel is not found", channelID: uuid.NewString(), want: http.StatusNotFound},
 	}
 
@@ -799,19 +832,19 @@ func TestCreateVideoRequiresOwnedVideoChannel(t *testing.T) {
 	}
 }
 
-func TestUpdateVideoRejectsChannelOwnershipAndTypeMismatch(t *testing.T) {
+func TestUpdateVideoAcceptsOwnedGlobalChannelAndRejectsForeignChannel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newVideoTestDB(t)
 	user := seedVideoUser(t, db)
 	otherUser := seedVideoUser(t, db)
 	video := seedVideo(t, db, user.UUID)
+	require.NoError(t, db.Model(&video).Update("status", "draft").Error)
 	currentChannel := seedVideoChannel(t, db, user.UUID, "Current Video Channel")
 	otherUsersVideoChannel := seedVideoChannel(t, db, otherUser.UUID, "Other Update Video Channel")
 	mismatchedChannel := model.Channel{
-		UserID:      &user.UUID,
-		Name:        "User Podcast Channel",
-		Slug:        "user-podcast-channel-" + uuid.NewString()[:8],
-		ContentType: "podcast",
+		UserID: &user.UUID,
+		Name:   "User Podcast Channel",
+		Slug:   "user-podcast-channel-" + uuid.NewString()[:8],
 	}
 	require.NoError(t, db.Create(&mismatchedChannel).Error)
 	require.NoError(t, db.Model(&video).Update("channel_id", currentChannel.ID).Error)
@@ -825,7 +858,7 @@ func TestUpdateVideoRejectsChannelOwnershipAndTypeMismatch(t *testing.T) {
 		want      int
 	}{
 		{name: "other users channel is forbidden", channelID: otherUsersVideoChannel.ID.String(), want: http.StatusForbidden},
-		{name: "content type mismatch is rejected", channelID: mismatchedChannel.ID.String(), want: http.StatusBadRequest},
+		{name: "owned global channel succeeds", channelID: mismatchedChannel.ID.String(), want: http.StatusOK},
 		{name: "missing channel is not found", channelID: uuid.NewString(), want: http.StatusNotFound},
 	}
 

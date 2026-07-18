@@ -237,6 +237,29 @@ func TestBootstrapOwnerFromEnvCreatesOwnerWhenConfigured(t *testing.T) {
 	if !user.IsActive {
 		t.Fatal("expected owner to be active")
 	}
+	var channels []model.Channel
+	if err := db.Where("user_id = ?", user.UUID).Find(&channels).Error; err != nil {
+		t.Fatalf("find owner channels: %v", err)
+	}
+	if len(channels) != 1 {
+		t.Fatalf("expected one owner studio channel, got %d", len(channels))
+	}
+	var state model.UserStudioState
+	if err := db.First(&state, "user_id = ?", user.UUID).Error; err != nil {
+		t.Fatalf("find owner studio state: %v", err)
+	}
+	if state.ChannelID == nil || *state.ChannelID != channels[0].ID {
+		t.Fatalf("expected current channel %s, got %#v", channels[0].ID, state.ChannelID)
+	}
+	for _, contentType := range []string{"blog", "podcast", "video"} {
+		var count int64
+		if err := db.Model(&model.Collection{}).Where("channel_id = ? AND content_type = ? AND is_default = ?", channels[0].ID, contentType, true).Count(&count).Error; err != nil {
+			t.Fatalf("count %s default collection: %v", contentType, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected one %s default collection, got %d", contentType, count)
+		}
+	}
 }
 
 func TestBootstrapOwnerFromEnvSkipsWhenNotConfigured(t *testing.T) {
@@ -319,14 +342,14 @@ func ownerBootstrapModels() []interface{} {
 		&model.User{},
 		&model.UserSettings{},
 		&model.Channel{},
-		&model.UserDefaultChannel{},
 		&model.Collection{},
+		&model.UserStudioState{},
+		&model.StudioModuleSettings{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 		&model.BookmarkFolder{},
 		&model.Playlist{},
-		&model.UserDefaultChannel{},
 	}
 }
 

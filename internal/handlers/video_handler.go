@@ -20,6 +20,7 @@ import (
 	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/modules/recommendation"
+	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/service"
 	"atoman/internal/storage"
@@ -524,8 +525,8 @@ func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		var viewCount int
-		readResult := publicVideo().Select("view_count").Scan(&viewCount)
+		var video model.Video
+		readResult := publicVideo().Select("id", "channel_id", "view_count").First(&video)
 		if readResult.Error != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load view count"})
 			return
@@ -534,7 +535,13 @@ func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
-		c.JSON(http.StatusOK, VideoViewCountResponse{OK: true, ViewCount: viewCount})
+		if video.ChannelID != nil {
+			if err := studioapi.NewService(db).RecordMetricEvent(*video.ChannelID, studioapi.ModuleVideo, video.ID, "play"); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record video play"})
+				return
+			}
+		}
+		c.JSON(http.StatusOK, VideoViewCountResponse{OK: true, ViewCount: video.ViewCount})
 	}
 }
 
@@ -601,10 +608,14 @@ func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 				return
 			}
-			if model.NormalizeChannelContentType(channel.ContentType) != model.ChannelContentTypeVideo {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "channel content type mismatch"})
-				return
-			}
+		}
+		var channelID uuid.UUID
+		if input.ChannelID != nil {
+			channelID = *input.ChannelID
+		}
+		if err := studioapi.NewService(db).ValidateContentScope(userID, channelID, studioapi.ModuleVideo, input.CollectionIDs, status == "published"); err != nil {
+			httpx.Error(c, err)
+			return
 		}
 
 		video := model.Video{
@@ -677,7 +688,7 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 
 		var video model.Video
-		if err := db.First(&video, "id = ?", id).Error; err != nil {
+		if err := db.Preload("Collections").First(&video, "id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
@@ -715,10 +726,28 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 				return
 			}
-			if model.NormalizeChannelContentType(channel.ContentType) != model.ChannelContentTypeVideo {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "channel content type mismatch"})
-				return
+		}
+		effectiveChannelID := uuid.Nil
+		if video.ChannelID != nil {
+			effectiveChannelID = *video.ChannelID
+		}
+		if input.ChannelID != nil {
+			effectiveChannelID = *input.ChannelID
+		}
+		effectiveStatus := video.Status
+		if input.Status != nil {
+			effectiveStatus = *input.Status
+		}
+		effectiveCollectionIDs := input.CollectionIDs
+		if input.CollectionIDs == nil {
+			effectiveCollectionIDs = make([]uuid.UUID, 0, len(video.Collections))
+			for _, collection := range video.Collections {
+				effectiveCollectionIDs = append(effectiveCollectionIDs, collection.ID)
 			}
+		}
+		if err := studioapi.NewService(db).ValidateContentScope(userID, effectiveChannelID, studioapi.ModuleVideo, effectiveCollectionIDs, effectiveStatus == "published"); err != nil {
+			httpx.Error(c, err)
+			return
 		}
 
 		updates := map[string]interface{}{}

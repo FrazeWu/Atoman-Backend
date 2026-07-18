@@ -13,6 +13,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/modules/recommendation"
+	"atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/sitehandle"
@@ -20,7 +21,6 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/net/html"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var slugInvalidChars = regexp.MustCompile(`[^a-z0-9一-龥]+`)
@@ -486,7 +486,7 @@ func (s *Service) ListUserCollections(userID uuid.UUID) ([]model.Collection, err
 	return s.repo.ListUserCollections(userID)
 }
 
-func (s *Service) CreateChannel(user authctx.CurrentUser, name string, slug string, description string, coverURL string, contentType string) (model.Channel, error) {
+func (s *Service) CreateChannel(user authctx.CurrentUser, name string, slug string, description string, coverURL string) (model.Channel, error) {
 	if user.ID == uuid.Nil {
 		return model.Channel{}, apperr.Unauthorized("Login required")
 	}
@@ -501,20 +501,12 @@ func (s *Service) CreateChannel(user authctx.CurrentUser, name string, slug stri
 			return model.Channel{}, err
 		}
 	}
-	contentType = model.NormalizeChannelContentType(contentType)
-	if contentType == "" {
-		contentType = model.ChannelContentTypeBlog
-	}
-	if !model.IsValidChannelContentType(contentType) {
-		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "content_type must be blog, podcast, or video")
-	}
 	channel := model.Channel{
 		UserID:      &user.ID,
 		Name:        name,
 		Slug:        slug,
 		Description: strings.TrimSpace(description),
 		CoverURL:    strings.TrimSpace(coverURL),
-		ContentType: contentType,
 	}
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&channel).Error; err != nil {
@@ -829,24 +821,31 @@ func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName stri
 		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "user_id is required")
 	}
 
-	var existing model.Channel
-	err := s.db.Where("user_id = ? AND is_default = ?", userID, true).First(&existing).Error
-	if err == nil {
+	var state model.UserStudioState
+	err := s.db.Preload("Channel").First(&state, "user_id = ?", userID).Error
+	if err == nil && state.Channel != nil && state.Channel.UserID != nil && *state.Channel.UserID == userID {
+		existing := *state.Channel
 		if ensureErr := s.ensureDefaultCollectionForChannel(existing.ID); ensureErr != nil {
-			return model.Channel{}, ensureErr
-		}
-		if existing.ContentType == "" {
-			if saveErr := s.db.Model(&existing).Update("content_type", model.ChannelContentTypeBlog).Error; saveErr != nil {
-				return model.Channel{}, saveErr
-			}
-			existing.ContentType = model.ChannelContentTypeBlog
-		}
-		if ensureErr := s.upsertUserDefaultChannelSelection(userID, model.ChannelContentTypeBlog, existing.ID); ensureErr != nil {
 			return model.Channel{}, ensureErr
 		}
 		return existing, nil
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Channel{}, err
+	}
+
+	var existing model.Channel
+	err = s.db.Where("user_id = ?", userID).Order("created_at ASC, id ASC").First(&existing).Error
+	if err == nil {
+		if ensureErr := s.ensureDefaultCollectionForChannel(existing.ID); ensureErr != nil {
+			return model.Channel{}, ensureErr
+		}
+		if saveErr := s.saveStudioState(userID, existing.ID); saveErr != nil {
+			return model.Channel{}, saveErr
+		}
+		return existing, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.Channel{}, err
 	}
 
@@ -869,8 +868,6 @@ func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName stri
 		Name:        name,
 		Slug:        slug,
 		Description: "默认合集",
-		ContentType: model.ChannelContentTypeBlog,
-		IsDefault:   true,
 	}
 	if err := s.db.Create(&channel).Error; err != nil {
 		return model.Channel{}, err
@@ -878,7 +875,7 @@ func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName stri
 	if err := s.ensureDefaultCollectionForChannel(channel.ID); err != nil {
 		return model.Channel{}, err
 	}
-	if err := s.upsertUserDefaultChannelSelection(userID, model.ChannelContentTypeBlog, channel.ID); err != nil {
+	if err := s.ensureStudioState(userID, channel.ID); err != nil {
 		return model.Channel{}, err
 	}
 	return channel, nil
@@ -888,24 +885,41 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	if user.ID == uuid.Nil {
 		return model.Post{}, apperr.Unauthorized("Login required")
 	}
-	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Content) == "" || req.CollectionID == uuid.Nil {
-		return model.Post{}, apperr.BadRequest("validation.invalid_request", "title, content and collection_id are required")
+	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Content) == "" {
+		return model.Post{}, apperr.BadRequest("validation.invalid_request", "title and content are required")
 	}
 	if len(req.CollectionIDs) > 0 {
 		return model.Post{}, apperr.BadRequest("validation.invalid_request", "collection_ids is no longer supported")
 	}
+	status := strings.TrimSpace(req.Status)
+	if status == "" {
+		status = "draft"
+	}
+	if _, ok := allowedPostStatuses[status]; !ok {
+		return model.Post{}, apperr.BadRequest("blog.invalid_status_transition", "status is invalid")
+	}
 
-	var collection model.Collection
-	if err := s.db.Preload("Channel").First(&collection, "id = ?", req.CollectionID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return model.Post{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
+	channelID := req.ChannelID
+	var collection *model.Collection
+	collectionIDs := make([]uuid.UUID, 0, 1)
+	if req.CollectionID != uuid.Nil {
+		var loaded model.Collection
+		if err := s.db.First(&loaded, "id = ?", req.CollectionID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return model.Post{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
+			}
+			return model.Post{}, err
 		}
+		collection = &loaded
+		collectionIDs = append(collectionIDs, loaded.ID)
+		if channelID == uuid.Nil {
+			channelID = loaded.ChannelID
+		}
+	}
+	if err := studio.NewService(s.db).ValidateContentScope(user.ID, channelID, studio.ModuleBlog, collectionIDs, status == "published"); err != nil {
 		return model.Post{}, err
 	}
-	if collection.Channel == nil {
-		return model.Post{}, apperr.NotFound("blog.channel_not_found", "Channel not found")
-	}
-	channel, err := s.repo.GetChannel(collection.ChannelID)
+	channel, err := s.repo.GetChannel(channelID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.Post{}, apperr.NotFound("blog.channel_not_found", "Channel not found")
@@ -915,10 +929,7 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	if channel.UserID == nil || *channel.UserID != user.ID {
 		return model.Post{}, apperr.Forbidden("blog.channel_forbidden", "You don't have permission to create post in this channel")
 	}
-	if req.ChannelID != uuid.Nil && req.ChannelID != channel.ID {
-		return model.Post{}, apperr.BadRequest("validation.invalid_request", "collection does not belong to selected channel")
-	}
-	if isChannelBanned(channel) && strings.TrimSpace(req.Status) == "published" {
+	if isChannelBanned(channel) && status == "published" {
 		return model.Post{}, apperr.Forbidden("blog.channel_banned", "Banned channel cannot publish posts")
 	}
 
@@ -929,29 +940,23 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	if _, ok := allowedPostVisibilities[visibility]; !ok {
 		return model.Post{}, apperr.BadRequest("blog.invalid_visibility", "visibility is invalid")
 	}
-	status := strings.TrimSpace(req.Status)
-	if status == "" {
-		status = "draft"
-	}
-	if _, ok := allowedPostStatuses[status]; !ok {
-		return model.Post{}, apperr.BadRequest("blog.invalid_status_transition", "status is invalid")
-	}
-
 	summary := strings.TrimSpace(req.Summary)
 	if summary == "" {
 		summary = strings.TrimSpace(req.Excerpt)
 	}
 
 	post := model.Post{
-		UserID:       user.ID,
-		ChannelID:    &channel.ID,
-		CollectionID: &collection.ID,
-		Title:        strings.TrimSpace(req.Title),
-		Content:      strings.TrimSpace(req.Content),
-		Summary:      summary,
-		CoverURL:     strings.TrimSpace(req.CoverURL),
-		Visibility:   visibility,
-		Status:       status,
+		UserID:     user.ID,
+		ChannelID:  &channel.ID,
+		Title:      strings.TrimSpace(req.Title),
+		Content:    strings.TrimSpace(req.Content),
+		Summary:    summary,
+		CoverURL:   strings.TrimSpace(req.CoverURL),
+		Visibility: visibility,
+		Status:     status,
+	}
+	if collection != nil {
+		post.CollectionID = &collection.ID
 	}
 	if status == "published" {
 		now := time.Now().UTC()
@@ -959,11 +964,13 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	}
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		var maxPosition int
-		if err := tx.Model(&model.Post{}).Where("collection_id = ?", collection.ID).Select("COALESCE(MAX(collection_position), -1)").Scan(&maxPosition).Error; err != nil {
-			return err
+		if collection != nil {
+			var maxPosition int
+			if err := tx.Model(&model.Post{}).Where("collection_id = ?", collection.ID).Select("COALESCE(MAX(collection_position), -1)").Scan(&maxPosition).Error; err != nil {
+				return err
+			}
+			post.CollectionPosition = maxPosition + 1
 		}
-		post.CollectionPosition = maxPosition + 1
 		if err := tx.Create(&post).Error; err != nil {
 			return err
 		}
@@ -975,7 +982,7 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 		return model.Post{}, err
 	}
 	post.Channel = &channel
-	post.Collection = &collection
+	post.Collection = collection
 	return post, nil
 }
 
@@ -1111,7 +1118,7 @@ func (s *Service) ensureDefaultCollectionForChannel(channelID uuid.UUID) error {
 
 func (s *Service) ensureDefaultCollectionForChannelDB(db *gorm.DB, channelID uuid.UUID) error {
 	var collection model.Collection
-	err := db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
+	err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channelID, "blog", true).First(&collection).Error
 	if err == nil {
 		return nil
 	}
@@ -1121,12 +1128,13 @@ func (s *Service) ensureDefaultCollectionForChannelDB(db *gorm.DB, channelID uui
 
 	name := ensureDefaultCollectionName()
 	var softDeleted model.Collection
-	softErr := db.Unscoped().Where("channel_id = ? AND name = ?", channelID, name).First(&softDeleted).Error
+	softErr := db.Unscoped().Where("channel_id = ? AND content_type = ? AND name = ?", channelID, "blog", name).First(&softDeleted).Error
 	if softErr == nil && softDeleted.DeletedAt.Valid {
 		return db.Unscoped().Model(&softDeleted).Updates(map[string]any{
-			"deleted_at": nil,
-			"is_default": true,
-			"name":       name,
+			"deleted_at":   nil,
+			"content_type": "blog",
+			"is_default":   true,
+			"name":         name,
 		}).Error
 	}
 	if softErr != nil && !errors.Is(softErr, gorm.ErrRecordNotFound) {
@@ -1135,11 +1143,16 @@ func (s *Service) ensureDefaultCollectionForChannelDB(db *gorm.DB, channelID uui
 
 	collection = model.Collection{
 		ChannelID:   channelID,
+		ContentType: "blog",
 		Name:        name,
 		Description: "默认合集",
 		IsDefault:   true,
 	}
 	return db.Create(&collection).Error
+}
+
+func (s *Service) saveStudioState(userID, channelID uuid.UUID) error {
+	return s.db.Save(&model.UserStudioState{UserID: userID, ChannelID: &channelID}).Error
 }
 
 func isChannelBanned(channel model.Channel) bool {
@@ -1193,15 +1206,19 @@ func (s *Service) uniqueChannelName(base string) (string, error) {
 	}
 }
 
-func (s *Service) upsertUserDefaultChannelSelection(userID uuid.UUID, contentType string, channelID uuid.UUID) error {
-	return s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "content_type"}},
-		DoUpdates: clause.AssignmentColumns([]string{"channel_id", "updated_at"}),
-	}).Create(&model.UserDefaultChannel{
-		UserID:      userID,
-		ContentType: contentType,
-		ChannelID:   channelID,
-	}).Error
+func (s *Service) ensureStudioState(userID, channelID uuid.UUID) error {
+	var state model.UserStudioState
+	err := s.db.First(&state, "user_id = ?", userID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return s.db.Create(&model.UserStudioState{UserID: userID, ChannelID: &channelID}).Error
+	}
+	if err != nil {
+		return err
+	}
+	if state.ChannelID == nil {
+		return s.db.Model(&state).Update("channel_id", channelID).Error
+	}
+	return nil
 }
 
 func dedupeUUIDs(values []uuid.UUID) []uuid.UUID {

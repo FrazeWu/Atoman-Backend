@@ -35,8 +35,14 @@ func TestMigrateSchemaCreatesDMTablesAndUnreadCountIndexes(t *testing.T) {
 	if !db.Migrator().HasTable(&model.DMMessage{}) {
 		t.Fatal("expected dm_messages table to exist")
 	}
-	if !db.Migrator().HasTable(&model.UserDefaultChannel{}) {
-		t.Fatal("expected user_default_channels table to exist")
+	if !db.Migrator().HasTable(&model.UserStudioState{}) {
+		t.Fatal("expected user_studio_states table to exist")
+	}
+	if !db.Migrator().HasTable(&model.StudioModuleSettings{}) {
+		t.Fatal("expected studio_module_settings table to exist")
+	}
+	if db.Migrator().HasTable("user_default_channels") {
+		t.Fatal("did not expect legacy user_default_channels table")
 	}
 	if !db.Migrator().HasTable(&model.CommentPublishRecord{}) {
 		t.Fatal("expected comment_publish_records table to exist")
@@ -144,21 +150,28 @@ func TestRunMigrationsBackfillsUserDefaultResources(t *testing.T) {
 	if err := db.Model(&model.UserSettings{}).Where("user_id = ?", user.UUID).Count(&settings).Error; err != nil || settings != 1 {
 		t.Fatalf("expected one user settings row, got %d err=%v", settings, err)
 	}
-	var selections []model.UserDefaultChannel
-	if err := db.Preload("Channel").Where("user_id = ?", user.UUID).Find(&selections).Error; err != nil {
-		t.Fatalf("find default channel selections: %v", err)
+	var channels []model.Channel
+	if err := db.Where("user_id = ?", user.UUID).Find(&channels).Error; err != nil {
+		t.Fatalf("find studio channels: %v", err)
 	}
-	if len(selections) != 3 {
-		t.Fatalf("expected three default channel selections, got %d", len(selections))
+	if len(channels) != 1 {
+		t.Fatalf("expected one studio channel, got %d", len(channels))
 	}
-	for _, selection := range selections {
-		if selection.Channel == nil || selection.Channel.ContentType != selection.ContentType {
-			t.Fatalf("unexpected default channel selection: %#v", selection)
-		}
+	var state model.UserStudioState
+	if err := db.First(&state, "user_id = ?", user.UUID).Error; err != nil {
+		t.Fatalf("find studio state: %v", err)
+	}
+	if state.ChannelID == nil || *state.ChannelID != channels[0].ID {
+		t.Fatalf("expected current channel %s, got %#v", channels[0].ID, state.ChannelID)
+	}
+	for _, contentType := range []string{"blog", "podcast", "video"} {
 		var collections int64
-		if err := db.Model(&model.Collection{}).Where("channel_id = ? AND is_default = ?", selection.ChannelID, true).Count(&collections).Error; err != nil || collections != 1 {
-			t.Fatalf("expected one %s default collection, got %d err=%v", selection.ContentType, collections, err)
+		if err := db.Model(&model.Collection{}).Where("channel_id = ? AND content_type = ? AND is_default = ?", channels[0].ID, contentType, true).Count(&collections).Error; err != nil || collections != 1 {
+			t.Fatalf("expected one %s default collection, got %d err=%v", contentType, collections, err)
 		}
+	}
+	if db.Migrator().HasTable("user_default_channels") {
+		t.Fatal("expected legacy default channel selections to be removed")
 	}
 	var favorites int64
 	if err := db.Model(&model.Playlist{}).Where("user_id = ? AND is_favorite = ?", user.UUID, true).Count(&favorites).Error; err != nil || favorites != 1 {
@@ -175,6 +188,44 @@ func TestRunMigrationsBackfillsUserDefaultResources(t *testing.T) {
 	var subscriptions int64
 	if err := db.Model(&model.Subscription{}).Where("user_id = ?", user.UUID).Count(&subscriptions).Error; err != nil || subscriptions != 1 {
 		t.Fatalf("expected one self subscription, got %d err=%v", subscriptions, err)
+	}
+}
+
+func TestRunMigrationsCreatesUnifiedStudioStateAndTypedCollections(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{})
+	user := model.User{Username: "studio-user", Email: "studio-user@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+
+	if err := runMigrations(db); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	var state model.UserStudioState
+	if err := db.First(&state, "user_id = ?", user.UUID).Error; err != nil {
+		t.Fatalf("load studio state: %v", err)
+	}
+	if state.ChannelID == nil {
+		t.Fatal("expected a current studio channel")
+	}
+
+	for _, contentType := range []string{
+		"blog",
+		"podcast",
+		"video",
+	} {
+		var count int64
+		if err := db.Model(&model.Collection{}).
+			Joins("JOIN channels ON channels.id = collections.channel_id").
+			Where("channels.user_id = ? AND collections.content_type = ? AND collections.is_default = ?", user.UUID, contentType, true).
+			Count(&count).Error; err != nil {
+			t.Fatalf("count %s collections: %v", contentType, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected one %s default collection, got %d", contentType, count)
+		}
 	}
 }
 

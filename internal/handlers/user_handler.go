@@ -41,9 +41,6 @@ func SetupUserRoutes(router *gin.Engine, db *gorm.DB) {
 			protected.PUT("/me", UpdateUserProfile(db))
 			protected.GET("/me/settings", GetUserSettings(db))
 			protected.PUT("/me/settings", UpdateUserSettings(db))
-			protected.GET("/me/default-channels", GetMyDefaultChannels(db))
-			protected.PATCH("/me/default-channels/:contentType", PutMyDefaultChannel(db))
-
 			protected.POST("/:id/follow", FollowUser(db))
 			protected.DELETE("/:id/follow", UnfollowUser(db))
 			protected.POST("/:id/block", BlockUser(db))
@@ -84,22 +81,6 @@ type UserProfileInput struct {
 type UserSettingsInput struct {
 	PrivateProfile *bool   `json:"private_profile"`
 	DMPermission   *string `json:"dm_permission"`
-}
-
-type defaultChannelSummary struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Slug string `json:"slug"`
-}
-
-type defaultChannelsPayload struct {
-	Blog    *defaultChannelSummary `json:"blog"`
-	Podcast *defaultChannelSummary `json:"podcast"`
-	Video   *defaultChannelSummary `json:"video"`
-}
-
-type putDefaultChannelInput struct {
-	ChannelID uuid.UUID `json:"channel_id" binding:"required"`
 }
 
 func isUserSettingsDuplicateError(err error) bool {
@@ -151,104 +132,6 @@ func loadOrCreateUserSettings(db *gorm.DB, userID uuid.UUID) (model.UserSettings
 	}
 
 	return settings, nil
-}
-
-func GetMyDefaultChannels(db *gorm.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userIDVal, _ := c.Get("user_id")
-		userID := userIDVal.(uuid.UUID)
-
-		var selections []model.UserDefaultChannel
-		if err := db.Preload("Channel").Where("user_id = ?", userID).Find(&selections).Error; err != nil {
-			if isMissingTableError(err) {
-				c.JSON(http.StatusOK, gin.H{"data": defaultChannelsPayload{}, "message": "ok"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch default channels"})
-			return
-		}
-
-		resp := defaultChannelsPayload{}
-		for _, selection := range selections {
-			if selection.Channel == nil {
-				continue
-			}
-			summary := &defaultChannelSummary{
-				ID:   selection.Channel.ID.String(),
-				Name: selection.Channel.Name,
-				Slug: selection.Channel.Slug,
-			}
-			switch model.NormalizeChannelContentType(selection.ContentType) {
-			case model.ChannelContentTypeBlog:
-				resp.Blog = summary
-			case model.ChannelContentTypePodcast:
-				resp.Podcast = summary
-			case model.ChannelContentTypeVideo:
-				resp.Video = summary
-			}
-		}
-
-		c.JSON(http.StatusOK, gin.H{"data": resp, "message": "ok"})
-	}
-}
-
-func PutMyDefaultChannel(db *gorm.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		userIDVal, _ := c.Get("user_id")
-		userID := userIDVal.(uuid.UUID)
-
-		contentType := model.NormalizeChannelContentType(c.Param("contentType"))
-		if !model.IsValidChannelContentType(contentType) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid content type"})
-			return
-		}
-
-		var input putDefaultChannelInput
-		if err := c.ShouldBindJSON(&input); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		var channel model.Channel
-		if err := db.First(&channel, "id = ?", input.ChannelID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				c.JSON(http.StatusNotFound, gin.H{"error": "Channel not found"})
-				return
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save default channel"})
-			return
-		}
-		if !ownsChannel(channel.UserID, userID) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Forbidden"})
-			return
-		}
-		if model.NormalizeChannelContentType(channel.ContentType) != contentType {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Channel content type does not match target module"})
-			return
-		}
-
-		selection := model.UserDefaultChannel{
-			UserID:      userID,
-			ContentType: contentType,
-			ChannelID:   channel.ID,
-		}
-		if err := db.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "user_id"}, {Name: "content_type"}},
-			DoUpdates: clause.AssignmentColumns([]string{"channel_id", "updated_at"}),
-		}).Create(&selection).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save default channel"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"data": defaultChannelSummary{
-				ID:   channel.ID.String(),
-				Name: channel.Name,
-				Slug: channel.Slug,
-			},
-			"message": "ok",
-		})
-	}
 }
 
 // GetCurrentUser returns the authenticated user's own full profile

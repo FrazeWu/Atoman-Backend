@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"atoman/internal/model"
 	"atoman/internal/service"
@@ -100,7 +99,7 @@ func collectionNameExists(db *gorm.DB, channelID uuid.UUID, name string, exclude
 func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collection, error) {
 	var collection model.Collection
 
-	err := db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
+	err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channelID, "blog", true).First(&collection).Error
 	if err == nil {
 		if strings.TrimSpace(collection.Name) == "" {
 			collection.Name = defaultCollectionName
@@ -115,7 +114,7 @@ func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collectio
 		return nil, err
 	}
 
-	err = db.Where("channel_id = ? AND name = ?", channelID, defaultCollectionName).First(&collection).Error
+	err = db.Where("channel_id = ? AND content_type = ? AND name = ?", channelID, "blog", defaultCollectionName).First(&collection).Error
 	if err == nil {
 		if !collection.IsDefault {
 			if saveErr := db.Model(&collection).Update("is_default", true).Error; saveErr != nil {
@@ -133,13 +132,14 @@ func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collectio
 	// Check for soft-deleted record that would block the unique index
 	var softDeleted model.Collection
 	softErr := db.Unscoped().
-		Where("channel_id = ? AND (is_default = ? OR name = ?)", channelID, true, defaultCollectionName).
+		Where("channel_id = ? AND content_type = ? AND (is_default = ? OR name = ?)", channelID, "blog", true, defaultCollectionName).
 		First(&softDeleted).Error
 	if softErr == nil && softDeleted.DeletedAt.Valid {
 		if restoreErr := db.Unscoped().Model(&softDeleted).Updates(map[string]interface{}{
-			"deleted_at": nil,
-			"is_default": true,
-			"name":       defaultCollectionName,
+			"deleted_at":   nil,
+			"content_type": "blog",
+			"is_default":   true,
+			"name":         defaultCollectionName,
 		}).Error; restoreErr != nil {
 			return nil, restoreErr
 		}
@@ -151,6 +151,7 @@ func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collectio
 
 	collection = model.Collection{
 		ChannelID:   channelID,
+		ContentType: "blog",
 		Name:        defaultCollectionName,
 		Description: "合集默认子合集",
 		IsDefault:   true,
@@ -163,52 +164,33 @@ func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collectio
 	return &collection, nil
 }
 
-// EnsureDefaultChannelForUser creates a default channel for a user if they don't have one
+// EnsureDefaultChannelForUser resolves the user's current Studio channel or creates the first one.
 func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string) (*model.Channel, error) {
-	var channel model.Channel
-
-	// Check if user already has a default channel
-	err := db.Where("user_id = ? AND is_default = ?", userID, true).First(&channel).Error
-	if err == nil {
-		if channel.ContentType == "" {
-			if saveErr := db.Model(&channel).Update("content_type", model.ChannelContentTypeBlog).Error; saveErr != nil {
-				return nil, saveErr
-			}
-			channel.ContentType = model.ChannelContentTypeBlog
+	var state model.UserStudioState
+	err := db.Preload("Channel").First(&state, "user_id = ?", userID).Error
+	if err == nil && state.Channel != nil && ownsChannel(state.Channel.UserID, userID) {
+		if _, ensureErr := ensureDefaultCollection(db, state.Channel.ID); ensureErr != nil {
+			return nil, ensureErr
 		}
-		if err := upsertDefaultChannelSelection(db, userID, channel.ID); err != nil {
+		return state.Channel, nil
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	var channel model.Channel
+	err = db.Where("user_id = ?", userID).Order("created_at ASC, id ASC").First(&channel).Error
+	if err == nil {
+		if _, ensureErr := ensureDefaultCollection(db, channel.ID); ensureErr != nil {
+			return nil, ensureErr
+		}
+		if err := saveStudioState(db, userID, channel.ID); err != nil {
 			return nil, err
 		}
 		return &channel, nil
 	}
-
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
-	}
-
-	// Check if user has any channel
-	var channels []model.Channel
-	if err := db.Where("user_id = ?", userID).Find(&channels).Error; err != nil {
-		return nil, err
-	}
-
-	// If user has channels but none marked as default, mark the first one as default
-	if len(channels) > 0 {
-		channels[0].IsDefault = true
-		updates := map[string]any{"is_default": true}
-		if channels[0].ContentType == "" {
-			updates["content_type"] = model.ChannelContentTypeBlog
-		}
-		if err := db.Model(&channels[0]).Updates(updates).Error; err != nil {
-			return nil, err
-		}
-		if channels[0].ContentType == "" {
-			channels[0].ContentType = model.ChannelContentTypeBlog
-		}
-		if err := upsertDefaultChannelSelection(db, userID, channels[0].ID); err != nil {
-			return nil, err
-		}
-		return &channels[0], nil
 	}
 
 	// Create a new default channel
@@ -223,8 +205,6 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 		Name:        defaultChannelName,
 		Slug:        channelSlug,
 		Description: "默认合集",
-		ContentType: model.ChannelContentTypeBlog,
-		IsDefault:   true,
 	}
 
 	if err := db.Create(&channel).Error; err != nil {
@@ -235,7 +215,7 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 	if _, err := ensureDefaultCollection(db, channel.ID); err != nil {
 		return nil, err
 	}
-	if err := upsertDefaultChannelSelection(db, userID, channel.ID); err != nil {
+	if err := ensureStudioState(db, userID, channel.ID); err != nil {
 		return nil, err
 	}
 
@@ -248,15 +228,23 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 	return &channel, nil
 }
 
-func upsertDefaultChannelSelection(db *gorm.DB, userID uuid.UUID, channelID uuid.UUID) error {
-	return db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "content_type"}},
-		DoUpdates: clause.AssignmentColumns([]string{"channel_id", "updated_at"}),
-	}).Create(&model.UserDefaultChannel{
-		UserID:      userID,
-		ContentType: model.ChannelContentTypeBlog,
-		ChannelID:   channelID,
-	}).Error
+func ensureStudioState(db *gorm.DB, userID uuid.UUID, channelID uuid.UUID) error {
+	var state model.UserStudioState
+	err := db.First(&state, "user_id = ?", userID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return db.Create(&model.UserStudioState{UserID: userID, ChannelID: &channelID}).Error
+	}
+	if err != nil {
+		return err
+	}
+	if state.ChannelID == nil {
+		return db.Model(&state).Update("channel_id", channelID).Error
+	}
+	return nil
+}
+
+func saveStudioState(db *gorm.DB, userID uuid.UUID, channelID uuid.UUID) error {
+	return db.Save(&model.UserStudioState{UserID: userID, ChannelID: &channelID}).Error
 }
 
 // autoSubscribeToChannel creates a feed subscription for user to their own channel

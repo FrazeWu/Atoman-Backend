@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"atoman/internal/middleware"
-	"atoman/internal/model"
+	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -381,8 +381,10 @@ func (h *Handler) removeReadingListItem(c *gin.Context) {
 
 func queryFromContext(c *gin.Context) (FeedQuery, error) {
 	contentType := strings.TrimSpace(strings.ToLower(c.Query("content_type")))
-	if contentType != "" && contentType != model.ChannelContentTypeBlog {
-		return FeedQuery{}, apperr.BadRequest("validation.invalid_request", "content_type must be blog")
+	if contentType != "" {
+		if _, err := studioapi.ParseModule(contentType); err != nil {
+			return FeedQuery{}, err
+		}
 	}
 	query := FeedQuery{
 		Page:           normalizedPageFromQuery(c),

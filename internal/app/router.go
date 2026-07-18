@@ -17,6 +17,7 @@ import (
 	"atoman/internal/modules/music"
 	"atoman/internal/modules/notification"
 	"atoman/internal/modules/portal"
+	"atoman/internal/modules/studio"
 	"atoman/internal/service"
 
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -52,6 +53,7 @@ func RegisterV1Routes(
 	musicGroup.Use(middleware.OptionalAuthMiddleware())
 	music.RegisterRoutes(musicGroup, music.NewServiceWithS3(db, s3Client))
 	portal.RegisterRoutes(group.Group("/portal"), portal.NewService(db))
+	studio.RegisterRoutes(group.Group("/studio"), studio.NewService(db))
 
 	handlers.SetupAuthRoutes(r, db, emailService)
 	handlers.SetupSiteRoutes(r, db)

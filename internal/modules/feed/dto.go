@@ -23,11 +23,13 @@ type FeedQuery struct {
 }
 
 type TimelineItemDTO struct {
-	Type        string           `json:"type"`
-	Post        *TimelinePostDTO `json:"post,omitempty"`
-	FeedItem    *model.FeedItem  `json:"feed_item,omitempty"`
-	PublishedAt time.Time        `json:"published_at"`
-	IsRead      bool             `json:"is_read"`
+	Type           string                `json:"type"`
+	Post           *TimelinePostDTO      `json:"post,omitempty"`
+	PodcastEpisode *model.PodcastEpisode `json:"podcast_episode,omitempty"`
+	Video          *model.Video          `json:"video,omitempty"`
+	FeedItem       *model.FeedItem       `json:"feed_item,omitempty"`
+	PublishedAt    time.Time             `json:"published_at"`
+	IsRead         bool                  `json:"is_read"`
 }
 
 type TimelinePostDTO struct {

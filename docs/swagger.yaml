@@ -33,6 +33,10 @@ definitions:
         type: string
       collection_position:
         type: integer
+      collections:
+        items:
+          $ref: '#/definitions/model.Collection'
+        type: array
       comments_count:
         type: integer
       content:
@@ -926,12 +930,16 @@ definitions:
         $ref: '#/definitions/model.FeedItem'
       is_read:
         type: boolean
+      podcast_episode:
+        $ref: '#/definitions/model.PodcastEpisode'
       post:
         $ref: '#/definitions/feed.TimelinePostDTO'
       published_at:
         type: string
       type:
         type: string
+      video:
+        $ref: '#/definitions/model.Video'
     type: object
   feed.TimelineListResponseDTO:
     properties:
@@ -954,6 +962,10 @@ definitions:
         type: string
       collection_position:
         type: integer
+      collections:
+        items:
+          $ref: '#/definitions/model.Collection'
+        type: array
       comments_count:
         type: integer
       content:
@@ -2297,6 +2309,13 @@ definitions:
       view_count:
         type: integer
     type: object
+  handlers.podcastPlaybackInput:
+    properties:
+      event:
+        type: string
+    required:
+    - event
+    type: object
   handlers.timelineProposalRequest:
     properties:
       attachment_ids:
@@ -2646,8 +2665,6 @@ definitions:
         type: string
       ban_until:
         type: string
-      content_type:
-        type: string
       cover_url:
         type: string
       created_at:
@@ -2657,8 +2674,6 @@ definitions:
       id:
         type: string
       is_anonymous:
-        type: boolean
-      is_default:
         type: boolean
       name:
         type: string
@@ -2676,6 +2691,8 @@ definitions:
       channel:
         $ref: '#/definitions/model.Channel'
       channel_id:
+        type: string
+      content_type:
         type: string
       cover_url:
         type: string
@@ -3344,6 +3361,10 @@ definitions:
         type: string
       collection_position:
         type: integer
+      collections:
+        items:
+          $ref: '#/definitions/model.Collection'
+        type: array
       content:
         type: string
       cover_url:
@@ -4357,6 +4378,294 @@ definitions:
         type: integer
       total:
         type: integer
+    type: object
+  studio.AnalyticsContentMetric:
+    properties:
+      id:
+        type: string
+      metrics:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      title:
+        type: string
+    type: object
+  studio.AnalyticsPoint:
+    properties:
+      date:
+        type: string
+      metrics:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+    type: object
+  studio.AnalyticsResponse:
+    properties:
+      from:
+        type: string
+      range:
+        type: integer
+      to:
+        type: string
+      top:
+        items:
+          $ref: '#/definitions/studio.AnalyticsContentMetric'
+        type: array
+      totals:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      trend:
+        items:
+          $ref: '#/definitions/studio.AnalyticsPoint'
+        type: array
+    type: object
+  studio.ChannelSummary:
+    properties:
+      cover_url:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      slug:
+        type: string
+    type: object
+  studio.CreateChannelInput:
+    properties:
+      cover_url:
+        type: string
+      description:
+        type: string
+      name:
+        type: string
+      slug:
+        type: string
+    required:
+    - name
+    type: object
+  studio.CreateCollectionInput:
+    properties:
+      channel_id:
+        type: string
+      cover_url:
+        type: string
+      description:
+        type: string
+      name:
+        type: string
+    required:
+    - channel_id
+    - name
+    type: object
+  studio.DashboardResponse:
+    properties:
+      channel_subscriber_count:
+        type: integer
+      sections:
+        items:
+          $ref: '#/definitions/studio.DashboardSection'
+        type: array
+    type: object
+  studio.DashboardSection:
+    properties:
+      error:
+        type: string
+      issues:
+        items:
+          $ref: '#/definitions/studio.StudioContentIssue'
+        type: array
+      metrics:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      module:
+        $ref: '#/definitions/studio.Module'
+      recent:
+        items:
+          $ref: '#/definitions/studio.StudioContentItem'
+        type: array
+    type: object
+  studio.Module:
+    enum:
+    - blog
+    - podcast
+    - video
+    type: string
+    x-enum-varnames:
+    - ModuleBlog
+    - ModulePodcast
+    - ModuleVideo
+  studio.PutStateInput:
+    properties:
+      channel_id:
+        type: string
+    required:
+    - channel_id
+    type: object
+  studio.SettingsInput:
+    properties:
+      autoplay_enabled:
+        type: boolean
+      channel_id:
+        type: string
+      default_collection_id:
+        type: string
+      default_publish_status:
+        type: string
+      default_visibility:
+        type: string
+    type: object
+  studio.SettingsResponse:
+    properties:
+      autoplay_enabled:
+        type: boolean
+      channel_id:
+        type: string
+      default_collection_id:
+        type: string
+      default_publish_status:
+        type: string
+      default_visibility:
+        type: string
+      module:
+        $ref: '#/definitions/studio.Module'
+    type: object
+  studio.ShareResponse:
+    properties:
+      path:
+        type: string
+    type: object
+  studio.StateResponse:
+    properties:
+      channels:
+        items:
+          $ref: '#/definitions/studio.ChannelSummary'
+        type: array
+      current_channel:
+        $ref: '#/definitions/studio.ChannelSummary'
+    type: object
+  studio.StudioCollectionSummary:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  studio.StudioContentIssue:
+    properties:
+      code:
+        type: string
+      count:
+        type: integer
+    type: object
+  studio.StudioContentItem:
+    properties:
+      channel_id:
+        type: string
+      collections:
+        items:
+          $ref: '#/definitions/studio.StudioCollectionSummary'
+        type: array
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      duration_sec:
+        type: integer
+      id:
+        type: string
+      module:
+        $ref: '#/definitions/studio.Module'
+      processing_status:
+        type: string
+      published_at:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      view_count:
+        type: integer
+      visibility:
+        type: string
+    type: object
+  studio.StudioInteractionAuthor:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      id:
+        type: string
+      username:
+        type: string
+    type: object
+  studio.StudioInteractionItem:
+    properties:
+      author:
+        $ref: '#/definitions/studio.StudioInteractionAuthor'
+      content:
+        type: string
+      content_id:
+        type: string
+      content_title:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      pinned:
+        type: boolean
+      replied:
+        type: boolean
+      reply_count:
+        type: integer
+      target_kind:
+        type: string
+      time_anchors:
+        items:
+          $ref: '#/definitions/studio.StudioTimeAnchor'
+        type: array
+    type: object
+  studio.StudioTimeAnchor:
+    properties:
+      end:
+        type: integer
+      seconds:
+        type: integer
+      start:
+        type: integer
+    type: object
+  studio.UpdateChannelInput:
+    properties:
+      cover_url:
+        type: string
+      description:
+        type: string
+      name:
+        type: string
+      slug:
+        type: string
+    type: object
+  studio.UpdateCollectionInput:
+    properties:
+      cover_url:
+        type: string
+      description:
+        type: string
+      name:
+        type: string
     type: object
 info:
   contact: {}
@@ -11129,6 +11438,42 @@ paths:
       summary: 更新播客单集
       tags:
       - podcast
+  /api/v1/podcast/episodes/{id}/playback:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 单集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 播放事件
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.podcastPlaybackInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 记录播客播放事件
+      tags:
+      - podcast
   /api/v1/podcast/shows/{channelSlug}/episodes:
     get:
       description: 返回某个频道下已发布的播客单集。
@@ -11794,6 +12139,693 @@ paths:
       summary: 比较歌曲修订差异
       tags:
       - music-revisions
+  /api/v1/studio/{module}/analytics:
+    get:
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        type: string
+      - description: 统计天数
+        enum:
+        - 7
+        - 28
+        - 90
+        in: query
+        name: range
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.AnalyticsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取创作数据
+      tags:
+      - studio
+  /api/v1/studio/{module}/collections:
+    get:
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.Collection'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取模块合集
+      tags:
+      - studio
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 合集信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.CreateCollectionInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Collection'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建模块合集
+      tags:
+      - studio
+  /api/v1/studio/{module}/collections/{id}:
+    delete:
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 删除模块合集
+      tags:
+      - studio
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 合集信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.UpdateCollectionInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Collection'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新模块合集
+      tags:
+      - studio
+  /api/v1/studio/{module}/contents:
+    get:
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        type: string
+      - description: 搜索词
+        in: query
+        name: q
+        type: string
+      - description: 发布状态
+        in: query
+        name: status
+        type: string
+      - description: 可见性
+        in: query
+        name: visibility
+        type: string
+      - description: 合集 UUID
+        in: query
+        name: collection_id
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/studio.StudioContentItem'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取创作内容
+      tags:
+      - studio
+  /api/v1/studio/{module}/contents/{id}/share:
+    post:
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 内容 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.ShareResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 记录内容分享
+      tags:
+      - studio
+  /api/v1/studio/{module}/interactions:
+    get:
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        type: string
+      - description: 仅未回复
+        in: query
+        name: unreplied
+        type: boolean
+      - description: 仅时间锚点评论
+        in: query
+        name: anchored
+        type: boolean
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/studio.StudioInteractionItem'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取创作互动
+      tags:
+      - studio
+  /api/v1/studio/{module}/settings:
+    get:
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.SettingsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取创作设置
+      tags:
+      - studio
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 创作设置
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.SettingsInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.SettingsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 保存创作设置
+      tags:
+      - studio
+  /api/v1/studio/channels:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/studio.ChannelSummary'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取创作频道
+      tags:
+      - studio
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 频道信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.CreateChannelInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/studio.ChannelSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建创作频道
+      tags:
+      - studio
+  /api/v1/studio/channels/{id}:
+    delete:
+      parameters:
+      - description: 频道 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 删除空创作频道
+      tags:
+      - studio
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 频道 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 频道信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.UpdateChannelInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.ChannelSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新创作频道
+      tags:
+      - studio
+  /api/v1/studio/dashboard:
+    get:
+      parameters:
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.DashboardResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取创作中心总览
+      tags:
+      - studio
+  /api/v1/studio/state:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.StateResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取当前创作频道
+      tags:
+      - studio
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 当前频道
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.PutStateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.StateResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 切换当前创作频道
+      tags:
+      - studio
   /api/v1/timeline/events:
     post:
       consumes:

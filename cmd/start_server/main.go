@@ -532,11 +532,6 @@ func main() {
 			fatalLogger.Fatal("Failed to run music bookmarks and playlists migration: ", err)
 		}
 		log.Println("Migration step completed: music bookmarks and playlists")
-		log.Println("Migration step: channel default selection")
-		if err := migrations.RunChannelDefaultSelectionMigration(db); err != nil {
-			fatalLogger.Fatal("Failed to run channel default selection migration: ", err)
-		}
-		log.Println("Migration step completed: channel default selection")
 		log.Println("Migration step: unified reading list")
 		if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
 			fatalLogger.Fatal("Failed to run unified reading list migration: ", err)
@@ -558,8 +553,9 @@ func main() {
 			&model.AlbumCorrection{},
 			&model.ArtistCorrection{},
 			&model.Channel{},
-			&model.UserDefaultChannel{},
 			&model.Collection{},
+			&model.UserStudioState{},
+			&model.StudioModuleSettings{},
 			&model.Post{},
 			&model.PostCollection{},
 			&model.BlogDraft{},
@@ -630,6 +626,11 @@ func main() {
 			fatalLogger.Fatal("Failed to run migrations: ", err)
 		}
 		log.Println("Migration step completed: auto migrate models")
+		log.Println("Migration step: unified studio")
+		if err := migrations.RunUnifiedStudioMigration(db); err != nil {
+			fatalLogger.Fatal("Failed to run unified studio migration: ", err)
+		}
+		log.Println("Migration step completed: unified studio")
 		log.Println("Migration step: clean reading list target constraints")
 		if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
 			fatalLogger.Fatal("Failed to clean reading list target constraints: ", err)

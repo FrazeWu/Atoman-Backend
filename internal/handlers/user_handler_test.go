@@ -15,7 +15,6 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -23,16 +22,6 @@ type userSettingsResponse struct {
 	Data    model.UserSettings `json:"data"`
 	Error   string             `json:"error"`
 	Message string             `json:"message"`
-}
-
-type defaultChannelsResponse struct {
-	Data struct {
-		Blog    *defaultChannelSummary `json:"blog"`
-		Podcast *defaultChannelSummary `json:"podcast"`
-		Video   *defaultChannelSummary `json:"video"`
-	} `json:"data"`
-	Error   string `json:"error"`
-	Message string `json:"message"`
 }
 
 type searchUsersTestResponse struct {
@@ -47,7 +36,7 @@ func newUserSettingsTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, model.User)
 
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.UserSettings{}, &model.Channel{}, &model.UserDefaultChannel{})
+	testdb.Migrate(t, db, &model.User{}, &model.UserSettings{})
 
 	user := model.User{
 		Username: "settings-user",
@@ -67,8 +56,6 @@ func newUserSettingsTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, model.User)
 	})
 	r.GET("/settings", GetUserSettings(db))
 	r.PUT("/settings", UpdateUserSettings(db))
-	r.GET("/users/me/default-channels", GetMyDefaultChannels(db))
-	r.PATCH("/users/me/default-channels/:contentType", PutMyDefaultChannel(db))
 	return r, db, user
 }
 
@@ -76,16 +63,6 @@ func decodeUserSettingsResponse(t *testing.T, body []byte) userSettingsResponse 
 	t.Helper()
 
 	var resp userSettingsResponse
-	if err := json.Unmarshal(body, &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	return resp
-}
-
-func decodeDefaultChannelsResponse(t *testing.T, body []byte) defaultChannelsResponse {
-	t.Helper()
-
-	var resp defaultChannelsResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
@@ -456,75 +433,6 @@ func TestGetUserSettingsHandlesInitialCreateConflictIdempotently(t *testing.T) {
 	}
 }
 
-func TestGetMyDefaultChannelsReturnsCurrentMapping(t *testing.T) {
-	r, db, user := newUserSettingsTestRouter(t)
-
-	blogChannel := model.Channel{
-		UserID:      &user.UUID,
-		Name:        "Blog Channel",
-		Slug:        "blog-channel",
-		ContentType: "blog",
-	}
-	podcastChannel := model.Channel{
-		UserID:      &user.UUID,
-		Name:        "Podcast Channel",
-		Slug:        "podcast-channel",
-		ContentType: "podcast",
-	}
-	if err := db.Create(&blogChannel).Error; err != nil {
-		t.Fatalf("create blog channel: %v", err)
-	}
-	if err := db.Create(&podcastChannel).Error; err != nil {
-		t.Fatalf("create podcast channel: %v", err)
-	}
-	if err := db.Create(&[]model.UserDefaultChannel{
-		{UserID: user.UUID, ContentType: "blog", ChannelID: blogChannel.ID},
-		{UserID: user.UUID, ContentType: "podcast", ChannelID: podcastChannel.ID},
-	}).Error; err != nil {
-		t.Fatalf("create default channels: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/users/me/default-channels", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	resp := decodeDefaultChannelsResponse(t, w.Body.Bytes())
-	if resp.Data.Blog == nil || resp.Data.Blog.ID != blogChannel.ID.String() || resp.Data.Blog.Name != blogChannel.Name {
-		t.Fatalf("expected blog default %s, got %#v", blogChannel.ID, resp.Data.Blog)
-	}
-	if resp.Data.Podcast == nil || resp.Data.Podcast.ID != podcastChannel.ID.String() || resp.Data.Podcast.Name != podcastChannel.Name {
-		t.Fatalf("expected podcast default %s, got %#v", podcastChannel.ID, resp.Data.Podcast)
-	}
-	if resp.Data.Video != nil {
-		t.Fatalf("expected video default to be nil, got %#v", resp.Data.Video)
-	}
-}
-
-func TestGetMyDefaultChannelsReturnsEmptyPayloadWhenSelectionTableMissing(t *testing.T) {
-	r, db, _ := newUserSettingsTestRouter(t)
-
-	if err := db.Migrator().DropTable(&model.UserDefaultChannel{}); err != nil {
-		t.Fatalf("drop user default channels table: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/users/me/default-channels", nil)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	resp := decodeDefaultChannelsResponse(t, w.Body.Bytes())
-	if resp.Data.Blog != nil || resp.Data.Podcast != nil || resp.Data.Video != nil {
-		t.Fatalf("expected empty defaults payload, got %#v", resp.Data)
-	}
-}
-
 func TestSetupUserRoutesDoesNotRegisterLegacyBlogExplore(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
@@ -623,129 +531,5 @@ func TestBlockUserRejectsSelf(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected self block 400, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestPutMyDefaultChannelPersistsPerModuleSelection(t *testing.T) {
-	r, db, user := newUserSettingsTestRouter(t)
-
-	blogChannel := model.Channel{
-		UserID:      &user.UUID,
-		Name:        "Blog Channel",
-		Slug:        "persist-blog-channel",
-		ContentType: "blog",
-	}
-	videoChannel := model.Channel{
-		UserID:      &user.UUID,
-		Name:        "Video Channel",
-		Slug:        "persist-video-channel",
-		ContentType: "video",
-	}
-	if err := db.Create(&blogChannel).Error; err != nil {
-		t.Fatalf("create blog channel: %v", err)
-	}
-	if err := db.Create(&videoChannel).Error; err != nil {
-		t.Fatalf("create video channel: %v", err)
-	}
-
-	putBody := bytes.NewBufferString(`{"channel_id":"` + videoChannel.ID.String() + `"}`)
-	putReq := httptest.NewRequest(http.MethodPatch, "/users/me/default-channels/video", putBody)
-	putReq.Header.Set("Content-Type", "application/json")
-	putW := httptest.NewRecorder()
-	r.ServeHTTP(putW, putReq)
-
-	if putW.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", putW.Code, putW.Body.String())
-	}
-
-	if err := db.Create(&model.UserDefaultChannel{
-		UserID:      user.UUID,
-		ContentType: "blog",
-		ChannelID:   blogChannel.ID,
-	}).Error; err != nil {
-		t.Fatalf("seed blog default channel: %v", err)
-	}
-
-	getReq := httptest.NewRequest(http.MethodGet, "/users/me/default-channels", nil)
-	getW := httptest.NewRecorder()
-	r.ServeHTTP(getW, getReq)
-
-	if getW.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", getW.Code, getW.Body.String())
-	}
-
-	resp := decodeDefaultChannelsResponse(t, getW.Body.Bytes())
-	if resp.Data.Video == nil || resp.Data.Video.ID != videoChannel.ID.String() || resp.Data.Video.Name != videoChannel.Name {
-		t.Fatalf("expected video default %s, got %#v", videoChannel.ID, resp.Data.Video)
-	}
-	if resp.Data.Blog == nil || resp.Data.Blog.ID != blogChannel.ID.String() || resp.Data.Blog.Name != blogChannel.Name {
-		t.Fatalf("expected blog default %s, got %#v", blogChannel.ID, resp.Data.Blog)
-	}
-
-	var selection model.UserDefaultChannel
-	if err := db.Where("user_id = ? AND content_type = ?", user.UUID, "video").First(&selection).Error; err != nil {
-		t.Fatalf("load persisted selection: %v", err)
-	}
-	if selection.ChannelID != videoChannel.ID {
-		t.Fatalf("expected persisted channel %s, got %s", videoChannel.ID, selection.ChannelID)
-	}
-}
-
-func TestPutMyDefaultChannelRejectsInvalidOwnershipAndType(t *testing.T) {
-	r, db, user := newUserSettingsTestRouter(t)
-
-	otherUser := model.User{
-		Username: "other-user",
-		Email:    "other-user@example.com",
-		Password: "hash",
-		Role:     "user",
-		IsActive: true,
-	}
-	if err := db.Create(&otherUser).Error; err != nil {
-		t.Fatalf("create other user: %v", err)
-	}
-
-	otherUsersBlogChannel := model.Channel{
-		UserID:      &otherUser.UUID,
-		Name:        "Other Blog",
-		Slug:        "other-blog-channel",
-		ContentType: "blog",
-	}
-	usersVideoChannel := model.Channel{
-		UserID:      &user.UUID,
-		Name:        "User Video",
-		Slug:        "user-video-channel",
-		ContentType: "video",
-	}
-	for _, channel := range []*model.Channel{&otherUsersBlogChannel, &usersVideoChannel} {
-		if err := db.Create(channel).Error; err != nil {
-			t.Fatalf("create channel %s: %v", channel.Name, err)
-		}
-	}
-
-	cases := []struct {
-		name        string
-		contentType string
-		channelID   string
-		want        int
-	}{
-		{name: "other users channel", contentType: "blog", channelID: otherUsersBlogChannel.ID.String(), want: http.StatusForbidden},
-		{name: "content type mismatch", contentType: "blog", channelID: usersVideoChannel.ID.String(), want: http.StatusBadRequest},
-		{name: "unknown module", contentType: "album", channelID: usersVideoChannel.ID.String(), want: http.StatusBadRequest},
-		{name: "missing channel", contentType: "blog", channelID: uuid.NewString(), want: http.StatusNotFound},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			body := bytes.NewBufferString(`{"channel_id":"` + tc.channelID + `"}`)
-			req := httptest.NewRequest(http.MethodPatch, "/users/me/default-channels/"+tc.contentType, body)
-			req.Header.Set("Content-Type", "application/json")
-			w := httptest.NewRecorder()
-			r.ServeHTTP(w, req)
-
-			if w.Code != tc.want {
-				t.Fatalf("expected %d, got %d: %s", tc.want, w.Code, w.Body.String())
-			}
-		})
 	}
 }
