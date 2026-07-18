@@ -850,6 +850,31 @@ func TestLoginHandlerReturnsPasswordMismatchCode(t *testing.T) {
 	}
 }
 
+func TestLoginHandlerReturnsPasswordNotSetForOAuthOnlyAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newAuthTestDB(t)
+	if err := db.Create(&model.User{Username: "oauth-only", Email: "oauth-only@example.com", Role: "user"}).Error; err != nil {
+		t.Fatalf("create oauth-only user: %v", err)
+	}
+	r := gin.New()
+	r.POST("/login", LoginHandler(db))
+
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"oauth-only@example.com","password":"any-password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
+	}
+	payload := decodeAuthError(t, w.Body.String())
+	if payload.Code != "auth.password_not_set" || payload.Error != "请使用第三方账号登录" {
+		t.Fatalf("unexpected payload: %#v", payload)
+	}
+}
+
 func TestLoginHandlerReturnsTokenGenerationFailedCode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("JWT_SECRET", "")

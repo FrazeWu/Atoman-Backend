@@ -31,6 +31,7 @@ const (
 	authInvalidClaims         authErrorCode = "auth.invalid_claims"
 	authUserNotFound          authErrorCode = "auth.user_not_found"
 	authAccountNotFound       authErrorCode = "auth.account_not_found"
+	authPasswordNotSet        authErrorCode = "auth.password_not_set"
 	authPasswordMismatch      authErrorCode = "auth.password_mismatch"
 	authTokenGenerationFailed authErrorCode = "auth.token_generation_failed"
 )
@@ -383,6 +384,10 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 		if user.Role == "" {
 			user.Role = "user"
+		}
+		if user.Password == "" {
+			authError(c, http.StatusUnauthorized, authPasswordNotSet, "请使用第三方账号登录")
+			return
 		}
 
 		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {

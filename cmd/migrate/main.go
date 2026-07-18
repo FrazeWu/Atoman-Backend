@@ -72,6 +72,9 @@ func runMigrations(db *gorm.DB) error {
 	if err := migrations.RunAuthPasswordResetMigration(db); err != nil {
 		return fmt.Errorf("auth password reset migration: %w", err)
 	}
+	if err := migrations.RunAuthOAuthMigration(db); err != nil {
+		return fmt.Errorf("auth oauth migration: %w", err)
+	}
 	if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
 		return fmt.Errorf("unified reading list migration: %w", err)
 	}
@@ -195,6 +198,8 @@ func migrateSchema(db *gorm.DB) error {
 		&model.User{},
 		&model.UserSettings{},
 		&model.EmailVerificationCode{},
+		&model.ExternalIdentity{},
+		&model.OAuthFlow{},
 		&model.Channel{},
 		&model.Collection{},
 		&model.UserStudioState{},
