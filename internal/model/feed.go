@@ -5,7 +5,6 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,25 +13,6 @@ import (
 type NullableUserUUID struct {
 	uuid.UUID
 	Valid bool
-}
-
-const (
-	ChannelContentTypeBlog    = "blog"
-	ChannelContentTypePodcast = "podcast"
-	ChannelContentTypeVideo   = "video"
-)
-
-func NormalizeChannelContentType(value string) string {
-	return strings.TrimSpace(strings.ToLower(value))
-}
-
-func IsValidChannelContentType(value string) bool {
-	switch NormalizeChannelContentType(value) {
-	case ChannelContentTypeBlog, ChannelContentTypePodcast, ChannelContentTypeVideo:
-		return true
-	default:
-		return false
-	}
 }
 
 func NewNullableUserUUID(id uuid.UUID) NullableUserUUID {
@@ -109,8 +89,6 @@ type Channel struct {
 	Slug        string     `json:"slug" gorm:"uniqueIndex"`
 	Description string     `json:"description" gorm:"type:text"`
 	CoverURL    string     `json:"cover_url" gorm:"type:text"`
-	ContentType string     `json:"content_type" gorm:"type:varchar(16);not null;default:'blog';index"`
-	IsDefault   bool       `json:"is_default" gorm:"default:false;index"`
 	IsAnonymous bool       `json:"is_anonymous" gorm:"default:false;index"`
 	BanUntil    *time.Time `json:"ban_until,omitempty"`
 	BanReason   string     `json:"ban_reason" gorm:"type:text"`
@@ -134,22 +112,23 @@ func (Collection) TableName() string { return "collections" }
 
 type Post struct {
 	Base
-	UserID             uuid.UUID   `json:"user_id" gorm:"type:uuid;not null;index"`
-	User               *User       `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	ChannelID          *uuid.UUID  `json:"channel_id,omitempty" gorm:"type:uuid;index"`
-	Channel            *Channel    `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
-	CollectionID       *uuid.UUID  `json:"collection_id,omitempty" gorm:"type:uuid;index"`
-	Collection         *Collection `json:"collection,omitempty" gorm:"foreignKey:CollectionID"`
-	CollectionPosition int         `json:"collection_position" gorm:"not null;default:0"`
-	Title              string      `json:"title" gorm:"not null"`
-	Content            string      `json:"content" gorm:"type:text;not null"`
-	Summary            string      `json:"summary" gorm:"type:text"`
-	CoverURL           string      `json:"cover_url" gorm:"type:text"`
-	Status             string      `json:"status" gorm:"default:'draft'"` // draft / published
-	Visibility         string      `json:"visibility" gorm:"not null;default:'public'"`
-	Pinned             bool        `json:"pinned" gorm:"default:false"`
-	PublishedAt        *time.Time  `json:"published_at,omitempty" gorm:"index"`
-	ViewCount          int64       `json:"view_count" gorm:"not null;default:0"`
+	UserID             uuid.UUID    `json:"user_id" gorm:"type:uuid;not null;index"`
+	User               *User        `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	ChannelID          *uuid.UUID   `json:"channel_id,omitempty" gorm:"type:uuid;index"`
+	Channel            *Channel     `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
+	CollectionID       *uuid.UUID   `json:"collection_id,omitempty" gorm:"type:uuid;index"`
+	Collection         *Collection  `json:"collection,omitempty" gorm:"foreignKey:CollectionID"`
+	Collections        []Collection `json:"collections,omitempty" gorm:"many2many:post_collections;"`
+	CollectionPosition int          `json:"collection_position" gorm:"not null;default:0"`
+	Title              string       `json:"title" gorm:"not null"`
+	Content            string       `json:"content" gorm:"type:text;not null"`
+	Summary            string       `json:"summary" gorm:"type:text"`
+	CoverURL           string       `json:"cover_url" gorm:"type:text"`
+	Status             string       `json:"status" gorm:"default:'draft'"` // draft / published
+	Visibility         string       `json:"visibility" gorm:"not null;default:'public'"`
+	Pinned             bool         `json:"pinned" gorm:"default:false"`
+	PublishedAt        *time.Time   `json:"published_at,omitempty" gorm:"index"`
+	ViewCount          int64        `json:"view_count" gorm:"not null;default:0"`
 }
 
 func (Post) TableName() string { return "posts" }

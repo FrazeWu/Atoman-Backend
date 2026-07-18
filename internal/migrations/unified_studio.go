@@ -27,6 +27,13 @@ type legacyUserDefaultChannel struct {
 
 func (legacyUserDefaultChannel) TableName() string { return "user_default_channels" }
 
+type legacyStudioChannel struct {
+	ContentType string
+	IsDefault   bool
+}
+
+func (legacyStudioChannel) TableName() string { return "channels" }
+
 func RunUnifiedStudioMigration(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(
@@ -37,7 +44,7 @@ func RunUnifiedStudioMigration(db *gorm.DB) error {
 			return err
 		}
 
-		if tx.Migrator().HasColumn(&model.Channel{}, "content_type") {
+		if tx.Migrator().HasColumn(&legacyStudioChannel{}, "ContentType") {
 			if err := tx.Exec(`
 				UPDATE collections
 				SET content_type = COALESCE(NULLIF((
@@ -120,7 +127,10 @@ func RunUnifiedStudioMigration(db *gorm.DB) error {
 			}
 		}
 
-		return dropLegacyDefaultChannelSelections(tx)
+		if err := dropLegacyDefaultChannelSelections(tx); err != nil {
+			return err
+		}
+		return dropLegacyChannelModuleColumns(tx)
 	})
 }
 
@@ -161,4 +171,21 @@ func dropLegacyDefaultChannelSelections(tx *gorm.DB) error {
 		return nil
 	}
 	return tx.Migrator().DropTable(&legacyUserDefaultChannel{})
+}
+
+func dropLegacyChannelModuleColumns(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable(&model.Channel{}) {
+		return nil
+	}
+	if err := tx.Exec("DROP INDEX IF EXISTS idx_channels_user_default").Error; err != nil {
+		return err
+	}
+	for _, field := range []string{"IsDefault", "ContentType"} {
+		if tx.Migrator().HasColumn(&legacyStudioChannel{}, field) {
+			if err := tx.Migrator().DropColumn(&legacyStudioChannel{}, field); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

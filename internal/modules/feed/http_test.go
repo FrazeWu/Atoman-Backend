@@ -583,16 +583,17 @@ func TestGetSubscribedFeedHandlerRejectsInvalidSourceAndGroupIDs(t *testing.T) {
 	}
 }
 
-func TestQueryFromContextIncludesContentType(t *testing.T) {
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?content_type=blog", nil)
-
-	query, err := queryFromContext(c)
-	if err != nil {
-		t.Fatalf("parse query: %v", err)
-	}
-	if query.ContentType != "blog" {
-		t.Fatalf("expected blog content type, got %q", query.ContentType)
+func TestQueryFromContextAcceptsCreatorContentTypes(t *testing.T) {
+	for _, contentType := range []string{"blog", "podcast", "video"} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?content_type="+contentType, nil)
+		query, err := queryFromContext(c)
+		if err != nil {
+			t.Fatalf("parse %s query: %v", contentType, err)
+		}
+		if query.ContentType != contentType {
+			t.Fatalf("expected %s content type, got %q", contentType, query.ContentType)
+		}
 	}
 }
 
@@ -603,7 +604,7 @@ func TestGetSubscribedFeedHandlerRejectsUnsupportedContentType(t *testing.T) {
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
-	for _, contentType := range []string{"video", "bolg"} {
+	for _, contentType := range []string{"bolg", "music"} {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?content_type="+contentType, nil)
 		rr := httptest.NewRecorder()
 		router.ServeHTTP(rr, req)
@@ -947,10 +948,9 @@ func TestFeedRecommendationChannelsReturnsData(t *testing.T) {
 		t.Fatalf("delete channel feed source: %v", err)
 	}
 	deletedChannel := model.Channel{
-		UserID:      &user.ID,
-		Name:        "Deleted Channel",
-		Slug:        "deleted-channel",
-		ContentType: model.ChannelContentTypeBlog,
+		UserID: &user.ID,
+		Name:   "Deleted Channel",
+		Slug:   "deleted-channel",
 	}
 	if err := db.Create(&deletedChannel).Error; err != nil {
 		t.Fatalf("create deleted channel: %v", err)

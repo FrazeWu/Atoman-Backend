@@ -46,7 +46,7 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		t.Fatalf("create user: %v", err)
 	}
 
-	channel := model.Channel{Name: "Podcast", Slug: "podcast", ContentType: "podcast"}
+	channel := model.Channel{UserID: &user.UUID, Name: "Podcast", Slug: "podcast"}
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
@@ -681,7 +681,7 @@ func TestPodcastShowBookmarksExcludeVideoChannelBookmarks(t *testing.T) {
 	}
 }
 
-func TestCreatePodcastEpisodeRequiresOwnedChannel(t *testing.T) {
+func TestCreatePodcastEpisodeAcceptsOwnedGlobalChannel(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	r, db, user, channel := newPodcastHandlerTestDB(t)
 
@@ -692,26 +692,28 @@ func TestCreatePodcastEpisodeRequiresOwnedChannel(t *testing.T) {
 	if err := db.Model(&channel).Update("user_id", owner.UUID).Error; err != nil {
 		t.Fatalf("assign channel owner: %v", err)
 	}
+	globalChannel := model.Channel{Name: "Global Channel", Slug: "global-channel-" + uuid.NewString()[:8], UserID: &user.UUID}
+	if err := db.Create(&globalChannel).Error; err != nil {
+		t.Fatalf("create global channel: %v", err)
+	}
+	podcastCollection := model.Collection{ChannelID: globalChannel.ID, ContentType: "podcast", Name: "Episodes"}
+	if err := db.Create(&podcastCollection).Error; err != nil {
+		t.Fatalf("create podcast collection: %v", err)
+	}
 
 	cases := []struct {
 		name      string
 		channelID string
 		want      int
 	}{
+		{name: "owned global channel succeeds", channelID: globalChannel.ID.String(), want: http.StatusCreated},
 		{name: "other user's channel is forbidden", channelID: channel.ID.String(), want: http.StatusForbidden},
-		{name: "content type mismatch is rejected", channelID: func() string {
-			mismatched := model.Channel{Name: "Blog Channel", Slug: "blog-channel-" + uuid.NewString()[:8], UserID: &user.UUID, ContentType: "blog"}
-			if err := db.Create(&mismatched).Error; err != nil {
-				t.Fatalf("create mismatched channel: %v", err)
-			}
-			return mismatched.ID.String()
-		}(), want: http.StatusBadRequest},
 		{name: "missing channel is not found", channelID: uuid.NewString(), want: http.StatusNotFound},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			body := []byte(`{"channel_id":"` + tc.channelID + `","title":"Episode","audio_url":"https://cdn.example.com/episode.mp3"}`)
+			body := []byte(`{"channel_id":"` + tc.channelID + `","title":"Episode","audio_url":"https://cdn.example.com/episode.mp3","status":"published","collection_ids":["` + podcastCollection.ID.String() + `"]}`)
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/episodes", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
@@ -783,6 +785,28 @@ func TestUpdatePodcastEpisodeKeepsBadCollectionAsBadRequestAndRollsBack(t *testi
 	}
 	if post.Title != "draft episode" {
 		t.Errorf("expected post update to roll back, got title %q", post.Title)
+	}
+}
+
+func TestUpdatePodcastEpisodePublishRequiresCollection(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "draft")
+
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/podcast/episodes/"+episode.ID.String(), bytes.NewBufferString(`{"status":"published"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", podcastAuthHeader(t, user))
+	response := httptest.NewRecorder()
+	r.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected collectionless publish 400, got %d: %s", response.Code, response.Body.String())
+	}
+	var post model.Post
+	if err := db.First(&post, "id = ?", episode.PostID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if post.Status != "draft" {
+		t.Fatalf("expected status to remain draft, got %q", post.Status)
 	}
 }
 

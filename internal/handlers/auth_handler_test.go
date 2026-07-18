@@ -735,7 +735,7 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	if state.ChannelID == nil || *state.ChannelID != channel.ID {
 		t.Fatalf("expected current channel %s, got %#v", channel.ID, state.ChannelID)
 	}
-	for _, contentType := range []string{model.ChannelContentTypeBlog, model.ChannelContentTypePodcast, model.ChannelContentTypeVideo} {
+	for _, contentType := range []string{"blog", "podcast", "video"} {
 		var collection model.Collection
 		if err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channel.ID, contentType, true).First(&collection).Error; err != nil {
 			t.Fatalf("find %s default collection: %v", contentType, err)

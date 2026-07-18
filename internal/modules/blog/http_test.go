@@ -80,6 +80,28 @@ func TestRegisterRoutesCreatePostRequiresCurrentUser(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesUpdateDraftAllowsNoCollection(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel := model.Channel{UserID: &user.ID, Name: "Draft Channel", Slug: "draft-channel-" + uuid.NewString()[:8]}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Before", Content: "body", Status: "draft", Visibility: "public"}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	router := newBlogHTTPRouter(service, &user)
+	body := bytes.NewBufferString(`{"title":"After","content":"updated","status":"draft","channel_id":"` + channel.ID.String() + `"}`)
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/blog/posts/"+post.ID.String(), body)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected collectionless draft update 200, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestRegisterRoutesMountsChannelReadEndpointsAndEnsureDefault(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
@@ -199,7 +221,7 @@ func TestRegisterRoutesMountsChannelAndCollectionMutationEndpoints(t *testing.T)
 	}
 }
 
-func TestCreateChannelPersistsRequestedContentType(t *testing.T) {
+func TestCreateChannelCreatesGlobalChannel(t *testing.T) {
 	service, _, user := newBlogHTTPTestService(t)
 	r := newBlogHTTPRouter(service, &user)
 
@@ -207,7 +229,7 @@ func TestCreateChannelPersistsRequestedContentType(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/blog/channels",
-		bytes.NewBufferString(`{"name":"Video Channel","content_type":"video"}`),
+		bytes.NewBufferString(`{"name":"Global Channel"}`),
 	)
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
@@ -221,8 +243,11 @@ func TestCreateChannelPersistsRequestedContentType(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if payload.Data.ContentType != model.ChannelContentTypeVideo {
-		t.Fatalf("expected video channel, got %#v", payload.Data)
+	if payload.Data.Name != "Global Channel" || payload.Data.ID == uuid.Nil {
+		t.Fatalf("expected global channel, got %#v", payload.Data)
+	}
+	if strings.Contains(w.Body.String(), `"content_type"`) {
+		t.Fatalf("expected channel response without module type, got %s", w.Body.String())
 	}
 }
 
@@ -732,16 +757,60 @@ func TestCreateDefaultChannelForUserSetsInitialStudioChannel(t *testing.T) {
 		t.Fatalf("create default channel: %v", err)
 	}
 
-	if channel.ContentType != "blog" {
-		t.Fatalf("expected blog content type, got %q", channel.ContentType)
-	}
-
 	var state model.UserStudioState
 	if err := db.First(&state, "user_id = ?", user.ID).Error; err != nil {
 		t.Fatalf("load studio state: %v", err)
 	}
 	if state.ChannelID == nil || *state.ChannelID != channel.ID {
 		t.Fatalf("expected selected channel %s, got %#v", channel.ID, state.ChannelID)
+	}
+}
+
+func TestCreateDefaultChannelForUserUsesCurrentStudioChannel(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	first := model.Channel{UserID: &user.ID, Name: "First", Slug: "first-" + uuid.NewString()[:8]}
+	second := model.Channel{UserID: &user.ID, Name: "Current", Slug: "current-" + uuid.NewString()[:8]}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("create first channel: %v", err)
+	}
+	if err := db.Create(&second).Error; err != nil {
+		t.Fatalf("create current channel: %v", err)
+	}
+	if err := db.Create(&model.UserStudioState{UserID: user.ID, ChannelID: &second.ID}).Error; err != nil {
+		t.Fatalf("create studio state: %v", err)
+	}
+
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("resolve studio channel: %v", err)
+	}
+	if channel.ID != second.ID {
+		t.Fatalf("expected current studio channel %s, got %s", second.ID, channel.ID)
+	}
+}
+
+func TestCreateDefaultChannelForUserCreatesTypedBlogCollection(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel := model.Channel{UserID: &user.ID, Name: "Global", Slug: "global-" + uuid.NewString()[:8]}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	if err := db.Create(&model.UserStudioState{UserID: user.ID, ChannelID: &channel.ID}).Error; err != nil {
+		t.Fatalf("create studio state: %v", err)
+	}
+	podcastCollection := model.Collection{
+		ChannelID: channel.ID, ContentType: "podcast", Name: "Podcast Default", IsDefault: true,
+	}
+	if err := db.Create(&podcastCollection).Error; err != nil {
+		t.Fatalf("create podcast collection: %v", err)
+	}
+
+	if _, err := service.CreateDefaultChannelForUser(user.ID, "Alice"); err != nil {
+		t.Fatalf("ensure blog defaults: %v", err)
+	}
+	var blogCollection model.Collection
+	if err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channel.ID, "blog", true).First(&blogCollection).Error; err != nil {
+		t.Fatalf("expected typed blog default collection: %v", err)
 	}
 }
 

@@ -85,11 +85,6 @@ func RunBlogSingleCollectionMigration(db *gorm.DB) error {
 			}
 		}
 
-		if tx.Migrator().HasTable(&model.PostCollection{}) {
-			if err := tx.Migrator().DropTable(&model.PostCollection{}); err != nil {
-				return err
-			}
-		}
 		if tx.Migrator().HasTable(&legacyBlogPostRating{}) {
 			if err := tx.Migrator().DropTable(&legacyBlogPostRating{}); err != nil {
 				return err
@@ -127,12 +122,12 @@ func migrationCollectionForPost(tx *gorm.DB, post model.Post, links []model.Post
 		channelID = &channel.ID
 	}
 	var collection model.Collection
-	if err := tx.Where("channel_id = ? AND is_default = ?", *channelID, true).First(&collection).Error; err == nil {
+	if err := tx.Where("channel_id = ? AND content_type = ? AND is_default = ?", *channelID, "blog", true).First(&collection).Error; err == nil {
 		return collection, migrationNextPosition(tx, collection.ID), nil
 	} else if err != gorm.ErrRecordNotFound {
 		return model.Collection{}, 0, err
 	}
-	collection = model.Collection{ChannelID: *channelID, CreatedBy: &post.UserID, Name: "默认专栏", Description: "默认合集", IsDefault: true}
+	collection = model.Collection{ChannelID: *channelID, ContentType: "blog", CreatedBy: &post.UserID, Name: "默认专栏", Description: "默认合集", IsDefault: true}
 	if err := tx.Create(&collection).Error; err != nil {
 		return model.Collection{}, 0, err
 	}
@@ -141,12 +136,24 @@ func migrationCollectionForPost(tx *gorm.DB, post model.Post, links []model.Post
 
 func migrationDefaultChannelForPost(tx *gorm.DB, post model.Post) (model.Channel, error) {
 	var channel model.Channel
-	if err := tx.Where("user_id = ? AND content_type = ? AND is_default = ?", post.UserID, model.ChannelContentTypeBlog, true).First(&channel).Error; err == nil {
+	if tx.Migrator().HasTable(&model.UserStudioState{}) {
+		var state model.UserStudioState
+		if err := tx.First(&state, "user_id = ?", post.UserID).Error; err == nil && state.ChannelID != nil {
+			if err := tx.Where("id = ? AND user_id = ?", *state.ChannelID, post.UserID).First(&channel).Error; err == nil {
+				return channel, nil
+			} else if err != gorm.ErrRecordNotFound {
+				return model.Channel{}, err
+			}
+		} else if err != nil && err != gorm.ErrRecordNotFound {
+			return model.Channel{}, err
+		}
+	}
+	if err := tx.Where("user_id = ?", post.UserID).Order("created_at ASC, id ASC").First(&channel).Error; err == nil {
 		return channel, nil
 	} else if err != gorm.ErrRecordNotFound {
 		return model.Channel{}, err
 	}
-	channel = model.Channel{UserID: &post.UserID, Name: "文章", Slug: "posts-" + post.UserID.String(), ContentType: model.ChannelContentTypeBlog, IsDefault: true}
+	channel = model.Channel{UserID: &post.UserID, Name: "文章", Slug: "posts-" + post.UserID.String()}
 	if err := tx.Create(&channel).Error; err != nil {
 		return model.Channel{}, err
 	}

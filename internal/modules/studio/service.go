@@ -300,6 +300,32 @@ func (s *Service) DeleteCollection(user authctx.CurrentUser, module Module, coll
 	})
 }
 
+func (s *Service) ValidateContentScope(userID, channelID uuid.UUID, module Module, collectionIDs []uuid.UUID, publishing bool) error {
+	if userID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	if _, err := s.ownedChannel(userID, channelID); err != nil {
+		return err
+	}
+	collectionIDs = uniqueUUIDs(collectionIDs)
+	if len(collectionIDs) == 0 {
+		if publishing {
+			return apperr.BadRequest("studio.collection_required", "At least one collection is required before publishing")
+		}
+		return nil
+	}
+	var count int64
+	if err := s.db.Model(&model.Collection{}).
+		Where("id IN ? AND channel_id = ? AND content_type = ?", collectionIDs, channelID, module).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count != int64(len(collectionIDs)) {
+		return apperr.BadRequest("studio.invalid_collection_scope", "Collections must belong to the selected channel and module")
+	}
+	return nil
+}
+
 func (s *Service) ownedChannel(userID, channelID uuid.UUID) (model.Channel, error) {
 	if channelID == uuid.Nil {
 		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "channel_id is required")
@@ -392,4 +418,20 @@ func summarizeChannel(channel model.Channel) ChannelSummary {
 		Description: channel.Description,
 		CoverURL:    channel.CoverURL,
 	}
+}
+
+func uniqueUUIDs(values []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{}, len(values))
+	result := make([]uuid.UUID, 0, len(values))
+	for _, value := range values {
+		if value == uuid.Nil {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
 }

@@ -81,9 +81,7 @@ func (r *Repo) ListPublishedPostsByUserIDs(userIDs []uuid.UUID, contentType stri
 	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("posts.status = ?", "published").
 		Where("posts.user_id IN ?", userIDs)
-	if contentType != "" {
-		db = db.Joins("JOIN channels ON channels.id = posts.channel_id").Where("channels.content_type = ?", contentType)
-	}
+	db = filterPostContentType(db, contentType)
 	err := db.Find(&posts).Error
 	return posts, err
 }
@@ -96,9 +94,7 @@ func (r *Repo) ListPublishedPostsByChannelIDs(channelIDs []uuid.UUID, contentTyp
 	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("posts.status = ?", "published").
 		Where("posts.channel_id IN ?", channelIDs)
-	if contentType != "" {
-		db = db.Joins("JOIN channels ON channels.id = posts.channel_id").Where("channels.content_type = ?", contentType)
-	}
+	db = filterPostContentType(db, contentType)
 	err := db.Find(&posts).Error
 	return posts, err
 }
@@ -110,12 +106,61 @@ func (r *Repo) ListPublishedPostsByCollectionIDs(collectionIDs []uuid.UUID, cont
 	var posts []model.Post
 	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("posts.status = ?", "published").
-		Where("posts.collection_id IN ?", collectionIDs)
-	if contentType != "" {
-		db = db.Joins("JOIN channels ON channels.id = posts.channel_id").Where("channels.content_type = ?", contentType)
-	}
+		Where("posts.collection_id IN ? OR EXISTS (SELECT 1 FROM post_collections links WHERE links.post_id = posts.id AND links.collection_id IN ?)", collectionIDs, collectionIDs)
+	db = filterPostContentType(db, contentType)
 	err := db.Find(&posts).Error
 	return posts, err
+}
+
+func filterPostContentType(db *gorm.DB, contentType string) *gorm.DB {
+	switch contentType {
+	case "blog":
+		return db.Where("NOT EXISTS (SELECT 1 FROM podcast_episodes episodes WHERE episodes.post_id = posts.id AND episodes.deleted_at IS NULL)")
+	case "podcast":
+		return db.Where("EXISTS (SELECT 1 FROM podcast_episodes episodes WHERE episodes.post_id = posts.id AND episodes.deleted_at IS NULL)")
+	case "video":
+		return db.Where("1 = 0")
+	default:
+		return db
+	}
+}
+
+func (r *Repo) ListPodcastEpisodesByPostIDs(postIDs []uuid.UUID) ([]model.PodcastEpisode, error) {
+	if len(postIDs) == 0 {
+		return []model.PodcastEpisode{}, nil
+	}
+	var episodes []model.PodcastEpisode
+	err := r.db.Preload("Channel").Where("post_id IN ?", postIDs).Find(&episodes).Error
+	return episodes, err
+}
+
+func (r *Repo) ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs []uuid.UUID, contentType string) ([]model.Video, error) {
+	if contentType != "" && contentType != "video" {
+		return []model.Video{}, nil
+	}
+	conditions := make([]string, 0, 3)
+	args := make([]any, 0, 4)
+	if len(userIDs) > 0 {
+		conditions = append(conditions, "videos.user_id IN ?")
+		args = append(args, userIDs)
+	}
+	if len(channelIDs) > 0 {
+		conditions = append(conditions, "videos.channel_id IN ?")
+		args = append(args, channelIDs)
+	}
+	if len(collectionIDs) > 0 {
+		conditions = append(conditions, "EXISTS (SELECT 1 FROM video_collections links WHERE links.video_id = videos.id AND links.collection_id IN ?)")
+		args = append(args, collectionIDs)
+	}
+	if len(conditions) == 0 {
+		return []model.Video{}, nil
+	}
+	var videos []model.Video
+	err := r.db.Preload("Channel").Preload("Collections").
+		Where("videos.status = ? AND videos.visibility IN ?", "published", []string{"public", "followers"}).
+		Where("("+strings.Join(conditions, " OR ")+")", args...).
+		Find(&videos).Error
+	return videos, err
 }
 
 func (r *Repo) ListPostEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCount, error) {
@@ -146,7 +191,8 @@ func (r *Repo) ListSubscribedBlogPosts(
 	buildQuery := func() *gorm.DB {
 		db := r.db.Model(&model.Post{}).
 			Joins("JOIN channels ON channels.id = posts.channel_id").
-			Where("posts.status = ? AND channels.content_type = ? AND channels.deleted_at IS NULL", "published", model.ChannelContentTypeBlog)
+			Where("posts.status = ? AND channels.deleted_at IS NULL", "published").
+			Where("NOT EXISTS (SELECT 1 FROM podcast_episodes WHERE podcast_episodes.post_id = posts.id AND podcast_episodes.deleted_at IS NULL)")
 
 		sourceConditions := make([]string, 0, 3)
 		sourceArgs := make([]interface{}, 0, 3)

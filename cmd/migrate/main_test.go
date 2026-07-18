@@ -154,7 +154,7 @@ func TestRunMigrationsBackfillsUserDefaultResources(t *testing.T) {
 	if state.ChannelID == nil || *state.ChannelID != channels[0].ID {
 		t.Fatalf("expected current channel %s, got %#v", channels[0].ID, state.ChannelID)
 	}
-	for _, contentType := range []string{model.ChannelContentTypeBlog, model.ChannelContentTypePodcast, model.ChannelContentTypeVideo} {
+	for _, contentType := range []string{"blog", "podcast", "video"} {
 		var collections int64
 		if err := db.Model(&model.Collection{}).Where("channel_id = ? AND content_type = ? AND is_default = ?", channels[0].ID, contentType, true).Count(&collections).Error; err != nil || collections != 1 {
 			t.Fatalf("expected one %s default collection, got %d err=%v", contentType, collections, err)
@@ -202,9 +202,9 @@ func TestRunMigrationsCreatesUnifiedStudioStateAndTypedCollections(t *testing.T)
 	}
 
 	for _, contentType := range []string{
-		model.ChannelContentTypeBlog,
-		model.ChannelContentTypePodcast,
-		model.ChannelContentTypeVideo,
+		"blog",
+		"podcast",
+		"video",
 	} {
 		var count int64
 		if err := db.Model(&model.Collection{}).

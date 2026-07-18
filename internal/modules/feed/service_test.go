@@ -33,6 +33,9 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		&model.Collection{},
 		&model.Post{},
 		&model.PostCollection{},
+		&model.PodcastEpisode{},
+		&model.Video{},
+		&model.VideoCollection{},
 		&model.Like{},
 		&model.DiscussionTarget{},
 		&model.FeedSource{},
@@ -139,6 +142,135 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 	return NewService(db), db, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser}
 }
 
+func newUnifiedSubscriptionFixture(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, model.User, model.Channel) {
+	t.Helper()
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PostCollection{},
+		&model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
+		&model.FeedSource{}, &model.Subscription{}, &model.FeedItem{}, &model.FeedItemRead{},
+		&model.Like{}, &model.DiscussionTarget{},
+	)
+	viewer := model.User{Username: "unified-viewer", Email: "unified-viewer@example.com", Password: "hash", IsActive: true}
+	creator := model.User{Username: "unified-creator", Email: "unified-creator@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&viewer).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&creator).Error; err != nil {
+		t.Fatal(err)
+	}
+	channel := model.Channel{UserID: &creator.UUID, Name: "Unified Channel", Slug: "unified-channel"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	return NewService(db), db, authctx.CurrentUser{ID: viewer.UUID, Username: viewer.Username, Role: authctx.RoleUser}, creator, channel
+}
+
+func seedUnifiedChannelUpdates(t *testing.T, db *gorm.DB, creator model.User, channel model.Channel) (model.Post, model.PodcastEpisode, model.Video) {
+	t.Helper()
+	blogCollection := model.Collection{ChannelID: channel.ID, ContentType: "blog", Name: "Articles"}
+	podcastCollection := model.Collection{ChannelID: channel.ID, ContentType: "podcast", Name: "Episodes"}
+	videoCollection := model.Collection{ChannelID: channel.ID, ContentType: "video", Name: "Videos"}
+	for _, collection := range []*model.Collection{&blogCollection, &podcastCollection, &videoCollection} {
+		if err := db.Create(collection).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	blogPost := model.Post{UserID: creator.UUID, ChannelID: &channel.ID, CollectionID: &blogCollection.ID, Title: "Unified blog", Content: "body", Status: "published", Visibility: "public"}
+	if err := db.Create(&blogPost).Error; err != nil {
+		t.Fatal(err)
+	}
+	podcastPost := model.Post{UserID: creator.UUID, ChannelID: &channel.ID, Title: "Unified podcast", Content: "shownotes", Status: "published", Visibility: "public"}
+	if err := db.Create(&podcastPost).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.PostCollection{PostID: podcastPost.ID, CollectionID: podcastCollection.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	episode := model.PodcastEpisode{PostID: podcastPost.ID, ChannelID: channel.ID, AudioURL: "https://example.com/episode.mp3"}
+	if err := db.Create(&episode).Error; err != nil {
+		t.Fatal(err)
+	}
+	video := model.Video{UserID: creator.UUID, ChannelID: &channel.ID, Title: "Unified video", StorageType: "external", VideoURL: "https://example.com/video", Status: "published", Visibility: "public"}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.VideoCollection{VideoID: video.ID, CollectionID: videoCollection.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	return blogPost, episode, video
+}
+
+func TestChannelSubscriptionIncludesBlogPodcastAndVideoUpdates(t *testing.T) {
+	service, db, viewer, creator, channel := newUnifiedSubscriptionFixture(t)
+	blogPost, episode, video := seedUnifiedChannelUpdates(t, db, creator, channel)
+	source := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Hash: "unified-channel-source", Title: channel.Name}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(viewer, FeedQuery{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 3 || len(items) != 3 {
+		t.Fatalf("expected three module updates, total=%d items=%#v", total, items)
+	}
+	assertUnifiedUpdates(t, items, blogPost.ID, episode.ID, video.ID)
+}
+
+func TestFollowingUserIncludesUpdatesFromAllOwnedChannels(t *testing.T) {
+	service, db, viewer, creator, firstChannel := newUnifiedSubscriptionFixture(t)
+	blogPost, episode, _ := seedUnifiedChannelUpdates(t, db, creator, firstChannel)
+	secondChannel := model.Channel{UserID: &creator.UUID, Name: "Second Channel", Slug: "second-channel"}
+	if err := db.Create(&secondChannel).Error; err != nil {
+		t.Fatal(err)
+	}
+	videoCollection := model.Collection{ChannelID: secondChannel.ID, ContentType: "video", Name: "Second Videos"}
+	if err := db.Create(&videoCollection).Error; err != nil {
+		t.Fatal(err)
+	}
+	video := model.Video{UserID: creator.UUID, ChannelID: &secondChannel.ID, Title: "Second video", StorageType: "external", VideoURL: "https://example.com/second", Status: "published", Visibility: "public"}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.VideoCollection{VideoID: video.ID, CollectionID: videoCollection.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	source := model.FeedSource{SourceType: "internal_user", SourceID: &creator.UUID, Hash: "unified-user-source", Title: creator.Username}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(viewer, FeedQuery{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 4 || len(items) != 4 {
+		t.Fatalf("expected all updates from all owned channels, total=%d items=%#v", total, items)
+	}
+	assertUnifiedUpdates(t, items, blogPost.ID, episode.ID, video.ID)
+}
+
+func assertUnifiedUpdates(t *testing.T, items []TimelineItemDTO, blogPostID, episodeID, videoID uuid.UUID) {
+	t.Helper()
+	var foundBlog, foundPodcast, foundVideo bool
+	for _, item := range items {
+		foundBlog = foundBlog || item.Post != nil && item.Post.ID == blogPostID
+		foundPodcast = foundPodcast || item.PodcastEpisode != nil && item.PodcastEpisode.ID == episodeID
+		foundVideo = foundVideo || item.Video != nil && item.Video.ID == videoID
+	}
+	if !foundBlog || !foundPodcast || !foundVideo {
+		t.Fatalf("missing unified updates: blog=%v podcast=%v video=%v items=%#v", foundBlog, foundPodcast, foundVideo, items)
+	}
+}
+
 func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20})
@@ -202,7 +334,7 @@ func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 	}
 }
 
-func TestGetSubscribedBlogFeedExcludesExternalAndNonBlogContent(t *testing.T) {
+func TestGetSubscribedBlogFeedExcludesExternalAndPodcastContent(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	pagedPostQueryHadLimit := false
 	pagedPostQueryUsedDistinct := false
@@ -220,16 +352,19 @@ func TestGetSubscribedBlogFeedExcludesExternalAndNonBlogContent(t *testing.T) {
 	if err := db.First(&author, "uuid = ?", user.ID).Error; err != nil {
 		t.Fatalf("find author: %v", err)
 	}
-	videoChannel := model.Channel{Name: "Alice Video", Slug: "alice-video", UserID: &author.UUID, ContentType: model.ChannelContentTypeVideo}
-	if err := db.Create(&videoChannel).Error; err != nil {
-		t.Fatalf("create video channel: %v", err)
+	var channel model.Channel
+	if err := db.Where("user_id = ?", author.UUID).First(&channel).Error; err != nil {
+		t.Fatalf("find shared channel: %v", err)
 	}
-	videoPost := model.Post{UserID: author.UUID, ChannelID: &videoChannel.ID, Title: "Video channel post", Content: "body", Status: "published", Visibility: "public"}
-	if err := db.Create(&videoPost).Error; err != nil {
-		t.Fatalf("create video post: %v", err)
+	podcastPost := model.Post{UserID: author.UUID, ChannelID: &channel.ID, Title: "Podcast episode", Content: "shownotes", Status: "published", Visibility: "public"}
+	if err := db.Create(&podcastPost).Error; err != nil {
+		t.Fatalf("create podcast post: %v", err)
+	}
+	if err := db.Create(&model.PodcastEpisode{PostID: podcastPost.ID, ChannelID: channel.ID, AudioURL: "https://cdn.example.com/episode.mp3"}).Error; err != nil {
+		t.Fatalf("create podcast episode: %v", err)
 	}
 
-	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 1, ContentType: model.ChannelContentTypeBlog})
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 1, ContentType: "blog"})
 	if err != nil {
 		t.Fatalf("get subscribed blog feed: %v", err)
 	}
@@ -243,7 +378,7 @@ func TestGetSubscribedBlogFeedExcludesExternalAndNonBlogContent(t *testing.T) {
 		t.Fatal("expected blog timeline page query not to use SELECT DISTINCT")
 	}
 	seen := make(map[uuid.UUID]struct{})
-	allItems, allTotal, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 100, ContentType: model.ChannelContentTypeBlog})
+	allItems, allTotal, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 100, ContentType: "blog"})
 	if err != nil {
 		t.Fatalf("get all subscribed blog posts: %v", err)
 	}
@@ -254,8 +389,8 @@ func TestGetSubscribedBlogFeedExcludesExternalAndNonBlogContent(t *testing.T) {
 		if item.Type != "post" || item.Post == nil {
 			t.Fatalf("expected blog mode to exclude external RSS, got %#v", item)
 		}
-		if item.Post.Title == videoPost.Title {
-			t.Fatalf("expected person subscription to exclude non-blog channel post")
+		if item.Post.ID == podcastPost.ID {
+			t.Fatalf("expected blog subscription to exclude podcast episode post")
 		}
 		if _, exists := seen[item.Post.ID]; exists {
 			t.Fatalf("expected post %s to be deduplicated", item.Post.ID)
@@ -288,7 +423,7 @@ func TestSubscribedBlogFeedUsesCanonicalCollectionWithoutLegacyJoinTable(t *test
 		t.Fatalf("drop legacy post_collections table: %v", err)
 	}
 
-	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, ContentType: model.ChannelContentTypeBlog})
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, ContentType: "blog"})
 	if err != nil {
 		t.Fatalf("get collection blog feed without legacy table: %v", err)
 	}
@@ -317,7 +452,7 @@ func TestSubscribedBlogFeedExcludesPostsFromDeletedChannels(t *testing.T) {
 		t.Fatalf("soft delete channel: %v", err)
 	}
 
-	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, ContentType: model.ChannelContentTypeBlog})
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, ContentType: "blog"})
 	if err != nil {
 		t.Fatalf("get blog feed after channel deletion: %v", err)
 	}
@@ -352,8 +487,8 @@ func TestSubscribedBlogFeedFollowerVisibilityRequiresAuthorOrChannelSubscription
 			}
 
 			var channel model.Channel
-			if err := db.Where("content_type = ?", model.ChannelContentTypeBlog).First(&channel).Error; err != nil {
-				t.Fatalf("find blog channel: %v", err)
+			if err := db.Where("user_id = ?", user.ID).Order("created_at ASC, id ASC").First(&channel).Error; err != nil {
+				t.Fatalf("find shared channel: %v", err)
 			}
 			var collection model.Collection
 			if err := db.Where("channel_id = ?", channel.ID).First(&collection).Error; err != nil {
@@ -368,7 +503,7 @@ func TestSubscribedBlogFeedFollowerVisibilityRequiresAuthorOrChannelSubscription
 				t.Fatalf("create private post: %v", err)
 			}
 
-			items, _, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 100, ContentType: model.ChannelContentTypeBlog})
+			items, _, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 100, ContentType: "blog"})
 			if err != nil {
 				t.Fatalf("get subscribed blog feed: %v", err)
 			}
@@ -408,7 +543,7 @@ func TestSubscribedBlogFeedCombinesSourceAndGroupFilters(t *testing.T) {
 	items, total, err := service.GetSubscribedFeed(user, FeedQuery{
 		Page:        1,
 		PageSize:    100,
-		ContentType: model.ChannelContentTypeBlog,
+		ContentType: "blog",
 		SourceType:  "internal_user",
 		SourceID:    subscription.ID,
 		GroupID:     group.ID,
@@ -428,7 +563,7 @@ func TestSubscribedBlogFeedCombinesSourceAndGroupFilters(t *testing.T) {
 	items, total, err = service.GetSubscribedFeed(user, FeedQuery{
 		Page:        1,
 		PageSize:    100,
-		ContentType: model.ChannelContentTypeBlog,
+		ContentType: "blog",
 		SourceType:  "internal_user",
 		SourceID:    subscription.ID,
 		GroupID:     uuid.New(),
@@ -444,8 +579,8 @@ func TestSubscribedBlogFeedCombinesSourceAndGroupFilters(t *testing.T) {
 func TestSubscribedBlogFeedSortsByPublishedAt(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	var channel model.Channel
-	if err := db.Where("content_type = ?", model.ChannelContentTypeBlog).First(&channel).Error; err != nil {
-		t.Fatalf("find blog channel: %v", err)
+	if err := db.Where("user_id = ?", user.ID).Order("created_at ASC, id ASC").First(&channel).Error; err != nil {
+		t.Fatalf("find shared channel: %v", err)
 	}
 	now := time.Now().UTC()
 	latePublishedAt := now
@@ -462,7 +597,7 @@ func TestSubscribedBlogFeedSortsByPublishedAt(t *testing.T) {
 		t.Fatalf("backdate late-published post creation: %v", err)
 	}
 
-	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 10, ContentType: model.ChannelContentTypeBlog, Search: "publish-order"})
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 10, ContentType: "blog", Search: "publish-order"})
 	if err != nil {
 		t.Fatalf("get subscribed blog feed: %v", err)
 	}

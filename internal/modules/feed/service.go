@@ -36,7 +36,7 @@ func (s *Service) RecommendChannelsByMode(mode recommendation.Mode, category str
 }
 
 func (s *Service) GetPublicFeedBySourceID(feedSourceID uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {
-	if query.ContentType == model.ChannelContentTypeBlog {
+	if query.ContentType == "blog" {
 		return []TimelineItemDTO{}, 0, nil
 	}
 	page := normalizedPage(query.Page)
@@ -67,7 +67,7 @@ func (s *Service) GetPublicFeedBySourceID(feedSourceID uuid.UUID, query FeedQuer
 
 func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) ([]TimelineItemDTO, int64, error) {
 	if user.ID == uuid.Nil {
-		if query.ContentType == model.ChannelContentTypeBlog {
+		if query.ContentType == "blog" {
 			return []TimelineItemDTO{}, 0, nil
 		}
 		return s.GetPublicFeed(query)
@@ -103,7 +103,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 				collectionIDs = append(collectionIDs, *sub.FeedSource.SourceID)
 			}
 		case "external_rss":
-			if query.ContentType != model.ChannelContentTypeBlog {
+			if query.ContentType != "blog" {
 				feedSourceIDs = append(feedSourceIDs, sub.FeedSource.ID)
 			}
 		}
@@ -113,7 +113,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	channelIDs = dedupeUUIDs(channelIDs)
 	collectionIDs = dedupeUUIDs(collectionIDs)
 	feedSourceIDs = dedupeUUIDs(feedSourceIDs)
-	if query.ContentType == model.ChannelContentTypeBlog {
+	if query.ContentType == "blog" {
 		return s.getSubscribedBlogFeed(user.ID, userIDs, channelIDs, collectionIDs, query)
 	}
 	if len(userIDs) == 0 && len(channelIDs) == 0 && len(collectionIDs) == 0 && !query.HideDuplicates && strings.TrimSpace(query.Search) == "" {
@@ -149,6 +149,19 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	for _, count := range engagementCounts {
 		engagementByPostID[count.PostID] = count
 	}
+	episodes, err := s.repo.ListPodcastEpisodesByPostIDs(postIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	episodeByPostID := make(map[uuid.UUID]model.PodcastEpisode, len(episodes))
+	for _, episode := range episodes {
+		episodeByPostID[episode.PostID] = episode
+	}
+	videos, err := s.repo.ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs, query.ContentType)
+	if err != nil {
+		return nil, 0, err
+	}
+	videos = dedupeVideos(videos)
 
 	feedItems, err := s.repo.ListFeedItemsBySourceIDs(feedSourceIDs)
 	if err != nil {
@@ -161,12 +174,30 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 		return nil, 0, err
 	}
 
-	items := make([]TimelineItemDTO, 0, len(posts)+len(feedItems))
+	items := make([]TimelineItemDTO, 0, len(posts)+len(videos)+len(feedItems))
 	for i := range posts {
+		if episode, ok := episodeByPostID[posts[i].ID]; ok {
+			episode.Post = &posts[i]
+			items = append(items, TimelineItemDTO{
+				Type:           "podcast_episode",
+				PodcastEpisode: &episode,
+				PublishedAt:    postTimelinePublishedAt(posts[i]),
+				IsRead:         false,
+			})
+			continue
+		}
 		items = append(items, TimelineItemDTO{
 			Type:        "post",
 			Post:        timelinePostDTO(posts[i], engagementByPostID[posts[i].ID]),
 			PublishedAt: postTimelinePublishedAt(posts[i]),
+			IsRead:      false,
+		})
+	}
+	for i := range videos {
+		items = append(items, TimelineItemDTO{
+			Type:        "video",
+			Video:       &videos[i],
+			PublishedAt: videos[i].CreatedAt,
 			IsRead:      false,
 		})
 	}
@@ -666,6 +697,18 @@ func timelineSearchValues(item TimelineItemDTO) []string {
 			values = append(values, item.FeedItem.FeedSource.Title, item.FeedItem.FeedSource.RssURL)
 		}
 	}
+	if item.PodcastEpisode != nil && item.PodcastEpisode.Post != nil {
+		values = append(values, item.PodcastEpisode.Post.Title, item.PodcastEpisode.Post.Summary)
+		if item.PodcastEpisode.Channel != nil {
+			values = append(values, item.PodcastEpisode.Channel.Name, item.PodcastEpisode.Channel.Slug)
+		}
+	}
+	if item.Video != nil {
+		values = append(values, item.Video.Title, item.Video.Description)
+		if item.Video.Channel != nil {
+			values = append(values, item.Video.Channel.Name, item.Video.Channel.Slug)
+		}
+	}
 	return values
 }
 
@@ -685,8 +728,12 @@ func timelineTypeRank(itemType string) int {
 	switch itemType {
 	case "post":
 		return 0
-	case "feed_item":
+	case "podcast_episode":
 		return 1
+	case "video":
+		return 2
+	case "feed_item":
+		return 3
 	default:
 		return 2
 	}
@@ -698,6 +745,12 @@ func timelineItemID(item TimelineItemDTO) string {
 	}
 	if item.FeedItem != nil {
 		return item.FeedItem.ID.String()
+	}
+	if item.PodcastEpisode != nil {
+		return item.PodcastEpisode.ID.String()
+	}
+	if item.Video != nil {
+		return item.Video.ID.String()
 	}
 	return ""
 }
@@ -760,6 +813,22 @@ func dedupePosts(posts []model.Post) []model.Post {
 		}
 		seen[post.ID] = struct{}{}
 		result = append(result, post)
+	}
+	return result
+}
+
+func dedupeVideos(videos []model.Video) []model.Video {
+	seen := make(map[uuid.UUID]struct{}, len(videos))
+	result := make([]model.Video, 0, len(videos))
+	for _, video := range videos {
+		if video.ID == uuid.Nil {
+			continue
+		}
+		if _, exists := seen[video.ID]; exists {
+			continue
+		}
+		seen[video.ID] = struct{}{}
+		result = append(result, video)
 	}
 	return result
 }

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -30,7 +31,6 @@ type channelInput struct {
 	Slug        string `json:"slug"`
 	Description string `json:"description"`
 	CoverURL    string `json:"cover_url"`
-	ContentType string `json:"content_type"`
 }
 
 type collectionInput struct {
@@ -330,7 +330,7 @@ func (h *Handler) createChannel(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
 		return
 	}
-	channel, err := h.service.CreateChannel(user, req.Name, req.Slug, req.Description, req.CoverURL, req.ContentType)
+	channel, err := h.service.CreateChannel(user, req.Name, req.Slug, req.Description, req.CoverURL)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -1136,6 +1136,28 @@ func (h *Handler) updatePost(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "collection_ids is no longer supported"))
 		return
 	}
+	effectiveStatus := post.Status
+	if req.Status == "published" || req.Status == "draft" {
+		effectiveStatus = req.Status
+		updates["status"] = req.Status
+	}
+	effectiveChannelID := uuid.Nil
+	if post.ChannelID != nil {
+		effectiveChannelID = *post.ChannelID
+	}
+	if req.ChannelID != nil {
+		channelID, err := uuid.Parse(strings.TrimSpace(*req.ChannelID))
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid channel UUID"))
+			return
+		}
+		effectiveChannelID = channelID
+		updates["channel_id"] = channelID
+	}
+	effectiveCollectionIDs := make([]uuid.UUID, 0, 1)
+	if post.CollectionID != nil {
+		effectiveCollectionIDs = append(effectiveCollectionIDs, *post.CollectionID)
+	}
 	if req.CollectionID != nil {
 		collectionID, err := uuid.Parse(strings.TrimSpace(*req.CollectionID))
 		if err != nil {
@@ -1155,15 +1177,12 @@ func (h *Handler) updatePost(c *gin.Context) {
 			httpx.Error(c, apperr.Forbidden("blog.collection_forbidden", "You don't have permission to assign this collection"))
 			return
 		}
-		if req.ChannelID != nil {
-			channelID, err := uuid.Parse(strings.TrimSpace(*req.ChannelID))
-			if err != nil || channelID != collection.ChannelID {
-				httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Collection does not belong to selected channel"))
-				return
-			}
+		effectiveCollectionIDs = []uuid.UUID{collection.ID}
+		if effectiveChannelID == uuid.Nil {
+			effectiveChannelID = collection.ChannelID
 		}
 		updates["collection_id"] = collection.ID
-		updates["channel_id"] = collection.ChannelID
+		updates["channel_id"] = effectiveChannelID
 		if post.CollectionID == nil || *post.CollectionID != collection.ID {
 			var maxPosition int
 			if err := h.service.db.Model(&model.Post{}).Where("collection_id = ?", collection.ID).Select("COALESCE(MAX(collection_position), -1)").Scan(&maxPosition).Error; err != nil {
@@ -1172,14 +1191,12 @@ func (h *Handler) updatePost(c *gin.Context) {
 			}
 			updates["collection_position"] = maxPosition + 1
 		}
-	} else if post.CollectionID == nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "collection_id is required"))
+	}
+	if err := studioapi.NewService(h.service.db).ValidateContentScope(user.ID, effectiveChannelID, studioapi.ModuleBlog, effectiveCollectionIDs, effectiveStatus == "published"); err != nil {
+		httpx.Error(c, err)
 		return
 	}
 
-	if req.Status == "published" || req.Status == "draft" {
-		updates["status"] = req.Status
-	}
 	if req.Status == "published" && post.PublishedAt == nil {
 		now := time.Now().UTC()
 		updates["published_at"] = now
@@ -1573,7 +1590,7 @@ func buildBlogDraftResponse(draft model.BlogDraft) blogDraftResponse {
 
 func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collection, error) {
 	var collection model.Collection
-	err := db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
+	err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channelID, "blog", true).First(&collection).Error
 	if err == nil {
 		return &collection, nil
 	}
@@ -1583,6 +1600,7 @@ func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collectio
 
 	collection = model.Collection{
 		ChannelID:   channelID,
+		ContentType: "blog",
 		Name:        ensureDefaultCollectionName(),
 		Description: "默认合集",
 		IsDefault:   true,

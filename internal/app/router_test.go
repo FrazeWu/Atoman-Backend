@@ -387,11 +387,11 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	channel := model.Channel{UserID: &user.UUID, Name: "Alice", Slug: "alice", IsDefault: true}
+	channel := model.Channel{UserID: &user.UUID, Name: "Alice", Slug: "alice"}
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
-	collection := model.Collection{ChannelID: channel.ID, Name: "默认专栏", IsDefault: true}
+	collection := model.Collection{ChannelID: channel.ID, ContentType: "blog", Name: "默认专栏", IsDefault: true}
 	if err := db.Create(&collection).Error; err != nil {
 		t.Fatalf("create default collection: %v", err)
 	}

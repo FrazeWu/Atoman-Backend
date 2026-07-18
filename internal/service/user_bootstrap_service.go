@@ -36,9 +36,9 @@ func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string)
 		return err
 	}
 	for _, contentType := range []string{
-		model.ChannelContentTypeBlog,
-		model.ChannelContentTypePodcast,
-		model.ChannelContentTypeVideo,
+		"blog",
+		"podcast",
+		"video",
 	} {
 		if err := s.ensureDefaultCollectionForChannel(userID, channel.ID, contentType); err != nil {
 			return err
@@ -107,8 +107,6 @@ func (s *UserBootstrapService) ensureStudioChannel(userID uuid.UUID, username st
 		Name:        name,
 		Slug:        slug,
 		Description: defaultChannelDescription,
-		ContentType: model.ChannelContentTypeBlog,
-		IsDefault:   true,
 	}
 	if err := s.db.Create(&channel).Error; err != nil {
 		return nil, err

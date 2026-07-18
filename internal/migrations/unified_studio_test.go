@@ -28,6 +28,12 @@ func seedUnifiedStudioFixture(t *testing.T, db *gorm.DB) unifiedStudioFixture {
 		&model.PodcastEpisode{},
 		&model.Video{},
 	)
+	if err := db.Exec("ALTER TABLE channels ADD COLUMN `content_type` varchar(16) NOT NULL DEFAULT 'blog'").Error; err != nil {
+		t.Fatalf("add legacy channel content type: %v", err)
+	}
+	if err := db.Exec("ALTER TABLE channels ADD COLUMN `is_default` boolean NOT NULL DEFAULT false").Error; err != nil {
+		t.Fatalf("add legacy channel default flag: %v", err)
+	}
 
 	user := model.User{
 		Username: "studio-migration",
@@ -41,22 +47,28 @@ func seedUnifiedStudioFixture(t *testing.T, db *gorm.DB) unifiedStudioFixture {
 
 	createdAt := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
 	channels := map[string]model.Channel{
-		model.ChannelContentTypeBlog: {
+		"blog": {
 			Base: model.Base{CreatedAt: createdAt}, UserID: &user.UUID,
-			Name: "Studio Blog", Slug: "studio-blog", ContentType: model.ChannelContentTypeBlog, IsDefault: true,
+			Name: "Studio Blog", Slug: "studio-blog",
 		},
-		model.ChannelContentTypePodcast: {
+		"podcast": {
 			Base: model.Base{CreatedAt: createdAt.Add(time.Hour)}, UserID: &user.UUID,
-			Name: "Studio Podcast", Slug: "studio-podcast", ContentType: model.ChannelContentTypePodcast, IsDefault: true,
+			Name: "Studio Podcast", Slug: "studio-podcast",
 		},
-		model.ChannelContentTypeVideo: {
+		"video": {
 			Base: model.Base{CreatedAt: createdAt.Add(2 * time.Hour)}, UserID: &user.UUID,
-			Name: "Studio Video", Slug: "studio-video", ContentType: model.ChannelContentTypeVideo, IsDefault: true,
+			Name: "Studio Video", Slug: "studio-video",
 		},
 	}
 	for contentType, channel := range channels {
 		if err := db.Create(&channel).Error; err != nil {
 			t.Fatalf("create %s channel: %v", contentType, err)
+		}
+		if err := db.Table("channels").Where("id = ?", channel.ID).Updates(map[string]any{
+			"content_type": contentType,
+			"is_default":   true,
+		}).Error; err != nil {
+			t.Fatalf("set %s legacy channel fields: %v", contentType, err)
 		}
 		channels[contentType] = channel
 		if err := db.Create(&legacyUserDefaultChannel{
@@ -72,7 +84,7 @@ func seedUnifiedStudioFixture(t *testing.T, db *gorm.DB) unifiedStudioFixture {
 		}
 	}
 
-	blogChannel := channels[model.ChannelContentTypeBlog]
+	blogChannel := channels["blog"]
 	post := model.Post{
 		UserID: user.UUID, ChannelID: &blogChannel.ID,
 		Title: "Article", Content: "body", Status: "published", Visibility: "public",
@@ -81,7 +93,7 @@ func seedUnifiedStudioFixture(t *testing.T, db *gorm.DB) unifiedStudioFixture {
 		t.Fatalf("create post: %v", err)
 	}
 
-	podcastChannel := channels[model.ChannelContentTypePodcast]
+	podcastChannel := channels["podcast"]
 	episodePost := model.Post{
 		UserID: user.UUID, ChannelID: &podcastChannel.ID,
 		Title: "Episode", Content: "shownotes", Status: "published", Visibility: "public",
@@ -97,7 +109,7 @@ func seedUnifiedStudioFixture(t *testing.T, db *gorm.DB) unifiedStudioFixture {
 		t.Fatalf("create episode: %v", err)
 	}
 
-	videoChannel := channels[model.ChannelContentTypeVideo]
+	videoChannel := channels["video"]
 	video := model.Video{
 		ChannelID: &videoChannel.ID, UserID: user.UUID,
 		Title: "Video", StorageType: "external", VideoURL: "https://example.com/video", Status: "published", Visibility: "public",
@@ -173,7 +185,7 @@ func TestRunUnifiedStudioMigrationSelectsOneCurrentChannelPerUser(t *testing.T) 
 	if err := db.First(&state, "user_id = ?", fixture.user.UUID).Error; err != nil {
 		t.Fatalf("load studio state: %v", err)
 	}
-	blogChannel := fixture.channels[model.ChannelContentTypeBlog]
+	blogChannel := fixture.channels["blog"]
 	if state.ChannelID == nil || *state.ChannelID != blogChannel.ID {
 		t.Fatalf("expected blog channel %s, got %#v", blogChannel.ID, state.ChannelID)
 	}
@@ -220,6 +232,27 @@ func TestRunUnifiedStudioMigrationDropsLegacyDefaultChannelSelections(t *testing
 	}
 }
 
+func TestRunUnifiedStudioMigrationDropsLegacyChannelModuleColumns(t *testing.T) {
+	db := testdb.Open(t)
+	seedUnifiedStudioFixture(t, db)
+
+	if err := RunUnifiedStudioMigration(db); err != nil {
+		t.Fatalf("run migration: %v", err)
+	}
+	contentTypeExists := db.Migrator().HasColumn("channels", "content_type")
+	isDefaultExists := db.Migrator().HasColumn("channels", "is_default")
+	if contentTypeExists || isDefaultExists {
+		columns, _ := db.Migrator().ColumnTypes("channels")
+		names := make([]string, 0, len(columns))
+		for _, column := range columns {
+			names = append(names, column.Name())
+		}
+		var ddl string
+		_ = db.Raw("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'channels'").Scan(&ddl).Error
+		t.Fatalf("expected legacy channel columns to be dropped, columns=%v ddl=%s", names, ddl)
+	}
+}
+
 func TestRunUnifiedStudioMigrationReplacesSingleDefaultCollectionIndex(t *testing.T) {
 	db := testdb.Open(t)
 	fixture := seedUnifiedStudioFixture(t, db)
@@ -231,8 +264,8 @@ func TestRunUnifiedStudioMigrationReplacesSingleDefaultCollectionIndex(t *testin
 	if err := RunUnifiedStudioMigration(db); err != nil {
 		t.Fatalf("run migration: %v", err)
 	}
-	channel := fixture.channels[model.ChannelContentTypeBlog]
-	for _, contentType := range []string{model.ChannelContentTypePodcast, model.ChannelContentTypeVideo} {
+	channel := fixture.channels["blog"]
+	for _, contentType := range []string{"podcast", "video"} {
 		collection := model.Collection{
 			ChannelID: channel.ID, ContentType: contentType,
 			Name: "Default " + contentType, IsDefault: true,

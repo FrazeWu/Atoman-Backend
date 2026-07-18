@@ -188,7 +188,7 @@ func TestBootstrapOwnerFromEnvCreatesOwnerWhenConfigured(t *testing.T) {
 	if state.ChannelID == nil || *state.ChannelID != channels[0].ID {
 		t.Fatalf("expected current channel %s, got %#v", channels[0].ID, state.ChannelID)
 	}
-	for _, contentType := range []string{model.ChannelContentTypeBlog, model.ChannelContentTypePodcast, model.ChannelContentTypeVideo} {
+	for _, contentType := range []string{"blog", "podcast", "video"} {
 		var count int64
 		if err := db.Model(&model.Collection{}).Where("channel_id = ? AND content_type = ? AND is_default = ?", channels[0].ID, contentType, true).Count(&count).Error; err != nil {
 			t.Fatalf("count %s default collection: %v", contentType, err)

@@ -20,6 +20,7 @@ import (
 	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/modules/recommendation"
+	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -378,14 +379,13 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
-		if model.NormalizeChannelContentType(channel.ContentType) != model.ChannelContentTypePodcast {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "channel content type mismatch"})
-			return
-		}
-
 		status := input.Status
 		if status == "" {
 			status = "draft"
+		}
+		if err := studioapi.NewService(db).ValidateContentScope(userID, chID, studioapi.ModulePodcast, input.CollectionIDs, status == "published"); err != nil {
+			httpx.Error(c, err)
+			return
 		}
 		seasonNum := input.SeasonNumber
 		if seasonNum < 1 {
@@ -458,7 +458,7 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 
 		var ep model.PodcastEpisode
-		if err := db.Preload("Post").First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
+		if err := db.Preload("Post").Preload("Post.Collections").First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
 			return
 		}
@@ -480,6 +480,24 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		effectiveStatus := ep.Post.Status
+		if input.Status != nil {
+			effectiveStatus = *input.Status
+		}
+		effectiveCollectionIDs := input.CollectionIDs
+		if input.CollectionIDs == nil {
+			effectiveCollectionIDs = make([]uuid.UUID, 0, len(ep.Post.Collections)+1)
+			for _, collection := range ep.Post.Collections {
+				effectiveCollectionIDs = append(effectiveCollectionIDs, collection.ID)
+			}
+			if ep.Post.CollectionID != nil {
+				effectiveCollectionIDs = append(effectiveCollectionIDs, *ep.Post.CollectionID)
+			}
+		}
+		if err := studioapi.NewService(db).ValidateContentScope(userID, ep.ChannelID, studioapi.ModulePodcast, effectiveCollectionIDs, effectiveStatus == "published"); err != nil {
+			httpx.Error(c, err)
 			return
 		}
 

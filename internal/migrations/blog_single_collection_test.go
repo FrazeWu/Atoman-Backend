@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestRunBlogSingleCollectionMigrationBackfillsAndRemovesLegacyTables(t *testing.T) {
+func TestRunBlogSingleCollectionMigrationBackfillsAndPreservesCollectionLinks(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
@@ -26,12 +26,12 @@ func TestRunBlogSingleCollectionMigrationBackfillsAndRemovesLegacyTables(t *test
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	channel := model.Channel{UserID: &user.UUID, Name: "Migration", Slug: "migration", ContentType: "blog", IsDefault: true}
+	channel := model.Channel{UserID: &user.UUID, Name: "Migration", Slug: "migration"}
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
-	defaultCollection := model.Collection{ChannelID: channel.ID, CreatedBy: &user.UUID, Name: "默认专栏", IsDefault: true}
-	secondaryCollection := model.Collection{ChannelID: channel.ID, CreatedBy: &user.UUID, Name: "Secondary"}
+	defaultCollection := model.Collection{ChannelID: channel.ID, ContentType: "blog", CreatedBy: &user.UUID, Name: "默认专栏", IsDefault: true}
+	secondaryCollection := model.Collection{ChannelID: channel.ID, ContentType: "blog", CreatedBy: &user.UUID, Name: "Secondary"}
 	if err := db.Create(&defaultCollection).Error; err != nil {
 		t.Fatalf("create default collection: %v", err)
 	}
@@ -90,7 +90,10 @@ func TestRunBlogSingleCollectionMigrationBackfillsAndRemovesLegacyTables(t *test
 	if migratedUnassigned.CollectionID == nil || *migratedUnassigned.CollectionID != defaultCollection.ID {
 		t.Fatalf("expected default collection, got %#v", migratedUnassigned.CollectionID)
 	}
-	if db.Migrator().HasTable("post_collections") || db.Migrator().HasTable("blog_post_ratings") {
-		t.Fatal("expected legacy collection and rating tables to be removed")
+	if !db.Migrator().HasTable("post_collections") {
+		t.Fatal("expected collection links to remain available for podcast episodes")
+	}
+	if db.Migrator().HasTable("blog_post_ratings") {
+		t.Fatal("expected legacy rating table to be removed")
 	}
 }

@@ -277,7 +277,7 @@ func TestContentResolversAllowChannelSubscribersToSeePublishedFollowersContent(t
 	registry, db := newTargetTestRegistry(t)
 	owner := createTargetTestUser(t, db, "subscriber-owner")
 	subscriber := createTargetTestUser(t, db, "subscriber")
-	channel := model.Channel{UserID: &owner.UUID, Name: "followers", Slug: "followers", ContentType: model.ChannelContentTypeBlog}
+	channel := model.Channel{UserID: &owner.UUID, Name: "followers", Slug: "followers"}
 	require.NoError(t, db.Create(&channel).Error)
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte("internal_channel:"+channel.ID.String())))
 	source := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Provider: "internal", Category: "blog", Hash: hash}
