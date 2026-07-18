@@ -28,6 +28,7 @@ func SetupUserRoutes(router *gin.Engine, db *gorm.DB) {
 		// Public routes — lookup by username (must come before /:id routes)
 		users.GET("/search", middleware.OptionalAuthMiddleware(), SearchUsers(db))
 		users.GET("/by-username/:username", GetUserByUsername(db))
+		users.GET("/blocked", middleware.AuthMiddleware(), ListBlockedUsers(db))
 		users.GET("/:id/profile", GetUserProfile(db))
 		users.GET("/:id/followers", GetUserFollowers(db))
 		users.GET("/:id/following", GetUserFollowing(db))
@@ -45,6 +46,8 @@ func SetupUserRoutes(router *gin.Engine, db *gorm.DB) {
 
 			protected.POST("/:id/follow", FollowUser(db))
 			protected.DELETE("/:id/follow", UnfollowUser(db))
+			protected.POST("/:id/block", BlockUser(db))
+			protected.DELETE("/:id/block", UnblockUser(db))
 		}
 
 		owner := users.Group("")
@@ -591,6 +594,69 @@ func UnfollowUser(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	}
+}
+
+// ListBlockedUsers returns users blocked by the current user.
+func ListBlockedUsers(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("user_id").(uuid.UUID)
+		var blocks []model.UserBlock
+		if err := db.Preload("Blocked").Where("blocker_id = ?", userID).Order("created_at DESC").Find(&blocks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch blocked users"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": blocks, "message": "ok"})
+	}
+}
+
+// BlockUser blocks a user for private messages.
+func BlockUser(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("user_id").(uuid.UUID)
+		targetID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user UUID"})
+			return
+		}
+		if userID == targetID {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "You cannot block yourself"})
+			return
+		}
+
+		var target model.User
+		if err := db.Where("uuid = ?", targetID).First(&target).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find user"})
+			return
+		}
+
+		block := model.UserBlock{BlockerID: userID, BlockedID: target.UUID}
+		if err := db.Where(model.UserBlock{BlockerID: userID, BlockedID: target.UUID}).FirstOrCreate(&block).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to block user"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
+	}
+}
+
+// UnblockUser removes a private-message block.
+func UnblockUser(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("user_id").(uuid.UUID)
+		targetID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user UUID"})
+			return
+		}
+		if err := db.Where("blocker_id = ? AND blocked_id = ?", userID, targetID).Delete(&model.UserBlock{}).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to unblock user"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "ok"})
 	}
 }

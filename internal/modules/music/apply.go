@@ -2,6 +2,7 @@ package music
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -332,6 +333,67 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		}
 		if result.RowsAffected == 0 {
 			return apperr.NotFound("music.album_not_found", "Album not found")
+		}
+		return nil
+	case "merge_album":
+		if edit.EntityID == nil {
+			return apperr.BadRequest("validation.invalid_request", "entity_id is required")
+		}
+		var changes struct {
+			SourceAlbumID string `json:"source_album_id"`
+		}
+		if err := json.Unmarshal([]byte(edit.ChangesJSON), &changes); err != nil {
+			return apperr.BadRequest("validation.invalid_request", "changes are not valid JSON")
+		}
+		sourceAlbumID, err := uuid.Parse(changes.SourceAlbumID)
+		if err != nil || sourceAlbumID == *edit.EntityID {
+			return apperr.BadRequest("validation.invalid_request", "source_album_id must be a different valid UUID")
+		}
+
+		var target, source model.Album
+		if err := tx.First(&target, "id = ?", *edit.EntityID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("music.album_not_found", "Target album not found")
+			}
+			return err
+		}
+		if err := tx.First(&source, "id = ?", sourceAlbumID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("music.album_not_found", "Source album not found")
+			}
+			return err
+		}
+		if target.EntryStatus == "closed" || target.Status == "closed" || source.EntryStatus == "closed" || source.Status == "closed" {
+			return apperr.Unprocessable("music.album_not_open", "Both albums must be available")
+		}
+
+		var sourceArtists []model.Artist
+		if err := tx.Model(&source).Association("Artists").Find(&sourceArtists); err != nil {
+			return err
+		}
+		var targetArtists []model.Artist
+		if err := tx.Model(&target).Association("Artists").Find(&targetArtists); err != nil {
+			return err
+		}
+		targetArtistIDs := make(map[uuid.UUID]struct{}, len(targetArtists))
+		for _, artist := range targetArtists {
+			targetArtistIDs[artist.ID] = struct{}{}
+		}
+		for _, artist := range sourceArtists {
+			if _, exists := targetArtistIDs[artist.ID]; !exists {
+				if err := tx.Model(&target).Association("Artists").Append(&artist); err != nil {
+					return err
+				}
+			}
+		}
+		if err := tx.Model(&source).Association("Artists").Clear(); err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Song{}).Where("album_id = ?", source.ID).Update("album_id", target.ID).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&source).Updates(map[string]any{"entry_status": "closed", "status": "closed"}).Error; err != nil {
+			return err
 		}
 		return nil
 	default:

@@ -46,6 +46,7 @@ func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		p.POST("/upload-audio", middleware.AuthMiddleware(), UploadPodcastAudio(s3Client))
 		p.POST("/upload-cover", middleware.AuthMiddleware(), UploadPodcastCover(s3Client))
 	}
+	SetupPodcastCreatorRoutes(p, db)
 	router.GET("/api/v1/channels/:slug/rss/podcast", GetPodcastRSS(db))
 }
 

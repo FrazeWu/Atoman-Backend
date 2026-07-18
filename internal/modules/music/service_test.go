@@ -766,6 +766,76 @@ func TestMergeArtistsMovesAlbumRelationsAndAliasesToTarget(t *testing.T) {
 	}
 }
 
+func TestApproveAlbumMergeMovesSongsAndClosesSource(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	moderatorModel := model.User{Username: "album-merge-mod", Email: "album-merge-mod@example.com", Password: "hash", Role: authctx.RoleModerator, IsActive: true}
+	if err := db.Create(&moderatorModel).Error; err != nil {
+		t.Fatalf("create moderator: %v", err)
+	}
+	moderator := authctx.CurrentUser{ID: moderatorModel.UUID, Username: moderatorModel.Username, Role: authctx.RoleModerator}
+	artist := model.Artist{Name: "Album Merge Artist", EntryStatus: "open"}
+	target := model.Album{Title: "Target Album", EntryStatus: "open", Status: "open"}
+	source := model.Album{Title: "Source Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target album: %v", err)
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source album: %v", err)
+	}
+	if err := db.Model(&target).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("link target artist: %v", err)
+	}
+	if err := db.Model(&source).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("link source artist: %v", err)
+	}
+	song := model.Song{Title: "Migrated Song", AlbumID: &source.ID, Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
+		Type:       "merge_album",
+		EntityType: "album",
+		EntityID:   &target.ID,
+		Changes:    map[string]any{"source_album_id": source.ID.String()},
+		Reason:     "merge duplicate albums",
+	})
+	if err != nil {
+		t.Fatalf("submit album merge: %v", err)
+	}
+	if edit.Status != "open" {
+		t.Fatalf("expected open merge edit, got %#v", edit)
+	}
+	if _, err := svc.ApproveEdit(moderator, edit.ID, "approved"); err != nil {
+		t.Fatalf("approve album merge: %v", err)
+	}
+
+	var refreshedSource model.Album
+	if err := db.First(&refreshedSource, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("load source album: %v", err)
+	}
+	if refreshedSource.EntryStatus != "closed" || refreshedSource.Status != "closed" {
+		t.Fatalf("expected source album closed, got %#v", refreshedSource)
+	}
+	var refreshedSong model.Song
+	if err := db.First(&refreshedSong, "id = ?", song.ID).Error; err != nil {
+		t.Fatalf("load migrated song: %v", err)
+	}
+	if refreshedSong.AlbumID == nil || *refreshedSong.AlbumID != target.ID {
+		t.Fatalf("expected song moved to target album, got %#v", refreshedSong.AlbumID)
+	}
+	var artistLinks []model.AlbumArtist
+	if err := db.Where("album_id = ?", target.ID).Find(&artistLinks).Error; err != nil {
+		t.Fatalf("load target artist links: %v", err)
+	}
+	if len(artistLinks) != 1 || artistLinks[0].ArtistID != artist.ID {
+		t.Fatalf("expected one target artist link, got %#v", artistLinks)
+	}
+}
+
 func TestSubmitEditAutoAppliesCreateAlbumForMainWikiFlow(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 

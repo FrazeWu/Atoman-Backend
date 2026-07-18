@@ -224,6 +224,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.ChannelBookmark{},
 		&model.SiteSetting{},
 		&model.FeedSource{},
+		&model.OnboardingFeedRecommendation{},
 		&model.Subscription{},
 		&model.SubscriptionGroup{},
 		&model.FeedItem{},
@@ -286,6 +287,10 @@ func migrateSchema(db *gorm.DB) error {
 
 	if err := db.AutoMigrate(models...); err != nil {
 		return err
+	}
+
+	if err := migrations.RunUserBlocksMigration(db); err != nil {
+		return fmt.Errorf("user blocks migration: %w", err)
 	}
 
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {

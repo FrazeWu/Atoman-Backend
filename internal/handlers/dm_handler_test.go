@@ -44,6 +44,7 @@ func newDMTestRouterWithS3(t *testing.T, s3Client *s3.S3) (*gin.Engine, *gorm.DB
 		&model.User{},
 		&model.UserSettings{},
 		&model.Follow{},
+		&model.UserBlock{},
 		&model.DMConversation{},
 		&model.DMMessage{},
 	); err != nil {
@@ -72,6 +73,65 @@ func newDMTestRouterWithS3(t *testing.T, s3Client *s3.S3) (*gin.Engine, *gorm.DB
 	r := gin.New()
 	SetupDMRoutes(r, db, nil, s3Client)
 	return r, db, sender, recipient
+}
+
+func TestSendMessageIsRejectedWhenEitherUserBlockedTheOther(t *testing.T) {
+	r, db, sender, recipient := newDMTestRouter(t)
+
+	if err := db.Create(&model.UserBlock{BlockerID: recipient.UUID, BlockedID: sender.UUID}).Error; err != nil {
+		t.Fatalf("create block: %v", err)
+	}
+	body := bytes.NewBufferString(`{"content":"hello"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/dm/conversations/"+recipient.Username, body)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected blocked send 403, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "dm_blocked") {
+		t.Fatalf("expected dm_blocked error, got %s", w.Body.String())
+	}
+	var messages int64
+	if err := db.Model(&model.DMMessage{}).Count(&messages).Error; err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	if messages != 0 {
+		t.Fatalf("expected no messages after blocked send, got %d", messages)
+	}
+}
+
+func TestListConversationsReportsBidirectionalBlockedState(t *testing.T) {
+	r, db, sender, recipient := newDMTestRouter(t)
+	conversation := model.DMConversation{ParticipantA: sender.UUID, ParticipantB: recipient.UUID}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := db.Create(&model.UserBlock{BlockerID: recipient.UUID, BlockedID: sender.UUID}).Error; err != nil {
+		t.Fatalf("create block: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations", nil)
+	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data []struct {
+			OtherUserID string `json:"other_user_id"`
+			IsBlocked   bool   `json:"is_blocked"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode conversations: %v", err)
+	}
+	if len(response.Data) != 1 || response.Data[0].OtherUserID != recipient.UUID.String() || !response.Data[0].IsBlocked {
+		t.Fatalf("expected blocked conversation, got %s", w.Body.String())
+	}
 }
 
 func dmAuthHeader(t *testing.T, user model.User) string {

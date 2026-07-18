@@ -541,6 +541,91 @@ func TestSetupUserRoutesDoesNotRegisterLegacyBlogExplore(t *testing.T) {
 	}
 }
 
+func TestUserBlockRoutesCreateListAndDeleteBlock(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.UserBlock{})
+
+	actor := model.User{Username: "blocker", Email: "blocker@example.com", Password: "hash", Role: "user", IsActive: true}
+	target := model.User{Username: "blocked", Email: "blocked@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&actor).Error; err != nil {
+		t.Fatalf("create actor: %v", err)
+	}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("user_id", actor.UUID)
+		c.Next()
+	})
+	r.GET("/users/blocked", ListBlockedUsers(db))
+	r.POST("/users/:id/block", BlockUser(db))
+	r.DELETE("/users/:id/block", UnblockUser(db))
+
+	req := httptest.NewRequest(http.MethodPost, "/users/"+target.UUID.String()+"/block", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected block 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/users/blocked", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var listResponse struct {
+		Data []struct {
+			BlockedID string `json:"blocked_id"`
+			Blocked   struct {
+				Username string `json:"username"`
+			} `json:"blocked"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &listResponse); err != nil {
+		t.Fatalf("decode block list: %v", err)
+	}
+	if len(listResponse.Data) != 1 || listResponse.Data[0].BlockedID != target.UUID.String() || listResponse.Data[0].Blocked.Username != target.Username {
+		t.Fatalf("unexpected block list: %s", w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/users/"+target.UUID.String()+"/block", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected unblock 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var count int64
+	if err := db.Model(&model.UserBlock{}).Count(&count).Error; err != nil {
+		t.Fatalf("count blocks: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no blocks after delete, got %d", count)
+	}
+}
+
+func TestBlockUserRejectsSelf(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.UserBlock{})
+	actor := model.User{Username: "self-blocker", Email: "self-blocker@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&actor).Error; err != nil {
+		t.Fatalf("create actor: %v", err)
+	}
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("user_id", actor.UUID); c.Next() })
+	r.POST("/users/:id/block", BlockUser(db))
+
+	req := httptest.NewRequest(http.MethodPost, "/users/"+actor.UUID.String()+"/block", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected self block 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestPutMyDefaultChannelPersistsPerModuleSelection(t *testing.T) {
 	r, db, user := newUserSettingsTestRouter(t)
 

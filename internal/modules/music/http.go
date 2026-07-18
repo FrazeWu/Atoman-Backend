@@ -175,6 +175,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.PATCH("/artists/:artistId", h.updateArtist)
 	group.GET("/albums", h.listAlbums)
 	group.GET("/albums/:albumId", h.getAlbum)
+	group.POST("/albums/:albumId/merge", h.submitAlbumMerge)
 	group.GET("/bookmarks/artists", h.listArtistBookmarks)
 	group.POST("/bookmarks/artists", h.createArtistBookmark)
 	group.DELETE("/bookmarks/artists/:artistId", h.deleteArtistBookmark)
@@ -1245,6 +1246,31 @@ func (h *Handler) submitEdit(c *gin.Context) {
 	}
 
 	edit, err := h.service.SubmitEdit(user, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, edit)
+}
+
+func (h *Handler) submitAlbumMerge(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+
+	targetAlbumID, err := parseMusicID(c.Param("albumId"), "albumId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var req AlbumMergeRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	edit, err := h.service.SubmitAlbumMerge(user, targetAlbumID, req.SourceAlbumID)
 	if err != nil {
 		httpx.Error(c, err)
 		return

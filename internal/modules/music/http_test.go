@@ -476,6 +476,40 @@ func TestRegisterRoutesSubmitEditReturnsCreatedAppliedEditForMainWikiFlow(t *tes
 	}
 }
 
+func TestRegisterRoutesCreatesAlbumMergeEdit(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	target := model.Album{Title: "HTTP Target Album", EntryStatus: "open", Status: "open"}
+	source := model.Album{Title: "HTTP Source Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target album: %v", err)
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source album: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+	body := `{"source_album_id":"` + source.ID.String() + `"}`
+	w := performMusicJSONRequest(t, r, http.MethodPost, "/api/v1/music/albums/"+target.ID.String()+"/merge", body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Data model.MusicEdit `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Data.Type != "merge_album" || resp.Data.EntityType != "album" || resp.Data.EntityID == nil || *resp.Data.EntityID != target.ID || resp.Data.Status != "open" {
+		t.Fatalf("unexpected album merge edit: %#v", resp.Data)
+	}
+	var changes map[string]string
+	if err := json.Unmarshal([]byte(resp.Data.ChangesJSON), &changes); err != nil {
+		t.Fatalf("decode changes: %v", err)
+	}
+	if changes["source_album_id"] != source.ID.String() {
+		t.Fatalf("unexpected merge changes: %#v", changes)
+	}
+}
+
 func TestRegisterRoutesListsArtistsThroughMusicV1(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Visible Artist", Bio: "bio", EntryStatus: "open"}

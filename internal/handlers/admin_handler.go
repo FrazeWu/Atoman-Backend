@@ -61,6 +61,10 @@ func SetupAdminRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		admin.GET("/feed/sources", AdminListFeedSources(db))
 		admin.PATCH("/feed/sources/:id", AdminUpdateFeedSourceRow(db))
 		admin.DELETE("/feed/sources/:id", AdminDeleteFeedSourceRow(db))
+		admin.GET("/feed/onboarding/recommendations", ListAdminOnboardingFeedRecommendations(db))
+		admin.POST("/feed/onboarding/recommendations", CreateAdminOnboardingFeedRecommendation(db))
+		admin.PATCH("/feed/onboarding/recommendations/:id", UpdateAdminOnboardingFeedRecommendation(db))
+		admin.DELETE("/feed/onboarding/recommendations/:id", DeleteAdminOnboardingFeedRecommendation(db))
 
 		reviews := admin.Group("/reviews")
 		{

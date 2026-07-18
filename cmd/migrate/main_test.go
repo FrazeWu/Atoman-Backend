@@ -52,6 +52,16 @@ func TestMigrateSchemaCreatesDMTablesAndUnreadCountIndexes(t *testing.T) {
 	assertIndexExists(t, db, "dm_messages", "idx_dm_message_conv_sender_read")
 }
 
+func TestMigrateSchemaCreatesOnboardingRecommendationTable(t *testing.T) {
+	db := testdb.Open(t)
+	if err := migrateSchema(db); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+	if !db.Migrator().HasTable(&model.OnboardingFeedRecommendation{}) {
+		t.Fatal("expected onboarding feed recommendation table")
+	}
+}
+
 func TestRunMigrationsAddsPasswordResetAuthSchema(t *testing.T) {
 	db := testdb.Open(t)
 	if err := db.AutoMigrate(&legacyEmailVerificationCode{}); err != nil {

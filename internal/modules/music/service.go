@@ -506,6 +506,41 @@ func (s *Service) SubmitEdit(user authctx.CurrentUser, req SubmitEditRequest) (m
 	return edit, nil
 }
 
+func (s *Service) SubmitAlbumMerge(user authctx.CurrentUser, targetAlbumID, sourceAlbumID uuid.UUID) (model.MusicEdit, error) {
+	if user.ID == uuid.Nil {
+		return model.MusicEdit{}, apperr.Unauthorized("Login required")
+	}
+	if targetAlbumID == uuid.Nil || sourceAlbumID == uuid.Nil || targetAlbumID == sourceAlbumID {
+		return model.MusicEdit{}, apperr.BadRequest("validation.invalid_request", "source_album_id and target album must be different valid UUIDs")
+	}
+
+	var target model.Album
+	if err := s.db.First(&target, "id = ?", targetAlbumID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.MusicEdit{}, apperr.NotFound("music.album_not_found", "Target album not found")
+		}
+		return model.MusicEdit{}, err
+	}
+	var source model.Album
+	if err := s.db.First(&source, "id = ?", sourceAlbumID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.MusicEdit{}, apperr.NotFound("music.album_not_found", "Source album not found")
+		}
+		return model.MusicEdit{}, err
+	}
+	if target.EntryStatus == "closed" || target.Status == "closed" || source.EntryStatus == "closed" || source.Status == "closed" {
+		return model.MusicEdit{}, apperr.Unprocessable("music.album_not_open", "Both albums must be available")
+	}
+
+	return s.SubmitEdit(user, SubmitEditRequest{
+		Type:       "merge_album",
+		EntityType: "album",
+		EntityID:   &targetAlbumID,
+		Changes:    map[string]any{"source_album_id": sourceAlbumID.String()},
+		Reason:     "合并重复专辑",
+	})
+}
+
 func (s *Service) Vote(user authctx.CurrentUser, editID uuid.UUID, req VoteRequest) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")

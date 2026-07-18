@@ -24,6 +24,10 @@ type SubmitEditRequest struct {
 	Sources    []Source       `json:"sources"`
 }
 
+type AlbumMergeRequest struct {
+	SourceAlbumID uuid.UUID `json:"source_album_id"`
+}
+
 type VoteRequest struct {
 	Vote    string `json:"vote"`
 	Comment string `json:"comment"`

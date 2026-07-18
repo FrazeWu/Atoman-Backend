@@ -45,6 +45,7 @@ type dmConversationItem struct {
 	LastMessageAt  *time.Time `json:"last_message_at"`
 	Preview        string     `json:"preview"`
 	UnreadCount    int64      `json:"unread_count"`
+	IsBlocked      bool       `json:"is_blocked"`
 }
 
 type dmPushPayload struct {
@@ -113,6 +114,13 @@ func (h *dmHandler) listConversations(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count unread messages"})
 			return
 		}
+		var blockedCount int64
+		if err := h.db.Model(&model.UserBlock{}).
+			Where("(blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)", userID, otherID, otherID, userID).
+			Count(&blockedCount).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check blocked state"})
+			return
+		}
 		result = append(result, dmConversationItem{
 			ConversationID: conversation.ID.String(),
 			OtherUsername:  other.Username,
@@ -120,6 +128,7 @@ func (h *dmHandler) listConversations(c *gin.Context) {
 			LastMessageAt:  conversation.LastMessageAt,
 			Preview:        conversation.LastMessagePreview,
 			UnreadCount:    unread,
+			IsBlocked:      blockedCount > 0,
 		})
 	}
 
@@ -497,6 +506,16 @@ func (h *dmHandler) findConversation(userA, userB uuid.UUID) (*model.DMConversat
 }
 
 func (h *dmHandler) sendConversationForRecipient(tx *gorm.DB, senderID, recipientID uuid.UUID) (*model.DMConversation, error) {
+	var blockedCount int64
+	if err := tx.Model(&model.UserBlock{}).
+		Where("(blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)", senderID, recipientID, recipientID, senderID).
+		Count(&blockedCount).Error; err != nil {
+		return nil, err
+	}
+	if blockedCount > 0 {
+		return nil, &dmPermissionError{code: "dm_blocked", message: "你无法向已拉黑或拉黑你的用户发送私信"}
+	}
+
 	var settings model.UserSettings
 	if err := tx.Where("user_id = ?", recipientID).First(&settings).Error; err != nil {
 		settings = model.UserSettings{UserID: recipientID, DMPermission: "anyone"}

@@ -40,6 +40,9 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		&model.PodcastEpisode{},
 		&model.PodcastEpisodeBookmark{},
 		&model.ChannelBookmark{},
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
+		&model.CommentTimeAnchor{},
 	)
 
 	user := model.User{Username: "podcast-user", Email: "podcast-user@example.com", Password: "hash", Role: "user", IsActive: true}
@@ -56,6 +59,50 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 	r.Use(middleware.OptionalAuthMiddleware())
 	SetupPodcastRoutes(r, db, nil)
 	return r, db, user, channel
+}
+
+func TestPodcastCreatorRoutesExposeOwnedDataAndExplicitlyRejectUnsupportedSettings(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	owned := createPodcastEpisodeForPostStatus(t, db, user, channel, "draft")
+	other := model.User{Username: "podcast-creator-other", Email: uuid.NewString() + "@example.com", Password: "hash", Role: "user", IsActive: true}
+	require.NoError(t, db.Create(&other).Error)
+	createPodcastEpisodeForPostStatus(t, db, other, channel, "published")
+
+	request := func(method, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set("Authorization", podcastAuthHeader(t, user))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	w := request(http.MethodGet, "/api/v1/podcast/creator/episodes?status=draft")
+	require.Equal(t, http.StatusOK, w.Code)
+	var episodes struct {
+		Data []model.PodcastEpisode `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &episodes))
+	require.Len(t, episodes.Data, 1)
+	require.Equal(t, owned.ID, episodes.Data[0].ID)
+
+	w = request(http.MethodGet, "/api/v1/podcast/creator/dashboard")
+	require.Equal(t, http.StatusOK, w.Code)
+	var dashboard struct {
+		Data struct {
+			TotalEpisodes int64 `json:"total_episodes"`
+			DraftEpisodes int64 `json:"draft_episodes"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &dashboard))
+	require.Equal(t, int64(1), dashboard.Data.TotalEpisodes)
+	require.Equal(t, int64(1), dashboard.Data.DraftEpisodes)
+
+	w = request(http.MethodGet, "/api/v1/podcast/creator/analytics")
+	require.Equal(t, http.StatusOK, w.Code)
+	w = request(http.MethodGet, "/api/v1/podcast/creator/comments")
+	require.Equal(t, http.StatusOK, w.Code)
+	w = request(http.MethodGet, "/api/v1/podcast/creator/settings")
+	require.Equal(t, http.StatusNotImplemented, w.Code)
 }
 
 func createPodcastEpisodeForPostStatus(t *testing.T, db *gorm.DB, user model.User, channel model.Channel, status string) model.PodcastEpisode {
