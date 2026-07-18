@@ -9,7 +9,6 @@ import (
 
 const (
 	OAuthProviderGoogle    = "google"
-	OAuthProviderApple     = "apple"
 	OAuthProviderGitHub    = "github"
 	OAuthProviderMicrosoft = "microsoft"
 

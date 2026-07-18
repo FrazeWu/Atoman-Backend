@@ -35,7 +35,7 @@ func configuredOAuthRegistry() *oauthprovider.Registry {
 	if baseURL == "" {
 		return oauthprovider.NewRegistry()
 	}
-	providers := make([]oauthprovider.Provider, 0, 4)
+	providers := make([]oauthprovider.Provider, 0, 3)
 	add := func(provider oauthprovider.Provider, err error) {
 		if err != nil {
 			log.Printf("[OAuth] provider disabled: %v", err)
@@ -67,16 +67,6 @@ func configuredOAuthRegistry() *oauthprovider.Registry {
 			ClientID: microsoftID, ClientSecret: microsoftSecret,
 			RedirectURL: baseURL + "/api/v1/auth/oauth/microsoft/callback",
 			Tenant:      os.Getenv("MICROSOFT_OAUTH_TENANT"),
-		}))
-	}
-	appleID := os.Getenv("APPLE_OAUTH_CLIENT_ID")
-	appleTeamID := os.Getenv("APPLE_OAUTH_TEAM_ID")
-	appleKeyID := os.Getenv("APPLE_OAUTH_KEY_ID")
-	applePrivateKey := os.Getenv("APPLE_OAUTH_PRIVATE_KEY")
-	if appleID != "" || appleTeamID != "" || appleKeyID != "" || applePrivateKey != "" {
-		add(oauthprovider.NewAppleProvider(oauthprovider.AppleConfig{
-			ClientID: appleID, TeamID: appleTeamID, KeyID: appleKeyID, PrivateKey: applePrivateKey,
-			RedirectURL: baseURL + "/api/v1/auth/oauth/apple/callback",
 		}))
 	}
 	return oauthprovider.NewRegistry(providers...)
@@ -120,7 +110,7 @@ func (h *OAuthHandler) providers(c *gin.Context) {
 // @Description 重定向到第三方平台，并通过 HttpOnly Cookie 绑定当前浏览器的 OAuth state。
 // @Tags auth-oauth
 // @Produce json
-// @Param provider path string true "平台" Enums(google,apple,github,microsoft)
+// @Param provider path string true "平台" Enums(google,github,microsoft)
 // @Param purpose query string false "用途" Enums(login,link)
 // @Param return_to query string false "站内返回路径"
 // @Success 302
@@ -159,7 +149,7 @@ func (h *OAuthHandler) start(c *gin.Context) {
 // @Summary 接收第三方登录回调
 // @Description 仅接受携带 start 端点下发的浏览器态 Cookie 且 state 匹配的回调。
 // @Tags auth-oauth
-// @Param provider path string true "平台" Enums(google,apple,github,microsoft)
+// @Param provider path string true "平台" Enums(google,github,microsoft)
 // @Param state query string false "OAuth state"
 // @Param code query string false "Authorization code"
 // @Success 302
@@ -180,7 +170,6 @@ func (h *OAuthHandler) callback(c *gin.Context) {
 		Provider: c.Param("provider"),
 		State:    state,
 		Code:     c.Request.FormValue("code"),
-		RawUser:  c.Request.FormValue("user"),
 	})
 	if err != nil {
 		log.Printf("[OAuth] callback failed for %s: %v", c.Param("provider"), err)
@@ -370,7 +359,7 @@ func (h *OAuthHandler) identities(c *gin.Context) {
 // @Tags auth-oauth
 // @Security BearerAuth
 // @Security CookieAuth
-// @Param provider path string true "平台" Enums(google,apple,github,microsoft)
+// @Param provider path string true "平台" Enums(google,github,microsoft)
 // @Success 204
 // @Failure 401 {object} ErrorResponse
 // @Failure 409 {object} ErrorResponse

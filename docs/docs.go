@@ -3035,7 +3035,6 @@ const docTemplate = `{
                     {
                         "enum": [
                             "google",
-                            "apple",
                             "github",
                             "microsoft"
                         ],
@@ -3076,7 +3075,6 @@ const docTemplate = `{
                     {
                         "enum": [
                             "google",
-                            "apple",
                             "github",
                             "microsoft"
                         ],
@@ -3115,7 +3113,6 @@ const docTemplate = `{
                     {
                         "enum": [
                             "google",
-                            "apple",
                             "github",
                             "microsoft"
                         ],
@@ -3159,7 +3156,6 @@ const docTemplate = `{
                     {
                         "enum": [
                             "google",
-                            "apple",
                             "github",
                             "microsoft"
                         ],
@@ -18064,7 +18060,6 @@ const docTemplate = `{
                     },
                     "example": [
                         "google",
-                        "apple",
                         "github",
                         "microsoft"
                     ]

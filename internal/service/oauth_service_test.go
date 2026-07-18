@@ -277,9 +277,9 @@ func TestOAuthServiceConfirmAccountRequiresCorrectPasswordBeforeBinding(t *testi
 		t.Fatalf("create user: %v", err)
 	}
 	provider := &fakeOAuthProvider{
-		name: model.OAuthProviderApple,
+		name: model.OAuthProviderMicrosoft,
 		profile: oauthprovider.Profile{
-			Issuer: "https://appleid.apple.com", Subject: "apple-subject",
+			Issuer: "https://login.microsoftonline.com/common/v2.0", Subject: "microsoft-subject",
 			Email: user.Email, EmailVerified: true,
 		},
 	}

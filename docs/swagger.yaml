@@ -1672,7 +1672,6 @@ definitions:
       providers:
         example:
         - google
-        - apple
         - github
         - microsoft
         items:
@@ -6526,7 +6525,6 @@ paths:
       - description: 平台
         enum:
         - google
-        - apple
         - github
         - microsoft
         in: path
@@ -6557,7 +6555,6 @@ paths:
       - description: 平台
         enum:
         - google
-        - apple
         - github
         - microsoft
         in: path
@@ -6584,7 +6581,6 @@ paths:
       - description: 平台
         enum:
         - google
-        - apple
         - github
         - microsoft
         in: path
@@ -6612,7 +6608,6 @@ paths:
       - description: 平台
         enum:
         - google
-        - apple
         - github
         - microsoft
         in: path

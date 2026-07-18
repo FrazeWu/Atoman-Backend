@@ -302,13 +302,18 @@ func TestSetupAuthRoutesEnablesConfiguredOAuthProviders(t *testing.T) {
 	t.Setenv("FRONTEND_URL", "https://app.example.com")
 	t.Setenv("GOOGLE_OAUTH_CLIENT_ID", "google-client")
 	t.Setenv("GOOGLE_OAUTH_CLIENT_SECRET", "google-secret")
+	t.Setenv("GITHUB_OAUTH_CLIENT_ID", "github-client")
+	t.Setenv("GITHUB_OAUTH_CLIENT_SECRET", "github-secret")
+	t.Setenv("MICROSOFT_OAUTH_CLIENT_ID", "microsoft-client")
+	t.Setenv("MICROSOFT_OAUTH_CLIENT_SECRET", "microsoft-secret")
+	t.Setenv("MICROSOFT_OAUTH_TENANT", "common")
 	db := newAuthTestDB(t)
 	router := gin.New()
 	SetupAuthRoutes(router, db, service.NewEmailServiceWithoutRedis(db))
 
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/providers", nil))
-	if response.Code != http.StatusOK || response.Body.String() != `{"providers":["google"]}` {
+	if response.Code != http.StatusOK || response.Body.String() != `{"providers":["github","google","microsoft"]}` {
 		t.Fatalf("unexpected configured providers: %d %s", response.Code, response.Body.String())
 	}
 }

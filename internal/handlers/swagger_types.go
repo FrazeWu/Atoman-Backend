@@ -37,7 +37,7 @@ type AuthSuccessResponse struct {
 }
 
 type OAuthProvidersResponse struct {
-	Providers []string `json:"providers" example:"google,apple,github,microsoft"`
+	Providers []string `json:"providers" example:"google,github,microsoft"`
 }
 
 type OAuthPendingResponse struct {

@@ -3032,7 +3032,6 @@
                     {
                         "enum": [
                             "google",
-                            "apple",
                             "github",
                             "microsoft"
                         ],
@@ -3073,7 +3072,6 @@
                     {
                         "enum": [
                             "google",
-                            "apple",
                             "github",
                             "microsoft"
                         ],
@@ -3112,7 +3110,6 @@
                     {
                         "enum": [
                             "google",
-                            "apple",
                             "github",
                             "microsoft"
                         ],
@@ -3156,7 +3153,6 @@
                     {
                         "enum": [
                             "google",
-                            "apple",
                             "github",
                             "microsoft"
                         ],
@@ -18061,7 +18057,6 @@
                     },
                     "example": [
                         "google",
-                        "apple",
                         "github",
                         "microsoft"
                     ]

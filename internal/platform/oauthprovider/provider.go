@@ -13,7 +13,6 @@ type AuthorizationRequest struct {
 
 type CallbackRequest struct {
 	Code         string
-	RawUser      string
 	CodeVerifier string
 	NonceHash    string
 }

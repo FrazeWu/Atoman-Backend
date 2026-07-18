@@ -50,7 +50,6 @@ type OAuthCallbackInput struct {
 	Provider string
 	State    string
 	Code     string
-	RawUser  string
 }
 
 type OAuthCallbackResult struct {
@@ -169,7 +168,6 @@ func (s *OAuthService) HandleCallback(ctx context.Context, input OAuthCallbackIn
 
 	profile, err := provider.Exchange(ctx, oauthprovider.CallbackRequest{
 		Code:         input.Code,
-		RawUser:      input.RawUser,
 		CodeVerifier: flow.CodeVerifier,
 		NonceHash:    flow.NonceHash,
 	})
