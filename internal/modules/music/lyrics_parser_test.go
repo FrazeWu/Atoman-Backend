@@ -157,6 +157,20 @@ func TestParseLyricLinesLRCPairsRepeatedTimeTranslationsByOccurrence(t *testing.
 	}
 }
 
+func TestParseLyricLinesLRCPreservesSparseRepeatedTimeTranslations(t *testing.T) {
+	lines, err := ParseLyricLines(
+		"[00:01.00]One A\n[00:01.00]One B",
+		"[00:01.00]\n[00:01.00]乙",
+		"lrc",
+	)
+	if err != nil {
+		t.Fatalf("parse LRC lyrics: %v", err)
+	}
+	if lines[0].Translation != "" || lines[1].Translation != "乙" {
+		t.Fatalf("expected sparse translations to stay aligned by occurrence, got %#v", lines)
+	}
+}
+
 func TestParseLyricLinesLRCLeavesUnmatchedRepeatedTimeContentWithoutTranslation(t *testing.T) {
 	lines, err := ParseLyricLines(
 		"[00:01.00]One A\n[00:01.00]One B",
