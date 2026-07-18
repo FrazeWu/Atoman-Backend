@@ -275,3 +275,18 @@ func TestRunUnifiedStudioMigrationReplacesSingleDefaultCollectionIndex(t *testin
 		}
 	}
 }
+
+func TestRunUnifiedStudioMigrationCreatesMetricEventQueryIndex(t *testing.T) {
+	db := testdb.Open(t)
+	seedUnifiedStudioFixture(t, db)
+
+	if err := RunUnifiedStudioMigration(db); err != nil {
+		t.Fatalf("run migration: %v", err)
+	}
+	if !db.Migrator().HasTable(&model.StudioMetricEvent{}) {
+		t.Fatal("expected studio metric event table")
+	}
+	if !db.Migrator().HasIndex(&model.StudioMetricEvent{}, "idx_studio_metric_content_created") {
+		t.Fatal("expected Studio metric content/time query index")
+	}
+}

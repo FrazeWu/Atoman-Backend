@@ -121,3 +121,84 @@ type DashboardResponse struct {
 	ChannelSubscriberCount int64              `json:"channel_subscriber_count"`
 	Sections               []DashboardSection `json:"sections"`
 }
+
+type SettingsInput struct {
+	ChannelID            uuid.UUID  `json:"channel_id"`
+	DefaultCollectionID  *uuid.UUID `json:"default_collection_id"`
+	DefaultVisibility    *string    `json:"default_visibility"`
+	DefaultPublishStatus *string    `json:"default_publish_status"`
+	AutoplayEnabled      *bool      `json:"autoplay_enabled"`
+}
+
+type SettingsResponse struct {
+	ChannelID            uuid.UUID  `json:"channel_id"`
+	Module               Module     `json:"module"`
+	DefaultCollectionID  *uuid.UUID `json:"default_collection_id"`
+	DefaultVisibility    string     `json:"default_visibility"`
+	DefaultPublishStatus string     `json:"default_publish_status"`
+	AutoplayEnabled      bool       `json:"autoplay_enabled"`
+}
+
+type InteractionQuery struct {
+	ChannelID uuid.UUID
+	Unreplied bool
+	Anchored  bool
+	Page      int
+	PageSize  int
+}
+
+type StudioInteractionAuthor struct {
+	ID          uuid.UUID `json:"id"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name"`
+	AvatarURL   string    `json:"avatar_url"`
+}
+
+type StudioTimeAnchor struct {
+	Start   int `json:"start"`
+	End     int `json:"end"`
+	Seconds int `json:"seconds"`
+}
+
+type StudioInteractionItem struct {
+	ID           uuid.UUID               `json:"id"`
+	ContentID    uuid.UUID               `json:"content_id"`
+	ContentTitle string                  `json:"content_title"`
+	TargetKind   string                  `json:"target_kind"`
+	Author       StudioInteractionAuthor `json:"author"`
+	Content      string                  `json:"content"`
+	ReplyCount   int                     `json:"reply_count"`
+	Replied      bool                    `json:"replied"`
+	Pinned       bool                    `json:"pinned"`
+	TimeAnchors  []StudioTimeAnchor      `json:"time_anchors"`
+	CreatedAt    time.Time               `json:"created_at"`
+}
+
+type AnalyticsQuery struct {
+	ChannelID uuid.UUID
+	Range     int
+}
+
+type AnalyticsPoint struct {
+	Date    string           `json:"date"`
+	Metrics map[string]int64 `json:"metrics"`
+}
+
+type AnalyticsContentMetric struct {
+	ID      uuid.UUID        `json:"id"`
+	Title   string           `json:"title"`
+	Metrics map[string]int64 `json:"metrics"`
+}
+
+type AnalyticsResponse struct {
+	Range  int                      `json:"range"`
+	From   time.Time                `json:"from"`
+	To     time.Time                `json:"to"`
+	Totals map[string]int64         `json:"totals"`
+	Trend  []AnalyticsPoint         `json:"trend"`
+	Top    []AnalyticsContentMetric `json:"top"`
+}
+
+type ShareResponse struct {
+	Path string `json:"path"`
+}

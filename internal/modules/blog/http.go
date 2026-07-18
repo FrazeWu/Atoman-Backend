@@ -875,6 +875,12 @@ func (h *Handler) getPost(c *gin.Context) {
 			return
 		}
 		post.ViewCount++
+		if post.ChannelID != nil {
+			if err := studioapi.NewService(h.service.db).RecordMetricEvent(*post.ChannelID, studioapi.ModuleBlog, post.ID, "view"); err != nil {
+				httpx.Error(c, err)
+				return
+			}
+		}
 	}
 
 	likesCount, err := h.service.CountPostLikes(post.ID)

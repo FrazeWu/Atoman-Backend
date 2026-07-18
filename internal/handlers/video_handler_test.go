@@ -36,11 +36,30 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.VideoTag{},
 		&model.VideoCollection{},
 		&model.VideoTagRelation{},
+		&model.StudioMetricEvent{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 	)
 	return db
+}
+
+func TestStudioVideoViewRecordsPlayMetric(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, user.UUID, "Metric Channel")
+	video := seedVideo(t, db, user.UUID)
+	require.NoError(t, db.Model(&video).Update("channel_id", channel.ID).Error)
+
+	r := gin.New()
+	r.POST("/api/v1/videos/:id/view", IncrementVideoView(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/view", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var event model.StudioMetricEvent
+	require.NoError(t, db.First(&event, "channel_id = ? AND content_type = ? AND content_id = ? AND metric = ?", channel.ID, "video", video.ID, "play").Error)
 }
 
 func signedVideoListTokenForTest(t *testing.T, user model.User) string {

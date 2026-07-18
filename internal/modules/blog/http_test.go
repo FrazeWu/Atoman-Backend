@@ -30,6 +30,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.Channel{},
 		&model.Collection{},
 		&model.UserStudioState{},
+		&model.StudioMetricEvent{},
 		&model.Post{},
 		&model.PostCollection{},
 		&model.BlogPostVersion{},
@@ -1218,7 +1219,7 @@ func TestRegisterRoutesGetPostReturnsViewerLikeState(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesGetPostReturnsPublicStatsAndCountsReaderView(t *testing.T) {
+func TestStudioBlogReadRecordsViewMetricAndReturnsPublicStats(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
 	channel, collection := createOwnedChannelAndCollection(t, service, owner, "Stats")
 	post := model.Post{
@@ -1273,6 +1274,13 @@ func TestRegisterRoutesGetPostReturnsPublicStatsAndCountsReaderView(t *testing.T
 	}
 	if reloaded.ViewCount != 4 {
 		t.Fatalf("expected owner view not to increment, got %d", reloaded.ViewCount)
+	}
+	var events []model.StudioMetricEvent
+	if err := db.Where("channel_id = ? AND content_type = ? AND content_id = ? AND metric = ?", channel.ID, "blog", post.ID, "view").Find(&events).Error; err != nil {
+		t.Fatalf("load view metric events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected one reader view metric and no owner metric, got %d", len(events))
 	}
 }
 

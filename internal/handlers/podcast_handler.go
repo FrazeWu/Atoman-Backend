@@ -34,6 +34,7 @@ func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		p.GET("/recommend/episodes", GetRecommendedPodcastEpisodes(db))
 		p.GET("/shows/:channelSlug/episodes", GetShowEpisodes(db))
 		p.GET("/episodes/:id", GetPodcastEpisode(db))
+		p.POST("/episodes/:id/playback", RecordPodcastPlayback(db))
 		p.GET("/bookmarks", middleware.AuthMiddleware(), GetPodcastEpisodeBookmarks(db))
 		p.POST("/bookmarks", middleware.AuthMiddleware(), CreatePodcastEpisodeBookmark(db))
 		p.DELETE("/bookmarks/:id", middleware.AuthMiddleware(), DeletePodcastEpisodeBookmark(db))
@@ -48,6 +49,51 @@ func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		p.POST("/upload-cover", middleware.AuthMiddleware(), UploadPodcastCover(s3Client))
 	}
 	router.GET("/api/v1/channels/:slug/rss/podcast", GetPodcastRSS(db))
+}
+
+type podcastPlaybackInput struct {
+	Event string `json:"event" binding:"required"`
+}
+
+// RecordPodcastPlayback godoc
+// @Summary 记录播客播放事件
+// @Tags podcast
+// @Accept json
+// @Produce json
+// @Param id path string true "单集 UUID"
+// @Param input body podcastPlaybackInput true "播放事件"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Router /api/v1/podcast/episodes/{id}/playback [post]
+func RecordPodcastPlayback(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
+			return
+		}
+		var input podcastPlaybackInput
+		if err := c.ShouldBindJSON(&input); err != nil || (input.Event != "play" && input.Event != "complete") {
+			httpx.Error(c, apperr.BadRequest("studio.invalid_metric", "event must be play or complete"))
+			return
+		}
+		var episode model.PodcastEpisode
+		if err := db.Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
+			First(&episode, "podcast_episodes.id = ?", id).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				httpx.Error(c, apperr.NotFound("podcast.episode_not_found", "Episode not found"))
+				return
+			}
+			httpx.Error(c, err)
+			return
+		}
+		if err := studioapi.NewService(db).RecordMetricEvent(episode.ChannelID, studioapi.ModulePodcast, episode.ID, input.Event); err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		httpx.OK(c, http.StatusOK, gin.H{"ok": true})
+	}
 }
 
 type recommendationItemDTO struct {

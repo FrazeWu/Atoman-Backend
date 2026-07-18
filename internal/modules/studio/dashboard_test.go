@@ -29,6 +29,8 @@ func newStudioQueryFixture(t *testing.T) studioQueryFixture {
 		&model.Channel{},
 		&model.Collection{},
 		&model.UserStudioState{},
+		&model.StudioModuleSettings{},
+		&model.StudioMetricEvent{},
 		&model.Post{},
 		&model.PostCollection{},
 		&model.PodcastEpisode{},
@@ -37,6 +39,14 @@ func newStudioQueryFixture(t *testing.T) studioQueryFixture {
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
+		&model.Like{},
+		&model.BookmarkFolder{},
+		&model.Bookmark{},
+		&model.PodcastEpisodeBookmark{},
+		&model.VideoBookmark{},
+		&model.DiscussionTarget{},
+		&model.CommentEntry{},
+		&model.CommentTimeAnchor{},
 	)
 	owner := model.User{Username: "studio-query-owner", Email: "studio-query-owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	foreign := model.User{Username: "studio-query-foreign", Email: "studio-query-foreign@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}

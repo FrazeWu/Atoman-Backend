@@ -37,6 +37,7 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		&model.Post{},
 		&model.PostCollection{},
 		&model.PodcastEpisode{},
+		&model.StudioMetricEvent{},
 		&model.PodcastEpisodeBookmark{},
 		&model.ChannelBookmark{},
 	)
@@ -55,6 +56,25 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 	r.Use(middleware.OptionalAuthMiddleware())
 	SetupPodcastRoutes(r, db, nil)
 	return r, db, user, channel
+}
+
+func TestStudioPodcastPlaybackRecordsPlayAndCompleteMetrics(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
+
+	for _, event := range []string{"play", "complete"} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/episodes/"+episode.ID.String()+"/playback", bytes.NewBufferString(`{"event":"`+event+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(w, req)
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	}
+
+	var events []model.StudioMetricEvent
+	require.NoError(t, db.Where("channel_id = ? AND content_type = ? AND content_id = ?", channel.ID, "podcast", episode.ID).Order("created_at ASC").Find(&events).Error)
+	require.Len(t, events, 2)
+	require.Equal(t, "play", events[0].Metric)
+	require.Equal(t, "complete", events[1].Metric)
 }
 
 func createPodcastEpisodeForPostStatus(t *testing.T, db *gorm.DB, user model.User, channel model.Channel, status string) model.PodcastEpisode {

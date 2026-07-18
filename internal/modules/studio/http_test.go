@@ -42,6 +42,7 @@ func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 		&model.VideoCollection{},
 		&model.UserStudioState{},
 		&model.StudioModuleSettings{},
+		&model.StudioMetricEvent{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
@@ -257,5 +258,55 @@ func TestStudioDashboardAndContentsRoutesUseCurrentChannel(t *testing.T) {
 	}
 	if len(payload.Data) != 1 || payload.Data[0].ID != post.ID || payload.Meta.Page != 1 || payload.Meta.PageSize != 10 || payload.Meta.Total != 1 {
 		t.Fatalf("unexpected contents response: %#v", payload)
+	}
+}
+
+func TestStudioAnalyticsInteractionsSettingsAndShareRoutes(t *testing.T) {
+	fixture := newStudioHTTPFixture(t)
+	channel := createStudioChannel(t, fixture.db, fixture.owner, "Creator Tools")
+	if err := fixture.db.Create(&model.UserStudioState{UserID: fixture.owner.UUID, ChannelID: &channel.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	analytics := studioRequest(t, fixture, fixture.owner, http.MethodGet, "/api/v1/studio/blog/analytics?range=7", "")
+	if analytics.Code != http.StatusOK {
+		t.Fatalf("expected analytics 200, got %d: %s", analytics.Code, analytics.Body.String())
+	}
+	interactions := studioRequest(t, fixture, fixture.owner, http.MethodGet, "/api/v1/studio/blog/interactions?unreplied=true&page=1&page_size=10", "")
+	if interactions.Code != http.StatusOK {
+		t.Fatalf("expected interactions 200, got %d: %s", interactions.Code, interactions.Body.String())
+	}
+	settings := studioRequest(t, fixture, fixture.owner, http.MethodGet, "/api/v1/studio/blog/settings", "")
+	if settings.Code != http.StatusOK {
+		t.Fatalf("expected settings 200, got %d: %s", settings.Code, settings.Body.String())
+	}
+	updatedSettings := studioRequest(t, fixture, fixture.owner, http.MethodPatch, "/api/v1/studio/blog/settings", `{"default_visibility":"subscribers","default_publish_status":"draft","autoplay_enabled":true}`)
+	if updatedSettings.Code != http.StatusOK {
+		t.Fatalf("expected settings patch 200, got %d: %s", updatedSettings.Code, updatedSettings.Body.String())
+	}
+	var settingsPayload struct {
+		Data SettingsResponse `json:"data"`
+	}
+	if err := json.Unmarshal(updatedSettings.Body.Bytes(), &settingsPayload); err != nil {
+		t.Fatal(err)
+	}
+	if settingsPayload.Data.DefaultVisibility != "subscribers" || settingsPayload.Data.DefaultPublishStatus != "draft" || settingsPayload.Data.AutoplayEnabled {
+		t.Fatalf("unexpected blog settings: %#v", settingsPayload.Data)
+	}
+
+	post := model.Post{
+		UserID: fixture.owner.UUID, ChannelID: &channel.ID,
+		Title: "Public post", Content: "body", Status: "published", Visibility: "public",
+	}
+	if err := fixture.db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	share := studioRequest(t, fixture, fixture.owner, http.MethodPost, "/api/v1/studio/blog/contents/"+post.ID.String()+"/share", `{}`)
+	if share.Code != http.StatusOK {
+		t.Fatalf("expected share 200, got %d: %s", share.Code, share.Body.String())
+	}
+	var event model.StudioMetricEvent
+	if err := fixture.db.First(&event, "content_type = ? AND content_id = ? AND metric = ?", ModuleBlog, post.ID, "share").Error; err != nil {
+		t.Fatalf("expected share metric event: %v", err)
 	}
 }

@@ -40,7 +40,14 @@ func RunUnifiedStudioMigration(db *gorm.DB) error {
 			&model.Collection{},
 			&model.UserStudioState{},
 			&model.StudioModuleSettings{},
+			&model.StudioMetricEvent{},
 		); err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			CREATE INDEX IF NOT EXISTS idx_studio_metric_content_created
+			ON studio_metric_events (channel_id, content_type, content_id, created_at)
+		`).Error; err != nil {
 			return err
 		}
 

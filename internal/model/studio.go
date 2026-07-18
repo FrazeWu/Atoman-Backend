@@ -22,3 +22,13 @@ type StudioModuleSettings struct {
 }
 
 func (StudioModuleSettings) TableName() string { return "studio_module_settings" }
+
+type StudioMetricEvent struct {
+	Base
+	ChannelID   uuid.UUID `json:"channel_id" gorm:"type:uuid;not null;index"`
+	ContentType string    `json:"content_type" gorm:"type:varchar(16);not null;index"`
+	ContentID   uuid.UUID `json:"content_id" gorm:"type:uuid;not null;index"`
+	Metric      string    `json:"metric" gorm:"type:varchar(16);not null;index"`
+}
+
+func (StudioMetricEvent) TableName() string { return "studio_metric_events" }

@@ -525,8 +525,8 @@ func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		var viewCount int
-		readResult := publicVideo().Select("view_count").Scan(&viewCount)
+		var video model.Video
+		readResult := publicVideo().Select("id", "channel_id", "view_count").First(&video)
 		if readResult.Error != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load view count"})
 			return
@@ -535,7 +535,13 @@ func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
-		c.JSON(http.StatusOK, VideoViewCountResponse{OK: true, ViewCount: viewCount})
+		if video.ChannelID != nil {
+			if err := studioapi.NewService(db).RecordMetricEvent(*video.ChannelID, studioapi.ModuleVideo, video.ID, "play"); err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record video play"})
+				return
+			}
+		}
+		c.JSON(http.StatusOK, VideoViewCountResponse{OK: true, ViewCount: video.ViewCount})
 	}
 }
 
