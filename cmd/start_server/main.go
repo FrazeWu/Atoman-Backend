@@ -51,6 +51,9 @@ import (
 // @description 使用登录后写入的 atoman_token Cookie
 
 func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
+	if err := migrations.RunAuthPasswordResetMigration(db); err != nil {
+		return fmt.Errorf("migrate password reset auth schema: %w", err)
+	}
 	models = append(models,
 		&model.ForumGroup{},
 		&model.ForumGroupMember{},

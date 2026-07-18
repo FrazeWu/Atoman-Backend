@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -12,6 +13,18 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/testdb"
 )
+
+type legacyStartupEmailVerificationCode struct {
+	UUID      uuid.UUID `gorm:"type:uuid;primaryKey"`
+	Email     string    `gorm:"uniqueIndex;not null"`
+	Code      string    `gorm:"not null"`
+	ExpiresAt time.Time `gorm:"not null"`
+	Used      bool      `gorm:"default:false"`
+	CreatedAt time.Time
+	DeletedAt gorm.DeletedAt `gorm:"index"`
+}
+
+func (legacyStartupEmailVerificationCode) TableName() string { return "email_verification_codes" }
 
 func TestCORSRejectsUnknownOriginWithCredentialsOutsideProduction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -86,6 +99,31 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 		if !db.Migrator().HasIndex(table, index) {
 			t.Fatalf("expected index %s on %s to exist", index, table)
 		}
+	}
+}
+
+func TestStartupMigrationsUpgradePasswordResetAuthSchema(t *testing.T) {
+	db := testdb.Open(t)
+	if err := db.AutoMigrate(&legacyStartupEmailVerificationCode{}); err != nil {
+		t.Fatalf("create legacy verification schema: %v", err)
+	}
+	legacy := legacyStartupEmailVerificationCode{
+		UUID: uuid.New(), Email: "legacy@example.com", Code: "123456",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("seed legacy verification code: %v", err)
+	}
+
+	if err := runUnifiedCommentStartupMigrations(db, &model.User{}, &model.EmailVerificationCode{}); err != nil {
+		t.Fatalf("run startup migrations: %v", err)
+	}
+	resetCode := model.EmailVerificationCode{
+		Email: "legacy@example.com", Purpose: "password_reset", Code: "654321",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}
+	if err := db.Create(&resetCode).Error; err != nil {
+		t.Fatalf("create purpose-specific reset code after startup migration: %v", err)
 	}
 }
 
