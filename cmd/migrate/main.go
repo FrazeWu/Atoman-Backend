@@ -154,6 +154,9 @@ func runMigrations(db *gorm.DB) error {
 	if err := migrations.RunMusicPlayCountsMigration(db); err != nil {
 		return fmt.Errorf("music play counts migration: %w", err)
 	}
+	if err := migrations.RunMusicLyricsMigration(db); err != nil {
+		return fmt.Errorf("music lyrics migration: %w", err)
+	}
 	if err := migrations.RunMusicListeningMigration(db); err != nil {
 		return fmt.Errorf("music listening migration: %w", err)
 	}
@@ -212,6 +215,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
 		&model.SongBookmark{},
+		&model.PlaylistBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
 		&model.MusicListeningHistory{},

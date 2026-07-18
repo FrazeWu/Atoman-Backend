@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"atoman/internal/model"
+	"atoman/internal/musiclyrics"
 )
 
 // RevisionService handles revision-related operations
@@ -368,10 +369,16 @@ func (s *RevisionService) applyRevisionToContent(tx *gorm.DB, revision *model.Re
 
 	switch revision.ContentType {
 	case "album":
-		return s.applyAlbumRevisionSnapshot(tx, revision.ContentID, revision.ContentSnapshot)
+		return s.applyAlbumRevisionSnapshot(tx, revision.ContentID, revision.EditorID, revision.ContentSnapshot)
 
 	case "song":
-		return applyFlatRevisionSnapshot(tx, &model.Song{}, revision.ContentID, revision.ContentType, content)
+		if err := applyFlatRevisionSnapshot(tx, &model.Song{}, revision.ContentID, revision.ContentType, content); err != nil {
+			return err
+		}
+		if lyrics, ok := content["lyrics"].(string); ok {
+			return musiclyrics.SyncLegacySongLyrics(tx, revision.EditorID, revision.ContentID, lyrics, "通过歌曲版本更新歌词")
+		}
+		return nil
 
 	case "artist":
 		return applyFlatRevisionSnapshot(tx, &model.Artist{}, revision.ContentID, revision.ContentType, content)
@@ -392,7 +399,7 @@ func applyFlatRevisionSnapshot(tx *gorm.DB, target any, contentID uuid.UUID, con
 	return nil
 }
 
-func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID uuid.UUID, raw []byte) error {
+func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actorID uuid.UUID, raw []byte) error {
 	var snapshot albumRevisionSnapshot
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
 		return fmt.Errorf("failed to parse album snapshot: %w", err)
@@ -468,6 +475,9 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID uuid.U
 				if err := tx.Save(existingSong).Error; err != nil {
 					return err
 				}
+				if err := musiclyrics.SyncLegacySongLyrics(tx, actorID, existingSong.ID, songSnap.Lyrics, "通过专辑版本更新歌词"); err != nil {
+					return err
+				}
 				continue
 			}
 
@@ -490,6 +500,9 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID uuid.U
 			if err := tx.Create(&newSong).Error; err != nil {
 				return err
 			}
+			if err := musiclyrics.SyncLegacySongLyrics(tx, actorID, newSong.ID, songSnap.Lyrics, "通过专辑版本更新歌词"); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -505,6 +518,9 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID uuid.U
 			UploadedBy:  album.UploadedBy,
 		}
 		if err := tx.Create(&newSong).Error; err != nil {
+			return err
+		}
+		if err := musiclyrics.SyncLegacySongLyrics(tx, actorID, newSong.ID, songSnap.Lyrics, "通过专辑版本更新歌词"); err != nil {
 			return err
 		}
 		seen[newSong.ID.String()] = true

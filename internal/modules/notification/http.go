@@ -20,8 +20,34 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.GET("/notifications", h.listNotifications)
 	group.GET("/notifications/unread-count", h.getUnreadCount)
+	group.GET("/notifications/unread-counts", h.getUnreadCounts)
 	group.PUT("/notifications/:id/read", h.markRead)
 	group.PUT("/notifications/read-all", h.markAllRead)
+}
+
+// getUnreadCounts godoc
+// @Summary 获取分类未读数
+// @Description 返回通知分类和私信的未读数量及总数。
+// @Tags notifications
+// @Produce json
+// @Success 200 {object} UnreadCountsResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/notifications/unread-counts [get]
+func (h *Handler) getUnreadCounts(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	counts, err := h.service.GetUnreadCounts(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, counts)
 }
 
 func (h *Handler) listNotifications(c *gin.Context) {

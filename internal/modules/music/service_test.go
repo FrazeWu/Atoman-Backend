@@ -32,6 +32,7 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
 		&model.SongBookmark{},
+		&model.PlaylistBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
 		&model.AlbumImportSession{},
@@ -39,6 +40,11 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.MusicEditVote{},
 		&model.MusicEditDecision{},
 		&model.MusicEditChange{},
+		&model.MusicSongLyric{},
+		&model.MusicSongLyricLine{},
+		&model.MusicSongLyricVersion{},
+		&model.MusicLyricAnnotation{},
+		&model.MusicLyricAnnotationVote{},
 		&model.AuditLog{},
 	)
 
@@ -48,6 +54,197 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 	}
 
 	return NewService(db), db, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser}
+}
+
+func TestPlaylistBookmarksRequireExistingPlaylistAndStayUserScoped(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	owner := model.User{Username: "playlist-owner", Email: "playlist-owner@example.com", Password: "hash", Role: "user", IsActive: true}
+	other := model.User{Username: "playlist-other", Email: "playlist-other@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	playlist := model.Playlist{UserID: owner.UUID, Name: "Shared", IsPublic: true}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+
+	first, err := svc.BookmarkPlaylist(user, playlist.ID)
+	if err != nil {
+		t.Fatalf("bookmark playlist: %v", err)
+	}
+	second, err := svc.BookmarkPlaylist(user, playlist.ID)
+	if err != nil {
+		t.Fatalf("bookmark playlist twice: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("expected idempotent bookmark, got %s and %s", first.ID, second.ID)
+	}
+
+	otherUser := authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: authctx.RoleUser}
+	if _, err := svc.BookmarkPlaylist(otherUser, playlist.ID); err != nil {
+		t.Fatalf("bookmark playlist as other user: %v", err)
+	}
+	bookmarks, total, err := svc.ListPlaylistBookmarks(user, 1, 20, "latest")
+	if err != nil {
+		t.Fatalf("list playlist bookmarks: %v", err)
+	}
+	if total != 1 || len(bookmarks) != 1 || bookmarks[0].UserID != user.ID {
+		t.Fatalf("expected only current user's bookmark, got total=%d rows=%#v", total, bookmarks)
+	}
+	if bookmarks[0].Playlist == nil || bookmarks[0].Playlist.User == nil || bookmarks[0].Playlist.User.Username != owner.Username {
+		t.Fatalf("expected playlist and owner to be preloaded, got %#v", bookmarks[0].Playlist)
+	}
+
+	if err := svc.DeletePlaylistBookmark(user, playlist.ID); err != nil {
+		t.Fatalf("delete playlist bookmark: %v", err)
+	}
+	otherBookmarks, otherTotal, err := svc.ListPlaylistBookmarks(otherUser, 1, 20, "latest")
+	if err != nil {
+		t.Fatalf("list other user's playlist bookmarks: %v", err)
+	}
+	if otherTotal != 1 || len(otherBookmarks) != 1 {
+		t.Fatalf("deleting current user's bookmark affected another user: total=%d rows=%#v", otherTotal, otherBookmarks)
+	}
+
+	if _, err := svc.BookmarkPlaylist(user, uuid.New()); err == nil {
+		t.Fatal("expected nonexistent playlist bookmark to fail")
+	}
+}
+
+func TestPlaylistBookmarksRespectPlaylistVisibility(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	ownerModel := model.User{Username: "visibility-owner", Email: "visibility-owner@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&ownerModel).Error; err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	owner := authctx.CurrentUser{ID: ownerModel.UUID, Username: ownerModel.Username, Role: authctx.RoleUser}
+	privatePlaylist := model.Playlist{UserID: owner.ID, Name: "Private"}
+	if err := db.Create(&privatePlaylist).Error; err != nil {
+		t.Fatalf("create private playlist: %v", err)
+	}
+
+	if _, err := svc.BookmarkPlaylist(user, privatePlaylist.ID); err == nil {
+		t.Fatal("expected another user's private playlist to be hidden")
+	}
+	if _, err := svc.BookmarkPlaylist(owner, privatePlaylist.ID); err != nil {
+		t.Fatalf("owner should bookmark own private playlist: %v", err)
+	}
+
+	publicPlaylist := model.Playlist{UserID: owner.ID, Name: "Public", IsPublic: true}
+	if err := db.Create(&publicPlaylist).Error; err != nil {
+		t.Fatalf("create public playlist: %v", err)
+	}
+	if _, err := svc.BookmarkPlaylist(user, publicPlaylist.ID); err != nil {
+		t.Fatalf("bookmark public playlist: %v", err)
+	}
+	if err := db.Model(&publicPlaylist).Update("is_public", false).Error; err != nil {
+		t.Fatalf("make playlist private: %v", err)
+	}
+
+	orphanedPlaylist := model.Playlist{UserID: owner.ID, Name: "Orphaned", IsPublic: true}
+	if err := db.Create(&orphanedPlaylist).Error; err != nil {
+		t.Fatalf("create orphan target: %v", err)
+	}
+	if _, err := svc.BookmarkPlaylist(user, orphanedPlaylist.ID); err != nil {
+		t.Fatalf("bookmark orphan target: %v", err)
+	}
+	if err := db.Unscoped().Delete(&orphanedPlaylist).Error; err != nil {
+		t.Fatalf("hard delete orphan target: %v", err)
+	}
+
+	bookmarks, total, err := svc.ListPlaylistBookmarks(user, 1, 20, "latest")
+	if err != nil {
+		t.Fatalf("list visible bookmarks: %v", err)
+	}
+	if total != 0 || len(bookmarks) != 0 {
+		t.Fatalf("expected private and orphaned targets to be excluded, total=%d rows=%#v", total, bookmarks)
+	}
+}
+
+func TestDeletePlaylistRemovesAllBookmarks(t *testing.T) {
+	svc, db, owner := newMusicTestService(t)
+	otherModel := model.User{Username: "delete-bookmark-other", Email: "delete-bookmark-other@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&otherModel).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	other := authctx.CurrentUser{ID: otherModel.UUID, Username: otherModel.Username, Role: authctx.RoleUser}
+	playlist := model.Playlist{UserID: owner.ID, Name: "Delete With Bookmarks", IsPublic: true}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	if _, err := svc.BookmarkPlaylist(owner, playlist.ID); err != nil {
+		t.Fatalf("owner bookmark: %v", err)
+	}
+	if _, err := svc.BookmarkPlaylist(other, playlist.ID); err != nil {
+		t.Fatalf("other bookmark: %v", err)
+	}
+
+	if err := svc.DeletePlaylist(owner, playlist.ID); err != nil {
+		t.Fatalf("delete playlist: %v", err)
+	}
+	var bookmarkCount int64
+	if err := db.Unscoped().Model(&model.PlaylistBookmark{}).Where("playlist_id = ?", playlist.ID).Count(&bookmarkCount).Error; err != nil {
+		t.Fatalf("count deleted playlist bookmarks: %v", err)
+	}
+	if bookmarkCount != 0 {
+		t.Fatalf("expected playlist bookmarks to be hard deleted, got %d", bookmarkCount)
+	}
+	bookmarks, total, err := svc.ListPlaylistBookmarks(other, 1, 20, "latest")
+	if err != nil {
+		t.Fatalf("list bookmarks after playlist delete: %v", err)
+	}
+	if total != 0 || len(bookmarks) != 0 {
+		t.Fatalf("expected empty bookmark list after playlist delete, total=%d rows=%#v", total, bookmarks)
+	}
+}
+
+func TestPlaylistBookmarkPopularSortIgnoresSoftDeletedSongs(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	inflated := model.Playlist{UserID: user.ID, Name: "Inflated", IsPublic: true}
+	live := model.Playlist{UserID: user.ID, Name: "Live", IsPublic: true}
+	if err := db.Create(&inflated).Error; err != nil {
+		t.Fatalf("create inflated playlist: %v", err)
+	}
+	if err := db.Create(&live).Error; err != nil {
+		t.Fatalf("create live playlist: %v", err)
+	}
+	for index := 0; index < 2; index++ {
+		song := model.Song{Title: "Deleted Song " + string(rune('A'+index)), AudioURL: "/deleted.mp3", Status: "open"}
+		if err := db.Create(&song).Error; err != nil {
+			t.Fatalf("create deleted song: %v", err)
+		}
+		row := model.PlaylistSong{PlaylistID: inflated.ID, SongID: song.ID}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatalf("add deleted song: %v", err)
+		}
+		if err := db.Delete(&row).Error; err != nil {
+			t.Fatalf("soft delete playlist song: %v", err)
+		}
+	}
+	liveSong := model.Song{Title: "Live Song", AudioURL: "/live.mp3", Status: "open"}
+	if err := db.Create(&liveSong).Error; err != nil {
+		t.Fatalf("create live song: %v", err)
+	}
+	if err := db.Create(&model.PlaylistSong{PlaylistID: live.ID, SongID: liveSong.ID}).Error; err != nil {
+		t.Fatalf("add live song: %v", err)
+	}
+	if _, err := svc.BookmarkPlaylist(user, inflated.ID); err != nil {
+		t.Fatalf("bookmark inflated playlist: %v", err)
+	}
+	if _, err := svc.BookmarkPlaylist(user, live.ID); err != nil {
+		t.Fatalf("bookmark live playlist: %v", err)
+	}
+
+	bookmarks, _, err := svc.ListPlaylistBookmarks(user, 1, 20, "popular")
+	if err != nil {
+		t.Fatalf("list popular bookmarks: %v", err)
+	}
+	if len(bookmarks) != 2 || bookmarks[0].PlaylistID != live.ID {
+		t.Fatalf("expected live playlist first, got %#v", bookmarks)
+	}
 }
 
 func createModerator(t *testing.T, db *gorm.DB) authctx.CurrentUser {
@@ -743,6 +940,13 @@ func TestSubmitEditAutoAppliesUpdateAlbumTracksForMainWikiFlow(t *testing.T) {
 	if updatedSong.Title != "Keep Me Better" || updatedSong.TrackNumber != 3 || updatedSong.AudioURL != "https://cdn.example.com/new.mp3" || updatedSong.Lyrics != "new lyrics" {
 		t.Fatalf("expected existing song updated, got %#v", updatedSong)
 	}
+	var updatedLyrics model.MusicSongLyric
+	if err := db.First(&updatedLyrics, "song_id = ?", existingSong.ID).Error; err != nil {
+		t.Fatalf("load updated wiki lyrics: %v", err)
+	}
+	if updatedLyrics.Content != "new lyrics" || updatedLyrics.UpdatedBy != user.ID || updatedLyrics.EditSummary != "通过专辑编辑更新歌词" {
+		t.Fatalf("unexpected updated wiki lyrics: %#v", updatedLyrics)
+	}
 
 	var createdSongs []model.Song
 	if err := db.Where("album_id = ? AND title = ?", album.ID, "Brand New Song").Find(&createdSongs).Error; err != nil {
@@ -753,6 +957,13 @@ func TestSubmitEditAutoAppliesUpdateAlbumTracksForMainWikiFlow(t *testing.T) {
 	}
 	if createdSongs[0].TrackNumber != 4 || createdSongs[0].AudioURL != "https://cdn.example.com/brand-new.mp3" {
 		t.Fatalf("expected created song fields, got %#v", createdSongs[0])
+	}
+	var createdLyrics model.MusicSongLyric
+	if err := db.First(&createdLyrics, "song_id = ?", createdSongs[0].ID).Error; err != nil {
+		t.Fatalf("load created wiki lyrics: %v", err)
+	}
+	if createdLyrics.Content != "brand new lyrics" || createdLyrics.EditSummary != "通过专辑编辑创建歌词" {
+		t.Fatalf("unexpected created wiki lyrics: %#v", createdLyrics)
 	}
 
 	var closedSong model.Song

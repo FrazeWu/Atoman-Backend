@@ -21,6 +21,7 @@ import (
 	"atoman/internal/middleware"
 	"atoman/internal/model"
 	feedmodule "atoman/internal/modules/feed"
+	"atoman/internal/musiclyrics"
 	"atoman/internal/service"
 	"atoman/internal/storage"
 )
@@ -1252,9 +1253,19 @@ func ApproveSongCorrectionHandler(db *gorm.DB) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to apply correction"})
 				return
 			}
+			if correction.FieldName == "lyrics" {
+				if err := musiclyrics.SyncLegacySongLyrics(tx, adminID, song.ID, correction.CorrectedValue, "通过歌词纠错更新"); err != nil {
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to apply correction"})
+					return
+				}
+			}
 		}
 
-		tx.Commit()
+		if err := tx.Commit().Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to apply correction"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "Song correction approved and applied"})
 	}
 }

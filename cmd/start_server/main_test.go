@@ -57,6 +57,17 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 	if err := runUnifiedCommentStartupMigrations(db); err != nil {
 		t.Fatalf("run unified comment startup migrations: %v", err)
 	}
+	for _, table := range []string{
+		"music_song_lyrics",
+		"music_song_lyric_lines",
+		"music_song_lyric_versions",
+		"music_lyric_annotations",
+		"music_lyric_annotation_votes",
+	} {
+		if !db.Migrator().HasTable(table) {
+			t.Fatalf("expected startup migration to create %s", table)
+		}
+	}
 
 	models := []any{
 		&model.ForumGroup{},
@@ -124,6 +135,20 @@ func TestStartupMigrationsUpgradePasswordResetAuthSchema(t *testing.T) {
 	}
 	if err := db.Create(&resetCode).Error; err != nil {
 		t.Fatalf("create purpose-specific reset code after startup migration: %v", err)
+	}
+}
+
+func TestRunMusicBookmarkStartupMigrationCreatesPlaylistBookmarksOnFreshDatabase(t *testing.T) {
+	db := testdb.Open(t)
+
+	if err := runMusicBookmarkStartupMigration(db); err != nil {
+		t.Fatalf("run music bookmark startup migration: %v", err)
+	}
+	if !db.Migrator().HasTable(&model.PlaylistBookmark{}) {
+		t.Fatal("expected startup migration to create music_playlist_bookmarks")
+	}
+	if !db.Migrator().HasIndex(&model.PlaylistBookmark{}, "idx_music_playlist_bookmarks_user_playlist") {
+		t.Fatal("expected startup migration to create playlist bookmark unique index")
 	}
 }
 

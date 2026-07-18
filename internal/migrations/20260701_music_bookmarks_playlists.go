@@ -12,6 +12,7 @@ func RunMusicBookmarksPlaylistsMigration(db *gorm.DB) error {
 		&model.AlbumBookmark{},
 		&model.SongBookmark{},
 		&model.Playlist{},
+		&model.PlaylistBookmark{},
 		&model.PlaylistSong{},
 	)
 }

@@ -10,7 +10,7 @@ import (
 )
 
 func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
-	assertNoLegacyLyrics := func(t *testing.T, document map[string]any) {
+	assertLyricsContract := func(t *testing.T, document map[string]any) {
 		t.Helper()
 		paths, _ := document["paths"].(map[string]any)
 		for path := range paths {
@@ -22,6 +22,78 @@ func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
 		if _, exists := definitions["model.LyricAnnotation"]; exists {
 			t.Fatal("legacy model.LyricAnnotation definition remains in Swagger")
 		}
+		expected := map[string][]string{
+			"/api/v1/music/songs/{songId}/lyrics":                                  {"get", "put"},
+			"/api/v1/music/songs/{songId}/lyrics/versions":                         {"get"},
+			"/api/v1/music/songs/{songId}/lyrics/versions/{version}/revert":        {"post"},
+			"/api/v1/music/songs/{songId}/lyrics/annotations":                      {"post"},
+			"/api/v1/music/songs/{songId}/lyrics/annotations/{annotationId}":       {"patch", "delete"},
+			"/api/v1/music/songs/{songId}/lyrics/annotations/{annotationId}/votes": {"post"},
+		}
+		for path, methods := range expected {
+			operations, exists := paths[path].(map[string]any)
+			if !exists {
+				t.Fatalf("music lyrics path missing from Swagger: %s", path)
+			}
+			for _, method := range methods {
+				if _, exists := operations[method]; !exists {
+					t.Fatalf("music lyrics operation missing from Swagger: %s %s", method, path)
+				}
+			}
+		}
+
+		lyricsPath := paths["/api/v1/music/songs/{songId}/lyrics"].(map[string]any)
+		put := lyricsPath["put"].(map[string]any)
+		responses := put["responses"].(map[string]any)
+		for _, status := range []string{"400", "401", "404", "409"} {
+			response := responses[status].(map[string]any)
+			schema := response["schema"].(map[string]any)
+			if schema["$ref"] != "#/definitions/music.MusicLyricsErrorResponse" {
+				t.Fatalf("lyrics PUT %s must use structured error response, got %#v", status, schema)
+			}
+		}
+
+		errorResponse, exists := definitions["music.MusicLyricsErrorResponse"].(map[string]any)
+		if !exists {
+			t.Fatal("music.MusicLyricsErrorResponse definition is missing")
+		}
+		errorProperties := errorResponse["properties"].(map[string]any)
+		errorSchema := errorProperties["error"].(map[string]any)
+		bodyRef, _ := errorSchema["$ref"].(string)
+		bodyName := strings.TrimPrefix(bodyRef, "#/definitions/")
+		errorBody, exists := definitions[bodyName].(map[string]any)
+		if !exists {
+			t.Fatalf("lyrics error body definition is missing: %q", bodyName)
+		}
+		bodyProperties := errorBody["properties"].(map[string]any)
+		for _, field := range []string{"code", "message", "details"} {
+			if _, exists := bodyProperties[field]; !exists {
+				t.Fatalf("lyrics error body field is missing: %s", field)
+			}
+		}
+
+		versionDefinition, exists := definitions["music.MusicSongLyricsVersionDTO"].(map[string]any)
+		if !exists {
+			t.Fatal("music.MusicSongLyricsVersionDTO definition is missing")
+		}
+		versionProperties := versionDefinition["properties"].(map[string]any)
+		for _, field := range []string{"id", "song_id", "version", "content", "translation", "format", "edit_summary", "created_by", "created_at"} {
+			if _, exists := versionProperties[field]; !exists {
+				t.Fatalf("lyrics version DTO field is missing: %s", field)
+			}
+		}
+
+		lineDefinition := definitions["music.MusicLyricLineDTO"].(map[string]any)
+		timeMS := lineDefinition["properties"].(map[string]any)["time_ms"].(map[string]any)
+		if nullable, _ := timeMS["x-nullable"].(bool); !nullable {
+			t.Fatalf("music.MusicLyricLineDTO.time_ms must be nullable, got %#v", timeMS)
+		}
+
+		voteDefinition := definitions["music.LyricAnnotationVoteRequest"].(map[string]any)
+		required, _ := voteDefinition["required"].([]any)
+		if len(required) != 1 || required[0] != "vote" {
+			t.Fatalf("vote request must require vote, got %#v", required)
+		}
 	}
 
 	jsonBytes, err := os.ReadFile("swagger.json")
@@ -32,7 +104,7 @@ func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
 	if err := json.Unmarshal(jsonBytes, &jsonDocument); err != nil {
 		t.Fatalf("parse swagger.json: %v", err)
 	}
-	assertNoLegacyLyrics(t, jsonDocument)
+	assertLyricsContract(t, jsonDocument)
 
 	yamlBytes, err := os.ReadFile("swagger.yaml")
 	if err != nil {
@@ -42,7 +114,7 @@ func TestSwaggerDoesNotExposeLegacyLyricAnnotations(t *testing.T) {
 	if err := yaml.Unmarshal(yamlBytes, &yamlDocument); err != nil {
 		t.Fatalf("parse swagger.yaml: %v", err)
 	}
-	assertNoLegacyLyrics(t, yamlDocument)
+	assertLyricsContract(t, yamlDocument)
 
 	docsGo, err := os.ReadFile("docs.go")
 	if err != nil {

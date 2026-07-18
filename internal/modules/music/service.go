@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"atoman/internal/model"
@@ -25,6 +26,8 @@ type Service struct {
 	repo                 *Repo
 	s3                   *s3.S3
 	albumImportMultipart albumImportMultipartStore
+	lyricsSaveMu         sync.Mutex
+	lyricsVoteMu         sync.Mutex
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
@@ -740,6 +743,34 @@ func (s *Service) DeleteSongBookmark(user authctx.CurrentUser, songID uuid.UUID)
 	return s.repo.DeleteSongBookmark(user.ID, songID)
 }
 
+func (s *Service) ListPlaylistBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.PlaylistBookmark, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	return s.repo.ListPlaylistBookmarks(user.ID, page, pageSize, sort)
+}
+
+func (s *Service) BookmarkPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.PlaylistBookmark, error) {
+	if user.ID == uuid.Nil {
+		return model.PlaylistBookmark{}, apperr.Unauthorized("Login required")
+	}
+	if playlistID == uuid.Nil {
+		return model.PlaylistBookmark{}, apperr.BadRequest("validation.invalid_request", "playlist_id is required")
+	}
+	if _, err := s.getVisiblePlaylist(user.ID, playlistID); err != nil {
+		return model.PlaylistBookmark{}, err
+	}
+	return s.repo.UpsertPlaylistBookmark(user.ID, playlistID)
+}
+
+func (s *Service) DeletePlaylistBookmark(user authctx.CurrentUser, playlistID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.repo.DeletePlaylistBookmark(user.ID, playlistID)
+}
+
 func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest) (model.Artist, error) {
 	if user.ID == uuid.Nil {
 		return model.Artist{}, apperr.Unauthorized("Login required")
@@ -923,6 +954,10 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 }
 
 func (s *Service) GetPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.Playlist, error) {
+	return s.getVisiblePlaylist(user.ID, playlistID)
+}
+
+func (s *Service) getVisiblePlaylist(userID uuid.UUID, playlistID uuid.UUID) (model.Playlist, error) {
 	playlist, err := s.repo.GetPlaylistByID(playlistID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -930,7 +965,7 @@ func (s *Service) GetPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (m
 		}
 		return model.Playlist{}, err
 	}
-	if playlist.UserID != user.ID && !playlist.IsPublic {
+	if playlist.UserID != userID && !playlist.IsPublic {
 		return model.Playlist{}, apperr.NotFound("music.playlist_not_found", "Playlist not found")
 	}
 	return playlist, nil

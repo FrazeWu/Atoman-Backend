@@ -184,6 +184,9 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/bookmarks/songs", h.listSongBookmarks)
 	group.POST("/bookmarks/songs", h.createSongBookmark)
 	group.DELETE("/bookmarks/songs/:songId", h.deleteSongBookmark)
+	group.GET("/bookmarks/playlists", h.listPlaylistBookmarks)
+	group.POST("/bookmarks/playlists", h.createPlaylistBookmark)
+	group.DELETE("/bookmarks/playlists/:playlistId", h.deletePlaylistBookmark)
 	group.GET("/discover", h.discover)
 	group.GET("/playlists", h.listPlaylists)
 	group.GET("/playlists/public", h.listPublicPlaylists)
@@ -199,6 +202,14 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/history", h.listListeningHistory)
 	group.GET("/recommend/albums", h.getRecommendedAlbums)
 	group.GET("/recommend/artists", h.getRecommendedArtists)
+	group.GET("/songs/:songId/lyrics", h.getSongLyrics)
+	group.PUT("/songs/:songId/lyrics", h.saveSongLyrics)
+	group.GET("/songs/:songId/lyrics/versions", h.listSongLyricVersions)
+	group.POST("/songs/:songId/lyrics/versions/:version/revert", h.revertSongLyrics)
+	group.POST("/songs/:songId/lyrics/annotations", h.createLyricAnnotation)
+	group.PATCH("/songs/:songId/lyrics/annotations/:annotationId", h.updateLyricAnnotation)
+	group.DELETE("/songs/:songId/lyrics/annotations/:annotationId", h.deleteLyricAnnotation)
+	group.POST("/songs/:songId/lyrics/annotations/:annotationId/votes", h.voteLyricAnnotation)
 	group.POST("/edits", h.submitEdit)
 	group.GET("/edits", h.listEdits)
 	group.GET("/edits/:editId", h.getEdit)
@@ -738,6 +749,97 @@ func (h *Handler) deleteSongBookmark(c *gin.Context) {
 		return
 	}
 	if err := h.service.DeleteSongBookmark(user, songID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
+}
+
+// listPlaylistBookmarks godoc
+// @Summary 获取当前用户收藏的歌单
+// @Tags music-bookmarks
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Success 200 {object} PlaylistBookmarkListResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Router /api/v1/music/bookmarks/playlists [get]
+func (h *Handler) listPlaylistBookmarks(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	page, pageSize := httpx.PageParams(c)
+	sort := c.DefaultQuery("sort", "latest")
+	bookmarks, total, err := h.service.ListPlaylistBookmarks(user, page, pageSize, sort)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	for index := range bookmarks {
+		if bookmarks[index].Playlist != nil {
+			bookmarks[index].Playlist.CoverURL = resolveMusicMediaURL(bookmarks[index].Playlist.CoverURL)
+		}
+	}
+	httpx.List(c, bookmarks, page, pageSize, total)
+}
+
+// createPlaylistBookmark godoc
+// @Summary 收藏歌单
+// @Tags music-bookmarks
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param body body CreatePlaylistBookmarkRequest true "歌单"
+// @Success 201 {object} model.PlaylistBookmark
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/music/bookmarks/playlists [post]
+func (h *Handler) createPlaylistBookmark(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req CreatePlaylistBookmarkRequest
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	bookmark, err := h.service.BookmarkPlaylist(user, req.PlaylistID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, bookmark)
+}
+
+// deletePlaylistBookmark godoc
+// @Summary 取消收藏歌单
+// @Tags music-bookmarks
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param playlistId path string true "歌单 ID"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Router /api/v1/music/bookmarks/playlists/{playlistId} [delete]
+func (h *Handler) deletePlaylistBookmark(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	playlistID, err := parseMusicID(c.Param("playlistId"), "playlistId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.DeletePlaylistBookmark(user, playlistID); err != nil {
 		httpx.Error(c, err)
 		return
 	}

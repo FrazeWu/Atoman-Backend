@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
 		&model.SongBookmark{},
+		&model.PlaylistBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
 		&model.MusicListeningHistory{},
@@ -43,6 +45,12 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.MusicEditVote{},
 		&model.MusicEditDecision{},
 		&model.MusicEditChange{},
+		&model.MusicSongLyric{},
+		&model.MusicSongLyricLine{},
+		&model.MusicSongLyricVersion{},
+		&model.MusicLyricAnnotation{},
+		&model.MusicLyricAnnotationVote{},
+		&model.Notification{},
 		&model.AuditLog{},
 	)
 
@@ -52,6 +60,93 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 	}
 
 	return NewService(db), db, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser}
+}
+
+func TestRegisterRoutesPlaylistBookmarksMatchFrontendContract(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	owner := model.User{Username: "playlist-owner", DisplayName: "Playlist Owner", Email: "playlist-owner@example.com", Password: "hash", Role: "user", IsActive: true}
+	other := model.User{Username: "playlist-other", Email: "playlist-other@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	playlist := model.Playlist{UserID: owner.UUID, Name: "Shared Playlist", IsPublic: true}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	song := model.Song{Title: "Playlist Bookmark Song", AudioURL: "/audio/bookmark.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := db.Create(&model.PlaylistSong{PlaylistID: playlist.ID, SongID: song.ID}).Error; err != nil {
+		t.Fatalf("create playlist song: %v", err)
+	}
+
+	userRouter := newMusicHTTPRouter(service, &user)
+	otherUser := authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: authctx.RoleUser}
+	otherRouter := newMusicHTTPRouter(service, &otherUser)
+	path := "/api/v1/music/bookmarks/playlists"
+	body := `{"playlist_id":"` + playlist.ID.String() + `"}`
+
+	for attempt := 0; attempt < 2; attempt++ {
+		response := performMusicJSONRequest(t, userRouter, http.MethodPost, path, body)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("expected post attempt %d to return 201, got %d: %s", attempt+1, response.Code, response.Body.String())
+		}
+	}
+	otherPost := performMusicJSONRequest(t, otherRouter, http.MethodPost, path, body)
+	if otherPost.Code != http.StatusCreated {
+		t.Fatalf("expected other user post 201, got %d: %s", otherPost.Code, otherPost.Body.String())
+	}
+
+	list := performMusicJSONRequest(t, userRouter, http.MethodGet, path, "")
+	if list.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", list.Code, list.Body.String())
+	}
+	var listResp struct {
+		Data []struct {
+			PlaylistID string `json:"playlist_id"`
+			UserID     string `json:"user_id"`
+			Playlist   struct {
+				ID            string `json:"id"`
+				Name          string `json:"name"`
+				OwnerUsername string `json:"owner_username"`
+				SongCount     int64  `json:"song_count"`
+			} `json:"playlist"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("decode playlist bookmarks: %v", err)
+	}
+	if listResp.Meta.Total != 1 || len(listResp.Data) != 1 {
+		t.Fatalf("expected only current user's bookmark, got %#v", listResp)
+	}
+	bookmark := listResp.Data[0]
+	if bookmark.PlaylistID != playlist.ID.String() || bookmark.UserID != user.ID.String() || bookmark.Playlist.ID != playlist.ID.String() || bookmark.Playlist.Name != playlist.Name || bookmark.Playlist.OwnerUsername != owner.Username || bookmark.Playlist.SongCount != 1 {
+		t.Fatalf("unexpected playlist bookmark payload: %#v", bookmark)
+	}
+
+	deleted := performMusicJSONRequest(t, userRouter, http.MethodDelete, path+"/"+playlist.ID.String(), "")
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("expected delete 200, got %d: %s", deleted.Code, deleted.Body.String())
+	}
+	otherList := performMusicJSONRequest(t, otherRouter, http.MethodGet, path, "")
+	if otherList.Code != http.StatusOK || !strings.Contains(otherList.Body.String(), playlist.ID.String()) {
+		t.Fatalf("current user delete removed other user's bookmark: %d %s", otherList.Code, otherList.Body.String())
+	}
+	missingDelete := performMusicJSONRequest(t, userRouter, http.MethodDelete, path+"/"+playlist.ID.String(), "")
+	if missingDelete.Code != http.StatusOK {
+		t.Fatalf("expected missing bookmark delete to stay idempotent, got %d: %s", missingDelete.Code, missingDelete.Body.String())
+	}
+	missingPost := performMusicJSONRequest(t, userRouter, http.MethodPost, path, `{"playlist_id":"`+uuid.NewString()+`"}`)
+	if missingPost.Code != http.StatusNotFound {
+		t.Fatalf("expected nonexistent playlist post 404, got %d: %s", missingPost.Code, missingPost.Body.String())
+	}
 }
 
 func newMusicHTTPRouter(service *Service, current *authctx.CurrentUser) *gin.Engine {
@@ -65,6 +160,277 @@ func newMusicHTTPRouter(service *Service, current *authctx.CurrentUser) *gin.Eng
 	v1 := r.Group("/api/v1")
 	RegisterRoutes(v1.Group("/music"), service)
 	return r
+}
+
+func TestRegisterRoutesMusicLyricsLifecycleMatchesFrontendContract(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "HTTP Lyrics", AudioURL: "/lyrics.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	userRouter := newMusicHTTPRouter(service, &user)
+	anonRouter := newMusicHTTPRouter(service, nil)
+	basePath := "/api/v1/music/songs/" + song.ID.String() + "/lyrics"
+
+	anonGet := performMusicJSONRequest(t, anonRouter, http.MethodGet, basePath, "")
+	if anonGet.Code != http.StatusOK {
+		t.Fatalf("expected anonymous GET 200, got %d: %s", anonGet.Code, anonGet.Body.String())
+	}
+
+	anonPut := performMusicJSONRequest(t, anonRouter, http.MethodPut, basePath, `{"content":"[00:01.00]hello","format":"lrc"}`)
+	assertMusicHTTPError(t, anonPut, http.StatusUnauthorized, "auth.unauthorized")
+
+	put := performMusicJSONRequest(t, userRouter, http.MethodPut, basePath, `{"content":"[00:01.00]hello\n[00:02.50]world","translation":"[00:01.00]\u4f60\u597d\n[00:02.50]\u4e16\u754c","format":"lrc","edit_summary":"initial"}`)
+	if put.Code != http.StatusOK {
+		t.Fatalf("expected PUT 200, got %d: %s", put.Code, put.Body.String())
+	}
+	var saved struct {
+		Data MusicLyricsDTO `json:"data"`
+	}
+	if err := json.Unmarshal(put.Body.Bytes(), &saved); err != nil {
+		t.Fatalf("decode saved lyrics: %v", err)
+	}
+	if saved.Data.Format != "lrc" || saved.Data.Translation == "" || len(saved.Data.Lines) != 2 || saved.Data.Lines[0].Translation != "\u4f60\u597d" {
+		t.Fatalf("unexpected saved lyrics: %#v", saved.Data)
+	}
+
+	get := performMusicJSONRequest(t, anonRouter, http.MethodGet, basePath, "")
+	if get.Code != http.StatusOK {
+		t.Fatalf("expected GET 200, got %d: %s", get.Code, get.Body.String())
+	}
+	var read struct {
+		Data MusicLyricsDTO `json:"data"`
+	}
+	if err := json.Unmarshal(get.Body.Bytes(), &read); err != nil {
+		t.Fatalf("decode read lyrics: %v", err)
+	}
+	if read.Data.Content != saved.Data.Content || read.Data.Translation != saved.Data.Translation || read.Data.Format != "lrc" {
+		t.Fatalf("read lyrics differ from saved lyrics: %#v", read.Data)
+	}
+
+	annotationPath := basePath + "/annotations"
+	create := performMusicJSONRequest(t, userRouter, http.MethodPost, annotationPath, `{"line_key":"`+saved.Data.Lines[0].LineKey+`","selected_text":"hello","start_offset":0,"end_offset":5,"body":"first note"}`)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected annotation POST 201, got %d: %s", create.Code, create.Body.String())
+	}
+	var created struct {
+		Data MusicLyricAnnotationDTO `json:"data"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created annotation: %v", err)
+	}
+	if created.Data.ID == uuid.Nil || created.Data.LineKey != saved.Data.Lines[0].LineKey || created.Data.Body != "first note" {
+		t.Fatalf("unexpected created annotation: %#v", created.Data)
+	}
+
+	itemPath := annotationPath + "/" + created.Data.ID.String()
+	patch := performMusicJSONRequest(t, userRouter, http.MethodPatch, itemPath, `{"body":"updated note"}`)
+	if patch.Code != http.StatusOK {
+		t.Fatalf("expected annotation PATCH 200, got %d: %s", patch.Code, patch.Body.String())
+	}
+	var updated struct {
+		Data MusicLyricAnnotationDTO `json:"data"`
+	}
+	if err := json.Unmarshal(patch.Body.Bytes(), &updated); err != nil || updated.Data.Body != "updated note" {
+		t.Fatalf("unexpected patched annotation: %#v, %v", updated.Data, err)
+	}
+
+	votesPath := itemPath + "/votes"
+	up := performMusicJSONRequest(t, userRouter, http.MethodPost, votesPath, `{"vote":"up"}`)
+	if up.Code != http.StatusOK {
+		t.Fatalf("expected vote up 200, got %d: %s", up.Code, up.Body.String())
+	}
+	var voted struct {
+		Data MusicLyricAnnotationDTO `json:"data"`
+	}
+	if err := json.Unmarshal(up.Body.Bytes(), &voted); err != nil || voted.Data.Upvotes != 1 || voted.Data.ViewerVote != "up" {
+		t.Fatalf("unexpected upvote response: %#v, %v", voted.Data, err)
+	}
+	none := performMusicJSONRequest(t, userRouter, http.MethodPost, votesPath, `{"vote":"none"}`)
+	if none.Code != http.StatusOK {
+		t.Fatalf("expected vote none 200, got %d: %s", none.Code, none.Body.String())
+	}
+	if err := json.Unmarshal(none.Body.Bytes(), &voted); err != nil || voted.Data.Upvotes != 0 || voted.Data.ViewerVote != "none" {
+		t.Fatalf("unexpected cleared vote response: %#v, %v", voted.Data, err)
+	}
+
+	deleted := performMusicJSONRequest(t, userRouter, http.MethodDelete, itemPath, "")
+	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"deleted":true`) {
+		t.Fatalf("expected annotation DELETE 200, got %d: %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+func TestRegisterRoutesMusicLyricsRejectsInvalidRequestsAndCrossSongAccess(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Lyrics Validation", AudioURL: "/validation.mp3", Status: "open"}
+	otherSong := model.Song{Title: "Other Song", AudioURL: "/other.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := db.Create(&otherSong).Error; err != nil {
+		t.Fatalf("create other song: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+	basePath := "/api/v1/music/songs/" + song.ID.String() + "/lyrics"
+
+	invalidID := performMusicJSONRequest(t, r, http.MethodGet, "/api/v1/music/songs/not-a-uuid/lyrics", "")
+	assertMusicHTTPError(t, invalidID, http.StatusBadRequest, "validation.invalid_request")
+	missing := performMusicJSONRequest(t, r, http.MethodGet, "/api/v1/music/songs/"+uuid.NewString()+"/lyrics", "")
+	assertMusicHTTPError(t, missing, http.StatusNotFound, "music.song_not_found")
+
+	put := performMusicJSONRequest(t, r, http.MethodPut, basePath, `{"content":"hello world","format":"plain"}`)
+	if put.Code != http.StatusOK {
+		t.Fatalf("seed lyrics: %d: %s", put.Code, put.Body.String())
+	}
+	var lyrics struct {
+		Data MusicLyricsDTO `json:"data"`
+	}
+	if err := json.Unmarshal(put.Body.Bytes(), &lyrics); err != nil {
+		t.Fatalf("decode seed lyrics: %v", err)
+	}
+
+	invalidAnchor := performMusicJSONRequest(t, r, http.MethodPost, basePath+"/annotations", `{"line_id":"`+lyrics.Data.Lines[0].ID.String()+`","selected_text":"wrong","start_offset":0,"end_offset":5,"body":"note"}`)
+	assertMusicHTTPError(t, invalidAnchor, http.StatusBadRequest, "validation.invalid_request")
+
+	create := performMusicJSONRequest(t, r, http.MethodPost, basePath+"/annotations", `{"line_id":"`+lyrics.Data.Lines[0].ID.String()+`","selected_text":"hello","start_offset":0,"end_offset":5,"body":"note"}`)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create annotation: %d: %s", create.Code, create.Body.String())
+	}
+	var annotation struct {
+		Data MusicLyricAnnotationDTO `json:"data"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &annotation); err != nil {
+		t.Fatalf("decode annotation: %v", err)
+	}
+	createSecond := performMusicJSONRequest(t, r, http.MethodPost, basePath+"/annotations", `{"line_id":"`+lyrics.Data.Lines[0].ID.String()+`","selected_text":"world","start_offset":6,"end_offset":11,"body":"second note"}`)
+	if createSecond.Code != http.StatusCreated {
+		t.Fatalf("create second annotation: %d: %s", createSecond.Code, createSecond.Body.String())
+	}
+	var secondAnnotation struct {
+		Data MusicLyricAnnotationDTO `json:"data"`
+	}
+	if err := json.Unmarshal(createSecond.Body.Bytes(), &secondAnnotation); err != nil {
+		t.Fatalf("decode second annotation: %v", err)
+	}
+	otherItemPath := "/api/v1/music/songs/" + otherSong.ID.String() + "/lyrics/annotations/" + annotation.Data.ID.String()
+	assertMusicHTTPError(t, performMusicJSONRequest(t, r, http.MethodPatch, otherItemPath, `{"body":"cross song"}`), http.StatusNotFound, "music.annotation_not_found")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, r, http.MethodPost, otherItemPath+"/votes", `{"vote":"up"}`), http.StatusNotFound, "music.annotation_not_found")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, r, http.MethodDelete, otherItemPath, ""), http.StatusNotFound, "music.annotation_not_found")
+
+	conflict := performMusicJSONRequest(t, r, http.MethodPut, basePath, `{"content":"goodbye earth","format":"plain","annotation_resolutions":[]}`)
+	assertMusicHTTPError(t, conflict, http.StatusConflict, "music.annotation_anchor_conflict")
+	var conflictBody struct {
+		Error struct {
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(conflict.Body.Bytes(), &conflictBody); err != nil || conflictBody.Error.Details == nil {
+		t.Fatalf("expected recognizable conflict details object: %s, %v", conflict.Body.String(), err)
+	}
+	wantAnnotationIDs := []string{annotation.Data.ID.String(), secondAnnotation.Data.ID.String()}
+	slices.Sort(wantAnnotationIDs)
+	gotAnnotationIDs, ok := conflictBody.Error.Details["annotation_ids"].([]any)
+	if !ok || len(gotAnnotationIDs) != len(wantAnnotationIDs) {
+		t.Fatalf("unexpected conflict annotation IDs: %#v", conflictBody.Error.Details)
+	}
+	for index, wantID := range wantAnnotationIDs {
+		if gotAnnotationIDs[index] != wantID {
+			t.Fatalf("unexpected conflict annotation IDs: got %#v want %#v", gotAnnotationIDs, wantAnnotationIDs)
+		}
+	}
+
+	badAnnotationID := performMusicJSONRequest(t, r, http.MethodPatch, basePath+"/annotations/not-a-uuid", `{"body":"x"}`)
+	assertMusicHTTPError(t, badAnnotationID, http.StatusBadRequest, "validation.invalid_request")
+}
+
+func TestRegisterRoutesMusicLyricsVersionsAndRevert(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Version HTTP", AudioURL: "/versions.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	userRouter := newMusicHTTPRouter(service, &user)
+	anonRouter := newMusicHTTPRouter(service, nil)
+	basePath := "/api/v1/music/songs/" + song.ID.String() + "/lyrics"
+	for _, content := range []string{"first", "second"} {
+		response := performMusicJSONRequest(t, userRouter, http.MethodPut, basePath, `{"content":"`+content+`","format":"plain"}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("save %s: %d %s", content, response.Code, response.Body.String())
+		}
+	}
+
+	list := performMusicJSONRequest(t, anonRouter, http.MethodGet, basePath+"/versions", "")
+	if list.Code != http.StatusOK {
+		t.Fatalf("anonymous list: %d %s", list.Code, list.Body.String())
+	}
+	var listed struct {
+		Data []MusicSongLyricsVersionDTO `json:"data"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil || len(listed.Data) != 2 || listed.Data[0].Version != 2 {
+		t.Fatalf("unexpected list: %#v, %v", listed.Data, err)
+	}
+
+	assertMusicHTTPError(t, performMusicJSONRequest(t, anonRouter, http.MethodPost, basePath+"/versions/1/revert", `{}`), http.StatusUnauthorized, "auth.unauthorized")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, userRouter, http.MethodPost, basePath+"/versions/zero/revert", `{}`), http.StatusBadRequest, "validation.invalid_request")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, userRouter, http.MethodPost, basePath+"/versions/0/revert", `{}`), http.StatusBadRequest, "validation.invalid_request")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, userRouter, http.MethodPost, basePath+"/versions/99/revert", `{}`), http.StatusNotFound, "music.lyrics_version_not_found")
+	revert := performMusicJSONRequest(t, userRouter, http.MethodPost, basePath+"/versions/1/revert", `{"edit_summary":"back"}`)
+	if revert.Code != http.StatusOK {
+		t.Fatalf("revert: %d %s", revert.Code, revert.Body.String())
+	}
+	var reverted struct {
+		Data MusicLyricsDTO `json:"data"`
+	}
+	if err := json.Unmarshal(revert.Body.Bytes(), &reverted); err != nil || reverted.Data.Version != 3 || reverted.Data.Content != "first" || reverted.Data.EditSummary != "back" {
+		t.Fatalf("unexpected revert: %#v, %v", reverted.Data, err)
+	}
+}
+
+func TestRegisterRoutesMusicLyricsVoteRequiresVoteField(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Vote HTTP", AudioURL: "/vote.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	lyrics, _ := service.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	annotation, _ := service.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note"})
+	router := newMusicHTTPRouter(service, &user)
+	path := "/api/v1/music/songs/" + song.ID.String() + "/lyrics/annotations/" + annotation.ID.String() + "/votes"
+	assertMusicHTTPError(t, performMusicJSONRequest(t, router, http.MethodPost, path, ""), http.StatusBadRequest, "validation.invalid_request")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, router, http.MethodPost, path, `{}`), http.StatusBadRequest, "validation.invalid_request")
+	clear := performMusicJSONRequest(t, router, http.MethodPost, path, `{"vote":"none"}`)
+	if clear.Code != http.StatusOK {
+		t.Fatalf("explicit none should clear vote: %d %s", clear.Code, clear.Body.String())
+	}
+}
+
+func performMusicJSONRequest(t *testing.T, r http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	r.ServeHTTP(w, req)
+	return w
+}
+
+func assertMusicHTTPError(t *testing.T, w *httptest.ResponseRecorder, status int, code string) {
+	t.Helper()
+	if w.Code != status {
+		t.Fatalf("expected status %d, got %d: %s", status, w.Code, w.Body.String())
+	}
+	var response struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if response.Error.Code != code {
+		t.Fatalf("expected error code %q, got %q: %s", code, response.Error.Code, w.Body.String())
+	}
 }
 
 func TestRegisterRoutesSubmitEditReturnsCreatedAppliedEditForMainWikiFlow(t *testing.T) {

@@ -381,6 +381,9 @@ func syncAlbumTracks(tx *gorm.DB, album *model.Album, submittedBy *uuid.UUID, tr
 					return err
 				}
 			}
+			if err := SyncLegacySongLyrics(tx, *submittedBy, song.ID, track.Lyrics, "通过专辑编辑更新歌词"); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -400,6 +403,9 @@ func syncAlbumTracks(tx *gorm.DB, album *model.Album, submittedBy *uuid.UUID, tr
 		}
 		song.ReleaseDate = album.ReleaseDate
 		if err := tx.Create(&song).Error; err != nil {
+			return err
+		}
+		if err := SyncLegacySongLyrics(tx, *submittedBy, song.ID, track.Lyrics, "通过专辑编辑创建歌词"); err != nil {
 			return err
 		}
 	}

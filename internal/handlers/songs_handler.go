@@ -15,6 +15,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	musicmodule "atoman/internal/modules/music"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/storage"
 )
@@ -493,8 +494,18 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to associate artist"})
 			return
 		}
+		if userID != nil {
+			if err := musicmodule.SyncLegacySongLyrics(tx, *userID, song.ID, input.Lyrics, "通过歌曲上传创建歌词"); err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save song lyrics"})
+				return
+			}
+		}
 
-		tx.Commit()
+		if err := tx.Commit().Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create song"})
+			return
+		}
 
 		db.Preload("Album").Preload("Artists").First(&song, "id = ?", song.ID)
 		c.JSON(http.StatusCreated, song)
@@ -689,6 +700,11 @@ func UpdateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update song"})
 			return
 		}
+		if err := musicmodule.SyncLegacySongLyrics(tx, userID.(uuid.UUID), song.ID, input.Lyrics, "通过歌曲编辑更新歌词"); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save song lyrics"})
+			return
+		}
 
 		if err := tx.Model(&song).Association("Artists").Clear(); err != nil {
 			tx.Rollback()
@@ -702,7 +718,10 @@ func UpdateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			return
 		}
 
-		tx.Commit()
+		if err := tx.Commit().Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update song"})
+			return
+		}
 
 		db.Preload("Album").Preload("Album.Artists").Preload("Artists").First(&song, "id = ?", song.ID)
 		c.JSON(http.StatusOK, song)

@@ -82,7 +82,14 @@ func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 	if err := migrations.MigrateLegacyForumReplies(db); err != nil {
 		return fmt.Errorf("migrate legacy forum replies: %w", err)
 	}
+	if err := migrations.RunMusicLyricsMigration(db); err != nil {
+		return fmt.Errorf("migrate music lyrics: %w", err)
+	}
 	return nil
+}
+
+func runMusicBookmarkStartupMigration(db *gorm.DB) error {
+	return migrations.RunMusicBookmarksPlaylistsMigration(db)
 }
 
 func ensureSoftDeleteColumns(db *gorm.DB) {
@@ -521,7 +528,7 @@ func main() {
 		}
 		log.Println("Migration step completed: content protection live unique index")
 		log.Println("Migration step: music bookmarks and playlists")
-		if err := migrations.RunMusicBookmarksPlaylistsMigration(db); err != nil {
+		if err := runMusicBookmarkStartupMigration(db); err != nil {
 			fatalLogger.Fatal("Failed to run music bookmarks and playlists migration: ", err)
 		}
 		log.Println("Migration step completed: music bookmarks and playlists")
@@ -641,7 +648,7 @@ func main() {
 		}
 		log.Println("Migration step completed: notification/dm indexes")
 		log.Println("Migration step: music bookmarks playlists")
-		if err := migrations.RunMusicBookmarksPlaylistsMigration(db); err != nil {
+		if err := runMusicBookmarkStartupMigration(db); err != nil {
 			fatalLogger.Fatal("Failed to run music bookmarks playlists migration: ", err)
 		}
 		log.Println("Migration step completed: music bookmarks playlists")

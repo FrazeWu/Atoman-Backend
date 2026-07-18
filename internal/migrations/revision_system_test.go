@@ -75,6 +75,54 @@ func TestMigrateToRevisionSystemUsesSystemUserForLegacyMissingUploaders(t *testi
 	assertLegacyRevisionEditor(t, db, "song", song.ID, 2)
 }
 
+func TestEnsureRevisionMigrationSystemUserDoesNotUseOrdinarySameUsername(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{})
+	ordinary := model.User{Username: "system-migration", Email: "ordinary@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&ordinary).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	systemID, err := ensureRevisionMigrationSystemUser(db)
+	if err != nil {
+		t.Fatalf("ensure migration user: %v", err)
+	}
+	if systemID == ordinary.UUID {
+		t.Fatal("ordinary same-name user was used as migration actor")
+	}
+	var unchanged model.User
+	if err := db.First(&unchanged, "uuid = ?", ordinary.UUID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.Role != "user" || unchanged.Email != "ordinary@example.com" {
+		t.Fatalf("ordinary user was modified: %#v", unchanged)
+	}
+}
+
+func TestEnsureRevisionMigrationSystemUserHandlesSoftDeletedSameUsername(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{})
+	deleted := model.User{Username: "system-migration", Email: "deleted@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&deleted).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&deleted).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	firstID, err := ensureRevisionMigrationSystemUser(db)
+	if err != nil {
+		t.Fatalf("ensure migration user with deleted collision: %v", err)
+	}
+	secondID, err := ensureRevisionMigrationSystemUser(db)
+	if err != nil {
+		t.Fatalf("rerun ensure migration user: %v", err)
+	}
+	if firstID != secondID || firstID == deleted.UUID {
+		t.Fatalf("migration actor is not stable or reused deleted ordinary user: %s / %s", firstID, secondID)
+	}
+}
+
 func assertLegacyRevisionEditor(t *testing.T, db *gorm.DB, contentType string, contentID uuid.UUID, version int) {
 	t.Helper()
 
