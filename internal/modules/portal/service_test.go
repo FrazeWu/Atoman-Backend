@@ -2,6 +2,7 @@ package portal
 
 import (
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
@@ -106,6 +107,10 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 		&model.Video{},
 		&model.FeedItem{},
 		&model.PodcastEpisode{},
+		&model.Artist{},
+		&model.Album{},
+		&model.AlbumArtist{},
+		&model.TimelineEvent{},
 	)
 
 	userID := uuid.Must(uuid.NewV7())
@@ -137,6 +142,19 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 		Title:   "Portal feed item",
 		Summary: "summary",
 	}
+	album := model.Album{
+		Title:    "Portal album",
+		Status:   "open",
+		HotScore: 12,
+	}
+	timelineEvent := model.TimelineEvent{
+		UserID:    userID,
+		Title:     "Portal timeline event",
+		EventDate: time.Now(),
+		Location:  "Berlin",
+		Source:    "Archive",
+		IsPublic:  true,
+	}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
@@ -145,6 +163,12 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 	}
 	if err := db.Create(&feedItem).Error; err != nil {
 		t.Fatalf("create feed item: %v", err)
+	}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	if err := db.Create(&timelineEvent).Error; err != nil {
+		t.Fatalf("create timeline event: %v", err)
 	}
 
 	episode := model.PodcastEpisode{
@@ -172,6 +196,8 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 	assertContainsPath(t, pathsByModule["video"], "/videos/watch/"+video.ID.String())
 	assertContainsPath(t, pathsByModule["feed"], "/feed/item/"+feedItem.ID.String())
 	assertContainsPath(t, pathsByModule["podcast"], "/podcasts/episode/"+episode.ID.String())
+	assertContainsPath(t, pathsByModule["music"], "/music/album/"+album.ID.String())
+	assertContainsPath(t, pathsByModule["timeline"], "/timeline?event="+timelineEvent.ID.String())
 }
 
 func assertContainsPath(t *testing.T, paths []string, expected string) {
