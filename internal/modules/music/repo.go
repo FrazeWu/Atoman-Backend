@@ -183,13 +183,21 @@ func (r *Repo) DeleteSongBookmark(userID uuid.UUID, songID uuid.UUID) error {
 
 func (r *Repo) UpsertPlaylistBookmark(userID uuid.UUID, playlistID uuid.UUID) (model.PlaylistBookmark, error) {
 	bookmark := model.PlaylistBookmark{UserID: userID, PlaylistID: playlistID}
-	err := r.db.Where("user_id = ? AND playlist_id = ?", userID, playlistID).FirstOrCreate(&bookmark).Error
-	return bookmark, err
+	if err := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&bookmark).Error; err != nil {
+		return model.PlaylistBookmark{}, err
+	}
+	var stored model.PlaylistBookmark
+	if err := r.db.Where("user_id = ? AND playlist_id = ?", userID, playlistID).First(&stored).Error; err != nil {
+		return model.PlaylistBookmark{}, err
+	}
+	return stored, nil
 }
 
 func (r *Repo) ListPlaylistBookmarks(userID uuid.UUID, page int, pageSize int, sort string) ([]model.PlaylistBookmark, int64, error) {
 	var total int64
-	db := r.db.Model(&model.PlaylistBookmark{}).Where("music_playlist_bookmarks.user_id = ?", userID)
+	db := r.db.Model(&model.PlaylistBookmark{}).
+		Joins("JOIN music_playlists ON music_playlists.id = music_playlist_bookmarks.playlist_id AND music_playlists.deleted_at IS NULL").
+		Where("music_playlist_bookmarks.user_id = ? AND (music_playlists.user_id = ? OR music_playlists.is_public = ?)", userID, userID, true)
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -197,6 +205,7 @@ func (r *Repo) ListPlaylistBookmarks(userID uuid.UUID, page int, pageSize int, s
 	if normalizeBookmarkSort(sort) == BookmarkSortPopular {
 		songCountSubquery := r.db.Table("music_playlist_songs").
 			Select("playlist_id, COUNT(*) AS song_count").
+			Where("music_playlist_songs.deleted_at IS NULL").
 			Group("playlist_id")
 		db = db.
 			Joins("LEFT JOIN (?) AS playlist_song_counts ON playlist_song_counts.playlist_id = music_playlist_bookmarks.playlist_id", songCountSubquery).
@@ -327,6 +336,9 @@ func (r *Repo) CountPlaylistSongs(playlistIDs []uuid.UUID) (map[uuid.UUID]int64,
 func (r *Repo) DeletePlaylist(userID uuid.UUID, playlistID uuid.UUID) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("playlist_id = ?", playlistID).Delete(&model.PlaylistSong{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("playlist_id = ?", playlistID).Delete(&model.PlaylistBookmark{}).Error; err != nil {
 			return err
 		}
 		return tx.Where("user_id = ? AND id = ?", userID, playlistID).Delete(&model.Playlist{}).Error

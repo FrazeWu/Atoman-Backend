@@ -758,10 +758,7 @@ func (s *Service) BookmarkPlaylist(user authctx.CurrentUser, playlistID uuid.UUI
 	if playlistID == uuid.Nil {
 		return model.PlaylistBookmark{}, apperr.BadRequest("validation.invalid_request", "playlist_id is required")
 	}
-	if _, err := s.repo.GetPlaylistByID(playlistID); err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return model.PlaylistBookmark{}, apperr.NotFound("music.playlist_not_found", "Playlist not found")
-		}
+	if _, err := s.getVisiblePlaylist(user.ID, playlistID); err != nil {
 		return model.PlaylistBookmark{}, err
 	}
 	return s.repo.UpsertPlaylistBookmark(user.ID, playlistID)
@@ -957,6 +954,10 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 }
 
 func (s *Service) GetPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.Playlist, error) {
+	return s.getVisiblePlaylist(user.ID, playlistID)
+}
+
+func (s *Service) getVisiblePlaylist(userID uuid.UUID, playlistID uuid.UUID) (model.Playlist, error) {
 	playlist, err := s.repo.GetPlaylistByID(playlistID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -964,7 +965,7 @@ func (s *Service) GetPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (m
 		}
 		return model.Playlist{}, err
 	}
-	if playlist.UserID != user.ID && !playlist.IsPublic {
+	if playlist.UserID != userID && !playlist.IsPublic {
 		return model.Playlist{}, apperr.NotFound("music.playlist_not_found", "Playlist not found")
 	}
 	return playlist, nil
