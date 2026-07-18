@@ -14,6 +14,7 @@ import (
 	"atoman/internal/modules/forum"
 	"atoman/internal/modules/forum_engagement"
 	"atoman/internal/modules/forum_moderation"
+	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/music"
 	"atoman/internal/modules/notification"
 	"atoman/internal/modules/portal"
@@ -54,6 +55,7 @@ func RegisterV1Routes(
 	music.RegisterRoutes(musicGroup, music.NewServiceWithS3(db, s3Client))
 	portal.RegisterRoutes(group.Group("/portal"), portal.NewService(db))
 	studio.RegisterRoutes(group.Group("/studio"), studio.NewService(db))
+	lifecycle.RegisterRoutes(group.Group("/content"), lifecycle.NewService(db))
 
 	handlers.SetupAuthRoutes(r, db, emailService)
 	handlers.SetupSiteRoutes(r, db)

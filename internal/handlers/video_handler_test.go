@@ -30,6 +30,7 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.Channel{},
 		&model.Collection{},
 		&model.Video{},
+		&model.ContentPublicationEvent{},
 		&model.VideoBookmark{},
 		&model.ChannelBookmark{},
 		&model.VideoProcessingJob{},
@@ -745,6 +746,46 @@ func TestCreateVideoPublishRequiresCollection(t *testing.T) {
 	router.ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+}
+
+func TestCreateLocalVideoPublishRequiresReadyProcessing(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, user.UUID, "Ready Channel")
+	collection := seedVideoCollection(t, db, channel.ID, "Ready Collection")
+	router := gin.New()
+	router.POST("/api/v1/videos", withVideoAuth(user.UUID, CreateVideo(db)))
+	body := strings.NewReader(`{"channel_id":"` + channel.ID.String() + `","title":"Pending","storage_type":"local","video_url":"/uploads/pending.mp4","status":"published","collection_ids":["` + collection.ID.String() + `"]}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/videos", body)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
+	var count int64
+	require.NoError(t, db.Model(&model.Video{}).Where("title = ?", "Pending").Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestCreateExternalVideoPublishEnqueuesOnce(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, user.UUID, "External Channel")
+	collection := seedVideoCollection(t, db, channel.ID, "External Collection")
+	router := gin.New()
+	router.POST("/api/v1/videos", withVideoAuth(user.UUID, CreateVideo(db)))
+	body := strings.NewReader(`{"channel_id":"` + channel.ID.String() + `","title":"External","storage_type":"external","video_url":"https://youtu.be/dQw4w9WgXcQ","status":"published","collection_ids":["` + collection.ID.String() + `"]}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/videos", body)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+
+	var publicationCount int64
+	require.NoError(t, db.Model(&model.ContentPublicationEvent{}).Where("content_type = ?", "video").Count(&publicationCount).Error)
+	require.EqualValues(t, 1, publicationCount)
 }
 
 func TestUpdateVideoUsesNewChannelWhenAssigningCollections(t *testing.T) {

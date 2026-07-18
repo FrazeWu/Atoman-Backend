@@ -19,6 +19,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/recommendation"
 	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
@@ -474,7 +475,13 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 					return err
 				}
 			}
-			return tx.Create(&ep).Error
+			if err := tx.Create(&ep).Error; err != nil {
+				return err
+			}
+			if status == "published" {
+				return lifecycle.NewService(tx).EnqueuePublication("podcast", ep.ID)
+			}
+			return nil
 		})
 		if txErr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
@@ -540,6 +547,7 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		effectiveStatus := ep.Post.Status
+		wasPublished := ep.Post.Status == "published"
 		if input.Status != nil {
 			effectiveStatus = *input.Status
 		}
@@ -617,7 +625,13 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 				}
 			}
 
-			return tx.Preload("Post.Collection").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID).Error
+			if err := tx.Preload("Post.Collection").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID).Error; err != nil {
+				return err
+			}
+			if effectiveStatus == "published" && !wasPublished {
+				return lifecycle.NewService(tx).EnqueuePublication("podcast", ep.ID)
+			}
+			return nil
 		}); err != nil {
 			c.JSON(statusCode, gin.H{"error": err.Error()})
 			return

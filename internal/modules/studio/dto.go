@@ -192,13 +192,26 @@ type AnalyticsContentMetric struct {
 	Metrics map[string]int64 `json:"metrics"`
 }
 
+type AnalyticsSourceMetric struct {
+	Source string `json:"source"`
+	Count  int64  `json:"count"`
+}
+
+type AnalyticsRetention struct {
+	Consumers          int64 `json:"consumers"`
+	ReturningConsumers int64 `json:"returning_consumers"`
+	Rate               int64 `json:"rate"`
+}
+
 type AnalyticsResponse struct {
-	Range  int                      `json:"range"`
-	From   time.Time                `json:"from"`
-	To     time.Time                `json:"to"`
-	Totals map[string]int64         `json:"totals"`
-	Trend  []AnalyticsPoint         `json:"trend"`
-	Top    []AnalyticsContentMetric `json:"top"`
+	Range     int                      `json:"range"`
+	From      time.Time                `json:"from"`
+	To        time.Time                `json:"to"`
+	Totals    map[string]int64         `json:"totals"`
+	Trend     []AnalyticsPoint         `json:"trend"`
+	Top       []AnalyticsContentMetric `json:"top"`
+	Sources   []AnalyticsSourceMetric  `json:"sources"`
+	Retention AnalyticsRetention       `json:"retention"`
 }
 
 type ShareResponse struct {

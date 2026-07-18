@@ -14,9 +14,9 @@ import (
 )
 
 var metricNamesByModule = map[Module][]string{
-	ModuleBlog:    {"view", "comment", "like", "bookmark", "share"},
-	ModulePodcast: {"play", "complete", "comment", "bookmark", "share"},
-	ModuleVideo:   {"play", "comment", "like", "bookmark", "share"},
+	ModuleBlog:    {"impression", "open", "engaged", "complete", "view", "comment", "like", "bookmark", "share", "follow"},
+	ModulePodcast: {"impression", "open", "engaged", "complete", "play", "comment", "bookmark", "share", "follow"},
+	ModuleVideo:   {"impression", "open", "engaged", "complete", "play", "comment", "like", "bookmark", "share", "follow"},
 }
 
 func (s *Service) GetAnalytics(user authctx.CurrentUser, module Module, query AnalyticsQuery) (AnalyticsResponse, error) {
@@ -65,12 +65,60 @@ func (s *Service) GetAnalytics(user authctx.CurrentUser, module Module, query An
 	for _, event := range events {
 		addAnalyticsMetric(event.Metric, event.ContentID, event.CreatedAt, totals, pointByDate, contentMetrics)
 	}
+	var lifecycleEvents []model.ContentLifecycleEvent
+	if err := s.db.Where(
+		"channel_id = ? AND content_type = ? AND created_at >= ? AND created_at < ?",
+		channel.ID, module, from, to,
+	).Find(&lifecycleEvents).Error; err != nil {
+		return AnalyticsResponse{}, err
+	}
+	sourceCounts := make(map[string]int64)
+	consumerDays := make(map[string]map[string]struct{})
+	for _, event := range lifecycleEvents {
+		addAnalyticsMetric(event.Event, event.ContentID, event.CreatedAt, totals, pointByDate, contentMetrics)
+		sourceCounts[event.Source]++
+		if event.Event != "open" && event.Event != "engaged" && event.Event != "complete" {
+			continue
+		}
+		identity := ""
+		if event.UserID != nil {
+			identity = "user:" + event.UserID.String()
+		} else if event.SessionID != "" {
+			identity = "session:" + event.SessionID
+		}
+		if identity == "" {
+			continue
+		}
+		if consumerDays[identity] == nil {
+			consumerDays[identity] = make(map[string]struct{})
+		}
+		consumerDays[identity][event.CreatedAt.UTC().Format("2006-01-02")] = struct{}{}
+	}
+	sources := make([]AnalyticsSourceMetric, 0, len(sourceCounts))
+	for source, count := range sourceCounts {
+		sources = append(sources, AnalyticsSourceMetric{Source: source, Count: count})
+	}
+	sort.Slice(sources, func(i, j int) bool {
+		if sources[i].Count == sources[j].Count {
+			return sources[i].Source < sources[j].Source
+		}
+		return sources[i].Count > sources[j].Count
+	})
+	retention := AnalyticsRetention{Consumers: int64(len(consumerDays))}
+	for _, days := range consumerDays {
+		if len(days) >= 2 {
+			retention.ReturningConsumers++
+		}
+	}
+	if retention.Consumers > 0 {
+		retention.Rate = retention.ReturningConsumers * 100 / retention.Consumers
+	}
 	if err := s.addExistingAnalytics(module, titles, from, to, totals, pointByDate, contentMetrics); err != nil {
 		return AnalyticsResponse{}, err
 	}
 	return AnalyticsResponse{
 		Range: days, From: from, To: to, Totals: totals, Trend: trend,
-		Top: rankedContentMetrics(titles, contentMetrics),
+		Top: rankedContentMetrics(titles, contentMetrics), Sources: sources, Retention: retention,
 	}, nil
 }
 
