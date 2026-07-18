@@ -39,6 +39,19 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.DELETE("/:module/collections/:id", h.deleteCollection)
 }
 
+// getAnalytics godoc
+// @Summary 获取创作数据
+// @Tags studio
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param channel_id query string false "频道 UUID"
+// @Param range query int false "统计天数" Enums(7,28,90)
+// @Success 200 {object} AnalyticsResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/analytics [get]
 func (h *Handler) getAnalytics(c *gin.Context) {
 	user, module, ok := requestScope(c)
 	if !ok {
@@ -61,6 +74,22 @@ func (h *Handler) getAnalytics(c *gin.Context) {
 	respond(c, http.StatusOK, analytics, err)
 }
 
+// listInteractions godoc
+// @Summary 获取创作互动
+// @Tags studio
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param channel_id query string false "频道 UUID"
+// @Param unreplied query bool false "仅未回复"
+// @Param anchored query bool false "仅时间锚点评论"
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Success 200 {array} StudioInteractionItem
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/interactions [get]
 func (h *Handler) listInteractions(c *gin.Context) {
 	user, module, ok := requestScope(c)
 	if !ok {
@@ -89,6 +118,18 @@ func (h *Handler) listInteractions(c *gin.Context) {
 	httpx.List(c, items, page, pageSize, total)
 }
 
+// getSettings godoc
+// @Summary 获取创作设置
+// @Tags studio
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param channel_id query string false "频道 UUID"
+// @Success 200 {object} SettingsResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/settings [get]
 func (h *Handler) getSettings(c *gin.Context) {
 	user, module, ok := requestScope(c)
 	if !ok {
@@ -102,6 +143,19 @@ func (h *Handler) getSettings(c *gin.Context) {
 	respond(c, http.StatusOK, settings, err)
 }
 
+// patchSettings godoc
+// @Summary 保存创作设置
+// @Tags studio
+// @Accept json
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param input body SettingsInput true "创作设置"
+// @Success 200 {object} SettingsResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/settings [patch]
 func (h *Handler) patchSettings(c *gin.Context) {
 	user, module, ok := requestScope(c)
 	if !ok {
@@ -115,6 +169,19 @@ func (h *Handler) patchSettings(c *gin.Context) {
 	respond(c, http.StatusOK, settings, err)
 }
 
+// shareContent godoc
+// @Summary 记录内容分享
+// @Tags studio
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param id path string true "内容 UUID"
+// @Param channel_id query string false "频道 UUID"
+// @Success 200 {object} ShareResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/contents/{id}/share [post]
 func (h *Handler) shareContent(c *gin.Context) {
 	user, module, ok := requestScope(c)
 	if !ok {
@@ -132,6 +199,17 @@ func (h *Handler) shareContent(c *gin.Context) {
 	respond(c, http.StatusOK, share, err)
 }
 
+// getDashboard godoc
+// @Summary 获取创作中心总览
+// @Tags studio
+// @Produce json
+// @Param channel_id query string false "频道 UUID"
+// @Success 200 {object} DashboardResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/dashboard [get]
 func (h *Handler) getDashboard(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -145,6 +223,24 @@ func (h *Handler) getDashboard(c *gin.Context) {
 	respond(c, http.StatusOK, dashboard, err)
 }
 
+// listContents godoc
+// @Summary 获取创作内容
+// @Tags studio
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param channel_id query string false "频道 UUID"
+// @Param q query string false "搜索词"
+// @Param status query string false "发布状态"
+// @Param visibility query string false "可见性"
+// @Param collection_id query string false "合集 UUID"
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Success 200 {array} StudioContentItem
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/contents [get]
 func (h *Handler) listContents(c *gin.Context) {
 	user, module, ok := requestScope(c)
 	if !ok {
@@ -171,6 +267,14 @@ func (h *Handler) listContents(c *gin.Context) {
 	httpx.List(c, items, page, pageSize, total)
 }
 
+// getState godoc
+// @Summary 获取当前创作频道
+// @Tags studio
+// @Produce json
+// @Success 200 {object} StateResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/state [get]
 func (h *Handler) getState(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -180,6 +284,18 @@ func (h *Handler) getState(c *gin.Context) {
 	respond(c, http.StatusOK, state, err)
 }
 
+// patchState godoc
+// @Summary 切换当前创作频道
+// @Tags studio
+// @Accept json
+// @Produce json
+// @Param input body PutStateInput true "当前频道"
+// @Success 200 {object} StateResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/state [patch]
 func (h *Handler) patchState(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -193,6 +309,14 @@ func (h *Handler) patchState(c *gin.Context) {
 	respond(c, http.StatusOK, state, err)
 }
 
+// listChannels godoc
+// @Summary 获取创作频道
+// @Tags studio
+// @Produce json
+// @Success 200 {array} ChannelSummary
+// @Failure 401 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/channels [get]
 func (h *Handler) listChannels(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -202,6 +326,18 @@ func (h *Handler) listChannels(c *gin.Context) {
 	respond(c, http.StatusOK, channels, err)
 }
 
+// createChannel godoc
+// @Summary 创建创作频道
+// @Tags studio
+// @Accept json
+// @Produce json
+// @Param input body CreateChannelInput true "频道信息"
+// @Success 201 {object} ChannelSummary
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/channels [post]
 func (h *Handler) createChannel(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -215,6 +351,19 @@ func (h *Handler) createChannel(c *gin.Context) {
 	respond(c, http.StatusCreated, channel, err)
 }
 
+// updateChannel godoc
+// @Summary 更新创作频道
+// @Tags studio
+// @Accept json
+// @Produce json
+// @Param id path string true "频道 UUID"
+// @Param input body UpdateChannelInput true "频道信息"
+// @Success 200 {object} ChannelSummary
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/channels/{id} [patch]
 func (h *Handler) updateChannel(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -232,6 +381,17 @@ func (h *Handler) updateChannel(c *gin.Context) {
 	respond(c, http.StatusOK, channel, err)
 }
 
+// deleteChannel godoc
+// @Summary 删除空创作频道
+// @Tags studio
+// @Produce json
+// @Param id path string true "频道 UUID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/channels/{id} [delete]
 func (h *Handler) deleteChannel(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {
@@ -248,6 +408,18 @@ func (h *Handler) deleteChannel(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Channel deleted"})
 }
 
+// listCollections godoc
+// @Summary 获取模块合集
+// @Tags studio
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param channel_id query string true "频道 UUID"
+// @Success 200 {array} model.Collection
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/collections [get]
 func (h *Handler) listCollections(c *gin.Context) {
 	user, module, ok := requestScope(c)
 	if !ok {
@@ -262,6 +434,19 @@ func (h *Handler) listCollections(c *gin.Context) {
 	respond(c, http.StatusOK, collections, serviceErr)
 }
 
+// createCollection godoc
+// @Summary 创建模块合集
+// @Tags studio
+// @Accept json
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param input body CreateCollectionInput true "合集信息"
+// @Success 201 {object} model.Collection
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/collections [post]
 func (h *Handler) createCollection(c *gin.Context) {
 	user, module, ok := requestScope(c)
 	if !ok {
@@ -275,6 +460,20 @@ func (h *Handler) createCollection(c *gin.Context) {
 	respond(c, http.StatusCreated, collection, err)
 }
 
+// updateCollection godoc
+// @Summary 更新模块合集
+// @Tags studio
+// @Accept json
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param id path string true "合集 UUID"
+// @Param input body UpdateCollectionInput true "合集信息"
+// @Success 200 {object} model.Collection
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/collections/{id} [patch]
 func (h *Handler) updateCollection(c *gin.Context) {
 	user, module, ok := requestScope(c)
 	if !ok {
@@ -292,6 +491,18 @@ func (h *Handler) updateCollection(c *gin.Context) {
 	respond(c, http.StatusOK, collection, err)
 }
 
+// deleteCollection godoc
+// @Summary 删除模块合集
+// @Tags studio
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param id path string true "合集 UUID"
+// @Success 200 {object} map[string]string
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/collections/{id} [delete]
 func (h *Handler) deleteCollection(c *gin.Context) {
 	user, module, ok := requestScope(c)
 	if !ok {
