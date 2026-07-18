@@ -96,16 +96,8 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("legacy forum replies migration: %w", err)
 	}
 
-	if err := migrations.RunChannelDefaultSelectionMigration(db); err != nil {
-		return fmt.Errorf("channel default selection migration: %w", err)
-	}
-
 	if err := migrations.RunBlogInteractionUniqueIndexes(db); err != nil {
 		return fmt.Errorf("blog interaction unique indexes migration: %w", err)
-	}
-
-	if err := migrations.RunBlogDefaultUniqueIndexes(db); err != nil {
-		return fmt.Errorf("blog default unique indexes migration: %w", err)
 	}
 
 	if err := migrations.RunContentProtectionLiveUniqueIndex(db); err != nil {
@@ -157,11 +149,11 @@ func runMigrations(db *gorm.DB) error {
 	if err := migrations.RunMusicListeningMigration(db); err != nil {
 		return fmt.Errorf("music listening migration: %w", err)
 	}
-	if err := backfillUserDefaultResources(db); err != nil {
-		return fmt.Errorf("user default resources migration: %w", err)
-	}
 	if err := migrations.RunUnifiedStudioMigration(db); err != nil {
 		return fmt.Errorf("unified studio migration: %w", err)
+	}
+	if err := backfillUserDefaultResources(db); err != nil {
+		return fmt.Errorf("user default resources migration: %w", err)
 	}
 
 	return nil
@@ -201,8 +193,9 @@ func migrateSchema(db *gorm.DB) error {
 		&model.UserSettings{},
 		&model.EmailVerificationCode{},
 		&model.Channel{},
-		&model.UserDefaultChannel{},
 		&model.Collection{},
+		&model.UserStudioState{},
+		&model.StudioModuleSettings{},
 		&model.Post{},
 		&model.BlogPostVersion{},
 		&model.PostCollection{},

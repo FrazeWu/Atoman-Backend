@@ -34,8 +34,9 @@ func newAuthTestDB(t *testing.T) *gorm.DB {
 		&model.UserSettings{},
 		&model.EmailVerificationCode{},
 		&model.Channel{},
-		&model.UserDefaultChannel{},
 		&model.Collection{},
+		&model.UserStudioState{},
+		&model.StudioModuleSettings{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
@@ -723,19 +724,20 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	if err := db.Where("user_id = ?", user.UUID).Find(&channels).Error; err != nil {
 		t.Fatalf("find default channels: %v", err)
 	}
-	if len(channels) != 3 {
-		t.Fatalf("expected three module channels, got %d", len(channels))
+	if len(channels) != 1 {
+		t.Fatalf("expected one unified studio channel, got %d", len(channels))
+	}
+	channel := channels[0]
+	var state model.UserStudioState
+	if err := db.First(&state, "user_id = ?", user.UUID).Error; err != nil {
+		t.Fatalf("find current studio channel: %v", err)
+	}
+	if state.ChannelID == nil || *state.ChannelID != channel.ID {
+		t.Fatalf("expected current channel %s, got %#v", channel.ID, state.ChannelID)
 	}
 	for _, contentType := range []string{model.ChannelContentTypeBlog, model.ChannelContentTypePodcast, model.ChannelContentTypeVideo} {
-		var selection model.UserDefaultChannel
-		if err := db.Preload("Channel").Where("user_id = ? AND content_type = ?", user.UUID, contentType).First(&selection).Error; err != nil {
-			t.Fatalf("find %s default channel selection: %v", contentType, err)
-		}
-		if selection.Channel == nil || selection.Channel.ContentType != contentType {
-			t.Fatalf("unexpected %s default channel: %#v", contentType, selection.Channel)
-		}
 		var collection model.Collection
-		if err := db.Where("channel_id = ? AND is_default = ?", selection.ChannelID, true).First(&collection).Error; err != nil {
+		if err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channel.ID, contentType, true).First(&collection).Error; err != nil {
 			t.Fatalf("find %s default collection: %v", contentType, err)
 		}
 	}

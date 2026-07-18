@@ -34,7 +34,6 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		&model.User{},
 		&model.Channel{},
 		&model.Collection{},
-		&model.UserDefaultChannel{},
 		&model.Post{},
 		&model.PostCollection{},
 		&model.PodcastEpisode{},

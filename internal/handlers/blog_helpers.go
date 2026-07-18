@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 
 	"atoman/internal/model"
 	"atoman/internal/service"
@@ -176,7 +175,7 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 			}
 			channel.ContentType = model.ChannelContentTypeBlog
 		}
-		if err := upsertDefaultChannelSelection(db, userID, channel.ID); err != nil {
+		if err := ensureStudioState(db, userID, channel.ID); err != nil {
 			return nil, err
 		}
 		return &channel, nil
@@ -205,7 +204,7 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 		if channels[0].ContentType == "" {
 			channels[0].ContentType = model.ChannelContentTypeBlog
 		}
-		if err := upsertDefaultChannelSelection(db, userID, channels[0].ID); err != nil {
+		if err := ensureStudioState(db, userID, channels[0].ID); err != nil {
 			return nil, err
 		}
 		return &channels[0], nil
@@ -235,7 +234,7 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 	if _, err := ensureDefaultCollection(db, channel.ID); err != nil {
 		return nil, err
 	}
-	if err := upsertDefaultChannelSelection(db, userID, channel.ID); err != nil {
+	if err := ensureStudioState(db, userID, channel.ID); err != nil {
 		return nil, err
 	}
 
@@ -248,15 +247,19 @@ func EnsureDefaultChannelForUser(db *gorm.DB, userID uuid.UUID, username string)
 	return &channel, nil
 }
 
-func upsertDefaultChannelSelection(db *gorm.DB, userID uuid.UUID, channelID uuid.UUID) error {
-	return db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "content_type"}},
-		DoUpdates: clause.AssignmentColumns([]string{"channel_id", "updated_at"}),
-	}).Create(&model.UserDefaultChannel{
-		UserID:      userID,
-		ContentType: model.ChannelContentTypeBlog,
-		ChannelID:   channelID,
-	}).Error
+func ensureStudioState(db *gorm.DB, userID uuid.UUID, channelID uuid.UUID) error {
+	var state model.UserStudioState
+	err := db.First(&state, "user_id = ?", userID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return db.Create(&model.UserStudioState{UserID: userID, ChannelID: &channelID}).Error
+	}
+	if err != nil {
+		return err
+	}
+	if state.ChannelID == nil {
+		return db.Model(&state).Update("channel_id", channelID).Error
+	}
+	return nil
 }
 
 // autoSubscribeToChannel creates a feed subscription for user to their own channel

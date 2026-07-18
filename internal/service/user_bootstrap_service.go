@@ -31,19 +31,16 @@ func NewUserBootstrapService(db *gorm.DB) *UserBootstrapService {
 }
 
 func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string) error {
+	channel, err := s.ensureStudioChannel(userID, username)
+	if err != nil {
+		return err
+	}
 	for _, contentType := range []string{
 		model.ChannelContentTypeBlog,
 		model.ChannelContentTypePodcast,
 		model.ChannelContentTypeVideo,
 	} {
-		channel, err := s.ensureDefaultChannel(userID, username, contentType)
-		if err != nil {
-			return err
-		}
-		if err := s.ensureDefaultCollectionForChannel(channel.ID); err != nil {
-			return err
-		}
-		if err := s.upsertUserDefaultChannelSelection(userID, contentType, channel.ID); err != nil {
+		if err := s.ensureDefaultCollectionForChannel(userID, channel.ID, contentType); err != nil {
 			return err
 		}
 	}
@@ -65,19 +62,22 @@ func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string)
 	return nil
 }
 
-func (s *UserBootstrapService) ensureDefaultChannel(userID uuid.UUID, username string, contentType string) (*model.Channel, error) {
-	var selection model.UserDefaultChannel
-	if err := s.db.Preload("Channel").Where("user_id = ? AND content_type = ?", userID, contentType).First(&selection).Error; err == nil {
-		if selection.Channel != nil && selection.Channel.UserID != nil && *selection.Channel.UserID == userID && model.NormalizeChannelContentType(selection.Channel.ContentType) == contentType {
-			return selection.Channel, nil
+func (s *UserBootstrapService) ensureStudioChannel(userID uuid.UUID, username string) (*model.Channel, error) {
+	var state model.UserStudioState
+	if err := s.db.Preload("Channel").First(&state, "user_id = ?", userID).Error; err == nil {
+		if state.Channel != nil && state.Channel.UserID != nil && *state.Channel.UserID == userID {
+			return state.Channel, nil
 		}
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
 
 	var channel model.Channel
-	err := s.db.Where("user_id = ? AND content_type = ?", userID, contentType).Order("created_at ASC").First(&channel).Error
+	err := s.db.Where("user_id = ?", userID).Order("created_at ASC, id ASC").First(&channel).Error
 	if err == nil {
+		if err := s.saveStudioState(userID, channel.ID); err != nil {
+			return nil, err
+		}
 		return &channel, nil
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -91,14 +91,6 @@ func (s *UserBootstrapService) ensureDefaultChannel(userID uuid.UUID, username s
 	slugBase := strings.TrimSpace(username)
 	if slugBase == "" {
 		slugBase = "channel"
-	}
-	switch contentType {
-	case model.ChannelContentTypePodcast:
-		baseName += " 播客"
-		slugBase += "-podcast"
-	case model.ChannelContentTypeVideo:
-		baseName += " 视频"
-		slugBase += "-video"
 	}
 
 	name, err := s.uniqueChannelName(baseName)
@@ -115,29 +107,25 @@ func (s *UserBootstrapService) ensureDefaultChannel(userID uuid.UUID, username s
 		Name:        name,
 		Slug:        slug,
 		Description: defaultChannelDescription,
-		ContentType: contentType,
-		IsDefault:   contentType == model.ChannelContentTypeBlog,
+		ContentType: model.ChannelContentTypeBlog,
+		IsDefault:   true,
 	}
 	if err := s.db.Create(&channel).Error; err != nil {
+		return nil, err
+	}
+	if err := s.saveStudioState(userID, channel.ID); err != nil {
 		return nil, err
 	}
 	return &channel, nil
 }
 
-func (s *UserBootstrapService) upsertUserDefaultChannelSelection(userID uuid.UUID, contentType string, channelID uuid.UUID) error {
-	return s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "content_type"}},
-		DoUpdates: clause.AssignmentColumns([]string{"channel_id", "updated_at"}),
-	}).Create(&model.UserDefaultChannel{
-		UserID:      userID,
-		ContentType: contentType,
-		ChannelID:   channelID,
-	}).Error
+func (s *UserBootstrapService) saveStudioState(userID, channelID uuid.UUID) error {
+	return s.db.Save(&model.UserStudioState{UserID: userID, ChannelID: &channelID}).Error
 }
 
-func (s *UserBootstrapService) ensureDefaultCollectionForChannel(channelID uuid.UUID) error {
+func (s *UserBootstrapService) ensureDefaultCollectionForChannel(userID, channelID uuid.UUID, contentType string) error {
 	var collection model.Collection
-	err := s.db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
+	err := s.db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channelID, contentType, true).First(&collection).Error
 	if err == nil {
 		return nil
 	}
@@ -146,12 +134,14 @@ func (s *UserBootstrapService) ensureDefaultCollectionForChannel(channelID uuid.
 	}
 
 	var softDeleted model.Collection
-	softErr := s.db.Unscoped().Where("channel_id = ? AND name = ?", channelID, defaultCollectionName).First(&softDeleted).Error
+	softErr := s.db.Unscoped().Where("channel_id = ? AND content_type = ? AND name = ?", channelID, contentType, defaultCollectionName).First(&softDeleted).Error
 	if softErr == nil && softDeleted.DeletedAt.Valid {
 		return s.db.Unscoped().Model(&softDeleted).Updates(map[string]any{
-			"deleted_at": nil,
-			"is_default": true,
-			"name":       defaultCollectionName,
+			"deleted_at":   nil,
+			"is_default":   true,
+			"name":         defaultCollectionName,
+			"content_type": contentType,
+			"created_by":   userID,
 		}).Error
 	}
 	if softErr != nil && !errors.Is(softErr, gorm.ErrRecordNotFound) {
@@ -160,6 +150,8 @@ func (s *UserBootstrapService) ensureDefaultCollectionForChannel(channelID uuid.
 
 	collection = model.Collection{
 		ChannelID:   channelID,
+		ContentType: contentType,
+		CreatedBy:   &userID,
 		Name:        defaultCollectionName,
 		Description: defaultChannelDescription,
 		IsDefault:   true,

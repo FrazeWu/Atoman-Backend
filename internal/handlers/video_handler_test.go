@@ -29,7 +29,6 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.User{},
 		&model.Channel{},
 		&model.Collection{},
-		&model.UserDefaultChannel{},
 		&model.Video{},
 		&model.VideoBookmark{},
 		&model.ChannelBookmark{},

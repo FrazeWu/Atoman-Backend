@@ -22,7 +22,7 @@ func seedUnifiedStudioFixture(t *testing.T, db *gorm.DB) unifiedStudioFixture {
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Channel{},
-		&model.UserDefaultChannel{},
+		&legacyUserDefaultChannel{},
 		&model.Collection{},
 		&model.Post{},
 		&model.PodcastEpisode{},
@@ -59,7 +59,7 @@ func seedUnifiedStudioFixture(t *testing.T, db *gorm.DB) unifiedStudioFixture {
 			t.Fatalf("create %s channel: %v", contentType, err)
 		}
 		channels[contentType] = channel
-		if err := db.Create(&model.UserDefaultChannel{
+		if err := db.Create(&legacyUserDefaultChannel{
 			UserID: user.UUID, ContentType: contentType, ChannelID: channel.ID,
 		}).Error; err != nil {
 			t.Fatalf("create %s selection: %v", contentType, err)
@@ -204,6 +204,41 @@ func TestRunUnifiedStudioMigrationDoesNotMergeChannelsWithSameOwner(t *testing.T
 	for _, channel := range channels {
 		if _, ok := originalIDs[channel.ID]; !ok {
 			t.Fatalf("unexpected merged or replacement channel %s", channel.ID)
+		}
+	}
+}
+
+func TestRunUnifiedStudioMigrationDropsLegacyDefaultChannelSelections(t *testing.T) {
+	db := testdb.Open(t)
+	seedUnifiedStudioFixture(t, db)
+
+	if err := RunUnifiedStudioMigration(db); err != nil {
+		t.Fatalf("run migration: %v", err)
+	}
+	if db.Migrator().HasTable("user_default_channels") {
+		t.Fatal("expected legacy user_default_channels table to be dropped")
+	}
+}
+
+func TestRunUnifiedStudioMigrationReplacesSingleDefaultCollectionIndex(t *testing.T) {
+	db := testdb.Open(t)
+	fixture := seedUnifiedStudioFixture(t, db)
+	if err := db.Exec(`CREATE UNIQUE INDEX idx_collections_channel_default
+		ON collections (channel_id) WHERE is_default = true`).Error; err != nil {
+		t.Fatalf("create legacy default collection index: %v", err)
+	}
+
+	if err := RunUnifiedStudioMigration(db); err != nil {
+		t.Fatalf("run migration: %v", err)
+	}
+	channel := fixture.channels[model.ChannelContentTypeBlog]
+	for _, contentType := range []string{model.ChannelContentTypePodcast, model.ChannelContentTypeVideo} {
+		collection := model.Collection{
+			ChannelID: channel.ID, ContentType: contentType,
+			Name: "Default " + contentType, IsDefault: true,
+		}
+		if err := db.Create(&collection).Error; err != nil {
+			t.Fatalf("create %s default collection on unified channel: %v", contentType, err)
 		}
 	}
 }

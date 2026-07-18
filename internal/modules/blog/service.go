@@ -20,7 +20,6 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/net/html"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 var slugInvalidChars = regexp.MustCompile(`[^a-z0-9一-龥]+`)
@@ -841,7 +840,7 @@ func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName stri
 			}
 			existing.ContentType = model.ChannelContentTypeBlog
 		}
-		if ensureErr := s.upsertUserDefaultChannelSelection(userID, model.ChannelContentTypeBlog, existing.ID); ensureErr != nil {
+		if ensureErr := s.ensureStudioState(userID, existing.ID); ensureErr != nil {
 			return model.Channel{}, ensureErr
 		}
 		return existing, nil
@@ -878,7 +877,7 @@ func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName stri
 	if err := s.ensureDefaultCollectionForChannel(channel.ID); err != nil {
 		return model.Channel{}, err
 	}
-	if err := s.upsertUserDefaultChannelSelection(userID, model.ChannelContentTypeBlog, channel.ID); err != nil {
+	if err := s.ensureStudioState(userID, channel.ID); err != nil {
 		return model.Channel{}, err
 	}
 	return channel, nil
@@ -1193,15 +1192,19 @@ func (s *Service) uniqueChannelName(base string) (string, error) {
 	}
 }
 
-func (s *Service) upsertUserDefaultChannelSelection(userID uuid.UUID, contentType string, channelID uuid.UUID) error {
-	return s.db.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "user_id"}, {Name: "content_type"}},
-		DoUpdates: clause.AssignmentColumns([]string{"channel_id", "updated_at"}),
-	}).Create(&model.UserDefaultChannel{
-		UserID:      userID,
-		ContentType: contentType,
-		ChannelID:   channelID,
-	}).Error
+func (s *Service) ensureStudioState(userID, channelID uuid.UUID) error {
+	var state model.UserStudioState
+	err := s.db.First(&state, "user_id = ?", userID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return s.db.Create(&model.UserStudioState{UserID: userID, ChannelID: &channelID}).Error
+	}
+	if err != nil {
+		return err
+	}
+	if state.ChannelID == nil {
+		return s.db.Model(&state).Update("channel_id", channelID).Error
+	}
+	return nil
 }
 
 func dedupeUUIDs(values []uuid.UUID) []uuid.UUID {

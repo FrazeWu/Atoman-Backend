@@ -18,6 +18,15 @@ type studioChannelSelection struct {
 	ChannelID uuid.UUID
 }
 
+type legacyUserDefaultChannel struct {
+	model.Base
+	UserID      uuid.UUID
+	ContentType string
+	ChannelID   uuid.UUID
+}
+
+func (legacyUserDefaultChannel) TableName() string { return "user_default_channels" }
+
 func RunUnifiedStudioMigration(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(
@@ -46,6 +55,28 @@ func RunUnifiedStudioMigration(db *gorm.DB) error {
 				return err
 			}
 		}
+		if err := tx.Exec(`DROP INDEX IF EXISTS idx_collections_channel_default`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`
+			UPDATE collections
+			SET is_default = false
+			WHERE id IN (
+				SELECT id
+				FROM (
+					SELECT id,
+					       ROW_NUMBER() OVER (
+					         PARTITION BY channel_id, content_type
+					         ORDER BY created_at ASC, id ASC
+					       ) AS row_num
+					FROM collections
+					WHERE is_default = true AND deleted_at IS NULL
+				)
+				WHERE row_num > 1
+			)
+		`).Error; err != nil {
+			return err
+		}
 		if err := tx.Exec(`
 			CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_default_channel_type
 			ON collections (channel_id, content_type)
@@ -55,7 +86,7 @@ func RunUnifiedStudioMigration(db *gorm.DB) error {
 		}
 
 		if !tx.Migrator().HasTable(&model.Channel{}) {
-			return nil
+			return dropLegacyDefaultChannelSelections(tx)
 		}
 		var owners []studioChannelOwner
 		if err := tx.Model(&model.Channel{}).
@@ -89,12 +120,12 @@ func RunUnifiedStudioMigration(db *gorm.DB) error {
 			}
 		}
 
-		return nil
+		return dropLegacyDefaultChannelSelections(tx)
 	})
 }
 
 func initialStudioChannelID(tx *gorm.DB, userID uuid.UUID) (uuid.UUID, error) {
-	if tx.Migrator().HasTable(&model.UserDefaultChannel{}) {
+	if tx.Migrator().HasTable(&legacyUserDefaultChannel{}) {
 		var selection studioChannelSelection
 		err := tx.Table("user_default_channels AS selections").
 			Select("selections.channel_id").
@@ -123,4 +154,11 @@ func initialStudioChannelID(tx *gorm.DB, userID uuid.UUID) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	return channel.ID, nil
+}
+
+func dropLegacyDefaultChannelSelections(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable(&legacyUserDefaultChannel{}) {
+		return nil
+	}
+	return tx.Migrator().DropTable(&legacyUserDefaultChannel{})
 }

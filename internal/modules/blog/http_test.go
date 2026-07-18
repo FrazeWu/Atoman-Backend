@@ -28,8 +28,8 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Channel{},
-		&model.UserDefaultChannel{},
 		&model.Collection{},
+		&model.UserStudioState{},
 		&model.Post{},
 		&model.PostCollection{},
 		&model.BlogPostVersion{},
@@ -724,7 +724,7 @@ func TestCreateDefaultChannelForUserSkipsReservedAndUserHandles(t *testing.T) {
 	}
 }
 
-func TestCreateDefaultChannelForUserPersistsBlogDefaultSelection(t *testing.T) {
+func TestCreateDefaultChannelForUserSetsInitialStudioChannel(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
@@ -736,12 +736,12 @@ func TestCreateDefaultChannelForUserPersistsBlogDefaultSelection(t *testing.T) {
 		t.Fatalf("expected blog content type, got %q", channel.ContentType)
 	}
 
-	var selection model.UserDefaultChannel
-	if err := db.Where("user_id = ? AND content_type = ?", user.ID, "blog").First(&selection).Error; err != nil {
-		t.Fatalf("load default selection: %v", err)
+	var state model.UserStudioState
+	if err := db.First(&state, "user_id = ?", user.ID).Error; err != nil {
+		t.Fatalf("load studio state: %v", err)
 	}
-	if selection.ChannelID != channel.ID {
-		t.Fatalf("expected selected channel %s, got %s", channel.ID, selection.ChannelID)
+	if state.ChannelID == nil || *state.ChannelID != channel.ID {
+		t.Fatalf("expected selected channel %s, got %#v", channel.ID, state.ChannelID)
 	}
 }
 

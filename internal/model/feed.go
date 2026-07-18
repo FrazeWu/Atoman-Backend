@@ -118,17 +118,6 @@ type Channel struct {
 
 func (Channel) TableName() string { return "channels" }
 
-type UserDefaultChannel struct {
-	Base
-	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_user_default_channels_user_content,priority:1"`
-	User        *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	ContentType string    `json:"content_type" gorm:"type:varchar(16);not null;uniqueIndex:idx_user_default_channels_user_content,priority:2"`
-	ChannelID   uuid.UUID `json:"channel_id" gorm:"type:uuid;not null;index"`
-	Channel     *Channel  `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
-}
-
-func (UserDefaultChannel) TableName() string { return "user_default_channels" }
-
 type Collection struct {
 	Base
 	ChannelID   uuid.UUID  `json:"channel_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_collection_channel_type_name,priority:1"`
