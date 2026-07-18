@@ -32,6 +32,7 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
 		&model.SongBookmark{},
+		&model.PlaylistBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
 		&model.AlbumImportSession{},
@@ -53,6 +54,64 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 	}
 
 	return NewService(db), db, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser}
+}
+
+func TestPlaylistBookmarksRequireExistingPlaylistAndStayUserScoped(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	owner := model.User{Username: "playlist-owner", Email: "playlist-owner@example.com", Password: "hash", Role: "user", IsActive: true}
+	other := model.User{Username: "playlist-other", Email: "playlist-other@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	playlist := model.Playlist{UserID: owner.UUID, Name: "Shared", IsPublic: true}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+
+	first, err := svc.BookmarkPlaylist(user, playlist.ID)
+	if err != nil {
+		t.Fatalf("bookmark playlist: %v", err)
+	}
+	second, err := svc.BookmarkPlaylist(user, playlist.ID)
+	if err != nil {
+		t.Fatalf("bookmark playlist twice: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("expected idempotent bookmark, got %s and %s", first.ID, second.ID)
+	}
+
+	otherUser := authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: authctx.RoleUser}
+	if _, err := svc.BookmarkPlaylist(otherUser, playlist.ID); err != nil {
+		t.Fatalf("bookmark playlist as other user: %v", err)
+	}
+	bookmarks, total, err := svc.ListPlaylistBookmarks(user, 1, 20, "latest")
+	if err != nil {
+		t.Fatalf("list playlist bookmarks: %v", err)
+	}
+	if total != 1 || len(bookmarks) != 1 || bookmarks[0].UserID != user.ID {
+		t.Fatalf("expected only current user's bookmark, got total=%d rows=%#v", total, bookmarks)
+	}
+	if bookmarks[0].Playlist == nil || bookmarks[0].Playlist.User == nil || bookmarks[0].Playlist.User.Username != owner.Username {
+		t.Fatalf("expected playlist and owner to be preloaded, got %#v", bookmarks[0].Playlist)
+	}
+
+	if err := svc.DeletePlaylistBookmark(user, playlist.ID); err != nil {
+		t.Fatalf("delete playlist bookmark: %v", err)
+	}
+	otherBookmarks, otherTotal, err := svc.ListPlaylistBookmarks(otherUser, 1, 20, "latest")
+	if err != nil {
+		t.Fatalf("list other user's playlist bookmarks: %v", err)
+	}
+	if otherTotal != 1 || len(otherBookmarks) != 1 {
+		t.Fatalf("deleting current user's bookmark affected another user: total=%d rows=%#v", otherTotal, otherBookmarks)
+	}
+
+	if _, err := svc.BookmarkPlaylist(user, uuid.New()); err == nil {
+		t.Fatal("expected nonexistent playlist bookmark to fail")
+	}
 }
 
 func createModerator(t *testing.T, db *gorm.DB) authctx.CurrentUser {

@@ -3,6 +3,8 @@ package music
 import (
 	"time"
 
+	"atoman/internal/model"
+
 	"github.com/google/uuid"
 )
 
@@ -41,6 +43,10 @@ type CreateAlbumBookmarkRequest struct {
 
 type CreateSongBookmarkRequest struct {
 	SongID uuid.UUID `json:"song_id"`
+}
+
+type CreatePlaylistBookmarkRequest struct {
+	PlaylistID uuid.UUID `json:"playlist_id"`
 }
 
 type CreatePlaylistRequest struct {
@@ -134,6 +140,11 @@ type PaginationMetaResponse struct {
 type PlaylistSummaryListResponse struct {
 	Data []PlaylistSummaryResponse `json:"data"`
 	Meta PaginationMetaResponse    `json:"meta"`
+}
+
+type PlaylistBookmarkListResponse struct {
+	Data []model.PlaylistBookmark `json:"data"`
+	Meta PaginationMetaResponse   `json:"meta"`
 }
 
 type DiscoverListResponse struct {

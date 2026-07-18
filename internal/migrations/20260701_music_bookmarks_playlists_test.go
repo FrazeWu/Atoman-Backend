@@ -19,6 +19,7 @@ func TestRunMusicBookmarksPlaylistsMigrationCreatesTablesAndIndexes(t *testing.T
 		"music_artist_bookmarks",
 		"music_album_bookmarks",
 		"music_song_bookmarks",
+		"music_playlist_bookmarks",
 		"music_playlists",
 		"music_playlist_songs",
 	} {
@@ -30,5 +31,6 @@ func TestRunMusicBookmarksPlaylistsMigrationCreatesTablesAndIndexes(t *testing.T
 	assertIndexExists(t, db, "music_artist_bookmarks", "idx_music_artist_bookmarks_user_artist")
 	assertIndexExists(t, db, "music_album_bookmarks", "idx_music_album_bookmarks_user_album")
 	assertIndexExists(t, db, "music_song_bookmarks", "idx_music_song_bookmarks_user_song")
+	assertIndexExists(t, db, "music_playlist_bookmarks", "idx_music_playlist_bookmarks_user_playlist")
 	assertIndexExists(t, db, "music_playlist_songs", "idx_music_playlist_songs_playlist_song")
 }

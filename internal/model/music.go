@@ -259,16 +259,30 @@ func (SongBookmark) TableName() string {
 
 type Playlist struct {
 	Base
-	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
-	Name        string    `json:"name" gorm:"not null"`
-	Description string    `json:"description" gorm:"type:text"`
-	CoverURL    string    `json:"cover_url"`
-	IsPublic    bool      `json:"is_public" gorm:"default:false;index"`
-	IsFavorite  bool      `json:"is_favorite" gorm:"default:false;index"`
+	UserID        uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
+	User          *User     `json:"-" gorm:"foreignKey:UserID;references:UUID"`
+	Name          string    `json:"name" gorm:"not null"`
+	Description   string    `json:"description" gorm:"type:text"`
+	CoverURL      string    `json:"cover_url"`
+	IsPublic      bool      `json:"is_public" gorm:"default:false;index"`
+	IsFavorite    bool      `json:"is_favorite" gorm:"default:false;index"`
+	OwnerUsername string    `json:"owner_username,omitempty" gorm:"-"`
+	SongCount     int64     `json:"song_count" gorm:"-"`
 }
 
 func (Playlist) TableName() string {
 	return "music_playlists"
+}
+
+type PlaylistBookmark struct {
+	Base
+	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_playlist_bookmarks_user_playlist,priority:1,where:deleted_at IS NULL"`
+	PlaylistID uuid.UUID `json:"playlist_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_playlist_bookmarks_user_playlist,priority:2,where:deleted_at IS NULL"`
+	Playlist   *Playlist `json:"playlist,omitempty" gorm:"foreignKey:PlaylistID"`
+}
+
+func (PlaylistBookmark) TableName() string {
+	return "music_playlist_bookmarks"
 }
 
 type PlaylistSong struct {

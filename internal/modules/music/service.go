@@ -743,6 +743,37 @@ func (s *Service) DeleteSongBookmark(user authctx.CurrentUser, songID uuid.UUID)
 	return s.repo.DeleteSongBookmark(user.ID, songID)
 }
 
+func (s *Service) ListPlaylistBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.PlaylistBookmark, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	return s.repo.ListPlaylistBookmarks(user.ID, page, pageSize, sort)
+}
+
+func (s *Service) BookmarkPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.PlaylistBookmark, error) {
+	if user.ID == uuid.Nil {
+		return model.PlaylistBookmark{}, apperr.Unauthorized("Login required")
+	}
+	if playlistID == uuid.Nil {
+		return model.PlaylistBookmark{}, apperr.BadRequest("validation.invalid_request", "playlist_id is required")
+	}
+	if _, err := s.repo.GetPlaylistByID(playlistID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.PlaylistBookmark{}, apperr.NotFound("music.playlist_not_found", "Playlist not found")
+		}
+		return model.PlaylistBookmark{}, err
+	}
+	return s.repo.UpsertPlaylistBookmark(user.ID, playlistID)
+}
+
+func (s *Service) DeletePlaylistBookmark(user authctx.CurrentUser, playlistID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.repo.DeletePlaylistBookmark(user.ID, playlistID)
+}
+
 func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest) (model.Artist, error) {
 	if user.ID == uuid.Nil {
 		return model.Artist{}, apperr.Unauthorized("Login required")

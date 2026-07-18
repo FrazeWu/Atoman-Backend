@@ -3236,6 +3236,46 @@ definitions:
       updated_at:
         type: string
     type: object
+  model.Playlist:
+    properties:
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      is_favorite:
+        type: boolean
+      is_public:
+        type: boolean
+      name:
+        type: string
+      owner_username:
+        type: string
+      song_count:
+        type: integer
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
+  model.PlaylistBookmark:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      playlist:
+        $ref: '#/definitions/model.Playlist'
+      playlist_id:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
   model.PodcastEpisode:
     properties:
       audio_url:
@@ -3757,6 +3797,11 @@ definitions:
       start_offset:
         type: integer
     type: object
+  music.CreatePlaylistBookmarkRequest:
+    properties:
+      playlist_id:
+        type: string
+    type: object
   music.CreatePlaylistRequest:
     properties:
       cover_url:
@@ -4010,6 +4055,15 @@ definitions:
         type: integer
       total:
         type: integer
+    type: object
+  music.PlaylistBookmarkListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.PlaylistBookmark'
+        type: array
+      meta:
+        $ref: '#/definitions/music.PaginationMetaResponse'
     type: object
   music.PlaylistSongDetail:
     properties:
@@ -10087,6 +10141,91 @@ paths:
       summary: 重新评估用户论坛信任等级
       tags:
       - forum
+  /api/v1/music/bookmarks/playlists:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.PlaylistBookmarkListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取当前用户收藏的歌单
+      tags:
+      - music-bookmarks
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 歌单
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/music.CreatePlaylistBookmarkRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.PlaylistBookmark'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 收藏歌单
+      tags:
+      - music-bookmarks
+  /api/v1/music/bookmarks/playlists/{playlistId}:
+    delete:
+      parameters:
+      - description: 歌单 ID
+        in: path
+        name: playlistId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 取消收藏歌单
+      tags:
+      - music-bookmarks
   /api/v1/music/discover:
     get:
       description: 返回混合发现流，按专辑、艺人、公开歌单的简单规则混排。

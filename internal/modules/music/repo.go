@@ -181,6 +181,57 @@ func (r *Repo) DeleteSongBookmark(userID uuid.UUID, songID uuid.UUID) error {
 	return r.db.Where("user_id = ? AND song_id = ?", userID, songID).Delete(&model.SongBookmark{}).Error
 }
 
+func (r *Repo) UpsertPlaylistBookmark(userID uuid.UUID, playlistID uuid.UUID) (model.PlaylistBookmark, error) {
+	bookmark := model.PlaylistBookmark{UserID: userID, PlaylistID: playlistID}
+	err := r.db.Where("user_id = ? AND playlist_id = ?", userID, playlistID).FirstOrCreate(&bookmark).Error
+	return bookmark, err
+}
+
+func (r *Repo) ListPlaylistBookmarks(userID uuid.UUID, page int, pageSize int, sort string) ([]model.PlaylistBookmark, int64, error) {
+	var total int64
+	db := r.db.Model(&model.PlaylistBookmark{}).Where("music_playlist_bookmarks.user_id = ?", userID)
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var bookmarks []model.PlaylistBookmark
+	if normalizeBookmarkSort(sort) == BookmarkSortPopular {
+		songCountSubquery := r.db.Table("music_playlist_songs").
+			Select("playlist_id, COUNT(*) AS song_count").
+			Group("playlist_id")
+		db = db.
+			Joins("LEFT JOIN (?) AS playlist_song_counts ON playlist_song_counts.playlist_id = music_playlist_bookmarks.playlist_id", songCountSubquery).
+			Order("COALESCE(playlist_song_counts.song_count, 0) DESC").
+			Order("music_playlist_bookmarks.created_at DESC")
+	} else {
+		db = db.Order("music_playlist_bookmarks.created_at DESC")
+	}
+	if err := db.Preload("Playlist.User").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error; err != nil {
+		return nil, 0, err
+	}
+	playlistIDs := make([]uuid.UUID, 0, len(bookmarks))
+	for _, bookmark := range bookmarks {
+		playlistIDs = append(playlistIDs, bookmark.PlaylistID)
+	}
+	songCounts, err := r.CountPlaylistSongs(playlistIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	for index := range bookmarks {
+		if bookmarks[index].Playlist == nil {
+			continue
+		}
+		bookmarks[index].Playlist.SongCount = songCounts[bookmarks[index].PlaylistID]
+		if bookmarks[index].Playlist.User != nil {
+			bookmarks[index].Playlist.OwnerUsername = bookmarks[index].Playlist.User.Username
+		}
+	}
+	return bookmarks, total, nil
+}
+
+func (r *Repo) DeletePlaylistBookmark(userID uuid.UUID, playlistID uuid.UUID) error {
+	return r.db.Where("user_id = ? AND playlist_id = ?", userID, playlistID).Delete(&model.PlaylistBookmark{}).Error
+}
+
 func (r *Repo) CreateArtist(artist model.Artist) (model.Artist, error) {
 	return artist, r.db.Create(&artist).Error
 }

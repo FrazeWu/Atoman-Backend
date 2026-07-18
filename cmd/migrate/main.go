@@ -212,6 +212,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
 		&model.SongBookmark{},
+		&model.PlaylistBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
 		&model.MusicListeningHistory{},

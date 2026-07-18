@@ -36,6 +36,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
 		&model.SongBookmark{},
+		&model.PlaylistBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
 		&model.MusicListeningHistory{},
@@ -59,6 +60,93 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 	}
 
 	return NewService(db), db, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser}
+}
+
+func TestRegisterRoutesPlaylistBookmarksMatchFrontendContract(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	owner := model.User{Username: "playlist-owner", DisplayName: "Playlist Owner", Email: "playlist-owner@example.com", Password: "hash", Role: "user", IsActive: true}
+	other := model.User{Username: "playlist-other", Email: "playlist-other@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("create owner: %v", err)
+	}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	playlist := model.Playlist{UserID: owner.UUID, Name: "Shared Playlist", IsPublic: true}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	song := model.Song{Title: "Playlist Bookmark Song", AudioURL: "/audio/bookmark.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := db.Create(&model.PlaylistSong{PlaylistID: playlist.ID, SongID: song.ID}).Error; err != nil {
+		t.Fatalf("create playlist song: %v", err)
+	}
+
+	userRouter := newMusicHTTPRouter(service, &user)
+	otherUser := authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: authctx.RoleUser}
+	otherRouter := newMusicHTTPRouter(service, &otherUser)
+	path := "/api/v1/music/bookmarks/playlists"
+	body := `{"playlist_id":"` + playlist.ID.String() + `"}`
+
+	for attempt := 0; attempt < 2; attempt++ {
+		response := performMusicJSONRequest(t, userRouter, http.MethodPost, path, body)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("expected post attempt %d to return 201, got %d: %s", attempt+1, response.Code, response.Body.String())
+		}
+	}
+	otherPost := performMusicJSONRequest(t, otherRouter, http.MethodPost, path, body)
+	if otherPost.Code != http.StatusCreated {
+		t.Fatalf("expected other user post 201, got %d: %s", otherPost.Code, otherPost.Body.String())
+	}
+
+	list := performMusicJSONRequest(t, userRouter, http.MethodGet, path, "")
+	if list.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", list.Code, list.Body.String())
+	}
+	var listResp struct {
+		Data []struct {
+			PlaylistID string `json:"playlist_id"`
+			UserID     string `json:"user_id"`
+			Playlist   struct {
+				ID            string `json:"id"`
+				Name          string `json:"name"`
+				OwnerUsername string `json:"owner_username"`
+				SongCount     int64  `json:"song_count"`
+			} `json:"playlist"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listResp); err != nil {
+		t.Fatalf("decode playlist bookmarks: %v", err)
+	}
+	if listResp.Meta.Total != 1 || len(listResp.Data) != 1 {
+		t.Fatalf("expected only current user's bookmark, got %#v", listResp)
+	}
+	bookmark := listResp.Data[0]
+	if bookmark.PlaylistID != playlist.ID.String() || bookmark.UserID != user.ID.String() || bookmark.Playlist.ID != playlist.ID.String() || bookmark.Playlist.Name != playlist.Name || bookmark.Playlist.OwnerUsername != owner.Username || bookmark.Playlist.SongCount != 1 {
+		t.Fatalf("unexpected playlist bookmark payload: %#v", bookmark)
+	}
+
+	deleted := performMusicJSONRequest(t, userRouter, http.MethodDelete, path+"/"+playlist.ID.String(), "")
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("expected delete 200, got %d: %s", deleted.Code, deleted.Body.String())
+	}
+	otherList := performMusicJSONRequest(t, otherRouter, http.MethodGet, path, "")
+	if otherList.Code != http.StatusOK || !strings.Contains(otherList.Body.String(), playlist.ID.String()) {
+		t.Fatalf("current user delete removed other user's bookmark: %d %s", otherList.Code, otherList.Body.String())
+	}
+	missingDelete := performMusicJSONRequest(t, userRouter, http.MethodDelete, path+"/"+playlist.ID.String(), "")
+	if missingDelete.Code != http.StatusOK {
+		t.Fatalf("expected missing bookmark delete to stay idempotent, got %d: %s", missingDelete.Code, missingDelete.Body.String())
+	}
+	missingPost := performMusicJSONRequest(t, userRouter, http.MethodPost, path, `{"playlist_id":"`+uuid.NewString()+`"}`)
+	if missingPost.Code != http.StatusNotFound {
+		t.Fatalf("expected nonexistent playlist post 404, got %d: %s", missingPost.Code, missingPost.Body.String())
+	}
 }
 
 func newMusicHTTPRouter(service *Service, current *authctx.CurrentUser) *gin.Engine {

@@ -100,6 +100,20 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 	}
 }
 
+func TestRunMusicBookmarkStartupMigrationCreatesPlaylistBookmarksOnFreshDatabase(t *testing.T) {
+	db := testdb.Open(t)
+
+	if err := runMusicBookmarkStartupMigration(db); err != nil {
+		t.Fatalf("run music bookmark startup migration: %v", err)
+	}
+	if !db.Migrator().HasTable(&model.PlaylistBookmark{}) {
+		t.Fatal("expected startup migration to create music_playlist_bookmarks")
+	}
+	if !db.Migrator().HasIndex(&model.PlaylistBookmark{}, "idx_music_playlist_bookmarks_user_playlist") {
+		t.Fatal("expected startup migration to create playlist bookmark unique index")
+	}
+}
+
 func TestRunUnifiedCommentStartupMigrationsBackfillsLegacyForumReplies(t *testing.T) {
 	db := testdb.Open(t)
 	requireLegacyForumTables(t, db)
