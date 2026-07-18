@@ -3067,6 +3067,7 @@ const docTemplate = `{
         },
         "/api/v1/auth/oauth/{provider}/callback": {
             "get": {
+                "description": "仅接受携带 start 端点下发的浏览器态 Cookie 且 state 匹配的回调。",
                 "tags": [
                     "auth-oauth"
                 ],
@@ -3105,6 +3106,7 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "description": "仅接受携带 start 端点下发的浏览器态 Cookie 且 state 匹配的回调。",
                 "tags": [
                     "auth-oauth"
                 ],
@@ -3145,6 +3147,7 @@ const docTemplate = `{
         },
         "/api/v1/auth/oauth/{provider}/start": {
             "get": {
+                "description": "重定向到第三方平台，并通过 HttpOnly Cookie 绑定当前浏览器的 OAuth state。",
                 "produces": [
                     "application/json"
                 ],

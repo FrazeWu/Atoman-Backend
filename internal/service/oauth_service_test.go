@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/url"
+	"strings"
 	"testing"
 
 	"atoman/internal/model"
@@ -402,5 +403,39 @@ func TestOAuthServiceUnlinkKeepsAtLeastOneLoginMethod(t *testing.T) {
 	}
 	if err := svc.Unlink(context.Background(), user.UUID, model.OAuthProviderGitHub); err != nil {
 		t.Fatalf("unlink with password fallback: %v", err)
+	}
+}
+
+func TestOAuthServiceUnlinkLocksUserBeforeCountingLoginMethods(t *testing.T) {
+	db := newOAuthServiceTestDB(t)
+	user := model.User{Username: "locked-user", Email: "locked@example.com", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	identity := model.ExternalIdentity{
+		UserID: user.UUID, Provider: model.OAuthProviderGoogle,
+		Issuer: "google", Subject: "locked-google", Email: user.Email, EmailVerified: true,
+	}
+	if err := db.Create(&identity).Error; err != nil {
+		t.Fatalf("create identity: %v", err)
+	}
+
+	userQueryLocked := false
+	callbackName := "test:detect_oauth_user_lock"
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
+		if strings.EqualFold(tx.Statement.Table, "users") {
+			_, userQueryLocked = tx.Statement.Clauses["FOR"]
+		}
+	}); err != nil {
+		t.Fatalf("register query callback: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
+
+	svc := NewOAuthService(db, oauthprovider.NewRegistry())
+	if err := svc.Unlink(context.Background(), user.UUID, model.OAuthProviderGoogle); err == nil {
+		t.Fatal("expected last login method unlink to fail")
+	}
+	if !userQueryLocked {
+		t.Fatal("expected unlink to lock the user row before counting login methods")
 	}
 }

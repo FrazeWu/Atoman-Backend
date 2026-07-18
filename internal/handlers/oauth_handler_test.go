@@ -22,9 +22,10 @@ import (
 )
 
 type handlerOAuthProvider struct {
-	name         string
-	authorizeReq oauthprovider.AuthorizationRequest
-	profile      oauthprovider.Profile
+	name          string
+	authorizeReq  oauthprovider.AuthorizationRequest
+	profile       oauthprovider.Profile
+	exchangeCalls int
 }
 
 func (p *handlerOAuthProvider) Name() string {
@@ -37,6 +38,7 @@ func (p *handlerOAuthProvider) AuthorizationURL(req oauthprovider.AuthorizationR
 }
 
 func (p *handlerOAuthProvider) Exchange(_ context.Context, _ oauthprovider.CallbackRequest) (oauthprovider.Profile, error) {
+	p.exchangeCalls++
 	return p.profile, nil
 }
 
@@ -115,7 +117,9 @@ func TestOAuthCallbackCreatesPendingCookieAndReturnsMaskedFlow(t *testing.T) {
 
 	callbackURL := "/api/v1/auth/oauth/google/callback?state=" + url.QueryEscape(provider.authorizeReq.State) + "&code=code"
 	callbackResponse := httptest.NewRecorder()
-	router.ServeHTTP(callbackResponse, httptest.NewRequest(http.MethodGet, callbackURL, nil))
+	callbackRequest := httptest.NewRequest(http.MethodGet, callbackURL, nil)
+	callbackRequest.AddCookie(requireOAuthStateCookie(t, startResponse))
+	router.ServeHTTP(callbackResponse, callbackRequest)
 	if callbackResponse.Code != http.StatusFound {
 		t.Fatalf("callback oauth: %d %s", callbackResponse.Code, callbackResponse.Body.String())
 	}
@@ -145,6 +149,37 @@ func TestOAuthCallbackCreatesPendingCookieAndReturnsMaskedFlow(t *testing.T) {
 	}
 }
 
+func TestOAuthCallbackRejectsStateFromAnotherBrowser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &handlerOAuthProvider{
+		name: model.OAuthProviderGoogle,
+		profile: oauthprovider.Profile{
+			Issuer: "https://accounts.google.com", Subject: "attacker-subject",
+			Email: "attacker@example.com", EmailVerified: true,
+		},
+	}
+	svc := newOAuthHandlerTestService(t, provider)
+	router := gin.New()
+	RegisterOAuthRoutes(router.Group("/api/v1/auth"), svc, "https://app.example.com")
+
+	startResponse := httptest.NewRecorder()
+	router.ServeHTTP(startResponse, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/google/start", nil))
+	if startResponse.Code != http.StatusFound {
+		t.Fatalf("start oauth: %d %s", startResponse.Code, startResponse.Body.String())
+	}
+
+	callbackURL := "/api/v1/auth/oauth/google/callback?state=" + url.QueryEscape(provider.authorizeReq.State) + "&code=code"
+	callbackResponse := httptest.NewRecorder()
+	router.ServeHTTP(callbackResponse, httptest.NewRequest(http.MethodGet, callbackURL, nil))
+
+	if callbackResponse.Header().Get("Location") != "https://app.example.com/auth/oauth/callback?result=failed" {
+		t.Fatalf("expected callback without browser state to fail, got %q", callbackResponse.Header().Get("Location"))
+	}
+	if provider.exchangeCalls != 0 {
+		t.Fatalf("expected provider exchange to be skipped, got %d calls", provider.exchangeCalls)
+	}
+}
+
 func TestOAuthCompleteProfileReturnsAtomanSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("JWT_SECRET", "test-secret")
@@ -163,7 +198,9 @@ func TestOAuthCompleteProfileReturnsAtomanSession(t *testing.T) {
 	router.ServeHTTP(startResponse, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/google/start?return_to=%2Fforum", nil))
 	callbackResponse := httptest.NewRecorder()
 	callbackURL := "/api/v1/auth/oauth/google/callback?state=" + url.QueryEscape(provider.authorizeReq.State) + "&code=code"
-	router.ServeHTTP(callbackResponse, httptest.NewRequest(http.MethodGet, callbackURL, nil))
+	callbackRequest := httptest.NewRequest(http.MethodGet, callbackURL, nil)
+	callbackRequest.AddCookie(requireOAuthStateCookie(t, startResponse))
+	router.ServeHTTP(callbackResponse, callbackRequest)
 	var pendingCookie *http.Cookie
 	for _, cookie := range callbackResponse.Result().Cookies() {
 		if cookie.Name == oauthFlowCookieName && cookie.Value != "" {
@@ -274,4 +311,15 @@ func TestSetupAuthRoutesEnablesConfiguredOAuthProviders(t *testing.T) {
 	if response.Code != http.StatusOK || response.Body.String() != `{"providers":["google"]}` {
 		t.Fatalf("unexpected configured providers: %d %s", response.Code, response.Body.String())
 	}
+}
+
+func requireOAuthStateCookie(t *testing.T, response *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == oauthStateCookieName && cookie.Value != "" {
+			return cookie
+		}
+	}
+	t.Fatal("missing oauth state cookie")
+	return nil
 }

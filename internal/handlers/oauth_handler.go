@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"crypto/subtle"
 	"log"
 	"net/http"
 	"net/url"
@@ -24,7 +25,10 @@ type OAuthHandler struct {
 	frontendURL string
 }
 
-const oauthFlowCookieName = "atoman_oauth_flow"
+const (
+	oauthFlowCookieName  = "atoman_oauth_flow"
+	oauthStateCookieName = "atoman_oauth_state"
+)
 
 func configuredOAuthRegistry() *oauthprovider.Registry {
 	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("BASE_URL")), "/")
@@ -113,6 +117,7 @@ func (h *OAuthHandler) providers(c *gin.Context) {
 
 // start godoc
 // @Summary 开始第三方登录或绑定
+// @Description 重定向到第三方平台，并通过 HttpOnly Cookie 绑定当前浏览器的 OAuth state。
 // @Tags auth-oauth
 // @Produce json
 // @Param provider path string true "平台" Enums(google,apple,github,microsoft)
@@ -145,12 +150,14 @@ func (h *OAuthHandler) start(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	setOAuthStateCookie(c, result.State)
 	c.Header("Cache-Control", "no-store")
 	c.Redirect(http.StatusFound, result.AuthorizationURL)
 }
 
 // callback godoc
 // @Summary 接收第三方登录回调
+// @Description 仅接受携带 start 端点下发的浏览器态 Cookie 且 state 匹配的回调。
 // @Tags auth-oauth
 // @Param provider path string true "平台" Enums(google,apple,github,microsoft)
 // @Param state query string false "OAuth state"
@@ -159,13 +166,19 @@ func (h *OAuthHandler) start(c *gin.Context) {
 // @Router /api/v1/auth/oauth/{provider}/callback [get]
 // @Router /api/v1/auth/oauth/{provider}/callback [post]
 func (h *OAuthHandler) callback(c *gin.Context) {
+	state := c.Request.FormValue("state")
+	if !oauthStateMatches(c, state) {
+		h.redirectFailure(c)
+		return
+	}
+	clearOAuthStateCookie(c)
 	if c.Request.FormValue("error") != "" {
 		h.redirectFailure(c)
 		return
 	}
 	result, err := h.service.HandleCallback(c.Request.Context(), service.OAuthCallbackInput{
 		Provider: c.Param("provider"),
-		State:    c.Request.FormValue("state"),
+		State:    state,
 		Code:     c.Request.FormValue("code"),
 		RawUser:  c.Request.FormValue("user"),
 	})
@@ -399,6 +412,7 @@ func (h *OAuthHandler) writeCompletion(c *gin.Context, result service.OAuthCompl
 }
 
 func (h *OAuthHandler) redirectFailure(c *gin.Context) {
+	clearOAuthStateCookie(c)
 	clearOAuthFlowCookie(c)
 	h.redirect(c, "/auth/oauth/callback?result=failed")
 }
@@ -420,6 +434,30 @@ func setOAuthFlowCookie(c *gin.Context, token string) {
 	})
 }
 
+func setOAuthStateCookie(c *gin.Context, state string) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name: oauthStateCookieName, Value: state, Path: "/api/v1/auth/oauth",
+		Domain: os.Getenv("AUTH_COOKIE_DOMAIN"), MaxAge: int((10 * time.Minute).Seconds()),
+		HttpOnly: true, Secure: oauthCookieSecure(), SameSite: oauthStateCookieSameSite(),
+	})
+}
+
+func clearOAuthStateCookie(c *gin.Context) {
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name: oauthStateCookieName, Value: "", Path: "/api/v1/auth/oauth",
+		Domain: os.Getenv("AUTH_COOKIE_DOMAIN"), MaxAge: -1,
+		HttpOnly: true, Secure: oauthCookieSecure(), SameSite: oauthStateCookieSameSite(),
+	})
+}
+
+func oauthStateMatches(c *gin.Context, state string) bool {
+	stored, err := c.Cookie(oauthStateCookieName)
+	if err != nil || state == "" || len(stored) != len(state) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(stored), []byte(state)) == 1
+}
+
 func clearOAuthFlowCookie(c *gin.Context) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name: oauthFlowCookieName, Value: "", Path: "/api/v1/auth/oauth",
@@ -429,7 +467,15 @@ func clearOAuthFlowCookie(c *gin.Context) {
 }
 
 func oauthCookieSecure() bool {
-	return os.Getenv("ENV") == "production" || os.Getenv("AUTH_COOKIE_DOMAIN") != ""
+	return os.Getenv("ENV") == "production" || os.Getenv("AUTH_COOKIE_DOMAIN") != "" ||
+		strings.HasPrefix(strings.ToLower(strings.TrimSpace(os.Getenv("BASE_URL"))), "https://")
+}
+
+func oauthStateCookieSameSite() http.SameSite {
+	if oauthCookieSecure() {
+		return http.SameSiteNoneMode
+	}
+	return http.SameSiteLaxMode
 }
 
 func maskOAuthEmail(email string) string {

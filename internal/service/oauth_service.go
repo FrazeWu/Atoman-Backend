@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const oauthFlowTTL = 10 * time.Minute
@@ -37,6 +38,7 @@ type OAuthBeginInput struct {
 
 type OAuthBeginResult struct {
 	AuthorizationURL string
+	State            string
 }
 
 const (
@@ -141,7 +143,7 @@ func (s *OAuthService) Begin(ctx context.Context, input OAuthBeginInput) (OAuthB
 	if err != nil {
 		return OAuthBeginResult{}, apperr.Wrap(502, "oauth.provider_error", "Login provider is unavailable", err)
 	}
-	return OAuthBeginResult{AuthorizationURL: authorizationURL}, nil
+	return OAuthBeginResult{AuthorizationURL: authorizationURL, State: state}, nil
 }
 
 func (s *OAuthService) HandleCallback(ctx context.Context, input OAuthCallbackInput) (OAuthCallbackResult, error) {
@@ -518,7 +520,8 @@ func (s *OAuthService) CancelPending(ctx context.Context, token string) error {
 func (s *OAuthService) Unlink(ctx context.Context, userID uuid.UUID, provider string) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var user model.User
-		if err := tx.Where("uuid = ? AND is_active = ?", userID, true).First(&user).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("uuid = ? AND is_active = ?", userID, true).First(&user).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return apperr.NotFound("oauth.account_not_found", "Account not found")
 			}
