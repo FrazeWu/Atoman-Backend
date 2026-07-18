@@ -36,10 +36,15 @@ func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 		&model.Channel{},
 		&model.Collection{},
 		&model.Post{},
+		&model.PostCollection{},
 		&model.PodcastEpisode{},
 		&model.Video{},
+		&model.VideoCollection{},
 		&model.UserStudioState{},
 		&model.StudioModuleSettings{},
+		&model.FeedSource{},
+		&model.SubscriptionGroup{},
+		&model.Subscription{},
 	)
 	middleware.SetAuthDB(db)
 	t.Cleanup(func() { middleware.SetAuthDB(nil) })
@@ -210,5 +215,47 @@ func TestStudioCollectionMutationRejectsWrongModule(t *testing.T) {
 	response := studioRequest(t, fixture, fixture.owner, http.MethodPatch, "/api/v1/studio/video/collections/"+collection.ID.String(), `{"name":"Wrong"}`)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestStudioDashboardAndContentsRoutesUseCurrentChannel(t *testing.T) {
+	fixture := newStudioHTTPFixture(t)
+	channel := createStudioChannel(t, fixture.db, fixture.owner, "Dashboard")
+	collection := model.Collection{ChannelID: channel.ID, ContentType: string(ModuleBlog), Name: "Articles"}
+	if err := fixture.db.Create(&collection).Error; err != nil {
+		t.Fatal(err)
+	}
+	post := model.Post{
+		UserID: fixture.owner.UUID, ChannelID: &channel.ID, CollectionID: &collection.ID,
+		Title: "Studio Draft", Content: "body", Status: "draft", Visibility: "public",
+	}
+	if err := fixture.db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.UserStudioState{UserID: fixture.owner.UUID, ChannelID: &channel.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	dashboard := studioRequest(t, fixture, fixture.owner, http.MethodGet, "/api/v1/studio/dashboard", "")
+	if dashboard.Code != http.StatusOK {
+		t.Fatalf("expected dashboard 200, got %d: %s", dashboard.Code, dashboard.Body.String())
+	}
+	contents := studioRequest(t, fixture, fixture.owner, http.MethodGet, "/api/v1/studio/blog/contents?status=draft&page=1&page_size=10", "")
+	if contents.Code != http.StatusOK {
+		t.Fatalf("expected contents 200, got %d: %s", contents.Code, contents.Body.String())
+	}
+	var payload struct {
+		Data []StudioContentItem `json:"data"`
+		Meta struct {
+			Page     int   `json:"page"`
+			PageSize int   `json:"page_size"`
+			Total    int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(contents.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].ID != post.ID || payload.Meta.Page != 1 || payload.Meta.PageSize != 10 || payload.Meta.Total != 1 {
+		t.Fatalf("unexpected contents response: %#v", payload)
 	}
 }
