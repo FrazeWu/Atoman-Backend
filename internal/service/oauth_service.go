@@ -503,6 +503,9 @@ func (s *OAuthService) PendingInfo(ctx context.Context, token string) (OAuthPend
 	if err != nil {
 		return OAuthPendingInfo{}, apperr.Internal(err)
 	}
+	if _, ok := s.providers.Get(flow.Provider); !ok {
+		return OAuthPendingInfo{}, apperr.BadRequest("oauth.invalid_flow", "OAuth session is invalid or expired")
+	}
 	return OAuthPendingInfo{Provider: flow.Provider, Stage: flow.Stage, Email: flow.Email, ReturnTo: flow.ReturnTo}, nil
 }
 
@@ -561,6 +564,9 @@ func (s *OAuthService) pendingFlow(ctx context.Context, token string, stage stri
 	}
 	if err != nil {
 		return model.OAuthFlow{}, apperr.Internal(err)
+	}
+	if _, ok := s.providers.Get(flow.Provider); !ok {
+		return model.OAuthFlow{}, apperr.BadRequest("oauth.invalid_flow", "OAuth session is invalid or expired")
 	}
 	return flow, nil
 }

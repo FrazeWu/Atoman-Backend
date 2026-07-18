@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/oauthprovider"
@@ -261,6 +262,95 @@ func TestOAuthServiceCompleteProfileCreatesOAuthOnlyUserAndDefaults(t *testing.T
 		PendingToken: callback.PendingToken, Username: "second-user",
 	}); err == nil {
 		t.Fatal("expected pending flow to be one-time")
+	}
+}
+
+func TestOAuthServicePendingInfoRejectsUnavailableProvider(t *testing.T) {
+	db := newOAuthServiceTestDB(t)
+	token := "removed-provider-pending-token"
+	flow := model.OAuthFlow{
+		SecretHash: hashOAuthSecret(token), Provider: "removed-provider",
+		Purpose: model.OAuthPurposeLogin, Stage: model.OAuthStageCompleteProfile,
+		Email: "pending@example.com", EmailVerified: true,
+		Issuer: "https://removed.example", Subject: "removed-subject",
+		ExpiresAt: time.Now().UTC().Add(time.Minute),
+	}
+	if err := db.Create(&flow).Error; err != nil {
+		t.Fatalf("create pending flow: %v", err)
+	}
+	svc := NewOAuthService(db, oauthprovider.NewRegistry())
+
+	if _, err := svc.PendingInfo(context.Background(), token); err == nil {
+		t.Fatal("expected unavailable provider pending info to fail")
+	}
+}
+
+func TestOAuthServiceCompleteProfileRejectsUnavailableProvider(t *testing.T) {
+	db := newOAuthServiceTestDB(t)
+	token := "removed-provider-profile-token"
+	flow := model.OAuthFlow{
+		SecretHash: hashOAuthSecret(token), Provider: "removed-provider",
+		Purpose: model.OAuthPurposeLogin, Stage: model.OAuthStageCompleteProfile,
+		Email: "removed@example.com", EmailVerified: true,
+		Issuer: "https://removed.example", Subject: "removed-subject",
+		ExpiresAt: time.Now().UTC().Add(time.Minute),
+	}
+	if err := db.Create(&flow).Error; err != nil {
+		t.Fatalf("create pending flow: %v", err)
+	}
+	svc := NewOAuthService(db, oauthprovider.NewRegistry())
+
+	if _, err := svc.CompleteProfile(context.Background(), OAuthCompleteProfileInput{
+		PendingToken: token, Username: "removed-user",
+	}); err == nil {
+		t.Fatal("expected unavailable provider profile completion to fail")
+	}
+	var count int64
+	if err := db.Model(&model.User{}).Count(&count).Error; err != nil {
+		t.Fatalf("count users: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no user for unavailable provider, got %d", count)
+	}
+}
+
+func TestOAuthServiceConfirmAccountRejectsUnavailableProvider(t *testing.T) {
+	db := newOAuthServiceTestDB(t)
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	user := model.User{
+		Username: "existing-removed", Email: "existing-removed@example.com",
+		Password: string(hash), Role: "user", IsActive: true,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	token := "removed-provider-confirm-token"
+	flow := model.OAuthFlow{
+		SecretHash: hashOAuthSecret(token), Provider: "removed-provider",
+		Purpose: model.OAuthPurposeLogin, Stage: model.OAuthStageConfirmAccount,
+		UserID: &user.UUID, Email: user.Email, EmailVerified: true,
+		Issuer: "https://removed.example", Subject: "removed-subject",
+		ExpiresAt: time.Now().UTC().Add(time.Minute),
+	}
+	if err := db.Create(&flow).Error; err != nil {
+		t.Fatalf("create pending flow: %v", err)
+	}
+	svc := NewOAuthService(db, oauthprovider.NewRegistry())
+
+	if _, err := svc.ConfirmAccount(context.Background(), OAuthConfirmAccountInput{
+		PendingToken: token, Password: "correct-password",
+	}); err == nil {
+		t.Fatal("expected unavailable provider account confirmation to fail")
+	}
+	var count int64
+	if err := db.Model(&model.ExternalIdentity{}).Count(&count).Error; err != nil {
+		t.Fatalf("count identities: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no identity for unavailable provider, got %d", count)
 	}
 }
 
