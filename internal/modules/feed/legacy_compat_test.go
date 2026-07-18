@@ -1295,6 +1295,117 @@ func TestFindOrCreateFeedSourceDoesNotLogRecordNotFoundOnExpectedMiss(t *testing
 	}
 }
 
+func TestUpdateSubscriptionPersistsAutomationFlags(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+	source, err := findOrCreateFeedSource(db, "external_rss", nil, "https://example.com/feed.xml", "Example Feed", "")
+	if err != nil {
+		t.Fatalf("create feed source: %v", err)
+	}
+	subscription := model.Subscription{UserID: user.UUID, FeedSourceID: source.ID, Title: "Example Feed"}
+	if err := db.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.PUT("/subscriptions/:id", withFeedAuth(user.UUID, UpdateSubscription(db)))
+
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/feed/subscriptions/"+subscription.ID.String(), strings.NewReader(`{
+		"is_muted": true,
+		"auto_mark_read": true,
+		"auto_add_reading_list": true
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+
+	var response struct {
+		Data struct {
+			IsMuted            bool `json:"is_muted"`
+			AutoMarkRead       bool `json:"auto_mark_read"`
+			AutoAddReadingList bool `json:"auto_add_reading_list"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.Data.IsMuted || !response.Data.AutoMarkRead || !response.Data.AutoAddReadingList {
+		t.Fatalf("expected saved subscription flags, got %+v", response.Data)
+	}
+}
+
+func TestSubscriptionRulesCreateListAndApplyToMatchingSubscriptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	if err := db.AutoMigrate(&model.FeedSubscriptionRule{}); err != nil {
+		t.Fatalf("migrate subscription rules: %v", err)
+	}
+	user := seedFeedTestUser(t, db)
+	source, err := findOrCreateFeedSource(db, "external_rss", nil, "https://podcast.example.com/feed.xml", "Tech Podcast", "")
+	if err != nil {
+		t.Fatalf("create feed source: %v", err)
+	}
+	source.Category = "podcast"
+	if err := db.Save(source).Error; err != nil {
+		t.Fatalf("save feed source category: %v", err)
+	}
+	subscription := model.Subscription{UserID: user.UUID, FeedSourceID: source.ID, Title: "Tech Podcast"}
+	if err := db.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set("user_id", user.UUID)
+		c.Next()
+	})
+	feed := router.Group("/api/v1/feed")
+	RegisterSubscriptionRuleRoutes(feed, db)
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscription-rules", strings.NewReader(`{
+		"name":"播客自动已读",
+		"enabled":true,
+		"match_type":"source_category",
+		"conditions_json":{"categories":["podcast"]},
+		"action_auto_mark_read":true
+	}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRR := httptest.NewRecorder()
+	router.ServeHTTP(createRR, createReq)
+	if createRR.Code != http.StatusCreated {
+		t.Fatalf("expected create status %d, got %d with body %s", http.StatusCreated, createRR.Code, createRR.Body.String())
+	}
+
+	applyReq := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscription-rules/apply", strings.NewReader(`{"all":true}`))
+	applyReq.Header.Set("Content-Type", "application/json")
+	applyRR := httptest.NewRecorder()
+	router.ServeHTTP(applyRR, applyReq)
+	if applyRR.Code != http.StatusOK {
+		t.Fatalf("expected apply status %d, got %d with body %s", http.StatusOK, applyRR.Code, applyRR.Body.String())
+	}
+
+	var updated model.Subscription
+	if err := db.First(&updated, "id = ?", subscription.ID).Error; err != nil {
+		t.Fatalf("reload subscription: %v", err)
+	}
+	if !updated.AutoMarkRead {
+		t.Fatal("expected matching subscription to enable automatic read")
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/feed/subscription-rules", nil)
+	listRR := httptest.NewRecorder()
+	router.ServeHTTP(listRR, listReq)
+	if listRR.Code != http.StatusOK || !strings.Contains(listRR.Body.String(), "播客自动已读") {
+		t.Fatalf("expected persisted rule in list, got status %d body %s", listRR.Code, listRR.Body.String())
+	}
+}
+
 func TestCreateSubscriptionReusesExistingFeedSourceForSameCanonicalURL(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newFeedHandlerTestDB(t)

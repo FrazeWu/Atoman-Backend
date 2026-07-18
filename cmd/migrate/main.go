@@ -227,6 +227,8 @@ func migrateSchema(db *gorm.DB) error {
 		&model.FeedSource{},
 		&model.OnboardingFeedRecommendation{},
 		&model.Subscription{},
+		&model.FeedSubscriptionRule{},
+		&model.FeedPreference{},
 		&model.SubscriptionGroup{},
 		&model.FeedItem{},
 		&model.FeedItemRead{},

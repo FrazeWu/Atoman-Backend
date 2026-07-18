@@ -255,9 +255,35 @@ type Subscription struct {
 	HealthStatus        string             `json:"health_status" gorm:"default:'healthy'"` // healthy | warning | error
 	ErrorMessage        string             `json:"error_message" gorm:"type:text"`
 	LastChecked         *time.Time         `json:"last_checked"`
+	IsMuted             bool               `json:"is_muted" gorm:"not null;default:false"`
+	AutoMarkRead        bool               `json:"auto_mark_read" gorm:"not null;default:false"`
+	AutoAddReadingList  bool               `json:"auto_add_reading_list" gorm:"not null;default:false"`
 }
 
 func (Subscription) TableName() string { return "subscriptions" }
+
+type FeedSubscriptionRule struct {
+	Base
+	UserID                   uuid.UUID       `json:"user_id" gorm:"type:uuid;not null;index"`
+	Name                     string          `json:"name" gorm:"not null"`
+	Enabled                  bool            `json:"enabled" gorm:"not null;default:true"`
+	Position                 int             `json:"position" gorm:"not null;default:0;index"`
+	MatchType                string          `json:"match_type" gorm:"not null"`
+	ConditionsJSON           json.RawMessage `json:"conditions_json" gorm:"type:jsonb;not null"`
+	ActionGroupID            *uuid.UUID      `json:"action_group_id" gorm:"type:uuid"`
+	ActionMuted              *bool           `json:"action_muted"`
+	ActionAutoMarkRead       *bool           `json:"action_auto_mark_read"`
+	ActionAutoAddReadingList *bool           `json:"action_auto_add_reading_list"`
+}
+
+func (FeedSubscriptionRule) TableName() string { return "feed_subscription_rules" }
+
+type FeedPreference struct {
+	UserID         uuid.UUID       `json:"user_id" gorm:"type:uuid;primaryKey"`
+	HiddenKeywords json.RawMessage `json:"hidden_keywords" gorm:"type:jsonb;not null"`
+}
+
+func (FeedPreference) TableName() string { return "feed_preferences" }
 
 type FeedItem struct {
 	Base

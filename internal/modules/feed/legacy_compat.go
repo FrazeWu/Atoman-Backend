@@ -79,6 +79,7 @@ func getOrCreateDefaultSubscriptionGroup(db *gorm.DB, userID uuid.UUID) (*model.
 				}
 				return nil
 			}
+			applySubscriptionRulesForUser(db, userID)
 		case 1:
 			canonical = groups[0]
 		default:
@@ -862,8 +863,11 @@ func UpdateSubscription(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var input struct {
-			Title   *string    `json:"title"`
-			GroupID *uuid.UUID `json:"group_id"`
+			Title              *string    `json:"title"`
+			GroupID            *uuid.UUID `json:"group_id"`
+			IsMuted            *bool      `json:"is_muted"`
+			AutoMarkRead       *bool      `json:"auto_mark_read"`
+			AutoAddReadingList *bool      `json:"auto_add_reading_list"`
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
@@ -887,6 +891,15 @@ func UpdateSubscription(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 			updates["subscription_group_id"] = *input.GroupID
+		}
+		if input.IsMuted != nil {
+			updates["is_muted"] = *input.IsMuted
+		}
+		if input.AutoMarkRead != nil {
+			updates["auto_mark_read"] = *input.AutoMarkRead
+		}
+		if input.AutoAddReadingList != nil {
+			updates["auto_add_reading_list"] = *input.AutoAddReadingList
 		}
 		if len(updates) > 0 {
 			if err := db.Model(&sub).Updates(updates).Error; err != nil {
@@ -1877,6 +1890,13 @@ type OPML struct {
 	Body    OPMLBody `xml:"body"`
 }
 
+func walkOPMLOutlines(outlines []OPMLOutline, visit func(OPMLOutline)) {
+	for _, outline := range outlines {
+		visit(outline)
+		walkOPMLOutlines(outline.Outlines, visit)
+	}
+}
+
 type OPMLHead struct {
 	Title string `xml:"title,omitempty"`
 }
@@ -1991,6 +2011,7 @@ func importFeedFromURL(db *gorm.DB, userID uuid.UUID, title, xmlURL string) erro
 	if err := db.Create(&subscription).Error; err != nil {
 		return err
 	}
+	applySubscriptionRulesForUser(db, userID)
 
 	go service.SyncSingleRSS(db, *feedSource)
 	return nil
@@ -2041,25 +2062,16 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 		imported := 0
 		failed := 0
 
-		for _, outline := range opml.Body.Outlines {
-			if outline.XMLURL != "" {
-				if err := importFeedFromURL(db, userID, outline.Text, outline.XMLURL); err != nil {
-					failed++
-				} else {
-					imported++
-				}
+		walkOPMLOutlines(opml.Body.Outlines, func(outline OPMLOutline) {
+			if outline.XMLURL == "" {
+				return
 			}
-
-			for _, subOutline := range outline.Outlines {
-				if subOutline.XMLURL != "" {
-					if err := importFeedFromURL(db, userID, subOutline.Text, subOutline.XMLURL); err != nil {
-						failed++
-					} else {
-						imported++
-					}
-				}
+			if err := importFeedFromURL(db, userID, outline.Text, outline.XMLURL); err != nil {
+				failed++
+			} else {
+				imported++
 			}
-		}
+		})
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":  "OPML import completed",
@@ -2134,12 +2146,7 @@ func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
 			}
 		}
 
-		for _, outline := range opml.Body.Outlines {
-			importOutline(outline)
-			for _, subOutline := range outline.Outlines {
-				importOutline(subOutline)
-			}
-		}
+		walkOPMLOutlines(opml.Body.Outlines, importOutline)
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":  "OPML import completed",
