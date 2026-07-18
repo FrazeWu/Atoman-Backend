@@ -10213,6 +10213,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/notifications/unread-counts": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回通知分类和私信的未读数量及总数。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "notifications"
+                ],
+                "summary": "获取分类未读数",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/notification.UnreadCountsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/podcast/episodes": {
             "get": {
                 "description": "返回所有已发布的播客单集。",
@@ -19918,6 +19958,30 @@ const docTemplate = `{
             "properties": {
                 "body": {
                     "type": "string"
+                }
+            }
+        },
+        "notification.UnreadCountsDTO": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                },
+                "total": {
+                    "type": "integer",
+                    "example": 8
+                }
+            }
+        },
+        "notification.UnreadCountsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/notification.UnreadCountsDTO"
                 }
             }
         },

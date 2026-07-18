@@ -40,6 +40,31 @@ func (r *Repo) CountUnreadNotifications(recipientID uuid.UUID) (int64, error) {
 	return count, err
 }
 
+type unreadTypeCount struct {
+	Type  string
+	Count int64
+}
+
+func (r *Repo) CountUnreadNotificationsByType(recipientID uuid.UUID) ([]unreadTypeCount, error) {
+	var counts []unreadTypeCount
+	err := r.db.Model(&model.Notification{}).
+		Select("type, COUNT(*) AS count").
+		Where("recipient_id = ? AND read_at IS NULL", recipientID).
+		Group("type").
+		Scan(&counts).Error
+	return counts, err
+}
+
+func (r *Repo) CountUnreadDM(recipientID uuid.UUID) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.DMMessage{}).
+		Joins("JOIN dm_conversations ON dm_conversations.id = dm_messages.conversation_id").
+		Where("dm_messages.sender_id != ? AND dm_messages.read_at IS NULL", recipientID).
+		Where("dm_conversations.participant_a = ? OR dm_conversations.participant_b = ?", recipientID, recipientID).
+		Count(&count).Error
+	return count, err
+}
+
 func (r *Repo) MarkRead(recipientID uuid.UUID, notificationID uuid.UUID, readAt time.Time) (bool, error) {
 	result := r.db.Model(&model.Notification{}).
 		Where("id = ? AND recipient_id = ?", notificationID, recipientID).

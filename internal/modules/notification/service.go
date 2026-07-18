@@ -17,6 +17,25 @@ type Service struct {
 	repo *Repo
 }
 
+var notificationCategories = [...]string{"like", "interaction", "mention", "reply", "collaboration", "system"}
+
+func categoryForType(notificationType string) string {
+	switch strings.TrimSpace(notificationType) {
+	case "comment_like", "forum_like":
+		return "like"
+	case "comment_marked", "forum_follow", "forum_solved":
+		return "interaction"
+	case "comment_mention", "forum_mention":
+		return "mention"
+	case "comment_reply", "forum_reply", "forum_topic_comment":
+		return "reply"
+	case "collaboration.required":
+		return "collaboration"
+	default:
+		return "system"
+	}
+}
+
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
 
 func (s *Service) ListNotifications(user authctx.CurrentUser, query ListQuery) ([]NotificationDTO, int64, error) {
@@ -39,6 +58,32 @@ func (s *Service) GetUnreadCount(user authctx.CurrentUser) (int64, error) {
 		return 0, apperr.Unauthorized("Login required")
 	}
 	return s.repo.CountUnreadNotifications(user.ID)
+}
+
+func (s *Service) GetUnreadCounts(user authctx.CurrentUser) (UnreadCountsDTO, error) {
+	if user.ID == uuid.Nil {
+		return UnreadCountsDTO{}, apperr.Unauthorized("Login required")
+	}
+	items := make(map[string]int64, len(notificationCategories)+1)
+	for _, category := range notificationCategories {
+		items[category] = 0
+	}
+	counts, err := s.repo.CountUnreadNotificationsByType(user.ID)
+	if err != nil {
+		return UnreadCountsDTO{}, err
+	}
+	var total int64
+	for _, count := range counts {
+		items[categoryForType(count.Type)] += count.Count
+		total += count.Count
+	}
+	dmCount, err := s.repo.CountUnreadDM(user.ID)
+	if err != nil {
+		return UnreadCountsDTO{}, err
+	}
+	items["dm"] = dmCount
+	total += dmCount
+	return UnreadCountsDTO{Total: total, Items: items}, nil
 }
 
 func (s *Service) MarkRead(user authctx.CurrentUser, notificationID uuid.UUID) error {
@@ -69,6 +114,7 @@ func toDTO(notification model.Notification) NotificationDTO {
 	dto := NotificationDTO{
 		ID:         notification.ID.String(),
 		Type:       notification.Type,
+		Category:   categoryForType(notification.Type),
 		SourceType: notification.SourceType,
 		SourceID:   notification.SourceID.String(),
 		Meta:       notification.Meta,

@@ -4113,6 +4113,22 @@ definitions:
       body:
         type: string
     type: object
+  notification.UnreadCountsDTO:
+    properties:
+      items:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+      total:
+        example: 8
+        type: integer
+    type: object
+  notification.UnreadCountsResponse:
+    properties:
+      data:
+        $ref: '#/definitions/notification.UnreadCountsDTO'
+    type: object
   service.SiteAccessFeedSettings:
     properties:
       allow_add_source:
@@ -10679,6 +10695,30 @@ paths:
       summary: 恢复歌词历史版本
       tags:
       - music-lyrics
+  /api/v1/notifications/unread-counts:
+    get:
+      description: 返回通知分类和私信的未读数量及总数。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/notification.UnreadCountsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取分类未读数
+      tags:
+      - notifications
   /api/v1/podcast/episodes:
     get:
       description: 返回所有已发布的播客单集。
