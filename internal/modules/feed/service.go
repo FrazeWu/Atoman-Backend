@@ -174,7 +174,9 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	if err != nil {
 		return nil, 0, err
 	}
-	legacyfeed.AnnotateDuplicateFeedItems(feedItems)
+	if query.HideDuplicates {
+		legacyfeed.AnnotateDuplicateFeedItems(feedItems)
+	}
 
 	readMap, err := s.readMap(user.ID, feedItems)
 	if err != nil {
@@ -213,7 +215,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 			Type:        "feed_item",
 			FeedItem:    &feedItems[i],
 			PublishedAt: feedItems[i].PublishedAt,
-			IsRead:      readMap[feedItems[i].ID],
+			IsRead:      feedItemClusterRead(feedItems[i], readMap),
 		})
 	}
 
@@ -470,13 +472,30 @@ func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]T
 		items = append(items, TimelineItemDTO{Type: "post", Post: timelinePostDTO(posts[i], PostEngagementCount{}), PublishedAt: posts[i].CreatedAt})
 	}
 	for i := range feedItems {
-		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt, IsRead: readMap[feedItems[i].ID]})
+		isRead := readMap[feedItems[i].ID]
+		if query.HideDuplicates {
+			isRead = feedItemClusterRead(feedItems[i], readMap)
+		}
+		items = append(items, TimelineItemDTO{Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt, IsRead: isRead})
 	}
 
 	sortTimeline(items)
 	items = filterTimeline(items, query)
 	paged, total := paginateTimeline(items, page, limit)
 	return paged, total, nil
+}
+
+func feedItemClusterRead(item model.FeedItem, readMap map[uuid.UUID]bool) bool {
+	itemIDs := item.DuplicateItemIDs
+	if len(itemIDs) == 0 {
+		itemIDs = []uuid.UUID{item.ID}
+	}
+	for _, itemID := range itemIDs {
+		if !readMap[itemID] {
+			return false
+		}
+	}
+	return true
 }
 
 func timelinePostDTO(post model.Post, engagement PostEngagementCount) *TimelinePostDTO {
@@ -667,6 +686,21 @@ func (s *Service) ensureFeedItemExists(feedItemID uuid.UUID) error {
 }
 
 func filterTimeline(items []TimelineItemDTO, query FeedQuery) []TimelineItemDTO {
+	hasSearch := strings.TrimSpace(query.Search) != ""
+	mergedSearchMatches := make(map[uuid.UUID]bool)
+	if query.HideDuplicates && hasSearch {
+		for _, item := range items {
+			if item.Type != "feed_item" || item.FeedItem == nil || !matchesTimelineSearch(item, query.Search) {
+				continue
+			}
+			primaryID := item.FeedItem.ID
+			if item.FeedItem.DuplicateOfID != nil {
+				primaryID = *item.FeedItem.DuplicateOfID
+			}
+			mergedSearchMatches[primaryID] = true
+		}
+	}
+
 	filtered := items[:0]
 	for _, item := range items {
 		if query.IsRead != nil && item.IsRead != *query.IsRead {
@@ -675,7 +709,11 @@ func filterTimeline(items []TimelineItemDTO, query FeedQuery) []TimelineItemDTO 
 		if query.HideDuplicates && item.Type == "feed_item" && item.FeedItem != nil && item.FeedItem.IsDuplicate {
 			continue
 		}
-		if !matchesTimelineSearch(item, query.Search) {
+		if query.HideDuplicates && hasSearch && item.Type == "feed_item" && item.FeedItem != nil {
+			if !mergedSearchMatches[item.FeedItem.ID] {
+				continue
+			}
+		} else if !matchesTimelineSearch(item, query.Search) {
 			continue
 		}
 		filtered = append(filtered, item)

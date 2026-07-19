@@ -330,6 +330,183 @@ func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 	}
 }
 
+func TestGetSubscribedFeedUsesClusterReadStateAndDeduplicatedPagination(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var primarySource model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&primarySource).Error; err != nil {
+		t.Fatalf("find primary source: %v", err)
+	}
+	duplicateSource := model.FeedSource{SourceType: "external_rss", RssURL: "https://cluster.example.com/feed.xml", Hash: "cluster-source", Title: "Cluster Source"}
+	if err := db.Create(&duplicateSource).Error; err != nil {
+		t.Fatalf("create duplicate source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: duplicateSource.ID, Title: duplicateSource.Title}).Error; err != nil {
+		t.Fatalf("create duplicate subscription: %v", err)
+	}
+	now := time.Now().UTC()
+	duplicate := model.FeedItem{
+		FeedSourceID: duplicateSource.ID,
+		GUID:         "cluster-duplicate",
+		Title:        "Feed item",
+		Link:         "https://example.com/items/1",
+		PublishedAt:  now,
+		FetchedAt:    now,
+	}
+	if err := db.Create(&duplicate).Error; err != nil {
+		t.Fatalf("create duplicate item: %v", err)
+	}
+	unique := model.FeedItem{
+		FeedSourceID: primarySource.ID,
+		GUID:         "cluster-unique",
+		Title:        "Unique item",
+		Link:         "https://example.com/items/unique",
+		PublishedAt:  now.Add(-2 * time.Hour),
+		FetchedAt:    now,
+	}
+	if err := db.Create(&unique).Error; err != nil {
+		t.Fatalf("create unique item: %v", err)
+	}
+
+	firstPage, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 1, SourceType: "external_rss", HideDuplicates: true})
+	if err != nil {
+		t.Fatalf("get first deduplicated page: %v", err)
+	}
+	if total != 2 || len(firstPage) != 1 || firstPage[0].FeedItem == nil || len(firstPage[0].FeedItem.DuplicateItemIDs) != 2 {
+		t.Fatalf("expected one cluster on first page and total 2, got total=%d items=%#v", total, firstPage)
+	}
+	cluster := firstPage[0]
+	if err := db.Create(&model.FeedItemRead{UserID: user.ID, FeedItemID: cluster.FeedItem.ID, ReadAt: now}).Error; err != nil {
+		t.Fatalf("mark only primary item read: %v", err)
+	}
+
+	unread := false
+	unreadItems, unreadTotal, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, SourceType: "external_rss", HideDuplicates: true, IsRead: &unread})
+	if err != nil {
+		t.Fatalf("get unread clusters: %v", err)
+	}
+	if unreadTotal != 2 || len(unreadItems) != 2 || unreadItems[0].IsRead {
+		t.Fatalf("expected partially read cluster to remain unread, total=%d items=%#v", unreadTotal, unreadItems)
+	}
+
+	for _, itemID := range cluster.FeedItem.DuplicateItemIDs {
+		read := model.FeedItemRead{UserID: user.ID, FeedItemID: itemID, ReadAt: now}
+		if err := db.Where("user_id = ? AND feed_item_id = ?", user.ID, itemID).FirstOrCreate(&read).Error; err != nil {
+			t.Fatalf("mark cluster member read: %v", err)
+		}
+	}
+	read := true
+	readItems, readTotal, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, SourceType: "external_rss", HideDuplicates: true, IsRead: &read})
+	if err != nil {
+		t.Fatalf("get read clusters: %v", err)
+	}
+	if readTotal != 1 || len(readItems) != 1 || !readItems[0].IsRead || readItems[0].FeedItem == nil || readItems[0].FeedItem.DuplicateCount != 2 {
+		t.Fatalf("expected fully read cluster only, total=%d items=%#v", readTotal, readItems)
+	}
+}
+
+func TestGetSubscribedFeedKeepsDuplicateItemsIndependentWhenMergingIsDisabled(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var primarySource model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&primarySource).Error; err != nil {
+		t.Fatalf("find primary source: %v", err)
+	}
+	duplicateSource := model.FeedSource{SourceType: "external_rss", RssURL: "https://raw.example.com/feed.xml", Hash: "raw-source", Title: "Raw Source"}
+	if err := db.Create(&duplicateSource).Error; err != nil {
+		t.Fatalf("create duplicate source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: duplicateSource.ID, Title: duplicateSource.Title}).Error; err != nil {
+		t.Fatalf("create duplicate subscription: %v", err)
+	}
+	var primary model.FeedItem
+	if err := db.Where("feed_source_id = ?", primarySource.ID).First(&primary).Error; err != nil {
+		t.Fatalf("find primary item: %v", err)
+	}
+	duplicate := model.FeedItem{
+		FeedSourceID: duplicateSource.ID,
+		GUID:         "raw-duplicate",
+		Title:        primary.Title,
+		Link:         primary.Link,
+		PublishedAt:  primary.PublishedAt.Add(-time.Minute),
+		FetchedAt:    primary.FetchedAt,
+	}
+	if err := db.Create(&duplicate).Error; err != nil {
+		t.Fatalf("create duplicate item: %v", err)
+	}
+	if err := db.Create(&model.FeedItemRead{UserID: user.ID, FeedItemID: primary.ID, ReadAt: time.Now().UTC()}).Error; err != nil {
+		t.Fatalf("mark primary read: %v", err)
+	}
+
+	items, _, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20, HideDuplicates: false})
+	if err != nil {
+		t.Fatalf("get unmerged timeline: %v", err)
+	}
+	matching := make([]TimelineItemDTO, 0, 2)
+	for _, item := range items {
+		if item.FeedItem != nil && item.FeedItem.Link == primary.Link {
+			matching = append(matching, item)
+		}
+	}
+	if len(matching) != 2 {
+		t.Fatalf("expected both raw duplicate items, got %#v", matching)
+	}
+	readCount := 0
+	for _, item := range matching {
+		if len(item.FeedItem.DuplicateItemIDs) != 0 || item.FeedItem.DuplicateCount != 0 {
+			t.Fatalf("expected unannotated raw item, got %#v", item.FeedItem)
+		}
+		if item.IsRead {
+			readCount++
+		}
+	}
+	if readCount != 1 {
+		t.Fatalf("expected independent read state with one read item, got %#v", matching)
+	}
+}
+
+func TestGetSubscribedFeedMergedSearchMatchesAnyClusterMember(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var primarySource model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&primarySource).Error; err != nil {
+		t.Fatalf("find primary source: %v", err)
+	}
+	var primary model.FeedItem
+	if err := db.Where("feed_source_id = ?", primarySource.ID).First(&primary).Error; err != nil {
+		t.Fatalf("find primary item: %v", err)
+	}
+	duplicateSource := model.FeedSource{SourceType: "external_rss", RssURL: "https://search-copy.example.com/feed.xml", Hash: "search-copy-source", Title: "Search Copy Source"}
+	if err := db.Create(&duplicateSource).Error; err != nil {
+		t.Fatalf("create duplicate source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: duplicateSource.ID, Title: duplicateSource.Title}).Error; err != nil {
+		t.Fatalf("create duplicate subscription: %v", err)
+	}
+	duplicate := model.FeedItem{
+		FeedSourceID: duplicateSource.ID,
+		GUID:         "search-copy",
+		Title:        primary.Title,
+		Link:         primary.Link,
+		Summary:      "needle-only-on-copy",
+		PublishedAt:  primary.PublishedAt.Add(-time.Minute),
+		FetchedAt:    primary.FetchedAt,
+	}
+	if err := db.Create(&duplicate).Error; err != nil {
+		t.Fatalf("create duplicate item: %v", err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{
+		Page:           1,
+		PageSize:       20,
+		HideDuplicates: true,
+		Search:         "needle-only-on-copy",
+	})
+	if err != nil {
+		t.Fatalf("search merged timeline: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].FeedItem == nil || items[0].FeedItem.ID != primary.ID {
+		t.Fatalf("expected primary cluster item from duplicate match, total=%d items=%#v", total, items)
+	}
+}
+
 func TestGetSubscribedBlogFeedExcludesExternalAndPodcastContent(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	pagedPostQueryHadLimit := false
@@ -935,8 +1112,8 @@ func TestGetExploreFeedAppliesDuplicateAndReadFilters(t *testing.T) {
 
 	now := time.Now().UTC()
 	readItem := seedExploreFeedItem(t, db, sourceA.ID, "read-guid", "Read item", now.Add(3*time.Minute), "https://example.com/read")
-	seedExploreFeedItem(t, db, sourceA.ID, "canonical-guid", "Canonical item", now.Add(2*time.Minute), "https://example.com/duplicate")
-	seedExploreFeedItem(t, db, sourceB.ID, "duplicate-guid", "Duplicate item", now.Add(time.Minute), "https://example.com/duplicate")
+	canonicalItem := seedExploreFeedItem(t, db, sourceA.ID, "canonical-guid", "Canonical item", now.Add(2*time.Minute), "https://example.com/duplicate")
+	duplicateItem := seedExploreFeedItem(t, db, sourceB.ID, "duplicate-guid", "Duplicate item", now.Add(time.Minute), "https://example.com/duplicate")
 	unreadItem := seedExploreFeedItem(t, db, sourceA.ID, "unread-guid", "Unread item", now, "https://example.com/unread")
 	if err := db.Create(&model.FeedItemRead{UserID: user.ID, FeedItemID: readItem.ID, ReadAt: now}).Error; err != nil {
 		t.Fatalf("mark read item: %v", err)
@@ -949,6 +1126,22 @@ func TestGetExploreFeedAppliesDuplicateAndReadFilters(t *testing.T) {
 	}
 	if readTotal != 1 || len(readItems) != 1 || readItems[0].FeedItem == nil || readItems[0].FeedItem.ID != readItem.ID {
 		t.Fatalf("expected only read item %s, got total=%d items=%#v", readItem.ID, readTotal, readItems)
+	}
+	if err := db.Create(&model.FeedItemRead{UserID: user.ID, FeedItemID: canonicalItem.ID, ReadAt: now}).Error; err != nil {
+		t.Fatalf("mark only canonical duplicate read: %v", err)
+	}
+	unmergedRead, unmergedReadTotal, err := service.GetExploreFeed(user, FeedQuery{Page: 1, PageSize: 20, Sort: "recent", IsRead: &readOnly})
+	if err != nil {
+		t.Fatalf("get unmerged read explore feed: %v", err)
+	}
+	unmergedReadIDs := make(map[uuid.UUID]bool, len(unmergedRead))
+	for _, item := range unmergedRead {
+		if item.FeedItem != nil {
+			unmergedReadIDs[item.FeedItem.ID] = true
+		}
+	}
+	if unmergedReadTotal != 2 || !unmergedReadIDs[readItem.ID] || !unmergedReadIDs[canonicalItem.ID] || unmergedReadIDs[duplicateItem.ID] {
+		t.Fatalf("expected independent unmerged read items, total=%d items=%#v", unmergedReadTotal, unmergedRead)
 	}
 
 	unreadOnly := false
