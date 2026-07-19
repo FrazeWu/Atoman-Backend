@@ -4245,6 +4245,22 @@ definitions:
       total:
         type: integer
     type: object
+  music.PendingLyricAnnotationDTO:
+    properties:
+      album_id:
+        type: string
+      annotation_id:
+        type: string
+      song_id:
+        type: string
+    type: object
+  music.PendingLyricAnnotationsResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/music.PendingLyricAnnotationDTO'
+        type: array
+    type: object
   music.PlaylistBookmarkListResponse:
     properties:
       data:
@@ -11197,6 +11213,30 @@ paths:
       summary: 获取最近播放
       tags:
       - music
+  /api/v1/music/lyrics/annotations/pending:
+    get:
+      description: 返回当前用户创建且需要重新绑定、所属歌曲已归入专辑的歌词注释。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.PendingLyricAnnotationsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/music.MusicLyricsErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/music.MusicLyricsErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取待重新绑定的歌词注释
+      tags:
+      - music-lyrics
   /api/v1/music/playlists:
     post:
       consumes:

@@ -260,6 +260,49 @@ func TestRegisterRoutesMusicLyricsLifecycleMatchesFrontendContract(t *testing.T)
 	}
 }
 
+func TestRegisterRoutesListsPendingLyricAnnotationsForCurrentUser(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	album := model.Album{Title: "Pending Annotation Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatal(err)
+	}
+	song := model.Song{Title: "Pending Annotation Song", AudioURL: "/pending.mp3", Status: "open", AlbumID: &album.ID}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	lyrics, err := service.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation, err := service.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+		LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "pending",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", annotation.ID).Update("status", "needs_rebind").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	path := "/api/v1/music/lyrics/annotations/pending"
+	anon := performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodGet, path, "")
+	assertMusicHTTPError(t, anon, http.StatusUnauthorized, "auth.unauthorized")
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, &user), http.MethodGet, path, "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected pending annotations 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data []PendingLyricAnnotationDTO `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode pending annotations: %v", err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].AnnotationID != annotation.ID.String() || payload.Data[0].SongID != song.ID.String() || payload.Data[0].AlbumID != album.ID.String() {
+		t.Fatalf("unexpected pending annotations: %#v", payload.Data)
+	}
+}
+
 func TestRegisterRoutesMusicLyricsRejectsInvalidRequestsAndCrossSongAccess(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	song := model.Song{Title: "Lyrics Validation", AudioURL: "/validation.mp3", Status: "open"}
