@@ -2,6 +2,7 @@ package debate
 
 import (
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -125,6 +126,10 @@ func (s *Service) DeleteDebate(user authctx.CurrentUser, debateID uuid.UUID) err
 		return apperr.Forbidden("debate.forbidden", "Not authorized")
 	}
 	return s.comments.DeleteTarget(comment.TargetRef{Kind: comment.TargetKindDebate, ResourceID: debateID}, func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("source_debate_id = ? OR target_debate_id = ?", debateID, debateID).
+			Delete(&model.DebateRelation{}).Error; err != nil {
+			return err
+		}
 		return tx.Delete(&model.Debate{}, "id = ?", debateID).Error
 	})
 }
@@ -138,7 +143,7 @@ func (s *Service) ConcludeDebate(user authctx.CurrentUser, debateID uuid.UUID, c
 		return model.Debate{}, apperr.Forbidden("debate.forbidden", "Not authorized")
 	}
 	switch strings.TrimSpace(conclusionType) {
-	case "yes", "no", "inconclusive":
+	case "yes", "no":
 	default:
 		return model.Debate{}, apperr.BadRequest("validation.invalid_request", "conclusion_type is invalid")
 	}
@@ -154,6 +159,130 @@ func (s *Service) ConcludeDebate(user authctx.CurrentUser, debateID uuid.UUID, c
 		return model.Debate{}, err
 	}
 	return s.repo.GetDebate(debate.ID)
+}
+
+func (s *Service) CreateRelation(user authctx.CurrentUser, req CreateRelationRequest) (model.DebateRelation, error) {
+	if user.ID == uuid.Nil {
+		return model.DebateRelation{}, apperr.Unauthorized("Login required")
+	}
+	if req.SourceDebateID == uuid.Nil || req.TargetDebateID == uuid.Nil {
+		return model.DebateRelation{}, apperr.BadRequest("validation.invalid_request", "source_debate_id and target_debate_id are required")
+	}
+	if req.SourceDebateID == req.TargetDebateID {
+		return model.DebateRelation{}, apperr.BadRequest("debate.invalid_relation", "A debate cannot reference itself")
+	}
+	stance := strings.TrimSpace(req.Stance)
+	if stance != model.DebateRelationSupport && stance != model.DebateRelationOppose {
+		return model.DebateRelation{}, apperr.BadRequest("debate.invalid_relation", "stance must be support or oppose")
+	}
+
+	source, err := s.GetDebate(req.SourceDebateID)
+	if err != nil {
+		return model.DebateRelation{}, err
+	}
+	if source.Status != "concluded" || (source.ConclusionType != "yes" && source.ConclusionType != "no") {
+		return model.DebateRelation{}, apperr.BadRequest("debate.source_not_concluded", "Only concluded debates with a yes or no conclusion can be referenced")
+	}
+	if _, err := s.GetDebate(req.TargetDebateID); err != nil {
+		return model.DebateRelation{}, err
+	}
+
+	var count int64
+	if err := s.db.Model(&model.DebateRelation{}).
+		Where("source_debate_id = ? AND target_debate_id = ?", req.SourceDebateID, req.TargetDebateID).
+		Count(&count).Error; err != nil {
+		return model.DebateRelation{}, err
+	}
+	if count > 0 {
+		return model.DebateRelation{}, apperr.Conflict("debate.relation_exists", "Relation already exists")
+	}
+
+	relation := model.DebateRelation{
+		SourceDebateID: req.SourceDebateID,
+		TargetDebateID: req.TargetDebateID,
+		Stance:         stance,
+		UserID:         user.ID,
+	}
+	if err := s.db.Create(&relation).Error; err != nil {
+		return model.DebateRelation{}, err
+	}
+	return relation, nil
+}
+
+func (s *Service) DeleteRelation(user authctx.CurrentUser, relationID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	var relation model.DebateRelation
+	if err := s.db.First(&relation, "id = ?", relationID).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return apperr.NotFound("debate.relation_not_found", "Relation not found")
+		}
+		return err
+	}
+	if relation.UserID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		return apperr.Forbidden("debate.forbidden", "Not authorized")
+	}
+	return s.db.Unscoped().Delete(&relation).Error
+}
+
+func (s *Service) GetDebateGraph(rootID uuid.UUID, mode string) (DebateGraph, error) {
+	if _, err := s.GetDebate(rootID); err != nil {
+		return DebateGraph{}, err
+	}
+	if mode == "" {
+		mode = "tree"
+	}
+	if mode != "tree" && mode != "graph" {
+		return DebateGraph{}, apperr.BadRequest("validation.invalid_request", "view must be tree or graph")
+	}
+
+	visited := map[uuid.UUID]bool{rootID: true}
+	frontier := []uuid.UUID{rootID}
+	relationsByID := make(map[uuid.UUID]model.DebateRelation)
+	for len(frontier) > 0 {
+		var relations []model.DebateRelation
+		query := s.db.Order("created_at ASC")
+		if mode == "tree" {
+			query = query.Where("target_debate_id IN ?", frontier)
+		} else {
+			query = query.Where("source_debate_id IN ? OR target_debate_id IN ?", frontier, frontier)
+		}
+		if err := query.Find(&relations).Error; err != nil {
+			return DebateGraph{}, err
+		}
+
+		next := make([]uuid.UUID, 0)
+		for _, relation := range relations {
+			relationsByID[relation.ID] = relation
+			candidateIDs := []uuid.UUID{relation.SourceDebateID}
+			if mode == "graph" {
+				candidateIDs = append(candidateIDs, relation.TargetDebateID)
+			}
+			for _, candidateID := range candidateIDs {
+				if !visited[candidateID] {
+					visited[candidateID] = true
+					next = append(next, candidateID)
+				}
+			}
+		}
+		frontier = next
+	}
+
+	ids := make([]uuid.UUID, 0, len(visited))
+	for id := range visited {
+		ids = append(ids, id)
+	}
+	nodes := make([]model.Debate, 0, len(ids))
+	if err := s.db.Preload("User").Where("id IN ?", ids).Order("created_at ASC").Find(&nodes).Error; err != nil {
+		return DebateGraph{}, err
+	}
+	relations := make([]model.DebateRelation, 0, len(relationsByID))
+	for _, relation := range relationsByID {
+		relations = append(relations, relation)
+	}
+	sort.Slice(relations, func(i, j int) bool { return relations[i].CreatedAt.Before(relations[j].CreatedAt) })
+	return DebateGraph{RootID: rootID, Nodes: nodes, Relations: relations}, nil
 }
 
 func (s *Service) ReopenDebate(user authctx.CurrentUser, debateID uuid.UUID) (model.Debate, error) {

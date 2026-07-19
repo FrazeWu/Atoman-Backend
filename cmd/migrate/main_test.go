@@ -53,6 +53,9 @@ func TestMigrateSchemaCreatesDMTablesAndUnreadCountIndexes(t *testing.T) {
 	if !db.Migrator().HasTable(&model.ForumUserTrust{}) {
 		t.Fatal("expected forum_user_trust table to exist")
 	}
+	if !db.Migrator().HasTable(&model.DebateRelation{}) {
+		t.Fatal("expected debate_relations table to exist")
+	}
 
 	assertIndexExists(t, db, "notifications", "idx_notification_recipient_read")
 	assertIndexExists(t, db, "dm_messages", "idx_dm_message_conv_sender_read")

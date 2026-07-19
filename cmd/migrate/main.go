@@ -264,6 +264,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.PodcastEpisode{},
 		&model.PodcastEpisodeBookmark{},
 		&model.Debate{},
+		&model.DebateRelation{},
 		&model.DebateVote{},
 		&model.VoteHistory{},
 		&model.DebateConcludeVote{},

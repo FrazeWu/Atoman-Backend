@@ -103,6 +103,18 @@ func (h *Handler) removeArgumentVote(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Vote removed"})
 }
 
+// setConclusionVote godoc
+// @Summary Request that a debate be concluded
+// @Description Records a conclusion request. Reaching the threshold does not choose a yes/no conclusion automatically.
+// @Tags Debate
+// @Produce json
+// @Security BearerAuth
+// @Param debateID path string true "Debate ID"
+// @Success 200 {object} handlers.DebateConcludeVoteResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/debates/{debateID}/conclusion-vote [post]
 func (h *Handler) setConclusionVote(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {

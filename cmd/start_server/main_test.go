@@ -89,6 +89,7 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 		&model.DebateArgumentDetail{},
 		&model.DebateArgumentReference{},
 		&model.DebateArgumentDebateRef{},
+		&model.DebateRelation{},
 	}
 	for _, schemaModel := range models {
 		if !db.Migrator().HasTable(schemaModel) {

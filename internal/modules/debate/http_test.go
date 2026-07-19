@@ -23,7 +23,7 @@ func newDebateHTTPTestService(t *testing.T) (*Service, authctx.CurrentUser) {
 		&model.DiscussionTarget{}, &model.CommentEntry{}, &model.CommentMention{},
 		&model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{}, &model.CommentPublishRecord{},
 		&model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{}, &model.DebateArgumentReference{},
-		&model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{})
+		&model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{}, &model.DebateRelation{})
 	if err := db.Exec(`CREATE UNIQUE INDEX uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error; err != nil {
 		t.Fatalf("create target index: %v", err)
 	}
@@ -43,6 +43,66 @@ func newDebateHTTPTestService(t *testing.T) (*Service, authctx.CurrentUser) {
 	}
 
 	return NewService(db), authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: user.Role}
+}
+
+func TestRegisterRoutesMountsDebateRelationLifecycle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, user := newDebateHTTPTestService(t)
+	source, err := service.CreateDebate(user, CreateDebateRequest{Title: "来源辩题"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err = service.ConcludeDebate(user, source.ID, "yes", "结论明确")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := service.CreateDebate(user, CreateDebateRequest{Title: "目标辩题"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	router := newDebateHTTPRouter(service, &user)
+	body, _ := json.Marshal(CreateRelationRequest{
+		SourceDebateID: source.ID,
+		TargetDebateID: target.ID,
+		Stance:         "support",
+	})
+	createRecorder := httptest.NewRecorder()
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/debate-relations", bytes.NewReader(body))
+	createRequest.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(createRecorder, createRequest)
+	if createRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected relation create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	}
+	var created struct {
+		Data model.DebateRelation `json:"data"`
+	}
+	if err := json.Unmarshal(createRecorder.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+
+	graphRecorder := httptest.NewRecorder()
+	graphRequest := httptest.NewRequest(http.MethodGet, "/api/v1/debates/"+target.ID.String()+"/relations?view=tree", nil)
+	router.ServeHTTP(graphRecorder, graphRequest)
+	if graphRecorder.Code != http.StatusOK {
+		t.Fatalf("expected relation graph status 200, got %d: %s", graphRecorder.Code, graphRecorder.Body.String())
+	}
+	var graph struct {
+		Data DebateGraph `json:"data"`
+	}
+	if err := json.Unmarshal(graphRecorder.Body.Bytes(), &graph); err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Data.Nodes) != 2 || len(graph.Data.Relations) != 1 {
+		t.Fatalf("expected two nodes and one relation, got %s", graphRecorder.Body.String())
+	}
+
+	deleteRecorder := httptest.NewRecorder()
+	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/debate-relations/"+created.Data.ID.String(), nil)
+	router.ServeHTTP(deleteRecorder, deleteRequest)
+	if deleteRecorder.Code != http.StatusOK {
+		t.Fatalf("expected relation delete status 200, got %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+	}
 }
 
 func newDebateHTTPRouter(service *Service, current *authctx.CurrentUser) *gin.Engine {
@@ -149,6 +209,39 @@ func TestListDebatesFiltersByTag(t *testing.T) {
 	}
 	if len(response.Data) != 1 || response.Data[0].Title != "Science" {
 		t.Fatalf("expected only science debate, got %#v", response.Data)
+	}
+}
+
+func TestSearchDebatesFiltersByStatus(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, user := newDebateHTTPTestService(t)
+	openDebate, err := service.CreateDebate(user, CreateDebateRequest{Title: "肺癌风险会不会增加？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	concluded, err := service.CreateDebate(user, CreateDebateRequest{Title: "吸烟量会不会影响风险？"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ConcludeDebate(user, concluded.ID, "yes", "结论明确"); err != nil {
+		t.Fatal(err)
+	}
+
+	router := newDebateHTTPRouter(service, nil)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/debate/topics/search?q=%E4%BC%9A%E4%B8%8D%E4%BC%9A&status=concluded&limit=10", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data []model.Debate `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data) != 1 || response.Data[0].ID != concluded.ID || response.Data[0].ID == openDebate.ID {
+		t.Fatalf("expected only concluded search result, got %s", recorder.Body.String())
 	}
 }
 

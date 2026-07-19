@@ -498,6 +498,15 @@ definitions:
       title:
         type: string
     type: object
+  debate.CreateRelationRequest:
+    properties:
+      source_debate_id:
+        type: string
+      stance:
+        type: string
+      target_debate_id:
+        type: string
+    type: object
   debate.DebateReferenceRequest:
     properties:
       debate_id:
@@ -1383,6 +1392,46 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/model.DebateArgumentDTO'
+    type: object
+  handlers.DebateConcludeVoteData:
+    properties:
+      auto_concluded:
+        example: false
+        type: boolean
+      conclude_threshold:
+        example: 10
+        type: integer
+      conclude_vote_count:
+        example: 3
+        type: integer
+    type: object
+  handlers.DebateConcludeVoteResponse:
+    properties:
+      data:
+        $ref: '#/definitions/handlers.DebateConcludeVoteData'
+    type: object
+  handlers.DebateGraphData:
+    properties:
+      nodes:
+        items:
+          $ref: '#/definitions/model.Debate'
+        type: array
+      relations:
+        items:
+          $ref: '#/definitions/model.DebateRelation'
+        type: array
+      root_id:
+        type: string
+    type: object
+  handlers.DebateGraphResponse:
+    properties:
+      data:
+        $ref: '#/definitions/handlers.DebateGraphData'
+    type: object
+  handlers.DebateRelationResponse:
+    properties:
+      data:
+        $ref: '#/definitions/model.DebateRelation'
     type: object
   handlers.DebateResponse:
     properties:
@@ -2928,6 +2977,29 @@ definitions:
       vote_count:
         type: integer
     type: object
+  model.DebateRelation:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      source_debate:
+        $ref: '#/definitions/model.Debate'
+      source_debate_id:
+        type: string
+      stance:
+        type: string
+      target_debate:
+        $ref: '#/definitions/model.Debate'
+      target_debate_id:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+      user_id:
+        type: string
+    type: object
   model.EditConflict:
     properties:
       base_revision:
@@ -3610,6 +3682,10 @@ definitions:
     type: object
   model.Subscription:
     properties:
+      auto_add_reading_list:
+        type: boolean
+      auto_mark_read:
+        type: boolean
       created_at:
         type: string
       error_message:
@@ -3623,6 +3699,8 @@ definitions:
         type: string
       id:
         type: string
+      is_muted:
+        type: boolean
       last_checked:
         type: string
       subscription:
@@ -4645,6 +4723,11 @@ definitions:
         type: integer
       id:
         type: string
+      metrics:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
       module:
         $ref: '#/definitions/studio.Module'
       processing_status:
@@ -8074,6 +8157,73 @@ paths:
       summary: Remove an argument reference
       tags:
       - Debate
+  /api/v1/debate-relations:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate relation
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.CreateRelationRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.DebateRelationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Connect a concluded debate to another debate
+      tags:
+      - Debate
+  /api/v1/debate-relations/{relationID}:
+    delete:
+      parameters:
+      - description: Relation ID
+        in: path
+        name: relationID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.MessageResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete a debate relation
+      tags:
+      - Debate
   /api/v1/debates:
     post:
       consumes:
@@ -8176,6 +8326,71 @@ paths:
       security:
       - BearerAuth: []
       summary: Create a typed debate argument
+      tags:
+      - Debate
+  /api/v1/debates/{debateID}/conclusion-vote:
+    post:
+      description: Records a conclusion request. Reaching the threshold does not choose
+        a yes/no conclusion automatically.
+      parameters:
+      - description: Debate ID
+        in: path
+        name: debateID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateConcludeVoteResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Request that a debate be concluded
+      tags:
+      - Debate
+  /api/v1/debates/{debateID}/relations:
+    get:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: debateID
+        required: true
+        type: string
+      - default: tree
+        description: tree or graph
+        in: query
+        name: view
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.DebateGraphResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: Get the debate tree or connected relation graph
       tags:
       - Debate
   /api/v1/discussions/{kind}/{resource_id}/comments:
@@ -14454,6 +14669,40 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 获取推荐视频
+      tags:
+      - videos
+  /api/v1/videos/{id}/reprocess:
+    post:
+      parameters:
+      - description: 视频 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 重新处理视频预览
       tags:
       - videos
   /api/v1/videos/{id}/view:

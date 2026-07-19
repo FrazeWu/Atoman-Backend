@@ -22,7 +22,7 @@ func seededDebateCommentService(t *testing.T) (*Service, *gorm.DB, authctx.Curre
 		&model.User{}, &model.MediaAsset{}, &model.Debate{}, &model.DiscussionTarget{}, &model.CommentEntry{},
 		&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentTimeAnchor{},
 		&model.CommentLike{}, &model.CommentReport{}, &model.CommentPublishRecord{}, &model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{},
-		&model.DebateArgumentReference{}, &model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{},
+		&model.DebateArgumentReference{}, &model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{}, &model.DebateRelation{},
 	)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_comment_root_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error)
@@ -35,6 +35,111 @@ func seededDebateCommentService(t *testing.T) (*Service, *gorm.DB, authctx.Curre
 	require.NoError(t, db.Create(&debate).Error)
 	comments := comment.NewService(db, comment.NewTargetRegistry(db))
 	return NewService(db, comments), db, user, debate
+}
+
+func TestCreateRelationRequiresConcludedBinarySource(t *testing.T) {
+	svc, db, user, target := seededDebateCommentService(t)
+	source := model.Debate{UserID: user.ID, Title: "来源辩题", Status: "open"}
+	require.NoError(t, db.Create(&source).Error)
+
+	_, err := svc.CreateRelation(user, CreateRelationRequest{
+		SourceDebateID: source.ID,
+		TargetDebateID: target.ID,
+		Stance:         "support",
+	})
+	require.Error(t, err)
+
+	require.NoError(t, db.Model(&source).Updates(map[string]any{
+		"status": "concluded", "conclusion_type": "inconclusive",
+	}).Error)
+	_, err = svc.CreateRelation(user, CreateRelationRequest{
+		SourceDebateID: source.ID,
+		TargetDebateID: target.ID,
+		Stance:         "support",
+	})
+	require.Error(t, err)
+
+	require.NoError(t, db.Model(&source).Update("conclusion_type", "yes").Error)
+	relation, err := svc.CreateRelation(user, CreateRelationRequest{
+		SourceDebateID: source.ID,
+		TargetDebateID: target.ID,
+		Stance:         "support",
+	})
+	require.NoError(t, err)
+	require.Equal(t, source.ID, relation.SourceDebateID)
+	require.Equal(t, target.ID, relation.TargetDebateID)
+	require.Equal(t, "support", relation.Stance)
+	require.Equal(t, user.ID, relation.UserID)
+}
+
+func TestCreateRelationRejectsInvalidAndDuplicateLinks(t *testing.T) {
+	svc, db, user, target := seededDebateCommentService(t)
+	require.NoError(t, db.Model(&target).Updates(map[string]any{
+		"status": "concluded", "conclusion_type": "yes",
+	}).Error)
+
+	for _, request := range []CreateRelationRequest{
+		{SourceDebateID: target.ID, TargetDebateID: target.ID, Stance: "support"},
+		{SourceDebateID: target.ID, TargetDebateID: uuid.New(), Stance: "neutral"},
+	} {
+		_, err := svc.CreateRelation(user, request)
+		require.Error(t, err)
+	}
+
+	other := model.Debate{UserID: user.ID, Title: "目标辩题", Status: "open"}
+	require.NoError(t, db.Create(&other).Error)
+	request := CreateRelationRequest{SourceDebateID: target.ID, TargetDebateID: other.ID, Stance: "oppose"}
+	_, err := svc.CreateRelation(user, request)
+	require.NoError(t, err)
+	_, err = svc.CreateRelation(user, request)
+	require.Error(t, err)
+}
+
+func TestGetDebateGraphUsesIncomingLinksForTreeAndAllLinksForGraph(t *testing.T) {
+	svc, db, user, root := seededDebateCommentService(t)
+	require.NoError(t, db.Model(&root).Updates(map[string]any{
+		"status": "concluded", "conclusion_type": "yes",
+	}).Error)
+
+	child := model.Debate{UserID: user.ID, Title: "直接支撑", Status: "concluded", ConclusionType: "yes"}
+	grandchild := model.Debate{UserID: user.ID, Title: "间接反驳", Status: "concluded", ConclusionType: "no"}
+	parent := model.Debate{UserID: user.ID, Title: "上游目标", Status: "open"}
+	require.NoError(t, db.Create(&child).Error)
+	require.NoError(t, db.Create(&grandchild).Error)
+	require.NoError(t, db.Create(&parent).Error)
+
+	for _, request := range []CreateRelationRequest{
+		{SourceDebateID: child.ID, TargetDebateID: root.ID, Stance: "support"},
+		{SourceDebateID: grandchild.ID, TargetDebateID: child.ID, Stance: "oppose"},
+		{SourceDebateID: root.ID, TargetDebateID: parent.ID, Stance: "support"},
+	} {
+		_, err := svc.CreateRelation(user, request)
+		require.NoError(t, err)
+	}
+
+	tree, err := svc.GetDebateGraph(root.ID, "tree")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []uuid.UUID{root.ID, child.ID, grandchild.ID}, debateIDs(tree.Nodes))
+	require.Len(t, tree.Relations, 2)
+
+	graph, err := svc.GetDebateGraph(root.ID, "graph")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []uuid.UUID{root.ID, child.ID, grandchild.ID, parent.ID}, debateIDs(graph.Nodes))
+	require.Len(t, graph.Relations, 3)
+}
+
+func TestConcludeDebateRejectsNonBinaryConclusion(t *testing.T) {
+	svc, _, user, debate := seededDebateCommentService(t)
+	_, err := svc.ConcludeDebate(user, debate.ID, "inconclusive", "仍无定论")
+	require.Error(t, err)
+}
+
+func debateIDs(debates []model.Debate) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(debates))
+	for _, debate := range debates {
+		ids = append(ids, debate.ID)
+	}
+	return ids
 }
 
 func TestCreateArgumentWritesCommentAndTypedDetail(t *testing.T) {
@@ -262,6 +367,53 @@ func TestDeleteDebateRemovesCommentTargetAndTypedRelations(t *testing.T) {
 		require.NoError(t, db.Model(table).Count(&count).Error)
 		require.Zero(t, count)
 	}
+}
+
+func TestDeleteDebateRemovesNodeRelations(t *testing.T) {
+	svc, db, user, source := seededDebateCommentService(t)
+	require.NoError(t, db.Model(&source).Updates(map[string]any{
+		"status": "concluded", "conclusion_type": "yes",
+	}).Error)
+	target := model.Debate{UserID: user.ID, Title: "保留的目标", Status: "open"}
+	require.NoError(t, db.Create(&target).Error)
+	_, err := svc.CreateRelation(user, CreateRelationRequest{
+		SourceDebateID: source.ID,
+		TargetDebateID: target.ID,
+		Stance:         "support",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, svc.DeleteDebate(user, source.ID))
+	var count int64
+	require.NoError(t, db.Model(&model.DebateRelation{}).Count(&count).Error)
+	require.Zero(t, count)
+}
+
+func TestDeleteRelationRequiresCreatorOrAdmin(t *testing.T) {
+	svc, db, user, source := seededDebateCommentService(t)
+	require.NoError(t, db.Model(&source).Updates(map[string]any{
+		"status": "concluded", "conclusion_type": "yes",
+	}).Error)
+	target := model.Debate{UserID: user.ID, Title: "目标", Status: "open"}
+	require.NoError(t, db.Create(&target).Error)
+	relation, err := svc.CreateRelation(user, CreateRelationRequest{
+		SourceDebateID: source.ID,
+		TargetDebateID: target.ID,
+		Stance:         "oppose",
+	})
+	require.NoError(t, err)
+
+	other := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
+	require.Error(t, svc.DeleteRelation(other, relation.ID))
+	admin := other
+	admin.Role = authctx.RoleAdmin
+	require.NoError(t, svc.DeleteRelation(admin, relation.ID))
+	_, err = svc.CreateRelation(user, CreateRelationRequest{
+		SourceDebateID: source.ID,
+		TargetDebateID: target.ID,
+		Stance:         "oppose",
+	})
+	require.NoError(t, err)
 }
 
 func TestListArgumentsUsesBoundedQueryCount(t *testing.T) {

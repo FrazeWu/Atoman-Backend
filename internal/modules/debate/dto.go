@@ -1,6 +1,7 @@
 package debate
 
 import (
+	"atoman/internal/model"
 	"atoman/internal/modules/comment"
 
 	"github.com/google/uuid"
@@ -39,4 +40,16 @@ type ReferenceRequest struct {
 
 type DebateReferenceRequest struct {
 	DebateID uuid.UUID `json:"debate_id"`
+}
+
+type CreateRelationRequest struct {
+	SourceDebateID uuid.UUID `json:"source_debate_id"`
+	TargetDebateID uuid.UUID `json:"target_debate_id"`
+	Stance         string    `json:"stance"`
+}
+
+type DebateGraph struct {
+	RootID    uuid.UUID              `json:"root_id"`
+	Nodes     []model.Debate         `json:"nodes"`
+	Relations []model.DebateRelation `json:"relations"`
 }

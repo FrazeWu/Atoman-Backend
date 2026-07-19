@@ -28,8 +28,11 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/debate/topics/:debateID/conclude", h.concludeLegacyDebate)
 	group.POST("/debate/topics/:debateID/reopen", h.reopenLegacyDebate)
 	group.POST("/debates", h.createDebate)
+	group.GET("/debates/:debateID/relations", h.getDebateRelations)
 	group.GET("/debates/:debateID/arguments", h.listArguments)
 	group.POST("/debates/:debateID/arguments", h.createLegacyArgument)
+	group.POST("/debate-relations", h.createDebateRelation)
+	group.DELETE("/debate-relations/:relationID", h.deleteDebateRelation)
 	group.PATCH("/debate-arguments/:argumentID", h.updateLegacyArgument)
 	group.DELETE("/debate-arguments/:argumentID", h.deleteLegacyArgument)
 	group.POST("/debate-arguments/:argumentID/reference", h.addArgumentReference)
@@ -38,6 +41,90 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.DELETE("/debate-arguments/:argumentID/debate-reference/:debateRefID", h.removeDebateReference)
 	group.POST("/debate-arguments/:argumentID/fold", h.foldArgument)
 	group.DELETE("/debate-arguments/:argumentID/fold", h.unfoldArgument)
+}
+
+// getDebateRelations godoc
+// @Summary Get the debate tree or connected relation graph
+// @Tags Debate
+// @Produce json
+// @Param debateID path string true "Debate ID"
+// @Param view query string false "tree or graph" default(tree)
+// @Success 200 {object} handlers.DebateGraphResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/debates/{debateID}/relations [get]
+func (h *Handler) getDebateRelations(c *gin.Context) {
+	debateID, err := uuid.Parse(c.Param("debateID"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateID must be a valid uuid"))
+		return
+	}
+	graph, err := h.service.GetDebateGraph(debateID, c.Query("view"))
+	if err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.OK(c, http.StatusOK, graph)
+}
+
+// createDebateRelation godoc
+// @Summary Connect a concluded debate to another debate
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param body body CreateRelationRequest true "Debate relation"
+// @Success 201 {object} handlers.DebateRelationResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 409 {object} handlers.ErrorResponse
+// @Router /api/v1/debate-relations [post]
+func (h *Handler) createDebateRelation(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var req CreateRelationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	relation, err := h.service.CreateRelation(user, req)
+	if err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.OK(c, http.StatusCreated, relation)
+}
+
+// deleteDebateRelation godoc
+// @Summary Delete a debate relation
+// @Tags Debate
+// @Produce json
+// @Security BearerAuth
+// @Param relationID path string true "Relation ID"
+// @Success 200 {object} handlers.MessageResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/debate-relations/{relationID} [delete]
+func (h *Handler) deleteDebateRelation(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	relationID, err := uuid.Parse(c.Param("relationID"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "relationID must be a valid uuid"))
+		return
+	}
+	if err := h.service.DeleteRelation(user, relationID); err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "Relation deleted"})
 }
 
 func (h *Handler) listDebates(c *gin.Context) {
@@ -57,6 +144,7 @@ func (h *Handler) listDebates(c *gin.Context) {
 
 func (h *Handler) searchDebates(c *gin.Context) {
 	query := ListDebatesQuery{
+		Status:   c.Query("status"),
 		Search:   c.Query("q"),
 		Page:     page(c),
 		PageSize: pageSize(c),

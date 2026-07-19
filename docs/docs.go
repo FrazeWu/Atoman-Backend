@@ -5302,6 +5302,113 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/debate-relations": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Connect a concluded debate to another debate",
+                "parameters": [
+                    {
+                        "description": "Debate relation",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/debate.CreateRelationRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateRelationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debate-relations/{relationID}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Delete a debate relation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Relation ID",
+                        "name": "relationID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/debates": {
             "post": {
                 "security": [
@@ -5452,6 +5559,105 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debates/{debateID}/conclusion-vote": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Records a conclusion request. Reaching the threshold does not choose a yes/no conclusion automatically.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Request that a debate be concluded",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "debateID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateConcludeVoteResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/debates/{debateID}/relations": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Debate"
+                ],
+                "summary": "Get the debate tree or connected relation graph",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Debate ID",
+                        "name": "debateID",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "default": "tree",
+                        "description": "tree or graph",
+                        "name": "view",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.DebateGraphResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -15516,6 +15722,60 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/videos/{id}/reprocess": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "重新处理视频预览",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "视频 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/videos/{id}/view": {
             "post": {
                 "description": "为指定视频增加一次播放计数。",
@@ -16319,6 +16579,20 @@ const docTemplate = `{
                     }
                 },
                 "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "debate.CreateRelationRequest": {
+            "type": "object",
+            "properties": {
+                "source_debate_id": {
+                    "type": "string"
+                },
+                "stance": {
+                    "type": "string"
+                },
+                "target_debate_id": {
                     "type": "string"
                 }
             }
@@ -17623,6 +17897,67 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/model.DebateArgumentDTO"
+                }
+            }
+        },
+        "handlers.DebateConcludeVoteData": {
+            "type": "object",
+            "properties": {
+                "auto_concluded": {
+                    "type": "boolean",
+                    "example": false
+                },
+                "conclude_threshold": {
+                    "type": "integer",
+                    "example": 10
+                },
+                "conclude_vote_count": {
+                    "type": "integer",
+                    "example": 3
+                }
+            }
+        },
+        "handlers.DebateConcludeVoteResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/handlers.DebateConcludeVoteData"
+                }
+            }
+        },
+        "handlers.DebateGraphData": {
+            "type": "object",
+            "properties": {
+                "nodes": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Debate"
+                    }
+                },
+                "relations": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.DebateRelation"
+                    }
+                },
+                "root_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.DebateGraphResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/handlers.DebateGraphData"
+                }
+            }
+        },
+        "handlers.DebateRelationResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/model.DebateRelation"
                 }
             }
         },
@@ -19897,6 +20232,41 @@ const docTemplate = `{
                 }
             }
         },
+        "model.DebateRelation": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "source_debate": {
+                    "$ref": "#/definitions/model.Debate"
+                },
+                "source_debate_id": {
+                    "type": "string"
+                },
+                "stance": {
+                    "type": "string"
+                },
+                "target_debate": {
+                    "$ref": "#/definitions/model.Debate"
+                },
+                "target_debate_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "model.EditConflict": {
             "type": "object",
             "properties": {
@@ -20915,6 +21285,12 @@ const docTemplate = `{
         "model.Subscription": {
             "type": "object",
             "properties": {
+                "auto_add_reading_list": {
+                    "type": "boolean"
+                },
+                "auto_mark_read": {
+                    "type": "boolean"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -20933,6 +21309,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "is_muted": {
+                    "type": "boolean"
                 },
                 "last_checked": {
                     "type": "string"
@@ -22490,6 +22869,13 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "metrics": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
                 },
                 "module": {
                     "$ref": "#/definitions/studio.Module"

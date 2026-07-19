@@ -48,3 +48,24 @@ func TestArgumentVoteRejectsHiddenAndConcludedArguments(t *testing.T) {
 	_, err = NewService(db).SetArgumentVote(authctx.CurrentUser{ID: user.UUID, Role: user.Role}, entry.ID, 1)
 	require.Error(t, err)
 }
+
+func TestConclusionVoteThresholdDoesNotInventAConclusionDirection(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Debate{}, &model.DebateConcludeVote{})
+	user := model.User{Username: "conclusion-voter", Email: "conclusion@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	require.NoError(t, db.Create(&user).Error)
+	debate := model.Debate{
+		UserID: user.UUID, Title: "是否形成结论？", Status: "open", ConcludeThreshold: 1,
+	}
+	require.NoError(t, db.Create(&debate).Error)
+
+	state, err := NewService(db).SetConclusionVote(authctx.CurrentUser{ID: user.UUID, Role: user.Role}, debate.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, state.ConcludeVoteCount)
+	require.False(t, state.AutoConcluded)
+
+	var stored model.Debate
+	require.NoError(t, db.First(&stored, "id = ?", debate.ID).Error)
+	require.Equal(t, "open", stored.Status)
+	require.Empty(t, stored.ConclusionType)
+}

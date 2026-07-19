@@ -31,6 +31,25 @@ type Debate struct {
 
 func (Debate) TableName() string { return "debates" }
 
+const (
+	DebateRelationSupport = "support"
+	DebateRelationOppose  = "oppose"
+)
+
+// DebateRelation connects a concluded debate node to the debate it supports or opposes.
+type DebateRelation struct {
+	Base
+	SourceDebateID uuid.UUID `json:"source_debate_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_relation_pair,priority:1"`
+	SourceDebate   *Debate   `json:"source_debate,omitempty" gorm:"foreignKey:SourceDebateID"`
+	TargetDebateID uuid.UUID `json:"target_debate_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_relation_pair,priority:2"`
+	TargetDebate   *Debate   `json:"target_debate,omitempty" gorm:"foreignKey:TargetDebateID"`
+	Stance         string    `json:"stance" gorm:"type:varchar(16);not null"`
+	UserID         uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
+	User           *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+}
+
+func (DebateRelation) TableName() string { return "debate_relations" }
+
 // ArgumentType represents the type of argument
 type ArgumentType string
 

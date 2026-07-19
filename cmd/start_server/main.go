@@ -75,6 +75,7 @@ func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 		&model.DebateArgumentDetail{},
 		&model.DebateArgumentReference{},
 		&model.DebateArgumentDebateRef{},
+		&model.DebateRelation{},
 	)
 	if err := db.AutoMigrate(models...); err != nil {
 		return fmt.Errorf("auto migrate startup models: %w", err)

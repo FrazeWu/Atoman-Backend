@@ -2,7 +2,6 @@ package debate_voting
 
 import (
 	"errors"
-	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -195,18 +194,6 @@ func (s *Service) SetConclusionVote(user authctx.CurrentUser, debateID uuid.UUID
 		if err := tx.First(&debate, "id = ?", debateID).Error; err != nil {
 			return err
 		}
-		if debate.ConcludeVoteCount >= debate.ConcludeThreshold {
-			now := time.Now()
-			if err := tx.Model(&model.Debate{}).Where("id = ?", debateID).Updates(map[string]any{
-				"status":          "concluded",
-				"concluded_at":    now,
-				"conclusion_type": "inconclusive",
-			}).Error; err != nil {
-				return err
-			}
-			debate.Status = "concluded"
-		}
-
 		state = ConclusionVoteState{
 			ConcludeVoteCount: debate.ConcludeVoteCount,
 			ConcludeThreshold: debate.ConcludeThreshold,

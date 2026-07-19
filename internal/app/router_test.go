@@ -941,6 +941,34 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 	}
 }
 
+func TestRegisterV1RoutesDebateCreateAcceptsBearerAuth(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Debate{}, &model.DebateVote{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.DebateArgumentDetail{},
+	)
+	user := model.User{Username: "debate-bearer", Email: "debate-bearer@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+
+	router := gin.New()
+	RegisterV1Routes(router, db, nil, nil, collab.NewUserHub(), collab.NewHub())
+	body := bytes.NewBufferString(`{"title":"Bearer debate","description":"Body"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/debates", body)
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected bearer-authenticated debate creation to return 201, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestRegisterV1RoutesDoesNotMountLegacyInteractionRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()

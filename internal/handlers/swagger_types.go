@@ -4,6 +4,8 @@ import (
 	"atoman/internal/model"
 	feedmodule "atoman/internal/modules/feed"
 	"atoman/internal/service"
+
+	"github.com/google/uuid"
 )
 
 type ErrorResponse struct {
@@ -849,10 +851,14 @@ type DebateConcludeInput struct {
 	ConclusionSummary string `json:"conclusion_summary" example:"主要证据已形成共识。"`
 }
 
-type DebateConcludeVoteResponse struct {
+type DebateConcludeVoteData struct {
 	ConcludeVoteCount int  `json:"conclude_vote_count" example:"3"`
 	ConcludeThreshold int  `json:"conclude_threshold" example:"10"`
 	AutoConcluded     bool `json:"auto_concluded" example:"false"`
+}
+
+type DebateConcludeVoteResponse struct {
+	Data DebateConcludeVoteData `json:"data"`
 }
 
 type DebateArgumentResponse struct {
@@ -862,6 +868,20 @@ type DebateArgumentResponse struct {
 type DebateArgumentListResponse struct {
 	Data      []model.DebateArgumentDTO `json:"data"`
 	UserVotes map[string]int            `json:"user_votes"`
+}
+
+type DebateRelationResponse struct {
+	Data model.DebateRelation `json:"data"`
+}
+
+type DebateGraphData struct {
+	RootID    uuid.UUID              `json:"root_id"`
+	Nodes     []model.Debate         `json:"nodes"`
+	Relations []model.DebateRelation `json:"relations"`
+}
+
+type DebateGraphResponse struct {
+	Data DebateGraphData `json:"data"`
 }
 
 type DebateVoteListResponse struct {
