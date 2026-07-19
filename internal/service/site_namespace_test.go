@@ -66,6 +66,9 @@ func TestSiteNamespaceUserChannelConflictChecks(t *testing.T) {
 	if err := ns.ValidateUsernameAvailable(context.Background(), "design"); err != service.ErrSiteHandleTaken {
 		t.Fatalf("expected taken username error, got %v", err)
 	}
+	if err := ns.ValidateUsernameAvailable(context.Background(), "Alice"); err != service.ErrSiteHandleTaken {
+		t.Fatalf("expected existing username error, got %v", err)
+	}
 	if err := ns.ValidateChannelSlugAvailable(context.Background(), "music", nil); err != service.ErrSiteHandleReserved {
 		t.Fatalf("expected reserved channel slug error, got %v", err)
 	}

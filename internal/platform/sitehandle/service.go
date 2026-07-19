@@ -101,11 +101,18 @@ func (s *Service) ValidateUsernameAvailable(ctx context.Context, username string
 	if _, ok := reservedHandles[handle]; ok {
 		return ErrReserved
 	}
-	var count int64
-	if err := s.db.WithContext(ctx).Model(&model.Channel{}).Where("LOWER(slug) = ?", handle).Count(&count).Error; err != nil {
+	var userCount int64
+	if err := s.db.WithContext(ctx).Model(&model.User{}).Where("LOWER(username) = ?", handle).Count(&userCount).Error; err != nil {
 		return err
 	}
-	if count > 0 {
+	if userCount > 0 {
+		return ErrTaken
+	}
+	var channelCount int64
+	if err := s.db.WithContext(ctx).Model(&model.Channel{}).Where("LOWER(slug) = ?", handle).Count(&channelCount).Error; err != nil {
+		return err
+	}
+	if channelCount > 0 {
 		return ErrTaken
 	}
 	return nil
