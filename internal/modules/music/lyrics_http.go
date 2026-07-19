@@ -30,7 +30,11 @@ type CreateLyricAnnotationRequest struct {
 }
 
 type UpdateLyricAnnotationRequest struct {
-	Body string `json:"body"`
+	Body         *string `json:"body"`
+	LineKey      *string `json:"line_key"`
+	SelectedText *string `json:"selected_text"`
+	StartOffset  *int    `json:"start_offset"`
+	EndOffset    *int    `json:"end_offset"`
 }
 
 type LyricAnnotationVoteRequest struct {
@@ -242,7 +246,7 @@ func (h *Handler) createLyricAnnotation(c *gin.Context) {
 // @Produce json
 // @Param songId path string true "歌曲 UUID"
 // @Param annotationId path string true "注释 UUID"
-// @Param input body UpdateLyricAnnotationRequest true "注释正文"
+// @Param input body UpdateLyricAnnotationRequest true "注释正文或完整重绑锚点"
 // @Success 200 {object} MusicLyricAnnotationResponse
 // @Failure 400 {object} MusicLyricsErrorResponse
 // @Failure 401 {object} MusicLyricsErrorResponse
@@ -262,7 +266,7 @@ func (h *Handler) updateLyricAnnotation(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	annotation, err := h.service.UpdateLyricAnnotation(user, songID, annotationID, req.Body)
+	annotation, err := h.service.UpdateLyricAnnotation(user, songID, annotationID, UpdateLyricAnnotationInput(req))
 	if err != nil {
 		httpx.Error(c, err)
 		return

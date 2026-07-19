@@ -44,6 +44,14 @@ type CreateAnnotationInput struct {
 	Body         string    `json:"body"`
 }
 
+type UpdateLyricAnnotationInput struct {
+	Body         *string
+	LineKey      *string
+	SelectedText *string
+	StartOffset  *int
+	EndOffset    *int
+}
+
 type MusicLyricLineDTO struct {
 	ID          uuid.UUID `json:"id"`
 	LineKey     string    `json:"line_key"`
@@ -471,13 +479,23 @@ func findCurrentLyricLine(db *gorm.DB, songID, lineID uuid.UUID, lineKey string)
 	return line, nil
 }
 
-func (s *Service) UpdateLyricAnnotation(user authctx.CurrentUser, songID, annotationID uuid.UUID, body string) (MusicLyricAnnotationDTO, error) {
+func (s *Service) UpdateLyricAnnotation(user authctx.CurrentUser, songID, annotationID uuid.UUID, input UpdateLyricAnnotationInput) (MusicLyricAnnotationDTO, error) {
 	if user.ID == uuid.Nil {
 		return MusicLyricAnnotationDTO{}, apperr.Unauthorized("Login required")
 	}
-	body = strings.TrimSpace(body)
-	if body == "" {
-		return MusicLyricAnnotationDTO{}, lyricValidationError("annotation body is required")
+	hasAnchor := input.LineKey != nil || input.SelectedText != nil || input.StartOffset != nil || input.EndOffset != nil
+	if hasAnchor && (input.LineKey == nil || input.SelectedText == nil || input.StartOffset == nil || input.EndOffset == nil) {
+		return MusicLyricAnnotationDTO{}, lyricValidationError("line_key, selected_text, start_offset, and end_offset are required together")
+	}
+	if input.Body == nil && !hasAnchor {
+		return MusicLyricAnnotationDTO{}, lyricValidationError("annotation update is required")
+	}
+	var body string
+	if input.Body != nil {
+		body = strings.TrimSpace(*input.Body)
+		if body == "" {
+			return MusicLyricAnnotationDTO{}, lyricValidationError("annotation body is required")
+		}
 	}
 	unlock := s.serializeLyricsSaveForSQLite()
 	defer unlock()
@@ -489,8 +507,26 @@ func (s *Service) UpdateLyricAnnotation(user authctx.CurrentUser, songID, annota
 		if err != nil {
 			return err
 		}
+		updates := map[string]any{}
+		if input.Body != nil {
+			updates["body"] = body
+		}
+		if hasAnchor {
+			line, err := findCurrentLyricLine(tx, songID, uuid.Nil, *input.LineKey)
+			if err != nil {
+				return err
+			}
+			if err := ValidateAnnotationAnchor(line.Text, *input.StartOffset, *input.EndOffset, *input.SelectedText); err != nil {
+				return err
+			}
+			updates["line_id"] = line.ID
+			updates["selected_text"] = *input.SelectedText
+			updates["start_offset"] = *input.StartOffset
+			updates["end_offset"] = *input.EndOffset
+			updates["status"] = "active"
+		}
 		result := tx.Model(&model.MusicLyricAnnotation{}).
-			Where("id = ? AND status <> ?", annotation.ID, "deleted").Update("body", body)
+			Where("id = ? AND status <> ?", annotation.ID, "deleted").Updates(updates)
 		if result.Error != nil {
 			return result.Error
 		}

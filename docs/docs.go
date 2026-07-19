@@ -10765,7 +10765,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "注释正文",
+                        "description": "注释正文或完整重绑锚点",
                         "name": "input",
                         "in": "body",
                         "required": true,
@@ -22307,6 +22307,18 @@ const docTemplate = `{
             "properties": {
                 "body": {
                     "type": "string"
+                },
+                "end_offset": {
+                    "type": "integer"
+                },
+                "line_key": {
+                    "type": "string"
+                },
+                "selected_text": {
+                    "type": "string"
+                },
+                "start_offset": {
+                    "type": "integer"
                 }
             }
         },
