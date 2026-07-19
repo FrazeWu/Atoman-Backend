@@ -46,7 +46,7 @@ func openLyricsPostgresTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("open isolated PostgreSQL schema: %v", err)
 	}
 	if err := db.AutoMigrate(
-		&model.User{}, &model.Song{}, &model.MusicSongLyric{}, &model.MusicSongLyricLine{},
+		&model.User{}, &model.Album{}, &model.Song{}, &model.MusicSongLyric{}, &model.MusicSongLyricLine{},
 		&model.MusicSongLyricVersion{}, &model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
 		&model.Notification{},
 	); err != nil {
@@ -115,6 +115,41 @@ func createLyricsPostgresFixture(t *testing.T, db *gorm.DB) (authctx.CurrentUser
 		t.Fatal(err)
 	}
 	return authctx.CurrentUser{ID: userModel.UUID, Username: userModel.Username, Role: authctx.RoleUser}, song
+}
+
+func TestPostgresListPendingLyricAnnotationsUsesQuotedSongsTable(t *testing.T) {
+	db := openLyricsPostgresTestDB(t)
+	user, song := createLyricsPostgresFixture(t, db)
+	album := model.Album{Title: "PostgreSQL Pending Album " + uuid.NewString(), EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&song).Update("album_id", album.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	svc := NewService(db)
+	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation, err := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+		LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "pending",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", annotation.ID).Update("status", "needs_rebind").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := svc.ListPendingLyricAnnotations(user)
+	if err != nil {
+		t.Fatalf("list pending lyric annotations: %v", err)
+	}
+	if len(items) != 1 || items[0].AnnotationID != annotation.ID.String() || items[0].SongID != song.ID.String() || items[0].AlbumID != album.ID.String() {
+		t.Fatalf("unexpected pending lyric annotations: %#v", items)
+	}
 }
 
 func TestPostgresConcurrentSaveSongLyricsAcrossServices(t *testing.T) {
