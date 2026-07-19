@@ -54,8 +54,16 @@ func (s *Service) CreateDebate(user authctx.CurrentUser, req CreateDebateRequest
 	if err != nil {
 		return DebateDTO{}, err
 	}
+	sourceIDs, err := debateReferenceIDs(snapshot.Content)
+	if err != nil {
+		return DebateDTO{}, err
+	}
 	var debateID uuid.UUID
 	err = s.db.Transaction(func(tx *gorm.DB) error {
+		lockedDebates, err := lockDebatesInOrder(tx, sourceIDs)
+		if err != nil {
+			return err
+		}
 		debate := model.Debate{
 			UserID: user.ID, Title: snapshot.Title, Description: snapshot.Description,
 			Content: snapshot.Content, Tags: pq.StringArray(snapshot.Tags), Status: model.DebateStatusActive,
@@ -67,7 +75,9 @@ func (s *Service) CreateDebate(user authctx.CurrentUser, req CreateDebateRequest
 		if err != nil {
 			return err
 		}
-		if _, err := s.projectReferences(tx, user, debate, revision, uuid.Nil); err != nil {
+		// The new target row is owned by this transaction; source rows were locked first.
+		lockedDebates[debate.ID] = debate
+		if _, err := s.projectReferences(tx, user, debate, revision, uuid.Nil, lockedDebates); err != nil {
 			return err
 		}
 		if err := tx.Model(&debate).Update("current_revision_id", revision.ID).Error; err != nil {
@@ -114,10 +124,14 @@ func (s *Service) SetProtection(user authctx.CurrentUser, debateID uuid.UUID, re
 	if req.ProtectionLevel != "none" && req.ProtectionLevel != "semi" && req.ProtectionLevel != "full" {
 		return apperr.BadRequest("validation.invalid_request", "invalid protection_level")
 	}
-	if _, err := s.GetDebate(debateID); err != nil {
-		return err
-	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		locked, err := lockDebatesInOrder(tx, []uuid.UUID{debateID})
+		if err != nil {
+			return err
+		}
+		if _, ok := locked[debateID]; !ok {
+			return apperr.NotFound("debate.not_found", "Debate not found")
+		}
 		if err := tx.Unscoped().Where("content_type = ? AND content_id = ?", debateContentType, debateID).Delete(&model.ContentProtection{}).Error; err != nil {
 			return err
 		}
@@ -135,7 +149,16 @@ func (s *Service) DeleteProtection(user authctx.CurrentUser, debateID uuid.UUID)
 	if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
 		return apperr.Forbidden("debate.admin_required", "Administrator access required")
 	}
-	return s.db.Where("content_type = ? AND content_id = ?", debateContentType, debateID).Delete(&model.ContentProtection{}).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		locked, err := lockDebatesInOrder(tx, []uuid.UUID{debateID})
+		if err != nil {
+			return err
+		}
+		if _, ok := locked[debateID]; !ok {
+			return apperr.NotFound("debate.not_found", "Debate not found")
+		}
+		return tx.Where("content_type = ? AND content_id = ?", debateContentType, debateID).Delete(&model.ContentProtection{}).Error
+	})
 }
 
 func (s *Service) requireActiveUser(user authctx.CurrentUser) error {

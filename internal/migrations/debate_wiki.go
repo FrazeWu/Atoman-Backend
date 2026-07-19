@@ -57,7 +57,7 @@ func RunDebateWikiMigration(db *gorm.DB) error {
 
 func hasLegacyDebateSchema(db *gorm.DB) bool {
 	return db.Migrator().HasColumn("debate_votes", "argument_id") ||
-		db.Migrator().HasColumn("debate_relations", "user_id") ||
+		hasLegacyDebateRelationSchema(db) ||
 		db.Migrator().HasTable("debate_argument_details")
 }
 
@@ -113,7 +113,7 @@ func cleanLegacyDebateData(db *gorm.DB) error {
 			}
 		}
 	}
-	if db.Migrator().HasTable("debate_relations") {
+	if hasLegacyDebateRelationSchema(db) {
 		if err := db.Migrator().DropTable("debate_relations"); err != nil {
 			return err
 		}
@@ -124,6 +124,12 @@ func cleanLegacyDebateData(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+func hasLegacyDebateRelationSchema(db *gorm.DB) bool {
+	return db.Migrator().HasTable("debate_relations") &&
+		(db.Migrator().HasColumn("debate_relations", "user_id") ||
+			!db.Migrator().HasColumn("debate_relations", "target_revision_id"))
 }
 
 func recountDebateDiscussionTargets(db *gorm.DB, targetIDs, removedCommentIDs []uuid.UUID) error {

@@ -1,6 +1,7 @@
 package debate
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -121,6 +122,69 @@ func TestWikiProtectionAndArchiveRules(t *testing.T) {
 	requireAppError(t, err, "debate.admin_required", 403)
 }
 
+func TestSaveWikiLocksDebatesInStableOrder(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	low := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	middle := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	high := uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	seedDebateWithID(t, ctx, low, "Low")
+	seedDebateWithID(t, ctx, middle, "Middle")
+	target := seedDebateWithID(t, ctx, high, "Target")
+	setConclusionForTest(t, ctx.db, low, model.DebateVoteYes)
+	setConclusionForTest(t, ctx.db, middle, model.DebateVoteYes)
+	locked := captureLockedDebateIDs(t, ctx.db)
+
+	_, err := ctx.service.SaveWiki(ctx.editor, high, SaveWikiRequest{
+		Title: "Target", Content: "@debate:" + middle.String() + ":support @debate:" + low.String() + ":support",
+		EditSummary: "ordered locks", BaseRevisionID: *target.CurrentRevisionID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{low, middle, high}, *locked)
+}
+
+func TestReconfirmLocksDebatesBeforeRelationInStableOrder(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	sourceID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	targetID := uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	seedDebateWithID(t, ctx, sourceID, "Source")
+	target := seedDebateWithID(t, ctx, targetID, "Target")
+	setConclusionForTest(t, ctx.db, sourceID, model.DebateVoteYes)
+	relation := insertRelationForTest(t, ctx.db, sourceID, targetID, model.DebateRelationSupport, *target.CurrentRevisionID)
+	require.NoError(t, ctx.db.Model(&relation).Update("status", model.DebateRelationStale).Error)
+	locked := captureLockedDebateIDs(t, ctx.db)
+
+	_, err := ctx.service.ReconfirmReference(ctx.editor, targetID, relation.ID, ReconfirmReferenceRequest{
+		BaseRevisionID: *target.CurrentRevisionID, EditSummary: "reconfirm",
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{sourceID, targetID}, *locked)
+}
+
+func TestProtectionMutationsLockDebate(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	created := createDebateForTest(t, ctx, "Protected", "body")
+
+	locked := captureLockedDebateIDs(t, ctx.db)
+	require.NoError(t, ctx.service.SetProtection(ctx.admin, created.ID, ProtectionRequest{ProtectionLevel: "full"}))
+	require.Equal(t, []uuid.UUID{created.ID}, *locked)
+
+	locked = captureLockedDebateIDs(t, ctx.db)
+	require.NoError(t, ctx.service.DeleteProtection(ctx.admin, created.ID))
+	require.Equal(t, []uuid.UUID{created.ID}, *locked)
+}
+
+func TestRevertAndReconfirmRejectMissingBaseRevision(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	created := createDebateForTest(t, ctx, "Topic", "body")
+	revision, err := ctx.service.GetRevision(created.ID, *created.CurrentRevisionID)
+	require.NoError(t, err)
+
+	_, err = ctx.service.RevertRevision(ctx.editor, created.ID, revision.ID, RevertRevisionRequest{EditSummary: "revert"})
+	requireAppError(t, err, "validation.invalid_request", 400)
+	_, err = ctx.service.ReconfirmReference(ctx.editor, created.ID, uuid.New(), ReconfirmReferenceRequest{EditSummary: "reconfirm"})
+	requireAppError(t, err, "validation.invalid_request", 400)
+}
+
 func TestArchiveMakesActiveOutboundRelationsUnavailable(t *testing.T) {
 	ctx := newDebateTestContext(t)
 	source := createDebateForTest(t, ctx, "Source", "source")
@@ -194,6 +258,51 @@ func TestDebateReferencesProjectRelationsRejectConflictAndCycle(t *testing.T) {
 	require.NotEmpty(t, appErr.Details["path"])
 }
 
+func TestSaveWikiRollsBackRevisionDebateAndRelationsWhenReferenceSnapshotFails(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	oldSource := createDebateForTest(t, ctx, "Old source", "old")
+	newSource := createDebateForTest(t, ctx, "New source", "new")
+	setConclusionForTest(t, ctx.db, oldSource.ID, model.DebateVoteYes)
+	setConclusionForTest(t, ctx.db, newSource.ID, model.DebateVoteNo)
+	target := createDebateForTest(t, ctx, "Target", "body")
+	oldRaw := "@debate:" + oldSource.ID.String() + ":support"
+	before, err := ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Before", Content: oldRaw, EditSummary: "old ref", BaseRevisionID: *target.CurrentRevisionID})
+	require.NoError(t, err)
+	require.Len(t, before.References, 1)
+
+	injected := errors.New("injected reference snapshot failure")
+	callback := "test:fail-debate-reference-create"
+	require.NoError(t, ctx.db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "debate_revision_references" {
+			tx.AddError(injected)
+		}
+	}))
+	t.Cleanup(func() { _ = ctx.db.Callback().Create().Remove(callback) })
+	newRaw := "@debate:" + newSource.ID.String() + ":oppose"
+	_, err = ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "After", Content: newRaw, EditSummary: "new ref", BaseRevisionID: *before.CurrentRevisionID})
+	require.ErrorIs(t, err, injected)
+	require.NoError(t, ctx.db.Callback().Create().Remove(callback))
+
+	var stored model.Debate
+	require.NoError(t, ctx.db.First(&stored, "id = ?", target.ID).Error)
+	require.Equal(t, "Before", stored.Title)
+	require.Equal(t, oldRaw, stored.Content)
+	require.Equal(t, before.CurrentRevisionID, stored.CurrentRevisionID)
+	var revisions []model.Revision
+	require.NoError(t, ctx.db.Where("content_type = ? AND content_id = ?", debateContentType, target.ID).Order("version_number").Find(&revisions).Error)
+	require.Len(t, revisions, 2)
+	require.True(t, revisions[1].IsCurrent)
+	var refs []model.DebateRevisionReference
+	require.NoError(t, ctx.db.Find(&refs).Error)
+	require.Len(t, refs, 1)
+	require.Equal(t, oldSource.ID, refs[0].ResourceID)
+	var relations []model.DebateRelation
+	require.NoError(t, ctx.db.Where("target_debate_id = ?", target.ID).Find(&relations).Error)
+	require.Len(t, relations, 1)
+	require.Equal(t, oldSource.ID, relations[0].SourceDebateID)
+	require.Equal(t, *before.CurrentRevisionID, relations[0].TargetRevisionID)
+}
+
 func TestStaleReferencesCanBeInheritedAndReconfirmed(t *testing.T) {
 	ctx := newDebateTestContext(t)
 	source := createDebateForTest(t, ctx, "Source", "source")
@@ -243,6 +352,42 @@ func TestOrdinaryResourceReferenceUsesPublicVisibility(t *testing.T) {
 	requireAppError(t, err, "debate.reference_unavailable", 400)
 	_, err = ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Target", Content: "@post:" + draft.ID.String(), EditSummary: "draft", BaseRevisionID: *publicSaved.CurrentRevisionID})
 	requireAppError(t, err, "debate.reference_unavailable", 400)
+}
+
+func TestOrdinaryReferenceAvailabilityIsResolvedWhenReadingDTOs(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	post := model.Post{UserID: ctx.owner.ID, Title: "Snapshot post", Content: "body", Status: "published", Visibility: "public"}
+	require.NoError(t, ctx.db.Create(&post).Error)
+	playlist := model.Playlist{UserID: ctx.owner.ID, Name: "Snapshot playlist", IsPublic: true}
+	require.NoError(t, ctx.db.Create(&playlist).Error)
+	created := createDebateForTest(t, ctx, "Target", "body")
+	saved, err := ctx.service.SaveWiki(ctx.editor, created.ID, SaveWikiRequest{
+		Title: "Target", Content: "@post:" + post.ID.String() + " @playlist:" + playlist.ID.String(),
+		EditSummary: "add resources", BaseRevisionID: *created.CurrentRevisionID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{model.DebateRelationActive, model.DebateRelationActive}, []string{saved.References[0].State, saved.References[1].State})
+
+	require.NoError(t, ctx.db.Model(&post).Update("visibility", "private").Error)
+	require.NoError(t, ctx.db.Delete(&playlist).Error)
+	assertUnavailableSnapshots := func(t *testing.T, refs []DebateReferenceDTO) {
+		t.Helper()
+		require.Len(t, refs, 2)
+		require.Equal(t, []string{"Snapshot post", "Snapshot playlist"}, []string{refs[0].Title, refs[1].Title})
+		require.Equal(t, []string{model.DebateRelationUnavailable, model.DebateRelationUnavailable}, []string{refs[0].State, refs[1].State})
+	}
+	detail, err := ctx.service.GetDebate(created.ID)
+	require.NoError(t, err)
+	assertUnavailableSnapshots(t, detail.References)
+	revision, err := ctx.service.GetRevision(created.ID, *saved.CurrentRevisionID)
+	require.NoError(t, err)
+	assertUnavailableSnapshots(t, revision.References)
+
+	require.NoError(t, ctx.db.Model(&post).Update("visibility", "public").Error)
+	detail, err = ctx.service.GetDebate(created.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.DebateRelationActive, detail.References[0].State)
+	require.Equal(t, model.DebateRelationUnavailable, detail.References[1].State)
 }
 
 func TestPodcastEpisodeRequiresEpisodeReferenceKind(t *testing.T) {
@@ -338,4 +483,33 @@ func requireAppError(t *testing.T, err error, code string, status int) {
 	require.True(t, errors.As(err, &appErr))
 	require.Equal(t, code, appErr.Code)
 	require.Equal(t, status, appErr.HTTPStatus)
+}
+
+func seedDebateWithID(t *testing.T, ctx debateTestContext, id uuid.UUID, title string) DebateDTO {
+	t.Helper()
+	debate := model.Debate{Base: model.Base{ID: id}, UserID: ctx.owner.ID, Title: title, Content: title, Status: model.DebateStatusActive}
+	require.NoError(t, ctx.db.Create(&debate).Error)
+	snapshot, err := json.Marshal(DebateSnapshot{Title: title, Content: title, Tags: []string{}})
+	require.NoError(t, err)
+	revision := model.Revision{ContentType: debateContentType, ContentID: debate.ID, VersionNumber: 1, ContentSnapshot: snapshot, EditorID: ctx.owner.ID, EditSummary: "Created", EditType: "creation", Status: "approved", IsCurrent: true}
+	require.NoError(t, ctx.db.Create(&revision).Error)
+	require.NoError(t, ctx.db.Model(&debate).Update("current_revision_id", revision.ID).Error)
+	debate.CurrentRevisionID = &revision.ID
+	return DebateDTO{Debate: debate}
+}
+
+func captureLockedDebateIDs(t *testing.T, db *gorm.DB) *[]uuid.UUID {
+	t.Helper()
+	locked := []uuid.UUID{}
+	callback := "test:capture_locked_debates:" + uuid.NewString()
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Clauses["FOR"]; !ok {
+			return
+		}
+		if debate, ok := tx.Statement.Dest.(*model.Debate); ok && debate.ID != uuid.Nil {
+			locked = append(locked, debate.ID)
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callback) })
+	return &locked
 }

@@ -29,7 +29,7 @@ type relationProjection struct {
 	indices  []int
 }
 
-func (s *Service) projectReferences(tx *gorm.DB, user authctx.CurrentUser, debate model.Debate, revision model.Revision, baseRevisionID uuid.UUID) ([]model.DebateRevisionReference, error) {
+func (s *Service) projectReferences(tx *gorm.DB, user authctx.CurrentUser, debate model.Debate, revision model.Revision, baseRevisionID uuid.UUID, lockedDebates map[uuid.UUID]model.Debate) ([]model.DebateRevisionReference, error) {
 	parsed, err := resourceref.Parse(debate.Content)
 	if err != nil {
 		return nil, apperr.BadRequest("debate.reference_invalid", "Content contains an invalid resource reference")
@@ -58,7 +58,7 @@ func (s *Service) projectReferences(tx *gorm.DB, user authctx.CurrentUser, debat
 			copy := prior[occurrence-1]
 			base = &copy
 		}
-		resolvedRef, projection, err := s.resolveRevisionReference(tx, user, debate, parsedRef, occurrence, base)
+		resolvedRef, projection, err := s.resolveRevisionReference(tx, user, debate, parsedRef, occurrence, base, lockedDebates)
 		if err != nil {
 			return nil, err
 		}
@@ -155,7 +155,7 @@ func (s *Service) projectReferences(tx *gorm.DB, user authctx.CurrentUser, debat
 	return refs, nil
 }
 
-func (s *Service) resolveRevisionReference(tx *gorm.DB, user authctx.CurrentUser, debate model.Debate, parsed resourceref.Reference, occurrence int, base *model.DebateRevisionReference) (model.DebateRevisionReference, *relationProjection, error) {
+func (s *Service) resolveRevisionReference(tx *gorm.DB, user authctx.CurrentUser, debate model.Debate, parsed resourceref.Reference, occurrence int, base *model.DebateRevisionReference, lockedDebates map[uuid.UUID]model.Debate) (model.DebateRevisionReference, *relationProjection, error) {
 	result := model.DebateRevisionReference{
 		Raw: parsed.Raw, Kind: parsed.Kind, ResourceID: parsed.ResourceID,
 		Qualifier: parsed.Qualifier, Occurrence: occurrence, State: model.DebateRelationActive,
@@ -179,9 +179,8 @@ func (s *Service) resolveRevisionReference(tx *gorm.DB, user authctx.CurrentUser
 		if parsed.ResourceID == debate.ID {
 			return model.DebateRevisionReference{}, nil, apperr.BadRequest("debate.reference_self", "A debate cannot reference itself")
 		}
-		var source model.Debate
-		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&source, "id = ?", parsed.ResourceID).Error
-		valid := err == nil && source.Status == model.DebateStatusActive && source.CurrentConclusionEventID != nil
+		source, found := lockedDebates[parsed.ResourceID]
+		valid := found && source.Status == model.DebateStatusActive && source.CurrentConclusionEventID != nil
 		if !valid {
 			if base == nil {
 				return model.DebateRevisionReference{}, nil, apperr.BadRequest("debate.reference_unavailable", "Referenced debate is unavailable")
@@ -214,16 +213,25 @@ func (s *Service) attachCurrentReferences(debate model.Debate) (DebateDTO, error
 	if err != nil {
 		return DebateDTO{}, err
 	}
-	result.References = referenceDTOs(refs)
+	result.References = s.referenceDTOs(refs)
 	return result, nil
 }
 
-func referenceDTOs(refs []model.DebateRevisionReference) []DebateReferenceDTO {
+func (s *Service) referenceDTOs(refs []model.DebateRevisionReference) []DebateReferenceDTO {
 	result := make([]DebateReferenceDTO, 0, len(refs))
 	for _, ref := range refs {
+		state := ref.State
+		if ref.RelationID == nil {
+			resolved, err := s.resources.Resolve(context.Background(), resourceref.Viewer{}, ref.Kind, ref.ResourceID)
+			if err != nil || !resolved.Visible || !resolved.Referenceable {
+				state = model.DebateRelationUnavailable
+			} else {
+				state = model.DebateRelationActive
+			}
+		}
 		result = append(result, DebateReferenceDTO{
 			Raw: ref.Raw, Kind: ref.Kind, ResourceID: ref.ResourceID, Title: ref.Title,
-			Qualifier: ref.Qualifier, State: ref.State, RelationID: ref.RelationID,
+			Qualifier: ref.Qualifier, State: state, RelationID: ref.RelationID,
 		})
 	}
 	return result
@@ -296,23 +304,37 @@ func (s *Service) ReconfirmReference(user authctx.CurrentUser, debateID, relatio
 	if strings.TrimSpace(req.EditSummary) == "" {
 		return DebateDTO{}, apperr.BadRequest("validation.invalid_request", "edit_summary is required")
 	}
+	if req.BaseRevisionID == uuid.Nil {
+		return DebateDTO{}, apperr.BadRequest("validation.invalid_request", "base_revision is required")
+	}
+	var identity model.DebateRelation
+	if err := s.db.Select("id", "source_debate_id", "target_debate_id").First(&identity, "id = ?", relationID).Error; err != nil {
+		return DebateDTO{}, apperr.NotFound("debate.relation_not_found", "Reference relation not found")
+	}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		debate, current, err := lockWikiForEdit(tx, debateID, req.BaseRevisionID)
+		lockedDebates, err := lockDebatesInOrder(tx, []uuid.UUID{identity.SourceDebateID, identity.TargetDebateID})
+		if err != nil {
+			return err
+		}
+		var relation model.DebateRelation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&relation, "id = ?", relationID).Error; err != nil {
+			return apperr.NotFound("debate.relation_not_found", "Reference relation not found")
+		}
+		if relation.SourceDebateID != identity.SourceDebateID || relation.TargetDebateID != identity.TargetDebateID || relation.TargetDebateID != debateID {
+			return apperr.NotFound("debate.relation_not_found", "Reference relation not found")
+		}
+		if relation.Status != model.DebateRelationStale {
+			return apperr.Conflict("debate.reference_not_stale", "Only stale references can be reconfirmed")
+		}
+		debate, current, err := lockWikiForEdit(tx, lockedDebates, debateID, req.BaseRevisionID)
 		if err != nil {
 			return err
 		}
 		if err := ensureWikiEditable(tx, user, debate); err != nil {
 			return err
 		}
-		var relation model.DebateRelation
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&relation, "id = ? AND target_debate_id = ?", relationID, debateID).Error; err != nil {
-			return apperr.NotFound("debate.relation_not_found", "Reference relation not found")
-		}
-		if relation.Status != model.DebateRelationStale {
-			return apperr.Conflict("debate.reference_not_stale", "Only stale references can be reconfirmed")
-		}
-		var source model.Debate
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&source, "id = ? AND status = ?", relation.SourceDebateID, model.DebateStatusActive).Error; err != nil || source.CurrentConclusionEventID == nil {
+		source, found := lockedDebates[relation.SourceDebateID]
+		if !found || source.Status != model.DebateStatusActive || source.CurrentConclusionEventID == nil {
 			return apperr.BadRequest("debate.reference_unavailable", "Referenced debate is unavailable")
 		}
 		sourceEventID := *source.CurrentConclusionEventID

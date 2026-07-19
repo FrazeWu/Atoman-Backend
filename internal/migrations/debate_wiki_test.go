@@ -48,6 +48,15 @@ type legacyDebateRelation struct {
 
 func (legacyDebateRelation) TableName() string { return "debate_relations" }
 
+type legacyDebateRelationWithoutUser struct {
+	model.Base
+	SourceDebateID uuid.UUID
+	TargetDebateID uuid.UUID
+	Stance         string
+}
+
+func (legacyDebateRelationWithoutUser) TableName() string { return "debate_relations" }
+
 type legacyDebateArgumentDetail struct {
 	CommentID    uuid.UUID `gorm:"primaryKey"`
 	ArgumentType string
@@ -212,6 +221,28 @@ func TestRunDebateWikiMigrationIsIdempotentAndKeepsNewProjectionData(t *testing.
 	require.EqualValues(t, 1, voteCount)
 	require.EqualValues(t, 1, relationCount)
 	require.EqualValues(t, 1, revisionCount)
+}
+
+func TestCleanLegacyDebateDataKeepsNewRelationProjectionWhenOtherLegacyMarkerExists(t *testing.T) {
+	db := testdb.Open(t)
+	require.NoError(t, db.AutoMigrate(&model.DebateRelation{}, &legacyDebateArgumentDetail{}))
+	relation := model.DebateRelation{
+		SourceDebateID: uuid.New(), TargetDebateID: uuid.New(), Stance: model.DebateRelationSupport,
+		TargetRevisionID: uuid.New(), SourceConclusionEventID: uuid.New(), Status: model.DebateRelationActive,
+	}
+	require.NoError(t, db.Create(&relation).Error)
+
+	require.NoError(t, cleanLegacyDebateData(db))
+	require.True(t, db.Migrator().HasTable("debate_relations"))
+	var count int64
+	require.NoError(t, db.Model(&model.DebateRelation{}).Where("id = ?", relation.ID).Count(&count).Error)
+	require.EqualValues(t, 1, count)
+}
+
+func TestLegacyDebateSchemaDetectsRelationMissingTargetRevision(t *testing.T) {
+	db := testdb.Open(t)
+	require.NoError(t, db.AutoMigrate(&legacyDebateRelationWithoutUser{}))
+	require.True(t, hasLegacyDebateSchema(db))
 }
 
 func mustCurrentRevisionID(t *testing.T, db interface{ First(any, ...any) *gorm.DB }, debateID uuid.UUID) *uuid.UUID {

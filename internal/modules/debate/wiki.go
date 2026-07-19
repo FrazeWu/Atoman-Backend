@@ -31,8 +31,17 @@ func (s *Service) SaveWiki(user authctx.CurrentUser, debateID uuid.UUID, req Sav
 	if req.BaseRevisionID == uuid.Nil {
 		return DebateDTO{}, apperr.BadRequest("validation.invalid_request", "base_revision is required")
 	}
+	lockIDs, err := debateReferenceIDs(snapshot.Content)
+	if err != nil {
+		return DebateDTO{}, err
+	}
+	lockIDs = append(lockIDs, debateID)
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		debate, current, err := lockWikiForEdit(tx, debateID, req.BaseRevisionID)
+		lockedDebates, err := lockDebatesInOrder(tx, lockIDs)
+		if err != nil {
+			return err
+		}
+		debate, current, err := lockWikiForEdit(tx, lockedDebates, debateID, req.BaseRevisionID)
 		if err != nil {
 			return err
 		}
@@ -55,7 +64,7 @@ func (s *Service) SaveWiki(user authctx.CurrentUser, debateID uuid.UUID, req Sav
 		}).Error; err != nil {
 			return err
 		}
-		_, err = s.projectReferences(tx, user, debate, revision, current.ID)
+		_, err = s.projectReferences(tx, user, debate, revision, current.ID, lockedDebates)
 		return err
 	})
 	if err != nil {
@@ -96,11 +105,11 @@ func (s *Service) GetRevision(debateID, revisionID uuid.UUID) (DebateRevisionDTO
 	if err != nil {
 		return DebateRevisionDTO{}, err
 	}
-	var refs []model.DebateRevisionReference
-	if err := s.db.Where("revision_id = ?", revision.ID).Order("created_at ASC, id ASC").Find(&refs).Error; err != nil {
+	refs, err := effectiveRevisionReferences(s.db, revision.ID)
+	if err != nil {
 		return DebateRevisionDTO{}, err
 	}
-	result.References = referenceDTOs(refs)
+	result.References = s.referenceDTOs(refs)
 	return result, nil
 }
 
@@ -125,6 +134,9 @@ func (s *Service) DiffRevisions(debateID, revisionID, againstID uuid.UUID) (Revi
 }
 
 func (s *Service) RevertRevision(user authctx.CurrentUser, debateID, revisionID uuid.UUID, req RevertRevisionRequest) (DebateDTO, error) {
+	if req.BaseRevisionID == uuid.Nil {
+		return DebateDTO{}, apperr.BadRequest("validation.invalid_request", "base_revision is required")
+	}
 	target, err := s.GetRevision(debateID, revisionID)
 	if err != nil {
 		return DebateDTO{}, err
@@ -135,8 +147,17 @@ func (s *Service) RevertRevision(user authctx.CurrentUser, debateID, revisionID 
 	if err := s.requireActiveUser(user); err != nil {
 		return DebateDTO{}, err
 	}
+	lockIDs, err := debateReferenceIDs(target.Snapshot.Content)
+	if err != nil {
+		return DebateDTO{}, err
+	}
+	lockIDs = append(lockIDs, debateID)
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		debate, current, err := lockWikiForEdit(tx, debateID, req.BaseRevisionID)
+		lockedDebates, err := lockDebatesInOrder(tx, lockIDs)
+		if err != nil {
+			return err
+		}
+		debate, current, err := lockWikiForEdit(tx, lockedDebates, debateID, req.BaseRevisionID)
 		if err != nil {
 			return err
 		}
@@ -159,7 +180,7 @@ func (s *Service) RevertRevision(user authctx.CurrentUser, debateID, revisionID 
 		}
 		debate.Title, debate.Description, debate.Content = target.Snapshot.Title, target.Snapshot.Description, target.Snapshot.Content
 		debate.Tags, debate.CurrentRevisionID = pq.StringArray(target.Snapshot.Tags), &revision.ID
-		_, err = s.projectReferences(tx, user, debate, revision, current.ID)
+		_, err = s.projectReferences(tx, user, debate, revision, current.ID, lockedDebates)
 		return err
 	})
 	if err != nil {
@@ -199,13 +220,10 @@ func fieldDiff(before, after any) RevisionFieldDiff {
 	return RevisionFieldDiff{Before: before, After: after, Changed: !reflect.DeepEqual(before, after)}
 }
 
-func lockWikiForEdit(tx *gorm.DB, debateID, baseRevisionID uuid.UUID) (model.Debate, model.Revision, error) {
-	var debate model.Debate
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&debate, "id = ?", debateID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return model.Debate{}, model.Revision{}, apperr.NotFound("debate.not_found", "Debate not found")
-		}
-		return model.Debate{}, model.Revision{}, err
+func lockWikiForEdit(tx *gorm.DB, lockedDebates map[uuid.UUID]model.Debate, debateID, baseRevisionID uuid.UUID) (model.Debate, model.Revision, error) {
+	debate, ok := lockedDebates[debateID]
+	if !ok {
+		return model.Debate{}, model.Revision{}, apperr.NotFound("debate.not_found", "Debate not found")
 	}
 	if debate.CurrentRevisionID == nil {
 		return model.Debate{}, model.Revision{}, apperr.Conflict("debate.edit_conflict", "Debate has no current revision")
