@@ -18,6 +18,7 @@ const (
 	OAuthStageStarted         = "started"
 	OAuthStageCompleteProfile = "complete_profile"
 	OAuthStageConfirmAccount  = "confirm_account"
+	OAuthStageSetPassword     = "set_password"
 )
 
 type ExternalIdentity struct {

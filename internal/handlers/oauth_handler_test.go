@@ -18,6 +18,7 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -149,6 +150,52 @@ func TestOAuthCallbackCreatesPendingCookieAndReturnsMaskedFlow(t *testing.T) {
 	}
 }
 
+func TestOAuthCallbackRedirectsOAuthOnlyUserToSetPassword(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newOAuthHandlerTestDB(t)
+	user := model.User{Username: "oauth-only", Email: "oauth-only@example.com", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&model.ExternalIdentity{
+		UserID: user.UUID, Provider: model.OAuthProviderGitHub,
+		Issuer: "https://github.com", Subject: "linked-subject",
+		Email: user.Email, EmailVerified: true,
+	}).Error; err != nil {
+		t.Fatalf("create identity: %v", err)
+	}
+	provider := &handlerOAuthProvider{
+		name: model.OAuthProviderGitHub,
+		profile: oauthprovider.Profile{
+			Issuer: "https://github.com", Subject: "linked-subject",
+			Email: user.Email, EmailVerified: true,
+		},
+	}
+	svc := service.NewOAuthService(db, oauthprovider.NewRegistry(provider))
+	router := gin.New()
+	RegisterOAuthRoutes(router.Group("/api/v1/auth"), svc, "https://app.example.com")
+
+	startResponse := httptest.NewRecorder()
+	router.ServeHTTP(startResponse, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/github/start", nil))
+	callbackURL := "/api/v1/auth/oauth/github/callback?state=" + url.QueryEscape(provider.authorizeReq.State) + "&code=code"
+	callbackRequest := httptest.NewRequest(http.MethodGet, callbackURL, nil)
+	callbackRequest.AddCookie(requireOAuthStateCookie(t, startResponse))
+	callbackResponse := httptest.NewRecorder()
+	router.ServeHTTP(callbackResponse, callbackRequest)
+	if callbackResponse.Header().Get("Location") != "https://app.example.com/auth/oauth/set-password" {
+		t.Fatalf("unexpected callback redirect: %q", callbackResponse.Header().Get("Location"))
+	}
+	pendingCookie := requireOAuthFlowCookie(t, callbackResponse)
+
+	pendingRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/pending", nil)
+	pendingRequest.AddCookie(pendingCookie)
+	pendingResponse := httptest.NewRecorder()
+	router.ServeHTTP(pendingResponse, pendingRequest)
+	if pendingResponse.Code != http.StatusOK || !strings.Contains(pendingResponse.Body.String(), `"has_password":false`) {
+		t.Fatalf("unexpected pending response: %d %s", pendingResponse.Code, pendingResponse.Body.String())
+	}
+}
+
 func TestOAuthCallbackRejectsStateFromAnotherBrowser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	provider := &handlerOAuthProvider{
@@ -211,7 +258,7 @@ func TestOAuthCompleteProfileReturnsAtomanSession(t *testing.T) {
 		t.Fatal("missing pending cookie")
 	}
 
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/complete-profile", bytes.NewBufferString(`{"username":"person"}`))
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/complete-profile", bytes.NewBufferString(`{"username":"person","password":"secret123","password_confirm":"secret123"}`))
 	request.Header.Set("Content-Type", "application/json")
 	request.AddCookie(pendingCookie)
 	response := httptest.NewRecorder()
@@ -244,6 +291,81 @@ func TestOAuthCompleteProfileReturnsAtomanSession(t *testing.T) {
 	}
 	if !authCookie || !clearedFlow {
 		t.Fatalf("expected auth cookie and cleared flow cookie: %#v", response.Result().Cookies())
+	}
+}
+
+func TestOAuthSetPasswordReturnsAtomanSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("JWT_SECRET", "test-secret")
+	db := newOAuthHandlerTestDB(t)
+	user := model.User{Username: "oauth-migration", Email: "migration@example.com", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&model.ExternalIdentity{
+		UserID: user.UUID, Provider: model.OAuthProviderMicrosoft,
+		Issuer: "https://login.microsoftonline.com/common/v2.0", Subject: "migration-subject",
+		Email: user.Email, EmailVerified: true,
+	}).Error; err != nil {
+		t.Fatalf("create identity: %v", err)
+	}
+	provider := &handlerOAuthProvider{
+		name: model.OAuthProviderMicrosoft,
+		profile: oauthprovider.Profile{
+			Issuer: "https://login.microsoftonline.com/common/v2.0", Subject: "migration-subject",
+			Email: user.Email, EmailVerified: true,
+		},
+	}
+	svc := service.NewOAuthService(db, oauthprovider.NewRegistry(provider))
+	router := gin.New()
+	RegisterOAuthRoutes(router.Group("/api/v1/auth"), svc, "https://app.example.com")
+	router.POST("/api/v1/auth/login", LoginHandler(db))
+
+	startResponse := httptest.NewRecorder()
+	router.ServeHTTP(startResponse, httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/microsoft/start?return_to=%2Fposts", nil))
+	callbackURL := "/api/v1/auth/oauth/microsoft/callback?state=" + url.QueryEscape(provider.authorizeReq.State) + "&code=code"
+	callbackRequest := httptest.NewRequest(http.MethodGet, callbackURL, nil)
+	callbackRequest.AddCookie(requireOAuthStateCookie(t, startResponse))
+	callbackResponse := httptest.NewRecorder()
+	router.ServeHTTP(callbackResponse, callbackRequest)
+	pendingCookie := requireOAuthFlowCookie(t, callbackResponse)
+
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/set-password", bytes.NewBufferString(`{"password":"secret123","password_confirm":"secret123"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.AddCookie(pendingCookie)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("set oauth password: %d %s", response.Code, response.Body.String())
+	}
+	if !strings.Contains(response.Body.String(), `"return_to":"/posts"`) {
+		t.Fatalf("unexpected completion response: %s", response.Body.String())
+	}
+	var authCookie, clearedFlow bool
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == authTokenCookieName && cookie.Value != "" {
+			authCookie = true
+		}
+		if cookie.Name == oauthFlowCookieName && cookie.MaxAge < 0 {
+			clearedFlow = true
+		}
+	}
+	if !authCookie || !clearedFlow {
+		t.Fatalf("expected auth cookie and cleared flow cookie: %#v", response.Result().Cookies())
+	}
+	var updated model.User
+	if err := db.First(&updated, "uuid = ?", user.UUID).Error; err != nil {
+		t.Fatalf("reload user: %v", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(updated.Password), []byte("secret123")); err != nil {
+		t.Fatalf("stored password is not a matching bcrypt hash: %v", err)
+	}
+	loginRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewBufferString(`{"username":"oauth-migration","password":"secret123"}`))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	loginResponse := httptest.NewRecorder()
+	router.ServeHTTP(loginResponse, loginRequest)
+	if loginResponse.Code != http.StatusOK {
+		t.Fatalf("login with local password: %d %s", loginResponse.Code, loginResponse.Body.String())
 	}
 }
 
@@ -326,5 +448,16 @@ func requireOAuthStateCookie(t *testing.T, response *httptest.ResponseRecorder) 
 		}
 	}
 	t.Fatal("missing oauth state cookie")
+	return nil
+}
+
+func requireOAuthFlowCookie(t *testing.T, response *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+	for _, cookie := range response.Result().Cookies() {
+		if cookie.Name == oauthFlowCookieName && cookie.Value != "" {
+			return cookie
+		}
+	}
+	t.Fatal("missing oauth flow cookie")
 	return nil
 }

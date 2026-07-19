@@ -2998,6 +2998,51 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/auth/oauth/pending/set-password": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "为第三方登录账号设置本地密码",
+                "parameters": [
+                    {
+                        "description": "密码",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OAuthSetPasswordRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OAuthCompletionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/auth/oauth/providers": {
             "get": {
                 "produces": [
@@ -18310,6 +18355,14 @@ const docTemplate = `{
         "handlers.OAuthCompleteProfileRequest": {
             "type": "object",
             "properties": {
+                "password": {
+                    "type": "string",
+                    "example": "secret123"
+                },
+                "password_confirm": {
+                    "type": "string",
+                    "example": "secret123"
+                },
                 "username": {
                     "type": "string",
                     "example": "fafa"
@@ -18375,6 +18428,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "f***@example.com"
                 },
+                "has_password": {
+                    "type": "boolean",
+                    "example": false
+                },
                 "provider": {
                     "type": "string",
                     "example": "google"
@@ -18398,6 +18455,19 @@ const docTemplate = `{
                         "github",
                         "microsoft"
                     ]
+                }
+            }
+        },
+        "handlers.OAuthSetPasswordRequest": {
+            "type": "object",
+            "properties": {
+                "password": {
+                    "type": "string",
+                    "example": "secret123"
+                },
+                "password_confirm": {
+                    "type": "string",
+                    "example": "secret123"
                 }
             }
         },

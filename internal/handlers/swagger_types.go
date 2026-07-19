@@ -43,13 +43,21 @@ type OAuthProvidersResponse struct {
 }
 
 type OAuthPendingResponse struct {
-	Provider string `json:"provider" example:"google"`
-	Stage    string `json:"stage" example:"complete_profile"`
-	Email    string `json:"email" example:"f***@example.com"`
+	Provider    string `json:"provider" example:"google"`
+	Stage       string `json:"stage" example:"complete_profile"`
+	Email       string `json:"email" example:"f***@example.com"`
+	HasPassword bool   `json:"has_password" example:"false"`
 }
 
 type OAuthCompleteProfileRequest struct {
-	Username string `json:"username" example:"fafa"`
+	Username        string `json:"username" example:"fafa"`
+	Password        string `json:"password" example:"secret123"`
+	PasswordConfirm string `json:"password_confirm" example:"secret123"`
+}
+
+type OAuthSetPasswordRequest struct {
+	Password        string `json:"password" example:"secret123"`
+	PasswordConfirm string `json:"password_confirm" example:"secret123"`
 }
 
 type OAuthConfirmAccountRequest struct {

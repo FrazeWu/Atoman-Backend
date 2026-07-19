@@ -1665,6 +1665,12 @@ definitions:
     type: object
   handlers.OAuthCompleteProfileRequest:
     properties:
+      password:
+        example: secret123
+        type: string
+      password_confirm:
+        example: secret123
+        type: string
       username:
         example: fafa
         type: string
@@ -1709,6 +1715,9 @@ definitions:
       email:
         example: f***@example.com
         type: string
+      has_password:
+        example: false
+        type: boolean
       provider:
         example: google
         type: string
@@ -1726,6 +1735,15 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  handlers.OAuthSetPasswordRequest:
+    properties:
+      password:
+        example: secret123
+        type: string
+      password_confirm:
+        example: secret123
+        type: string
     type: object
   handlers.OnboardingCompleteResponse:
     properties:
@@ -6830,6 +6848,35 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 验证原密码并绑定第三方身份
+      tags:
+      - auth-oauth
+  /api/v1/auth/oauth/pending/set-password:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 密码
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.OAuthSetPasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.OAuthCompletionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 为第三方登录账号设置本地密码
       tags:
       - auth-oauth
   /api/v1/auth/oauth/providers:

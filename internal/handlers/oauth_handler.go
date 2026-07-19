@@ -88,6 +88,7 @@ func RegisterOAuthRoutes(group *gin.RouterGroup, oauthService *service.OAuthServ
 	group.POST("/oauth/:provider/callback", handler.callback)
 	group.GET("/oauth/pending", handler.pending)
 	group.POST("/oauth/pending/complete-profile", handler.completeProfile)
+	group.POST("/oauth/pending/set-password", handler.setPassword)
 	group.POST("/oauth/pending/confirm-account", handler.confirmAccount)
 	group.DELETE("/oauth/pending", handler.cancelPending)
 	group.GET("/oauth/identities", middleware.StableAuthMiddleware(), handler.identities)
@@ -183,6 +184,8 @@ func (h *OAuthHandler) callback(c *gin.Context) {
 			h.redirect(c, "/auth/oauth/complete-profile")
 		case model.OAuthStageConfirmAccount:
 			h.redirect(c, "/auth/oauth/confirm-account")
+		case model.OAuthStageSetPassword:
+			h.redirect(c, "/auth/oauth/set-password")
 		default:
 			h.redirectFailure(c)
 		}
@@ -228,14 +231,17 @@ func (h *OAuthHandler) pending(c *gin.Context) {
 	}
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, gin.H{
-		"provider": info.Provider,
-		"stage":    info.Stage,
-		"email":    maskOAuthEmail(info.Email),
+		"provider":     info.Provider,
+		"stage":        info.Stage,
+		"email":        maskOAuthEmail(info.Email),
+		"has_password": info.HasPassword,
 	})
 }
 
 type oauthCompleteProfileRequest struct {
-	Username string `json:"username" binding:"required"`
+	Username        string `json:"username" binding:"required"`
+	Password        string `json:"password" binding:"required,min=6"`
+	PasswordConfirm string `json:"password_confirm" binding:"required,eqfield=Password"`
 }
 
 // completeProfile godoc
@@ -251,7 +257,7 @@ type oauthCompleteProfileRequest struct {
 func (h *OAuthHandler) completeProfile(c *gin.Context) {
 	var input oauthCompleteProfileRequest
 	if err := c.ShouldBindJSON(&input); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Username is required"))
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Username and matching passwords are required"))
 		return
 	}
 	pendingToken, ok := h.pendingToken(c)
@@ -259,8 +265,47 @@ func (h *OAuthHandler) completeProfile(c *gin.Context) {
 		return
 	}
 	result, err := h.service.CompleteProfile(c.Request.Context(), service.OAuthCompleteProfileInput{
-		PendingToken: pendingToken,
-		Username:     input.Username,
+		PendingToken:    pendingToken,
+		Username:        input.Username,
+		Password:        input.Password,
+		PasswordConfirm: input.PasswordConfirm,
+	})
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	h.writeCompletion(c, result)
+}
+
+type oauthSetPasswordRequest struct {
+	Password        string `json:"password" binding:"required,min=6"`
+	PasswordConfirm string `json:"password_confirm" binding:"required,eqfield=Password"`
+}
+
+// setPassword godoc
+// @Summary 为第三方登录账号设置本地密码
+// @Tags auth-oauth
+// @Accept json
+// @Produce json
+// @Param input body OAuthSetPasswordRequest true "密码"
+// @Success 200 {object} OAuthCompletionResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 409 {object} ErrorResponse
+// @Router /api/v1/auth/oauth/pending/set-password [post]
+func (h *OAuthHandler) setPassword(c *gin.Context) {
+	var input oauthSetPasswordRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Matching passwords are required"))
+		return
+	}
+	pendingToken, ok := h.pendingToken(c)
+	if !ok {
+		return
+	}
+	result, err := h.service.SetPassword(c.Request.Context(), service.OAuthSetPasswordInput{
+		PendingToken:    pendingToken,
+		Password:        input.Password,
+		PasswordConfirm: input.PasswordConfirm,
 	})
 	if err != nil {
 		httpx.Error(c, err)

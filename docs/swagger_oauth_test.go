@@ -23,6 +23,7 @@ func TestSwaggerDocumentsOAuthWebRoutes(t *testing.T) {
 		"/api/v1/auth/oauth/{provider}/callback":      {"get", "post"},
 		"/api/v1/auth/oauth/pending":                  {"get", "delete"},
 		"/api/v1/auth/oauth/pending/complete-profile": {"post"},
+		"/api/v1/auth/oauth/pending/set-password":     {"post"},
 		"/api/v1/auth/oauth/pending/confirm-account":  {"post"},
 		"/api/v1/auth/oauth/identities":               {"get"},
 		"/api/v1/auth/oauth/{provider}":               {"delete"},
