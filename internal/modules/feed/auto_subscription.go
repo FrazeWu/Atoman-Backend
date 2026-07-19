@@ -674,7 +674,7 @@ func createAutoSubscription(db *gorm.DB, userID uuid.UUID, target autoSubscripti
 			}
 			return err
 		}
-		applySubscriptionRulesForUser(tx, userID)
+		applySubscriptionRulesForSubscription(tx, subscription)
 		return tx.Preload("FeedSource").Preload("SubscriptionGroup").First(&subscription, "id = ?", subscription.ID).Error
 	})
 	return subscription, err

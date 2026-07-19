@@ -79,7 +79,6 @@ func getOrCreateDefaultSubscriptionGroup(db *gorm.DB, userID uuid.UUID) (*model.
 				}
 				return nil
 			}
-			applySubscriptionRulesForUser(db, userID)
 		case 1:
 			canonical = groups[0]
 		default:
@@ -250,14 +249,32 @@ func GetExploreSources(db *gorm.DB) gin.HandlerFunc {
 			limit = 100
 		}
 		category := c.Query("category")
+		query := c.Query("q")
 		offset := (page - 1) * limit
 
-		rows, err := repo.ListExploreSources(limit, offset, category)
+		rows, err := repo.ListExploreSources(limit, offset, category, query)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch explore sources"})
 			return
 		}
-		total, err := repo.CountExploreSources(category)
+		if userIDValue, ok := c.Get("user_id"); ok {
+			if userID, valid := userIDValue.(uuid.UUID); valid && len(rows) > 0 {
+				ids := make([]uuid.UUID, 0, len(rows))
+				for _, row := range rows {
+					ids = append(ids, row.ID)
+				}
+				var subscriptions []model.Subscription
+				db.Where("user_id = ? AND feed_source_id IN ?", userID, ids).Find(&subscriptions)
+				subscribed := map[uuid.UUID]bool{}
+				for _, subscription := range subscriptions {
+					subscribed[subscription.FeedSourceID] = true
+				}
+				for index := range rows {
+					rows[index].Subscribed = subscribed[rows[index].ID]
+				}
+			}
+		}
+		total, err := repo.CountExploreSources(category, query)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count explore sources"})
 			return
@@ -632,6 +649,7 @@ func CreateSubscription(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Already subscribed to this source"})
 			return
 		}
+		applySubscriptionRulesForSubscription(db, subscription)
 
 		if input.TargetType == "external_rss" {
 			syncFeedSource(db, *source)
@@ -2011,7 +2029,7 @@ func importFeedFromURL(db *gorm.DB, userID uuid.UUID, title, xmlURL string) erro
 	if err := db.Create(&subscription).Error; err != nil {
 		return err
 	}
-	applySubscriptionRulesForUser(db, userID)
+	applySubscriptionRulesForSubscription(db, subscription)
 
 	go service.SyncSingleRSS(db, *feedSource)
 	return nil
@@ -2061,6 +2079,7 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 
 		imported := 0
 		failed := 0
+		failedSources := []gin.H{}
 
 		walkOPMLOutlines(opml.Body.Outlines, func(outline OPMLOutline) {
 			if outline.XMLURL == "" {
@@ -2068,16 +2087,18 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 			}
 			if err := importFeedFromURL(db, userID, outline.Text, outline.XMLURL); err != nil {
 				failed++
+				failedSources = append(failedSources, gin.H{"url": outline.XMLURL, "reason": err.Error()})
 			} else {
 				imported++
 			}
 		})
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":  "OPML import completed",
-			"imported": imported,
-			"reused":   0,
-			"failed":   failed,
+			"message":        "OPML import completed",
+			"imported":       imported,
+			"reused":         0,
+			"failed":         failed,
+			"failed_sources": failedSources,
 		})
 	}
 }
@@ -2126,6 +2147,7 @@ func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
 		imported := 0
 		reused := 0
 		failed := 0
+		failedSources := []gin.H{}
 
 		importOutline := func(outline OPMLOutline) {
 			if strings.TrimSpace(outline.XMLURL) == "" {
@@ -2134,6 +2156,7 @@ func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
 			result, err := importFeedSourceFromURL(db, strings.TrimSpace(outline.Text), strings.TrimSpace(outline.XMLURL))
 			if err != nil {
 				failed++
+				failedSources = append(failedSources, gin.H{"url": outline.XMLURL, "reason": err.Error()})
 				return
 			}
 			if result.Imported {
@@ -2149,11 +2172,36 @@ func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
 		walkOPMLOutlines(opml.Body.Outlines, importOutline)
 
 		c.JSON(http.StatusOK, gin.H{
-			"message":  "OPML import completed",
-			"imported": imported,
-			"reused":   reused,
-			"failed":   failed,
+			"message":        "OPML import completed",
+			"imported":       imported,
+			"reused":         reused,
+			"failed":         failed,
+			"failed_sources": failedSources,
 		})
+	}
+}
+
+// RetryGlobalFeedSource retries one failed global OPML source without requiring the original file.
+func RetryGlobalFeedSource(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input struct {
+			Title string `json:"title"`
+			URL   string `json:"url" binding:"required"`
+		}
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+			return
+		}
+
+		result, err := importFeedSourceFromURL(db, strings.TrimSpace(input.Title), strings.TrimSpace(input.URL))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if result.Source != nil {
+			go syncFeedSource(db, *result.Source)
+		}
+		c.JSON(http.StatusOK, gin.H{"imported": result.Imported, "reused": !result.Imported})
 	}
 }
 

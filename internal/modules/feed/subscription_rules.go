@@ -249,19 +249,18 @@ func applySubscriptionRules(db *gorm.DB) gin.HandlerFunc {
 }
 
 // applySubscriptionRulesForUser applies enabled rules after a new subscription is created.
-func applySubscriptionRulesForUser(db *gorm.DB, userID uuid.UUID) {
+func applySubscriptionRulesForSubscription(db *gorm.DB, subscription model.Subscription) {
 	if !db.Migrator().HasTable(&model.FeedSubscriptionRule{}) {
 		return
 	}
 	var rules []model.FeedSubscriptionRule
-	if db.Where("user_id = ? AND enabled = ?", userID, true).Order("position ASC").Find(&rules).Error != nil || len(rules) == 0 {
+	if db.Where("user_id = ? AND enabled = ?", subscription.UserID, true).Order("position ASC").Find(&rules).Error != nil || len(rules) == 0 {
 		return
 	}
-	var subscriptions []model.Subscription
-	if db.Preload("FeedSource").Where("user_id = ?", userID).Find(&subscriptions).Error != nil {
+	if db.Preload("FeedSource").First(&subscription, "id = ?", subscription.ID).Error != nil {
 		return
 	}
-	applyRulesToSubscriptions(db, rules, subscriptions)
+	applyRulesToSubscriptions(db, rules, []model.Subscription{subscription})
 }
 
 func applyRulesToSubscriptions(db *gorm.DB, rules []model.FeedSubscriptionRule, subscriptions []model.Subscription) {

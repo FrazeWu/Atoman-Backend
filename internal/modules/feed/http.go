@@ -28,7 +28,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.GET("/timeline", middleware.OptionalAuthMiddleware(), h.getSubscribedFeed)
 	group.GET("/explore", middleware.OptionalAuthMiddleware(), h.getExploreFeed)
-	group.GET("/explore/sources", GetExploreSources(service.db))
+	group.GET("/explore/sources", middleware.OptionalAuthMiddleware(), GetExploreSources(service.db))
 	group.GET("/recommend/themes", h.getRecommendationThemes)
 	group.GET("/recommend/articles", h.getRecommendedArticles)
 	group.GET("/recommend/channels", h.getRecommendedChannels)
@@ -69,6 +69,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/opml/import", ImportOPML(service.db))
 		protected.GET("/opml/export", ExportOPML(service.db))
 		protected.POST("/sources/opml/import", middleware.AdminMiddleware(service.db), ImportGlobalOPML(service.db))
+		protected.POST("/sources/retry-import", middleware.AdminMiddleware(service.db), RetryGlobalFeedSource(service.db))
 		protected.GET("/sources/opml/export", middleware.AdminMiddleware(service.db), ExportGlobalOPML(service.db))
 		protected.GET("/stars", GetStarredItems(service.db))
 		protected.GET("/star-groups", GetFeedStarGroups(service.db))

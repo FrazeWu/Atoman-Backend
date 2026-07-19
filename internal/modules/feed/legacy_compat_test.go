@@ -696,9 +696,13 @@ func TestImportGlobalOPMLRejectsInvalidFeedURLs(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	var payload struct {
-		Imported int `json:"imported"`
-		Reused   int `json:"reused"`
-		Failed   int `json:"failed"`
+		Imported      int `json:"imported"`
+		Reused        int `json:"reused"`
+		Failed        int `json:"failed"`
+		FailedSources []struct {
+			URL    string `json:"url"`
+			Reason string `json:"reason"`
+		} `json:"failed_sources"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -706,12 +710,51 @@ func TestImportGlobalOPMLRejectsInvalidFeedURLs(t *testing.T) {
 	if payload.Imported != 0 || payload.Reused != 0 || payload.Failed != 3 {
 		t.Fatalf("unexpected import counts: %#v", payload)
 	}
+	if len(payload.FailedSources) != 3 || payload.FailedSources[0].URL == "" || payload.FailedSources[0].Reason == "" {
+		t.Fatalf("expected failed source details, got %#v", payload.FailedSources)
+	}
 	var count int64
 	if err := db.Model(&model.FeedSource{}).Count(&count).Error; err != nil {
 		t.Fatalf("count feed sources: %v", err)
 	}
 	if count != 0 {
 		t.Fatalf("expected invalid urls not to create sources, got %d", count)
+	}
+}
+
+func TestRetryGlobalFeedSourceImportsSingleValidURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	admin := seedFeedAdminUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/sources/retry-import", withFeedAuth(admin.UUID, RetryGlobalFeedSource(db)))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/sources/retry-import", strings.NewReader(`{"title":"Recovered feed","url":"https://example.com/recovered.xml"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		Imported bool `json:"imported"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !payload.Imported {
+		t.Fatalf("expected retry to create source, got %s", w.Body.String())
+	}
+	var count int64
+	if err := db.Model(&model.FeedSource{}).Where("rss_url = ?", "https://example.com/recovered.xml").Count(&count).Error; err != nil {
+		t.Fatalf("count recovered source: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected recovered source, got %d", count)
 	}
 }
 

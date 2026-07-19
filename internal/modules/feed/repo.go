@@ -32,6 +32,7 @@ type ExploreSourceRow struct {
 	RecentItemCount   int64                     `json:"recent_item_count"`
 	LastPublishedAt   *time.Time                `json:"last_published_at"`
 	RecentItems       []ExploreSourceRecentItem `json:"recent_items"`
+	Subscribed        bool                      `json:"subscribed" gorm:"-"`
 }
 
 type ExploreSourceRecentItem struct {
@@ -514,7 +515,7 @@ func (r *Repo) CountExploreFeedItems() (int64, error) {
 	return count, err
 }
 
-func (r *Repo) ListExploreSources(limit int, offset int, category string) ([]ExploreSourceRow, error) {
+func (r *Repo) ListExploreSources(limit int, offset int, category string, query ...string) ([]ExploreSourceRow, error) {
 	type exploreSourceRowRaw struct {
 		ID                uuid.UUID
 		Title             string
@@ -580,6 +581,13 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string) ([]Exp
 	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
 		rows = filterExploreSourceRowsByCategory(rows, normalizedCategory)
 	}
+	queryValue := ""
+	if len(query) > 0 {
+		queryValue = query[0]
+	}
+	if normalizedQuery := strings.ToLower(strings.TrimSpace(queryValue)); normalizedQuery != "" {
+		rows = filterExploreSourceRowsByQuery(rows, normalizedQuery)
+	}
 	if offset >= len(rows) {
 		return []ExploreSourceRow{}, nil
 	}
@@ -642,8 +650,8 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 	return nil
 }
 
-func (r *Repo) CountExploreSources(category string) (int64, error) {
-	rows, err := r.ListExploreSources(100000, 0, category)
+func (r *Repo) CountExploreSources(category string, query string) (int64, error) {
+	rows, err := r.ListExploreSources(100000, 0, category, query)
 	if err != nil {
 		return 0, err
 	}
@@ -722,6 +730,17 @@ func filterExploreSourceRowsByCategory(rows []ExploreSourceRow, category string)
 	filtered := make([]ExploreSourceRow, 0, len(rows))
 	for _, row := range rows {
 		if row.Category == category {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
+}
+
+func filterExploreSourceRowsByQuery(rows []ExploreSourceRow, query string) []ExploreSourceRow {
+	filtered := make([]ExploreSourceRow, 0, len(rows))
+	for _, row := range rows {
+		value := strings.ToLower(row.Title + " " + row.RSSURL)
+		if strings.Contains(value, query) {
 			filtered = append(filtered, row)
 		}
 	}

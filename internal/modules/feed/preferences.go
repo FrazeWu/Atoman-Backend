@@ -53,19 +53,30 @@ func BatchSubscribeFeedSources(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		created := 0
+		createdSubscriptions := []model.Subscription{}
+		createdIDs := []uuid.UUID{}
+		reusedIDs := []uuid.UUID{}
+		missingIDs := []uuid.UUID{}
 		for _, sourceID := range input.SourceIDs {
 			var source model.FeedSource
 			if db.First(&source, "id = ? AND hidden = ?", sourceID, false).Error != nil {
+				missingIDs = append(missingIDs, sourceID)
 				continue
 			}
 			sub := model.Subscription{UserID: userID, FeedSourceID: source.ID, Title: source.Title, SubscriptionGroupID: &group.ID}
 			result := db.Where("user_id = ? AND feed_source_id = ?", userID, source.ID).FirstOrCreate(&sub)
 			if result.Error == nil && result.RowsAffected > 0 {
 				created++
+				createdSubscriptions = append(createdSubscriptions, sub)
+				createdIDs = append(createdIDs, sourceID)
+			} else if result.Error == nil {
+				reusedIDs = append(reusedIDs, sourceID)
 			}
 		}
-		applySubscriptionRulesForUser(db, userID)
-		c.JSON(200, gin.H{"data": gin.H{"created": created}})
+		for _, subscription := range createdSubscriptions {
+			applySubscriptionRulesForSubscription(db, subscription)
+		}
+		c.JSON(200, gin.H{"data": gin.H{"created": created, "created_ids": createdIDs, "reused_ids": reusedIDs, "missing_ids": missingIDs}})
 	}
 }
 

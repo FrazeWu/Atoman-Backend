@@ -104,6 +104,34 @@ func TestGetExploreSourcesHandlerAllowsAnonymousPublicRead(t *testing.T) {
 	}
 }
 
+func TestGetExploreSourcesHandlerMarksSourcesSubscribedForAuthenticatedUser(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, _, user := newFeedTestService(t)
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/explore/sources?page=1&limit=20", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected authenticated source explore to return 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			Subscribed bool `json:"subscribed"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) == 0 || !payload.Data[0].Subscribed {
+		t.Fatalf("expected subscribed source row, got %s", rr.Body.String())
+	}
+}
+
 func TestGetExploreSourcesHandlerFiltersByCategory(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
@@ -159,6 +187,130 @@ func TestGetExploreSourcesHandlerFiltersByCategory(t *testing.T) {
 		if row.Category != "news" {
 			t.Fatalf("expected only news category rows, got body %s", rr.Body.String())
 		}
+	}
+}
+
+func TestGetExploreSourcesHandlerFiltersBySearchQuery(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	source := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://search.example.com/feed.xml",
+		Hash:         "search-http-source-hash",
+		Title:        "Unique Search Source",
+		Category:     "blog",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create search source: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&model.FeedItem{
+		FeedSourceID: source.ID,
+		GUID:         "search-http-item",
+		Title:        "Search item",
+		Link:         "https://search.example.com/item",
+		PublishedAt:  now,
+		FetchedAt:    now,
+	}).Error; err != nil {
+		t.Fatalf("create search item: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/explore/sources?page=1&limit=20&q=unique%20search", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected search source explore to return 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			Title string `json:"title"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(payload.Data) != 1 || payload.Data[0].Title != "Unique Search Source" {
+		t.Fatalf("expected one matching source, got %s", rr.Body.String())
+	}
+}
+
+func TestFeedPreferencesPersistPerUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	if err := db.AutoMigrate(&model.FeedPreference{}); err != nil {
+		t.Fatalf("migrate feed preferences: %v", err)
+	}
+	firstUser := seedFeedTestUser(t, db)
+	secondUser := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.PUT("/preferences", withFeedAuth(firstUser.UUID, UpdateFeedPreferences(db)))
+	feed.GET("/preferences/first", withFeedAuth(firstUser.UUID, GetFeedPreferences(db)))
+	feed.GET("/preferences/second", withFeedAuth(secondUser.UUID, GetFeedPreferences(db)))
+
+	update := httptest.NewRequest(http.MethodPut, "/api/v1/feed/preferences", strings.NewReader(`{"hidden_keywords":["广告","剧透"]}`))
+	update.Header.Set("Content-Type", "application/json")
+	updateResponse := httptest.NewRecorder()
+	router.ServeHTTP(updateResponse, update)
+	if updateResponse.Code != http.StatusOK {
+		t.Fatalf("expected preference update 200, got %d: %s", updateResponse.Code, updateResponse.Body.String())
+	}
+
+	firstResponse := httptest.NewRecorder()
+	router.ServeHTTP(firstResponse, httptest.NewRequest(http.MethodGet, "/api/v1/feed/preferences/first", nil))
+	if !strings.Contains(firstResponse.Body.String(), "广告") || !strings.Contains(firstResponse.Body.String(), "剧透") {
+		t.Fatalf("expected saved keywords, got %s", firstResponse.Body.String())
+	}
+	secondResponse := httptest.NewRecorder()
+	router.ServeHTTP(secondResponse, httptest.NewRequest(http.MethodGet, "/api/v1/feed/preferences/second", nil))
+	if secondResponse.Code != http.StatusOK || strings.Contains(secondResponse.Body.String(), "广告") {
+		t.Fatalf("expected isolated default preferences, got %d: %s", secondResponse.Code, secondResponse.Body.String())
+	}
+}
+
+func TestBatchSubscribeFeedSourcesReportsCreatedReusedMissingAndIsolatesUsers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	firstUser := seedFeedTestUser(t, db)
+	secondUser := seedFeedTestUser(t, db)
+	source := model.FeedSource{SourceType: "external_rss", RssURL: "https://batch.example.com/feed.xml", Hash: "batch-source-" + uuid.NewString(), Title: "Batch source"}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	missingID := uuid.New()
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/batch/first", withFeedAuth(firstUser.UUID, BatchSubscribeFeedSources(db)))
+	feed.POST("/batch/second", withFeedAuth(secondUser.UUID, BatchSubscribeFeedSources(db)))
+	requestFor := func(path string) *httptest.ResponseRecorder {
+		body := fmt.Sprintf(`{"source_ids":["%s","%s"]}`, source.ID, missingID)
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		return response
+	}
+
+	first := requestFor("/api/v1/feed/batch/first")
+	if first.Code != http.StatusOK || !strings.Contains(first.Body.String(), `"created":1`) || !strings.Contains(first.Body.String(), missingID.String()) {
+		t.Fatalf("expected created and missing IDs, got %d: %s", first.Code, first.Body.String())
+	}
+	reused := requestFor("/api/v1/feed/batch/first")
+	if reused.Code != http.StatusOK || !strings.Contains(reused.Body.String(), `"reused_ids"`) {
+		t.Fatalf("expected reused ID for same user, got %d: %s", reused.Code, reused.Body.String())
+	}
+	second := requestFor("/api/v1/feed/batch/second")
+	if second.Code != http.StatusOK || !strings.Contains(second.Body.String(), `"created":1`) {
+		t.Fatalf("expected separate subscription for another user, got %d: %s", second.Code, second.Body.String())
 	}
 }
 
