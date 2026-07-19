@@ -19,6 +19,13 @@ func UpsertRebindNotification(tx *gorm.DB, actorID, songID uuid.UUID, annotation
 		"title": "歌词修改影响了你的注释绑定",
 		"body":  "请重新选择注释对应的歌词片段。", "source_label": "歌词注释",
 	}
+	var song model.Song
+	if err := tx.Select("album_id").First(&song, "id = ?", songID).Error; err != nil {
+		return err
+	}
+	if song.AlbumID != nil {
+		meta["album_id"] = song.AlbumID.String()
+	}
 	var existing model.Notification
 	err := tx.Where("recipient_id = ? AND source_type = ? AND source_id = ? AND aggregation_key = ''", annotation.CreatedBy, "music_lyrics", annotation.ID).
 		First(&existing).Error

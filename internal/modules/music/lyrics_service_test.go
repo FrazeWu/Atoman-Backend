@@ -21,6 +21,7 @@ func newLyricsTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
+		&model.Album{},
 		&model.Song{},
 		&model.MusicSongLyric{},
 		&model.MusicSongLyricLine{},
@@ -33,7 +34,11 @@ func newLyricsTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser
 	if err := db.Create(&userModel).Error; err != nil {
 		t.Fatal(err)
 	}
-	song := model.Song{Title: "Test Song", AudioURL: "/test.mp3", Status: "open"}
+	album := model.Album{Title: "Test Album"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatal(err)
+	}
+	song := model.Song{Title: "Test Song", AudioURL: "/test.mp3", Status: "open", AlbumID: &album.ID}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +140,7 @@ func TestSaveAndRevertNotifyOnlyFirstNeedsRebindTransition(t *testing.T) {
 	if n.RecipientID != owner.ID || n.ActorID == nil || *n.ActorID != editor.ID || n.Type != "collaboration.required" || n.SourceType != "music_lyrics" || n.SourceID != annotation.ID {
 		t.Fatalf("unexpected notification identity: %#v", n)
 	}
-	if n.Meta["song_id"] != song.ID.String() || n.Meta["annotation_id"] != annotation.ID.String() || n.Meta["title"] != "歌词修改影响了你的注释绑定" || n.Meta["body"] == "" || n.Meta["source_label"] == "" {
+	if n.Meta["song_id"] != song.ID.String() || n.Meta["album_id"] != song.AlbumID.String() || n.Meta["annotation_id"] != annotation.ID.String() || n.Meta["title"] != "歌词修改影响了你的注释绑定" || n.Meta["body"] == "" || n.Meta["source_label"] == "" {
 		t.Fatalf("unexpected notification meta: %#v", n.Meta)
 	}
 	if _, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{Content: "changed again", Format: "plain"}); err != nil {
