@@ -53,6 +53,41 @@ type MusicLyricAnnotationResponse struct {
 	Data MusicLyricAnnotationDTO `json:"data"`
 }
 
+type PendingLyricAnnotationDTO struct {
+	AnnotationID string `json:"annotation_id"`
+	SongID       string `json:"song_id"`
+	AlbumID      string `json:"album_id"`
+}
+
+type PendingLyricAnnotationsResponse struct {
+	Data []PendingLyricAnnotationDTO `json:"data"`
+}
+
+// listPendingLyricAnnotations godoc
+// @Summary 获取待重新绑定的歌词注释
+// @Description 返回当前用户创建且需要重新绑定、所属歌曲已归入专辑的歌词注释。
+// @Tags music-lyrics
+// @Produce json
+// @Success 200 {object} PendingLyricAnnotationsResponse
+// @Failure 401 {object} MusicLyricsErrorResponse
+// @Failure 500 {object} MusicLyricsErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/music/lyrics/annotations/pending [get]
+func (h *Handler) listPendingLyricAnnotations(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	items, err := h.service.ListPendingLyricAnnotations(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, items)
+}
+
 type MusicSongLyricsVersionsResponse struct {
 	Data []MusicSongLyricsVersionDTO `json:"data"`
 }
