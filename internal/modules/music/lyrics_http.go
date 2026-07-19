@@ -53,6 +53,30 @@ type MusicLyricAnnotationResponse struct {
 	Data MusicLyricAnnotationDTO `json:"data"`
 }
 
+type PendingLyricAnnotationDTO struct {
+	AnnotationID string `json:"annotation_id"`
+	SongID       string `json:"song_id"`
+	AlbumID      string `json:"album_id"`
+}
+
+type PendingLyricAnnotationsResponse struct {
+	Data []PendingLyricAnnotationDTO `json:"data"`
+}
+
+func (h *Handler) listPendingLyricAnnotations(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	items, err := h.service.ListPendingLyricAnnotations(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, items)
+}
+
 type MusicSongLyricsVersionsResponse struct {
 	Data []MusicSongLyricsVersionDTO `json:"data"`
 }
