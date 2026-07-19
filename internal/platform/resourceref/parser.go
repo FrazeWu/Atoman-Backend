@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -45,6 +44,8 @@ var supportedKinds = map[string]struct{}{
 	KindCollection: {}, KindComment: {},
 }
 
+const canonicalUUIDLength = 36
+
 type Reference struct {
 	Raw        string
 	Kind       string
@@ -74,26 +75,24 @@ func Parse(content string) ([]Reference, error) {
 
 		kind := content[start+1 : kindEnd]
 		if !isSupportedKind(kind) {
+			if isTrailingColon(content, kindEnd) {
+				offset = kindEnd + 1
+				continue
+			}
 			return nil, fmt.Errorf("%w: %s", ErrUnknownKind, kind)
 		}
 
 		valueStart := kindEnd + 1
-		end := valueStart
-		for end < len(content) {
-			r, size := utf8.DecodeRuneInString(content[end:])
-			if !isReferenceValueRune(r) {
-				break
-			}
-			end += size
+		if len(content)-valueStart < canonicalUUIDLength {
+			return nil, fmt.Errorf("%w at byte %d", ErrInvalidResourceID, start)
 		}
-
-		parts := strings.Split(content[valueStart:end], ":")
-		resourceID, err := parseCanonicalUUID(parts[0])
+		resourceEnd := valueStart + canonicalUUIDLength
+		resourceID, err := parseCanonicalUUID(content[valueStart:resourceEnd])
 		if err != nil {
 			return nil, fmt.Errorf("%w at byte %d", ErrInvalidResourceID, start)
 		}
 
-		qualifier, err := validateQualifier(kind, parts)
+		end, qualifier, err := parseSuffix(content, kind, resourceEnd)
 		if err != nil {
 			return nil, fmt.Errorf("%w at byte %d", err, start)
 		}
@@ -123,11 +122,11 @@ func isKindByte(value byte) bool {
 		value == '_' || value == '-'
 }
 
-func isReferenceValueRune(value rune) bool {
+func isReferenceValueByte(value byte) bool {
 	return value >= 'a' && value <= 'z' ||
 		value >= 'A' && value <= 'Z' ||
 		value >= '0' && value <= '9' ||
-		value == '-' || value == ':'
+		value == '-'
 }
 
 func parseCanonicalUUID(value string) (uuid.UUID, error) {
@@ -138,15 +137,61 @@ func parseCanonicalUUID(value string) (uuid.UUID, error) {
 	return resourceID, nil
 }
 
-func validateQualifier(kind string, parts []string) (string, error) {
-	if kind != KindDebate {
-		if len(parts) != 1 {
-			return "", ErrInvalidQualifier
+func parseSuffix(content string, kind string, resourceEnd int) (int, string, error) {
+	if resourceEnd == len(content) {
+		if kind == KindDebate {
+			return 0, "", ErrInvalidQualifier
 		}
-		return "", nil
+		return resourceEnd, "", nil
 	}
-	if len(parts) != 2 || parts[1] != QualifierSupport && parts[1] != QualifierOppose {
-		return "", ErrInvalidQualifier
+
+	if content[resourceEnd] != ':' {
+		if isReferenceValueByte(content[resourceEnd]) {
+			return 0, "", ErrInvalidResourceID
+		}
+		if kind == KindDebate {
+			return 0, "", ErrInvalidQualifier
+		}
+		return resourceEnd, "", nil
 	}
-	return parts[1], nil
+
+	if isTrailingColon(content, resourceEnd) {
+		if kind == KindDebate {
+			return 0, "", ErrInvalidQualifier
+		}
+		return resourceEnd, "", nil
+	}
+	if kind != KindDebate {
+		return 0, "", ErrInvalidQualifier
+	}
+
+	qualifierStart := resourceEnd + 1
+	for _, qualifier := range []string{QualifierSupport, QualifierOppose} {
+		if !strings.HasPrefix(content[qualifierStart:], qualifier) {
+			continue
+		}
+		end := qualifierStart + len(qualifier)
+		if end == len(content) {
+			return end, qualifier, nil
+		}
+		if content[end] == ':' {
+			if isTrailingColon(content, end) {
+				return end, qualifier, nil
+			}
+			return 0, "", ErrInvalidQualifier
+		}
+		if isReferenceValueByte(content[end]) {
+			return 0, "", ErrInvalidQualifier
+		}
+		return end, qualifier, nil
+	}
+	return 0, "", ErrInvalidQualifier
+}
+
+func isTrailingColon(content string, colon int) bool {
+	if colon+1 == len(content) {
+		return true
+	}
+	next := content[colon+1]
+	return next != ':' && !isReferenceValueByte(next)
 }

@@ -1,8 +1,8 @@
 package resourceref
 
 import (
-	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -23,6 +23,13 @@ func TestParseIgnoresUserMentionsAlongsideResourceReferences(t *testing.T) {
 		Start:      len("请 @alice 看 "),
 		End:        len(content),
 	}}, references)
+}
+
+func TestParseIgnoresUserMentionWithTrailingColon(t *testing.T) {
+	references, err := Parse("@alice:")
+
+	require.NoError(t, err)
+	require.Empty(t, references)
 }
 
 func TestParseSupportsFixedKinds(t *testing.T) {
@@ -85,12 +92,44 @@ func TestParseRequiresDebateQualifier(t *testing.T) {
 	_, err := Parse("@debate:550e8400-e29b-41d4-a716-446655440000")
 	require.ErrorIs(t, err, ErrInvalidQualifier)
 
-	_, err = Parse("@debate:550e8400-e29b-41d4-a716-446655440000:neutral")
+	_, err = Parse("@debate:550e8400-e29b-41d4-a716-446655440000:bad")
 	require.ErrorIs(t, err, ErrInvalidQualifier)
 }
 
 func TestParseRejectsQualifierOnNonDebate(t *testing.T) {
-	_, err := Parse("@album:550e8400-e29b-41d4-a716-446655440000:support")
+	_, err := Parse("@post:550e8400-e29b-41d4-a716-446655440000:bad")
+	require.ErrorIs(t, err, ErrInvalidQualifier)
+}
+
+func TestParseTreatsColonBeforeSpaceAsTrailingPunctuation(t *testing.T) {
+	tests := []struct {
+		name      string
+		raw       string
+		qualifier string
+	}{
+		{name: "post", raw: "@post:550e8400-e29b-41d4-a716-446655440000"},
+		{name: "debate", raw: "@debate:550e8400-e29b-41d4-a716-446655440000:support", qualifier: QualifierSupport},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			content := test.raw + ": details"
+			references, err := Parse(content)
+
+			require.NoError(t, err)
+			require.Len(t, references, 1)
+			require.Equal(t, test.raw, references[0].Raw)
+			require.Equal(t, test.qualifier, references[0].Qualifier)
+			require.Equal(t, test.raw, content[references[0].Start:references[0].End])
+		})
+	}
+}
+
+func TestParseRejectsCandidateWithExcessiveColons(t *testing.T) {
+	content := "@post:550e8400-e29b-41d4-a716-446655440000" + strings.Repeat(":", 1<<20) + "bad"
+
+	_, err := Parse(content)
+
 	require.ErrorIs(t, err, ErrInvalidQualifier)
 }
 
@@ -134,8 +173,21 @@ func TestParseKeepsDuplicateReferencesWithDistinctPositions(t *testing.T) {
 	}
 }
 
-func TestParserErrorsAreComparableSentinels(t *testing.T) {
-	require.True(t, errors.Is(fmt.Errorf("wrapped: %w", ErrUnknownKind), ErrUnknownKind))
-	require.True(t, errors.Is(fmt.Errorf("wrapped: %w", ErrInvalidResourceID), ErrInvalidResourceID))
-	require.True(t, errors.Is(fmt.Errorf("wrapped: %w", ErrInvalidQualifier), ErrInvalidQualifier))
+func TestParseClassifiesErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    error
+	}{
+		{name: "unknown kind", content: "@unknown:550e8400-e29b-41d4-a716-446655440000", want: ErrUnknownKind},
+		{name: "invalid UUID", content: "@album:not-a-uuid", want: ErrInvalidResourceID},
+		{name: "invalid qualifier", content: "@debate:550e8400-e29b-41d4-a716-446655440000:neutral", want: ErrInvalidQualifier},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Parse(test.content)
+			require.ErrorIs(t, err, test.want)
+		})
+	}
 }

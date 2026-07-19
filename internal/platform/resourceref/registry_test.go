@@ -2,6 +2,7 @@ package resourceref
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -71,4 +72,19 @@ func TestRegistryReturnsInvisibleAndUnreferenceableResultUnchanged(t *testing.T)
 
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+}
+
+func TestRegistryReturnsResolverResultAndErrorUnchanged(t *testing.T) {
+	resolverErr := errors.New("resolver failed")
+	resourceID := uuid.New()
+	want := Resolved{Kind: KindAlbum, ID: resourceID, Title: "Partial result"}
+	registry := NewRegistry()
+	require.NoError(t, registry.Register(KindAlbum, func(context.Context, Viewer, uuid.UUID) (Resolved, error) {
+		return want, resolverErr
+	}))
+
+	got, err := registry.Resolve(context.Background(), Viewer{}, KindAlbum, resourceID)
+
+	require.Equal(t, want, got)
+	require.ErrorIs(t, err, resolverErr)
 }
