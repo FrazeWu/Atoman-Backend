@@ -343,6 +343,77 @@ func TestRegisterRoutesMusicLyricsRejectsInvalidRequestsAndCrossSongAccess(t *te
 	assertMusicHTTPError(t, badAnnotationID, http.StatusBadRequest, "validation.invalid_request")
 }
 
+func TestRegisterRoutesMusicLyricsRebindsAnnotationAnchor(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Rebind HTTP", AudioURL: "/rebind.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+	basePath := "/api/v1/music/songs/" + song.ID.String() + "/lyrics"
+	put := performMusicJSONRequest(t, r, http.MethodPut, basePath, `{"content":"first line\nsecond line","format":"plain"}`)
+	if put.Code != http.StatusOK {
+		t.Fatalf("seed lyrics: %d: %s", put.Code, put.Body.String())
+	}
+	var lyrics struct {
+		Data MusicLyricsDTO `json:"data"`
+	}
+	if err := json.Unmarshal(put.Body.Bytes(), &lyrics); err != nil {
+		t.Fatalf("decode lyrics: %v", err)
+	}
+	created := performMusicJSONRequest(t, r, http.MethodPost, basePath+"/annotations", `{"line_key":"`+lyrics.Data.Lines[0].LineKey+`","selected_text":"first","start_offset":0,"end_offset":5,"body":"keep body"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create annotation: %d: %s", created.Code, created.Body.String())
+	}
+	var annotation struct {
+		Data MusicLyricAnnotationDTO `json:"data"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &annotation); err != nil {
+		t.Fatalf("decode annotation: %v", err)
+	}
+	if err := db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", annotation.Data.ID).Update("status", "needs_rebind").Error; err != nil {
+		t.Fatal(err)
+	}
+
+	itemPath := basePath + "/annotations/" + annotation.Data.ID.String()
+	rebound := performMusicJSONRequest(t, r, http.MethodPatch, itemPath, `{"line_key":"`+lyrics.Data.Lines[1].LineKey+`","selected_text":"second","start_offset":0,"end_offset":6}`)
+	if rebound.Code != http.StatusOK {
+		t.Fatalf("rebind annotation: %d: %s", rebound.Code, rebound.Body.String())
+	}
+	var updated struct {
+		Data MusicLyricAnnotationDTO `json:"data"`
+	}
+	if err := json.Unmarshal(rebound.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode rebound annotation: %v", err)
+	}
+	if updated.Data.Body != "keep body" || updated.Data.LineID != lyrics.Data.Lines[1].ID || updated.Data.Status != "active" {
+		t.Fatalf("unexpected rebound annotation: %#v", updated.Data)
+	}
+}
+
+func TestRegisterRoutesMusicLyricsRejectsInvalidAnnotationRebindPayload(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Rebind Validation", AudioURL: "/rebind-validation.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+	basePath := "/api/v1/music/songs/" + song.ID.String() + "/lyrics"
+	lyrics, err := service.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation, err := service.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{LineKey: lyrics.Lines[0].LineKey, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := basePath + "/annotations/" + annotation.ID.String()
+	assertMusicHTTPError(t, performMusicJSONRequest(t, r, http.MethodPatch, path, `{}`), http.StatusBadRequest, "validation.invalid_request")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, r, http.MethodPatch, path, `{"line_key":"`+lyrics.Lines[0].LineKey+`"}`), http.StatusBadRequest, "validation.invalid_request")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, r, http.MethodPatch, path, `{"body":"   "}`), http.StatusBadRequest, "validation.invalid_request")
+	assertMusicHTTPError(t, performMusicJSONRequest(t, r, http.MethodPatch, path, `{"line_key":"`+lyrics.Lines[0].LineKey+`","selected_text":"wrong","start_offset":0,"end_offset":5}`), http.StatusBadRequest, "validation.invalid_request")
+}
+
 func TestRegisterRoutesMusicLyricsVersionsAndRevert(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	song := model.Song{Title: "Version HTTP", AudioURL: "/versions.mp3", Status: "open"}

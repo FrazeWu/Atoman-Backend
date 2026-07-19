@@ -562,7 +562,7 @@ func TestAnnotationPermissionsSoftDeleteAndAnonymousDTO(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := authctx.CurrentUser{ID: otherModel.UUID, Username: otherModel.Username, Role: authctx.RoleUser}
-	_, err = svc.UpdateLyricAnnotation(other, song.ID, annotation.ID, "stolen")
+	_, err = svc.UpdateLyricAnnotation(other, song.ID, annotation.ID, UpdateLyricAnnotationInput{Body: stringPointer("stolen")})
 	assertAppErrorCode(t, err, "music.annotation_forbidden")
 
 	anonymous, err := svc.GetSongLyrics(authctx.CurrentUser{}, song.ID)
@@ -589,13 +589,89 @@ func TestUpdateLyricAnnotationKeepsNeedsRebindStatus(t *testing.T) {
 	if err := db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", annotation.ID).Update("status", "needs_rebind").Error; err != nil {
 		t.Fatal(err)
 	}
-	updated, err := svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, "after")
+	updated, err := svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, UpdateLyricAnnotationInput{Body: stringPointer("after")})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.Body != "after" || updated.Status != "needs_rebind" {
 		t.Fatalf("unexpected updated annotation: %#v", updated)
 	}
+}
+
+func TestUpdateLyricAnnotationRebindsNeedsRebindAnchor(t *testing.T) {
+	svc, db, user, song := newLyricsTestService(t)
+	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "first line\nsecond line", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation, err := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+		LineKey: lyrics.Lines[0].LineKey, SelectedText: "first", StartOffset: 0, EndOffset: 5, Body: "keep body",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", annotation.ID).Update("status", "needs_rebind").Error; err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, UpdateLyricAnnotationInput{
+		LineKey: stringPointer(lyrics.Lines[1].LineKey), SelectedText: stringPointer("second"),
+		StartOffset: intPointer(0), EndOffset: intPointer(6),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Body != "keep body" || updated.LineID != lyrics.Lines[1].ID || updated.SelectedText != "second" || updated.Status != "active" {
+		t.Fatalf("unexpected rebound annotation: %#v", updated)
+	}
+}
+
+func TestUpdateLyricAnnotationRejectsInvalidRebindAnchor(t *testing.T) {
+	svc, db, user, song := newLyricsTestService(t)
+	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation, err := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+		LineKey: lyrics.Lines[0].LineKey, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "note",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	partial := UpdateLyricAnnotationInput{LineKey: stringPointer(lyrics.Lines[0].LineKey)}
+	_, err = svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, partial)
+	assertAppErrorCode(t, err, "validation.invalid_request")
+	wrongText := UpdateLyricAnnotationInput{
+		LineKey: stringPointer(lyrics.Lines[0].LineKey), SelectedText: stringPointer("wrong"),
+		StartOffset: intPointer(0), EndOffset: intPointer(5),
+	}
+	_, err = svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, wrongText)
+	assertAppErrorCode(t, err, "validation.invalid_request")
+	wrongOffset := UpdateLyricAnnotationInput{
+		LineKey: stringPointer(lyrics.Lines[0].LineKey), SelectedText: stringPointer("hello"),
+		StartOffset: intPointer(1), EndOffset: intPointer(5),
+	}
+	_, err = svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, wrongOffset)
+	assertAppErrorCode(t, err, "validation.invalid_request")
+	if err := db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", annotation.ID).Update("status", "needs_rebind").Error; err != nil {
+		t.Fatal(err)
+	}
+	otherModel := model.User{Username: "rebind-other", Email: "rebind-other@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&otherModel).Error; err != nil {
+		t.Fatal(err)
+	}
+	other := authctx.CurrentUser{ID: otherModel.UUID, Username: otherModel.Username, Role: authctx.RoleUser}
+	valid := UpdateLyricAnnotationInput{
+		LineKey: stringPointer(lyrics.Lines[0].LineKey), SelectedText: stringPointer("hello"),
+		StartOffset: intPointer(0), EndOffset: intPointer(5),
+	}
+	_, err = svc.UpdateLyricAnnotation(other, song.ID, annotation.ID, valid)
+	assertAppErrorCode(t, err, "music.annotation_forbidden")
+	otherSong := model.Song{Title: "Other", AudioURL: "/other.mp3"}
+	if err := db.Create(&otherSong).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.UpdateLyricAnnotation(user, otherSong.ID, annotation.ID, valid)
+	assertAppErrorCode(t, err, "music.annotation_not_found")
 }
 
 func TestUpdateAndDeleteLyricAnnotationLockSongBeforeAnnotation(t *testing.T) {
@@ -619,7 +695,7 @@ func TestUpdateAndDeleteLyricAnnotationLockSongBeforeAnnotation(t *testing.T) {
 			t.Cleanup(func() { _ = db.Callback().Query().Remove(callbackName) })
 
 			if action == "update" {
-				_, err := svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, "after")
+				_, err := svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, UpdateLyricAnnotationInput{Body: stringPointer("after")})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -632,6 +708,10 @@ func TestUpdateAndDeleteLyricAnnotationLockSongBeforeAnnotation(t *testing.T) {
 		})
 	}
 }
+
+func stringPointer(value string) *string { return &value }
+
+func intPointer(value int) *int { return &value }
 
 func TestSetLyricAnnotationVoteReplacesCancelsAndAllowsRevote(t *testing.T) {
 	svc, _, user, song := newLyricsTestService(t)
