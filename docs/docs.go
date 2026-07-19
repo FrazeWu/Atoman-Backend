@@ -10195,6 +10195,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/lyrics/annotations/pending": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回当前用户创建且需要重新绑定、所属歌曲已归入专辑的歌词注释。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-lyrics"
+                ],
+                "summary": "获取待重新绑定的歌词注释",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.PendingLyricAnnotationsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicLyricsErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/playlists": {
             "post": {
                 "security": [
@@ -22205,6 +22245,31 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "music.PendingLyricAnnotationDTO": {
+            "type": "object",
+            "properties": {
+                "album_id": {
+                    "type": "string"
+                },
+                "annotation_id": {
+                    "type": "string"
+                },
+                "song_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.PendingLyricAnnotationsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.PendingLyricAnnotationDTO"
+                    }
                 }
             }
         },

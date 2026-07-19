@@ -313,6 +313,7 @@ type FeedItem struct {
 	DuplicateCount        int         `json:"duplicate_count" gorm:"-"`
 	DuplicateOfID         *uuid.UUID  `json:"duplicate_of_id,omitempty" gorm:"-"`
 	DuplicateSources      []string    `json:"duplicate_sources,omitempty" gorm:"-"`
+	DuplicateItemIDs      []uuid.UUID `json:"duplicate_item_ids,omitempty" gorm:"-"`
 }
 
 func (FeedItem) TableName() string { return "feed_items" }

@@ -21,6 +21,7 @@ func newLyricsTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
+		&model.Album{},
 		&model.Song{},
 		&model.MusicSongLyric{},
 		&model.MusicSongLyricLine{},
@@ -33,7 +34,11 @@ func newLyricsTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser
 	if err := db.Create(&userModel).Error; err != nil {
 		t.Fatal(err)
 	}
-	song := model.Song{Title: "Test Song", AudioURL: "/test.mp3", Status: "open"}
+	album := model.Album{Title: "Test Album"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatal(err)
+	}
+	song := model.Song{Title: "Test Song", AudioURL: "/test.mp3", Status: "open", AlbumID: &album.ID}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +140,7 @@ func TestSaveAndRevertNotifyOnlyFirstNeedsRebindTransition(t *testing.T) {
 	if n.RecipientID != owner.ID || n.ActorID == nil || *n.ActorID != editor.ID || n.Type != "collaboration.required" || n.SourceType != "music_lyrics" || n.SourceID != annotation.ID {
 		t.Fatalf("unexpected notification identity: %#v", n)
 	}
-	if n.Meta["song_id"] != song.ID.String() || n.Meta["annotation_id"] != annotation.ID.String() || n.Meta["title"] != "歌词修改影响了你的注释绑定" || n.Meta["body"] == "" || n.Meta["source_label"] == "" {
+	if n.Meta["song_id"] != song.ID.String() || n.Meta["album_id"] != song.AlbumID.String() || n.Meta["annotation_id"] != annotation.ID.String() || n.Meta["title"] != "歌词修改影响了你的注释绑定" || n.Meta["body"] == "" || n.Meta["source_label"] == "" {
 		t.Fatalf("unexpected notification meta: %#v", n.Meta)
 	}
 	if _, err := svc.SaveSongLyrics(editor, song.ID, SaveLyricsInput{Content: "changed again", Format: "plain"}); err != nil {
@@ -217,6 +222,29 @@ func TestSaveAndRevertNotifyOnlyFirstNeedsRebindTransition(t *testing.T) {
 	if err := db.Model(&model.Notification{}).Count(&count).Error; err != nil || count != 2 {
 		t.Fatalf("revert should add one notification: %d, %v", count, err)
 	}
+}
+
+func TestListPendingLyricAnnotationsReturnsOnlyCurrentNeedsRebindWithAlbum(t *testing.T) {
+	svc, db, user, song := newLyricsTestService(t)
+	lyrics, _ := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	pending, _ := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "pending"})
+	active, _ := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{LineID: lyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "active"})
+	_ = db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", pending.ID).Update("status", "needs_rebind").Error
+	items, err := svc.ListPendingLyricAnnotations(user)
+	if err != nil || len(items) != 1 || items[0].AnnotationID != pending.ID.String() || items[0].SongID != song.ID.String() || items[0].AlbumID != song.AlbumID.String() {
+		t.Fatalf("pending = %#v, %v", items, err)
+	}
+	_ = db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", pending.ID).Update("status", "active").Error
+	noAlbumSong := model.Song{Title: "No Album", AudioURL: "/none.mp3", Status: "open"}
+	_ = db.Create(&noAlbumSong).Error
+	noAlbumLyrics, _ := svc.SaveSongLyrics(user, noAlbumSong.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
+	noAlbum, _ := svc.CreateLyricAnnotation(user, noAlbumSong.ID, CreateAnnotationInput{LineID: noAlbumLyrics.Lines[0].ID, SelectedText: "hello", StartOffset: 0, EndOffset: 5, Body: "none"})
+	_ = db.Model(&model.MusicLyricAnnotation{}).Where("id = ?", noAlbum.ID).Update("status", "needs_rebind").Error
+	items, err = svc.ListPendingLyricAnnotations(user)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("active should disappear: %#v, %v", items, err)
+	}
+	_ = active
 }
 
 func TestSaveSongLyricsDoesNotNotifyAnnotationCreatorAboutOwnEdit(t *testing.T) {

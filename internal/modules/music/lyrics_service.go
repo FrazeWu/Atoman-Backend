@@ -419,6 +419,31 @@ func (s *Service) GetSongLyrics(user authctx.CurrentUser, songID uuid.UUID) (Mus
 	return dto, nil
 }
 
+func (s *Service) ListPendingLyricAnnotations(user authctx.CurrentUser) ([]PendingLyricAnnotationDTO, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	type row struct {
+		AnnotationID, SongID uuid.UUID
+		AlbumID              *uuid.UUID
+	}
+	var rows []row
+	if err := s.db.Table("music_lyric_annotations AS a").
+		Select("a.id AS annotation_id, a.song_id, s.album_id").
+		Joins(`JOIN "Songs" AS s ON s.id = a.song_id`).
+		Where("a.created_by = ? AND a.status = ? AND a.deleted_at IS NULL AND s.album_id IS NOT NULL", user.ID, "needs_rebind").
+		Order("a.updated_at DESC").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]PendingLyricAnnotationDTO, 0, len(rows))
+	for _, row := range rows {
+		if row.AlbumID != nil {
+			items = append(items, PendingLyricAnnotationDTO{AnnotationID: row.AnnotationID.String(), SongID: row.SongID.String(), AlbumID: row.AlbumID.String()})
+		}
+	}
+	return items, nil
+}
+
 func lyricLineDTO(line model.MusicSongLyricLine) MusicLyricLineDTO {
 	return MusicLyricLineDTO{ID: line.ID, LineKey: line.LineKey, LineIndex: line.LineIndex, TimeMS: line.TimeMS, Text: line.Text, Translation: line.Translation}
 }

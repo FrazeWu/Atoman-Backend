@@ -9,6 +9,8 @@ import (
 	"unicode"
 
 	"atoman/internal/model"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -38,6 +40,7 @@ func AnnotateDuplicateFeedItems(items []model.FeedItem) {
 		items[i].DuplicateCount = 1
 		items[i].DuplicateOfID = nil
 		items[i].DuplicateSources = nil
+		items[i].DuplicateItemIDs = []uuid.UUID{items[i].ID}
 
 		normalizedURL := NormalizeFeedItemURL(items[i].Link)
 		normalizedTitle := NormalizeFeedItemTitle(items[i].Title)
@@ -74,10 +77,15 @@ func AnnotateDuplicateFeedItems(items []model.FeedItem) {
 
 		primaryIndex := group.indices[0]
 		sourceTitles := sortedDuplicateSources(group.sources)
+		itemIDs := make([]uuid.UUID, 0, len(group.indices))
+		for _, itemIndex := range group.indices {
+			itemIDs = append(itemIDs, items[itemIndex].ID)
+		}
 
 		for position, itemIndex := range group.indices {
 			items[itemIndex].DuplicateCount = len(group.indices)
 			items[itemIndex].DuplicateSources = append([]string(nil), sourceTitles...)
+			items[itemIndex].DuplicateItemIDs = append([]uuid.UUID(nil), itemIDs...)
 			if position == 0 {
 				continue
 			}
