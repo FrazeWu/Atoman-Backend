@@ -625,6 +625,30 @@ func TestUpdateLyricAnnotationRebindsNeedsRebindAnchor(t *testing.T) {
 	}
 }
 
+func TestUpdateLyricAnnotationRebindsActiveAnchor(t *testing.T) {
+	svc, _, user, song := newLyricsTestService(t)
+	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "first line\nsecond line", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	annotation, err := svc.CreateLyricAnnotation(user, song.ID, CreateAnnotationInput{
+		LineKey: lyrics.Lines[0].LineKey, SelectedText: "first", StartOffset: 0, EndOffset: 5, Body: "note",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, UpdateLyricAnnotationInput{
+		LineKey: stringPointer(lyrics.Lines[1].LineKey), SelectedText: stringPointer("second"),
+		StartOffset: intPointer(0), EndOffset: intPointer(6),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.LineID != lyrics.Lines[1].ID || updated.Status != "active" {
+		t.Fatalf("unexpected active annotation rebind: %#v", updated)
+	}
+}
+
 func TestUpdateLyricAnnotationRejectsInvalidRebindAnchor(t *testing.T) {
 	svc, db, user, song := newLyricsTestService(t)
 	lyrics, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "hello", Format: "plain"})
@@ -672,6 +696,16 @@ func TestUpdateLyricAnnotationRejectsInvalidRebindAnchor(t *testing.T) {
 	}
 	_, err = svc.UpdateLyricAnnotation(user, otherSong.ID, annotation.ID, valid)
 	assertAppErrorCode(t, err, "music.annotation_not_found")
+	otherLyrics, err := svc.SaveSongLyrics(user, otherSong.ID, SaveLyricsInput{Content: "other line", Format: "plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	crossSongLine := UpdateLyricAnnotationInput{
+		LineKey: stringPointer(otherLyrics.Lines[0].LineKey), SelectedText: stringPointer("other"),
+		StartOffset: intPointer(0), EndOffset: intPointer(5),
+	}
+	_, err = svc.UpdateLyricAnnotation(user, song.ID, annotation.ID, crossSongLine)
+	assertAppErrorCode(t, err, "music.lyric_line_not_found")
 }
 
 func TestUpdateAndDeleteLyricAnnotationLockSongBeforeAnnotation(t *testing.T) {
