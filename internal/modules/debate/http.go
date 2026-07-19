@@ -39,7 +39,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 // @Param status query string false "Status"
 // @Param search query string false "Search"
 // @Param tag query string false "Tag"
-// @Success 200 {array} model.Debate
+// @Success 200 {object} handlers.DebateListResponse
 // @Router /api/v1/debate/topics [get]
 func (h *Handler) list(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
@@ -60,7 +60,7 @@ func (h *Handler) list(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param body body CreateDebateRequest true "Debate"
-// @Success 201 {object} DebateDTO
+// @Success 201 {object} handlers.DebateResponse
 // @Router /api/v1/debate/topics [post]
 func (h *Handler) create(c *gin.Context) {
 	user, ok := requireCurrentUser(c)
@@ -84,7 +84,7 @@ func (h *Handler) create(c *gin.Context) {
 // @Tags Debate
 // @Produce json
 // @Param id path string true "Debate ID"
-// @Success 200 {object} DebateDTO
+// @Success 200 {object} handlers.DebateResponse
 // @Router /api/v1/debate/topics/{id} [get]
 func (h *Handler) get(c *gin.Context) {
 	id, ok := parseID(c, "id")
@@ -107,7 +107,7 @@ func (h *Handler) get(c *gin.Context) {
 // @Security BearerAuth
 // @Param id path string true "Debate ID"
 // @Param body body SaveWikiRequest true "Revision"
-// @Success 200 {object} DebateDTO
+// @Success 200 {object} handlers.DebateResponse
 // @Router /api/v1/debate/topics/{id} [put]
 func (h *Handler) save(c *gin.Context) {
 	user, ok := requireCurrentUser(c)
@@ -136,7 +136,7 @@ func (h *Handler) save(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path string true "Debate ID"
-// @Success 200 {object} DebateDTO
+// @Success 200 {object} handlers.DebateResponse
 // @Router /api/v1/debate/topics/{id}/archive [post]
 func (h *Handler) archive(c *gin.Context) {
 	user, ok := requireCurrentUser(c)
@@ -160,7 +160,7 @@ func (h *Handler) archive(c *gin.Context) {
 // @Tags Debate
 // @Produce json
 // @Param id path string true "Debate ID"
-// @Success 200 {array} DebateRevisionDTO
+// @Success 200 {object} handlers.DebateRevisionListResponse
 // @Router /api/v1/debate/topics/{id}/revisions [get]
 func (h *Handler) listRevisions(c *gin.Context) {
 	id, ok := parseID(c, "id")
@@ -181,7 +181,7 @@ func (h *Handler) listRevisions(c *gin.Context) {
 // @Produce json
 // @Param id path string true "Debate ID"
 // @Param revisionID path string true "Revision ID"
-// @Success 200 {object} DebateRevisionDTO
+// @Success 200 {object} handlers.DebateRevisionResponse
 // @Router /api/v1/debate/topics/{id}/revisions/{revisionID} [get]
 func (h *Handler) getRevision(c *gin.Context) {
 	id, revisionID, ok := parseTwoIDs(c, "id", "revisionID")
@@ -203,7 +203,7 @@ func (h *Handler) getRevision(c *gin.Context) {
 // @Param id path string true "Debate ID"
 // @Param revisionID path string true "Revision ID"
 // @Param against query string true "Other revision ID"
-// @Success 200 {object} RevisionDiffDTO
+// @Success 200 {object} handlers.DebateRevisionDiffResponse
 // @Router /api/v1/debate/topics/{id}/revisions/{revisionID}/diff [get]
 func (h *Handler) diffRevision(c *gin.Context) {
 	id, revisionID, ok := parseTwoIDs(c, "id", "revisionID")
@@ -232,7 +232,7 @@ func (h *Handler) diffRevision(c *gin.Context) {
 // @Param id path string true "Debate ID"
 // @Param revisionID path string true "Revision ID"
 // @Param body body RevertRevisionRequest true "Revert"
-// @Success 200 {object} DebateDTO
+// @Success 200 {object} handlers.DebateResponse
 // @Router /api/v1/debate/topics/{id}/revisions/{revisionID}/revert [post]
 func (h *Handler) revertRevision(c *gin.Context) {
 	user, ok := requireCurrentUser(c)
@@ -264,7 +264,7 @@ func (h *Handler) revertRevision(c *gin.Context) {
 // @Param id path string true "Debate ID"
 // @Param relationID path string true "Relation ID"
 // @Param body body ReconfirmReferenceRequest true "Reconfirmation"
-// @Success 200 {object} DebateDTO
+// @Success 200 {object} handlers.DebateResponse
 // @Router /api/v1/debate/topics/{id}/references/{relationID}/reconfirm [post]
 func (h *Handler) reconfirm(c *gin.Context) {
 	user, ok := requireCurrentUser(c)
@@ -295,7 +295,7 @@ func (h *Handler) reconfirm(c *gin.Context) {
 // @Security BearerAuth
 // @Param id path string true "Debate ID"
 // @Param body body ProtectionRequest true "Protection"
-// @Success 200 {object} map[string]string
+// @Success 200 {object} handlers.DebateMessageResponse
 // @Router /api/v1/debate/topics/{id}/protection [put]
 func (h *Handler) putProtection(c *gin.Context) {
 	user, ok := requireCurrentUser(c)
@@ -323,7 +323,7 @@ func (h *Handler) putProtection(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path string true "Debate ID"
-// @Success 200 {object} map[string]string
+// @Success 200 {object} handlers.DebateMessageResponse
 // @Router /api/v1/debate/topics/{id}/protection [delete]
 func (h *Handler) deleteProtection(c *gin.Context) {
 	user, ok := requireCurrentUser(c)
@@ -348,7 +348,7 @@ func (h *Handler) deleteProtection(c *gin.Context) {
 // @Param id path string true "Debate ID"
 // @Param view query string false "tree or graph"
 // @Param depth query int false "Depth"
-// @Success 200 {object} DebateGraph
+// @Success 200 {object} handlers.DebateGraphResponse
 // @Router /api/v1/debates/{id}/relations [get]
 func (h *Handler) graph(c *gin.Context) {
 	id, ok := parseID(c, "id")

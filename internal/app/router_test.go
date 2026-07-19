@@ -909,31 +909,6 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 		}
 	}
 
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate/arguments/"+uuid.NewString()+"/vote", bytes.NewBufferString(`{"vote_type":1}`))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected legacy debate vote route to be unmounted, got %d: %s", w.Code, w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics/"+uuid.NewString()+"/conclude-vote", nil)
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected legacy debate conclude vote route to be unmounted, got %d: %s", w.Code, w.Body.String())
-	}
-
-	for _, legacy := range []string{
-		"/api/v1/debate-arguments/" + uuid.NewString() + "/vote",
-		"/api/v1/debates/" + uuid.NewString() + "/conclusion-vote",
-	} {
-		w = httptest.NewRecorder()
-		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, legacy, nil))
-		if w.Code != http.StatusNotFound {
-			t.Fatalf("expected legacy route %s to return 404, got %d", legacy, w.Code)
-		}
-	}
 }
 
 func TestRegisterV1RoutesDebateCreateAcceptsBearerAuth(t *testing.T) {
@@ -990,8 +965,29 @@ func TestRegisterV1RoutesDoesNotMountLegacyInteractionRoutes(t *testing.T) {
 		{http.MethodDelete, "/api/v1/forum/replies/" + id + "/solve"},
 		{http.MethodGet, "/api/v1/debate/topics/" + id + "/arguments"},
 		{http.MethodPost, "/api/v1/debate/topics/" + id + "/arguments"},
-		{http.MethodPut, "/api/v1/debate/arguments/" + id},
-		{http.MethodDelete, "/api/v1/debate/arguments/" + id},
+		{http.MethodGet, "/api/v1/debates/" + id + "/arguments"},
+		{http.MethodPost, "/api/v1/debates/" + id + "/arguments"},
+		{http.MethodGet, "/api/v1/debate-arguments/" + id},
+		{http.MethodPatch, "/api/v1/debate-arguments/" + id},
+		{http.MethodDelete, "/api/v1/debate-arguments/" + id},
+		{http.MethodPost, "/api/v1/debate-arguments/" + id + "/fold"},
+		{http.MethodDelete, "/api/v1/debate-arguments/" + id + "/fold"},
+		{http.MethodPost, "/api/v1/debate-arguments/" + id + "/vote"},
+		{http.MethodDelete, "/api/v1/debate-arguments/" + id + "/vote"},
+		{http.MethodPost, "/api/v1/debate-arguments/" + id + "/reference"},
+		{http.MethodDelete, "/api/v1/debate-arguments/" + id + "/reference/" + id},
+		{http.MethodPost, "/api/v1/debate-arguments/" + id + "/debate-reference"},
+		{http.MethodDelete, "/api/v1/debate-arguments/" + id + "/debate-reference/" + id},
+		{http.MethodPost, "/api/v1/debate-relations"},
+		{http.MethodDelete, "/api/v1/debate-relations/" + id},
+		{http.MethodPost, "/api/v1/debate/topics/" + id + "/conclude"},
+		{http.MethodPost, "/api/v1/debate/topics/" + id + "/reopen"},
+		{http.MethodPost, "/api/v1/debate/topics/" + id + "/conclusion-vote"},
+		{http.MethodDelete, "/api/v1/debate/topics/" + id + "/conclusion-vote"},
+		{http.MethodPost, "/api/v1/debates/" + id + "/vote"},
+		{http.MethodDelete, "/api/v1/debates/" + id + "/vote"},
+		{http.MethodPost, "/api/v1/debates/" + id + "/conclusion-vote"},
+		{http.MethodDelete, "/api/v1/debates/" + id + "/conclusion-vote"},
 	}
 	for _, request := range requests {
 		response := httptest.NewRecorder()

@@ -2,12 +2,11 @@ package handlers
 
 import (
 	"atoman/internal/model"
-	debatemodule "atoman/internal/modules/debate"
-	debatevoting "atoman/internal/modules/debate_voting"
+	"atoman/internal/modules/debate"
+	"atoman/internal/modules/debate_voting"
 	feedmodule "atoman/internal/modules/feed"
+	"atoman/internal/platform/httpx"
 	"atoman/internal/service"
-
-	"github.com/google/uuid"
 )
 
 type ErrorResponse struct {
@@ -834,45 +833,44 @@ type TimelineRevisionListResponse struct {
 }
 
 type DebateResponse struct {
-	Data debatemodule.DebateDTO `json:"data"`
+	Data debate.DebateDTO `json:"data"`
 }
 
 type DebateListResponse struct {
-	Data  []model.Debate `json:"data"`
-	Total int64          `json:"total" example:"20"`
-	Page  int            `json:"page" example:"1"`
-	Limit int            `json:"limit" example:"20"`
+	Data []model.Debate `json:"data"`
+	Meta httpx.PageMeta `json:"meta"`
 }
 
-type DebateSearchResponse struct {
-	Data []model.Debate `json:"data"`
+type DebateRevisionResponse struct {
+	Data debate.DebateRevisionDTO `json:"data"`
+}
+
+type DebateRevisionListResponse struct {
+	Data []debate.DebateRevisionDTO `json:"data"`
+}
+
+type DebateRevisionDiffResponse struct {
+	Data debate.RevisionDiffDTO `json:"data"`
 }
 
 type DebateVoteResponse struct {
-	Data debatevoting.VoteStats `json:"data"`
+	Data debate_voting.VoteStats `json:"data"`
 }
 
-type DebateRelationResponse struct {
-	Data model.DebateRelation `json:"data"`
+type DebateConclusionListResponse struct {
+	Data []model.DebateConclusionEvent `json:"data"`
 }
 
-type DebateGraphData struct {
-	RootID            uuid.UUID              `json:"root_id"`
-	Nodes             []model.Debate         `json:"nodes"`
-	Relations         []model.DebateRelation `json:"relations"`
-	ExpandableNodeIDs []uuid.UUID            `json:"expandable_node_ids"`
+type DebateMessageData struct {
+	Message string `json:"message"`
+}
+
+type DebateMessageResponse struct {
+	Data DebateMessageData `json:"data"`
 }
 
 type DebateGraphResponse struct {
-	Data DebateGraphData `json:"data"`
-}
-
-type DebateVoteListResponse struct {
-	Data []model.DebateVote `json:"data"`
-}
-
-type FoldArgumentInput struct {
-	FoldNote string `json:"fold_note" example:"证据不足，暂时折叠。"`
+	Data debate.DebateGraph `json:"data"`
 }
 
 type TimelineProposalResponse struct {

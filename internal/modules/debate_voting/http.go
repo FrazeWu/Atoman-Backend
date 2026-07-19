@@ -30,7 +30,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 // @Tags Debate
 // @Produce json
 // @Param id path string true "Debate ID"
-// @Success 200 {object} VoteStats
+// @Success 200 {object} handlers.DebateVoteResponse
 // @Router /api/v1/debate/topics/{id}/votes [get]
 func (h *Handler) getVotes(c *gin.Context) {
 	id, ok := parseDebateID(c)
@@ -54,7 +54,7 @@ func (h *Handler) getVotes(c *gin.Context) {
 // @Security BearerAuth
 // @Param id path string true "Debate ID"
 // @Param body body voteRequest true "Vote"
-// @Success 200 {object} VoteStats
+// @Success 200 {object} handlers.DebateVoteResponse
 // @Router /api/v1/debate/topics/{id}/vote [put]
 func (h *Handler) setVote(c *gin.Context) {
 	user, ok := requireUser(c)
@@ -84,7 +84,7 @@ func (h *Handler) setVote(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Param id path string true "Debate ID"
-// @Success 200 {object} VoteStats
+// @Success 200 {object} handlers.DebateVoteResponse
 // @Router /api/v1/debate/topics/{id}/vote [delete]
 func (h *Handler) deleteVote(c *gin.Context) {
 	user, ok := requireUser(c)
@@ -108,7 +108,7 @@ func (h *Handler) deleteVote(c *gin.Context) {
 // @Tags Debate
 // @Produce json
 // @Param id path string true "Debate ID"
-// @Success 200 {array} model.DebateConclusionEvent
+// @Success 200 {object} handlers.DebateConclusionListResponse
 // @Router /api/v1/debate/topics/{id}/conclusions [get]
 func (h *Handler) listConclusions(c *gin.Context) {
 	id, ok := parseDebateID(c)

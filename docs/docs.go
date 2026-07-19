@@ -4936,10 +4936,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.Debate"
-                            }
+                            "$ref": "#/definitions/handlers.DebateListResponse"
                         }
                     }
                 }
@@ -4975,7 +4972,7 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/debate.DebateDTO"
+                            "$ref": "#/definitions/handlers.DebateResponse"
                         }
                     }
                 }
@@ -5003,7 +5000,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate.DebateDTO"
+                            "$ref": "#/definitions/handlers.DebateResponse"
                         }
                     }
                 }
@@ -5046,7 +5043,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate.DebateDTO"
+                            "$ref": "#/definitions/handlers.DebateResponse"
                         }
                     }
                 }
@@ -5079,7 +5076,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate.DebateDTO"
+                            "$ref": "#/definitions/handlers.DebateResponse"
                         }
                     }
                 }
@@ -5107,10 +5104,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.DebateConclusionEvent"
-                            }
+                            "$ref": "#/definitions/handlers.DebateConclusionListResponse"
                         }
                     }
                 }
@@ -5155,10 +5149,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/handlers.DebateMessageResponse"
                         }
                     }
                 }
@@ -5189,10 +5180,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/handlers.DebateMessageResponse"
                         }
                     }
                 }
@@ -5244,7 +5232,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate.DebateDTO"
+                            "$ref": "#/definitions/handlers.DebateResponse"
                         }
                     }
                 }
@@ -5272,10 +5260,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/debate.DebateRevisionDTO"
-                            }
+                            "$ref": "#/definitions/handlers.DebateRevisionListResponse"
                         }
                     }
                 }
@@ -5310,7 +5295,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate.DebateRevisionDTO"
+                            "$ref": "#/definitions/handlers.DebateRevisionResponse"
                         }
                     }
                 }
@@ -5352,7 +5337,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate.RevisionDiffDTO"
+                            "$ref": "#/definitions/handlers.DebateRevisionDiffResponse"
                         }
                     }
                 }
@@ -5404,7 +5389,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate.DebateDTO"
+                            "$ref": "#/definitions/handlers.DebateResponse"
                         }
                     }
                 }
@@ -5449,7 +5434,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate_voting.VoteStats"
+                            "$ref": "#/definitions/handlers.DebateVoteResponse"
                         }
                     }
                 }
@@ -5480,7 +5465,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate_voting.VoteStats"
+                            "$ref": "#/definitions/handlers.DebateVoteResponse"
                         }
                     }
                 }
@@ -5508,7 +5493,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate_voting.VoteStats"
+                            "$ref": "#/definitions/handlers.DebateVoteResponse"
                         }
                     }
                 }
@@ -5548,7 +5533,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/debate.DebateGraph"
+                            "$ref": "#/definitions/handlers.DebateGraphResponse"
                         }
                     }
                 }
@@ -18016,6 +18001,98 @@ const docTemplate = `{
                 "image_url": {
                     "type": "string",
                     "example": "https://cdn.example.com/dm.png"
+                }
+            }
+        },
+        "handlers.DebateConclusionListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.DebateConclusionEvent"
+                    }
+                }
+            }
+        },
+        "handlers.DebateGraphResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/debate.DebateGraph"
+                }
+            }
+        },
+        "handlers.DebateListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Debate"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/httpx.PageMeta"
+                }
+            }
+        },
+        "handlers.DebateMessageData": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.DebateMessageResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/handlers.DebateMessageData"
+                }
+            }
+        },
+        "handlers.DebateResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/debate.DebateDTO"
+                }
+            }
+        },
+        "handlers.DebateRevisionDiffResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/debate.RevisionDiffDTO"
+                }
+            }
+        },
+        "handlers.DebateRevisionListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/debate.DebateRevisionDTO"
+                    }
+                }
+            }
+        },
+        "handlers.DebateRevisionResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/debate.DebateRevisionDTO"
+                }
+            }
+        },
+        "handlers.DebateVoteResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/debate_voting.VoteStats"
                 }
             }
         },

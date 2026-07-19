@@ -21,8 +21,14 @@ func NewResourceRegistry(db *gorm.DB) *resourceref.Registry {
 	}
 	register(resourceref.KindPost, func(_ context.Context, _ resourceref.Viewer, id uuid.UUID) (resourceref.Resolved, error) {
 		var item model.Post
-		err := db.First(&item, "id = ?", id).Error
-		return resolved(kindTitle(resourceref.KindPost, id, item.Title), err == nil && item.Status == "published" && item.Visibility == "public"), err
+		if err := db.First(&item, "id = ?", id).Error; err != nil {
+			return resolved(kindTitle(resourceref.KindPost, id, item.Title), false), err
+		}
+		var episodeCount int64
+		if err := db.Model(&model.PodcastEpisode{}).Where("post_id = ?", item.ID).Count(&episodeCount).Error; err != nil {
+			return resourceref.Resolved{}, err
+		}
+		return resolved(kindTitle(resourceref.KindPost, id, item.Title), isPublicPublishedPost(item) && episodeCount == 0), nil
 	})
 	register(resourceref.KindThread, func(_ context.Context, _ resourceref.Viewer, id uuid.UUID) (resourceref.Resolved, error) {
 		var item model.ForumTopic
@@ -79,7 +85,7 @@ func NewResourceRegistry(db *gorm.DB) *resourceref.Registry {
 	register(resourceref.KindEpisode, func(_ context.Context, _ resourceref.Viewer, id uuid.UUID) (resourceref.Resolved, error) {
 		var item model.PodcastEpisode
 		err := db.Preload("Post").First(&item, "id = ?", id).Error
-		visible := err == nil && item.Post != nil && item.Post.Status == "published" && item.Post.Visibility == "public"
+		visible := err == nil && item.Post != nil && isPublicPublishedPost(*item.Post)
 		title := ""
 		if item.Post != nil {
 			title = item.Post.Title
@@ -138,12 +144,16 @@ func kindTitle(kind string, id uuid.UUID, title string) resourceref.Resolved {
 	return resourceref.Resolved{Kind: kind, ID: id, Title: strings.TrimSpace(title)}
 }
 
+func isPublicPublishedPost(item model.Post) bool {
+	return item.Status == "published" && (item.Visibility == "" || item.Visibility == "public")
+}
+
 func publicCommentTargetVisible(db *gorm.DB, target model.DiscussionTarget) (bool, error) {
 	switch target.Kind {
 	case "blog_post":
 		var item model.Post
 		err := db.First(&item, "id = ?", target.ResourceID).Error
-		return err == nil && item.Status == "published" && item.Visibility == "public", err
+		return err == nil && isPublicPublishedPost(item), err
 	case "video":
 		var item model.Video
 		err := db.First(&item, "id = ?", target.ResourceID).Error

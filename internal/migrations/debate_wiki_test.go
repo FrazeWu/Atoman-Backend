@@ -91,6 +91,7 @@ func TestRunDebateWikiMigrationCleansLegacyArgumentsAndBackfillsRevision(t *test
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &legacyDebate{}, &model.DiscussionTarget{}, &model.CommentEntry{},
 		&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{},
+		&model.CommentTimeAnchor{}, &model.CommentPublishRecord{}, &model.TimelineRevisionProposal{}, &model.Notification{},
 		&legacyDebateArgumentDetail{}, &legacyDebateArgumentReference{}, &legacyDebateArgumentDebateRef{},
 		&legacyDebateVote{}, &legacyVoteHistory{}, &legacyDebateConcludeVote{}, &legacyDebateRelation{},
 	))
@@ -99,14 +100,37 @@ func TestRunDebateWikiMigrationCleansLegacyArgumentsAndBackfillsRevision(t *test
 	require.NoError(t, db.Create(&user).Error)
 	debate := legacyDebate{UserID: user.UUID, Title: "Legacy", Description: "Summary", Content: "Body", Status: "concluded", Tags: `{tag}`, ConclusionType: "yes", ArgumentCount: 1, VoteCount: 1, ConcludeVoteCount: 1, ConcludeThreshold: 10}
 	require.NoError(t, db.Create(&debate).Error)
-	target := model.DiscussionTarget{Kind: "debate", ResourceID: debate.ID, ResourceKey: debate.ID.String(), OwnerID: &user.UUID}
+	target := model.DiscussionTarget{
+		Kind: "debate", ResourceID: debate.ID, ResourceKey: debate.ID.String(), OwnerID: &user.UUID,
+		CommentCount: 99, RootCount: 77, NextFloor: 42,
+	}
 	require.NoError(t, db.Create(&target).Error)
-	argument := model.CommentEntry{TargetID: target.ID, AuthorID: user.UUID, Content: "legacy argument", ContentHash: "legacy", Status: "active"}
+	argumentFloor, ordinaryFloor := 1, 5
+	argument := model.CommentEntry{TargetID: target.ID, AuthorID: user.UUID, FloorNumber: &argumentFloor, Content: "legacy argument", ContentHash: "legacy-root", Status: "active"}
 	require.NoError(t, db.Create(&argument).Error)
-	require.NoError(t, db.Create(&legacyDebateArgumentDetail{CommentID: argument.ID, ArgumentType: "support"}).Error)
-	require.NoError(t, db.Create(&model.CommentMention{CommentID: argument.ID, UserID: user.UUID}).Error)
-	require.NoError(t, db.Create(&model.CommentLike{CommentID: argument.ID, UserID: user.UUID}).Error)
-	require.NoError(t, db.Create(&model.CommentReport{CommentID: argument.ID, ReporterID: user.UUID, Reason: "spam"}).Error)
+	argumentReply := model.CommentEntry{TargetID: target.ID, AuthorID: user.UUID, RootID: &argument.ID, ReplyToID: &argument.ID, Content: "legacy argument reply", ContentHash: "legacy-reply", Status: "active"}
+	require.NoError(t, db.Create(&argumentReply).Error)
+	ordinary := model.CommentEntry{TargetID: target.ID, AuthorID: user.UUID, FloorNumber: &ordinaryFloor, Content: "ordinary discussion", ContentHash: "ordinary-root", Status: "active"}
+	require.NoError(t, db.Create(&ordinary).Error)
+	ordinaryReply := model.CommentEntry{TargetID: target.ID, AuthorID: user.UUID, RootID: &ordinary.ID, ReplyToID: &ordinary.ID, Content: "ordinary reply", ContentHash: "ordinary-reply", Status: "auto_folded"}
+	require.NoError(t, db.Create(&ordinaryReply).Error)
+	require.NoError(t, db.Model(&target).Update("pinned_comment_id", argument.ID).Error)
+
+	for _, entry := range []model.CommentEntry{argument, argumentReply} {
+		require.NoError(t, db.Create(&legacyDebateArgumentDetail{CommentID: entry.ID, ArgumentType: "support"}).Error)
+	}
+	for _, entry := range []model.CommentEntry{argument, ordinary} {
+		require.NoError(t, db.Create(&model.CommentMention{CommentID: entry.ID, UserID: user.UUID}).Error)
+		require.NoError(t, db.Create(&model.CommentAttachment{CommentID: entry.ID, MediaAssetID: uuid.New()}).Error)
+		require.NoError(t, db.Create(&model.CommentLike{CommentID: entry.ID, UserID: user.UUID}).Error)
+		require.NoError(t, db.Create(&model.CommentReport{CommentID: entry.ID, ReporterID: user.UUID, Reason: "spam"}).Error)
+		require.NoError(t, db.Create(&model.CommentTimeAnchor{CommentID: entry.ID, Seconds: 10}).Error)
+		require.NoError(t, db.Create(&model.TimelineRevisionProposal{CommentID: entry.ID, TargetKind: "debate", TargetID: debate.ID, PatchJSON: []byte(`{}`), Evidence: "source"}).Error)
+		require.NoError(t, db.Create(&model.Notification{RecipientID: user.UUID, Type: "comment_reply", SourceType: "comment_event", SourceID: entry.ID}).Error)
+	}
+	require.NoError(t, db.Create(&model.Notification{RecipientID: user.UUID, Type: "debate_update", SourceType: "debate", SourceID: argument.ID}).Error)
+	publishRecord := model.CommentPublishRecord{AuthorID: user.UUID, TargetID: target.ID, ContentHash: argument.ContentHash}
+	require.NoError(t, db.Create(&publishRecord).Error)
 	require.NoError(t, db.Create(&legacyDebateVote{ArgumentID: argument.ID, UserID: user.UUID, VoteType: 1}).Error)
 	require.NoError(t, db.Create(&legacyVoteHistory{ArgumentID: argument.ID, UserID: user.UUID, NewVoteType: 1}).Error)
 	require.NoError(t, db.Create(&legacyDebateConcludeVote{DebateID: debate.ID, UserID: user.UUID}).Error)
@@ -132,11 +156,33 @@ func TestRunDebateWikiMigrationCleansLegacyArgumentsAndBackfillsRevision(t *test
 	for _, table := range []string{"debate_argument_details", "debate_argument_references", "debate_argument_debate_refs", "vote_histories", "debate_conclude_votes"} {
 		require.Falsef(t, db.Migrator().HasTable(table), "legacy table %s should be removed", table)
 	}
-	for _, table := range []string{"comment_entries", "comment_mentions", "comment_likes", "comment_reports"} {
+	var remainingEntries []model.CommentEntry
+	require.NoError(t, db.Order("content_hash").Find(&remainingEntries).Error)
+	require.Len(t, remainingEntries, 2)
+	require.Equal(t, []string{"ordinary-reply", "ordinary-root"}, []string{remainingEntries[0].ContentHash, remainingEntries[1].ContentHash})
+
+	var migratedTarget model.DiscussionTarget
+	require.NoError(t, db.First(&migratedTarget, "id = ?", target.ID).Error)
+	require.Equal(t, 2, migratedTarget.CommentCount)
+	require.Equal(t, 1, migratedTarget.RootCount)
+	require.Equal(t, 6, migratedTarget.NextFloor)
+	require.Nil(t, migratedTarget.PinnedCommentID)
+
+	for _, table := range []string{"comment_mentions", "comment_attachments", "comment_likes", "comment_reports", "comment_time_anchors", "timeline_revision_proposals"} {
 		var count int64
 		require.NoError(t, db.Table(table).Count(&count).Error)
-		require.Zero(t, count, table)
+		require.EqualValues(t, 1, count, table)
 	}
+	var argumentNotificationCount, ordinaryNotificationCount, unrelatedNotificationCount int64
+	require.NoError(t, db.Model(&model.Notification{}).Where("source_id = ? AND source_type LIKE ?", argument.ID, "comment_%").Count(&argumentNotificationCount).Error)
+	require.NoError(t, db.Model(&model.Notification{}).Where("source_id = ? AND source_type LIKE ?", ordinary.ID, "comment_%").Count(&ordinaryNotificationCount).Error)
+	require.NoError(t, db.Model(&model.Notification{}).Where("source_id = ? AND source_type = ?", argument.ID, "debate").Count(&unrelatedNotificationCount).Error)
+	require.Zero(t, argumentNotificationCount)
+	require.EqualValues(t, 1, ordinaryNotificationCount)
+	require.EqualValues(t, 1, unrelatedNotificationCount)
+	var publishRecordCount int64
+	require.NoError(t, db.Model(&model.CommentPublishRecord{}).Where("id = ?", publishRecord.ID).Count(&publishRecordCount).Error)
+	require.EqualValues(t, 1, publishRecordCount)
 }
 
 func TestRunDebateWikiMigrationIsIdempotentAndKeepsNewProjectionData(t *testing.T) {

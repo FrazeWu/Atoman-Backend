@@ -68,17 +68,34 @@ func cleanLegacyDebateData(db *gorm.DB) error {
 			return err
 		}
 		if len(argumentIDs) > 0 {
-			for _, table := range []string{"comment_mentions", "comment_attachments", "comment_likes", "comment_reports"} {
+			var targetIDs []uuid.UUID
+			if db.Migrator().HasTable("comment_entries") {
+				if err := db.Table("comment_entries").Where("id IN ?", argumentIDs).Distinct().Pluck("target_id", &targetIDs).Error; err != nil {
+					return err
+				}
+			}
+			for _, table := range []string{
+				"comment_mentions", "comment_attachments", "comment_likes", "comment_reports",
+				"comment_time_anchors", "timeline_revision_proposals",
+			} {
 				if db.Migrator().HasTable(table) {
 					if err := db.Exec("DELETE FROM "+table+" WHERE comment_id IN ?", argumentIDs).Error; err != nil {
 						return err
 					}
 				}
 			}
+			if db.Migrator().HasTable("notifications") {
+				if err := db.Exec("DELETE FROM notifications WHERE source_id IN ? AND source_type LIKE ?", argumentIDs, "comment_%").Error; err != nil {
+					return err
+				}
+			}
 			if db.Migrator().HasTable("comment_entries") {
 				if err := db.Exec("DELETE FROM comment_entries WHERE id IN ?", argumentIDs).Error; err != nil {
 					return err
 				}
+			}
+			if err := recountDebateDiscussionTargets(db, targetIDs, argumentIDs); err != nil {
+				return err
 			}
 		}
 	}
@@ -103,6 +120,52 @@ func cleanLegacyDebateData(db *gorm.DB) error {
 	}
 	if db.Migrator().HasColumn("debate_votes", "argument_id") {
 		if err := db.Migrator().DropTable("debate_votes"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func recountDebateDiscussionTargets(db *gorm.DB, targetIDs, removedCommentIDs []uuid.UUID) error {
+	if len(targetIDs) == 0 || !db.Migrator().HasTable("discussion_targets") {
+		return nil
+	}
+	removed := make(map[uuid.UUID]struct{}, len(removedCommentIDs))
+	for _, id := range removedCommentIDs {
+		removed[id] = struct{}{}
+	}
+	visibleStatuses := []string{"active", "auto_folded"}
+	for _, targetID := range targetIDs {
+		var target model.DiscussionTarget
+		if err := db.Unscoped().First(&target, "id = ?", targetID).Error; err != nil {
+			return err
+		}
+		comments := db.Model(&model.CommentEntry{}).
+			Where("target_id = ? AND status IN ?", targetID, visibleStatuses)
+		var commentCount, rootCount int64
+		if err := comments.Count(&commentCount).Error; err != nil {
+			return err
+		}
+		roots := db.Model(&model.CommentEntry{}).
+			Where("target_id = ? AND root_id IS NULL AND status IN ?", targetID, visibleStatuses)
+		if err := roots.Count(&rootCount).Error; err != nil {
+			return err
+		}
+		var maxFloor int
+		if err := roots.Select("COALESCE(MAX(floor_number), 0)").Scan(&maxFloor).Error; err != nil {
+			return err
+		}
+		updates := map[string]any{
+			"comment_count": commentCount,
+			"root_count":    rootCount,
+			"next_floor":    maxFloor + 1,
+		}
+		if target.PinnedCommentID != nil {
+			if _, ok := removed[*target.PinnedCommentID]; ok {
+				updates["pinned_comment_id"] = nil
+			}
+		}
+		if err := db.Unscoped().Model(&model.DiscussionTarget{}).Where("id = ?", targetID).Updates(updates).Error; err != nil {
 			return err
 		}
 	}

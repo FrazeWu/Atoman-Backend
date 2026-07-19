@@ -1522,6 +1522,64 @@ definitions:
         example: https://cdn.example.com/dm.png
         type: string
     type: object
+  handlers.DebateConclusionListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.DebateConclusionEvent'
+        type: array
+    type: object
+  handlers.DebateGraphResponse:
+    properties:
+      data:
+        $ref: '#/definitions/debate.DebateGraph'
+    type: object
+  handlers.DebateListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.Debate'
+        type: array
+      meta:
+        $ref: '#/definitions/httpx.PageMeta'
+    type: object
+  handlers.DebateMessageData:
+    properties:
+      message:
+        type: string
+    type: object
+  handlers.DebateMessageResponse:
+    properties:
+      data:
+        $ref: '#/definitions/handlers.DebateMessageData'
+    type: object
+  handlers.DebateResponse:
+    properties:
+      data:
+        $ref: '#/definitions/debate.DebateDTO'
+    type: object
+  handlers.DebateRevisionDiffResponse:
+    properties:
+      data:
+        $ref: '#/definitions/debate.RevisionDiffDTO'
+    type: object
+  handlers.DebateRevisionListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/debate.DebateRevisionDTO'
+        type: array
+    type: object
+  handlers.DebateRevisionResponse:
+    properties:
+      data:
+        $ref: '#/definitions/debate.DebateRevisionDTO'
+    type: object
+  handlers.DebateVoteResponse:
+    properties:
+      data:
+        $ref: '#/definitions/debate_voting.VoteStats'
+    type: object
   handlers.EntryStatusInput:
     properties:
       reason:
@@ -7946,9 +8004,7 @@ paths:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/model.Debate'
-            type: array
+            $ref: '#/definitions/handlers.DebateListResponse'
       summary: List debate topics
       tags:
       - Debate
@@ -7968,7 +8024,7 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/debate.DebateDTO'
+            $ref: '#/definitions/handlers.DebateResponse'
       security:
       - BearerAuth: []
       summary: Create a debate topic
@@ -7988,7 +8044,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate.DebateDTO'
+            $ref: '#/definitions/handlers.DebateResponse'
       summary: Get a debate topic
       tags:
       - Debate
@@ -8013,7 +8069,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate.DebateDTO'
+            $ref: '#/definitions/handlers.DebateResponse'
       security:
       - BearerAuth: []
       summary: Save a debate wiki revision
@@ -8033,7 +8089,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate.DebateDTO'
+            $ref: '#/definitions/handlers.DebateResponse'
       security:
       - BearerAuth: []
       summary: Archive a debate topic
@@ -8053,9 +8109,7 @@ paths:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/model.DebateConclusionEvent'
-            type: array
+            $ref: '#/definitions/handlers.DebateConclusionListResponse'
       summary: List immutable debate conclusion events
       tags:
       - Debate
@@ -8073,9 +8127,7 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/handlers.DebateMessageResponse'
       security:
       - BearerAuth: []
       summary: Remove debate protection
@@ -8102,9 +8154,7 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/handlers.DebateMessageResponse'
       security:
       - BearerAuth: []
       summary: Protect a debate topic
@@ -8137,7 +8187,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate.DebateDTO'
+            $ref: '#/definitions/handlers.DebateResponse'
       security:
       - BearerAuth: []
       summary: Reconfirm a stale debate reference
@@ -8157,9 +8207,7 @@ paths:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/debate.DebateRevisionDTO'
-            type: array
+            $ref: '#/definitions/handlers.DebateRevisionListResponse'
       summary: List debate revisions
       tags:
       - Debate
@@ -8182,7 +8230,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate.DebateRevisionDTO'
+            $ref: '#/definitions/handlers.DebateRevisionResponse'
       summary: Get a debate revision
       tags:
       - Debate
@@ -8210,7 +8258,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate.RevisionDiffDTO'
+            $ref: '#/definitions/handlers.DebateRevisionDiffResponse'
       summary: Diff two debate revisions
       tags:
       - Debate
@@ -8241,7 +8289,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate.DebateDTO'
+            $ref: '#/definitions/handlers.DebateResponse'
       security:
       - BearerAuth: []
       summary: Revert to a debate revision
@@ -8261,7 +8309,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate_voting.VoteStats'
+            $ref: '#/definitions/handlers.DebateVoteResponse'
       security:
       - BearerAuth: []
       summary: Delete the current user's debate vote
@@ -8288,7 +8336,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate_voting.VoteStats'
+            $ref: '#/definitions/handlers.DebateVoteResponse'
       security:
       - BearerAuth: []
       summary: Set a community debate vote
@@ -8308,7 +8356,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate_voting.VoteStats'
+            $ref: '#/definitions/handlers.DebateVoteResponse'
       summary: Get community vote statistics
       tags:
       - Debate
@@ -8334,7 +8382,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/debate.DebateGraph'
+            $ref: '#/definitions/handlers.DebateGraphResponse'
       summary: Get the read-only debate graph
       tags:
       - Debate

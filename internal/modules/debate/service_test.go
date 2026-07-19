@@ -227,16 +227,66 @@ func TestStaleReferencesCanBeInheritedAndReconfirmed(t *testing.T) {
 
 func TestOrdinaryResourceReferenceUsesPublicVisibility(t *testing.T) {
 	ctx := newDebateTestContext(t)
-	post := model.Post{UserID: ctx.owner.ID, Title: "Public post", Content: "body", Status: "published", Visibility: "public"}
+	post := model.Post{UserID: ctx.owner.ID, Title: "Legacy public post", Content: "body", Status: "published", Visibility: "public"}
 	require.NoError(t, ctx.db.Create(&post).Error)
+	require.NoError(t, ctx.db.Model(&post).UpdateColumn("visibility", "").Error)
 	private := model.Post{UserID: ctx.owner.ID, Title: "Private post", Content: "body", Status: "published", Visibility: "private"}
 	require.NoError(t, ctx.db.Create(&private).Error)
+	draft := model.Post{UserID: ctx.owner.ID, Title: "Draft post", Content: "body", Status: "draft", Visibility: "public"}
+	require.NoError(t, ctx.db.Create(&draft).Error)
 	target := createDebateForTest(t, ctx, "Target", "body")
 
 	publicSaved, err := ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Target", Content: "@post:" + post.ID.String(), EditSummary: "public", BaseRevisionID: *target.CurrentRevisionID})
 	require.NoError(t, err)
-	require.Equal(t, "Public post", publicSaved.References[0].Title)
+	require.Equal(t, "Legacy public post", publicSaved.References[0].Title)
 	_, err = ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Target", Content: "@post:" + private.ID.String(), EditSummary: "private", BaseRevisionID: *publicSaved.CurrentRevisionID})
+	requireAppError(t, err, "debate.reference_unavailable", 400)
+	_, err = ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Target", Content: "@post:" + draft.ID.String(), EditSummary: "draft", BaseRevisionID: *publicSaved.CurrentRevisionID})
+	requireAppError(t, err, "debate.reference_unavailable", 400)
+}
+
+func TestPodcastEpisodeRequiresEpisodeReferenceKind(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	channel := model.Channel{Name: "Podcast", Slug: "podcast"}
+	require.NoError(t, ctx.db.Create(&channel).Error)
+	post := model.Post{UserID: ctx.owner.ID, ChannelID: &channel.ID, Title: "Episode one", Content: "body", Status: "published", Visibility: "public"}
+	require.NoError(t, ctx.db.Create(&post).Error)
+	episode := model.PodcastEpisode{PostID: post.ID, ChannelID: channel.ID, AudioURL: "https://example.com/episode.mp3"}
+	require.NoError(t, ctx.db.Create(&episode).Error)
+	target := createDebateForTest(t, ctx, "Target", "body")
+
+	episodeSaved, err := ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Target", Content: "@episode:" + episode.ID.String(), EditSummary: "episode", BaseRevisionID: *target.CurrentRevisionID})
+	require.NoError(t, err)
+	require.Equal(t, "Episode one", episodeSaved.References[0].Title)
+	_, err = ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Target", Content: "@post:" + post.ID.String(), EditSummary: "wrong kind", BaseRevisionID: *episodeSaved.CurrentRevisionID})
+	requireAppError(t, err, "debate.reference_unavailable", 400)
+}
+
+func TestCommentReferenceUsesBlogPostPublicVisibility(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	legacy := model.Post{UserID: ctx.owner.ID, Title: "Legacy", Content: "body", Status: "published", Visibility: "public"}
+	require.NoError(t, ctx.db.Create(&legacy).Error)
+	require.NoError(t, ctx.db.Model(&legacy).UpdateColumn("visibility", "").Error)
+	private := model.Post{UserID: ctx.owner.ID, Title: "Private", Content: "body", Status: "published", Visibility: "private"}
+	require.NoError(t, ctx.db.Create(&private).Error)
+	draft := model.Post{UserID: ctx.owner.ID, Title: "Draft", Content: "body", Status: "draft", Visibility: "public"}
+	require.NoError(t, ctx.db.Create(&draft).Error)
+	posts := []model.Post{legacy, private, draft}
+	comments := make([]model.CommentEntry, 0, len(posts))
+	for i, post := range posts {
+		target := model.DiscussionTarget{Kind: "blog_post", ResourceID: post.ID, ResourceKey: post.ID.String()}
+		require.NoError(t, ctx.db.Create(&target).Error)
+		entry := model.CommentEntry{TargetID: target.ID, AuthorID: ctx.owner.ID, Content: post.Title + " comment", ContentHash: fmt.Sprintf("comment-%d", i), Status: "active"}
+		require.NoError(t, ctx.db.Create(&entry).Error)
+		comments = append(comments, entry)
+	}
+	debate := createDebateForTest(t, ctx, "Target", "body")
+
+	saved, err := ctx.service.SaveWiki(ctx.editor, debate.ID, SaveWikiRequest{Title: "Target", Content: "@comment:" + comments[0].ID.String(), EditSummary: "legacy comment", BaseRevisionID: *debate.CurrentRevisionID})
+	require.NoError(t, err)
+	_, err = ctx.service.SaveWiki(ctx.editor, debate.ID, SaveWikiRequest{Title: "Target", Content: "@comment:" + comments[1].ID.String(), EditSummary: "private comment", BaseRevisionID: *saved.CurrentRevisionID})
+	requireAppError(t, err, "debate.reference_unavailable", 400)
+	_, err = ctx.service.SaveWiki(ctx.editor, debate.ID, SaveWikiRequest{Title: "Target", Content: "@comment:" + comments[2].ID.String(), EditSummary: "draft comment", BaseRevisionID: *saved.CurrentRevisionID})
 	requireAppError(t, err, "debate.reference_unavailable", 400)
 }
 
