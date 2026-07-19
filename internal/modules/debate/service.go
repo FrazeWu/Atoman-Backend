@@ -1,15 +1,14 @@
 package debate
 
 import (
-	"net/url"
-	"sort"
+	"errors"
 	"strings"
-	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/resourceref"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -17,576 +16,155 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+const debateContentType = "debate"
+
 type Service struct {
-	db       *gorm.DB
-	repo     *Repo
-	comments *comment.Service
+	db        *gorm.DB
+	repo      *Repo
+	resources *resourceref.Registry
 }
 
-var validArgumentTypes = map[string]bool{"support": true, "oppose": true, "neutral": true, "evidence": true, "question": true, "counter": true}
-
-func validateArgumentMetadata(argumentType, sourceURL string) error {
-	if !validArgumentTypes[argumentType] {
-		return apperr.BadRequest("debate.invalid_argument_type", "Invalid argument type")
-	}
-	if sourceURL == "" {
-		return nil
-	}
-	parsed, err := url.Parse(sourceURL)
-	if err != nil || parsed.Host == "" || parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return apperr.BadRequest("debate.invalid_source_url", "Source URL must be HTTP or HTTPS")
-	}
-	return nil
-}
-
-func NewService(db *gorm.DB, services ...*comment.Service) *Service {
-	commentService := comment.NewService(db, comment.NewTargetRegistry(db))
-	if len(services) > 0 && services[0] != nil {
-		commentService = services[0]
-	}
-	return &Service{db: db, repo: NewRepo(db), comments: commentService}
+func NewService(db *gorm.DB, _ ...*comment.Service) *Service {
+	return &Service{db: db, repo: NewRepo(db), resources: NewResourceRegistry(db)}
 }
 
 func (s *Service) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error) {
 	return s.repo.ListDebates(query)
 }
 
-func (s *Service) GetDebate(id uuid.UUID) (model.Debate, error) {
+func (s *Service) GetDebate(id uuid.UUID) (DebateDTO, error) {
 	if id == uuid.Nil {
-		return model.Debate{}, apperr.BadRequest("validation.invalid_request", "debate_id is required")
+		return DebateDTO{}, apperr.BadRequest("validation.invalid_request", "debate_id is required")
 	}
 	debate, err := s.repo.GetDebate(id)
 	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return model.Debate{}, apperr.NotFound("debate.not_found", "Debate not found")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return DebateDTO{}, apperr.NotFound("debate.not_found", "Debate not found")
 		}
-		return model.Debate{}, err
+		return DebateDTO{}, err
 	}
-	return debate, nil
+	return s.attachCurrentReferences(debate)
 }
 
-func (s *Service) CreateDebate(user authctx.CurrentUser, req CreateDebateRequest) (model.Debate, error) {
-	if user.ID == uuid.Nil {
-		return model.Debate{}, apperr.Unauthorized("Login required")
+func (s *Service) CreateDebate(user authctx.CurrentUser, req CreateDebateRequest) (DebateDTO, error) {
+	if err := s.requireActiveUser(user); err != nil {
+		return DebateDTO{}, err
 	}
-
-	title := strings.TrimSpace(req.Title)
-	description := strings.TrimSpace(req.Description)
-	if title == "" {
-		return model.Debate{}, apperr.BadRequest("validation.invalid_request", "title is required")
-	}
-
-	debate := model.Debate{
-		UserID:            user.ID,
-		Title:             title,
-		Description:       description,
-		Content:           strings.TrimSpace(req.Content),
-		Tags:              pq.StringArray(req.Tags),
-		Status:            "open",
-		ConcludeThreshold: 10,
-	}
-	if err := s.repo.CreateDebate(&debate); err != nil {
-		return model.Debate{}, err
-	}
-	return s.repo.GetDebate(debate.ID)
-}
-
-func (s *Service) UpdateDebate(user authctx.CurrentUser, debateID uuid.UUID, req CreateDebateRequest) (model.Debate, error) {
-	debate, err := s.GetDebate(debateID)
+	snapshot, err := normalizedSnapshot(req.Title, req.Description, req.Content, req.Tags)
 	if err != nil {
-		return model.Debate{}, err
+		return DebateDTO{}, err
 	}
-	if debate.UserID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
-		return model.Debate{}, apperr.Forbidden("debate.forbidden", "Not authorized")
-	}
-
-	title := strings.TrimSpace(req.Title)
-	if title == "" {
-		return model.Debate{}, apperr.BadRequest("validation.invalid_request", "title is required")
-	}
+	var debateID uuid.UUID
 	err = s.db.Transaction(func(tx *gorm.DB) error {
-		var locked model.Debate
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", debateID).Error; err != nil {
+		debate := model.Debate{
+			UserID: user.ID, Title: snapshot.Title, Description: snapshot.Description,
+			Content: snapshot.Content, Tags: pq.StringArray(snapshot.Tags), Status: model.DebateStatusActive,
+		}
+		if err := tx.Create(&debate).Error; err != nil {
 			return err
 		}
-		return tx.Model(&locked).Updates(map[string]any{"title": title, "description": strings.TrimSpace(req.Description), "content": strings.TrimSpace(req.Content), "tags": req.Tags}).Error
-	})
-	if err != nil {
-		return model.Debate{}, err
-	}
-	return s.repo.GetDebate(debate.ID)
-}
-
-func (s *Service) DeleteDebate(user authctx.CurrentUser, debateID uuid.UUID) error {
-	debate, err := s.GetDebate(debateID)
-	if err != nil {
-		return err
-	}
-	if debate.UserID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
-		return apperr.Forbidden("debate.forbidden", "Not authorized")
-	}
-	return s.comments.DeleteTarget(comment.TargetRef{Kind: comment.TargetKindDebate, ResourceID: debateID}, func(tx *gorm.DB) error {
-		if err := tx.Unscoped().Where("source_debate_id = ? OR target_debate_id = ?", debateID, debateID).
-			Delete(&model.DebateRelation{}).Error; err != nil {
+		revision, err := createRevision(tx, debate.ID, user.ID, nil, 1, snapshot, "Created", "creation")
+		if err != nil {
 			return err
 		}
-		return tx.Delete(&model.Debate{}, "id = ?", debateID).Error
-	})
-}
-
-func (s *Service) ConcludeDebate(user authctx.CurrentUser, debateID uuid.UUID, conclusionType string, conclusionSummary string) (model.Debate, error) {
-	debate, err := s.GetDebate(debateID)
-	if err != nil {
-		return model.Debate{}, err
-	}
-	if debate.UserID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
-		return model.Debate{}, apperr.Forbidden("debate.forbidden", "Not authorized")
-	}
-	switch strings.TrimSpace(conclusionType) {
-	case "yes", "no":
-	default:
-		return model.Debate{}, apperr.BadRequest("validation.invalid_request", "conclusion_type is invalid")
-	}
-	now := time.Now()
-	err = s.db.Transaction(func(tx *gorm.DB) error {
-		var locked model.Debate
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", debateID).Error; err != nil {
+		if _, err := s.projectReferences(tx, user, debate, revision, uuid.Nil); err != nil {
 			return err
 		}
-		return tx.Model(&locked).Updates(map[string]any{"status": "concluded", "concluded_at": now, "conclusion_type": strings.TrimSpace(conclusionType), "conclusion_summary": strings.TrimSpace(conclusionSummary)}).Error
-	})
-	if err != nil {
-		return model.Debate{}, err
-	}
-	return s.repo.GetDebate(debate.ID)
-}
-
-func (s *Service) CreateRelation(user authctx.CurrentUser, req CreateRelationRequest) (model.DebateRelation, error) {
-	if user.ID == uuid.Nil {
-		return model.DebateRelation{}, apperr.Unauthorized("Login required")
-	}
-	if req.SourceDebateID == uuid.Nil || req.TargetDebateID == uuid.Nil {
-		return model.DebateRelation{}, apperr.BadRequest("validation.invalid_request", "source_debate_id and target_debate_id are required")
-	}
-	if req.SourceDebateID == req.TargetDebateID {
-		return model.DebateRelation{}, apperr.BadRequest("debate.invalid_relation", "A debate cannot reference itself")
-	}
-	stance := strings.TrimSpace(req.Stance)
-	if stance != model.DebateRelationSupport && stance != model.DebateRelationOppose {
-		return model.DebateRelation{}, apperr.BadRequest("debate.invalid_relation", "stance must be support or oppose")
-	}
-
-	source, err := s.GetDebate(req.SourceDebateID)
-	if err != nil {
-		return model.DebateRelation{}, err
-	}
-	if source.Status != "concluded" || (source.ConclusionType != "yes" && source.ConclusionType != "no") {
-		return model.DebateRelation{}, apperr.BadRequest("debate.source_not_concluded", "Only concluded debates with a yes or no conclusion can be referenced")
-	}
-	if _, err := s.GetDebate(req.TargetDebateID); err != nil {
-		return model.DebateRelation{}, err
-	}
-
-	var count int64
-	if err := s.db.Model(&model.DebateRelation{}).
-		Where("source_debate_id = ? AND target_debate_id = ?", req.SourceDebateID, req.TargetDebateID).
-		Count(&count).Error; err != nil {
-		return model.DebateRelation{}, err
-	}
-	if count > 0 {
-		return model.DebateRelation{}, apperr.Conflict("debate.relation_exists", "Relation already exists")
-	}
-
-	relation := model.DebateRelation{
-		SourceDebateID: req.SourceDebateID,
-		TargetDebateID: req.TargetDebateID,
-		Stance:         stance,
-		UserID:         user.ID,
-	}
-	if err := s.db.Create(&relation).Error; err != nil {
-		return model.DebateRelation{}, err
-	}
-	return relation, nil
-}
-
-func (s *Service) DeleteRelation(user authctx.CurrentUser, relationID uuid.UUID) error {
-	if user.ID == uuid.Nil {
-		return apperr.Unauthorized("Login required")
-	}
-	var relation model.DebateRelation
-	if err := s.db.First(&relation, "id = ?", relationID).Error; err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return apperr.NotFound("debate.relation_not_found", "Relation not found")
-		}
-		return err
-	}
-	if relation.UserID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
-		return apperr.Forbidden("debate.forbidden", "Not authorized")
-	}
-	return s.db.Unscoped().Delete(&relation).Error
-}
-
-func (s *Service) GetDebateGraph(rootID uuid.UUID, mode string) (DebateGraph, error) {
-	if _, err := s.GetDebate(rootID); err != nil {
-		return DebateGraph{}, err
-	}
-	if mode == "" {
-		mode = "tree"
-	}
-	if mode != "tree" && mode != "graph" {
-		return DebateGraph{}, apperr.BadRequest("validation.invalid_request", "view must be tree or graph")
-	}
-
-	visited := map[uuid.UUID]bool{rootID: true}
-	frontier := []uuid.UUID{rootID}
-	relationsByID := make(map[uuid.UUID]model.DebateRelation)
-	for len(frontier) > 0 {
-		var relations []model.DebateRelation
-		query := s.db.Order("created_at ASC")
-		if mode == "tree" {
-			query = query.Where("target_debate_id IN ?", frontier)
-		} else {
-			query = query.Where("source_debate_id IN ? OR target_debate_id IN ?", frontier, frontier)
-		}
-		if err := query.Find(&relations).Error; err != nil {
-			return DebateGraph{}, err
-		}
-
-		next := make([]uuid.UUID, 0)
-		for _, relation := range relations {
-			relationsByID[relation.ID] = relation
-			candidateIDs := []uuid.UUID{relation.SourceDebateID}
-			if mode == "graph" {
-				candidateIDs = append(candidateIDs, relation.TargetDebateID)
-			}
-			for _, candidateID := range candidateIDs {
-				if !visited[candidateID] {
-					visited[candidateID] = true
-					next = append(next, candidateID)
-				}
-			}
-		}
-		frontier = next
-	}
-
-	ids := make([]uuid.UUID, 0, len(visited))
-	for id := range visited {
-		ids = append(ids, id)
-	}
-	nodes := make([]model.Debate, 0, len(ids))
-	if err := s.db.Preload("User").Where("id IN ?", ids).Order("created_at ASC").Find(&nodes).Error; err != nil {
-		return DebateGraph{}, err
-	}
-	relations := make([]model.DebateRelation, 0, len(relationsByID))
-	for _, relation := range relationsByID {
-		relations = append(relations, relation)
-	}
-	sort.Slice(relations, func(i, j int) bool { return relations[i].CreatedAt.Before(relations[j].CreatedAt) })
-	return DebateGraph{RootID: rootID, Nodes: nodes, Relations: relations}, nil
-}
-
-func (s *Service) ReopenDebate(user authctx.CurrentUser, debateID uuid.UUID) (model.Debate, error) {
-	debate, err := s.GetDebate(debateID)
-	if err != nil {
-		return model.Debate{}, err
-	}
-	if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
-		return model.Debate{}, apperr.Forbidden("debate.forbidden", "Admin only")
-	}
-	err = s.db.Transaction(func(tx *gorm.DB) error {
-		var locked model.Debate
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", debateID).Error; err != nil {
+		if err := tx.Model(&debate).Update("current_revision_id", revision.ID).Error; err != nil {
 			return err
 		}
-		return tx.Model(&locked).Updates(map[string]any{"status": "open", "concluded_at": nil, "conclusion_type": "", "conclusion_summary": ""}).Error
-	})
-	if err != nil {
-		return model.Debate{}, err
-	}
-	return s.repo.GetDebate(debate.ID)
-}
-
-func (s *Service) CreateArgument(user authctx.CurrentUser, req CreateArgumentRequest) (model.DebateArgumentDTO, error) {
-	if user.ID == uuid.Nil {
-		return model.DebateArgumentDTO{}, apperr.Unauthorized("Login required")
-	}
-	if req.DebateID == uuid.Nil {
-		return model.DebateArgumentDTO{}, apperr.BadRequest("validation.invalid_request", "debate_id is required")
-	}
-	debate, err := s.GetDebate(req.DebateID)
-	if err != nil {
-		return model.DebateArgumentDTO{}, err
-	}
-	if debate.Status != "open" {
-		return model.DebateArgumentDTO{}, apperr.BadRequest("debate.closed", "Debate is closed")
-	}
-	content := req.Content
-	argumentType := strings.TrimSpace(req.ArgumentType)
-	if err := validateArgumentMetadata(argumentType, strings.TrimSpace(req.SourceURL)); err != nil {
-		return model.DebateArgumentDTO{}, err
-	}
-	if req.ParentID != nil {
-		parent, err := s.repo.GetArgument(*req.ParentID)
-		if err != nil || parent.DebateID != req.DebateID {
-			return model.DebateArgumentDTO{}, apperr.BadRequest("debate.invalid_parent", "Parent argument is invalid")
-		}
-	}
-	created, err := s.comments.CreateWithExtension(user,
-		comment.TargetRef{Kind: comment.TargetKindDebate, ResourceID: req.DebateID},
-		comment.CreateCommentInput{Content: content, ReplyToID: req.ParentID, Mentions: req.Mentions, AttachmentIDs: req.AttachmentIDs},
-		func(tx *gorm.DB, entry *model.CommentEntry) error {
-			var current model.Debate
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, "id = ?", req.DebateID).Error; err != nil {
-				return err
-			}
-			if current.Status != "open" {
-				return apperr.BadRequest("debate.closed", "Debate is closed")
-			}
-			detail := model.DebateArgumentDetail{
-				CommentID: entry.ID, ArgumentType: argumentType,
-				SourceURL: strings.TrimSpace(req.SourceURL), SourceTitle: strings.TrimSpace(req.SourceTitle),
-				SourceExcerpt: strings.TrimSpace(req.SourceExcerpt),
-			}
-			if err := tx.Create(&detail).Error; err != nil {
-				return err
-			}
-			return tx.Model(&model.Debate{}).Where("id = ?", req.DebateID).
-				UpdateColumn("argument_count", gorm.Expr("argument_count + 1")).Error
-		})
-	if err != nil {
-		return model.DebateArgumentDTO{}, err
-	}
-	return s.repo.GetArgument(created.ID)
-}
-
-func (s *Service) UpdateArgument(user authctx.CurrentUser, argumentID uuid.UUID, req CreateArgumentRequest) (model.DebateArgumentDTO, error) {
-	argument, err := s.repo.GetArgument(argumentID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return model.DebateArgumentDTO{}, apperr.NotFound("debate.argument_not_found", "Argument not found")
-		}
-		return model.DebateArgumentDTO{}, err
-	}
-	if argument.UserID != user.ID {
-		return model.DebateArgumentDTO{}, apperr.Forbidden("debate.forbidden", "Not authorized")
-	}
-	content := req.Content
-	argumentType := strings.TrimSpace(req.ArgumentType)
-	if err := validateArgumentMetadata(argumentType, strings.TrimSpace(req.SourceURL)); err != nil {
-		return model.DebateArgumentDTO{}, err
-	}
-	if _, err := s.comments.EditWithExtension(user, argumentID, comment.EditCommentInput{Content: content, Mentions: req.Mentions, AttachmentIDs: req.AttachmentIDs}, func(tx *gorm.DB, _ *model.CommentEntry) error {
-		result := tx.Model(&model.DebateArgumentDetail{}).Where("comment_id = ?", argumentID).Updates(map[string]any{
-			"argument_type": argumentType, "source_url": strings.TrimSpace(req.SourceURL),
-			"source_title": strings.TrimSpace(req.SourceTitle), "source_excerpt": strings.TrimSpace(req.SourceExcerpt),
-		})
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return gorm.ErrRecordNotFound
-		}
+		debateID = debate.ID
 		return nil
-	}); err != nil {
-		return model.DebateArgumentDTO{}, err
+	})
+	if err != nil {
+		return DebateDTO{}, err
 	}
-	return s.repo.GetArgument(argument.ID)
+	return s.GetDebate(debateID)
 }
 
-func (s *Service) GetArgument(argumentID uuid.UUID) (model.DebateArgumentDTO, error) {
-	argument, err := s.repo.GetArgument(argumentID)
-	if err == gorm.ErrRecordNotFound {
-		return model.DebateArgumentDTO{}, apperr.NotFound("debate.argument_not_found", "Argument not found")
-	}
-	return argument, err
-}
-
-func (s *Service) DeleteArgument(user authctx.CurrentUser, argumentID uuid.UUID) error {
-	_, err := s.repo.GetArgument(argumentID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return apperr.NotFound("debate.argument_not_found", "Argument not found")
-		}
-		return err
-	}
-	return s.comments.Delete(user, argumentID)
-}
-
-func (s *Service) AddArgumentReference(user authctx.CurrentUser, argumentID uuid.UUID, referenceID uuid.UUID) error {
-	if user.ID == uuid.Nil {
-		return apperr.Unauthorized("Login required")
-	}
-	argument, err := s.repo.GetArgument(argumentID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return apperr.NotFound("debate.argument_not_found", "Argument not found")
-		}
-		return err
-	}
-	if !canManageArgument(user, argument) {
-		return apperr.Forbidden("debate.forbidden", "Not authorized")
-	}
-	refArgument, err := s.repo.GetArgument(referenceID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return apperr.NotFound("debate.reference_not_found", "Reference argument not found")
-		}
-		return err
-	}
-	if argument.DebateID != refArgument.DebateID {
-		return apperr.BadRequest("debate.invalid_reference", "Reference must belong to the same debate")
-	}
-	return s.db.Create(&model.DebateArgumentReference{CommentID: argumentID, ReferencedCommentID: referenceID}).Error
-}
-
-func (s *Service) RemoveArgumentReference(user authctx.CurrentUser, argumentID uuid.UUID, referenceID uuid.UUID) error {
-	if user.ID == uuid.Nil {
-		return apperr.Unauthorized("Login required")
-	}
-	argument, err := s.repo.GetArgument(argumentID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return apperr.NotFound("debate.argument_not_found", "Argument not found")
-		}
-		return err
-	}
-	if !canManageArgument(user, argument) {
-		return apperr.Forbidden("debate.forbidden", "Not authorized")
-	}
-	refArgument, err := s.repo.GetArgument(referenceID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return apperr.NotFound("debate.reference_not_found", "Reference not found")
-		}
-		return err
-	}
-	return s.db.Where("comment_id = ? AND referenced_comment_id = ?", argument.ID, refArgument.ID).Delete(&model.DebateArgumentReference{}).Error
-}
-
-func (s *Service) AddDebateReference(user authctx.CurrentUser, argumentID uuid.UUID, debateID uuid.UUID) error {
-	if user.ID == uuid.Nil {
-		return apperr.Unauthorized("Login required")
-	}
-	argument, err := s.repo.GetArgument(argumentID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return apperr.NotFound("debate.argument_not_found", "Argument not found")
-		}
-		return err
-	}
-	if !canManageArgument(user, argument) {
-		return apperr.Forbidden("debate.forbidden", "Not authorized")
-	}
-	debate, err := s.repo.GetDebate(debateID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return apperr.NotFound("debate.not_found", "Debate not found")
-		}
-		return err
-	}
-	return s.db.Create(&model.DebateArgumentDebateRef{CommentID: argument.ID, DebateID: debate.ID}).Error
-}
-
-func (s *Service) RemoveDebateReference(user authctx.CurrentUser, argumentID uuid.UUID, debateID uuid.UUID) error {
-	if user.ID == uuid.Nil {
-		return apperr.Unauthorized("Login required")
-	}
-	argument, err := s.repo.GetArgument(argumentID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return apperr.NotFound("debate.argument_not_found", "Argument not found")
-		}
-		return err
-	}
-	if !canManageArgument(user, argument) {
-		return apperr.Forbidden("debate.forbidden", "Not authorized")
-	}
-	debate, err := s.repo.GetDebate(debateID)
-	if err != nil {
-		if err == gorm.ErrRecordNotFound {
-			return apperr.NotFound("debate.not_found", "Debate not found")
-		}
-		return err
-	}
-	return s.db.Where("comment_id = ? AND debate_id = ?", argument.ID, debate.ID).Delete(&model.DebateArgumentDebateRef{}).Error
-}
-
-func parseArgumentType(value string) (model.ArgumentType, bool) {
-	argumentType := model.ArgumentType(strings.TrimSpace(value))
-	switch argumentType {
-	case model.ArgumentTypeSupport,
-		model.ArgumentTypeOppose,
-		model.ArgumentTypeNeutral,
-		model.ArgumentTypeEvidence,
-		model.ArgumentTypeQuestion,
-		model.ArgumentTypeCounter:
-		return argumentType, true
-	default:
-		return "", false
-	}
-}
-
-func canManageArgument(user authctx.CurrentUser, argument model.DebateArgumentDTO) bool {
-	return argument.UserID == user.ID || authctx.RoleAtLeast(user.Role, authctx.RoleAdmin)
-}
-
-func (s *Service) FoldArgument(user authctx.CurrentUser, argumentID uuid.UUID, foldNote string) error {
+func (s *Service) ArchiveDebate(user authctx.CurrentUser, debateID uuid.UUID) (DebateDTO, error) {
 	if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
-		return apperr.Forbidden("debate.forbidden", "Admin only")
+		return DebateDTO{}, apperr.Forbidden("debate.admin_required", "Administrator access required")
 	}
-	return s.db.Model(&model.DebateArgumentDetail{}).Where("comment_id = ?", argumentID).Updates(map[string]any{
-		"is_folded": true,
-		"fold_note": strings.TrimSpace(foldNote),
-	}).Error
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var debate model.Debate
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&debate, "id = ?", debateID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("debate.not_found", "Debate not found")
+			}
+			return err
+		}
+		if err := tx.Model(&debate).Update("status", model.DebateStatusArchived).Error; err != nil {
+			return err
+		}
+		return tx.Model(&model.DebateRelation{}).
+			Where("source_debate_id = ? AND status = ?", debateID, model.DebateRelationActive).
+			Update("status", model.DebateRelationUnavailable).Error
+	})
+	if err != nil {
+		return DebateDTO{}, err
+	}
+	return s.GetDebate(debateID)
 }
 
-func (s *Service) UnfoldArgument(user authctx.CurrentUser, argumentID uuid.UUID) error {
+func (s *Service) SetProtection(user authctx.CurrentUser, debateID uuid.UUID, req ProtectionRequest) error {
 	if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
-		return apperr.Forbidden("debate.forbidden", "Admin only")
+		return apperr.Forbidden("debate.admin_required", "Administrator access required")
 	}
-	return s.db.Model(&model.DebateArgumentDetail{}).Where("comment_id = ?", argumentID).Updates(map[string]any{
-		"is_folded": false,
-		"fold_note": "",
-	}).Error
-}
-
-func (s *Service) ListArguments(debateID uuid.UUID, pageAndSize ...int) ([]model.DebateArgumentDTO, int64, error) {
-	if debateID == uuid.Nil {
-		return nil, 0, apperr.BadRequest("validation.invalid_request", "debate_id is required")
+	if req.ProtectionLevel != "none" && req.ProtectionLevel != "semi" && req.ProtectionLevel != "full" {
+		return apperr.BadRequest("validation.invalid_request", "invalid protection_level")
 	}
 	if _, err := s.GetDebate(debateID); err != nil {
-		return nil, 0, err
+		return err
 	}
-	page, pageSize := 1, 20
-	if len(pageAndSize) > 0 && pageAndSize[0] > 0 {
-		page = pageAndSize[0]
-	}
-	if len(pageAndSize) > 1 && pageAndSize[1] > 0 {
-		pageSize = pageAndSize[1]
-	}
-	if pageSize > 100 {
-		pageSize = 100
-	}
-	return s.repo.ListArguments(debateID, page, pageSize)
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("content_type = ? AND content_id = ?", debateContentType, debateID).Delete(&model.ContentProtection{}).Error; err != nil {
+			return err
+		}
+		if req.ProtectionLevel == "none" {
+			return nil
+		}
+		return tx.Create(&model.ContentProtection{
+			ContentType: debateContentType, ContentID: debateID, ProtectionLevel: req.ProtectionLevel,
+			ProtectedBy: user.ID, Reason: strings.TrimSpace(req.Reason), ExpiresAt: req.ExpiresAt,
+		}).Error
+	})
 }
 
-func (s *Service) ListArgumentVotes(userID uuid.UUID, debateID uuid.UUID) (map[string]int, error) {
-	votes := make([]model.DebateVote, 0)
-	err := s.db.Where(
-		"user_id = ? AND argument_id IN (?)",
-		userID,
-		s.db.Table("comment_entries AS comments").
-			Select("comments.id").
-			Joins("JOIN discussion_targets AS targets ON targets.id = comments.target_id").
-			Where("targets.kind = ? AND targets.resource_id = ?", "debate", debateID),
-	).Find(&votes).Error
-	if err != nil {
-		return nil, err
+func (s *Service) DeleteProtection(user authctx.CurrentUser, debateID uuid.UUID) error {
+	if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		return apperr.Forbidden("debate.admin_required", "Administrator access required")
 	}
+	return s.db.Where("content_type = ? AND content_id = ?", debateContentType, debateID).Delete(&model.ContentProtection{}).Error
+}
 
-	result := make(map[string]int, len(votes))
-	for _, vote := range votes {
-		result[vote.ArgumentID.String()] = vote.VoteType
+func (s *Service) requireActiveUser(user authctx.CurrentUser) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
 	}
-	return result, nil
+	var count int64
+	if err := s.db.Model(&model.User{}).Where("uuid = ? AND is_active = ?", user.ID, true).Count(&count).Error; err != nil {
+		return err
+	}
+	if count == 0 {
+		return apperr.Forbidden("auth.inactive", "Account is inactive")
+	}
+	return nil
+}
+
+func normalizedSnapshot(title, description, content string, tags []string) (DebateSnapshot, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return DebateSnapshot{}, apperr.BadRequest("validation.invalid_request", "title is required")
+	}
+	if refs, err := resourceref.Parse(title); err != nil || len(refs) > 0 {
+		return DebateSnapshot{}, apperr.BadRequest("debate.title_reference", "Title cannot contain resource references")
+	}
+	cleanTags := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		if tag = strings.TrimSpace(tag); tag != "" {
+			cleanTags = append(cleanTags, tag)
+		}
+	}
+	return DebateSnapshot{Title: title, Description: strings.TrimSpace(description), Content: strings.TrimSpace(content), Tags: cleanTags}, nil
 }

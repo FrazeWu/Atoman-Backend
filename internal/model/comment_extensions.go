@@ -17,24 +17,3 @@ type TimelineRevisionProposal struct {
 	ReviewerID        *uuid.UUID      `json:"reviewer_id,omitempty" gorm:"type:uuid"`
 	AppliedRevisionID *uuid.UUID      `json:"applied_revision_id,omitempty" gorm:"type:uuid"`
 }
-
-type DebateArgumentDetail struct {
-	CommentID     uuid.UUID `json:"comment_id" gorm:"type:uuid;primaryKey"`
-	ArgumentType  string    `json:"argument_type" gorm:"not null"`
-	SourceURL     string    `json:"source_url"`
-	SourceTitle   string    `json:"source_title"`
-	SourceExcerpt string    `json:"source_excerpt" gorm:"type:text"`
-	Conclusion    string    `json:"conclusion" gorm:"type:text"`
-	IsFolded      bool      `json:"is_folded" gorm:"not null;default:false"`
-	FoldNote      string    `json:"fold_note" gorm:"type:text;not null;default:''"`
-}
-
-type DebateArgumentReference struct {
-	CommentID           uuid.UUID `json:"comment_id" gorm:"type:uuid;primaryKey"`
-	ReferencedCommentID uuid.UUID `json:"referenced_comment_id" gorm:"type:uuid;primaryKey"`
-}
-
-type DebateArgumentDebateRef struct {
-	CommentID uuid.UUID `json:"comment_id" gorm:"type:uuid;primaryKey"`
-	DebateID  uuid.UUID `json:"debate_id" gorm:"type:uuid;primaryKey"`
-}

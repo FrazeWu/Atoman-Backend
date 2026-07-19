@@ -571,39 +571,10 @@ func deleteCommentRelations(tx *gorm.DB, ids []uuid.UUID) error {
 }
 
 func deleteCommentExtensionRelations(tx *gorm.DB, ids []uuid.UUID) error {
-	type debateCount struct {
-		DebateID uuid.UUID
-		Count    int64
-	}
-	var counts []debateCount
-	if err := tx.Table("debate_argument_details AS details").Select("targets.resource_id AS debate_id, COUNT(*) AS count").
-		Joins("JOIN comment_entries AS comments ON comments.id = details.comment_id").
-		Joins("JOIN discussion_targets AS targets ON targets.id = comments.target_id AND targets.kind = ?", TargetKindDebate).
-		Where("details.comment_id IN ?", ids).Group("targets.resource_id").Scan(&counts).Error; err != nil {
-		return err
-	}
-	for _, item := range counts {
-		result := tx.Model(&model.Debate{}).Where("id = ? AND argument_count >= ?", item.DebateID, item.Count).
-			UpdateColumn("argument_count", gorm.Expr("argument_count - ?", item.Count))
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected != 1 {
-			return fmt.Errorf("debate argument count is inconsistent")
-		}
-	}
-	for _, relation := range []any{&model.DebateVote{}, &model.VoteHistory{}} {
-		if err := tx.Unscoped().Where("argument_id IN ?", ids).Delete(relation).Error; err != nil {
-			return err
-		}
-	}
-	for _, relation := range []any{&model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{}, &model.DebateArgumentDebateRef{}} {
+	for _, relation := range []any{&model.TimelineRevisionProposal{}} {
 		if err := tx.Unscoped().Where("comment_id IN ?", ids).Delete(relation).Error; err != nil {
 			return fmt.Errorf("delete comment extension relations: %w", err)
 		}
-	}
-	if err := tx.Unscoped().Where("comment_id IN ? OR referenced_comment_id IN ?", ids, ids).Delete(&model.DebateArgumentReference{}).Error; err != nil {
-		return fmt.Errorf("delete comment extension references: %w", err)
 	}
 	return nil
 }

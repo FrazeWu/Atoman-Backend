@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"atoman/internal/model"
+	debatemodule "atoman/internal/modules/debate"
+	debatevoting "atoman/internal/modules/debate_voting"
 	feedmodule "atoman/internal/modules/feed"
 	"atoman/internal/service"
 
@@ -832,7 +834,7 @@ type TimelineRevisionListResponse struct {
 }
 
 type DebateResponse struct {
-	Data model.Debate `json:"data"`
+	Data debatemodule.DebateDTO `json:"data"`
 }
 
 type DebateListResponse struct {
@@ -846,28 +848,8 @@ type DebateSearchResponse struct {
 	Data []model.Debate `json:"data"`
 }
 
-type DebateConcludeInput struct {
-	ConclusionType    string `json:"conclusion_type" binding:"required" example:"yes"`
-	ConclusionSummary string `json:"conclusion_summary" example:"主要证据已形成共识。"`
-}
-
-type DebateConcludeVoteData struct {
-	ConcludeVoteCount int  `json:"conclude_vote_count" example:"3"`
-	ConcludeThreshold int  `json:"conclude_threshold" example:"10"`
-	AutoConcluded     bool `json:"auto_concluded" example:"false"`
-}
-
-type DebateConcludeVoteResponse struct {
-	Data DebateConcludeVoteData `json:"data"`
-}
-
-type DebateArgumentResponse struct {
-	Data model.DebateArgumentDTO `json:"data"`
-}
-
-type DebateArgumentListResponse struct {
-	Data      []model.DebateArgumentDTO `json:"data"`
-	UserVotes map[string]int            `json:"user_votes"`
+type DebateVoteResponse struct {
+	Data debatevoting.VoteStats `json:"data"`
 }
 
 type DebateRelationResponse struct {
@@ -875,9 +857,10 @@ type DebateRelationResponse struct {
 }
 
 type DebateGraphData struct {
-	RootID    uuid.UUID              `json:"root_id"`
-	Nodes     []model.Debate         `json:"nodes"`
-	Relations []model.DebateRelation `json:"relations"`
+	RootID            uuid.UUID              `json:"root_id"`
+	Nodes             []model.Debate         `json:"nodes"`
+	Relations         []model.DebateRelation `json:"relations"`
+	ExpandableNodeIDs []uuid.UUID            `json:"expandable_node_ids"`
 }
 
 type DebateGraphResponse struct {

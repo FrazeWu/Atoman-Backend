@@ -12,137 +12,78 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type ConclusionVoteState struct {
-	ConcludeVoteCount int  `json:"conclude_vote_count"`
-	ConcludeThreshold int  `json:"conclude_threshold"`
-	AutoConcluded     bool `json:"auto_concluded"`
+type VoteStats struct {
+	YesVotes         int    `json:"yes_votes"`
+	NoVotes          int    `json:"no_votes"`
+	TotalVotes       int    `json:"total_votes"`
+	CurrentDirection string `json:"current_direction"`
+	CurrentUserVote  string `json:"current_user_vote"`
 }
 
-type Service struct {
-	db *gorm.DB
-}
+type Service struct{ db *gorm.DB }
 
-func NewService(db *gorm.DB) *Service {
-	return &Service{db: db}
-}
+func NewService(db *gorm.DB) *Service { return &Service{db: db} }
 
-func validateArgumentVoteTarget(tx *gorm.DB, argumentID uuid.UUID) error {
-	var located model.CommentEntry
-	if err := tx.First(&located, "id = ?", argumentID).Error; err != nil {
-		return apperr.NotFound("debate.argument_not_found", "Argument not found")
-	}
-	var target model.DiscussionTarget
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&target, "id = ? AND kind = ?", located.TargetID, "debate").Error; err != nil {
-		return apperr.NotFound("debate.argument_not_found", "Argument not found")
-	}
-	var entry model.CommentEntry
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&entry, "id = ? AND status IN ?", argumentID, []string{"active", "auto_folded"}).Error; err != nil {
-		return apperr.NotFound("debate.argument_not_found", "Argument not found")
-	}
-	if entry.RootID != nil {
-		var root model.CommentEntry
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&root, "id = ? AND status IN ?", *entry.RootID, []string{"active", "auto_folded"}).Error; err != nil {
-			return apperr.NotFound("debate.argument_not_found", "Argument not found")
-		}
-	}
+func (s *Service) GetVotes(user authctx.CurrentUser, debateID uuid.UUID) (VoteStats, error) {
 	var debate model.Debate
-	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&debate, "id = ?", target.ResourceID).Error; err != nil {
-		return apperr.NotFound("debate.not_found", "Debate not found")
+	if err := s.db.First(&debate, "id = ?", debateID).Error; err != nil {
+		return VoteStats{}, debateNotFound(err)
 	}
-	if debate.Status != "open" {
-		return apperr.BadRequest("debate.closed", "Debate is closed")
-	}
-	var detail model.DebateArgumentDetail
-	if err := tx.First(&detail, "comment_id = ?", argumentID).Error; err != nil {
-		return apperr.NotFound("debate.argument_not_found", "Argument not found")
-	}
-	return nil
+	return loadVoteStats(s.db, debate, user.ID)
 }
 
-func (s *Service) SetDebateVote(user authctx.CurrentUser, debateID uuid.UUID, voteType int) (model.DebateVote, error) {
-	return model.DebateVote{}, apperr.BadRequest("debate.vote_unsupported", "debate votes require a debate_id column on debate_votes")
-}
-
-func (s *Service) RemoveDebateVote(user authctx.CurrentUser, debateID uuid.UUID) error {
-	return apperr.BadRequest("debate.vote_unsupported", "debate votes require a debate_id column on debate_votes")
-}
-
-func (s *Service) SetArgumentVote(user authctx.CurrentUser, argumentID uuid.UUID, voteType int) (model.DebateVote, error) {
-	if user.ID == uuid.Nil {
-		return model.DebateVote{}, apperr.Unauthorized("Login required")
+func (s *Service) SetVote(user authctx.CurrentUser, debateID uuid.UUID, direction string) (VoteStats, error) {
+	if err := requireActiveUser(s.db, user); err != nil {
+		return VoteStats{}, err
 	}
-	if argumentID == uuid.Nil {
-		return model.DebateVote{}, apperr.BadRequest("validation.invalid_request", "argument_id is required")
+	if direction != model.DebateVoteYes && direction != model.DebateVoteNo {
+		return VoteStats{}, apperr.BadRequest("validation.invalid_request", "direction must be yes or no")
 	}
-	if voteType != 1 && voteType != -1 {
-		return model.DebateVote{}, apperr.BadRequest("validation.invalid_request", "vote_type must be 1 or -1")
-	}
-
-	var saved model.DebateVote
+	var stats VoteStats
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := validateArgumentVoteTarget(tx, argumentID); err != nil {
-			return err
+		var debate model.Debate
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&debate, "id = ?", debateID).Error; err != nil {
+			return debateNotFound(err)
 		}
-
-		var existing model.DebateVote
-		result := tx.Where("argument_id = ? AND user_id = ?", argumentID, user.ID).Limit(1).Find(&existing)
+		var vote model.DebateVote
+		result := tx.Unscoped().Where("debate_id = ? AND user_id = ?", debateID, user.ID).Limit(1).Find(&vote)
 		if result.Error != nil {
 			return result.Error
 		}
-		if result.RowsAffected > 0 {
-			if existing.VoteType == voteType {
-				saved = existing
-				return nil
-			}
-			oldVoteType := existing.VoteType
-			if err := tx.Model(&existing).Update("vote_type", voteType).Error; err != nil {
+		if result.RowsAffected == 0 {
+			vote = model.DebateVote{DebateID: debateID, UserID: user.ID, Direction: direction}
+			if err := tx.Create(&vote).Error; err != nil {
 				return err
 			}
-			history := model.VoteHistory{
-				ArgumentID:  argumentID,
-				UserID:      user.ID,
-				OldVoteType: oldVoteType,
-				NewVoteType: voteType,
-			}
-			if err := tx.Create(&history).Error; err != nil {
-				return err
-			}
-			existing.VoteType = voteType
-			saved = existing
-			return nil
-		}
-
-		vote := model.DebateVote{
-			ArgumentID: argumentID,
-			UserID:     user.ID,
-			VoteType:   voteType,
-		}
-		if err := tx.Create(&vote).Error; err != nil {
+		} else if err := tx.Unscoped().Model(&vote).Updates(map[string]any{"direction": direction, "deleted_at": nil}).Error; err != nil {
 			return err
 		}
-		saved = vote
+		loaded, err := loadVoteStats(tx, debate, user.ID)
+		if err != nil {
+			return err
+		}
+		if err := evaluateConclusion(tx, &debate, loaded); err != nil {
+			return err
+		}
+		loaded.CurrentDirection = debate.ConclusionType
+		stats = loaded
 		return nil
 	})
-	if err != nil {
-		return model.DebateVote{}, err
-	}
-	return saved, nil
+	return stats, err
 }
 
-func (s *Service) RemoveArgumentVote(user authctx.CurrentUser, argumentID uuid.UUID) error {
-	if user.ID == uuid.Nil {
-		return apperr.Unauthorized("Login required")
+func (s *Service) DeleteVote(user authctx.CurrentUser, debateID uuid.UUID) (VoteStats, error) {
+	if err := requireActiveUser(s.db, user); err != nil {
+		return VoteStats{}, err
 	}
-	if argumentID == uuid.Nil {
-		return apperr.BadRequest("validation.invalid_request", "argument_id is required")
-	}
-
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		if err := validateArgumentVoteTarget(tx, argumentID); err != nil {
-			return err
+	var stats VoteStats
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var debate model.Debate
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&debate, "id = ?", debateID).Error; err != nil {
+			return debateNotFound(err)
 		}
 		var vote model.DebateVote
-		if err := tx.Where("argument_id = ? AND user_id = ?", argumentID, user.ID).First(&vote).Error; err != nil {
+		if err := tx.Where("debate_id = ? AND user_id = ?", debateID, user.ID).First(&vote).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return apperr.NotFound("debate.vote_not_found", "Vote not found")
 			}
@@ -151,82 +92,132 @@ func (s *Service) RemoveArgumentVote(user authctx.CurrentUser, argumentID uuid.U
 		if err := tx.Delete(&vote).Error; err != nil {
 			return err
 		}
+		loaded, err := loadVoteStats(tx, debate, user.ID)
+		if err != nil {
+			return err
+		}
+		if err := evaluateConclusion(tx, &debate, loaded); err != nil {
+			return err
+		}
+		loaded.CurrentDirection = debate.ConclusionType
+		stats = loaded
 		return nil
 	})
+	return stats, err
 }
 
-func (s *Service) SetConclusionVote(user authctx.CurrentUser, debateID uuid.UUID) (ConclusionVoteState, error) {
-	if user.ID == uuid.Nil {
-		return ConclusionVoteState{}, apperr.Unauthorized("Login required")
+func (s *Service) ListConclusions(debateID uuid.UUID) ([]model.DebateConclusionEvent, error) {
+	var count int64
+	if err := s.db.Model(&model.Debate{}).Where("id = ?", debateID).Count(&count).Error; err != nil {
+		return nil, err
 	}
-	if debateID == uuid.Nil {
-		return ConclusionVoteState{}, apperr.BadRequest("validation.invalid_request", "debate_id is required")
+	if count == 0 {
+		return nil, apperr.NotFound("debate.not_found", "Debate not found")
 	}
+	var events []model.DebateConclusionEvent
+	err := s.db.Where("debate_id = ?", debateID).Order("created_at DESC, id DESC").Find(&events).Error
+	return events, err
+}
 
-	var state ConclusionVoteState
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var debate model.Debate
-		if err := tx.First(&debate, "id = ?", debateID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.NotFound("debate.not_found", "Debate not found")
-			}
-			return err
-		}
-		if debate.Status != "open" {
-			return apperr.BadRequest("debate.not_open", "Debate is not open")
-		}
-
-		var existing model.DebateConcludeVote
-		result := tx.Where("debate_id = ? AND user_id = ?", debateID, user.ID).Limit(1).Find(&existing)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			vote := model.DebateConcludeVote{DebateID: debateID, UserID: user.ID}
-			if err := tx.Create(&vote).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&model.Debate{}).Where("id = ?", debateID).UpdateColumn("conclude_vote_count", gorm.Expr("conclude_vote_count + 1")).Error; err != nil {
-				return err
-			}
-		}
-
-		if err := tx.First(&debate, "id = ?", debateID).Error; err != nil {
-			return err
-		}
-		state = ConclusionVoteState{
-			ConcludeVoteCount: debate.ConcludeVoteCount,
-			ConcludeThreshold: debate.ConcludeThreshold,
-			AutoConcluded:     debate.Status == "concluded",
-		}
-		return nil
-	})
+func loadVoteStats(db *gorm.DB, debate model.Debate, userID uuid.UUID) (VoteStats, error) {
+	type counts struct {
+		YesVotes int
+		NoVotes  int
+	}
+	var count counts
+	err := db.Model(&model.DebateVote{}).Where("debate_id = ?", debate.ID).Select(
+		"SUM(CASE WHEN direction = ? THEN 1 ELSE 0 END) AS yes_votes, SUM(CASE WHEN direction = ? THEN 1 ELSE 0 END) AS no_votes",
+		model.DebateVoteYes, model.DebateVoteNo,
+	).Scan(&count).Error
 	if err != nil {
-		return ConclusionVoteState{}, err
+		return VoteStats{}, err
 	}
-	return state, nil
+	stats := VoteStats{YesVotes: count.YesVotes, NoVotes: count.NoVotes, TotalVotes: count.YesVotes + count.NoVotes, CurrentDirection: debate.ConclusionType}
+	if userID != uuid.Nil {
+		var vote model.DebateVote
+		result := db.Where("debate_id = ? AND user_id = ?", debate.ID, userID).Limit(1).Find(&vote)
+		if result.Error != nil {
+			return VoteStats{}, result.Error
+		}
+		if result.RowsAffected > 0 {
+			stats.CurrentUserVote = vote.Direction
+		}
+	}
+	return stats, nil
 }
 
-func (s *Service) RemoveConclusionVote(user authctx.CurrentUser, debateID uuid.UUID) error {
+func evaluateConclusion(tx *gorm.DB, debate *model.Debate, stats VoteStats) error {
+	candidate := qualifyingDirection(stats)
+	if candidate == "" || candidate == debate.ConclusionType {
+		return nil
+	}
+	if debate.ConclusionType != "" && candidate == debate.ConclusionType {
+		return nil
+	}
+	if debate.ConclusionType != "" {
+		opposite := model.DebateVoteNo
+		if debate.ConclusionType == model.DebateVoteNo {
+			opposite = model.DebateVoteYes
+		}
+		if candidate != opposite {
+			return nil
+		}
+	}
+	oldEventID := uuid.Nil
+	if debate.CurrentConclusionEventID != nil {
+		oldEventID = *debate.CurrentConclusionEventID
+	}
+	event := model.DebateConclusionEvent{
+		DebateID: debate.ID, Direction: candidate, YesVotes: stats.YesVotes,
+		NoVotes: stats.NoVotes, TotalVotes: stats.TotalVotes,
+	}
+	if err := tx.Create(&event).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(debate).Updates(map[string]any{"conclusion_type": candidate, "current_conclusion_event_id": event.ID}).Error; err != nil {
+		return err
+	}
+	debate.ConclusionType, debate.CurrentConclusionEventID = candidate, &event.ID
+	if oldEventID != uuid.Nil {
+		if err := tx.Model(&model.DebateRelation{}).
+			Where("source_debate_id = ? AND source_conclusion_event_id = ? AND status = ?", debate.ID, oldEventID, model.DebateRelationActive).
+			Update("status", model.DebateRelationStale).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func qualifyingDirection(stats VoteStats) string {
+	if stats.TotalVotes < 10 {
+		return ""
+	}
+	if stats.YesVotes*4 > stats.TotalVotes*3 {
+		return model.DebateVoteYes
+	}
+	if stats.NoVotes*4 > stats.TotalVotes*3 {
+		return model.DebateVoteNo
+	}
+	return ""
+}
+
+func requireActiveUser(db *gorm.DB, user authctx.CurrentUser) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
 	}
-	if debateID == uuid.Nil {
-		return apperr.BadRequest("validation.invalid_request", "debate_id is required")
+	var count int64
+	if err := db.Model(&model.User{}).Where("uuid = ? AND is_active = ?", user.ID, true).Count(&count).Error; err != nil {
+		return err
 	}
+	if count == 0 {
+		return apperr.Forbidden("auth.inactive", "Account is inactive")
+	}
+	return nil
+}
 
-	return s.db.Transaction(func(tx *gorm.DB) error {
-		var vote model.DebateConcludeVote
-		result := tx.Where("debate_id = ? AND user_id = ?", debateID, user.ID).Limit(1).Find(&vote)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return apperr.NotFound("debate.conclusion_vote_not_found", "Conclusion vote not found")
-		}
-		if err := tx.Delete(&vote).Error; err != nil {
-			return err
-		}
-		return tx.Model(&model.Debate{}).Where("id = ?", debateID).UpdateColumn("conclude_vote_count", gorm.Expr("conclude_vote_count - 1")).Error
-	})
+func debateNotFound(err error) error {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return apperr.NotFound("debate.not_found", "Debate not found")
+	}
+	return err
 }

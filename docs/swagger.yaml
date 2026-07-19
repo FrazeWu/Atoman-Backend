@@ -460,31 +460,6 @@ definitions:
       username:
         type: string
     type: object
-  debate.CreateArgumentRequest:
-    properties:
-      argument_type:
-        type: string
-      attachment_ids:
-        items:
-          type: string
-        type: array
-      content:
-        type: string
-      debate_id:
-        type: string
-      mentions:
-        items:
-          $ref: '#/definitions/comment.MentionInput'
-        type: array
-      parent_id:
-        type: string
-      source_excerpt:
-        type: string
-      source_title:
-        type: string
-      source_url:
-        type: string
-    type: object
   debate.CreateDebateRequest:
     properties:
       content:
@@ -498,23 +473,193 @@ definitions:
       title:
         type: string
     type: object
-  debate.CreateRelationRequest:
+  debate.DebateDTO:
     properties:
-      source_debate_id:
+      conclusion_type:
         type: string
-      stance:
+      content:
         type: string
-      target_debate_id:
+      created_at:
+        type: string
+      current_conclusion_event_id:
+        type: string
+      current_revision_id:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      references:
+        items:
+          $ref: '#/definitions/debate.DebateReferenceDTO'
+        type: array
+      status:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+      user_id:
+        type: string
+      view_count:
+        type: integer
+    type: object
+  debate.DebateGraph:
+    properties:
+      expandable_node_ids:
+        items:
+          type: string
+        type: array
+      nodes:
+        items:
+          $ref: '#/definitions/model.Debate'
+        type: array
+      relations:
+        items:
+          $ref: '#/definitions/model.DebateRelation'
+        type: array
+      root_id:
         type: string
     type: object
-  debate.DebateReferenceRequest:
+  debate.DebateReferenceDTO:
     properties:
-      debate_id:
+      kind:
+        type: string
+      qualifier:
+        type: string
+      raw:
+        type: string
+      relation_id:
+        type: string
+      resource_id:
+        type: string
+      state:
+        type: string
+      title:
         type: string
     type: object
-  debate.ReferenceRequest:
+  debate.DebateRevisionDTO:
     properties:
-      reference_id:
+      created_at:
+        type: string
+      edit_summary:
+        type: string
+      edit_type:
+        type: string
+      editor:
+        $ref: '#/definitions/model.User'
+      editor_id:
+        type: string
+      id:
+        type: string
+      is_current:
+        type: boolean
+      previous_revision_id:
+        type: string
+      references:
+        items:
+          $ref: '#/definitions/debate.DebateReferenceDTO'
+        type: array
+      snapshot:
+        $ref: '#/definitions/debate.DebateSnapshot'
+      status:
+        type: string
+      version_number:
+        type: integer
+    type: object
+  debate.DebateSnapshot:
+    properties:
+      content:
+        type: string
+      description:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    type: object
+  debate.ProtectionRequest:
+    properties:
+      expires_at:
+        type: string
+      protection_level:
+        type: string
+      reason:
+        type: string
+    type: object
+  debate.ReconfirmReferenceRequest:
+    properties:
+      base_revision:
+        type: string
+      edit_summary:
+        type: string
+    type: object
+  debate.RevertRevisionRequest:
+    properties:
+      base_revision:
+        type: string
+      edit_summary:
+        type: string
+    type: object
+  debate.RevisionDiffDTO:
+    properties:
+      against_revision_id:
+        type: string
+      changes:
+        additionalProperties:
+          $ref: '#/definitions/debate.RevisionFieldDiff'
+        type: object
+      revision_id:
+        type: string
+    type: object
+  debate.RevisionFieldDiff:
+    properties:
+      after: {}
+      before: {}
+      changed:
+        type: boolean
+    type: object
+  debate.SaveWikiRequest:
+    properties:
+      base_revision:
+        type: string
+      content:
+        type: string
+      description:
+        type: string
+      edit_summary:
+        type: string
+      tags:
+        items:
+          type: string
+        type: array
+      title:
+        type: string
+    type: object
+  debate_voting.VoteStats:
+    properties:
+      current_direction:
+        type: string
+      current_user_vote:
+        type: string
+      no_votes:
+        type: integer
+      total_votes:
+        type: integer
+      yes_votes:
+        type: integer
+    type: object
+  debate_voting.voteRequest:
+    properties:
+      direction:
         type: string
     type: object
   feed.AutoSubscriptionAddRequest:
@@ -1377,67 +1522,6 @@ definitions:
         example: https://cdn.example.com/dm.png
         type: string
     type: object
-  handlers.DebateArgumentListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.DebateArgumentDTO'
-        type: array
-      user_votes:
-        additionalProperties:
-          type: integer
-        type: object
-    type: object
-  handlers.DebateArgumentResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.DebateArgumentDTO'
-    type: object
-  handlers.DebateConcludeVoteData:
-    properties:
-      auto_concluded:
-        example: false
-        type: boolean
-      conclude_threshold:
-        example: 10
-        type: integer
-      conclude_vote_count:
-        example: 3
-        type: integer
-    type: object
-  handlers.DebateConcludeVoteResponse:
-    properties:
-      data:
-        $ref: '#/definitions/handlers.DebateConcludeVoteData'
-    type: object
-  handlers.DebateGraphData:
-    properties:
-      nodes:
-        items:
-          $ref: '#/definitions/model.Debate'
-        type: array
-      relations:
-        items:
-          $ref: '#/definitions/model.DebateRelation'
-        type: array
-      root_id:
-        type: string
-    type: object
-  handlers.DebateGraphResponse:
-    properties:
-      data:
-        $ref: '#/definitions/handlers.DebateGraphData'
-    type: object
-  handlers.DebateRelationResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.DebateRelation'
-    type: object
-  handlers.DebateResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.Debate'
-    type: object
   handlers.EntryStatusInput:
     properties:
       reason:
@@ -1465,12 +1549,6 @@ definitions:
         type: string
       error:
         example: 用户名和密码不匹配
-        type: string
-    type: object
-  handlers.FoldArgumentInput:
-    properties:
-      fold_note:
-        example: 证据不足，暂时折叠。
         type: string
     type: object
   handlers.ForumCategoryPermissionInput:
@@ -2567,42 +2645,6 @@ definitions:
       user_id:
         type: string
     type: object
-  model.ArgumentAttachment:
-    properties:
-      content_type:
-        type: string
-      id:
-        type: string
-      position:
-        type: integer
-      url:
-        type: string
-    type: object
-  model.ArgumentMention:
-    properties:
-      end:
-        type: integer
-      start:
-        type: integer
-      user_id:
-        type: string
-    type: object
-  model.ArgumentType:
-    enum:
-    - support
-    - oppose
-    - neutral
-    - evidence
-    - question
-    - counter
-    type: string
-    x-enum-varnames:
-    - ArgumentTypeSupport
-    - ArgumentTypeOppose
-    - ArgumentTypeNeutral
-    - ArgumentTypeEvidence
-    - ArgumentTypeQuestion
-    - ArgumentTypeCounter
   model.Artist:
     properties:
       active_end_date:
@@ -2874,21 +2916,15 @@ definitions:
     type: object
   model.Debate:
     properties:
-      argument_count:
-        type: integer
-      conclude_threshold:
-        type: integer
-      conclude_vote_count:
-        type: integer
-      concluded_at:
-        type: string
-      conclusion_summary:
-        type: string
       conclusion_type:
         type: string
       content:
         type: string
       created_at:
+        type: string
+      current_conclusion_event_id:
+        type: string
+      current_revision_id:
         type: string
       description:
         type: string
@@ -2910,71 +2946,24 @@ definitions:
         type: string
       view_count:
         type: integer
-      vote_count:
-        type: integer
     type: object
-  model.DebateArgumentDTO:
+  model.DebateConclusionEvent:
     properties:
-      argument_type:
-        $ref: '#/definitions/model.ArgumentType'
-      attachment_ids:
-        items:
-          type: string
-        type: array
-      attachments:
-        items:
-          $ref: '#/definitions/model.ArgumentAttachment'
-        type: array
-      conclusion:
-        type: string
-      content:
-        type: string
       created_at:
         type: string
-      debate:
-        $ref: '#/definitions/model.Debate'
       debate_id:
         type: string
-      fold_note:
-        description: admin note for why folded
+      direction:
         type: string
       id:
         type: string
-      is_concluded:
-        type: boolean
-      is_folded:
-        description: Admin moderation
-        type: boolean
-      mentions:
-        items:
-          $ref: '#/definitions/model.ArgumentMention'
-        type: array
-      parent:
-        $ref: '#/definitions/model.DebateArgumentDTO'
-      parent_id:
-        type: string
-      referenced_debates:
-        items:
-          $ref: '#/definitions/model.Debate'
-        type: array
-      references:
-        items:
-          $ref: '#/definitions/model.DebateArgumentDTO'
-        type: array
-      source_excerpt:
-        type: string
-      source_title:
-        type: string
-      source_url:
-        description: Evidence source fields (only used when ArgumentType == "evidence")
-        type: string
+      no_votes:
+        type: integer
+      total_votes:
+        type: integer
       updated_at:
         type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-      vote_count:
+      yes_votes:
         type: integer
     type: object
   model.DebateRelation:
@@ -2983,21 +2972,23 @@ definitions:
         type: string
       id:
         type: string
+      source_conclusion_event_id:
+        type: string
       source_debate:
         $ref: '#/definitions/model.Debate'
       source_debate_id:
         type: string
       stance:
         type: string
+      status:
+        type: string
       target_debate:
         $ref: '#/definitions/model.Debate'
       target_debate_id:
         type: string
-      updated_at:
+      target_revision_id:
         type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
+      updated_at:
         type: string
     type: object
   model.EditConflict:
@@ -3058,6 +3049,10 @@ definitions:
         type: string
       duplicate_count:
         type: integer
+      duplicate_item_ids:
+        items:
+          type: string
+        type: array
       duplicate_of_id:
         type: string
       duplicate_sources:
@@ -7930,13 +7925,20 @@ paths:
       summary: 提交歌曲纠错
       tags:
       - music-corrections
-  /api/v1/debate-arguments/{argumentID}:
-    delete:
+  /api/v1/debate/topics:
+    get:
       parameters:
-      - description: Argument ID
-        in: path
-        name: argumentID
-        required: true
+      - description: Status
+        in: query
+        name: status
+        type: string
+      - description: Search
+        in: query
+        name: search
+        type: string
+      - description: Tag
+        in: query
+        name: tag
         type: string
       produces:
       - application/json
@@ -7944,311 +7946,12 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Delete a typed debate argument
+            items:
+              $ref: '#/definitions/model.Debate'
+            type: array
+      summary: List debate topics
       tags:
       - Debate
-    patch:
-      consumes:
-      - application/json
-      parameters:
-      - description: Argument ID
-        in: path
-        name: argumentID
-        required: true
-        type: string
-      - description: Argument
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/debate.CreateArgumentRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DebateArgumentResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Update a typed debate argument
-      tags:
-      - Debate
-  /api/v1/debate-arguments/{argumentID}/debate-reference:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: Argument ID
-        in: path
-        name: argumentID
-        required: true
-        type: string
-      - description: Debate reference
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/debate.DebateReferenceRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Add a debate reference
-      tags:
-      - Debate
-  /api/v1/debate-arguments/{argumentID}/debate-reference/{debateRefID}:
-    delete:
-      parameters:
-      - description: Argument ID
-        in: path
-        name: argumentID
-        required: true
-        type: string
-      - description: Referenced debate ID
-        in: path
-        name: debateRefID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Remove a debate reference
-      tags:
-      - Debate
-  /api/v1/debate-arguments/{argumentID}/fold:
-    delete:
-      parameters:
-      - description: Argument ID
-        in: path
-        name: argumentID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Unfold a debate argument
-      tags:
-      - Debate
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: Argument ID
-        in: path
-        name: argumentID
-        required: true
-        type: string
-      - description: Fold note
-        in: body
-        name: body
-        schema:
-          $ref: '#/definitions/handlers.FoldArgumentInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Fold a debate argument
-      tags:
-      - Debate
-  /api/v1/debate-arguments/{argumentID}/reference:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: Argument ID
-        in: path
-        name: argumentID
-        required: true
-        type: string
-      - description: Reference
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/debate.ReferenceRequest'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Add an argument reference
-      tags:
-      - Debate
-  /api/v1/debate-arguments/{argumentID}/reference/{referenceID}:
-    delete:
-      parameters:
-      - description: Argument ID
-        in: path
-        name: argumentID
-        required: true
-        type: string
-      - description: Referenced argument ID
-        in: path
-        name: referenceID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Remove an argument reference
-      tags:
-      - Debate
-  /api/v1/debate-relations:
-    post:
-      consumes:
-      - application/json
-      parameters:
-      - description: Debate relation
-        in: body
-        name: body
-        required: true
-        schema:
-          $ref: '#/definitions/debate.CreateRelationRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.DebateRelationResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Connect a concluded debate to another debate
-      tags:
-      - Debate
-  /api/v1/debate-relations/{relationID}:
-    delete:
-      parameters:
-      - description: Relation ID
-        in: path
-        name: relationID
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Delete a debate relation
-      tags:
-      - Debate
-  /api/v1/debates:
     post:
       consumes:
       - application/json
@@ -8265,139 +7968,188 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/handlers.DebateResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/debate.DebateDTO'
       security:
       - BearerAuth: []
-      summary: Create a debate
+      summary: Create a debate topic
       tags:
       - Debate
-  /api/v1/debates/{debateID}/arguments:
+  /api/v1/debate/topics/{id}:
     get:
       parameters:
       - description: Debate ID
         in: path
-        name: debateID
+        name: id
         required: true
         type: string
-      - description: Page
-        in: query
-        name: page
-        type: integer
-      - description: Page size
-        in: query
-        name: page_size
-        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.DebateArgumentListResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: List typed debate arguments
+            $ref: '#/definitions/debate.DebateDTO'
+      summary: Get a debate topic
       tags:
       - Debate
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Revision
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.SaveWikiRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/debate.DebateDTO'
+      security:
+      - BearerAuth: []
+      summary: Save a debate wiki revision
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/archive:
+    post:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/debate.DebateDTO'
+      security:
+      - BearerAuth: []
+      summary: Archive a debate topic
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/conclusions:
+    get:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.DebateConclusionEvent'
+            type: array
+      summary: List immutable debate conclusion events
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/protection:
+    delete:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Remove debate protection
+      tags:
+      - Debate
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Protection
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.ProtectionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Protect a debate topic
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/references/{relationID}/reconfirm:
     post:
       consumes:
       - application/json
       parameters:
       - description: Debate ID
         in: path
-        name: debateID
+        name: id
         required: true
         type: string
-      - description: Argument
+      - description: Relation ID
+        in: path
+        name: relationID
+        required: true
+        type: string
+      - description: Reconfirmation
         in: body
         name: body
         required: true
         schema:
-          $ref: '#/definitions/debate.CreateArgumentRequest'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.DebateArgumentResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Create a typed debate argument
-      tags:
-      - Debate
-  /api/v1/debates/{debateID}/conclusion-vote:
-    post:
-      description: Records a conclusion request. Reaching the threshold does not choose
-        a yes/no conclusion automatically.
-      parameters:
-      - description: Debate ID
-        in: path
-        name: debateID
-        required: true
-        type: string
+          $ref: '#/definitions/debate.ReconfirmReferenceRequest'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.DebateConcludeVoteResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/debate.DebateDTO'
       security:
       - BearerAuth: []
-      summary: Request that a debate be concluded
+      summary: Reconfirm a stale debate reference
       tags:
       - Debate
-  /api/v1/debates/{debateID}/relations:
+  /api/v1/debate/topics/{id}/revisions:
     get:
       parameters:
       - description: Debate ID
         in: path
-        name: debateID
+        name: id
         required: true
-        type: string
-      - default: tree
-        description: tree or graph
-        in: query
-        name: view
         type: string
       produces:
       - application/json
@@ -8405,16 +8157,185 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.DebateGraphResponse'
-        "400":
-          description: Bad Request
+            items:
+              $ref: '#/definitions/debate.DebateRevisionDTO'
+            type: array
+      summary: List debate revisions
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/revisions/{revisionID}:
+    get:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Revision ID
+        in: path
+        name: revisionID
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
+            $ref: '#/definitions/debate.DebateRevisionDTO'
+      summary: Get a debate revision
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/revisions/{revisionID}/diff:
+    get:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Revision ID
+        in: path
+        name: revisionID
+        required: true
+        type: string
+      - description: Other revision ID
+        in: query
+        name: against
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: Get the debate tree or connected relation graph
+            $ref: '#/definitions/debate.RevisionDiffDTO'
+      summary: Diff two debate revisions
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/revisions/{revisionID}/revert:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Revision ID
+        in: path
+        name: revisionID
+        required: true
+        type: string
+      - description: Revert
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate.RevertRevisionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/debate.DebateDTO'
+      security:
+      - BearerAuth: []
+      summary: Revert to a debate revision
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/vote:
+    delete:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/debate_voting.VoteStats'
+      security:
+      - BearerAuth: []
+      summary: Delete the current user's debate vote
+      tags:
+      - Debate
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Vote
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/debate_voting.voteRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/debate_voting.VoteStats'
+      security:
+      - BearerAuth: []
+      summary: Set a community debate vote
+      tags:
+      - Debate
+  /api/v1/debate/topics/{id}/votes:
+    get:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/debate_voting.VoteStats'
+      summary: Get community vote statistics
+      tags:
+      - Debate
+  /api/v1/debates/{id}/relations:
+    get:
+      parameters:
+      - description: Debate ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: tree or graph
+        in: query
+        name: view
+        type: string
+      - description: Depth
+        in: query
+        name: depth
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/debate.DebateGraph'
+      summary: Get the read-only debate graph
       tags:
       - Debate
   /api/v1/discussions/{kind}/{resource_id}/comments:

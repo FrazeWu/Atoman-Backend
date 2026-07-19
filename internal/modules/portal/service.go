@@ -191,9 +191,20 @@ func (s *Service) hotForumTopics(limit int) ([]HotItem, error) {
 }
 
 func (s *Service) hotDebates(limit int) ([]HotItem, error) {
-	var debates []model.Debate
-	err := s.db.Where("status <> ?", "closed").
-		Order("(argument_count * 3 + vote_count * 2 + view_count) DESC").
+	type debateRow struct {
+		model.Debate
+		CommentCount int `gorm:"column:comment_count"`
+		VoteCount    int `gorm:"column:community_vote_count"`
+	}
+	var debates []debateRow
+	err := s.db.Model(&model.Debate{}).Select(`debates.*,
+		COALESCE((SELECT comment_count FROM discussion_targets WHERE kind = 'debate' AND resource_id = debates.id AND deleted_at IS NULL LIMIT 1), 0) AS comment_count,
+		COALESCE((SELECT COUNT(*) FROM debate_votes WHERE debate_id = debates.id AND deleted_at IS NULL), 0) AS community_vote_count,
+		(COALESCE((SELECT comment_count FROM discussion_targets WHERE kind = 'debate' AND resource_id = debates.id AND deleted_at IS NULL LIMIT 1), 0) * 3
+		 + COALESCE((SELECT COUNT(*) FROM debate_votes WHERE debate_id = debates.id AND deleted_at IS NULL), 0) * 2
+		 + debates.view_count) AS debate_hot_score`).
+		Where("debates.status = ?", model.DebateStatusActive).
+		Order("debate_hot_score DESC").
 		Order("updated_at DESC").
 		Limit(limit).
 		Find(&debates).Error
@@ -203,7 +214,7 @@ func (s *Service) hotDebates(limit int) ([]HotItem, error) {
 
 	items := make([]HotItem, 0, len(debates))
 	for _, debate := range debates {
-		score := float64(debate.ArgumentCount*3 + debate.VoteCount*2 + debate.ViewCount)
+		score := float64(debate.CommentCount*3 + debate.VoteCount*2 + debate.ViewCount)
 		items = append(items, HotItem{
 			ID:          debate.ID.String(),
 			Module:      "debate",
@@ -212,7 +223,7 @@ func (s *Service) hotDebates(limit int) ([]HotItem, error) {
 			Summary:     excerpt(debate.Description, debate.Content),
 			TargetPath:  "/debate/" + debate.ID.String(),
 			Score:       score,
-			ScoreLabel:  countLabel(int64(debate.ArgumentCount), "论点", int64(debate.VoteCount), "投票"),
+			ScoreLabel:  countLabel(int64(debate.CommentCount), "评论", int64(debate.VoteCount), "投票"),
 			PublishedAt: timePtr(debate.UpdatedAt),
 		})
 	}

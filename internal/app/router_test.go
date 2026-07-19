@@ -854,11 +854,11 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 		&model.User{},
 		&model.Debate{},
 		&model.DebateVote{},
-		&model.VoteHistory{},
-		&model.DebateConcludeVote{},
-		&model.DiscussionTarget{},
-		&model.CommentEntry{},
-		&model.DebateArgumentDetail{},
+		&model.DebateConclusionEvent{},
+		&model.DebateRevisionReference{},
+		&model.DebateRelation{},
+		&model.Revision{},
+		&model.ContentProtection{},
 	)
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -878,7 +878,7 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 	}
 	raw, _ := json.Marshal(body)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/debates", bytes.NewReader(raw))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics", bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -900,7 +900,6 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/debate/topics",
 		"/api/v1/debate/topics/" + created.Data.ID,
-		"/api/v1/debate/topics/search?q=Router",
 	} {
 		w = httptest.NewRecorder()
 		req = httptest.NewRequest(http.MethodGet, path, nil)
@@ -925,19 +924,15 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 		t.Fatalf("expected legacy debate conclude vote route to be unmounted, got %d: %s", w.Code, w.Body.String())
 	}
 
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate-arguments/"+uuid.NewString()+"/vote", bytes.NewBufferString(`{"vote_type":1}`))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound && !bytes.Contains(w.Body.Bytes(), []byte("debate.argument_not_found")) {
-		t.Fatalf("expected module debate argument vote route to be mounted, got router 404: %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debates/"+uuid.NewString()+"/conclusion-vote", nil)
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound && !bytes.Contains(w.Body.Bytes(), []byte("debate.not_found")) {
-		t.Fatalf("expected module debate conclusion vote route to be mounted, got router 404: %s", w.Body.String())
+	for _, legacy := range []string{
+		"/api/v1/debate-arguments/" + uuid.NewString() + "/vote",
+		"/api/v1/debates/" + uuid.NewString() + "/conclusion-vote",
+	} {
+		w = httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, legacy, nil))
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("expected legacy route %s to return 404, got %d", legacy, w.Code)
+		}
 	}
 }
 
@@ -946,7 +941,8 @@ func TestRegisterV1RoutesDebateCreateAcceptsBearerAuth(t *testing.T) {
 	t.Setenv("JWT_SECRET", "test-secret")
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.Debate{}, &model.DebateVote{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.DebateArgumentDetail{},
+		&model.User{}, &model.Debate{}, &model.DebateVote{}, &model.DebateConclusionEvent{},
+		&model.DebateRevisionReference{}, &model.DebateRelation{}, &model.Revision{}, &model.ContentProtection{},
 	)
 	user := model.User{Username: "debate-bearer", Email: "debate-bearer@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -958,7 +954,7 @@ func TestRegisterV1RoutesDebateCreateAcceptsBearerAuth(t *testing.T) {
 	router := gin.New()
 	RegisterV1Routes(router, db, nil, nil, collab.NewUserHub(), collab.NewHub())
 	body := bytes.NewBufferString(`{"title":"Bearer debate","description":"Body"}`)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/debates", body)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics", body)
 	request.Header.Set("Content-Type", "application/json")
 	request.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
 	response := httptest.NewRecorder()
