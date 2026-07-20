@@ -3,10 +3,12 @@ package feed
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	feedservice "atoman/internal/service"
 	"atoman/internal/testdb"
 
 	"github.com/google/uuid"
@@ -327,6 +330,149 @@ func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 	}
 	if feedItemCount != 1 {
 		t.Fatalf("expected duplicate filter to leave 1 feed item, got %d", feedItemCount)
+	}
+}
+
+func TestSyncSubscriptionChecksOwnershipAndReturnsSyncResult(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+	var subscription model.Subscription
+	if err := db.Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+
+	called := 0
+	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+		called++
+		if got.ID != source.ID {
+			t.Fatalf("sync source=%s want=%s", got.ID, source.ID)
+		}
+		return feedservice.RSSSyncResult{FeedSourceID: got.ID, FetchedItems: 5, NewItems: 2, SyncedAt: time.Now().UTC()}, nil
+	}
+
+	result, err := service.SyncSubscription(user, subscription.ID)
+	if err != nil {
+		t.Fatalf("sync owned subscription: %v", err)
+	}
+	if called != 1 || result.SubscriptionID != subscription.ID || result.NewItems != 2 || !result.Success {
+		t.Fatalf("unexpected sync result: %#v called=%d", result, called)
+	}
+
+	otherUser := authctx.CurrentUser{ID: uuid.New(), Username: "other", Role: authctx.RoleUser}
+	if _, err := service.SyncSubscription(otherUser, subscription.ID); err == nil {
+		t.Fatal("expected another user's subscription sync to fail")
+	}
+	if called != 1 {
+		t.Fatalf("sync called for unauthorized user: %d", called)
+	}
+
+	var internalSubscription model.Subscription
+	if err := db.Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+		Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", user.ID, "internal_user").
+		First(&internalSubscription).Error; err != nil {
+		t.Fatalf("find internal subscription: %v", err)
+	}
+	if _, err := service.SyncSubscription(user, internalSubscription.ID); err == nil {
+		t.Fatal("expected internal subscription sync to fail")
+	}
+	if called != 1 {
+		t.Fatalf("sync called for internal subscription: %d", called)
+	}
+}
+
+func TestSyncSubscriptionReturnsResultWhenHealthStateUpdateFails(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+	var subscription model.Subscription
+	if err := db.Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+		return feedservice.RSSSyncResult{
+			FeedSourceID: got.ID,
+			FetchedItems: 2,
+			NewItems:     1,
+			SyncedAt:     time.Now().UTC(),
+		}, nil
+	}
+
+	callbackName := "test:fail_subscription_sync_state_update"
+	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "subscriptions" {
+			tx.AddError(errors.New("subscription state unavailable"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Callback().Update().Remove(callbackName)
+
+	result, err := service.SyncSubscription(user, subscription.ID)
+	if err != nil {
+		t.Fatalf("expected structured sync result, got error: %v", err)
+	}
+	if result.Success || result.NewItems != 1 || result.Error != "failed to save refresh status" {
+		t.Fatalf("unexpected sync result: %#v", result)
+	}
+}
+
+func TestSyncAllSubscriptionsLimitsConcurrencyAndKeepsPartialResults(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	for i := 0; i < 5; i++ {
+		source := model.FeedSource{
+			SourceType: "external_rss",
+			RssURL:     fmt.Sprintf("https://sync-%d.example.com/feed.xml", i),
+			Hash:       fmt.Sprintf("sync-source-%d", i),
+			Title:      fmt.Sprintf("Sync Source %d", i),
+		}
+		if i == 4 {
+			source.Title = "Fail Source"
+		}
+		if err := db.Create(&source).Error; err != nil {
+			t.Fatalf("create source %d: %v", i, err)
+		}
+		if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+			t.Fatalf("create subscription %d: %v", i, err)
+		}
+	}
+
+	var mu sync.Mutex
+	active := 0
+	maxActive := 0
+	service.syncSource = func(_ *gorm.DB, source model.FeedSource) (feedservice.RSSSyncResult, error) {
+		mu.Lock()
+		active++
+		if active > maxActive {
+			maxActive = active
+		}
+		mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+		mu.Lock()
+		active--
+		mu.Unlock()
+		if source.Title == "Fail Source" {
+			return feedservice.RSSSyncResult{FeedSourceID: source.ID, FetchedItems: 2, NewItems: 1, SyncedAt: time.Now().UTC()}, errors.New("source unavailable")
+		}
+		return feedservice.RSSSyncResult{FeedSourceID: source.ID, FetchedItems: 3, NewItems: 1, SyncedAt: time.Now().UTC()}, nil
+	}
+
+	summary, err := service.SyncAllSubscriptions(user)
+	if err != nil {
+		t.Fatalf("sync all subscriptions: %v", err)
+	}
+	if summary.Total != 6 || summary.Succeeded != 5 || summary.Failed != 1 || summary.NewItems != 6 {
+		t.Fatalf("unexpected summary: %#v", summary)
+	}
+	if len(summary.Results) != summary.Total {
+		t.Fatalf("results=%d total=%d", len(summary.Results), summary.Total)
+	}
+	if maxActive > 4 || maxActive < 2 {
+		t.Fatalf("unexpected max concurrency: %d", maxActive)
 	}
 }
 

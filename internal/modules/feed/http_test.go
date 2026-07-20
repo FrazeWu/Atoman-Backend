@@ -3,6 +3,7 @@ package feed
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,10 +13,12 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	feedservice "atoman/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func signedFeedHTTPTokenForTest(t *testing.T, user authctx.CurrentUser) string {
@@ -56,6 +59,123 @@ func TestGetExploreFeedHandlerAllowsAnonymousPublicRead(t *testing.T) {
 	}
 	if len(payload.Data) == 0 {
 		t.Fatalf("expected public explore items, got body %s", rr.Body.String())
+	}
+}
+
+func TestSyncSubscriptionHandlerReturnsStructuredResult(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+	var subscription model.Subscription
+	if err := db.Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+		return feedservice.RSSSyncResult{FeedSourceID: got.ID, FetchedItems: 4, NewItems: 2, SyncedAt: time.Now().UTC()}, nil
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/feed/subscriptions/%s/sync", subscription.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("sync subscription status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Data SubscriptionSyncResult `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode sync response: %v", err)
+	}
+	if !payload.Data.Success || payload.Data.SubscriptionID != subscription.ID || payload.Data.NewItems != 2 {
+		t.Fatalf("unexpected sync response: %#v", payload.Data)
+	}
+}
+
+func TestSyncSubscriptionHandlerReturnsStructuredFeedFailure(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+	var subscription model.Subscription
+	if err := db.Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+	syncedAt := time.Date(2026, 7, 20, 4, 0, 0, 0, time.UTC)
+	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+		return feedservice.RSSSyncResult{
+			FeedSourceID: got.ID,
+			FetchedItems: 2,
+			NewItems:     1,
+			SyncedAt:     syncedAt,
+		}, errors.New("source unavailable")
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/feed/subscriptions/%s/sync", subscription.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("sync subscription status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Data SubscriptionSyncResult `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode sync response: %v", err)
+	}
+	if payload.Data.Success || payload.Data.SubscriptionID != subscription.ID || payload.Data.Error != "source unavailable" || payload.Data.FetchedItems != 2 || payload.Data.NewItems != 1 || !payload.Data.SyncedAt.Equal(syncedAt) {
+		t.Fatalf("unexpected failed sync response: %#v", payload.Data)
+	}
+
+	var refreshed model.Subscription
+	if err := db.First(&refreshed, "id = ?", subscription.ID).Error; err != nil {
+		t.Fatalf("reload subscription: %v", err)
+	}
+	if refreshed.HealthStatus != "error" || refreshed.ErrorMessage != "source unavailable" || refreshed.LastChecked == nil {
+		t.Fatalf("unexpected failed sync state: %#v", refreshed)
+	}
+}
+
+func TestSyncAllSubscriptionsHandlerReturnsSummary(t *testing.T) {
+	t.Setenv("JWT_SECRET", "test-secret")
+	gin.SetMode(gin.TestMode)
+	service, _, user := newFeedTestService(t)
+	service.syncSource = func(_ *gorm.DB, source model.FeedSource) (feedservice.RSSSyncResult, error) {
+		return feedservice.RSSSyncResult{FeedSourceID: source.ID, FetchedItems: 3, NewItems: 1, SyncedAt: time.Now().UTC()}, nil
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/sync-all", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("sync all status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Data SubscriptionSyncSummary `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode sync all response: %v", err)
+	}
+	if payload.Data.Total != 1 || payload.Data.Succeeded != 1 || payload.Data.Failed != 0 || payload.Data.NewItems != 1 {
+		t.Fatalf("unexpected sync all response: %#v", payload.Data)
 	}
 }
 

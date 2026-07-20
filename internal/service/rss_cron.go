@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/lib/pq"
 	"gorm.io/gorm"
@@ -408,9 +409,9 @@ func buildModelFeedItem(src model.FeedSource, normalized normalizedFeedItem, fet
 	return newFeedItem
 }
 
-func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized normalizedFeedItem, fetchedAt time.Time) error {
+func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized normalizedFeedItem, fetchedAt time.Time) (bool, error) {
 	if normalized.Identifier == "" || normalized.Link == "" {
-		return nil
+		return false, nil
 	}
 
 	newFeedItem := buildModelFeedItem(src, normalized, fetchedAt)
@@ -422,12 +423,12 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		DoNothing: true,
 	}).Create(&newFeedItem)
 	if result.Error == nil {
-		return nil
+		return result.RowsAffected > 0, nil
 	}
 	if isFeedItemDuplicateKeyError(result.Error) {
-		return nil
+		return false, nil
 	}
-	return result.Error
+	return false, result.Error
 }
 
 func isFeedItemDuplicateKeyError(err error) bool {
@@ -465,25 +466,32 @@ func isFeedItemDuplicateKeyError(err error) bool {
 		(strings.Contains(message, "duplicate key") && strings.Contains(message, "feed_items"))
 }
 
-func persistParsedFeedItems(db *gorm.DB, src model.FeedSource, items []ExtRSSItem, sourceTitle string, sourceCoverURL string, fetchedAt time.Time) error {
+func persistParsedFeedItems(db *gorm.DB, src model.FeedSource, items []ExtRSSItem, sourceTitle string, sourceCoverURL string, fetchedAt time.Time) (int64, error) {
+	var inserted int64
 	for _, raw := range items {
 		normalized := normalizeRSSItem(raw, sourceTitle, sourceCoverURL, fetchedAt)
-		if err := persistNormalizedFeedItem(db, src, normalized, fetchedAt); err != nil {
-			return err
+		created, err := persistNormalizedFeedItem(db, src, normalized, fetchedAt)
+		if err != nil {
+			return inserted, err
+		}
+		if created {
+			inserted++
 		}
 	}
-	return nil
+	return inserted, nil
 }
 
 func applyFetchedSourceUpdates(db *gorm.DB, src *model.FeedSource, sourceTitle string, sourceCoverURL string, fetchedAt time.Time) error {
+	updates := map[string]interface{}{
+		"last_fetched_at": fetchedAt,
+	}
 	if src.Title == "" && sourceTitle != "" {
-		src.Title = sourceTitle
+		updates["title"] = sourceTitle
 	}
 	if sourceCoverURL != "" {
-		src.CoverURL = sourceCoverURL
+		updates["cover_url"] = sourceCoverURL
 	}
-	src.LastFetchedAt = &fetchedAt
-	return db.Save(src).Error
+	return db.Model(src).Updates(updates).Error
 }
 
 // StartRSSCron starts a background worker that fetches all unique RSS URLs periodically
@@ -561,7 +569,7 @@ func syncAllRSSFeeds(db *gorm.DB) {
 		urlFailed := false
 
 		for _, src := range sources {
-			if err := persistParsedFeedItems(db, src, items, sourceTitle, sourceCoverURL, now); err != nil {
+			if _, err := persistParsedFeedItems(db, src, items, sourceTitle, sourceCoverURL, now); err != nil {
 				log.Printf("failed to persist feed items for %s: %v", sanitizeRSSLogURL(src.RssURL), err)
 				urlFailed = true
 				continue
@@ -580,30 +588,47 @@ func syncAllRSSFeeds(db *gorm.DB) {
 	}
 }
 
+type RSSSyncResult struct {
+	FeedSourceID uuid.UUID `json:"feed_source_id"`
+	FetchedItems int       `json:"fetched_items"`
+	NewItems     int64     `json:"new_items"`
+	SyncedAt     time.Time `json:"synced_at"`
+}
+
 func SyncSingleRSS(db *gorm.DB, src model.FeedSource) {
+	if _, err := SyncSingleRSSWithResult(db, src); err != nil {
+		log.Printf("Immediate RSS sync failed for %s: %v", sanitizeRSSLogURL(src.RssURL), sanitizeRSSLogError(err))
+	}
+}
+
+func SyncSingleRSSWithResult(db *gorm.DB, src model.FeedSource) (RSSSyncResult, error) {
+	result := RSSSyncResult{FeedSourceID: src.ID}
 	if src.SourceType != "external_rss" || src.RssURL == "" {
-		return
+		return result, errors.New("source is not an external RSS feed")
 	}
 	if err := ValidateFullTextTargetURL(src.RssURL); err != nil {
-		log.Printf("SyncSingleRSS skipping invalid URL: %s", sanitizeRSSLogURL(src.RssURL))
-		return
+		return result, err
 	}
 
 	items, sourceTitle, sourceCoverURL, err := FetchAndParseRSS(src.RssURL)
 	if err != nil {
-		log.Printf("Immediate RSS sync failed for %s: %v", sanitizeRSSLogURL(src.RssURL), sanitizeRSSLogError(err))
-		return
+		return result, err
 	}
 
 	now := time.Now()
+	result.FetchedItems = len(items)
+	result.SyncedAt = now
 
-	if err := persistParsedFeedItems(db, src, items, sourceTitle, sourceCoverURL, now); err != nil {
-		log.Printf("failed to persist feed items for %s: %v", sanitizeRSSLogURL(src.RssURL), err)
-		return
+	newItems, err := persistParsedFeedItems(db, src, items, sourceTitle, sourceCoverURL, now)
+	result.NewItems = newItems
+	if err != nil {
+		return result, err
 	}
 	if err := applyFetchedSourceUpdates(db, &src, sourceTitle, sourceCoverURL, now); err != nil {
-		log.Printf("failed to update source metadata for %s: %v", sanitizeRSSLogURL(src.RssURL), err)
+		return result, err
 	}
+
+	return result, nil
 }
 
 func FetchAndParseRSS(feedURL string) ([]ExtRSSItem, string, string, error) {

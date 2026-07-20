@@ -2,8 +2,10 @@ package feed
 
 import (
 	"errors"
+	"log"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"atoman/internal/model"
@@ -17,11 +19,136 @@ import (
 )
 
 type Service struct {
-	db   *gorm.DB
-	repo *Repo
+	db         *gorm.DB
+	repo       *Repo
+	syncSource func(*gorm.DB, model.FeedSource) (legacyfeed.RSSSyncResult, error)
 }
 
-func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
+func NewService(db *gorm.DB) *Service {
+	return &Service{db: db, repo: NewRepo(db), syncSource: legacyfeed.SyncSingleRSSWithResult}
+}
+
+type SubscriptionSyncResult struct {
+	SubscriptionID uuid.UUID `json:"subscription_id"`
+	FeedSourceID   uuid.UUID `json:"feed_source_id"`
+	FetchedItems   int       `json:"fetched_items"`
+	NewItems       int64     `json:"new_items"`
+	SyncedAt       time.Time `json:"synced_at"`
+	Success        bool      `json:"success"`
+	Error          string    `json:"error,omitempty"`
+}
+
+type SubscriptionSyncSummary struct {
+	Total     int                      `json:"total"`
+	Succeeded int                      `json:"succeeded"`
+	Failed    int                      `json:"failed"`
+	NewItems  int64                    `json:"new_items"`
+	Results   []SubscriptionSyncResult `json:"results"`
+}
+
+func (s *Service) SyncSubscription(user authctx.CurrentUser, subscriptionID uuid.UUID) (SubscriptionSyncResult, error) {
+	var subscription model.Subscription
+	err := s.db.Preload("FeedSource").
+		Where("id = ? AND user_id = ?", subscriptionID, user.ID).
+		First(&subscription).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return SubscriptionSyncResult{}, apperr.NotFound("feed.subscription_not_found", "Subscription not found")
+	}
+	if err != nil {
+		return SubscriptionSyncResult{}, err
+	}
+	if subscription.FeedSource == nil || subscription.FeedSource.SourceType != "external_rss" {
+		return SubscriptionSyncResult{}, apperr.BadRequest("feed.subscription_not_external", "Only external RSS subscriptions can be refreshed")
+	}
+
+	result, _ := s.syncLoadedSubscription(subscription)
+	if err := s.persistSubscriptionSyncState(subscription, result); err != nil {
+		log.Printf("failed to persist subscription sync state for %s: %v", subscription.ID, err)
+		result.Success = false
+		result.Error = "failed to save refresh status"
+	}
+	return result, nil
+}
+
+func (s *Service) SyncAllSubscriptions(user authctx.CurrentUser) (SubscriptionSyncSummary, error) {
+	var subscriptions []model.Subscription
+	if err := s.db.Preload("FeedSource").Where("user_id = ?", user.ID).Find(&subscriptions).Error; err != nil {
+		return SubscriptionSyncSummary{}, err
+	}
+
+	external := make([]model.Subscription, 0, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if subscription.FeedSource != nil && subscription.FeedSource.SourceType == "external_rss" {
+			external = append(external, subscription)
+		}
+	}
+
+	results := make([]SubscriptionSyncResult, len(external))
+	const maxConcurrency = 4
+	semaphore := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+	for i := range external {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+			results[index], _ = s.syncLoadedSubscription(external[index])
+		}(i)
+	}
+	wg.Wait()
+
+	summary := SubscriptionSyncSummary{Total: len(results), Results: results}
+	for i := range results {
+		if err := s.persistSubscriptionSyncState(external[i], results[i]); err != nil {
+			log.Printf("failed to persist subscription sync state for %s: %v", external[i].ID, err)
+			results[i].Success = false
+			results[i].Error = "failed to save refresh status"
+		}
+		summary.NewItems += results[i].NewItems
+		if results[i].Success {
+			summary.Succeeded++
+		} else {
+			summary.Failed++
+		}
+	}
+	summary.Results = results
+	return summary, nil
+}
+
+func (s *Service) syncLoadedSubscription(subscription model.Subscription) (SubscriptionSyncResult, error) {
+	result := SubscriptionSyncResult{
+		SubscriptionID: subscription.ID,
+		FeedSourceID:   subscription.FeedSourceID,
+		SyncedAt:       time.Now().UTC(),
+	}
+	rssResult, err := s.syncSource(s.db, *subscription.FeedSource)
+	result.FetchedItems = rssResult.FetchedItems
+	result.NewItems = rssResult.NewItems
+	if !rssResult.SyncedAt.IsZero() {
+		result.SyncedAt = rssResult.SyncedAt
+	}
+	if err != nil {
+		result.Error = err.Error()
+		return result, err
+	}
+	result.Success = true
+	return result, nil
+}
+
+func (s *Service) persistSubscriptionSyncState(subscription model.Subscription, result SubscriptionSyncResult) error {
+	updates := map[string]interface{}{
+		"last_checked": result.SyncedAt,
+	}
+	if result.Success {
+		updates["health_status"] = "healthy"
+		updates["error_message"] = ""
+	} else {
+		updates["health_status"] = "error"
+		updates["error_message"] = result.Error
+	}
+	return s.db.Model(&subscription).Updates(updates).Error
+}
 
 func (s *Service) ListRecommendationThemes(category string) []RecommendationThemeDTO {
 	return listRecommendationThemes(category)

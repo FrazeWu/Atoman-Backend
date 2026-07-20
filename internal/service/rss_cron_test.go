@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -462,10 +463,10 @@ func TestPersistNormalizedFeedItemUsesSharedPersistencePath(t *testing.T) {
 		ContentHTML: "<p>Hello world.</p><p>Second line.</p>",
 	}
 
-	if err := persistNormalizedFeedItem(db, source, normalized, now); err != nil {
+	if _, err := persistNormalizedFeedItem(db, source, normalized, now); err != nil {
 		t.Fatalf("persistNormalizedFeedItem returned error: %v", err)
 	}
-	if err := persistNormalizedFeedItem(db, source, normalized, now); err != nil {
+	if _, err := persistNormalizedFeedItem(db, source, normalized, now); err != nil {
 		t.Fatalf("persistNormalizedFeedItem second call returned error: %v", err)
 	}
 
@@ -511,10 +512,10 @@ func TestPersistNormalizedFeedItemDeduplicatesSameLinkWithDifferentGUID(t *testi
 	second := first
 	second.Identifier = "post-1-updated-guid"
 
-	if err := persistNormalizedFeedItem(db, source, first, now); err != nil {
+	if _, err := persistNormalizedFeedItem(db, source, first, now); err != nil {
 		t.Fatalf("persistNormalizedFeedItem first call returned error: %v", err)
 	}
-	if err := persistNormalizedFeedItem(db, source, second, now); err != nil {
+	if _, err := persistNormalizedFeedItem(db, source, second, now); err != nil {
 		t.Fatalf("persistNormalizedFeedItem second call returned error: %v", err)
 	}
 
@@ -584,7 +585,7 @@ func TestPersistNormalizedFeedItemIgnoresDuplicateKeyRace(t *testing.T) {
 		}
 	}()
 
-	if err := persistNormalizedFeedItem(db, source, normalized, now); err != nil {
+	if _, err := persistNormalizedFeedItem(db, source, normalized, now); err != nil {
 		t.Fatalf("persistNormalizedFeedItem returned error: %v", err)
 	}
 
@@ -615,7 +616,7 @@ func TestPersistNormalizedFeedItemSkipsEmptyIdentifierAndEmptyLink(t *testing.T)
 	}
 
 	now := time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
-	if err := persistNormalizedFeedItem(db, source, normalizedFeedItem{
+	if _, err := persistNormalizedFeedItem(db, source, normalizedFeedItem{
 		Title:       "Missing Identifier",
 		Link:        "https://example.com/posts/missing-identifier",
 		PublishedAt: now,
@@ -623,7 +624,7 @@ func TestPersistNormalizedFeedItemSkipsEmptyIdentifierAndEmptyLink(t *testing.T)
 	}, now); err != nil {
 		t.Fatalf("persistNormalizedFeedItem missing identifier returned error: %v", err)
 	}
-	if err := persistNormalizedFeedItem(db, source, normalizedFeedItem{
+	if _, err := persistNormalizedFeedItem(db, source, normalizedFeedItem{
 		Title:       "Missing Link",
 		Identifier:  "post-2",
 		PublishedAt: now,
@@ -717,6 +718,191 @@ func TestSyncSingleRSSPersistsNormalizedRSSContentAndMetadata(t *testing.T) {
 	expectedPublishedAt := time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
 	if !item.PublishedAt.Equal(expectedPublishedAt) {
 		t.Fatalf("published_at=%s", item.PublishedAt.Format(time.RFC3339))
+	}
+}
+
+func TestSyncSingleRSSWithResultCountsNewItems(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "rss-sync-result-source",
+		RssURL:     "https://example.com/feed.xml",
+		Title:      "Example Feed",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	originalClient := rssFetchHTTPClient
+	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml; charset=utf-8"}},
+			Body: io.NopCloser(strings.NewReader(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Example Feed</title>
+<item><title>One</title><link>https://example.com/posts/1</link><guid>post-1</guid></item>
+<item><title>Two</title><link>https://example.com/posts/2</link><guid>post-2</guid></item>
+</channel></rss>`)),
+		}, nil
+	})}
+	defer func() { rssFetchHTTPClient = originalClient }()
+
+	first, err := SyncSingleRSSWithResult(db, source)
+	if err != nil {
+		t.Fatalf("first sync: %v", err)
+	}
+	if first.FetchedItems != 2 || first.NewItems != 2 || first.SyncedAt.IsZero() {
+		t.Fatalf("unexpected first result: %#v", first)
+	}
+
+	second, err := SyncSingleRSSWithResult(db, source)
+	if err != nil {
+		t.Fatalf("second sync: %v", err)
+	}
+	if second.FetchedItems != 2 || second.NewItems != 0 || second.SyncedAt.IsZero() {
+		t.Fatalf("unexpected second result: %#v", second)
+	}
+}
+
+func TestSyncSingleRSSWithResultCountsOnlyRowsInsertedByThisSync(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "rss-sync-concurrent-count-source",
+		RssURL:     "https://example.com/feed.xml",
+		Title:      "Example Feed",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	originalClient := rssFetchHTTPClient
+	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		for index := 1; index <= 2; index++ {
+			item := model.FeedItem{
+				FeedSourceID: source.ID,
+				GUID:         fmt.Sprintf("post-%d", index),
+				Title:        fmt.Sprintf("Post %d", index),
+				Link:         fmt.Sprintf("https://example.com/posts/%d", index),
+			}
+			if err := db.Create(&item).Error; err != nil {
+				t.Fatalf("simulate concurrent insert: %v", err)
+			}
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml; charset=utf-8"}},
+			Body: io.NopCloser(strings.NewReader(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Example Feed</title>
+<item><title>Post 1</title><link>https://example.com/posts/1</link><guid>post-1</guid></item>
+<item><title>Post 2</title><link>https://example.com/posts/2</link><guid>post-2</guid></item>
+</channel></rss>`)),
+		}, nil
+	})}
+	defer func() { rssFetchHTTPClient = originalClient }()
+
+	result, err := SyncSingleRSSWithResult(db, source)
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if result.FetchedItems != 2 || result.NewItems != 0 {
+		t.Fatalf("unexpected concurrent sync result: %#v", result)
+	}
+}
+
+func TestApplyFetchedSourceUpdatesDoesNotOverwriteWorkerState(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := model.FeedSource{
+		SourceType:      "external_rss",
+		Hash:            "rss-targeted-source-update",
+		RssURL:          "https://example.com/feed.xml",
+		Title:           "Existing Title",
+		FullTextEnabled: true,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(map[string]interface{}{
+		"full_text_enabled":       false,
+		"full_text_failure_count": 3,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	fetchedAt := time.Date(2026, 7, 20, 8, 0, 0, 0, time.UTC)
+	if err := applyFetchedSourceUpdates(db, &source, "Fetched Title", "https://example.com/cover.jpg", fetchedAt); err != nil {
+		t.Fatal(err)
+	}
+
+	var refreshed model.FeedSource
+	if err := db.First(&refreshed, "id = ?", source.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if refreshed.FullTextEnabled || refreshed.FullTextFailureCount != 3 {
+		t.Fatalf("worker state was overwritten: %#v", refreshed)
+	}
+	if refreshed.Title != "Existing Title" || refreshed.CoverURL != "https://example.com/cover.jpg" || refreshed.LastFetchedAt == nil || !refreshed.LastFetchedAt.Equal(fetchedAt) {
+		t.Fatalf("unexpected fetched source state: %#v", refreshed)
+	}
+}
+
+func TestSyncSingleRSSWithResultKeepsCountsWhenSourceUpdateFails(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "rss-sync-source-update-failure",
+		RssURL:     "https://example.com/feed.xml",
+		Title:      "Example Feed",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	originalClient := rssFetchHTTPClient
+	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml; charset=utf-8"}},
+			Body: io.NopCloser(strings.NewReader(`<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Example Feed</title>
+<item><title>One</title><link>https://example.com/posts/1</link><guid>post-1</guid></item>
+</channel></rss>`)),
+		}, nil
+	})}
+	defer func() { rssFetchHTTPClient = originalClient }()
+
+	callbackName := "test:fail_feed_source_update"
+	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "feed_sources" {
+			tx.AddError(errors.New("source state unavailable"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Callback().Update().Remove(callbackName)
+
+	result, err := SyncSingleRSSWithResult(db, source)
+	if err == nil {
+		t.Fatal("expected source update failure")
+	}
+	if result.FetchedItems != 1 || result.NewItems != 1 || result.SyncedAt.IsZero() {
+		t.Fatalf("sync counts were lost after source update failure: %#v", result)
 	}
 }
 

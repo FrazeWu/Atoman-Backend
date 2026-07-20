@@ -56,6 +56,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/subscriptions", CreateSubscription(service.db))
 		protected.DELETE("/subscriptions/:id", DeleteSubscription(service.db))
 		protected.PUT("/subscriptions/:id", UpdateSubscription(service.db))
+		protected.POST("/subscriptions/sync-all", h.syncAllSubscriptions)
+		protected.POST("/subscriptions/:id/sync", h.syncSubscription)
 		protected.GET("/stats", GetFeedStats(service.db))
 		protected.GET("/groups", GetSubscriptionGroups(service.db))
 		protected.POST("/groups", CreateSubscriptionGroup(service.db))
@@ -87,6 +89,62 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.DELETE("/subscribe/collection/:collection_id", UnsubscribeCollection(service.db))
 		protected.GET("/subscribe/collection/:collection_id/status", CheckCollectionSubscription(service.db))
 	}
+}
+
+// syncSubscription godoc
+// @Summary 刷新单个订阅源
+// @Description 立即抓取当前用户指定的外部 RSS 订阅源并返回新增条目数。
+// @Tags feed
+// @Produce json
+// @Param id path string true "订阅 UUID"
+// @Success 200 {object} SubscriptionSyncResult
+// @Failure 400 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/subscriptions/{id}/sync [post]
+func (h *Handler) syncSubscription(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	subscriptionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "subscription id must be a valid uuid"))
+		return
+	}
+	result, err := h.service.SyncSubscription(user, subscriptionID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, result)
+}
+
+// syncAllSubscriptions godoc
+// @Summary 刷新全部外部订阅源
+// @Description 受限并发抓取当前用户的全部外部 RSS 订阅源并返回汇总结果。
+// @Tags feed
+// @Produce json
+// @Success 200 {object} SubscriptionSyncSummary
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/subscriptions/sync-all [post]
+func (h *Handler) syncAllSubscriptions(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	result, err := h.service.SyncAllSubscriptions(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, result)
 }
 
 // getSubscribedFeed godoc
