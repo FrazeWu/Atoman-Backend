@@ -3,20 +3,20 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
-	"time"
 
+	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/service"
 	"atoman/internal/testdb"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
@@ -32,6 +32,7 @@ func newAuthTestDB(t *testing.T) *gorm.DB {
 	if err := db.AutoMigrate(
 		&model.User{},
 		&model.UserSettings{},
+		&model.AuthSession{},
 		&model.EmailVerificationCode{},
 		&model.Channel{},
 		&model.Collection{},
@@ -49,40 +50,155 @@ func newAuthTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
-func seedAuthVerificationCode(t *testing.T, db *gorm.DB, email string) {
-	t.Helper()
-
-	code := model.EmailVerificationCode{
-		Email:     email,
-		Code:      "123456",
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
-		Used:      false,
+func TestLoginHandlerCreatesWebSessionWithoutReturningToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAuthTestDB(t)
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
 	}
-	if err := db.Create(&code).Error; err != nil {
+	user := model.User{Username: "web-user", Email: "web@example.com", Password: string(hash), Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	r := gin.New()
+	r.POST("/login", LoginHandler(db))
+	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"WEB@example.com","password":"correct-password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), `"token"`) || !strings.Contains(w.Body.String(), `"csrf_token"`) {
+		t.Fatalf("web response must contain csrf but no token: %s", w.Body.String())
+	}
+	var sessionCookie *http.Cookie
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name == middleware.AuthSessionCookieName {
+			sessionCookie = cookie
+			break
+		}
+	}
+	if sessionCookie == nil || sessionCookie.Value == "" || !sessionCookie.HttpOnly {
+		t.Fatalf("expected HttpOnly web session cookie, got %#v", sessionCookie)
+	}
+	var stored model.AuthSession
+	if err := db.First(&stored, "user_id = ?", user.UUID).Error; err != nil {
+		t.Fatalf("load auth session: %v", err)
+	}
+	if stored.Kind != authsession.KindWeb || stored.TokenHash == sessionCookie.Value {
+		t.Fatalf("unexpected stored session: %#v", stored)
+	}
+}
+
+func TestTokenLoginHandlerCreatesAPISessionWithoutCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAuthTestDB(t)
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	user := model.User{Username: "api-user", Email: "api@example.com", Password: string(hash), Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	r := gin.New()
+	r.POST("/token", TokenLoginHandler(db))
+	req := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader(`{"username":"api-user","password":"correct-password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"token"`) || strings.Contains(w.Body.String(), `"csrf_token"`) {
+		t.Fatalf("unexpected token response %d: %s", w.Code, w.Body.String())
+	}
+	if len(w.Result().Cookies()) != 0 {
+		t.Fatalf("api token login must not set cookies: %#v", w.Result().Cookies())
+	}
+	var stored model.AuthSession
+	if err := db.First(&stored, "user_id = ?", user.UUID).Error; err != nil {
+		t.Fatalf("load auth session: %v", err)
+	}
+	if stored.Kind != authsession.KindAPI {
+		t.Fatalf("expected api session, got %#v", stored)
+	}
+}
+
+func TestSessionHandlerRotatesCSRFAndLogoutRevokesSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("FRONTEND_URL", "https://www.atoman.org")
+	db := newAuthTestDB(t)
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("hash password: %v", err)
+	}
+	user := model.User{Username: "session-user", Email: "session@example.com", Password: string(hash), Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	credentials, err := authsession.New(db).Create(user.UUID, authsession.KindWeb)
+	if err != nil {
+		t.Fatalf("create web session: %v", err)
+	}
+	cookie := &http.Cookie{Name: middleware.AuthSessionCookieName, Value: credentials.Token}
+
+	sessionRouter := gin.New()
+	sessionRouter.GET("/session", SessionHandler(db))
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/session", nil)
+	sessionRequest.AddCookie(cookie)
+	sessionResponse := httptest.NewRecorder()
+	sessionRouter.ServeHTTP(sessionResponse, sessionRequest)
+	if sessionResponse.Code != http.StatusOK {
+		t.Fatalf("expected session restore, got %d: %s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+	var payload struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	if err := json.Unmarshal(sessionResponse.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode session response: %v", err)
+	}
+	if payload.CSRFToken == "" || payload.CSRFToken == credentials.CSRFToken {
+		t.Fatalf("expected rotated csrf token, got %q", payload.CSRFToken)
+	}
+
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	logoutRouter := gin.New()
+	logoutRouter.POST("/logout", middleware.AuthMiddleware(), LogoutHandler(db))
+	logoutRequest := httptest.NewRequest(http.MethodPost, "/logout", nil)
+	logoutRequest.AddCookie(cookie)
+	logoutRequest.Header.Set("Origin", "https://www.atoman.org")
+	logoutRequest.Header.Set(middleware.CSRFHeaderName, payload.CSRFToken)
+	logoutResponse := httptest.NewRecorder()
+	logoutRouter.ServeHTTP(logoutResponse, logoutRequest)
+	if logoutResponse.Code != http.StatusNoContent {
+		t.Fatalf("expected logout 204, got %d: %s", logoutResponse.Code, logoutResponse.Body.String())
+	}
+	if _, err := authsession.New(db).Authenticate(credentials.Token, authsession.KindWeb); !errors.Is(err, authsession.ErrInvalid) {
+		t.Fatalf("expected session revoked after logout, got %v", err)
+	}
+	assertClearedAuthCookie(t, logoutResponse)
+}
+
+func seedAuthVerificationCode(t *testing.T, db *gorm.DB, email string) string {
+	t.Helper()
+	t.Setenv("AUTH_CODE_SECRET", "test-auth-code-secret")
+	code, err := service.NewEmailServiceWithoutRedis(db).SendVerificationCode(email)
+	if err != nil {
 		t.Fatalf("seed verification code: %v", err)
 	}
+	return code
 }
 
-func signedAuthClaimsTokenForTest(t *testing.T, claims jwt.MapClaims) string {
+func apiAuthTokenForTest(t *testing.T, db *gorm.DB, user model.User) string {
 	t.Helper()
-	if _, ok := claims["exp"]; !ok {
-		claims["exp"] = time.Now().Add(time.Hour).Unix()
-	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString([]byte("test-secret"))
+	credentials, err := authsession.New(db).Create(user.UUID, authsession.KindAPI)
 	if err != nil {
-		t.Fatalf("sign token: %v", err)
+		t.Fatalf("create api auth session: %v", err)
 	}
-	return signed
-}
-
-func signedAuthTokenForTest(t *testing.T, userID uuid.UUID) string {
-	t.Helper()
-	return signedAuthClaimsTokenForTest(t, jwt.MapClaims{
-		"user_id":  userID.String(),
-		"username": "missing-user",
-		"role":     "user",
-	})
+	return credentials.Token
 }
 
 func decodeAuthError(t *testing.T, body string) authErrorBody {
@@ -145,7 +261,6 @@ func assertClearedAuthCookie(t *testing.T, w *httptest.ResponseRecorder) {
 
 func TestSessionHandlerReturnsNoContentWhenCookieMissing(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newAuthTestDB(t)
 	r := gin.New()
 	r.GET("/session", SessionHandler(db))
@@ -168,7 +283,6 @@ func TestSessionHandlerReturnsNoContentWhenCookieMissing(t *testing.T) {
 
 func TestSessionHandlerClearsCookieWhenTokenInvalid(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newAuthTestDB(t)
 	r := gin.New()
 	r.GET("/session", SessionHandler(db))
@@ -189,142 +303,8 @@ func TestSessionHandlerClearsCookieWhenTokenInvalid(t *testing.T) {
 	assertClearedAuthCookie(t, w)
 }
 
-func TestSessionHandlerRejectsOutdatedAuthVersion(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
-	db := newAuthTestDB(t)
-	user := model.User{
-		Username: "reset-user", Email: "reset@example.com", Password: "hash", Role: "user", IsActive: true, AuthVersion: 1,
-	}
-	if err := db.Create(&user).Error; err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	token := signedAuthClaimsTokenForTest(t, jwt.MapClaims{
-		"user_id": user.UUID.String(), "username": user.Username, "role": user.Role, "auth_version": 0,
-	})
-	r := gin.New()
-	r.GET("/session", SessionHandler(db))
-	req := httptest.NewRequest(http.MethodGet, "/session", nil)
-	req.AddCookie(&http.Cookie{Name: authTokenCookieName, Value: token})
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
-	}
-	assertClearedAuthCookie(t, w)
-}
-
-func TestSessionHandlerClearsCookieWhenClaimsMissingUserID(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
-	db := newAuthTestDB(t)
-	r := gin.New()
-	r.GET("/session", SessionHandler(db))
-
-	req := httptest.NewRequest(http.MethodGet, "/session", nil)
-	req.AddCookie(&http.Cookie{Name: authTokenCookieName, Value: signedAuthClaimsTokenForTest(t, jwt.MapClaims{
-		"username": "missing-user",
-		"role":     "user",
-	})})
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
-	}
-	payload := decodeAuthError(t, w.Body.String())
-	if payload.Code != "auth.invalid_claims" || payload.Error != "登录信息异常，请重新登录" {
-		t.Fatalf("unexpected payload: %#v", payload)
-	}
-	assertClearedAuthCookie(t, w)
-}
-
-func TestSessionHandlerClearsCookieWhenClaimsUserIDIsNotString(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
-	db := newAuthTestDB(t)
-	r := gin.New()
-	r.GET("/session", SessionHandler(db))
-
-	req := httptest.NewRequest(http.MethodGet, "/session", nil)
-	req.AddCookie(&http.Cookie{Name: authTokenCookieName, Value: signedAuthClaimsTokenForTest(t, jwt.MapClaims{
-		"user_id":  123,
-		"username": "missing-user",
-		"role":     "user",
-	})})
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
-	}
-	payload := decodeAuthError(t, w.Body.String())
-	if payload.Code != "auth.invalid_claims" || payload.Error != "登录信息异常，请重新登录" {
-		t.Fatalf("unexpected payload: %#v", payload)
-	}
-	assertClearedAuthCookie(t, w)
-}
-
-func TestSessionHandlerClearsCookieWhenTokenUserDoesNotExist(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
-	db := newAuthTestDB(t)
-	r := gin.New()
-	r.GET("/session", SessionHandler(db))
-
-	req := httptest.NewRequest(http.MethodGet, "/session", nil)
-	req.AddCookie(&http.Cookie{Name: authTokenCookieName, Value: signedAuthTokenForTest(t, uuid.New())})
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
-	}
-	payload := decodeAuthError(t, w.Body.String())
-	if payload.Code != "auth.user_not_found" || payload.Error != "账号不存在或已被移除，请重新登录" {
-		t.Fatalf("unexpected payload: %#v", payload)
-	}
-	assertClearedAuthCookie(t, w)
-}
-
-func TestSessionHandlerClearsCookieWhenTokenUserIsInactive(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
-	db := newAuthTestDB(t)
-	inactive := model.User{Username: "inactive", Email: "inactive@example.com", Password: "hash", Role: "user", IsActive: false}
-	if err := db.Create(&inactive).Error; err != nil {
-		t.Fatalf("create inactive user: %v", err)
-	}
-	if err := db.Model(&inactive).Update("is_active", false).Error; err != nil {
-		t.Fatalf("deactivate user: %v", err)
-	}
-	r := gin.New()
-	r.GET("/session", SessionHandler(db))
-
-	req := httptest.NewRequest(http.MethodGet, "/session", nil)
-	req.AddCookie(&http.Cookie{Name: authTokenCookieName, Value: signedAuthTokenForTest(t, inactive.UUID)})
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
-	}
-	payload := decodeAuthError(t, w.Body.String())
-	if payload.Code != "auth.user_not_found" || payload.Error != "账号不存在或已被移除，请重新登录" {
-		t.Fatalf("unexpected payload: %#v", payload)
-	}
-	assertClearedAuthCookie(t, w)
-}
-
 func TestLoginHandlerReturnsAccountNotFoundCode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newAuthTestDB(t)
 	r := gin.New()
 	r.POST("/login", LoginHandler(db))
@@ -346,7 +326,6 @@ func TestLoginHandlerReturnsAccountNotFoundCode(t *testing.T) {
 
 func TestLoginHandlerRejectsInactiveUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newAuthTestDB(t)
 	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
 	if err != nil {
@@ -378,7 +357,6 @@ func TestLoginHandlerRejectsInactiveUser(t *testing.T) {
 
 func TestLoginHandlerAcceptsEmailCaseInsensitively(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newAuthTestDB(t)
 	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
 	if err != nil {
@@ -431,11 +409,11 @@ func TestSendVerificationHandlerDoesNotLogVerificationCode(t *testing.T) {
 	if err := db.Where("email = ?", email).First(&stored).Error; err != nil {
 		t.Fatalf("load verification code: %v", err)
 	}
-	if stored.Code == "" {
-		t.Fatal("expected verification code to be stored")
+	if stored.CodeHash == "" {
+		t.Fatal("expected verification code hash to be stored")
 	}
-	if strings.Contains(stderr, stored.Code) {
-		t.Fatalf("expected stderr not to contain verification code %q, got %q", stored.Code, stderr)
+	if strings.Contains(stderr, stored.CodeHash) || strings.Contains(stderr, email) {
+		t.Fatalf("expected stderr not to contain verification secrets, got %q", stderr)
 	}
 }
 
@@ -519,17 +497,19 @@ func TestPasswordResetUpdatesPasswordAndAuthVersion(t *testing.T) {
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	code := model.EmailVerificationCode{
-		Email: "reset@example.com", Purpose: service.VerificationPurposePasswordReset,
-		Code: "123456", ExpiresAt: time.Now().UTC().Add(time.Hour),
+	oldSession, err := authsession.New(db).Create(user.UUID, authsession.KindAPI)
+	if err != nil {
+		t.Fatalf("create old api session: %v", err)
 	}
-	if err := db.Create(&code).Error; err != nil {
+	emailService := service.NewEmailServiceWithoutRedis(db)
+	resetCode, err := emailService.SendVerificationCodeForPurpose("reset@example.com", service.VerificationPurposePasswordReset)
+	if err != nil {
 		t.Fatalf("create reset code: %v", err)
 	}
 	r := gin.New()
 	SetupAuthRoutes(r, db, service.NewEmailServiceWithoutRedis(db))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password-reset", strings.NewReader(`{"email":"RESET@example.com","code":"123456","password":"new-password","password_confirm":"new-password"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password-reset", strings.NewReader(`{"email":"RESET@example.com","code":"`+resetCode+`","password":"new-password","password_confirm":"new-password"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.AddCookie(&http.Cookie{Name: authTokenCookieName, Value: "old-token"})
 	w := httptest.NewRecorder()
@@ -549,11 +529,14 @@ func TestPasswordResetUpdatesPasswordAndAuthVersion(t *testing.T) {
 		t.Fatalf("expected auth version 1, got %d", updated.AuthVersion)
 	}
 	var consumed model.EmailVerificationCode
-	if err := db.First(&consumed, "uuid = ?", code.UUID).Error; err != nil {
+	if err := db.First(&consumed, "email = ? AND purpose = ?", user.Email, service.VerificationPurposePasswordReset).Error; err != nil {
 		t.Fatalf("load reset code: %v", err)
 	}
 	if !consumed.Used {
 		t.Fatal("expected reset code to be consumed")
+	}
+	if _, err := authsession.New(db).Authenticate(oldSession.Token, authsession.KindAPI); !errors.Is(err, authsession.ErrInvalid) {
+		t.Fatalf("expected password reset to revoke existing sessions, got %v", err)
 	}
 	assertClearedAuthCookie(t, w)
 }
@@ -567,11 +550,11 @@ func TestPasswordResetRejectsRegistrationCode(t *testing.T) {
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	seedAuthVerificationCode(t, db, user.Email)
+	registrationCode := seedAuthVerificationCode(t, db, user.Email)
 	r := gin.New()
 	SetupAuthRoutes(r, db, service.NewEmailServiceWithoutRedis(db))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password-reset", strings.NewReader(`{"email":"reset@example.com","code":"123456","password":"new-password","password_confirm":"new-password"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password-reset", strings.NewReader(`{"email":"reset@example.com","code":"`+registrationCode+`","password":"new-password","password_confirm":"new-password"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -581,19 +564,33 @@ func TestPasswordResetRejectsRegistrationCode(t *testing.T) {
 	}
 }
 
+func TestPasswordResetRejectsPasswordOver72Bytes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAuthTestDB(t)
+	r := gin.New()
+	r.POST("/password-reset", PasswordResetHandler(db))
+	body := `{"email":"reset@example.com","code":"123456","password":"` + strings.Repeat("a", 73) + `","password_confirm":"` + strings.Repeat("a", 73) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/password-reset", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for password over 72 bytes, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestRegisterHandlerRejectsReservedUsername(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("ENV", "development")
 	t.Setenv("GIN_MODE", gin.DebugMode)
 	t.Setenv("TURNSTILE_SECRET_KEY", "")
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newAuthTestDB(t)
 	email := "feed-user@example.com"
-	seedAuthVerificationCode(t, db, email)
+	code := seedAuthVerificationCode(t, db, email)
 
 	r := gin.New()
 	r.POST("/register", RegisterHandler(db, service.NewEmailServiceWithoutRedis(db)))
-	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"username":"feed","email":"`+email+`","password":"secret123","password_confirm":"secret123","verification_code":"123456"}`))
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"username":"feed","email":"`+email+`","password":"secret123","password_confirm":"secret123","verification_code":"`+code+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -661,7 +658,6 @@ func TestRegisterHandlerRejectsUsernameMatchingChannelSlug(t *testing.T) {
 	t.Setenv("ENV", "development")
 	t.Setenv("GIN_MODE", gin.DebugMode)
 	t.Setenv("TURNSTILE_SECRET_KEY", "")
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newAuthTestDB(t)
 	owner := model.User{Username: "owner", Email: "owner@example.com", Password: "hash", IsActive: true}
 	if err := db.Create(&owner).Error; err != nil {
@@ -672,11 +668,11 @@ func TestRegisterHandlerRejectsUsernameMatchingChannelSlug(t *testing.T) {
 		t.Fatalf("create channel: %v", err)
 	}
 	email := "design-user@example.com"
-	seedAuthVerificationCode(t, db, email)
+	code := seedAuthVerificationCode(t, db, email)
 
 	r := gin.New()
 	r.POST("/register", RegisterHandler(db, service.NewEmailServiceWithoutRedis(db)))
-	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"username":"design","email":"`+email+`","password":"secret123","password_confirm":"secret123","verification_code":"123456"}`))
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"username":"design","email":"`+email+`","password":"secret123","password_confirm":"secret123","verification_code":"`+code+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
@@ -695,16 +691,15 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	t.Setenv("ENV", "development")
 	t.Setenv("GIN_MODE", gin.DebugMode)
 	t.Setenv("TURNSTILE_SECRET_KEY", "")
-	t.Setenv("JWT_SECRET", "test-secret")
 
 	db := newAuthTestDB(t)
 	email := "bootstrap-user@example.com"
-	seedAuthVerificationCode(t, db, email)
+	code := seedAuthVerificationCode(t, db, email)
 
 	r := gin.New()
 	r.POST("/register", RegisterHandler(db, service.NewEmailServiceWithoutRedis(db)))
 
-	body := `{"username":"bootstrap","email":"` + email + `","password":"secret123","password_confirm":"secret123","verification_code":"123456"}`
+	body := `{"username":"bootstrap","email":"` + email + `","password":"secret123","password_confirm":"secret123","verification_code":"` + code + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -714,10 +709,26 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
+	if strings.Contains(w.Body.String(), `"token"`) || !strings.Contains(w.Body.String(), `"csrf_token"`) {
+		t.Fatalf("registration must return csrf but no token: %s", w.Body.String())
+	}
+	foundSessionCookie := false
+	for _, cookie := range w.Result().Cookies() {
+		if cookie.Name == middleware.AuthSessionCookieName && cookie.Value != "" {
+			foundSessionCookie = true
+		}
+	}
+	if !foundSessionCookie {
+		t.Fatal("expected registration to create a web session cookie")
+	}
 
 	var user model.User
 	if err := db.Where("email = ?", email).First(&user).Error; err != nil {
 		t.Fatalf("find created user: %v", err)
+	}
+	var webSession model.AuthSession
+	if err := db.First(&webSession, "user_id = ? AND kind = ?", user.UUID, authsession.KindWeb).Error; err != nil {
+		t.Fatalf("find registration web session: %v", err)
 	}
 
 	var channels []model.Channel
@@ -800,16 +811,15 @@ func TestRegisterHandlerDoesNotRequireSecondTurnstileVerification(t *testing.T) 
 	t.Setenv("ENV", "production")
 	t.Setenv("GIN_MODE", gin.ReleaseMode)
 	t.Setenv("TURNSTILE_SECRET_KEY", "configured-secret")
-	t.Setenv("JWT_SECRET", "test-secret")
 
 	db := newAuthTestDB(t)
 	email := "single-turnstile@example.com"
-	seedAuthVerificationCode(t, db, email)
+	code := seedAuthVerificationCode(t, db, email)
 
 	r := gin.New()
 	r.POST("/register", RegisterHandler(db, service.NewEmailServiceWithoutRedis(db)))
 
-	body := `{"username":"singleturnstile","email":"` + email + `","password":"secret123","password_confirm":"secret123","verification_code":"123456"}`
+	body := `{"username":"singleturnstile","email":"` + email + `","password":"secret123","password_confirm":"secret123","verification_code":"` + code + `"}`
 	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -823,7 +833,6 @@ func TestRegisterHandlerDoesNotRequireSecondTurnstileVerification(t *testing.T) 
 
 func TestLoginHandlerReturnsPasswordMismatchCode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newAuthTestDB(t)
 	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
 	if err != nil {
@@ -850,9 +859,29 @@ func TestLoginHandlerReturnsPasswordMismatchCode(t *testing.T) {
 	}
 }
 
+func TestLoginHandlerRateLimitsRepeatedAccountFailures(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAuthTestDB(t)
+	r := gin.New()
+	r.POST("/login", LoginHandler(db))
+	for attempt := 1; attempt <= 11; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"limited@example.com","password":"wrong-password"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if attempt <= 10 && w.Code == http.StatusTooManyRequests {
+			t.Fatalf("attempt %d was limited too early", attempt)
+		}
+		if attempt == 11 {
+			if w.Code != http.StatusTooManyRequests || w.Header().Get("Retry-After") == "" {
+				t.Fatalf("expected rate limit with Retry-After, got %d: %s", w.Code, w.Body.String())
+			}
+		}
+	}
+}
+
 func TestLoginHandlerReturnsPasswordNotSetForOAuthOnlyAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newAuthTestDB(t)
 	if err := db.Create(&model.User{Username: "oauth-only", Email: "oauth-only@example.com", Role: "user"}).Error; err != nil {
 		t.Fatalf("create oauth-only user: %v", err)
@@ -871,35 +900,6 @@ func TestLoginHandlerReturnsPasswordNotSetForOAuthOnlyAccount(t *testing.T) {
 	}
 	payload := decodeAuthError(t, w.Body.String())
 	if payload.Code != "auth.password_not_set" || payload.Error != "请使用第三方账号登录" {
-		t.Fatalf("unexpected payload: %#v", payload)
-	}
-}
-
-func TestLoginHandlerReturnsTokenGenerationFailedCode(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "")
-	db := newAuthTestDB(t)
-	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.DefaultCost)
-	if err != nil {
-		t.Fatalf("hash password: %v", err)
-	}
-	if err := db.Create(&model.User{Username: "alice", Email: "alice@example.com", Password: string(hash), Role: "user"}).Error; err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	r := gin.New()
-	r.POST("/login", LoginHandler(db))
-
-	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"alice@example.com","password":"correct-password"}`))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
-	}
-	payload := decodeAuthError(t, w.Body.String())
-	if payload.Code != "auth.token_generation_failed" || payload.Error != "登录服务暂时不可用，请稍后重试" {
 		t.Fatalf("unexpected payload: %#v", payload)
 	}
 }

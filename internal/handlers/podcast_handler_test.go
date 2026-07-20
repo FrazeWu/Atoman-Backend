@@ -17,7 +17,6 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -26,12 +25,12 @@ import (
 func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, model.Channel) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 
 	db := testdb.Open(t)
 	middleware.SetAuthDB(db)
 	testdb.Migrate(t, db,
 		&model.User{},
+		&model.AuthSession{},
 		&model.Channel{},
 		&model.Collection{},
 		&model.Post{},
@@ -117,13 +116,9 @@ func createPodcastEpisodeForPostStatus(t *testing.T, db *gorm.DB, user model.Use
 	return episode
 }
 
-func podcastAuthHeader(t *testing.T, user model.User) string {
+func podcastAuthHeader(t *testing.T, db *gorm.DB, user model.User) string {
 	t.Helper()
-	return "Bearer " + signedAuthClaimsTokenForTest(t, jwt.MapClaims{
-		"user_id":  user.UUID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-	})
+	return "Bearer " + apiAuthTokenForTest(t, db, user)
 }
 
 func multipartPodcastUploadBody(t *testing.T, field, filename, contentType string, content []byte) (*bytes.Buffer, string) {
@@ -147,13 +142,13 @@ func multipartPodcastUploadBody(t *testing.T, field, filename, contentType strin
 	return body, writer.FormDataContentType()
 }
 
-func newPodcastUploadTestRouter(t *testing.T, path string, handler gin.HandlerFunc) (*gin.Engine, model.User) {
+func newPodcastUploadTestRouter(t *testing.T, path string, handler gin.HandlerFunc) (*gin.Engine, *gorm.DB, model.User) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	db := testdb.Open(t)
 	middleware.SetAuthDB(db)
-	testdb.Migrate(t, db, &model.User{})
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{})
 
 	user := model.User{Username: "podcast-upload-user", Email: uuid.NewString() + "@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -162,7 +157,7 @@ func newPodcastUploadTestRouter(t *testing.T, path string, handler gin.HandlerFu
 
 	r := gin.New()
 	r.POST(path, middleware.AuthMiddleware(), handler)
-	return r, user
+	return r, db, user
 }
 
 func validMP3Bytes() []byte {
@@ -284,9 +279,9 @@ func TestGetPodcastEpisodeAllowsPublishedOrAuthorDraftOnly(t *testing.T) {
 	}{
 		{name: "published post is visible", id: published.ID.String(), want: http.StatusOK},
 		{name: "draft post is hidden", id: draft.ID.String(), want: http.StatusNotFound},
-		{name: "draft post is visible to its author", id: draft.ID.String(), authHeader: podcastAuthHeader(t, user), want: http.StatusOK},
-		{name: "draft post is hidden from another user", id: draft.ID.String(), authHeader: podcastAuthHeader(t, otherUser), want: http.StatusNotFound},
-		{name: "scheduled post is hidden from its author", id: scheduled.ID.String(), authHeader: podcastAuthHeader(t, user), want: http.StatusNotFound},
+		{name: "draft post is visible to its author", id: draft.ID.String(), authHeader: podcastAuthHeader(t, db, user), want: http.StatusOK},
+		{name: "draft post is hidden from another user", id: draft.ID.String(), authHeader: podcastAuthHeader(t, db, otherUser), want: http.StatusNotFound},
+		{name: "scheduled post is hidden from its author", id: scheduled.ID.String(), authHeader: podcastAuthHeader(t, db, user), want: http.StatusNotFound},
 		{name: "soft deleted post is hidden", id: deletedPostEpisode.ID.String(), want: http.StatusNotFound},
 		{name: "soft deleted episode is hidden", id: deletedEpisode.ID.String(), want: http.StatusNotFound},
 	}
@@ -317,17 +312,16 @@ func TestGetPodcastEpisodeAllowsPublishedOrAuthorDraftOnly(t *testing.T) {
 }
 
 func TestUploadPodcastCoverRejectsSpoofedPNGContent(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
 
 	var s3Path string
 	var s3ContentType string
-	r, user := newPodcastUploadTestRouter(t, "/api/v1/podcast/upload-cover", UploadPodcastCover(fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)))
+	r, db, user := newPodcastUploadTestRouter(t, "/api/v1/podcast/upload-cover", UploadPodcastCover(fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)))
 
 	body, contentType := multipartPodcastUploadBody(t, "cover", "spoof.png", "image/png", []byte("not really a png"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/upload-cover", body)
-	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 
@@ -342,17 +336,16 @@ func TestUploadPodcastCoverRejectsSpoofedPNGContent(t *testing.T) {
 }
 
 func TestUploadPodcastAudioRejectsSpoofedMP3Content(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
 
 	var s3Path string
 	var s3ContentType string
-	r, user := newPodcastUploadTestRouter(t, "/api/v1/podcast/upload-audio", UploadPodcastAudio(fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)))
+	r, db, user := newPodcastUploadTestRouter(t, "/api/v1/podcast/upload-audio", UploadPodcastAudio(fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)))
 
 	body, contentType := multipartPodcastUploadBody(t, "audio", "spoof.mp3", "audio/mpeg", []byte("not really an mp3"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/upload-audio", body)
-	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 
@@ -367,17 +360,16 @@ func TestUploadPodcastAudioRejectsSpoofedMP3Content(t *testing.T) {
 }
 
 func TestUploadPodcastAudioAllowsRealMP3Header(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
 
 	var s3Path string
 	var s3ContentType string
-	r, user := newPodcastUploadTestRouter(t, "/api/v1/podcast/upload-audio", UploadPodcastAudio(fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)))
+	r, db, user := newPodcastUploadTestRouter(t, "/api/v1/podcast/upload-audio", UploadPodcastAudio(fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)))
 
 	body, contentType := multipartPodcastUploadBody(t, "audio", "episode.mp3", "audio/mpeg", validMP3Bytes())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/upload-audio", body)
-	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 
@@ -395,17 +387,16 @@ func TestUploadPodcastAudioAllowsRealMP3Header(t *testing.T) {
 }
 
 func TestUploadPodcastAudioAllowsRealWAVHeader(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
 
 	var s3Path string
 	var s3ContentType string
-	r, user := newPodcastUploadTestRouter(t, "/api/v1/podcast/upload-audio", UploadPodcastAudio(fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)))
+	r, db, user := newPodcastUploadTestRouter(t, "/api/v1/podcast/upload-audio", UploadPodcastAudio(fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)))
 
 	body, contentType := multipartPodcastUploadBody(t, "audio", "episode.wav", "audio/wav", validWAVBytes())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/upload-audio", body)
-	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 
@@ -497,7 +488,7 @@ func TestCreatePodcastEpisodeBookmarkIsIdempotentWithRepeatedRequests(t *testing
 	for i := 0; i < 2; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/bookmarks", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", podcastAuthHeader(t, user))
+		req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
@@ -534,7 +525,7 @@ func TestListAndDeletePodcastEpisodeBookmarks(t *testing.T) {
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/bookmarks", nil)
-	listReq.Header.Set("Authorization", podcastAuthHeader(t, user))
+	listReq.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	listW := httptest.NewRecorder()
 	r.ServeHTTP(listW, listReq)
 	if listW.Code != http.StatusOK {
@@ -548,7 +539,7 @@ func TestListAndDeletePodcastEpisodeBookmarks(t *testing.T) {
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/podcast/bookmarks/"+bookmark.ID.String(), nil)
-	deleteReq.Header.Set("Authorization", podcastAuthHeader(t, user))
+	deleteReq.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	deleteW := httptest.NewRecorder()
 	r.ServeHTTP(deleteW, deleteReq)
 	if deleteW.Code != http.StatusOK {
@@ -579,7 +570,7 @@ func TestPodcastEpisodeBookmarksSupportPopularSort(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/bookmarks?sort=popular", nil)
-	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -613,7 +604,7 @@ func TestCreatePodcastShowBookmarkIsIdempotentWithRepeatedRequests(t *testing.T)
 	for i := 0; i < 2; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/show-bookmarks", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", podcastAuthHeader(t, user))
+		req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)
 
@@ -652,7 +643,7 @@ func TestListAndDeletePodcastShowBookmarks(t *testing.T) {
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/show-bookmarks", nil)
-	listReq.Header.Set("Authorization", podcastAuthHeader(t, user))
+	listReq.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	listW := httptest.NewRecorder()
 	r.ServeHTTP(listW, listReq)
 	if listW.Code != http.StatusOK {
@@ -666,7 +657,7 @@ func TestListAndDeletePodcastShowBookmarks(t *testing.T) {
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/api/v1/podcast/show-bookmarks/"+bookmark.ID.String(), nil)
-	deleteReq.Header.Set("Authorization", podcastAuthHeader(t, user))
+	deleteReq.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	deleteW := httptest.NewRecorder()
 	r.ServeHTTP(deleteW, deleteReq)
 	if deleteW.Code != http.StatusOK {
@@ -699,7 +690,7 @@ func TestPodcastShowBookmarksExcludeVideoChannelBookmarks(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/show-bookmarks", nil)
-	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -714,7 +705,6 @@ func TestPodcastShowBookmarksExcludeVideoChannelBookmarks(t *testing.T) {
 }
 
 func TestCreatePodcastEpisodeAcceptsOwnedGlobalChannel(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	r, db, user, channel := newPodcastHandlerTestDB(t)
 
 	owner := model.User{Username: "podcast-owner", Email: "podcast-owner@example.com", Password: "hash", Role: "user", IsActive: true}
@@ -749,7 +739,7 @@ func TestCreatePodcastEpisodeAcceptsOwnedGlobalChannel(t *testing.T) {
 			w := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/episodes", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", podcastAuthHeader(t, user))
+			req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 
 			r.ServeHTTP(w, req)
 
@@ -769,7 +759,7 @@ func TestCreatePodcastEpisodePersistsVisibility(t *testing.T) {
 	body := []byte(`{"channel_id":"` + channel.ID.String() + `","title":"Private","audio_url":"episode.mp3","status":"published","visibility":"private","collection_ids":["` + collection.ID.String() + `"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/episodes", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusCreated {
@@ -803,7 +793,7 @@ func TestUpdatePodcastEpisodeReturnsInternalServerErrorAndRollsBackWhenEpisodeUp
 	body := []byte(`{"title":"updated before failure","duration_sec":120}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/podcast/episodes/"+episode.ID.String(), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -827,7 +817,7 @@ func TestUpdatePodcastEpisodeKeepsBadCollectionAsBadRequestAndRollsBack(t *testi
 	body := []byte(`{"title":"updated before validation failure","collection_ids":["` + uuid.NewString() + `"]}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/podcast/episodes/"+episode.ID.String(), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -850,7 +840,7 @@ func TestUpdatePodcastEpisodePublishRequiresCollection(t *testing.T) {
 
 	request := httptest.NewRequest(http.MethodPut, "/api/v1/podcast/episodes/"+episode.ID.String(), bytes.NewBufferString(`{"status":"published"}`))
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", podcastAuthHeader(t, user))
+	request.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	response := httptest.NewRecorder()
 	r.ServeHTTP(response, request)
 
@@ -890,7 +880,7 @@ func TestUpdatePodcastEpisodeReturnsInternalServerErrorWhenReloadFails(t *testin
 	body := []byte(`{"title":"updated title"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/podcast/episodes/"+episode.ID.String(), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", podcastAuthHeader(t, user))
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 

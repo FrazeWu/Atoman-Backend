@@ -18,13 +18,16 @@ type purposeVerificationService interface {
 	VerifyCodeForPurpose(email, code, purpose string) (bool, error)
 }
 
-func TestEmailVerificationCodeModelHasPurposeField(t *testing.T) {
-	field, ok := reflect.TypeOf(model.EmailVerificationCode{}).FieldByName("Purpose")
-	if !ok {
-		t.Fatal("expected EmailVerificationCode to have Purpose field")
+func TestEmailVerificationCodeModelStoresHashAndAttempts(t *testing.T) {
+	typeOfCode := reflect.TypeOf(model.EmailVerificationCode{})
+	if _, ok := typeOfCode.FieldByName("CodeHash"); !ok {
+		t.Fatal("expected EmailVerificationCode to have CodeHash field")
 	}
-	if field.Type.Kind() != reflect.String {
-		t.Fatalf("expected Purpose to be string, got %s", field.Type)
+	if _, ok := typeOfCode.FieldByName("FailedAttempts"); !ok {
+		t.Fatal("expected EmailVerificationCode to track failed attempts")
+	}
+	if _, ok := typeOfCode.FieldByName("Code"); ok {
+		t.Fatal("verification model must not expose a plaintext Code field")
 	}
 }
 
@@ -56,6 +59,13 @@ func TestVerificationCodesAreIsolatedByPurpose(t *testing.T) {
 	}
 	if count != 2 {
 		t.Fatalf("expected two purpose-specific codes, got %d", count)
+	}
+	var stored model.EmailVerificationCode
+	if err := db.First(&stored, "email = ? AND purpose = ?", email, "registration").Error; err != nil {
+		t.Fatalf("load registration code: %v", err)
+	}
+	if stored.CodeHash == registerCode || stored.CodeHash == "" {
+		t.Fatalf("expected only a verification hash to be stored, got %q", stored.CodeHash)
 	}
 
 	valid, err := purposeService.VerifyCodeForPurpose(email, resetCode, "registration")
@@ -126,9 +136,13 @@ func TestVerifyCodeConsumesCodeAtomically(t *testing.T) {
 
 	email := uuid.NewString() + "@example.com"
 	code := "123456"
+	digest, err := verificationCodeDigest(email, VerificationPurposeRegistration, code)
+	if err != nil {
+		t.Fatalf("hash verification code: %v", err)
+	}
 	if err := db.Create(&model.EmailVerificationCode{
 		Email:     email,
-		Code:      code,
+		CodeHash:  digest,
 		ExpiresAt: time.Now().UTC().Add(time.Minute),
 		Used:      false,
 	}).Error; err != nil {
@@ -173,10 +187,41 @@ func TestVerifyCodeConsumesCodeAtomically(t *testing.T) {
 	}
 
 	var stored model.EmailVerificationCode
-	if err := db.Where("email = ? AND code = ?", email, code).First(&stored).Error; err != nil {
+	if err := db.Where("email = ?", email).First(&stored).Error; err != nil {
 		t.Fatalf("load verification code: %v", err)
 	}
 	if !stored.Used {
 		t.Fatal("expected verification code to be marked used")
+	}
+}
+
+func TestVerifyCodeLocksAfterFiveWrongAttempts(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.EmailVerificationCode{})
+	email := " Attempts@Example.com "
+	service := NewEmailServiceWithoutRedis(db)
+	code, err := service.SendVerificationCode(email)
+	if err != nil {
+		t.Fatalf("send verification code: %v", err)
+	}
+	for attempt := 1; attempt <= 5; attempt++ {
+		valid, err := service.VerifyCode("attempts@example.com", "000000")
+		if err != nil || valid {
+			t.Fatalf("wrong attempt %d: valid=%v err=%v", attempt, valid, err)
+		}
+	}
+	valid, err := service.VerifyCode("attempts@example.com", code)
+	if err != nil {
+		t.Fatalf("verify locked code: %v", err)
+	}
+	if valid {
+		t.Fatal("expected correct code to be rejected after five failures")
+	}
+	var stored model.EmailVerificationCode
+	if err := db.First(&stored, "email = ?", "attempts@example.com").Error; err != nil {
+		t.Fatalf("load verification code: %v", err)
+	}
+	if stored.FailedAttempts != 5 {
+		t.Fatalf("expected five failed attempts, got %d", stored.FailedAttempts)
 	}
 }

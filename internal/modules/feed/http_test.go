@@ -13,27 +13,24 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/authsession"
 	feedservice "atoman/internal/service"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-func signedFeedHTTPTokenForTest(t *testing.T, user authctx.CurrentUser) string {
+func signedFeedHTTPTokenForTest(t *testing.T, db *gorm.DB, user authctx.CurrentUser) string {
 	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.ID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
+	if err := db.AutoMigrate(&model.AuthSession{}); err != nil {
+		t.Fatalf("migrate auth sessions: %v", err)
 	}
-	return signed
+	credentials, err := authsession.New(db).Create(user.ID, authsession.KindAPI)
+	if err != nil {
+		t.Fatalf("create api auth session: %v", err)
+	}
+	return credentials.Token
 }
 
 func TestGetExploreFeedHandlerAllowsAnonymousPublicRead(t *testing.T) {
@@ -63,7 +60,6 @@ func TestGetExploreFeedHandlerAllowsAnonymousPublicRead(t *testing.T) {
 }
 
 func TestSyncSubscriptionHandlerReturnsStructuredResult(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 	var source model.FeedSource
@@ -81,7 +77,7 @@ func TestSyncSubscriptionHandlerReturnsStructuredResult(t *testing.T) {
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/feed/subscriptions/%s/sync", subscription.ID), nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -100,7 +96,6 @@ func TestSyncSubscriptionHandlerReturnsStructuredResult(t *testing.T) {
 }
 
 func TestSyncSubscriptionHandlerReturnsStructuredFeedFailure(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 	var source model.FeedSource
@@ -124,7 +119,7 @@ func TestSyncSubscriptionHandlerReturnsStructuredFeedFailure(t *testing.T) {
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/feed/subscriptions/%s/sync", subscription.ID), nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -151,9 +146,8 @@ func TestSyncSubscriptionHandlerReturnsStructuredFeedFailure(t *testing.T) {
 }
 
 func TestSyncAllSubscriptionsHandlerReturnsSummary(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
-	service, _, user := newFeedTestService(t)
+	service, db, user := newFeedTestService(t)
 	service.syncSource = func(_ *gorm.DB, source model.FeedSource) (feedservice.RSSSyncResult, error) {
 		return feedservice.RSSSyncResult{FeedSourceID: source.ID, FetchedItems: 3, NewItems: 1, SyncedAt: time.Now().UTC()}, nil
 	}
@@ -161,7 +155,7 @@ func TestSyncAllSubscriptionsHandlerReturnsSummary(t *testing.T) {
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/sync-all", nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -180,7 +174,6 @@ func TestSyncAllSubscriptionsHandlerReturnsSummary(t *testing.T) {
 }
 
 func TestGetExploreSourcesHandlerAllowsAnonymousPublicRead(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, _, _ := newFeedTestService(t)
 
@@ -225,14 +218,13 @@ func TestGetExploreSourcesHandlerAllowsAnonymousPublicRead(t *testing.T) {
 }
 
 func TestGetExploreSourcesHandlerMarksSourcesSubscribedForAuthenticatedUser(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
-	service, _, user := newFeedTestService(t)
+	service, db, user := newFeedTestService(t)
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/explore/sources?page=1&limit=20", nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -253,7 +245,6 @@ func TestGetExploreSourcesHandlerMarksSourcesSubscribedForAuthenticatedUser(t *t
 }
 
 func TestGetExploreSourcesHandlerFiltersByCategory(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, _ := newFeedTestService(t)
 
@@ -311,7 +302,6 @@ func TestGetExploreSourcesHandlerFiltersByCategory(t *testing.T) {
 }
 
 func TestGetExploreSourcesHandlerFiltersBySearchQuery(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, _ := newFeedTestService(t)
 
@@ -435,7 +425,6 @@ func TestBatchSubscribeFeedSourcesReportsCreatedReusedMissingAndIsolatesUsers(t 
 }
 
 func TestGetSubscribedFeedHandlerAllowsPublicReadByFeedSourceID(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, _ := newFeedTestService(t)
 
@@ -473,7 +462,6 @@ func TestGetSubscribedFeedHandlerAllowsPublicReadByFeedSourceID(t *testing.T) {
 }
 
 func TestGetSubscribedFeedHandlerReturnsPostEngagementCounts(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 
@@ -494,7 +482,7 @@ func TestGetSubscribedFeedHandlerReturnsPostEngagementCounts(t *testing.T) {
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?page=1&limit=20", nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -544,7 +532,6 @@ func TestGetSubscribedFeedHandlerReturnsPostEngagementCounts(t *testing.T) {
 }
 
 func TestGetSubscribedBlogFeedRejectsExternalFeedSourceID(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, _ := newFeedTestService(t)
 	var source model.FeedSource
@@ -574,7 +561,6 @@ func TestGetSubscribedBlogFeedRejectsExternalFeedSourceID(t *testing.T) {
 }
 
 func TestTimelineWriteHandlersRequireAndAcceptRealAuthMiddleware(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 
@@ -597,7 +583,7 @@ func TestTimelineWriteHandlersRequireAndAcceptRealAuthMiddleware(t *testing.T) {
 
 	authReq := httptest.NewRequest(http.MethodPost, "/api/v1/feed/timeline/mark-read", bytes.NewReader(body))
 	authReq.Header.Set("Content-Type", "application/json")
-	authReq.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	authReq.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	authRR := httptest.NewRecorder()
 	router.ServeHTTP(authRR, authReq)
 	if authRR.Code != http.StatusOK {
@@ -614,7 +600,6 @@ func TestTimelineWriteHandlersRequireAndAcceptRealAuthMiddleware(t *testing.T) {
 }
 
 func TestReadingListHandlerUsesUnifiedPagedResponse(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 
@@ -630,7 +615,7 @@ func TestReadingListHandlerUsesUnifiedPagedResponse(t *testing.T) {
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/reading-list?page=1&limit=20", nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -653,7 +638,6 @@ func TestReadingListHandlerUsesUnifiedPagedResponse(t *testing.T) {
 }
 
 func TestReadingListHandlerTogglesAndListsInternalPostTargets(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 	var post model.Post
@@ -662,7 +646,7 @@ func TestReadingListHandlerTogglesAndListsInternalPostTargets(t *testing.T) {
 	}
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
-	token := signedFeedHTTPTokenForTest(t, user)
+	token := signedFeedHTTPTokenForTest(t, db, user)
 
 	toggle := func() *httptest.ResponseRecorder {
 		body, _ := json.Marshal(map[string]any{"target_type": "post", "target_id": post.ID})
@@ -702,7 +686,6 @@ func TestReadingListHandlerTogglesAndListsInternalPostTargets(t *testing.T) {
 }
 
 func TestRecordReadEventHandlerPersistsSourceReadEvent(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 
@@ -712,7 +695,7 @@ func TestRecordReadEventHandlerPersistsSourceReadEvent(t *testing.T) {
 	body := []byte(`{"source_type":"external_rss","source_id":"source-1","event_type":"original_click"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/events/read", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -732,7 +715,6 @@ func TestRecordReadEventHandlerPersistsSourceReadEvent(t *testing.T) {
 }
 
 func TestGetSubscribedFeedHandlerUsesOptionalAuthForSourceFilter(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 
@@ -743,16 +725,7 @@ func TestGetSubscribedFeedHandlerUsesOptionalAuthForSourceFilter(t *testing.T) {
 		t.Fatalf("find external subscription: %v", err)
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.ID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
-	}
+	signed := signedFeedHTTPTokenForTest(t, db, user)
 
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
@@ -781,7 +754,6 @@ func TestGetSubscribedFeedHandlerUsesOptionalAuthForSourceFilter(t *testing.T) {
 }
 
 func TestGetSubscribedFeedHandlerParsesUnreadOnlyFilter(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 
@@ -797,16 +769,7 @@ func TestGetSubscribedFeedHandlerParsesUnreadOnlyFilter(t *testing.T) {
 		t.Fatalf("mark feed item read: %v", err)
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.ID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
-	}
+	signed := signedFeedHTTPTokenForTest(t, db, user)
 
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
@@ -834,7 +797,6 @@ func TestGetSubscribedFeedHandlerParsesUnreadOnlyFilter(t *testing.T) {
 }
 
 func TestGetSubscribedFeedHandlerRejectsInvalidSourceAndGroupIDs(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, _, _ := newFeedTestService(t)
 
@@ -870,7 +832,6 @@ func TestQueryFromContextAcceptsCreatorContentTypes(t *testing.T) {
 }
 
 func TestGetSubscribedFeedHandlerRejectsUnsupportedContentType(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, _, _ := newFeedTestService(t)
 	router := gin.New()
@@ -887,15 +848,14 @@ func TestGetSubscribedFeedHandlerRejectsUnsupportedContentType(t *testing.T) {
 }
 
 func TestGetSubscribedFeedHandlerParsesSearchQuery(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
-	service, _, user := newFeedTestService(t)
+	service, db, user := newFeedTestService(t)
 
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?q=Feed+item", nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -921,7 +881,6 @@ func TestGetSubscribedFeedHandlerParsesSearchQuery(t *testing.T) {
 }
 
 func TestGetSubscribedFeedHandlerSearchMatchesFeedItemContentHTML(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 
@@ -940,7 +899,7 @@ func TestGetSubscribedFeedHandlerSearchMatchesFeedItemContentHTML(t *testing.T) 
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?q=longform+body+phrase", nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -1333,7 +1292,7 @@ func TestFeedRecommendationChannelsIncludePreviewAndStats(t *testing.T) {
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=featured", nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -1525,7 +1484,7 @@ func TestFeedRecommendationExternalChannelsIncludePreviewAndStats(t *testing.T) 
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=hot", nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -1631,7 +1590,6 @@ func TestFeedRecommendationChannelsIncludesExternalSources(t *testing.T) {
 }
 
 func TestMarkUnreadHandlerDeletesReadRecord(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
 
@@ -1649,7 +1607,7 @@ func TestMarkUnreadHandlerDeletesReadRecord(t *testing.T) {
 	body := []byte(`{"feed_item_ids":["` + feedItem.ID.String() + `"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/timeline/mark-unread", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 

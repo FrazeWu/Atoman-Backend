@@ -2,14 +2,18 @@ package collab
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
 
+	"atoman/internal/middleware"
+	"atoman/internal/platform/authsession"
+
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"gorm.io/gorm"
 )
 
 type UserMessage struct {
@@ -84,8 +88,8 @@ func (h *UserHub) Push(userID uuid.UUID, event string, data interface{}) {
 	}
 }
 
-func (h *UserHub) ServeWS(c *gin.Context, jwtSecret string) {
-	userID, err := extractUserIDFromRequest(c, jwtSecret)
+func (h *UserHub) ServeWS(c *gin.Context, db *gorm.DB) {
+	userID, err := extractUserIDFromRequest(c, db)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 		return
@@ -133,37 +137,25 @@ func (c *userClient) readPump() {
 	}
 }
 
-func extractUserIDFromRequest(c *gin.Context, jwtSecret string) (uuid.UUID, error) {
-	tokenStr := ""
-	authHeader := c.GetHeader("Authorization")
-	if strings.HasPrefix(authHeader, "Bearer ") {
-		tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
-	} else if q := c.Query("token"); q != "" {
-		tokenStr = q
-	} else if cookie, err := c.Cookie("atoman_token"); err == nil {
-		tokenStr = cookie
-	}
-	if tokenStr == "" {
-		return uuid.Nil, jwt.ErrTokenMalformed
-	}
-
-	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, jwt.ErrTokenSignatureInvalid
+func extractUserIDFromRequest(c *gin.Context, db *gorm.DB) (uuid.UUID, error) {
+	authorization := strings.TrimSpace(c.GetHeader("Authorization"))
+	if authorization != "" {
+		if !strings.HasPrefix(authorization, "Bearer ") {
+			return uuid.Nil, errors.New("invalid authorization")
 		}
-		return []byte(jwtSecret), nil
-	})
-	if err != nil || !token.Valid {
+		resolved, err := authsession.New(db).Authenticate(strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer ")), authsession.KindAPI)
+		if err != nil {
+			return uuid.Nil, err
+		}
+		return resolved.User.UUID, nil
+	}
+	cookie, err := c.Cookie(middleware.AuthSessionCookieName)
+	if err != nil || !middleware.IsTrustedWebOrigin(c.GetHeader("Origin")) {
+		return uuid.Nil, errors.New("invalid web session")
+	}
+	resolved, err := authsession.New(db).Authenticate(cookie, authsession.KindWeb)
+	if err != nil {
 		return uuid.Nil, err
 	}
-
-	claims, ok := token.Claims.(jwt.MapClaims)
-	if !ok {
-		return uuid.Nil, jwt.ErrTokenMalformed
-	}
-	userIDStr, ok := claims["user_id"].(string)
-	if !ok {
-		return uuid.Nil, jwt.ErrTokenMalformed
-	}
-	return uuid.Parse(userIDStr)
+	return resolved.User.UUID, nil
 }

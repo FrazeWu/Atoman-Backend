@@ -9,27 +9,23 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authsession"
+	"atoman/internal/platform/ratelimit"
 	"atoman/internal/service"
 )
 
-const (
-	authTokenCookieName = "atoman_token"
-	authTokenTTL        = 30 * 24 * time.Hour
-)
+const authTokenCookieName = middleware.AuthSessionCookieName
 
 type authErrorCode string
 
 const (
 	authRequired              authErrorCode = "auth.required"
 	authInvalidToken          authErrorCode = "auth.invalid_token"
-	authInvalidClaims         authErrorCode = "auth.invalid_claims"
-	authUserNotFound          authErrorCode = "auth.user_not_found"
 	authAccountNotFound       authErrorCode = "auth.account_not_found"
 	authPasswordNotSet        authErrorCode = "auth.password_not_set"
 	authPasswordMismatch      authErrorCode = "auth.password_mismatch"
@@ -53,52 +49,17 @@ func HashPassword(password string) (string, error) {
 	return string(hashedPassword), nil
 }
 
-func generateAuthToken(user model.User) (string, error) {
-	secret := os.Getenv("JWT_SECRET")
-	if secret == "" {
-		return "", fmt.Errorf("JWT_SECRET is not configured")
-	}
-
-	role := user.Role
-	if role == "" {
-		role = "user"
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":      user.UUID.String(),
-		"username":     user.Username,
-		"role":         role,
-		"auth_version": user.AuthVersion,
-		"exp":          time.Now().Add(authTokenTTL).Unix(),
-	})
-
-	return token.SignedString([]byte(secret))
-}
-
-func setAuthTokenCookie(c *gin.Context, tokenString string) {
-	domain := os.Getenv("AUTH_COOKIE_DOMAIN")
-	secure := os.Getenv("ENV") == "production" || domain != ""
-	cookie := http.Cookie{
-		Name:     authTokenCookieName,
-		Value:    tokenString,
-		Path:     "/",
-		Domain:   domain,
-		MaxAge:   int(authTokenTTL.Seconds()),
-		HttpOnly: true,
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-	}
-	http.SetCookie(c.Writer, &cookie)
+func validPasswordLength(password string) bool {
+	length := len([]byte(password))
+	return length >= 6 && length <= 72
 }
 
 func clearAuthTokenCookie(c *gin.Context) {
-	domain := os.Getenv("AUTH_COOKIE_DOMAIN")
-	secure := os.Getenv("ENV") == "production" || domain != ""
+	secure := os.Getenv("ENV") == "production"
 	cookie := http.Cookie{
 		Name:     authTokenCookieName,
 		Value:    "",
 		Path:     "/",
-		Domain:   domain,
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   secure,
@@ -107,9 +68,9 @@ func clearAuthTokenCookie(c *gin.Context) {
 	http.SetCookie(c.Writer, &cookie)
 }
 
-func userAuthResponse(user model.User, tokenString string) gin.H {
+func userAuthResponse(user model.User, csrfToken string) gin.H {
 	return gin.H{
-		"token": tokenString,
+		"csrf_token": csrfToken,
 		"user": gin.H{
 			"uuid":                    user.UUID,
 			"id":                      user.ID,
@@ -122,6 +83,27 @@ func userAuthResponse(user model.User, tokenString string) gin.H {
 			"onboarding_completed_at": user.OnboardingCompletedAt,
 		},
 	}
+}
+
+func apiAuthResponse(user model.User, credentials authsession.Credentials) gin.H {
+	return gin.H{
+		"token":      credentials.Token,
+		"expires_at": credentials.ExpiresAt,
+		"user":       userAuthResponse(user, "")["user"],
+	}
+}
+
+func setAuthSessionCookie(c *gin.Context, credentials authsession.Credentials) {
+	secure := os.Getenv("ENV") == "production"
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     middleware.AuthSessionCookieName,
+		Value:    credentials.Token,
+		Path:     "/",
+		MaxAge:   int(time.Until(credentials.ExpiresAt).Seconds()),
+		HttpOnly: true,
+		Secure:   secure,
+		SameSite: http.SameSiteLaxMode,
+	})
 }
 
 // RegisterInput represents user registration request
@@ -177,16 +159,17 @@ func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.Emai
 
 	auth := router.Group("/api/v1/auth")
 	{
-		auth.POST("/register", RegisterHandler(db, emailService))
-		auth.POST("/login", LoginHandler(db))
-		auth.POST("/logout", LogoutHandler())
+		auth.POST("/register", middleware.TrustedOriginMiddleware(), RegisterHandler(db, emailService))
+		auth.POST("/login", middleware.TrustedOriginMiddleware(), LoginHandler(db))
+		auth.POST("/token", TokenLoginHandler(db))
+		auth.POST("/logout", middleware.AuthMiddleware(), LogoutHandler(db))
 		auth.GET("/session", SessionHandler(db))
-		auth.POST("/check-email", CheckEmailHandler(db))
-		auth.POST("/check-username", CheckUsernameHandler(db))
-		auth.POST("/send-verification", SendVerificationHandler(emailService))
-		auth.POST("/verify-email", VerifyEmailHandler(emailService))
-		auth.POST("/password-reset/send-code", PasswordResetSendCodeHandler(db, emailService))
-		auth.POST("/password-reset", PasswordResetHandler(db))
+		auth.POST("/check-email", middleware.TrustedOriginMiddleware(), CheckEmailHandler(db))
+		auth.POST("/check-username", middleware.TrustedOriginMiddleware(), CheckUsernameHandler(db))
+		auth.POST("/send-verification", middleware.TrustedOriginMiddleware(), SendVerificationHandler(emailService))
+		auth.POST("/verify-email", middleware.TrustedOriginMiddleware(), VerifyEmailHandler(emailService))
+		auth.POST("/password-reset/send-code", middleware.TrustedOriginMiddleware(), PasswordResetSendCodeHandler(db, emailService))
+		auth.POST("/password-reset", middleware.TrustedOriginMiddleware(), PasswordResetHandler(db))
 	}
 	RegisterOAuthRoutes(auth, service.NewOAuthService(db, configuredOAuthRegistry()), configuredOAuthFrontendURL())
 }
@@ -203,6 +186,8 @@ func SetupAuthRoutes(router *gin.Engine, db *gorm.DB, emailService *service.Emai
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/register [post]
 func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.HandlerFunc {
+	emailLimiter := ratelimit.New()
+	ipLimiter := ratelimit.New()
 	return func(c *gin.Context) {
 		var input RegisterInput
 
@@ -213,6 +198,14 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 
 		input.Username = strings.ToLower(strings.TrimSpace(input.Username))
 		input.Email = strings.ToLower(strings.TrimSpace(input.Email))
+		if !validPasswordLength(input.Password) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "auth.password_invalid", "error": "密码长度需为 6–72 字节"})
+			return
+		}
+		if !allowAuthRequest(c, ipLimiter, "register:ip:"+c.ClientIP(), 10, time.Hour) ||
+			!allowAuthRequest(c, emailLimiter, "register:email:"+input.Email, 5, 15*time.Minute) {
+			return
+		}
 		if err := service.NewSiteNamespaceService(db).ValidateUsernameAvailable(c.Request.Context(), input.Username); err != nil {
 			if errors.Is(err, service.ErrSiteHandleReserved) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "Site handle is reserved"})
@@ -259,6 +252,7 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 			Role:     "user",
 		}
 
+		var credentials authsession.Credentials
 		if err := db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Create(&user).Error; err != nil {
 				return err
@@ -269,21 +263,19 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 			if err := service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.Username); err != nil {
 				return err
 			}
+			created, err := authsession.New(tx).Create(user.UUID, authsession.KindWeb)
+			if err != nil {
+				return err
+			}
+			credentials = created
 			return nil
 		}); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create default channel"})
 			return
 		}
 
-		tokenString, err := generateAuthToken(user)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
-			return
-		}
-
-		setAuthTokenCookie(c, tokenString)
-
-		c.JSON(http.StatusCreated, userAuthResponse(user, tokenString))
+		setAuthSessionCookie(c, credentials)
+		c.JSON(http.StatusCreated, userAuthResponse(user, credentials.CSRFToken))
 	}
 }
 
@@ -294,8 +286,17 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 // @Produce json
 // @Success 204
 // @Router /api/v1/auth/logout [post]
-func LogoutHandler() gin.HandlerFunc {
+func LogoutHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		session, ok := middleware.CurrentAuthSession(c)
+		if !ok {
+			authError(c, http.StatusUnauthorized, authRequired, "请先登录")
+			return
+		}
+		if err := authsession.New(db).RevokeID(session.ID); err != nil {
+			authError(c, http.StatusInternalServerError, authInvalidToken, "退出失败，请稍后重试")
+			return
+		}
 		clearAuthTokenCookie(c)
 		c.Status(http.StatusNoContent)
 	}
@@ -312,46 +313,22 @@ func LogoutHandler() gin.HandlerFunc {
 // @Router /api/v1/auth/session [get]
 func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cookie, err := c.Cookie(authTokenCookieName)
+		cookie, err := c.Cookie(middleware.AuthSessionCookieName)
 		if err != nil {
 			c.Status(http.StatusNoContent)
 			return
 		}
-
-		token, err := jwt.Parse(cookie, func(token *jwt.Token) (interface{}, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-				return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
-			}
-			return []byte(os.Getenv("JWT_SECRET")), nil
-		})
-		if err != nil || !token.Valid {
+		resolved, err := authsession.New(db).Authenticate(cookie, authsession.KindWeb)
+		if err != nil {
 			clearSessionAndAuthError(c, authInvalidToken, "登录状态已失效，请重新登录")
 			return
 		}
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok {
-			clearSessionAndAuthError(c, authInvalidClaims, "登录信息异常，请重新登录")
-			return
-		}
-		userID, ok := claims["user_id"].(string)
-		if !ok {
-			clearSessionAndAuthError(c, authInvalidClaims, "登录信息异常，请重新登录")
-			return
-		}
-		var user model.User
-		if err := db.Where("uuid = ? AND is_active = ?", userID, true).First(&user).Error; err != nil {
-			clearSessionAndAuthError(c, authUserNotFound, "账号不存在或已被移除，请重新登录")
-			return
-		}
-		authVersion, validVersion := middleware.ClaimsAuthVersion(claims)
-		if !validVersion || authVersion != user.AuthVersion {
+		csrfToken, err := authsession.New(db).RotateCSRF(resolved.Session.ID)
+		if err != nil {
 			clearSessionAndAuthError(c, authInvalidToken, "登录状态已失效，请重新登录")
 			return
 		}
-		if user.Role == "" {
-			user.Role = "user"
-		}
-		c.JSON(http.StatusOK, userAuthResponse(user, cookie))
+		c.JSON(http.StatusOK, userAuthResponse(resolved.User, csrfToken))
 	}
 }
 
@@ -368,6 +345,8 @@ func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/login [post]
 func LoginHandler(db *gorm.DB) gin.HandlerFunc {
+	accountLimiter := ratelimit.New()
+	ipLimiter := ratelimit.New()
 	return func(c *gin.Context) {
 		var input LoginInput
 
@@ -377,6 +356,10 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		normalizedLogin := strings.ToLower(strings.TrimSpace(input.Username))
+		if !allowAuthRequest(c, ipLimiter, "login:ip:"+c.ClientIP(), 20, 15*time.Minute) ||
+			!allowAuthRequest(c, accountLimiter, "login:account:"+normalizedLogin, 10, 15*time.Minute) {
+			return
+		}
 
 		var user model.User
 		if err := db.Where("(LOWER(username) = ? OR LOWER(email) = ?) AND is_active = ?", normalizedLogin, normalizedLogin, true).First(&user).Error; err != nil {
@@ -396,15 +379,88 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		tokenString, err := generateAuthToken(user)
+		credentials, err := authsession.New(db).Create(user.UUID, authsession.KindWeb)
 		if err != nil {
 			authError(c, http.StatusInternalServerError, authTokenGenerationFailed, "登录服务暂时不可用，请稍后重试")
 			return
 		}
 
-		setAuthTokenCookie(c, tokenString)
+		setAuthSessionCookie(c, credentials)
 
-		c.JSON(http.StatusOK, userAuthResponse(user, tokenString))
+		c.JSON(http.StatusOK, userAuthResponse(user, credentials.CSRFToken))
+	}
+}
+
+func allowAuthRequest(c *gin.Context, limiter *ratelimit.Limiter, key string, limit int, window time.Duration) bool {
+	allowed, retryAfter := limiter.Allow(key, limit, window)
+	if allowed {
+		return true
+	}
+	seconds := int(retryAfter.Seconds())
+	if retryAfter > time.Duration(seconds)*time.Second {
+		seconds++
+	}
+	if seconds < 1 {
+		seconds = 1
+	}
+	c.Header("Retry-After", fmt.Sprintf("%d", seconds))
+	c.JSON(http.StatusTooManyRequests, gin.H{
+		"code":  "auth.rate_limited",
+		"error": "尝试次数过多，请稍后重试",
+	})
+	return false
+}
+
+// TokenLoginHandler godoc
+// @Summary 获取 API Token
+// @Description 供 iOS 和自动化客户端使用用户名或邮箱换取可撤销 Bearer Token。
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param input body LoginInput true "登录请求"
+// @Success 200 {object} APIAuthSuccessResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 429 {object} ErrorResponse
+// @Router /api/v1/auth/token [post]
+func TokenLoginHandler(db *gorm.DB) gin.HandlerFunc {
+	accountLimiter := ratelimit.New()
+	ipLimiter := ratelimit.New()
+	return func(c *gin.Context) {
+		var input LoginInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		normalizedLogin := strings.ToLower(strings.TrimSpace(input.Username))
+		if !allowAuthRequest(c, ipLimiter, "token:ip:"+c.ClientIP(), 20, 15*time.Minute) ||
+			!allowAuthRequest(c, accountLimiter, "token:account:"+normalizedLogin, 10, 15*time.Minute) {
+			return
+		}
+		var user model.User
+		if err := db.Where("(LOWER(username) = ? OR LOWER(email) = ?) AND is_active = ?", normalizedLogin, normalizedLogin, true).First(&user).Error; err != nil {
+			authError(c, http.StatusUnauthorized, authAccountNotFound, "账号不存在")
+			return
+		}
+		if user.Role == "" {
+			user.Role = "user"
+		}
+		if user.Password == "" {
+			authError(c, http.StatusUnauthorized, authPasswordNotSet, "请使用第三方账号登录")
+			return
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
+			authError(c, http.StatusUnauthorized, authPasswordMismatch, "密码不正确")
+			return
+		}
+
+		credentials, err := authsession.New(db).Create(user.UUID, authsession.KindAPI)
+		if err != nil {
+			authError(c, http.StatusInternalServerError, authTokenGenerationFailed, "登录服务暂时不可用，请稍后重试")
+			return
+		}
+		c.JSON(http.StatusOK, apiAuthResponse(user, credentials))
 	}
 }
 
@@ -474,6 +530,8 @@ func CheckUsernameHandler(db *gorm.DB) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/send-verification [post]
 func SendVerificationHandler(emailService *service.EmailService) gin.HandlerFunc {
+	emailLimiter := ratelimit.New()
+	ipLimiter := ratelimit.New()
 	return func(c *gin.Context) {
 		var input SendVerificationInput
 
@@ -482,13 +540,18 @@ func SendVerificationHandler(emailService *service.EmailService) gin.HandlerFunc
 			return
 		}
 
+		email := strings.ToLower(strings.TrimSpace(input.Email))
+		if !allowAuthRequest(c, ipLimiter, "verification-send:ip:"+c.ClientIP(), 10, time.Hour) ||
+			!allowAuthRequest(c, emailLimiter, "verification-send:email:"+email, 3, 15*time.Minute) {
+			return
+		}
 		if err := verifyTurnstileToken(input.TurnstileToken, c.ClientIP()); err != nil {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}
 
 		// Send verification code
-		_, err := emailService.SendVerificationCode(input.Email)
+		_, err := emailService.SendVerificationCode(email)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send verification code", "details": err.Error()})
 			return
@@ -510,6 +573,8 @@ func SendVerificationHandler(emailService *service.EmailService) gin.HandlerFunc
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/verify-email [post]
 func VerifyEmailHandler(emailService *service.EmailService) gin.HandlerFunc {
+	emailLimiter := ratelimit.New()
+	ipLimiter := ratelimit.New()
 	return func(c *gin.Context) {
 		var input VerifyEmailInput
 
@@ -518,8 +583,12 @@ func VerifyEmailHandler(emailService *service.EmailService) gin.HandlerFunc {
 			return
 		}
 
-		// Verify the code
-		valid, err := emailService.VerifyCode(input.Email, input.Code)
+		email := strings.ToLower(strings.TrimSpace(input.Email))
+		if !allowAuthRequest(c, ipLimiter, "verification-check:ip:"+c.ClientIP(), 30, 15*time.Minute) ||
+			!allowAuthRequest(c, emailLimiter, "verification-check:email:"+email, 10, 15*time.Minute) {
+			return
+		}
+		valid, err := emailService.VerifyCode(email, input.Code)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify code"})
 			return
@@ -547,18 +616,23 @@ func VerifyEmailHandler(emailService *service.EmailService) gin.HandlerFunc {
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/password-reset/send-code [post]
 func PasswordResetSendCodeHandler(db *gorm.DB, emailService *service.EmailService) gin.HandlerFunc {
+	emailLimiter := ratelimit.New()
+	ipLimiter := ratelimit.New()
 	return func(c *gin.Context) {
 		var input PasswordResetSendCodeInput
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		email := strings.ToLower(strings.TrimSpace(input.Email))
+		if !allowAuthRequest(c, ipLimiter, "password-reset-send:ip:"+c.ClientIP(), 10, time.Hour) ||
+			!allowAuthRequest(c, emailLimiter, "password-reset-send:email:"+email, 3, 15*time.Minute) {
+			return
+		}
 		if err := verifyTurnstileToken(input.TurnstileToken, c.ClientIP()); err != nil {
 			c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 			return
 		}
-
-		email := strings.ToLower(strings.TrimSpace(input.Email))
 		var count int64
 		if err := db.Model(&model.User{}).Where("LOWER(email) = ? AND is_active = ?", email, true).Count(&count).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "发送验证码失败"})
@@ -587,6 +661,8 @@ func PasswordResetSendCodeHandler(db *gorm.DB, emailService *service.EmailServic
 // @Failure 500 {object} ErrorResponse
 // @Router /api/v1/auth/password-reset [post]
 func PasswordResetHandler(db *gorm.DB) gin.HandlerFunc {
+	emailLimiter := ratelimit.New()
+	ipLimiter := ratelimit.New()
 	return func(c *gin.Context) {
 		var input PasswordResetInput
 		if err := c.ShouldBindJSON(&input); err != nil {
@@ -595,6 +671,14 @@ func PasswordResetHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		email := strings.ToLower(strings.TrimSpace(input.Email))
+		if !allowAuthRequest(c, ipLimiter, "password-reset:ip:"+c.ClientIP(), 20, 15*time.Minute) ||
+			!allowAuthRequest(c, emailLimiter, "password-reset:email:"+email, 5, 15*time.Minute) {
+			return
+		}
+		if !validPasswordLength(input.Password) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "auth.password_invalid", "error": "密码长度需为 6–72 字节"})
+			return
+		}
 		hashedPassword, err := HashPassword(input.Password)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "重置密码失败"})
@@ -602,19 +686,18 @@ func PasswordResetHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		err = db.Transaction(func(tx *gorm.DB) error {
-			now := time.Now().UTC()
-			consumed := tx.Model(&model.EmailVerificationCode{}).
-				Where("email = ? AND code = ? AND purpose = ? AND used = ? AND expires_at > ?", email, input.Code, service.VerificationPurposePasswordReset, false, now).
-				Update("used", true)
-			if consumed.Error != nil {
-				return consumed.Error
+			valid, err := service.NewEmailServiceWithoutRedis(tx).VerifyCodeForPurpose(email, input.Code, service.VerificationPurposePasswordReset)
+			if err != nil {
+				return err
 			}
-			if consumed.RowsAffected != 1 {
+			if !valid {
 				return gorm.ErrRecordNotFound
 			}
-
-			updated := tx.Model(&model.User{}).
-				Where("LOWER(email) = ? AND is_active = ?", email, true).
+			var user model.User
+			if err := tx.Where("LOWER(email) = ? AND is_active = ?", email, true).First(&user).Error; err != nil {
+				return err
+			}
+			updated := tx.Model(&model.User{}).Where("uuid = ?", user.UUID).
 				Updates(map[string]any{
 					"password":     hashedPassword,
 					"auth_version": gorm.Expr("auth_version + 1"),
@@ -625,7 +708,7 @@ func PasswordResetHandler(db *gorm.DB) gin.HandlerFunc {
 			if updated.RowsAffected != 1 {
 				return gorm.ErrRecordNotFound
 			}
-			return nil
+			return authsession.New(tx).RevokeUser(user.UUID)
 		})
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "验证码无效或已过期"})

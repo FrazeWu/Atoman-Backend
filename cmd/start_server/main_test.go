@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,6 +52,43 @@ func TestCORSRejectsUnknownOriginWithCredentialsOutsideProduction(t *testing.T) 
 	}
 }
 
+func TestCORSPreflightAllowsCSRFHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(corsMiddleware([]string{"https://www.atoman.org"}))
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/users/me/password", nil)
+	req.Header.Set("Origin", "https://www.atoman.org")
+	req.Header.Set("Access-Control-Request-Headers", "X-CSRF-Token")
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("expected preflight 204, got %d", recorder.Code)
+	}
+	if !strings.Contains(recorder.Header().Get("Access-Control-Allow-Headers"), "X-CSRF-Token") {
+		t.Fatalf("expected X-CSRF-Token in allowed headers, got %q", recorder.Header().Get("Access-Control-Allow-Headers"))
+	}
+}
+
+func TestValidateAuthEnvironmentRequiresCodeSecretOnlyInProduction(t *testing.T) {
+	t.Setenv("ENV", "development")
+	t.Setenv("AUTH_CODE_SECRET", "")
+	if err := validateAuthEnvironment(); err != nil {
+		t.Fatalf("development auth environment should be valid: %v", err)
+	}
+
+	t.Setenv("ENV", "production")
+	if err := validateAuthEnvironment(); err == nil || !strings.Contains(err.Error(), "AUTH_CODE_SECRET") {
+		t.Fatalf("expected production AUTH_CODE_SECRET error, got %v", err)
+	}
+
+	t.Setenv("AUTH_CODE_SECRET", "production-auth-code-secret")
+	if err := validateAuthEnvironment(); err != nil {
+		t.Fatalf("production auth environment should be valid: %v", err)
+	}
+}
+
 func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T) {
 	db := testdb.Open(t)
 
@@ -70,6 +108,7 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 	}
 
 	models := []any{
+		&model.AuthSession{},
 		&model.ExternalIdentity{},
 		&model.OAuthFlow{},
 		&model.ForumGroup{},
@@ -133,7 +172,7 @@ func TestStartupMigrationsUpgradePasswordResetAuthSchema(t *testing.T) {
 		t.Fatalf("run startup migrations: %v", err)
 	}
 	resetCode := model.EmailVerificationCode{
-		Email: "legacy@example.com", Purpose: "password_reset", Code: "654321",
+		Email: "legacy@example.com", Purpose: "password_reset", CodeHash: "654321",
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	}
 	if err := db.Create(&resetCode).Error; err != nil {

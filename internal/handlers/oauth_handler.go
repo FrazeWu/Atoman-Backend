@@ -13,8 +13,10 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/platform/oauthprovider"
+	"atoman/internal/platform/ratelimit"
 	"atoman/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -23,6 +25,7 @@ import (
 type OAuthHandler struct {
 	service     *service.OAuthService
 	frontendURL string
+	pendingRate *ratelimit.Limiter
 }
 
 const (
@@ -81,16 +84,18 @@ func configuredOAuthFrontendURL() string {
 }
 
 func RegisterOAuthRoutes(group *gin.RouterGroup, oauthService *service.OAuthService, frontendURL string) {
-	handler := &OAuthHandler{service: oauthService, frontendURL: strings.TrimRight(frontendURL, "/")}
+	handler := &OAuthHandler{service: oauthService, frontendURL: strings.TrimRight(frontendURL, "/"), pendingRate: ratelimit.New()}
 	group.GET("/oauth/providers", handler.providers)
 	group.GET("/oauth/:provider/start", middleware.OptionalAuthMiddleware(), handler.start)
 	group.GET("/oauth/:provider/callback", handler.callback)
 	group.POST("/oauth/:provider/callback", handler.callback)
 	group.GET("/oauth/pending", handler.pending)
-	group.POST("/oauth/pending/complete-profile", handler.completeProfile)
-	group.POST("/oauth/pending/set-password", handler.setPassword)
-	group.POST("/oauth/pending/confirm-account", handler.confirmAccount)
-	group.DELETE("/oauth/pending", handler.cancelPending)
+	group.POST("/oauth/pending/send-verification", middleware.TrustedOriginMiddleware(), handler.sendPendingVerification)
+	group.POST("/oauth/pending/verify-email", middleware.TrustedOriginMiddleware(), handler.verifyPendingEmail)
+	group.POST("/oauth/pending/complete-profile", middleware.TrustedOriginMiddleware(), handler.completeProfile)
+	group.POST("/oauth/pending/set-password", middleware.TrustedOriginMiddleware(), handler.setPassword)
+	group.POST("/oauth/pending/confirm-account", middleware.TrustedOriginMiddleware(), handler.confirmAccount)
+	group.DELETE("/oauth/pending", middleware.TrustedOriginMiddleware(), handler.cancelPending)
 	group.GET("/oauth/identities", middleware.StableAuthMiddleware(), handler.identities)
 	group.DELETE("/oauth/:provider", middleware.StableAuthMiddleware(), handler.unlink)
 }
@@ -182,6 +187,8 @@ func (h *OAuthHandler) callback(c *gin.Context) {
 		switch result.Stage {
 		case model.OAuthStageCompleteProfile:
 			h.redirect(c, "/auth/oauth/complete-profile")
+		case model.OAuthStageVerifyEmail:
+			h.redirect(c, "/auth/oauth/verify-email")
 		case model.OAuthStageConfirmAccount:
 			h.redirect(c, "/auth/oauth/confirm-account")
 		case model.OAuthStageSetPassword:
@@ -195,19 +202,77 @@ func (h *OAuthHandler) callback(c *gin.Context) {
 		h.redirectFailure(c)
 		return
 	}
-	token, err := generateAuthToken(*result.User)
+	credentials, err := h.service.CreateWebSession(result.User.UUID)
 	if err != nil {
-		log.Printf("[OAuth] token generation failed: %v", err)
+		log.Printf("[OAuth] session creation failed: %v", err)
 		h.redirectFailure(c)
 		return
 	}
-	setAuthTokenCookie(c, token)
+	setAuthSessionCookie(c, credentials)
 	clearOAuthFlowCookie(c)
 	target := "/auth/oauth/callback?result=success"
 	if result.ReturnTo != "" && result.ReturnTo != "/" {
 		target += "&return_to=" + url.QueryEscape(result.ReturnTo)
 	}
 	h.redirect(c, target)
+}
+
+// sendPendingVerification godoc
+// @Summary 发送 Microsoft 邮箱验证码
+// @Tags auth-oauth
+// @Success 204
+// @Failure 400 {object} ErrorResponse
+// @Failure 429 {object} ErrorResponse
+// @Router /api/v1/auth/oauth/pending/send-verification [post]
+func (h *OAuthHandler) sendPendingVerification(c *gin.Context) {
+	pendingToken, ok := h.pendingToken(c)
+	if !ok {
+		return
+	}
+	if !allowAuthRequest(c, h.pendingRate, "oauth-email-send:"+authsession.Hash(pendingToken), 3, 15*time.Minute) {
+		return
+	}
+	if _, err := h.service.SendPendingEmailVerification(c.Request.Context(), pendingToken); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+type oauthVerifyEmailRequest struct {
+	Code string `json:"code" binding:"required,len=6"`
+}
+
+// verifyPendingEmail godoc
+// @Summary 确认 Microsoft 登录邮箱
+// @Tags auth-oauth
+// @Accept json
+// @Produce json
+// @Param input body oauthVerifyEmailRequest true "验证码"
+// @Success 200 {object} OAuthVerifyEmailResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 429 {object} ErrorResponse
+// @Router /api/v1/auth/oauth/pending/verify-email [post]
+func (h *OAuthHandler) verifyPendingEmail(c *gin.Context) {
+	var input oauthVerifyEmailRequest
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Verification code is required"))
+		return
+	}
+	pendingToken, ok := h.pendingToken(c)
+	if !ok {
+		return
+	}
+	if !allowAuthRequest(c, h.pendingRate, "oauth-email-check:"+authsession.Hash(pendingToken), 5, 15*time.Minute) {
+		return
+	}
+	info, err := h.service.VerifyPendingEmail(c.Request.Context(), pendingToken, input.Code)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	c.JSON(http.StatusOK, gin.H{"stage": info.Stage})
 }
 
 // pending godoc
@@ -264,6 +329,9 @@ func (h *OAuthHandler) completeProfile(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !allowAuthRequest(c, h.pendingRate, "oauth-complete:"+authsession.Hash(pendingToken), 5, 15*time.Minute) {
+		return
+	}
 	result, err := h.service.CompleteProfile(c.Request.Context(), service.OAuthCompleteProfileInput{
 		PendingToken:    pendingToken,
 		Username:        input.Username,
@@ -302,6 +370,9 @@ func (h *OAuthHandler) setPassword(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if !allowAuthRequest(c, h.pendingRate, "oauth-password:"+authsession.Hash(pendingToken), 5, 15*time.Minute) {
+		return
+	}
 	result, err := h.service.SetPassword(c.Request.Context(), service.OAuthSetPasswordInput{
 		PendingToken:    pendingToken,
 		Password:        input.Password,
@@ -336,6 +407,9 @@ func (h *OAuthHandler) confirmAccount(c *gin.Context) {
 	}
 	pendingToken, ok := h.pendingToken(c)
 	if !ok {
+		return
+	}
+	if !allowAuthRequest(c, h.pendingRate, "oauth-confirm:"+authsession.Hash(pendingToken), 5, 15*time.Minute) {
 		return
 	}
 	result, err := h.service.ConfirmAccount(c.Request.Context(), service.OAuthConfirmAccountInput{
@@ -432,14 +506,14 @@ func (h *OAuthHandler) pendingToken(c *gin.Context) (string, bool) {
 }
 
 func (h *OAuthHandler) writeCompletion(c *gin.Context, result service.OAuthCompletionResult) {
-	token, err := generateAuthToken(result.User)
+	credentials, err := h.service.CreateWebSession(result.User.UUID)
 	if err != nil {
 		httpx.Error(c, apperr.Internal(err))
 		return
 	}
-	setAuthTokenCookie(c, token)
+	setAuthSessionCookie(c, credentials)
 	clearOAuthFlowCookie(c)
-	payload := userAuthResponse(result.User, token)
+	payload := userAuthResponse(result.User, credentials.CSRFToken)
 	payload["return_to"] = result.ReturnTo
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, payload)
@@ -463,7 +537,7 @@ func (h *OAuthHandler) redirect(c *gin.Context, path string) {
 func setOAuthFlowCookie(c *gin.Context, token string) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name: oauthFlowCookieName, Value: token, Path: "/api/v1/auth/oauth",
-		Domain: os.Getenv("AUTH_COOKIE_DOMAIN"), MaxAge: int((10 * time.Minute).Seconds()),
+		MaxAge:   int((10 * time.Minute).Seconds()),
 		HttpOnly: true, Secure: oauthCookieSecure(), SameSite: http.SameSiteLaxMode,
 	})
 }
@@ -471,7 +545,7 @@ func setOAuthFlowCookie(c *gin.Context, token string) {
 func setOAuthStateCookie(c *gin.Context, state string) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name: oauthStateCookieName, Value: state, Path: "/api/v1/auth/oauth",
-		Domain: os.Getenv("AUTH_COOKIE_DOMAIN"), MaxAge: int((10 * time.Minute).Seconds()),
+		MaxAge:   int((10 * time.Minute).Seconds()),
 		HttpOnly: true, Secure: oauthCookieSecure(), SameSite: oauthStateCookieSameSite(),
 	})
 }
@@ -479,7 +553,7 @@ func setOAuthStateCookie(c *gin.Context, state string) {
 func clearOAuthStateCookie(c *gin.Context) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name: oauthStateCookieName, Value: "", Path: "/api/v1/auth/oauth",
-		Domain: os.Getenv("AUTH_COOKIE_DOMAIN"), MaxAge: -1,
+		MaxAge:   -1,
 		HttpOnly: true, Secure: oauthCookieSecure(), SameSite: oauthStateCookieSameSite(),
 	})
 }
@@ -495,13 +569,13 @@ func oauthStateMatches(c *gin.Context, state string) bool {
 func clearOAuthFlowCookie(c *gin.Context) {
 	http.SetCookie(c.Writer, &http.Cookie{
 		Name: oauthFlowCookieName, Value: "", Path: "/api/v1/auth/oauth",
-		Domain: os.Getenv("AUTH_COOKIE_DOMAIN"), MaxAge: -1,
+		MaxAge:   -1,
 		HttpOnly: true, Secure: oauthCookieSecure(), SameSite: http.SameSiteLaxMode,
 	})
 }
 
 func oauthCookieSecure() bool {
-	return os.Getenv("ENV") == "production" || os.Getenv("AUTH_COOKIE_DOMAIN") != "" ||
+	return os.Getenv("ENV") == "production" ||
 		strings.HasPrefix(strings.ToLower(strings.TrimSpace(os.Getenv("BASE_URL"))), "https://")
 }
 

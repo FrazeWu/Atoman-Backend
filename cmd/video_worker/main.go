@@ -27,10 +27,6 @@ func main() {
 		log.Println("No .env file found, using system environment variables")
 	}
 
-	if os.Getenv("JWT_SECRET") == "" {
-		log.Fatal("JWT_SECRET environment variable is required")
-	}
-
 	dbType := os.Getenv("DATABASE_TYPE")
 	if dbType == "" {
 		log.Fatal("DATABASE_TYPE environment variable is required (postgres)")

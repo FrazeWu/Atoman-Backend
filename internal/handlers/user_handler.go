@@ -18,7 +18,9 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/platform/httpx"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // SetupUserRoutes configures user-related routes
@@ -41,6 +43,7 @@ func SetupUserRoutes(router *gin.Engine, db *gorm.DB) {
 			protected.PUT("/me", UpdateUserProfile(db))
 			protected.GET("/me/settings", GetUserSettings(db))
 			protected.PUT("/me/settings", UpdateUserSettings(db))
+			protected.PUT("/me/password", ChangePassword(db))
 			protected.POST("/:id/follow", FollowUser(db))
 			protected.DELETE("/:id/follow", UnfollowUser(db))
 			protected.POST("/:id/block", BlockUser(db))
@@ -81,6 +84,81 @@ type UserProfileInput struct {
 type UserSettingsInput struct {
 	PrivateProfile *bool   `json:"private_profile"`
 	DMPermission   *string `json:"dm_permission"`
+}
+
+type ChangePasswordInput struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required"`
+	PasswordConfirm string `json:"password_confirm" binding:"required"`
+}
+
+// ChangePassword godoc
+// @Summary 修改当前账号密码
+// @Tags users
+// @Accept json
+// @Param input body ChangePasswordInput true "密码"
+// @Security BearerAuth
+// @Security CookieAuth
+// @Success 204
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Router /api/v1/users/me/password [put]
+func ChangePassword(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var input ChangePasswordInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "validation.invalid_request", "error": "请填写完整的密码信息"})
+			return
+		}
+		if !validPasswordLength(input.NewPassword) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "auth.password_invalid", "error": "密码长度需为 6–72 字节"})
+			return
+		}
+		if input.NewPassword != input.PasswordConfirm {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "auth.password_mismatch", "error": "两次输入的密码不一致"})
+			return
+		}
+		userID, ok := c.Get("user_id")
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "auth.required", "error": "请先登录"})
+			return
+		}
+		currentSession, ok := middleware.CurrentAuthSession(c)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "auth.invalid_token", "error": "登录状态已失效"})
+			return
+		}
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			var user model.User
+			if err := tx.First(&user, "uuid = ?", userID.(uuid.UUID)).Error; err != nil {
+				return err
+			}
+			if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.CurrentPassword)); err != nil {
+				return bcrypt.ErrMismatchedHashAndPassword
+			}
+			hash, err := bcrypt.GenerateFromPassword([]byte(input.NewPassword), bcrypt.DefaultCost)
+			if err != nil {
+				return err
+			}
+			if err := tx.Model(&user).Updates(map[string]any{
+				"password":     string(hash),
+				"auth_version": gorm.Expr("auth_version + 1"),
+			}).Error; err != nil {
+				return err
+			}
+			return authsession.New(tx).RevokeUserExcept(user.UUID, currentSession.ID)
+		})
+		if errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			c.JSON(http.StatusUnauthorized, gin.H{"code": "auth.password_mismatch", "error": "当前密码不正确"})
+			return
+		}
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "auth.password_change_failed", "error": "修改密码失败"})
+			return
+		}
+		c.Status(http.StatusNoContent)
+	}
 }
 
 func isUserSettingsDuplicateError(err error) bool {

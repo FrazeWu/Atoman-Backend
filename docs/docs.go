@@ -2998,6 +2998,31 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/auth/oauth/pending/send-verification": {
+            "post": {
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "发送 Microsoft 邮箱验证码",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/auth/oauth/pending/set-password": {
             "post": {
                 "consumes": [
@@ -3036,6 +3061,51 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/oauth/pending/verify-email": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth-oauth"
+                ],
+                "summary": "确认 Microsoft 登录邮箱",
+                "parameters": [
+                    {
+                        "description": "验证码",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.oauthVerifyEmailRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.OAuthVerifyEmailResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -3500,6 +3570,58 @@ const docTemplate = `{
                     },
                     "401": {
                         "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/token": {
+            "post": {
+                "description": "供 iOS 和自动化客户端使用用户名或邮箱换取可撤销 Bearer Token。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "auth"
+                ],
+                "summary": "获取 API Token",
+                "parameters": [
+                    {
+                        "description": "登录请求",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.LoginInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.APIAuthSuccessResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -7788,6 +7910,40 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/subscriptions/sync-all": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "受限并发抓取当前用户的全部外部 RSS 订阅源并返回汇总结果。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "刷新全部外部订阅源",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionSyncSummary"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/feed/subscriptions/{id}": {
             "put": {
                 "security": [
@@ -8005,6 +8161,61 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/subscriptions/{id}/sync": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "立即抓取当前用户指定的外部 RSS 订阅源并返回新增条目数。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "刷新单个订阅源",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订阅 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionSyncResult"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
                         }
@@ -11634,6 +11845,91 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/references/resolve": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "references"
+                ],
+                "summary": "解析草稿中的引用",
+                "parameters": [
+                    {
+                        "description": "草稿正文",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/reference.resolveRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/reference.ResolveResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/reference.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/references/search": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "references"
+                ],
+                "summary": "搜索引用目标",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "引用类型",
+                        "name": "type",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "搜索关键词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "返回数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/reference.SearchResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/reference.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/settings/site-access": {
             "get": {
                 "security": [
@@ -14896,6 +15192,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/users/me/password": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "修改当前账号密码",
+                "parameters": [
+                    {
+                        "description": "密码",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ChangePasswordInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/users/me/settings": {
             "get": {
                 "security": [
@@ -15984,6 +16327,12 @@ const docTemplate = `{
                 "published_at": {
                     "type": "string"
                 },
+                "references": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/reference.ResolvedReference"
+                    }
+                },
                 "status": {
                     "description": "draft / published",
                     "type": "string"
@@ -16235,6 +16584,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/comment.MentionDTO"
+                    }
+                },
+                "references": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/reference.ResolvedReference"
                     }
                 },
                 "rendered_html": {
@@ -17296,6 +17651,55 @@ const docTemplate = `{
                 }
             }
         },
+        "feed.SubscriptionSyncResult": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                },
+                "feed_source_id": {
+                    "type": "string"
+                },
+                "fetched_items": {
+                    "type": "integer"
+                },
+                "new_items": {
+                    "type": "integer"
+                },
+                "subscription_id": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean"
+                },
+                "synced_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "feed.SubscriptionSyncSummary": {
+            "type": "object",
+            "properties": {
+                "failed": {
+                    "type": "integer"
+                },
+                "new_items": {
+                    "type": "integer"
+                },
+                "results": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/feed.SubscriptionSyncResult"
+                    }
+                },
+                "succeeded": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
         "feed.TimelineItem": {
             "type": "object",
             "properties": {
@@ -17478,6 +17882,23 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.APIAuthSuccessResponse": {
+            "type": "object",
+            "properties": {
+                "expires_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "example": "2026-08-19T09:30:00Z"
+                },
+                "token": {
+                    "type": "string",
+                    "example": "v7A1..."
+                },
+                "user": {
+                    "$ref": "#/definitions/handlers.AuthUserResponse"
+                }
+            }
+        },
         "handlers.ArtistAliasInput": {
             "type": "object",
             "required": [
@@ -17623,9 +18044,9 @@ const docTemplate = `{
         "handlers.AuthSuccessResponse": {
             "type": "object",
             "properties": {
-                "token": {
+                "csrf_token": {
                     "type": "string",
-                    "example": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+                    "example": "v7A1..."
                 },
                 "user": {
                     "$ref": "#/definitions/handlers.AuthUserResponse"
@@ -17697,6 +18118,25 @@ const docTemplate = `{
                 "pinned": {
                     "type": "boolean",
                     "example": true
+                }
+            }
+        },
+        "handlers.ChangePasswordInput": {
+            "type": "object",
+            "required": [
+                "current_password",
+                "new_password",
+                "password_confirm"
+            ],
+            "properties": {
+                "current_password": {
+                    "type": "string"
+                },
+                "new_password": {
+                    "type": "string"
+                },
+                "password_confirm": {
+                    "type": "string"
                 }
             }
         },
@@ -18412,12 +18852,12 @@ const docTemplate = `{
         "handlers.OAuthCompletionResponse": {
             "type": "object",
             "properties": {
+                "csrf_token": {
+                    "type": "string"
+                },
                 "return_to": {
                     "type": "string",
                     "example": "/forum"
-                },
-                "token": {
-                    "type": "string"
                 },
                 "user": {
                     "$ref": "#/definitions/handlers.AuthUserResponse"
@@ -18508,6 +18948,15 @@ const docTemplate = `{
                 "password_confirm": {
                     "type": "string",
                     "example": "secret123"
+                }
+            }
+        },
+        "handlers.OAuthVerifyEmailResponse": {
+            "type": "object",
+            "properties": {
+                "stage": {
+                    "type": "string",
+                    "example": "complete_profile"
                 }
             }
         },
@@ -19510,6 +19959,17 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.oauthVerifyEmailRequest": {
+            "type": "object",
+            "required": [
+                "code"
+            ],
+            "properties": {
+                "code": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.podcastPlaybackInput": {
             "type": "object",
             "required": [
@@ -20459,6 +20919,12 @@ const docTemplate = `{
                 },
                 "duplicate_count": {
                     "type": "integer"
+                },
+                "duplicate_item_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "duplicate_of_id": {
                     "type": "string"
@@ -22481,6 +22947,131 @@ const docTemplate = `{
                 }
             }
         },
+        "reference.ErrorBody": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "details": {},
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
+        "reference.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "$ref": "#/definitions/reference.ErrorBody"
+                }
+            }
+        },
+        "reference.Kind": {
+            "type": "string",
+            "enum": [
+                "user",
+                "resource"
+            ],
+            "x-enum-varnames": [
+                "KindUser",
+                "KindResource"
+            ]
+        },
+        "reference.ResolveResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/reference.ResolvedReference"
+                    }
+                }
+            }
+        },
+        "reference.ResolvedReference": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "end": {
+                    "type": "integer"
+                },
+                "field": {
+                    "type": "string"
+                },
+                "kind": {
+                    "$ref": "#/definitions/reference.Kind"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "module": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "start": {
+                    "type": "integer"
+                },
+                "subtitle": {
+                    "type": "string"
+                },
+                "target_id": {
+                    "type": "string"
+                },
+                "target_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "reference.SearchResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/reference.Target"
+                    }
+                }
+            }
+        },
+        "reference.Target": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "module": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "subtitle": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "reference.resolveRequest": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                }
+            }
+        },
         "service.SiteAccessFeedSettings": {
             "type": "object",
             "properties": {
@@ -23165,9 +23756,9 @@ const docTemplate = `{
             "in": "header"
         },
         "CookieAuth": {
-            "description": "使用登录后写入的 atoman_token Cookie",
+            "description": "使用登录后写入的 atoman_session HttpOnly Cookie；写请求还需 X-CSRF-Token",
             "type": "apiKey",
-            "name": "atoman_token",
+            "name": "atoman_session",
             "in": "cookie"
         }
     }

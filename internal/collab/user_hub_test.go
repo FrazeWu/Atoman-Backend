@@ -4,26 +4,15 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
+
+	"atoman/internal/middleware"
+	"atoman/internal/model"
+	"atoman/internal/platform/authsession"
+	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
-
-func signedUserHubTokenForTest(t *testing.T, jwtSecret string, userID uuid.UUID) string {
-	t.Helper()
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": userID.String(),
-		"exp":     time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte(jwtSecret))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
-	}
-	return signed
-}
 
 func userHubGinContextForTest(req *http.Request) *gin.Context {
 	w := httptest.NewRecorder()
@@ -32,48 +21,49 @@ func userHubGinContextForTest(req *http.Request) *gin.Context {
 	return c
 }
 
-func TestExtractUserIDFromRequestAcceptsSharedAuthCookie(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	secret := "test-secret"
-	userID := uuid.New()
-	token := signedUserHubTokenForTest(t, secret, userID)
-	req := httptest.NewRequest(http.MethodGet, "/ws/user", nil)
-	req.AddCookie(&http.Cookie{Name: "atoman_token", Value: token})
-
-	got, err := extractUserIDFromRequest(userHubGinContextForTest(req), secret)
-
-	if err != nil {
-		t.Fatalf("expected cookie token to be accepted, got error: %v", err)
+func newUserHubAuthFixture(t *testing.T) (*gorm.DB, model.User) {
+	t.Helper()
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{})
+	user := model.User{Username: "socket-user", Email: "socket@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
 	}
-	if got != userID {
-		t.Fatalf("expected user ID %s, got %s", userID, got)
+	return db, user
+}
+
+func TestExtractUserIDFromRequestAcceptsTrustedWebCookie(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("FRONTEND_URL", "https://www.atoman.org")
+	db, user := newUserHubAuthFixture(t)
+	credentials, err := authsession.New(db).Create(user.UUID, authsession.KindWeb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/ws/user", nil)
+	req.Header.Set("Origin", "https://www.atoman.org")
+	req.AddCookie(&http.Cookie{Name: middleware.AuthSessionCookieName, Value: credentials.Token})
+	got, err := extractUserIDFromRequest(userHubGinContextForTest(req), db)
+	if err != nil || got != user.UUID {
+		t.Fatalf("expected cookie session user %s, got %s err=%v", user.UUID, got, err)
 	}
 }
 
-func TestExtractUserIDFromRequestKeepsBearerAndQueryCompatibility(t *testing.T) {
+func TestExtractUserIDFromRequestAcceptsAPIBearerAndRejectsQueryToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	secret := "test-secret"
-	headerUserID := uuid.New()
-	queryUserID := uuid.New()
-	headerToken := signedUserHubTokenForTest(t, secret, headerUserID)
-	queryToken := signedUserHubTokenForTest(t, secret, queryUserID)
-
+	db, user := newUserHubAuthFixture(t)
+	credentials, err := authsession.New(db).Create(user.UUID, authsession.KindAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
 	headerReq := httptest.NewRequest(http.MethodGet, "/ws/user", nil)
-	headerReq.Header.Set("Authorization", "Bearer "+headerToken)
-	headerGot, err := extractUserIDFromRequest(userHubGinContextForTest(headerReq), secret)
-	if err != nil {
-		t.Fatalf("expected bearer token to be accepted, got error: %v", err)
+	headerReq.Header.Set("Authorization", "Bearer "+credentials.Token)
+	headerGot, err := extractUserIDFromRequest(userHubGinContextForTest(headerReq), db)
+	if err != nil || headerGot != user.UUID {
+		t.Fatalf("expected api bearer user %s, got %s err=%v", user.UUID, headerGot, err)
 	}
-	if headerGot != headerUserID {
-		t.Fatalf("expected bearer user ID %s, got %s", headerUserID, headerGot)
-	}
-
-	queryReq := httptest.NewRequest(http.MethodGet, "/ws/user?token="+queryToken, nil)
-	queryGot, err := extractUserIDFromRequest(userHubGinContextForTest(queryReq), secret)
-	if err != nil {
-		t.Fatalf("expected query token to be accepted, got error: %v", err)
-	}
-	if queryGot != queryUserID {
-		t.Fatalf("expected query user ID %s, got %s", queryUserID, queryGot)
+	queryReq := httptest.NewRequest(http.MethodGet, "/ws/user?token="+credentials.Token, nil)
+	if _, err := extractUserIDFromRequest(userHubGinContextForTest(queryReq), db); err == nil {
+		t.Fatal("query tokens must be rejected")
 	}
 }

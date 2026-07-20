@@ -100,7 +100,7 @@ func TestRunMigrationsAddsPasswordResetAuthSchema(t *testing.T) {
 	resetCode := model.EmailVerificationCode{
 		Email:     legacy.Email,
 		Purpose:   "password_reset",
-		Code:      "654321",
+		CodeHash:  "654321",
 		ExpiresAt: time.Now().UTC().Add(time.Hour),
 	}
 	if err := db.Create(&resetCode).Error; err != nil {

@@ -7,7 +7,7 @@ import (
 
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"ENV", "GIN_MODE", "PORT", "JWT_SECRET", "DATABASE_TYPE", "DATABASE_URL", "STORAGE_TYPE", "ALLOWED_ORIGINS"} {
+	for _, key := range []string{"ENV", "GIN_MODE", "PORT", "AUTH_CODE_SECRET", "DATABASE_TYPE", "DATABASE_URL", "STORAGE_TYPE", "ALLOWED_ORIGINS"} {
 		t.Setenv(key, "")
 	}
 }
@@ -15,7 +15,6 @@ func clearConfigEnv(t *testing.T) {
 func setRequiredEnv(t *testing.T) {
 	t.Helper()
 	clearConfigEnv(t)
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("DATABASE_TYPE", "postgres")
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db")
 }
@@ -39,9 +38,6 @@ func TestLoadUsesDefaults(t *testing.T) {
 	}
 	if cfg.StorageType != DefaultStorageType {
 		t.Fatalf("StorageType = %q, want %q", cfg.StorageType, DefaultStorageType)
-	}
-	if cfg.JWTSecret != "test-secret" {
-		t.Fatalf("JWTSecret = %q, want test-secret", cfg.JWTSecret)
 	}
 	if cfg.DB.Type != "postgres" || cfg.DB.URL != "postgres://user:pass@localhost:5432/db" {
 		t.Fatalf("DB = %#v, want postgres URL", cfg.DB)
@@ -83,20 +79,8 @@ func TestLoadReadsConfiguredValues(t *testing.T) {
 	}
 }
 
-func TestLoadRequiresJWTSecret(t *testing.T) {
-	clearConfigEnv(t)
-	t.Setenv("DATABASE_TYPE", "postgres")
-	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db")
-
-	_, err := Load()
-	if err == nil || !strings.Contains(err.Error(), "JWT_SECRET") {
-		t.Fatalf("Load() error = %v, want JWT_SECRET required", err)
-	}
-}
-
 func TestLoadRequiresDatabaseType(t *testing.T) {
 	clearConfigEnv(t)
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db")
 
 	_, err := Load()
@@ -107,7 +91,6 @@ func TestLoadRequiresDatabaseType(t *testing.T) {
 
 func TestLoadRequiresDatabaseURL(t *testing.T) {
 	clearConfigEnv(t)
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("DATABASE_TYPE", "postgres")
 
 	_, err := Load()
@@ -119,6 +102,7 @@ func TestLoadRequiresDatabaseURL(t *testing.T) {
 func TestLoadAppendsAllowedOriginsInProduction(t *testing.T) {
 	setRequiredEnv(t)
 	t.Setenv("ENV", "production")
+	t.Setenv("AUTH_CODE_SECRET", "production-auth-code-secret")
 	t.Setenv("ALLOWED_ORIGINS", "https://atoman.example, https://studio.example ,,https://api.example")
 
 	cfg, err := Load()
@@ -128,6 +112,16 @@ func TestLoadAppendsAllowedOriginsInProduction(t *testing.T) {
 
 	want := append(DefaultAllowedOrigins(), "https://atoman.example", "https://studio.example", "https://api.example")
 	assertOrigins(t, cfg.AllowedOrigins, want)
+}
+
+func TestLoadRequiresAuthCodeSecretInProduction(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("ENV", "production")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "AUTH_CODE_SECRET") {
+		t.Fatalf("Load() error = %v, want AUTH_CODE_SECRET required", err)
+	}
 }
 
 func TestLoadIgnoresAllowedOriginsOutsideProduction(t *testing.T) {

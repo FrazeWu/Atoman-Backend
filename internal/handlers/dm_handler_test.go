@@ -20,7 +20,6 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -32,7 +31,6 @@ func newDMTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, model.User, model.Use
 func newDMTestRouterWithS3(t *testing.T, s3Client *s3.S3) (*gin.Engine, *gorm.DB, model.User, model.User) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 
 	dbPath := filepath.Join(t.TempDir(), "dm-test.sqlite")
 	dsn := fmt.Sprintf("file:%s?_txlock=immediate&_pragma=busy_timeout(5000)", dbPath)
@@ -42,6 +40,7 @@ func newDMTestRouterWithS3(t *testing.T, s3Client *s3.S3) (*gin.Engine, *gorm.DB
 	}
 	if err := db.AutoMigrate(
 		&model.User{},
+		&model.AuthSession{},
 		&model.UserSettings{},
 		&model.Follow{},
 		&model.UserBlock{},
@@ -84,7 +83,7 @@ func TestSendMessageIsRejectedWhenEitherUserBlockedTheOther(t *testing.T) {
 	body := bytes.NewBufferString(`{"content":"hello"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/dm/conversations/"+recipient.Username, body)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -114,7 +113,7 @@ func TestListConversationsReportsBidirectionalBlockedState(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations", nil)
-	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
@@ -134,19 +133,9 @@ func TestListConversationsReportsBidirectionalBlockedState(t *testing.T) {
 	}
 }
 
-func dmAuthHeader(t *testing.T, user model.User) string {
+func dmAuthHeader(t *testing.T, db *gorm.DB, user model.User) string {
 	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.UUID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
-	}
-	return "Bearer " + signed
+	return "Bearer " + apiAuthTokenForTest(t, db, user)
 }
 
 func multipartDMImageBody(t *testing.T, filename, contentType string, content []byte) (*bytes.Buffer, string) {
@@ -190,7 +179,7 @@ func TestListConversationsReturnsServerErrorWhenUnreadCountFails(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations", nil)
-	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 
@@ -203,7 +192,7 @@ func TestGetMessagesWithoutExistingConversationDoesNotCreateEmptyConversation(t 
 	r, db, sender, recipient := newDMTestRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations/"+recipient.Username, nil)
-	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 
@@ -244,7 +233,7 @@ func TestGetMessagesTreatsSoftDeletedConversationAsMissingWithoutWriting(t *test
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations/"+recipient.Username, nil)
-	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 
@@ -302,7 +291,7 @@ func TestGetMessagesReadsNormalizedConversationInBothDirectionsWithPagination(t 
 	assertPage := func(current model.User, otherUsername string, page int, wantContents ...string) {
 		t.Helper()
 		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/dm/conversations/%s?page=%d", otherUsername, page), nil)
-		req.Header.Set("Authorization", dmAuthHeader(t, current))
+		req.Header.Set("Authorization", dmAuthHeader(t, db, current))
 		resp := httptest.NewRecorder()
 		r.ServeHTTP(resp, req)
 		if resp.Code != http.StatusOK {
@@ -359,7 +348,7 @@ func TestGetMessagesReturnsServerErrorWhenCountFails(t *testing.T) {
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations/"+recipient.Username, nil)
-	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 
@@ -391,7 +380,7 @@ func TestGetMessagesCannotReadConversationBetweenOtherUsers(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations/"+sender.Username, nil)
-	req.Header.Set("Authorization", dmAuthHeader(t, third))
+	req.Header.Set("Authorization", dmAuthHeader(t, db, third))
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 
@@ -426,11 +415,11 @@ func TestDMUploadImageRejectsSpoofedImageContentType(t *testing.T) {
 
 	var s3Path string
 	var s3ContentType string
-	r, _, sender, _ := newDMTestRouterWithS3(t, fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType))
+	r, db, sender, _ := newDMTestRouterWithS3(t, fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType))
 
 	body, contentType := multipartDMImageBody(t, "message.png", "image/png", []byte("not really a png"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/dm/upload", body)
-	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 
@@ -451,11 +440,11 @@ func TestDMUploadImageAcceptsValidPNGContent(t *testing.T) {
 	var s3Path string
 	var s3ContentType string
 	var s3ACL string
-	r, _, sender, _ := newDMTestRouterWithS3(t, fakeS3ClientForUploadTestWithACL(t, &s3Path, &s3ContentType, &s3ACL))
+	r, db, sender, _ := newDMTestRouterWithS3(t, fakeS3ClientForUploadTestWithACL(t, &s3Path, &s3ContentType, &s3ACL))
 
 	body, contentType := multipartDMImageBody(t, "message.png", "image/png", validPNGBytes())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/dm/upload", body)
-	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 
@@ -490,7 +479,7 @@ func TestSendMessageOneBeforeReplyBlocksSecondSendWithoutReply(t *testing.T) {
 
 	firstReq := httptest.NewRequest(http.MethodPost, "/api/v1/dm/conversations/"+recipient.Username, bytes.NewReader(body))
 	firstReq.Header.Set("Content-Type", "application/json")
-	firstReq.Header.Set("Authorization", dmAuthHeader(t, sender))
+	firstReq.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	firstResp := httptest.NewRecorder()
 	r.ServeHTTP(firstResp, firstReq)
 	if firstResp.Code != http.StatusCreated {
@@ -499,7 +488,7 @@ func TestSendMessageOneBeforeReplyBlocksSecondSendWithoutReply(t *testing.T) {
 
 	secondReq := httptest.NewRequest(http.MethodPost, "/api/v1/dm/conversations/"+recipient.Username, bytes.NewReader(body))
 	secondReq.Header.Set("Content-Type", "application/json")
-	secondReq.Header.Set("Authorization", dmAuthHeader(t, sender))
+	secondReq.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	secondResp := httptest.NewRecorder()
 	r.ServeHTTP(secondResp, secondReq)
 	if secondResp.Code != http.StatusForbidden {
@@ -536,7 +525,7 @@ func TestSendMessageDoesNotOverwriteNewerConversationSummary(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/dm/conversations/"+recipient.Username, bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", dmAuthHeader(t, sender))
+	req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 	resp := httptest.NewRecorder()
 	r.ServeHTTP(resp, req)
 
@@ -586,7 +575,7 @@ func TestSendMessageOneBeforeReplyConcurrentSendsPersistAtMostOne(t *testing.T) 
 
 			req := httptest.NewRequest(http.MethodPost, "/api/v1/dm/conversations/"+recipient.Username, bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Authorization", dmAuthHeader(t, sender))
+			req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
 			resp := httptest.NewRecorder()
 			r.ServeHTTP(resp, req)
 			statuses <- resp.Code

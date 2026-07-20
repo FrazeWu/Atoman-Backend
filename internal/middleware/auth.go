@@ -1,9 +1,9 @@
 package middleware
 
 import (
-	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -11,11 +11,17 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/platform/httpx"
+
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
+)
+
+const (
+	AuthSessionCookieName = "atoman_session"
+	CSRFHeaderName        = "X-CSRF-Token"
+	authSessionContextKey = "auth_session"
 )
 
 var (
@@ -35,155 +41,186 @@ func currentAuthDB() *gorm.DB {
 	return authDB
 }
 
-func jwtSecret() []byte {
-	return []byte(os.Getenv("JWT_SECRET"))
+type requestCredential struct {
+	token   string
+	kind    string
+	present bool
 }
 
-func parseAuthToken(tokenString string) (*jwt.Token, error) {
-	return jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+func credentialFromRequest(c *gin.Context) requestCredential {
+	authorization := strings.TrimSpace(c.GetHeader("Authorization"))
+	if authorization != "" {
+		const prefix = "Bearer "
+		if !strings.HasPrefix(authorization, prefix) {
+			return requestCredential{kind: authsession.KindAPI, present: true}
 		}
-		return jwtSecret(), nil
+		return requestCredential{
+			token:   strings.TrimSpace(strings.TrimPrefix(authorization, prefix)),
+			kind:    authsession.KindAPI,
+			present: true,
+		}
+	}
+	cookie, err := c.Cookie(AuthSessionCookieName)
+	if err != nil || strings.TrimSpace(cookie) == "" {
+		return requestCredential{}
+	}
+	return requestCredential{token: cookie, kind: authsession.KindWeb, present: true}
+}
+
+func resolveRequestSession(c *gin.Context) (authsession.Resolved, requestCredential, bool) {
+	credential := credentialFromRequest(c)
+	db := currentAuthDB()
+	if !credential.present || credential.token == "" || db == nil {
+		return authsession.Resolved{}, credential, false
+	}
+	resolved, err := authsession.New(db).Authenticate(credential.token, credential.kind)
+	if err != nil {
+		return authsession.Resolved{}, credential, false
+	}
+	return resolved, credential, true
+}
+
+func setAuthContext(c *gin.Context, resolved authsession.Resolved) {
+	role := resolved.User.Role
+	if role == "" {
+		role = authctx.RoleUser
+	}
+	authctx.SetCurrentUser(c, authctx.CurrentUser{
+		ID:       resolved.User.UUID,
+		Username: resolved.User.Username,
+		Role:     role,
 	})
+	c.Set("user_id", resolved.User.UUID)
+	c.Set("username", resolved.User.Username)
+	c.Set("role", role)
+	c.Set(authSessionContextKey, resolved.Session)
 }
 
-func ClaimsAuthVersion(claims jwt.MapClaims) (uint, bool) {
-	raw, exists := claims["auth_version"]
+func CurrentAuthSession(c *gin.Context) (model.AuthSession, bool) {
+	value, exists := c.Get(authSessionContextKey)
 	if !exists {
-		return 0, true
+		return model.AuthSession{}, false
 	}
-	switch value := raw.(type) {
-	case float64:
-		if value < 0 || value != float64(uint(value)) {
-			return 0, false
-		}
-		return uint(value), true
-	case uint:
-		return value, true
-	case int:
-		if value < 0 {
-			return 0, false
-		}
-		return uint(value), true
-	default:
-		return 0, false
-	}
+	session, ok := value.(model.AuthSession)
+	return session, ok
 }
 
-func authTokenCandidatesFromRequest(c *gin.Context) []string {
-	candidates := make([]string, 0, 2)
-	tokenString := c.GetHeader("Authorization")
-	if strings.HasPrefix(tokenString, "Bearer ") {
-		tokenString = strings.TrimPrefix(tokenString, "Bearer ")
-	}
-	if tokenString != "" {
-		candidates = append(candidates, tokenString)
-	}
-	cookie, err := c.Cookie("atoman_token")
-	if err == nil && cookie != "" {
-		candidates = append(candidates, cookie)
-	}
-	return candidates
-}
-
-func resolveAuthClaims(c *gin.Context) (jwt.MapClaims, bool) {
-	for _, tokenString := range authTokenCandidatesFromRequest(c) {
-		token, err := parseAuthToken(tokenString)
-		if err != nil || !token.Valid {
-			continue
-		}
-		claims, ok := token.Claims.(jwt.MapClaims)
-		if !ok || !setAuthContext(c, claims) {
-			continue
-		}
-		return claims, true
-	}
-	return nil, false
-}
-
-func setAuthContext(c *gin.Context, claims jwt.MapClaims) bool {
-	var userIDStr string
-	switch v := claims["user_id"].(type) {
-	case string:
-		userIDStr = v
-	case float64:
-		userIDStr = fmt.Sprintf("%v", v)
-	default:
+func IsTrustedWebOrigin(rawOrigin string) bool {
+	rawOrigin = strings.TrimRight(strings.TrimSpace(rawOrigin), "/")
+	if rawOrigin == "" {
 		return false
 	}
-
-	userID, err := uuid.Parse(userIDStr)
+	configured := strings.TrimRight(strings.TrimSpace(os.Getenv("FRONTEND_URL")), "/")
+	if configured != "" && rawOrigin == configured {
+		return true
+	}
+	if os.Getenv("ENV") == "production" {
+		return false
+	}
+	parsed, err := url.Parse(rawOrigin)
 	if err != nil {
 		return false
 	}
+	return parsed.Scheme == "http" && (parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1")
+}
 
-	db := currentAuthDB()
-	if db == nil {
+func TrustedOriginMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if !requiresCSRF(c.Request.Method) {
+			c.Next()
+			return
+		}
+		origin := c.GetHeader("Origin")
+		if IsTrustedWebOrigin(origin) || (os.Getenv("ENV") != "production" && strings.TrimSpace(origin) == "") {
+			c.Next()
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"code":  "auth.origin_invalid",
+			"error": "请求来源无效",
+		})
+	}
+}
+
+func requiresCSRF(method string) bool {
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	default:
+		return true
+	}
+}
+
+func verifyWebRequest(c *gin.Context, resolved authsession.Resolved, credential requestCredential) bool {
+	if credential.kind != authsession.KindWeb || !requiresCSRF(c.Request.Method) {
+		return true
+	}
+	if !IsTrustedWebOrigin(c.GetHeader("Origin")) || !authsession.New(currentAuthDB()).VerifyCSRF(resolved.Session, c.GetHeader(CSRFHeaderName)) {
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+			"code":  "auth.csrf_invalid",
+			"error": "请求已失效，请刷新页面后重试",
+		})
 		return false
 	}
-
-	var user model.User
-	if err := db.Where("uuid = ? AND is_active = ?", userID, true).First(&user).Error; err != nil {
-		return false
-	}
-	authVersion, ok := ClaimsAuthVersion(claims)
-	if !ok || authVersion != user.AuthVersion {
-		return false
-	}
-	username := user.Username
-	role := user.Role
-	if role == "" {
-		role = "user"
-	}
-
-	authctx.SetCurrentUser(c, authctx.CurrentUser{ID: userID, Username: username, Role: role})
 	return true
 }
 
-// AuthMiddleware validates JWT tokens and sets user context
 func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if len(authTokenCandidatesFromRequest(c)) == 0 {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
-			c.Abort()
+		resolved, credential, ok := resolveRequestSession(c)
+		if !credential.present {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization required"})
 			return
 		}
-		if _, ok := resolveAuthClaims(c); !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
-			c.Abort()
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 			return
 		}
+		if !verifyWebRequest(c, resolved, credential) {
+			return
+		}
+		setAuthContext(c, resolved)
 		c.Next()
 	}
 }
 
 func StableAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if len(authTokenCandidatesFromRequest(c)) == 0 {
-			httpx.Error(c, apperr.Unauthorized("Authorization header required"))
+		resolved, credential, ok := resolveRequestSession(c)
+		if !credential.present {
+			httpx.Error(c, apperr.Unauthorized("Authorization required"))
 			c.Abort()
 			return
 		}
-		if _, ok := resolveAuthClaims(c); !ok {
+		if !ok {
 			httpx.Error(c, apperr.Unauthorized("Invalid token"))
 			c.Abort()
 			return
 		}
+		if !verifyWebRequest(c, resolved, credential) {
+			return
+		}
+		setAuthContext(c, resolved)
 		c.Next()
 	}
 }
 
-// OptionalAuthMiddleware validates JWT if present, but does not block if missing
 func OptionalAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if len(authTokenCandidatesFromRequest(c)) == 0 {
+		resolved, credential, ok := resolveRequestSession(c)
+		if !credential.present {
 			c.Next()
 			return
 		}
-		if _, ok := resolveAuthClaims(c); !ok {
-			log.Printf("[Auth] No valid auth token found in request candidates")
+		if !ok {
+			log.Printf("[Auth] No valid auth session found")
+			c.Next()
+			return
 		}
+		if !verifyWebRequest(c, resolved, credential) {
+			return
+		}
+		setAuthContext(c, resolved)
 		c.Next()
 	}
 }

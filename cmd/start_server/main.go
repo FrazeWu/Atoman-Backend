@@ -47,12 +47,15 @@ import (
 // @description 使用 Bearer Token，例如：Bearer <token>
 // @securityDefinitions.apikey CookieAuth
 // @in cookie
-// @name atoman_token
-// @description 使用登录后写入的 atoman_token Cookie
+// @name atoman_session
+// @description 使用登录后写入的 atoman_session HttpOnly Cookie；写请求还需 X-CSRF-Token
 
 func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 	if err := migrations.RunAuthPasswordResetMigration(db); err != nil {
 		return fmt.Errorf("migrate password reset auth schema: %w", err)
+	}
+	if err := migrations.RunAuthSecurityMigration(db); err != nil {
+		return fmt.Errorf("migrate auth security schema: %w", err)
 	}
 	if err := migrations.RunAuthOAuthMigration(db); err != nil {
 		return fmt.Errorf("migrate oauth auth schema: %w", err)
@@ -452,6 +455,13 @@ func originAllowed(origin string, allowedOrigins []string) bool {
 	return false
 }
 
+func validateAuthEnvironment() error {
+	if os.Getenv("ENV") == "production" && strings.TrimSpace(os.Getenv("AUTH_CODE_SECRET")) == "" {
+		return fmt.Errorf("AUTH_CODE_SECRET environment variable is required")
+	}
+	return nil
+}
+
 func main() {
 	mode := flag.String("mode", "dev", "startup mode: dev or prod")
 	flag.Parse()
@@ -479,8 +489,8 @@ func main() {
 		log.Println("Running in development mode")
 	}
 
-	if os.Getenv("JWT_SECRET") == "" {
-		fatalLogger.Fatal("JWT_SECRET environment variable is required")
+	if err := validateAuthEnvironment(); err != nil {
+		fatalLogger.Fatal(err)
 	}
 
 	dbType := os.Getenv("DATABASE_TYPE")

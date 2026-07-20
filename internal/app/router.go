@@ -1,8 +1,6 @@
 package app
 
 import (
-	"os"
-
 	"atoman/internal/collab"
 	"atoman/internal/handlers"
 	"atoman/internal/middleware"
@@ -17,6 +15,7 @@ import (
 	"atoman/internal/modules/music"
 	"atoman/internal/modules/notification"
 	"atoman/internal/modules/portal"
+	"atoman/internal/modules/reference"
 	"atoman/internal/modules/studio"
 	"atoman/internal/service"
 
@@ -38,6 +37,7 @@ func RegisterV1Routes(
 	forumService := forum.NewService(db)
 	commentService.SetForumPolicy(forumService)
 	comment.RegisterRoutes(group, commentService)
+	reference.RegisterRoutes(group, reference.NewService(db))
 	blog.RegisterRoutes(group.Group("/blog"), blog.NewService(db))
 	feed.RegisterRoutes(group.Group("/feed"), feed.NewService(db))
 	notification.RegisterRoutes(group, notification.NewService(db))
@@ -78,7 +78,7 @@ func RegisterV1Routes(
 	handlers.SetupAdminRoutes(r, db, s3Client)
 
 	r.GET("/ws/user", func(c *gin.Context) {
-		userHub.ServeWS(c, os.Getenv("JWT_SECRET"))
+		userHub.ServeWS(c, db)
 	})
 
 	collabGroup := r.Group("/api/v1/collab")

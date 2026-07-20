@@ -96,7 +96,7 @@ check_prerequisites() {
   require_file "$NGINX_REAL_IP_SOURCE"
   require_file "$NGINX_SITE_SOURCE"
 
-  for required_env in DATABASE_TYPE DATABASE_URL JWT_SECRET BASE_URL S3_BUCKET; do
+  for required_env in DATABASE_TYPE DATABASE_URL AUTH_CODE_SECRET BASE_URL S3_BUCKET; do
     grep -q "^${required_env}=" "$ENV_FILE" || die "$ENV_FILE is missing $required_env"
   done
 

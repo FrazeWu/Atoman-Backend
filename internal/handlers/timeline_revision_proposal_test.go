@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
@@ -14,7 +13,6 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -24,12 +22,14 @@ func timelineProposalHandlerContext(t *testing.T) (*gin.Engine, *proposalservice
 	t.Helper()
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.MediaAsset{}, &model.TimelineEvent{}, &model.TimelinePerson{}, &model.TimelineRevision{}, &model.Revision{},
+		&model.User{}, &model.AuthSession{}, &model.MediaAsset{}, &model.TimelineEvent{}, &model.TimelinePerson{}, &model.TimelineRevision{}, &model.Revision{},
 		&model.DiscussionTarget{}, &model.CommentEntry{}, &model.CommentMention{}, &model.CommentAttachment{}, &model.CommentLike{},
 		&model.CommentReport{}, &model.CommentTimeAnchor{}, &model.CommentPublishRecord{}, &model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{},
+		&model.ContentReference{},
 	)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_timeline_handler_target ON discussion_targets (kind, resource_key)`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_timeline_handler_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_timeline_handler_content_reference ON content_references (source_type, source_id, source_field, start_offset, end_offset) WHERE deleted_at IS NULL`).Error)
 	stored := model.User{Username: "timeline-handler", Email: "timeline-handler@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	require.NoError(t, db.Create(&stored).Error)
 	user := authctx.CurrentUser{ID: stored.UUID, Username: stored.Username, Role: stored.Role}
@@ -92,7 +92,6 @@ func TestTimelineProposalHandlerRejectsInvalidIDAndUnknownField(t *testing.T) {
 }
 
 func TestTimelineProposalRoutesUseOptionalAuthForLikedState(t *testing.T) {
-	t.Setenv("JWT_SECRET", "timeline-secret")
 	_, svc, db, user, event := timelineProposalHandlerContext(t)
 	created, err := svc.CreateEventProposal(user, event.ID, proposalservice.TimelineProposalInput{Content: "liked", Evidence: "archive", Patch: map[string]any{"location": "Berlin"}})
 	require.NoError(t, err)
@@ -100,8 +99,9 @@ func TestTimelineProposalRoutesUseOptionalAuthForLikedState(t *testing.T) {
 	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.Comment.ID).Update("like_count", 1).Error)
 	middleware.SetAuthDB(db)
 	t.Cleanup(func() { middleware.SetAuthDB(nil) })
-	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"user_id": user.ID.String(), "exp": time.Now().Add(time.Hour).Unix()}).SignedString([]byte("timeline-secret"))
-	require.NoError(t, err)
+	stored := model.User{UUID: user.ID}
+	require.NoError(t, db.First(&stored, "uuid = ?", user.ID).Error)
+	token := apiAuthTokenForTest(t, db, stored)
 	router := gin.New()
 	SetupTimelineRoutes(router, db)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/timeline/events/"+event.ID.String()+"/revision-proposals", nil)

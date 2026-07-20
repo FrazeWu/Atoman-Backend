@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
@@ -20,23 +19,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 )
-
-func signedUploadTokenForTest(t *testing.T, user model.User) string {
-	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.UUID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
-	}
-	return signed
-}
 
 func multipartUploadBody(t *testing.T, purpose, filename, contentType string, content []byte) (*bytes.Buffer, string) {
 	t.Helper()
@@ -104,13 +87,12 @@ func fakeS3ClientForUploadTestWithACL(t *testing.T, capturedPath *string, captur
 }
 
 func TestUploadMusicAssetStoresInS3AndPersistsMediaAsset(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	middleware.SetAuthDB(db)
-	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{})
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.MediaAsset{})
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
@@ -123,7 +105,7 @@ func TestUploadMusicAssetStoresInS3AndPersistsMediaAsset(t *testing.T) {
 
 	body, contentType := multipartUploadBody(t, "music.cover", "avatar.png", "image/png", validPNGBytes())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
-	req.Header.Set("Authorization", "Bearer "+signedUploadTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+apiAuthTokenForTest(t, db, user))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 
@@ -180,14 +162,13 @@ func TestUploadMusicAssetStoresInS3AndPersistsMediaAsset(t *testing.T) {
 }
 
 func TestUploadCommentImageStoresCommentPurposeAndReturnsAssetID(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	middleware.SetAuthDB(db)
 	t.Cleanup(func() { middleware.SetAuthDB(nil) })
-	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{})
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.MediaAsset{})
 	user := model.User{Username: "commenter", Email: "commenter@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
@@ -197,7 +178,7 @@ func TestUploadCommentImageStoresCommentPurposeAndReturnsAssetID(t *testing.T) {
 	SetupUploadRoutes(r, db, fakeS3ClientForUploadTest(t, &path, &contentType))
 	body, multipartType := multipartUploadBody(t, "comment.image", "comment.png", "image/png", validPNGBytes())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
-	req.Header.Set("Authorization", "Bearer "+signedUploadTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+apiAuthTokenForTest(t, db, user))
 	req.Header.Set("Content-Type", multipartType)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -238,13 +219,12 @@ func TestUniqueUploadFilenameUsesVerifiedImageContentTypeExtension(t *testing.T)
 }
 
 func TestUploadMusicCoverRejectsSpoofedImageContentType(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	middleware.SetAuthDB(db)
-	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{})
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.MediaAsset{})
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
@@ -257,7 +237,7 @@ func TestUploadMusicCoverRejectsSpoofedImageContentType(t *testing.T) {
 
 	body, contentType := multipartUploadBody(t, "music.cover", "avatar.png", "image/png", []byte("not really a png"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
-	req.Header.Set("Authorization", "Bearer "+signedUploadTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+apiAuthTokenForTest(t, db, user))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 
@@ -279,11 +259,10 @@ func TestUploadMusicCoverRejectsSpoofedImageContentType(t *testing.T) {
 }
 
 func TestUploadMusicAssetRequiresS3Storage(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	middleware.SetAuthDB(db)
-	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{})
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.MediaAsset{})
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
@@ -294,7 +273,7 @@ func TestUploadMusicAssetRequiresS3Storage(t *testing.T) {
 
 	body, contentType := multipartUploadBody(t, "music.cover", "avatar.png", "image/png", validPNGBytes())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
-	req.Header.Set("Authorization", "Bearer "+signedUploadTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+apiAuthTokenForTest(t, db, user))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 

@@ -13,6 +13,7 @@ import (
 	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/platform/oauthprovider"
 	"atoman/internal/service"
 	"atoman/internal/testdb"
@@ -52,7 +53,7 @@ func newOAuthHandlerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.UserSettings{}, &model.ExternalIdentity{}, &model.OAuthFlow{},
+		&model.User{}, &model.UserSettings{}, &model.AuthSession{}, &model.ExternalIdentity{}, &model.OAuthFlow{},
 		&model.Channel{}, &model.Collection{}, &model.UserStudioState{}, &model.StudioModuleSettings{},
 		&model.FeedSource{}, &model.SubscriptionGroup{}, &model.Subscription{},
 		&model.BookmarkFolder{}, &model.Playlist{}, &model.PlaylistSong{},
@@ -62,6 +63,7 @@ func newOAuthHandlerTestDB(t *testing.T) *gorm.DB {
 
 func TestOAuthRoutesListProvidersAndStartAuthorization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	t.Setenv("AUTH_COOKIE_DOMAIN", ".atoman.org")
 	provider := &handlerOAuthProvider{name: model.OAuthProviderGoogle}
 	svc := newOAuthHandlerTestService(t, provider)
 	router := gin.New()
@@ -94,6 +96,9 @@ func TestOAuthRoutesListProvidersAndStartAuthorization(t *testing.T) {
 	}
 	if location.Host != "provider.example" || provider.authorizeReq.State == "" {
 		t.Fatalf("unexpected authorization redirect: %s", location.String())
+	}
+	if cookie := requireOAuthStateCookie(t, startResponse); cookie.Domain != "" {
+		t.Fatalf("oauth state cookie must be host-only, got domain %q", cookie.Domain)
 	}
 }
 
@@ -229,7 +234,6 @@ func TestOAuthCallbackRejectsStateFromAnotherBrowser(t *testing.T) {
 
 func TestOAuthCompleteProfileReturnsAtomanSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	provider := &handlerOAuthProvider{
 		name: model.OAuthProviderGoogle,
 		profile: oauthprovider.Profile{
@@ -237,7 +241,8 @@ func TestOAuthCompleteProfileReturnsAtomanSession(t *testing.T) {
 			Email: "person@example.com", EmailVerified: true, DisplayName: "Person",
 		},
 	}
-	svc := newOAuthHandlerTestService(t, provider)
+	db := newOAuthHandlerTestDB(t)
+	svc := service.NewOAuthService(db, oauthprovider.NewRegistry(provider))
 	router := gin.New()
 	RegisterOAuthRoutes(router.Group("/api/v1/auth"), svc, "https://app.example.com")
 
@@ -267,9 +272,10 @@ func TestOAuthCompleteProfileReturnsAtomanSession(t *testing.T) {
 		t.Fatalf("complete oauth profile: %d %s", response.Code, response.Body.String())
 	}
 	var payload struct {
-		Token    string `json:"token"`
-		ReturnTo string `json:"return_to"`
-		User     struct {
+		Token     string `json:"token"`
+		CSRFToken string `json:"csrf_token"`
+		ReturnTo  string `json:"return_to"`
+		User      struct {
 			Username string `json:"username"`
 			Email    string `json:"email"`
 		} `json:"user"`
@@ -277,7 +283,7 @@ func TestOAuthCompleteProfileReturnsAtomanSession(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode auth session: %v", err)
 	}
-	if payload.Token == "" || payload.ReturnTo != "/forum" || payload.User.Username != "person" || payload.User.Email != "person@example.com" {
+	if payload.Token != "" || payload.CSRFToken == "" || payload.ReturnTo != "/forum" || payload.User.Username != "person" || payload.User.Email != "person@example.com" {
 		t.Fatalf("unexpected auth session: %#v", payload)
 	}
 	var authCookie, clearedFlow bool
@@ -292,11 +298,14 @@ func TestOAuthCompleteProfileReturnsAtomanSession(t *testing.T) {
 	if !authCookie || !clearedFlow {
 		t.Fatalf("expected auth cookie and cleared flow cookie: %#v", response.Result().Cookies())
 	}
+	var session model.AuthSession
+	if err := db.First(&session, "kind = ?", authsession.KindWeb).Error; err != nil {
+		t.Fatalf("expected persisted oauth web session: %v", err)
+	}
 }
 
 func TestOAuthSetPasswordReturnsAtomanSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newOAuthHandlerTestDB(t)
 	user := model.User{Username: "oauth-migration", Email: "migration@example.com", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -371,7 +380,6 @@ func TestOAuthSetPasswordReturnsAtomanSession(t *testing.T) {
 
 func TestOAuthIdentityRoutesListAndUnlinkCurrentUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newOAuthHandlerTestDB(t)
 	middleware.SetAuthDB(db)
 	user := model.User{Username: "settings-user", Email: "settings@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
@@ -385,17 +393,14 @@ func TestOAuthIdentityRoutesListAndUnlinkCurrentUser(t *testing.T) {
 	if err := db.Create(&identity).Error; err != nil {
 		t.Fatalf("create identity: %v", err)
 	}
-	token, err := generateAuthToken(user)
-	if err != nil {
-		t.Fatalf("generate auth token: %v", err)
-	}
+	token := apiAuthTokenForTest(t, db, user)
 
 	svc := service.NewOAuthService(db, oauthprovider.NewRegistry())
 	router := gin.New()
 	RegisterOAuthRoutes(router.Group("/api/v1/auth"), svc, "https://app.example.com")
 
 	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oauth/identities", nil)
-	listRequest.AddCookie(&http.Cookie{Name: authTokenCookieName, Value: token})
+	listRequest.Header.Set("Authorization", "Bearer "+token)
 	listResponse := httptest.NewRecorder()
 	router.ServeHTTP(listResponse, listRequest)
 	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"provider":"github"`) {
@@ -403,7 +408,7 @@ func TestOAuthIdentityRoutesListAndUnlinkCurrentUser(t *testing.T) {
 	}
 
 	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/oauth/github", nil)
-	deleteRequest.AddCookie(&http.Cookie{Name: authTokenCookieName, Value: token})
+	deleteRequest.Header.Set("Authorization", "Bearer "+token)
 	deleteResponse := httptest.NewRecorder()
 	router.ServeHTTP(deleteResponse, deleteRequest)
 	if deleteResponse.Code != http.StatusNoContent {

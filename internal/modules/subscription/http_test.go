@@ -6,35 +6,31 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
-func signedSubscriptionTokenForTest(t *testing.T, user model.User) string {
+func signedSubscriptionTokenForTest(t *testing.T, db *gorm.DB, user model.User) string {
 	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.UUID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
+	if err := db.AutoMigrate(&model.AuthSession{}); err != nil {
+		t.Fatalf("migrate auth sessions: %v", err)
 	}
-	return signed
+	credentials, err := authsession.New(db).Create(user.UUID, authsession.KindAPI)
+	if err != nil {
+		t.Fatalf("create api auth session: %v", err)
+	}
+	return credentials.Token
 }
 
 func TestCreateSubscriptionRouteAcceptsBearerAuth(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	middleware.SetAuthDB(db)
@@ -55,7 +51,7 @@ func TestCreateSubscriptionRouteAcceptsBearerAuth(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/subscriptions", bytes.NewBufferString(`{"target_type":"external_rss","rss_url":"https://example.com/feed.xml","title":"Example Feed"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+signedSubscriptionTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedSubscriptionTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
@@ -100,7 +96,7 @@ func TestCreateSubscriptionRouteCanUseExistingAuthContext(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/subscriptions", bytes.NewBufferString(`{"target_type":"external_rss","rss_url":"https://example.com/feed.xml"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+signedSubscriptionTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedSubscriptionTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 

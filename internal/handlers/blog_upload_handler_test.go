@@ -41,7 +41,7 @@ func newBlogUploadTestUser(t *testing.T) (*gorm.DB, model.User) {
 	t.Helper()
 	db := testdb.Open(t)
 	middleware.SetAuthDB(db)
-	testdb.Migrate(t, db, &model.User{})
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{})
 
 	user := model.User{Username: "alice_" + uuid.NewString()[:8], Email: uuid.NewString() + "@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -51,7 +51,6 @@ func newBlogUploadTestUser(t *testing.T) (*gorm.DB, model.User) {
 }
 
 func TestUploadBlogImageRejectsSpoofedImageContentType(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
 	gin.SetMode(gin.TestMode)
@@ -64,7 +63,7 @@ func TestUploadBlogImageRejectsSpoofedImageContentType(t *testing.T) {
 
 	body, contentType := multipartBlogImageBody(t, "spoof.png", "image/png", []byte("not really a png"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/upload-image", body)
-	req.Header.Set("Authorization", "Bearer "+signedUploadTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+apiAuthTokenForTest(t, db, user))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 
@@ -79,7 +78,6 @@ func TestUploadBlogImageRejectsSpoofedImageContentType(t *testing.T) {
 }
 
 func TestUploadBlogImageAllowsRealPNGHeader(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
 	gin.SetMode(gin.TestMode)
@@ -92,7 +90,7 @@ func TestUploadBlogImageAllowsRealPNGHeader(t *testing.T) {
 
 	body, contentType := multipartBlogImageBody(t, "avatar.png", "image/png", validPNGBytes())
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/upload-image", body)
-	req.Header.Set("Authorization", "Bearer "+signedUploadTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+apiAuthTokenForTest(t, db, user))
 	req.Header.Set("Content-Type", contentType)
 	w := httptest.NewRecorder()
 

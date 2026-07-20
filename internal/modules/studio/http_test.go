@@ -6,15 +6,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -28,7 +27,6 @@ type studioHTTPFixture struct {
 
 func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 	t.Helper()
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
@@ -72,24 +70,23 @@ func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 	return studioHTTPFixture{db: db, router: router, owner: owner, foreign: foreign}
 }
 
-func studioToken(t *testing.T, user model.User) string {
+func studioToken(t *testing.T, db *gorm.DB, user model.User) string {
 	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id": user.UUID.String(), "username": user.Username, "role": user.Role,
-		"auth_version": user.AuthVersion, "exp": time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
+	if err := db.AutoMigrate(&model.AuthSession{}); err != nil {
+		t.Fatalf("migrate auth sessions: %v", err)
 	}
-	return signed
+	credentials, err := authsession.New(db).Create(user.UUID, authsession.KindAPI)
+	if err != nil {
+		t.Fatalf("create api auth session: %v", err)
+	}
+	return credentials.Token
 }
 
 func studioRequest(t *testing.T, fixture studioHTTPFixture, user model.User, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(method, path, bytes.NewBufferString(body))
-	request.Header.Set("Authorization", "Bearer "+studioToken(t, user))
+	request.Header.Set("Authorization", "Bearer "+studioToken(t, fixture.db, user))
 	if body != "" {
 		request.Header.Set("Content-Type", "application/json")
 	}

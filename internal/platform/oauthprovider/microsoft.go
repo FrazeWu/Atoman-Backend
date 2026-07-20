@@ -111,7 +111,7 @@ func (p *MicrosoftProvider) Exchange(ctx context.Context, req CallbackRequest) (
 	}
 	return Profile{
 		Issuer: claims.Issuer, Subject: claims.Subject,
-		Email: strings.ToLower(email), EmailVerified: email != "",
+		Email: strings.ToLower(email), EmailVerified: false,
 		DisplayName: claims.Name, AvatarURL: claims.Picture,
 	}, nil
 }

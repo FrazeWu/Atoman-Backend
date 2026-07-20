@@ -14,26 +14,24 @@ import (
 	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
-func signedRouterTokenForTest(t *testing.T, user model.User) string {
+func signedRouterTokenForTest(t *testing.T, db *gorm.DB, user model.User) string {
 	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.UUID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
+	if err := db.AutoMigrate(&model.AuthSession{}); err != nil {
+		t.Fatalf("migrate auth sessions: %v", err)
 	}
-	return signed
+	credentials, err := authsession.New(db).Create(user.UUID, authsession.KindAPI)
+	if err != nil {
+		t.Fatalf("create api auth session: %v", err)
+	}
+	return credentials.Token
 }
 
 func TestRegisterV1RoutesMountsMusicSubmitEdit(t *testing.T) {
@@ -98,7 +96,6 @@ func TestRegisterV1RoutesMountsUnifiedCommentHTTP(t *testing.T) {
 
 func TestRegisterV1RoutesMountsStudioState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.UserStudioState{})
 	user := model.User{Username: "studio-router", Email: "studio-router@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
@@ -118,7 +115,7 @@ func TestRegisterV1RoutesMountsStudioState(t *testing.T) {
 	router := gin.New()
 	RegisterV1Routes(router, db, nil, nil, collab.NewUserHub(), collab.NewHub())
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/studio/state", nil)
-	request.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
+	request.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, db, user))
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
@@ -129,7 +126,6 @@ func TestRegisterV1RoutesMountsStudioState(t *testing.T) {
 
 func TestRegisterV1RoutesEnforcesForumACLForUnifiedCommentHTTP(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
@@ -140,6 +136,7 @@ func TestRegisterV1RoutesEnforcesForumACLForUnifiedCommentHTTP(t *testing.T) {
 		&model.ForumGroupMember{},
 		&model.ForumCategoryPermission{},
 		&model.ForumUserTrust{},
+		&model.ContentReference{},
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
 		&model.CommentMention{},
@@ -188,7 +185,7 @@ func TestRegisterV1RoutesEnforcesForumACLForUnifiedCommentHTTP(t *testing.T) {
 		t.Helper()
 		response := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/comments/"+entry.ID.String()+"/replies", nil)
-		req.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
+		req.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, db, user))
 		router.ServeHTTP(response, req)
 		return response
 	}
@@ -203,7 +200,6 @@ func TestRegisterV1RoutesEnforcesForumACLForUnifiedCommentHTTP(t *testing.T) {
 
 func TestRegisterV1RoutesMusicBookmarksAcceptBearerAuthWithoutExplicitRouteMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
@@ -231,7 +227,7 @@ func TestRegisterV1RoutesMusicBookmarksAcceptBearerAuthWithoutExplicitRouteMiddl
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/artists", nil)
-	req.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, db, user))
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -253,7 +249,6 @@ func TestRegisterV1RoutesMusicBookmarksAcceptBearerAuthWithoutExplicitRouteMiddl
 
 func TestRegisterV1RoutesForumSearchUsesOptionalAuthForPrivateCategoryMembership(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
@@ -266,6 +261,7 @@ func TestRegisterV1RoutesForumSearchUsesOptionalAuthForPrivateCategoryMembership
 		&model.ForumGroupMember{},
 		&model.ForumCategoryPermission{},
 		&model.ForumUserTrust{},
+		&model.ContentReference{},
 	)
 	middleware.SetAuthDB(db)
 	t.Cleanup(func() { middleware.SetAuthDB(nil) })
@@ -316,7 +312,7 @@ func TestRegisterV1RoutesForumSearchUsesOptionalAuthForPrivateCategoryMembership
 		return w.Code, response.Meta.Total
 	}
 
-	if code, total := search(signedRouterTokenForTest(t, member)); code != http.StatusOK || total != 1 {
+	if code, total := search(signedRouterTokenForTest(t, db, member)); code != http.StatusOK || total != 1 {
 		t.Fatalf("expected private category member to find one topic, got status=%d total=%d", code, total)
 	}
 	if code, total := search(""); code != http.StatusOK || total != 0 {
@@ -325,7 +321,6 @@ func TestRegisterV1RoutesForumSearchUsesOptionalAuthForPrivateCategoryMembership
 }
 
 func TestRegisterV1RoutesMountsS3OnlyUploads(t *testing.T) {
-	t.Setenv("JWT_SECRET", "test-secret")
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{})
@@ -355,7 +350,7 @@ func TestRegisterV1RoutesMountsS3OnlyUploads(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
-	req.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, db, user))
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	r.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
@@ -382,6 +377,7 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
+		&model.ContentReference{},
 	)
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", DisplayName: "Alice", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -574,21 +570,11 @@ func TestRegisterV1RoutesMountsSubscribedFeed(t *testing.T) {
 		&model.ForumCategoryPermission{},
 		&model.ForumModeratorAssignment{},
 	)
-	t.Setenv("JWT_SECRET", "test-secret")
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.UUID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
-	}
+	signed := signedRouterTokenForTest(t, db, user)
 	category := model.ForumCategory{Name: "General", Description: "General discussion", Color: "#000000"}
 	if err := db.Create(&category).Error; err != nil {
 		t.Fatalf("create forum category: %v", err)
@@ -859,6 +845,7 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
 		&model.DebateArgumentDetail{},
+		&model.ContentReference{},
 	)
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -943,10 +930,9 @@ func TestRegisterV1RoutesMountsDebateCreate(t *testing.T) {
 
 func TestRegisterV1RoutesDebateCreateAcceptsBearerAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.Debate{}, &model.DebateVote{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.DebateArgumentDetail{},
+		&model.User{}, &model.Debate{}, &model.DebateVote{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.DebateArgumentDetail{}, &model.ContentReference{},
 	)
 	user := model.User{Username: "debate-bearer", Email: "debate-bearer@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -960,7 +946,7 @@ func TestRegisterV1RoutesDebateCreateAcceptsBearerAuth(t *testing.T) {
 	body := bytes.NewBufferString(`{"title":"Bearer debate","description":"Body"}`)
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/debates", body)
 	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, user))
+	request.Header.Set("Authorization", "Bearer "+signedRouterTokenForTest(t, db, user))
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 

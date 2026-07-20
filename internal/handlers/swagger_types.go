@@ -34,8 +34,14 @@ type OnboardingCompleteResponse struct {
 }
 
 type AuthSuccessResponse struct {
-	Token string           `json:"token" example:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"`
-	User  AuthUserResponse `json:"user"`
+	CSRFToken string           `json:"csrf_token" example:"v7A1..."`
+	User      AuthUserResponse `json:"user"`
+}
+
+type APIAuthSuccessResponse struct {
+	Token     string           `json:"token" example:"v7A1..."`
+	ExpiresAt string           `json:"expires_at" format:"date-time" example:"2026-08-19T09:30:00Z"`
+	User      AuthUserResponse `json:"user"`
 }
 
 type OAuthProvidersResponse struct {
@@ -65,9 +71,13 @@ type OAuthConfirmAccountRequest struct {
 }
 
 type OAuthCompletionResponse struct {
-	Token    string           `json:"token"`
-	User     AuthUserResponse `json:"user"`
-	ReturnTo string           `json:"return_to" example:"/forum"`
+	CSRFToken string           `json:"csrf_token"`
+	User      AuthUserResponse `json:"user"`
+	ReturnTo  string           `json:"return_to" example:"/forum"`
+}
+
+type OAuthVerifyEmailResponse struct {
+	Stage string `json:"stage" example:"complete_profile"`
 }
 
 type OAuthIdentityResponse struct {

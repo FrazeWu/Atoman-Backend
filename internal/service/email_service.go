@@ -2,13 +2,17 @@ package service
 
 import (
 	"bytes"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math/big"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -27,6 +31,7 @@ type EmailService struct {
 const (
 	VerificationPurposeRegistration  = "registration"
 	VerificationPurposePasswordReset = "password_reset"
+	VerificationPurposeOAuthEmail    = "oauth_email"
 )
 
 // NewEmailService creates a new email service instance
@@ -68,27 +73,34 @@ func (s *EmailService) SendVerificationCode(email string) (string, error) {
 }
 
 func (s *EmailService) SendVerificationCodeForPurpose(email, purpose string) (string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	purpose = strings.TrimSpace(purpose)
 	// Generate verification code
 	code, err := generateVerificationCode()
 	if err != nil {
 		return "", fmt.Errorf("failed to generate code: %w", err)
+	}
+	codeHash, err := verificationCodeDigest(email, purpose, code)
+	if err != nil {
+		return "", err
 	}
 
 	// Store code in database with 10 minute expiration
 	// Use UPSERT to handle concurrent requests for the same email
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
 	verificationCode := model.EmailVerificationCode{
-		Email:     email,
-		Purpose:   purpose,
-		Code:      code,
-		ExpiresAt: expiresAt,
-		Used:      false,
+		Email:          email,
+		Purpose:        purpose,
+		CodeHash:       codeHash,
+		FailedAttempts: 0,
+		ExpiresAt:      expiresAt,
+		Used:           false,
 	}
 
 	// Upsert: insert new record, or update existing unused code for this email
 	if err := s.db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "email"}, {Name: "purpose"}},
-		DoUpdates: clause.AssignmentColumns([]string{"code", "expires_at", "used"}),
+		DoUpdates: clause.AssignmentColumns([]string{"code", "failed_attempts", "expires_at", "used"}),
 	}).Create(&verificationCode).Error; err != nil {
 		return "", fmt.Errorf("failed to store code: %w", err)
 	}
@@ -97,6 +109,8 @@ func (s *EmailService) SendVerificationCodeForPurpose(email, purpose string) (st
 	subject := "Atoman邮箱验证"
 	if purpose == VerificationPurposePasswordReset {
 		subject = "Atoman密码重置"
+	} else if purpose == VerificationPurposeOAuthEmail {
+		subject = "Atoman邮箱确认"
 	}
 	err = s.sendEmail(email, subject, s.buildVerificationEmail(code, purpose))
 	if err != nil {
@@ -112,21 +126,50 @@ func (s *EmailService) VerifyCode(email, code string) (bool, error) {
 }
 
 func (s *EmailService) VerifyCodeForPurpose(email, code, purpose string) (bool, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	purpose = strings.TrimSpace(purpose)
+	codeHash, err := verificationCodeDigest(email, purpose, strings.TrimSpace(code))
+	if err != nil {
+		return false, err
+	}
 	// Atomically consume an unused, non-expired verification code.
 	// The conditional update closes the race where two requests could both
 	// read the same row before either one marks it as used.
 	now := time.Now().UTC()
 	result := s.db.Model(&model.EmailVerificationCode{}).
-		Where("email = ? AND code = ? AND purpose = ? AND used = ? AND expires_at > ?", email, code, purpose, false, now).
+		Where("email = ? AND code = ? AND purpose = ? AND used = ? AND failed_attempts < ? AND expires_at > ?", email, codeHash, purpose, false, 5, now).
 		Update("used", true)
 	if result.Error != nil {
 		return false, result.Error
 	}
 	if result.RowsAffected == 0 {
+		failed := s.db.Model(&model.EmailVerificationCode{}).
+			Where("email = ? AND purpose = ? AND used = ? AND failed_attempts < ? AND expires_at > ?", email, purpose, false, 5, now).
+			UpdateColumn("failed_attempts", gorm.Expr("failed_attempts + 1"))
+		if failed.Error != nil {
+			return false, failed.Error
+		}
 		return false, nil
 	}
 
 	return true, nil
+}
+
+func verificationCodeDigest(email, purpose, code string) (string, error) {
+	secret := strings.TrimSpace(os.Getenv("AUTH_CODE_SECRET"))
+	if secret == "" {
+		if os.Getenv("ENV") == "production" {
+			return "", fmt.Errorf("AUTH_CODE_SECRET is not configured")
+		}
+		secret = "atoman-development-verification-secret"
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(email))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(purpose))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(code))
+	return hex.EncodeToString(mac.Sum(nil)), nil
 }
 
 // sendEmail sends an email using Resend API

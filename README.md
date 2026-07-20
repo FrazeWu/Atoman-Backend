@@ -49,7 +49,6 @@ Local development uses:
 - local PostgreSQL via `DATABASE_URL`
 - local MinIO via `S3_ENDPOINT=http://localhost:9100`
 - empty `TURNSTILE_SECRET_KEY`
-- empty `AUTH_COOKIE_DOMAIN`
 
 ## Project Layout
 

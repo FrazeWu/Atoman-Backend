@@ -16,6 +16,7 @@ const (
 	OAuthPurposeLink  = "link"
 
 	OAuthStageStarted         = "started"
+	OAuthStageVerifyEmail     = "verify_email"
 	OAuthStageCompleteProfile = "complete_profile"
 	OAuthStageConfirmAccount  = "confirm_account"
 	OAuthStageSetPassword     = "set_password"

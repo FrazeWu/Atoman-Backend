@@ -45,6 +45,7 @@ func newOAuthServiceTestDB(t *testing.T) *gorm.DB {
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.UserSettings{},
+		&model.EmailVerificationCode{},
 		&model.ExternalIdentity{},
 		&model.OAuthFlow{},
 		&model.Channel{},
@@ -59,6 +60,81 @@ func newOAuthServiceTestDB(t *testing.T) *gorm.DB {
 		&model.PlaylistSong{},
 	)
 	return db
+}
+
+func TestOAuthServiceVerifiesMicrosoftEmailLocallyBeforeAccountResolution(t *testing.T) {
+	t.Setenv("AUTH_CODE_SECRET", "test-auth-code-secret")
+	t.Setenv("RESEND_API_KEY", "")
+	db := newOAuthServiceTestDB(t)
+	provider := &fakeOAuthProvider{
+		name: model.OAuthProviderMicrosoft,
+		profile: oauthprovider.Profile{
+			Issuer: "https://login.microsoftonline.com/tenant/v2.0", Subject: "microsoft-subject",
+			Email: "person@example.com", EmailVerified: false,
+		},
+	}
+	svc := NewOAuthService(db, oauthprovider.NewRegistry(provider))
+	if _, err := svc.Begin(context.Background(), OAuthBeginInput{Provider: provider.name}); err != nil {
+		t.Fatalf("begin oauth: %v", err)
+	}
+	callback, err := svc.HandleCallback(context.Background(), OAuthCallbackInput{
+		Provider: provider.name, State: provider.authorizeReq.State, Code: "code",
+	})
+	if err != nil {
+		t.Fatalf("handle microsoft callback: %v", err)
+	}
+	if callback.Status != OAuthCallbackPending || callback.Stage != model.OAuthStageVerifyEmail || callback.PendingToken == "" {
+		t.Fatalf("expected email verification stage, got %#v", callback)
+	}
+	code, err := svc.SendPendingEmailVerification(context.Background(), callback.PendingToken)
+	if err != nil {
+		t.Fatalf("send pending email verification: %v", err)
+	}
+	info, err := svc.VerifyPendingEmail(context.Background(), callback.PendingToken, code)
+	if err != nil {
+		t.Fatalf("verify pending email: %v", err)
+	}
+	if info.Stage != model.OAuthStageCompleteProfile || !info.EmailVerified {
+		t.Fatalf("expected verified flow to continue to profile, got %#v", info)
+	}
+}
+
+func TestOAuthServiceMicrosoftEmailVerificationRequiresExistingPasswordlessAccountConfirmation(t *testing.T) {
+	t.Setenv("AUTH_CODE_SECRET", "test-auth-code-secret")
+	t.Setenv("RESEND_API_KEY", "")
+	db := newOAuthServiceTestDB(t)
+	user := model.User{Username: "microsoft-existing", Email: "existing@example.com", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create existing user: %v", err)
+	}
+	provider := &fakeOAuthProvider{
+		name: model.OAuthProviderMicrosoft,
+		profile: oauthprovider.Profile{
+			Issuer: "https://login.microsoftonline.com/tenant/v2.0", Subject: "microsoft-existing-subject",
+			Email: user.Email, EmailVerified: false,
+		},
+	}
+	svc := NewOAuthService(db, oauthprovider.NewRegistry(provider))
+	if _, err := svc.Begin(context.Background(), OAuthBeginInput{Provider: provider.name}); err != nil {
+		t.Fatalf("begin oauth: %v", err)
+	}
+	callback, err := svc.HandleCallback(context.Background(), OAuthCallbackInput{
+		Provider: provider.name, State: provider.authorizeReq.State, Code: "code",
+	})
+	if err != nil {
+		t.Fatalf("handle microsoft callback: %v", err)
+	}
+	code, err := svc.SendPendingEmailVerification(context.Background(), callback.PendingToken)
+	if err != nil {
+		t.Fatalf("send pending email verification: %v", err)
+	}
+	info, err := svc.VerifyPendingEmail(context.Background(), callback.PendingToken, code)
+	if err != nil {
+		t.Fatalf("verify pending email: %v", err)
+	}
+	if info.Stage != model.OAuthStageConfirmAccount || info.HasPassword {
+		t.Fatalf("expected passwordless existing account confirmation, got %#v", info)
+	}
 }
 
 func TestOAuthServiceBeginStoresHashedStateAndPKCE(t *testing.T) {

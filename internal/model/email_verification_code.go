@@ -9,14 +9,15 @@ import (
 
 // EmailVerificationCode represents an email verification code stored in database
 type EmailVerificationCode struct {
-	UUID      uuid.UUID      `json:"uuid" gorm:"type:uuid;primaryKey"`
-	Email     string         `json:"email" gorm:"uniqueIndex:idx_email_verification_email_purpose;not null"`
-	Purpose   string         `json:"purpose" gorm:"uniqueIndex:idx_email_verification_email_purpose;not null;default:registration"`
-	Code      string         `json:"-" gorm:"not null"`
-	ExpiresAt time.Time      `json:"expires_at" gorm:"not null"`
-	Used      bool           `json:"used" gorm:"default:false"`
-	CreatedAt time.Time      `json:"created_at"`
-	DeletedAt gorm.DeletedAt `json:"-" gorm:"index"`
+	UUID           uuid.UUID      `json:"uuid" gorm:"type:uuid;primaryKey"`
+	Email          string         `json:"email" gorm:"uniqueIndex:idx_email_verification_email_purpose;not null"`
+	Purpose        string         `json:"purpose" gorm:"uniqueIndex:idx_email_verification_email_purpose;not null;default:registration"`
+	CodeHash       string         `json:"-" gorm:"column:code;not null"`
+	FailedAttempts uint           `json:"-" gorm:"not null;default:0"`
+	ExpiresAt      time.Time      `json:"expires_at" gorm:"not null"`
+	Used           bool           `json:"used" gorm:"default:false"`
+	CreatedAt      time.Time      `json:"created_at"`
+	DeletedAt      gorm.DeletedAt `json:"-" gorm:"index"`
 }
 
 func (EmailVerificationCode) TableName() string {

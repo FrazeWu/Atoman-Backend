@@ -19,7 +19,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -27,6 +26,7 @@ import (
 	"atoman/internal/middleware"
 	"atoman/internal/migrations"
 	"atoman/internal/model"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/service"
 )
 
@@ -197,19 +197,16 @@ func disableFeedSourceSync(t *testing.T) {
 	})
 }
 
-func signedFeedTokenForTest(t *testing.T, user model.User) string {
+func signedFeedTokenForTest(t *testing.T, db *gorm.DB, user model.User) string {
 	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.UUID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	if err != nil {
-		t.Fatalf("sign token: %v", err)
+	if err := db.AutoMigrate(&model.AuthSession{}); err != nil {
+		t.Fatalf("migrate auth sessions: %v", err)
 	}
-	return signed
+	credentials, err := authsession.New(db).Create(user.UUID, authsession.KindAPI)
+	if err != nil {
+		t.Fatalf("create api auth session: %v", err)
+	}
+	return credentials.Token
 }
 
 func TestLegacyExploreFeedDefaultsAndUnknownSortUseRecentOrder(t *testing.T) {
@@ -486,7 +483,6 @@ func TestImportGlobalOPMLRequiresAuthenticatedUser(t *testing.T) {
 
 func TestImportGlobalOPMLRejectsNonAdminUsers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newFeedHandlerTestDB(t)
 	disableFeedSourceSync(t)
 	user := seedFeedTestUser(t, db)
@@ -496,7 +492,7 @@ func TestImportGlobalOPMLRejectsNonAdminUsers(t *testing.T) {
 
 	opml := `<?xml version="1.0"?><opml version="2.0"><body><outline text="User Feed" type="rss" xmlUrl="https://example.com/user.xml" /></body></opml>`
 	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
-	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, db, user))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -507,7 +503,6 @@ func TestImportGlobalOPMLRejectsNonAdminUsers(t *testing.T) {
 
 func TestImportGlobalOPMLAllowsAdminThroughRealRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newFeedHandlerTestDB(t)
 	disableFeedSourceSync(t)
 	admin := seedFeedAdminUser(t, db)
@@ -517,7 +512,7 @@ func TestImportGlobalOPMLAllowsAdminThroughRealRoute(t *testing.T) {
 
 	opml := `<?xml version="1.0"?><opml version="2.0"><body><outline text="Admin Feed" type="rss" xmlUrl="https://example.com/admin.xml" /></body></opml>`
 	req := newOPMLUploadRequest(t, "/api/v1/feed/sources/opml/import", opml)
-	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, admin))
+	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, db, admin))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -646,7 +641,6 @@ func TestExportGlobalOPMLExportsExternalRSSOnly(t *testing.T) {
 
 func TestExportGlobalOPMLRequiresAdminThroughRealRoute(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newFeedHandlerTestDB(t)
 	user := seedFeedTestUser(t, db)
 	admin := seedFeedAdminUser(t, db)
@@ -655,7 +649,7 @@ func TestExportGlobalOPMLRequiresAdminThroughRealRoute(t *testing.T) {
 	RegisterRoutes(router.Group("/api/v1/feed"), NewService(db))
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/sources/opml/export", nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, user))
+	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, db, user))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -664,7 +658,7 @@ func TestExportGlobalOPMLRequiresAdminThroughRealRoute(t *testing.T) {
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "/api/v1/feed/sources/opml/export", nil)
-	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, admin))
+	req.Header.Set("Authorization", "Bearer "+signedFeedTokenForTest(t, db, admin))
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 

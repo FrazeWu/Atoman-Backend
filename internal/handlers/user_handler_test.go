@@ -10,13 +10,68 @@ import (
 	"testing"
 	"time"
 
+	"atoman/internal/middleware"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
+
+func TestChangePasswordKeepsCurrentSessionAndRevokesOthers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("FRONTEND_URL", "https://www.atoman.org")
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{})
+	oldHash, err := bcrypt.GenerateFromPassword([]byte("old-password"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := model.User{Username: "password-user", Email: "password@example.com", Password: string(oldHash), Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	sessions := authsession.New(db)
+	current, err := sessions.Create(user.UUID, authsession.KindWeb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := sessions.Create(user.UUID, authsession.KindAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	r := gin.New()
+	r.PUT("/users/me/password", middleware.AuthMiddleware(), ChangePassword(db))
+	req := httptest.NewRequest(http.MethodPut, "/users/me/password", bytes.NewBufferString(`{"current_password":"old-password","new_password":"new-password","password_confirm":"new-password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://www.atoman.org")
+	req.Header.Set(middleware.CSRFHeaderName, current.CSRFToken)
+	req.AddCookie(&http.Cookie{Name: middleware.AuthSessionCookieName, Value: current.Token})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated model.User
+	if err := db.First(&updated, "uuid = ?", user.UUID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(updated.Password), []byte("new-password")); err != nil {
+		t.Fatalf("new password was not saved: %v", err)
+	}
+	if _, err := sessions.Authenticate(current.Token, authsession.KindWeb); err != nil {
+		t.Fatalf("current session should remain valid: %v", err)
+	}
+	if _, err := sessions.Authenticate(other.Token, authsession.KindAPI); !errors.Is(err, authsession.ErrInvalid) {
+		t.Fatalf("other session should be revoked, got %v", err)
+	}
+}
 
 type userSettingsResponse struct {
 	Data    model.UserSettings `json:"data"`

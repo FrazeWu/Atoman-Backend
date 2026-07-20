@@ -24,7 +24,6 @@ type Config struct {
 	Env            string
 	GinMode        string
 	Port           string
-	JWTSecret      string
 	DB             DBConfig
 	StorageType    string
 	AllowedOrigins []string
@@ -40,15 +39,11 @@ func Load() (Config, error) {
 		Env:            getEnv("ENV", DefaultEnv),
 		GinMode:        getEnv("GIN_MODE", DefaultGinMode),
 		Port:           getEnv("PORT", DefaultPort),
-		JWTSecret:      os.Getenv("JWT_SECRET"),
 		DB:             DBConfig{Type: os.Getenv("DATABASE_TYPE"), URL: os.Getenv("DATABASE_URL")},
 		StorageType:    getEnv("STORAGE_TYPE", DefaultStorageType),
 		AllowedOrigins: append([]string(nil), defaultAllowedOrigins...),
 	}
 
-	if cfg.JWTSecret == "" {
-		return Config{}, fmt.Errorf("JWT_SECRET is required")
-	}
 	if cfg.DB.Type == "" {
 		return Config{}, fmt.Errorf("DATABASE_TYPE is required")
 	}
@@ -57,6 +52,9 @@ func Load() (Config, error) {
 	}
 
 	if cfg.Env == "production" {
+		if strings.TrimSpace(os.Getenv("AUTH_CODE_SECRET")) == "" {
+			return Config{}, fmt.Errorf("AUTH_CODE_SECRET is required")
+		}
 		cfg.AllowedOrigins = append(cfg.AllowedOrigins, parseCSV(os.Getenv("ALLOWED_ORIGINS"))...)
 	}
 

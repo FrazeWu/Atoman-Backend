@@ -13,6 +13,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/authsession"
 	"atoman/internal/platform/oauthprovider"
 
 	"github.com/google/uuid"
@@ -84,11 +85,12 @@ type OAuthCompletionResult struct {
 }
 
 type OAuthPendingInfo struct {
-	Provider    string
-	Stage       string
-	Email       string
-	ReturnTo    string
-	HasPassword bool
+	Provider      string
+	Stage         string
+	Email         string
+	EmailVerified bool
+	ReturnTo      string
+	HasPassword   bool
 }
 
 func NewOAuthService(db *gorm.DB, providers *oauthprovider.Registry) *OAuthService {
@@ -97,6 +99,10 @@ func NewOAuthService(db *gorm.DB, providers *oauthprovider.Registry) *OAuthServi
 
 func (s *OAuthService) ProviderNames() []string {
 	return s.providers.Names()
+}
+
+func (s *OAuthService) CreateWebSession(userID uuid.UUID) (authsession.Credentials, error) {
+	return authsession.New(s.db).Create(userID, authsession.KindWeb)
 }
 
 func (s *OAuthService) Begin(ctx context.Context, input OAuthBeginInput) (OAuthBeginResult, error) {
@@ -196,8 +202,41 @@ func (s *OAuthService) HandleCallback(ctx context.Context, input OAuthCallbackIn
 		findErr := tx.Where("provider = ? AND issuer = ? AND subject = ?", input.Provider, profile.Issuer, profile.Subject).
 			First(&identity).Error
 		if errors.Is(findErr, gorm.ErrRecordNotFound) {
-			if !profile.EmailVerified || profile.Email == "" {
+			if profile.Email == "" {
 				return apperr.Unprocessable("oauth.verified_email_required", "A verified email address is required")
+			}
+			if !profile.EmailVerified {
+				if input.Provider != model.OAuthProviderMicrosoft {
+					return apperr.Unprocessable("oauth.verified_email_required", "A verified email address is required")
+				}
+				pendingToken, err := randomOAuthToken(32)
+				if err != nil {
+					return err
+				}
+				updates := map[string]any{
+					"secret_hash":    hashOAuthSecret(pendingToken),
+					"stage":          model.OAuthStageVerifyEmail,
+					"issuer":         profile.Issuer,
+					"subject":        profile.Subject,
+					"email":          profile.Email,
+					"email_verified": false,
+					"display_name":   profile.DisplayName,
+					"avatar_url":     profile.AvatarURL,
+				}
+				rotate := tx.Model(&model.OAuthFlow{}).
+					Where("uuid = ? AND secret_hash = ? AND stage = ? AND consumed_at IS NULL", flow.UUID, flow.SecretHash, model.OAuthStageStarted).
+					Updates(updates)
+				if rotate.Error != nil {
+					return rotate.Error
+				}
+				if rotate.RowsAffected != 1 {
+					return apperr.BadRequest("oauth.invalid_state", "OAuth session is invalid or expired")
+				}
+				result = OAuthCallbackResult{
+					Status: OAuthCallbackPending, Stage: model.OAuthStageVerifyEmail,
+					PendingToken: pendingToken, ReturnTo: flow.ReturnTo,
+				}
+				return nil
 			}
 			if flow.Purpose == model.OAuthPurposeLink {
 				if flow.UserID == nil {
@@ -615,6 +654,85 @@ func (s *OAuthService) ListIdentities(ctx context.Context, userID uuid.UUID) ([]
 	return identities, nil
 }
 
+func (s *OAuthService) SendPendingEmailVerification(ctx context.Context, token string) (string, error) {
+	flow, err := s.pendingFlow(ctx, token, model.OAuthStageVerifyEmail)
+	if err != nil {
+		return "", err
+	}
+	if flow.Provider != model.OAuthProviderMicrosoft || flow.Email == "" {
+		return "", apperr.BadRequest("oauth.invalid_flow", "OAuth session is invalid or expired")
+	}
+	code, err := NewEmailServiceWithoutRedis(s.db).SendVerificationCodeForPurpose(flow.Email, VerificationPurposeOAuthEmail)
+	if err != nil {
+		return "", apperr.Internal(err)
+	}
+	return code, nil
+}
+
+func (s *OAuthService) VerifyPendingEmail(ctx context.Context, token, code string) (OAuthPendingInfo, error) {
+	flow, err := s.pendingFlow(ctx, token, model.OAuthStageVerifyEmail)
+	if err != nil {
+		return OAuthPendingInfo{}, err
+	}
+	valid, err := NewEmailServiceWithoutRedis(s.db).VerifyCodeForPurpose(flow.Email, code, VerificationPurposeOAuthEmail)
+	if err != nil {
+		return OAuthPendingInfo{}, apperr.Internal(err)
+	}
+	if !valid {
+		return OAuthPendingInfo{}, apperr.BadRequest("oauth.email_code_invalid", "Verification code is invalid or expired")
+	}
+
+	var info OAuthPendingInfo
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var current model.OAuthFlow
+		if err := tx.Where("uuid = ? AND secret_hash = ? AND stage = ? AND consumed_at IS NULL AND expires_at > ?",
+			flow.UUID, hashOAuthSecret(token), model.OAuthStageVerifyEmail, s.now().UTC()).First(&current).Error; err != nil {
+			return apperr.BadRequest("oauth.invalid_flow", "OAuth session is invalid or expired")
+		}
+		stage := model.OAuthStageCompleteProfile
+		var existing model.User
+		if current.Purpose == model.OAuthPurposeLink {
+			if current.UserID == nil {
+				return apperr.Unauthorized("Login required")
+			}
+			if err := tx.Where("uuid = ? AND is_active = ?", *current.UserID, true).First(&existing).Error; err != nil {
+				return apperr.Forbidden("oauth.account_unavailable", "Account is unavailable")
+			}
+			stage = model.OAuthStageConfirmAccount
+		} else {
+			findErr := tx.Where("LOWER(email) = ?", current.Email).First(&existing).Error
+			if findErr == nil {
+				if !existing.IsActive {
+					return apperr.Forbidden("oauth.account_unavailable", "Account is unavailable")
+				}
+				current.UserID = &existing.UUID
+				stage = model.OAuthStageConfirmAccount
+			} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+				return findErr
+			}
+		}
+		updates := map[string]any{"stage": stage, "user_id": current.UserID, "email_verified": true}
+		result := tx.Model(&model.OAuthFlow{}).
+			Where("uuid = ? AND stage = ? AND consumed_at IS NULL", current.UUID, model.OAuthStageVerifyEmail).
+			Updates(updates)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return apperr.BadRequest("oauth.invalid_flow", "OAuth session is invalid or expired")
+		}
+		info = OAuthPendingInfo{
+			Provider: current.Provider, Stage: stage, Email: current.Email, EmailVerified: true,
+			ReturnTo: current.ReturnTo, HasPassword: existing.Password != "",
+		}
+		return nil
+	})
+	if err != nil {
+		return OAuthPendingInfo{}, err
+	}
+	return info, nil
+}
+
 func (s *OAuthService) PendingInfo(ctx context.Context, token string) (OAuthPendingInfo, error) {
 	if strings.TrimSpace(token) == "" {
 		return OAuthPendingInfo{}, apperr.BadRequest("oauth.invalid_flow", "OAuth session is invalid or expired")
@@ -622,7 +740,7 @@ func (s *OAuthService) PendingInfo(ctx context.Context, token string) (OAuthPend
 	var flow model.OAuthFlow
 	err := s.db.WithContext(ctx).
 		Where("secret_hash = ? AND stage IN ? AND consumed_at IS NULL AND expires_at > ?",
-			hashOAuthSecret(token), []string{model.OAuthStageCompleteProfile, model.OAuthStageConfirmAccount, model.OAuthStageSetPassword}, s.now().UTC()).
+			hashOAuthSecret(token), []string{model.OAuthStageVerifyEmail, model.OAuthStageCompleteProfile, model.OAuthStageConfirmAccount, model.OAuthStageSetPassword}, s.now().UTC()).
 		First(&flow).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return OAuthPendingInfo{}, apperr.BadRequest("oauth.invalid_flow", "OAuth session is invalid or expired")
@@ -646,7 +764,7 @@ func (s *OAuthService) PendingInfo(ctx context.Context, token string) (OAuthPend
 	}
 	return OAuthPendingInfo{
 		Provider: flow.Provider, Stage: flow.Stage, Email: flow.Email,
-		ReturnTo: flow.ReturnTo, HasPassword: hasPassword,
+		EmailVerified: flow.EmailVerified, ReturnTo: flow.ReturnTo, HasPassword: hasPassword,
 	}, nil
 }
 

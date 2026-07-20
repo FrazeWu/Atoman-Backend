@@ -13,7 +13,6 @@ import (
 
 	"atoman/internal/middleware"
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
@@ -27,6 +26,7 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
+		&model.AuthSession{},
 		&model.Channel{},
 		&model.Collection{},
 		&model.Video{},
@@ -64,7 +64,6 @@ func TestStudioVideoViewRecordsPlayMetric(t *testing.T) {
 
 func TestReprocessVideoCreatesPreviewJobForOwner(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newVideoTestDB(t)
 	middleware.SetAuthDB(db)
 	t.Cleanup(func() { middleware.SetAuthDB(nil) })
@@ -77,7 +76,7 @@ func TestReprocessVideoCreatesPreviewJobForOwner(t *testing.T) {
 	router := gin.New()
 	SetupVideoRoutes(router, db, nil)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+video.ID.String()+"/reprocess", nil)
-	req.Header.Set("Authorization", "Bearer "+signedVideoListTokenForTest(t, owner))
+	req.Header.Set("Authorization", "Bearer "+apiAuthTokenForTest(t, db, owner))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -87,22 +86,8 @@ func TestReprocessVideoCreatesPreviewJobForOwner(t *testing.T) {
 	require.Equal(t, "pending", job.Status)
 }
 
-func signedVideoListTokenForTest(t *testing.T, user model.User) string {
-	t.Helper()
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"user_id":  user.UUID.String(),
-		"username": user.Username,
-		"role":     user.Role,
-		"exp":      time.Now().Add(time.Hour).Unix(),
-	})
-	signed, err := token.SignedString([]byte("test-secret"))
-	require.NoError(t, err)
-	return signed
-}
-
 func TestSetupVideoRoutesListUsesOptionalAuthForOwnerCollection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	t.Setenv("JWT_SECRET", "test-secret")
 	db := newVideoTestDB(t)
 	middleware.SetAuthDB(db)
 	t.Cleanup(func() { middleware.SetAuthDB(nil) })
@@ -162,10 +147,10 @@ func TestSetupVideoRoutesListUsesOptionalAuthForOwnerCollection(t *testing.T) {
 		ownerPublic.ID,
 		ownerDraft.ID,
 		ownerPrivate.ID,
-	}, requestIDs(ownerCollection.ID, "Bearer "+signedVideoListTokenForTest(t, owner)))
+	}, requestIDs(ownerCollection.ID, "Bearer "+apiAuthTokenForTest(t, db, owner)))
 	require.ElementsMatch(t, []uuid.UUID{otherPublic.ID}, requestIDs(
 		otherCollection.ID,
-		"Bearer "+signedVideoListTokenForTest(t, owner),
+		"Bearer "+apiAuthTokenForTest(t, db, owner),
 	))
 	require.ElementsMatch(t, []uuid.UUID{ownerPublic.ID}, requestIDs(ownerCollection.ID, "Bearer invalid.token"))
 
@@ -187,7 +172,7 @@ func TestSetupVideoRoutesListUsesOptionalAuthForOwnerCollection(t *testing.T) {
 		return ids
 	}
 
-	ownerAuthorization := "Bearer " + signedVideoListTokenForTest(t, owner)
+	ownerAuthorization := "Bearer " + apiAuthTokenForTest(t, db, owner)
 	require.ElementsMatch(t, []uuid.UUID{ownerPublic.ID}, requestChannelIDs(ownerChannel.ID, ""))
 	require.ElementsMatch(t, []uuid.UUID{
 		ownerPublic.ID,

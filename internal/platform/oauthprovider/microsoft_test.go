@@ -65,7 +65,7 @@ func TestMicrosoftProviderValidatesTenantIssuerAndUsesPreferredUsername(t *testi
 	if profile.Issuer != "https://login.microsoftonline.com/tenant-id/v2.0" || profile.Subject != "microsoft-subject" {
 		t.Fatalf("unexpected microsoft identity: %#v", profile)
 	}
-	if profile.Email != "person@example.com" || !profile.EmailVerified {
-		t.Fatalf("expected trusted microsoft email: %#v", profile)
+	if profile.Email != "person@example.com" || profile.EmailVerified {
+		t.Fatalf("expected microsoft email to require local verification: %#v", profile)
 	}
 }

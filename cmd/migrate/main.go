@@ -82,6 +82,9 @@ func runMigrations(db *gorm.DB) error {
 	if err := migrateSchema(db); err != nil {
 		return err
 	}
+	if err := migrations.RunAuthSecurityMigration(db); err != nil {
+		return fmt.Errorf("auth security migration: %w", err)
+	}
 	if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
 		return fmt.Errorf("unified reading list post-schema migration: %w", err)
 	}
@@ -197,6 +200,7 @@ func migrateSchema(db *gorm.DB) error {
 	models := []any{
 		&model.User{},
 		&model.UserSettings{},
+		&model.AuthSession{},
 		&model.EmailVerificationCode{},
 		&model.ExternalIdentity{},
 		&model.OAuthFlow{},
@@ -276,6 +280,7 @@ func migrateSchema(db *gorm.DB) error {
 		&model.CommentReport{},
 		&model.CommentTimeAnchor{},
 		&model.CommentPublishRecord{},
+		&model.ContentReference{},
 		&model.TimelineRevisionProposal{},
 		&model.TimelineRevision{},
 		&model.DebateArgumentDetail{},
@@ -299,6 +304,9 @@ func migrateSchema(db *gorm.DB) error {
 
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {
 		return fmt.Errorf("notification/dm index migration: %w", err)
+	}
+	if err := migrations.RunContentReferencesMigration(db); err != nil {
+		return fmt.Errorf("content references migration: %w", err)
 	}
 
 	return nil
