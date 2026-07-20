@@ -23,6 +23,131 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestBuildAlbumImportMultipartDTOSerializesEmptyCompletedPartsAsArray(t *testing.T) {
+	dto := buildAlbumImportMultipartDTO(model.AlbumImportSession{}.ID, albumImportMultipartState{})
+
+	body, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatalf("marshal multipart DTO: %v", err)
+	}
+	if !strings.Contains(string(body), `"completedParts":[]`) {
+		t.Fatalf("expected completedParts to be an array, got %s", body)
+	}
+}
+
+func TestBuildAlbumImportDTOSerializesV2ListsAsArrays(t *testing.T) {
+	dto := buildAlbumImportDTO(model.AlbumImportSession{})
+	body, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatalf("marshal album import DTO: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal album import DTO: %v", err)
+	}
+	for _, field := range []string{"files", "tracks", "errors"} {
+		values, ok := payload[field].([]any)
+		if !ok || values == nil {
+			t.Fatalf("expected %s to be an array, got %s", field, body)
+		}
+	}
+	for _, field := range []string{"inputMode", "stage", "progress"} {
+		if _, ok := payload[field]; !ok {
+			t.Fatalf("expected %s field, got %s", field, body)
+		}
+	}
+}
+
+func TestCreateAlbumImportSessionStoresOwnerAndExpiration(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+	})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+	if session.UserID == nil || *session.UserID != user.ID {
+		t.Fatalf("expected owner %s, got %#v", user.ID, session.UserID)
+	}
+	if session.InputMode != AlbumImportInputModeAuto || session.Stage != AlbumImportStageUpload {
+		t.Fatalf("expected auto/upload defaults, got %q/%q", session.InputMode, session.Stage)
+	}
+	if session.ExpiresAt == nil || session.ExpiresAt.Before(time.Now().UTC().Add(6*24*time.Hour)) {
+		t.Fatalf("expected expiration about seven days ahead, got %#v", session.ExpiresAt)
+	}
+}
+
+func TestBuildAlbumImportDTOMapsV2StateAndFiles(t *testing.T) {
+	session := model.AlbumImportSession{
+		InputMode:       AlbumImportInputModeAuto,
+		Status:          AlbumImportStatusExtracting,
+		Stage:           AlbumImportStageAnalyzing,
+		ProgressCurrent: 2,
+		ProgressTotal:   5,
+		PayloadJSON:     "{}",
+		ErrorMessage:    "archive warning",
+		Files: []model.AlbumImportFile{{
+			FileName:         "01 - Track.flac",
+			Role:             "audio",
+			DetectedFormat:   "flac",
+			UploadStatus:     "uploaded",
+			ProcessingStatus: "failed",
+			ErrorMessage:     "transcode failed",
+		}},
+	}
+
+	dto := buildAlbumImportDTO(session)
+	if dto.InputMode != session.InputMode || dto.Stage != session.Stage {
+		t.Fatalf("expected mode/stage %q/%q, got %q/%q", session.InputMode, session.Stage, dto.InputMode, dto.Stage)
+	}
+	if dto.Progress.Current != 2 || dto.Progress.Total != 5 {
+		t.Fatalf("expected progress 2/5, got %#v", dto.Progress)
+	}
+	if len(dto.Files) != 1 || dto.Files[0].FileName != "01 - Track.flac" {
+		t.Fatalf("expected mapped file, got %#v", dto.Files)
+	}
+	if len(dto.Errors) != 2 {
+		t.Fatalf("expected session and file errors, got %#v", dto.Errors)
+	}
+}
+
+func TestGetAlbumImportSessionPreloadsFilesAndJob(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+	})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+	if err := db.Create(&model.AlbumImportFile{
+		ImportID:         session.ID,
+		FileName:         "album.flac",
+		Role:             "audio",
+		UploadStatus:     "uploaded",
+		ProcessingStatus: "pending",
+	}).Error; err != nil {
+		t.Fatalf("create album import file: %v", err)
+	}
+	if err := db.Create(&model.AlbumImportJob{
+		ImportID:    session.ID,
+		Status:      "queued",
+		Stage:       AlbumImportStageAnalyzing,
+		MaxAttempts: 3,
+	}).Error; err != nil {
+		t.Fatalf("create album import job: %v", err)
+	}
+
+	loaded, err := svc.GetAlbumImportSession(session.ID)
+	if err != nil {
+		t.Fatalf("get album import session: %v", err)
+	}
+	if len(loaded.Files) != 1 || loaded.Job == nil {
+		t.Fatalf("expected preloaded files and job, got files=%#v job=%#v", loaded.Files, loaded.Job)
+	}
+}
+
 func TestStartAlbumImportMultipartRejectsOversizedArchive(t *testing.T) {
 	svc, _, user := newMusicTestService(t)
 	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}

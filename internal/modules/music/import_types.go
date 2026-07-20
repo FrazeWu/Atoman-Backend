@@ -108,27 +108,79 @@ type AlbumImportDTOTrack struct {
 	Origin   string `json:"origin"`
 }
 
+type AlbumImportProgressDTO struct {
+	Current int64 `json:"current"`
+	Total   int64 `json:"total"`
+}
+
+type AlbumImportFileDTO struct {
+	ID               string  `json:"id"`
+	RelativePath     string  `json:"relativePath"`
+	FileName         string  `json:"fileName"`
+	Role             string  `json:"role"`
+	DetectedFormat   string  `json:"detectedFormat"`
+	ContentType      string  `json:"contentType"`
+	Size             int64   `json:"size"`
+	SourceKey        string  `json:"sourceKey"`
+	PlaybackKey      string  `json:"playbackKey"`
+	UploadStatus     string  `json:"uploadStatus"`
+	ProcessingStatus string  `json:"processingStatus"`
+	DiscNumber       int     `json:"discNumber"`
+	TrackNumber      int     `json:"trackNumber"`
+	Title            string  `json:"title"`
+	DurationSeconds  float64 `json:"durationSeconds"`
+	ErrorMessage     string  `json:"errorMessage"`
+}
+
+type AlbumImportErrorDTO struct {
+	FileID  string `json:"fileId"`
+	Message string `json:"message"`
+}
+
 type AlbumImportDTO struct {
-	ImportID          string                `json:"importId"`
-	Status            string                `json:"status"`
-	ArchiveName       string                `json:"archiveName"`
-	UploadProgress    float64               `json:"uploadProgress"`
-	UploadSpeed       float64               `json:"uploadSpeed"`
-	CoverURL          string                `json:"coverUrl"`
-	CoverKey          string                `json:"coverKey"`
-	DerivedAlbumTitle string                `json:"derivedAlbumTitle"`
-	DerivedCover      string                `json:"derivedCover"`
-	DerivedTracks     []AlbumImportDTOTrack `json:"derivedTracks"`
-	LastSyncedAt      string                `json:"lastSyncedAt"`
-	ErrorMessage      string                `json:"errorMessage"`
+	ImportID          string                 `json:"importId"`
+	Status            string                 `json:"status"`
+	InputMode         string                 `json:"inputMode"`
+	Stage             string                 `json:"stage"`
+	Progress          AlbumImportProgressDTO `json:"progress"`
+	Files             []AlbumImportFileDTO   `json:"files"`
+	Tracks            []AlbumImportDTOTrack  `json:"tracks"`
+	Errors            []AlbumImportErrorDTO  `json:"errors"`
+	ArchiveName       string                 `json:"archiveName"`
+	UploadProgress    float64                `json:"uploadProgress"`
+	UploadSpeed       float64                `json:"uploadSpeed"`
+	CoverURL          string                 `json:"coverUrl"`
+	CoverKey          string                 `json:"coverKey"`
+	DerivedAlbumTitle string                 `json:"derivedAlbumTitle"`
+	DerivedCover      string                 `json:"derivedCover"`
+	DerivedTracks     []AlbumImportDTOTrack  `json:"derivedTracks"`
+	LastSyncedAt      string                 `json:"lastSyncedAt"`
+	ErrorMessage      string                 `json:"errorMessage"`
 }
 
 const (
-	AlbumImportStatusPendingUpload = "pending_upload"
-	AlbumImportStatusUploading     = "uploading"
-	AlbumImportStatusUploaded      = "uploaded"
-	AlbumImportStatusExtracting    = "extracting"
-	AlbumImportStatusReady         = "ready"
-	AlbumImportStatusFailed        = "failed"
-	AlbumImportStatusCommitted     = "committed"
+	AlbumImportInputModeAuto = "auto"
+
+	AlbumImportStageUpload      = "upload"
+	AlbumImportStageQueued      = "queued"
+	AlbumImportStageExtracting  = "extracting"
+	AlbumImportStageAnalyzing   = "analyzing"
+	AlbumImportStageTranscoding = "transcoding"
+	AlbumImportStageReady       = "ready"
+	AlbumImportStageCommitting  = "committing"
+	AlbumImportStageCompleted   = "completed"
+
+	AlbumImportStatusPendingUpload  = "pending_upload"
+	AlbumImportStatusUploading      = "uploading"
+	AlbumImportStatusUploaded       = "uploaded"
+	AlbumImportStatusQueued         = "queued"
+	AlbumImportStatusExtracting     = "extracting"
+	AlbumImportStatusAnalyzing      = "analyzing"
+	AlbumImportStatusTranscoding    = "transcoding"
+	AlbumImportStatusReady          = "ready"
+	AlbumImportStatusNeedsAttention = "needs_attention"
+	AlbumImportStatusCommitting     = "committing"
+	AlbumImportStatusFailed         = "failed"
+	AlbumImportStatusCanceled       = "canceled"
+	AlbumImportStatusCommitted      = "committed"
 )

@@ -93,6 +93,8 @@ type Song struct {
 	TrackNumber int        `json:"track_number"`
 	Lyrics      string     `json:"lyrics" gorm:"type:text"`
 	AudioURL    string     `json:"audio_url" gorm:"not null"`
+	SourceKey   string     `json:"source_key" gorm:"type:text"`
+	PlaybackKey string     `json:"playback_key" gorm:"type:text"`
 	AudioSource string     `json:"audio_source" gorm:"default:'local'"`
 	CoverURL    string     `json:"cover_url"`
 	CoverSource string     `json:"cover_source" gorm:"default:'local'"`

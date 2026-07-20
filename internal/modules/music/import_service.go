@@ -39,9 +39,31 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 		_ = json.Unmarshal([]byte(session.PayloadJSON), &payload)
 	}
 
+	inputMode := session.InputMode
+	if inputMode == "" {
+		inputMode = AlbumImportInputModeAuto
+	}
+	stage := session.Stage
+	if stage == "" {
+		stage = AlbumImportStageUpload
+	}
+	errorMessage := session.ErrorMessage
+	if errorMessage == "" {
+		errorMessage = stringValue(payload["error_message"])
+	}
+
 	dto := AlbumImportDTO{
-		ImportID:          session.ID.String(),
-		Status:            session.Status,
+		ImportID:  session.ID.String(),
+		Status:    session.Status,
+		InputMode: inputMode,
+		Stage:     stage,
+		Progress: AlbumImportProgressDTO{
+			Current: session.ProgressCurrent,
+			Total:   session.ProgressTotal,
+		},
+		Files:             []AlbumImportFileDTO{},
+		Tracks:            []AlbumImportDTOTrack{},
+		Errors:            []AlbumImportErrorDTO{},
 		ArchiveName:       stringValue(payload["archive_name"]),
 		UploadProgress:    floatValue(payload["upload_progress"]),
 		UploadSpeed:       floatValue(payload["upload_speed"]),
@@ -50,8 +72,35 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 		DerivedAlbumTitle: stringValue(payload["derived_album_title"]),
 		DerivedCover:      stringValue(payload["derived_cover"]),
 		LastSyncedAt:      session.UpdatedAt.Format(time.RFC3339),
-		ErrorMessage:      stringValue(payload["error_message"]),
+		ErrorMessage:      errorMessage,
 		DerivedTracks:     []AlbumImportDTOTrack{},
+	}
+	for _, file := range session.Files {
+		fileDTO := AlbumImportFileDTO{
+			ID:               file.ID.String(),
+			RelativePath:     file.RelativePath,
+			FileName:         file.FileName,
+			Role:             file.Role,
+			DetectedFormat:   file.DetectedFormat,
+			ContentType:      file.ContentType,
+			Size:             file.Size,
+			SourceKey:        file.SourceKey,
+			PlaybackKey:      file.PlaybackKey,
+			UploadStatus:     file.UploadStatus,
+			ProcessingStatus: file.ProcessingStatus,
+			DiscNumber:       file.DiscNumber,
+			TrackNumber:      file.TrackNumber,
+			Title:            file.Title,
+			DurationSeconds:  file.DurationSeconds,
+			ErrorMessage:     file.ErrorMessage,
+		}
+		dto.Files = append(dto.Files, fileDTO)
+		if file.ErrorMessage != "" {
+			dto.Errors = append(dto.Errors, AlbumImportErrorDTO{
+				FileID:  file.ID.String(),
+				Message: file.ErrorMessage,
+			})
+		}
 	}
 
 	if rawTracks, ok := payload["derived_tracks"].([]any); ok {
@@ -60,13 +109,18 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 			if !ok {
 				continue
 			}
-			dto.DerivedTracks = append(dto.DerivedTracks, AlbumImportDTOTrack{
+			track := AlbumImportDTOTrack{
 				Title:    stringValue(trackMap["title"]),
 				AudioKey: stringValue(trackMap["audio_key"]),
 				AudioURL: stringValue(trackMap["audio_url"]),
 				Origin:   stringValue(trackMap["origin"]),
-			})
+			}
+			dto.DerivedTracks = append(dto.DerivedTracks, track)
+			dto.Tracks = append(dto.Tracks, track)
 		}
+	}
+	if dto.ErrorMessage != "" {
+		dto.Errors = append(dto.Errors, AlbumImportErrorDTO{Message: dto.ErrorMessage})
 	}
 
 	return dto
@@ -112,9 +166,14 @@ func (s *Service) CreateAlbumImportSession(user authctx.CurrentUser, input Creat
 	}
 
 	session := model.AlbumImportSession{
+		UserID:      &user.ID,
+		InputMode:   AlbumImportInputModeAuto,
 		Status:      status,
+		Stage:       AlbumImportStageUpload,
 		PayloadJSON: string(payloadJSON),
 	}
+	expiresAt := time.Now().UTC().Add(7 * 24 * time.Hour)
+	session.ExpiresAt = &expiresAt
 	if err := s.db.Create(&session).Error; err != nil {
 		return model.AlbumImportSession{}, err
 	}
@@ -501,7 +560,7 @@ func (s *Service) markAlbumImportFailed(id uuid.UUID, message string) error {
 
 func (s *Service) GetAlbumImportSession(id uuid.UUID) (model.AlbumImportSession, error) {
 	var session model.AlbumImportSession
-	if err := s.db.First(&session, "id = ?", id).Error; err != nil {
+	if err := s.db.Preload("Files").Preload("Job").First(&session, "id = ?", id).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			return model.AlbumImportSession{}, apperr.NotFound("music.import_not_found", "Import session not found")
 		}
@@ -955,7 +1014,7 @@ func writeAlbumImportMultipartState(payload map[string]any, state albumImportMul
 }
 
 func buildAlbumImportMultipartDTO(importID uuid.UUID, state albumImportMultipartState) AlbumImportMultipartDTO {
-	parts := append([]AlbumImportMultipartPartDTO(nil), state.CompletedParts...)
+	parts := append([]AlbumImportMultipartPartDTO{}, state.CompletedParts...)
 	return AlbumImportMultipartDTO{
 		ImportID:       importID.String(),
 		FileName:       state.FileName,
