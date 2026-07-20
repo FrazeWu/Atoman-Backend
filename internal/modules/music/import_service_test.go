@@ -630,7 +630,7 @@ func TestCompleteAlbumImportMultipartPartReplacesAndSortsParts(t *testing.T) {
 	}
 }
 
-func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDeletesObject(t *testing.T) {
+func TestCompleteAlbumImportMultipartCompletesSortedPartsAndQueuesWorker(t *testing.T) {
 	svc, _, user := newMusicTestService(t)
 	archiveBody := newImportTestZipArchive(t, map[string]string{
 		"02 - Archangel.flac": "",
@@ -660,13 +660,13 @@ func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDelet
 	}
 	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 2, CompleteAlbumImportMultipartPartInput{
 		ETag: "etag-2",
-		Size: albumImportMultipartPartSize,
+		Size: 2 * albumImportMultipartPartSize,
 	}); err != nil {
 		t.Fatalf("complete part 2: %v", err)
 	}
 	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 1, CompleteAlbumImportMultipartPartInput{
 		ETag: "etag-1",
-		Size: albumImportMultipartPartSize,
+		Size: 2 * albumImportMultipartPartSize,
 	}); err != nil {
 		t.Fatalf("complete part 1: %v", err)
 	}
@@ -675,11 +675,11 @@ func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDelet
 	if err != nil {
 		t.Fatalf("complete multipart: %v", err)
 	}
-	if updated.Status != AlbumImportStatusReady {
-		t.Fatalf("expected ready status, got %#v", updated)
+	if updated.Status != AlbumImportStatusQueued {
+		t.Fatalf("expected queued status, got %#v", updated)
 	}
-	if updated.Stage != AlbumImportStageReady || updated.ProgressCurrent != 2 || updated.ProgressTotal != 2 || updated.ErrorMessage != "" {
-		t.Fatalf("unexpected ready state: %#v", updated)
+	if updated.Stage != AlbumImportStageQueued || updated.ErrorMessage != "" || updated.Job == nil || updated.Job.Status != AlbumImportJobStatusQueued {
+		t.Fatalf("unexpected queued state: %#v", updated)
 	}
 	if store.completeKey != started.ObjectKey || store.completeUploadID != "upload-1" {
 		t.Fatalf("unexpected complete call key=%q uploadID=%q", store.completeKey, store.completeUploadID)
@@ -687,8 +687,8 @@ func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDelet
 	if fmt.Sprint(store.completedPartNumbers) != "[1 2]" {
 		t.Fatalf("expected sorted completed parts [1 2], got %#v", store.completedPartNumbers)
 	}
-	if len(store.deletedKeys) != 1 || store.deletedKeys[0] != started.ObjectKey {
-		t.Fatalf("expected original archive deleted, got %#v", store.deletedKeys)
+	if store.openCalls != 0 || len(store.deletedKeys) != 0 {
+		t.Fatalf("expected source object to be retained for worker, got %#v", store)
 	}
 
 	var payload map[string]any
@@ -698,18 +698,12 @@ func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDelet
 	if payload["archive_name"] != "Untrue.zip" {
 		t.Fatalf("expected archive_name preserved, got %#v", payload["archive_name"])
 	}
-	if stringValue(payload["multipart_upload_id"]) != "" {
-		t.Fatalf("expected multipart_upload_id removed, got %#v", payload["multipart_upload_id"])
+	if _, ok := payload["derived_tracks"]; ok {
+		t.Fatalf("HTTP completion must not derive tracks, got %#v", payload["derived_tracks"])
 	}
-	derivedTracks, ok := payload["derived_tracks"].([]any)
-	if !ok || len(derivedTracks) != 2 {
-		t.Fatalf("expected 2 derived tracks, got %#v", payload["derived_tracks"])
-	}
-	assertDerivedTrackPresent(t, derivedTracks, "Untitled", 1)
-	assertDerivedTrackPresent(t, derivedTracks, "Archangel", 2)
 }
 
-func TestCompleteAlbumImportMultipartKeepsReadyWhenCleanupDeleteFails(t *testing.T) {
+func TestCompleteAlbumImportMultipartDoesNotDeleteSourceObject(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	archiveBody := newImportTestZipArchive(t, map[string]string{
 		"01 - Untitled.mp3": "",
@@ -738,7 +732,7 @@ func TestCompleteAlbumImportMultipartKeepsReadyWhenCleanupDeleteFails(t *testing
 	}
 	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 1, CompleteAlbumImportMultipartPartInput{
 		ETag: "etag-1",
-		Size: albumImportMultipartPartSize,
+		Size: 4 * albumImportMultipartPartSize,
 	}); err != nil {
 		t.Fatalf("complete part 1: %v", err)
 	}
@@ -747,26 +741,24 @@ func TestCompleteAlbumImportMultipartKeepsReadyWhenCleanupDeleteFails(t *testing
 	if err != nil {
 		t.Fatalf("complete multipart should ignore cleanup failure: %v", err)
 	}
-	if updated.Status != AlbumImportStatusReady {
-		t.Fatalf("expected returned session ready, got %#v", updated)
+	if updated.Status != AlbumImportStatusQueued {
+		t.Fatalf("expected returned session queued, got %#v", updated)
 	}
 
 	var stored model.AlbumImportSession
 	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
 		t.Fatalf("load stored session: %v", err)
 	}
-	if stored.Status != AlbumImportStatusReady {
-		t.Fatalf("expected stored session to remain ready, got %#v", stored)
+	if stored.Status != AlbumImportStatusQueued {
+		t.Fatalf("expected stored session to remain queued, got %#v", stored)
 	}
 	payload, err := readAlbumImportPayloadMap(stored.PayloadJSON)
 	if err != nil {
 		t.Fatalf("read payload: %v", err)
 	}
-	derivedTracks, ok := payload["derived_tracks"].([]any)
-	if !ok || len(derivedTracks) != 1 {
-		t.Fatalf("expected derived tracks preserved, got %#v", payload["derived_tracks"])
+	if store.openCalls != 0 || len(store.deletedKeys) != 0 {
+		t.Fatalf("source object should not be read or deleted, got %#v", store)
 	}
-	assertDerivedTrackPresent(t, derivedTracks, "Untitled", 1)
 	if stringValue(payload["error_message"]) != "" {
 		t.Fatalf("expected no error_message after cleanup failure, got %#v", payload["error_message"])
 	}
@@ -1584,7 +1576,15 @@ type fakeAlbumImportMultipartStore struct {
 	presignPartNumber    int
 	completeKey          string
 	completeUploadID     string
+	completeCalls        int
 	completedPartNumbers []int
+	completedSize        int64
+	abortedKeys          []string
+	abortedUploadIDs     []string
+	openCalls            int
+	headCalls            int
+	objectCompleted      bool
+	objectSizeOverride   int64
 	deletedKeys          []string
 	deleteErr            error
 }
@@ -1610,20 +1610,38 @@ func (f *fakeAlbumImportMultipartStore) PresignUploadPart(key string, uploadID s
 }
 
 func (f *fakeAlbumImportMultipartStore) CompleteMultipartUpload(key string, uploadID string, parts []AlbumImportMultipartPartDTO) error {
+	f.completeCalls++
+	f.objectCompleted = true
 	f.completeKey = key
 	f.completeUploadID = uploadID
 	f.completedPartNumbers = nil
+	f.completedSize = 0
 	for _, part := range parts {
 		f.completedPartNumbers = append(f.completedPartNumbers, part.PartNumber)
+		f.completedSize += part.Size
 	}
 	return nil
 }
 
-func (f *fakeAlbumImportMultipartStore) AbortMultipartUpload(_ string, _ string) error {
+func (f *fakeAlbumImportMultipartStore) ObjectSize(_ string) (int64, error) {
+	f.headCalls++
+	if !f.objectCompleted {
+		return 0, errors.New("object not found")
+	}
+	if f.objectSizeOverride > 0 {
+		return f.objectSizeOverride, nil
+	}
+	return f.completedSize, nil
+}
+
+func (f *fakeAlbumImportMultipartStore) AbortMultipartUpload(key string, uploadID string) error {
+	f.abortedKeys = append(f.abortedKeys, key)
+	f.abortedUploadIDs = append(f.abortedUploadIDs, uploadID)
 	return nil
 }
 
 func (f *fakeAlbumImportMultipartStore) OpenObject(_ string) (io.ReadCloser, error) {
+	f.openCalls++
 	return io.NopCloser(bytes.NewReader(f.objectBody)), nil
 }
 

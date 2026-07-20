@@ -72,6 +72,17 @@ type StartAlbumImportMultipartInput struct {
 	ContentType string `json:"contentType"`
 }
 
+type AlbumImportFileInput struct {
+	RelativePath string `json:"relativePath"`
+	FileName     string `json:"fileName"`
+	FileSize     int64  `json:"fileSize"`
+	ContentType  string `json:"contentType"`
+}
+
+type RegisterAlbumImportFilesInput struct {
+	Files []AlbumImportFileInput `json:"files"`
+}
+
 type AlbumImportMultipartPartDTO struct {
 	PartNumber int    `json:"partNumber"`
 	ETag       string `json:"etag"`
@@ -114,22 +125,24 @@ type AlbumImportProgressDTO struct {
 }
 
 type AlbumImportFileDTO struct {
-	ID               string  `json:"id"`
-	RelativePath     string  `json:"relativePath"`
-	FileName         string  `json:"fileName"`
-	Role             string  `json:"role"`
-	DetectedFormat   string  `json:"detectedFormat"`
-	ContentType      string  `json:"contentType"`
-	Size             int64   `json:"size"`
-	SourceKey        string  `json:"sourceKey"`
-	PlaybackKey      string  `json:"playbackKey"`
-	UploadStatus     string  `json:"uploadStatus"`
-	ProcessingStatus string  `json:"processingStatus"`
-	DiscNumber       int     `json:"discNumber"`
-	TrackNumber      int     `json:"trackNumber"`
-	Title            string  `json:"title"`
-	DurationSeconds  float64 `json:"durationSeconds"`
-	ErrorMessage     string  `json:"errorMessage"`
+	ID               string                        `json:"id"`
+	RelativePath     string                        `json:"relativePath"`
+	FileName         string                        `json:"fileName"`
+	Role             string                        `json:"role"`
+	DetectedFormat   string                        `json:"detectedFormat"`
+	ContentType      string                        `json:"contentType"`
+	Size             int64                         `json:"size"`
+	SourceKey        string                        `json:"sourceKey"`
+	PartSize         int64                         `json:"partSize"`
+	CompletedParts   []AlbumImportMultipartPartDTO `json:"completedParts"`
+	PlaybackKey      string                        `json:"playbackKey"`
+	UploadStatus     string                        `json:"uploadStatus"`
+	ProcessingStatus string                        `json:"processingStatus"`
+	DiscNumber       int                           `json:"discNumber"`
+	TrackNumber      int                           `json:"trackNumber"`
+	Title            string                        `json:"title"`
+	DurationSeconds  float64                       `json:"durationSeconds"`
+	ErrorMessage     string                        `json:"errorMessage"`
 }
 
 type AlbumImportErrorDTO struct {
@@ -159,7 +172,27 @@ type AlbumImportDTO struct {
 }
 
 const (
-	AlbumImportInputModeAuto = "auto"
+	AlbumImportInputModeAuto    = "auto"
+	AlbumImportInputModeArchive = "archive"
+	AlbumImportInputModeFiles   = "files"
+	AlbumImportInputModeFolder  = "folder"
+
+	AlbumImportFileRoleArchive = "archive"
+	AlbumImportFileRoleAudio   = "audio"
+	AlbumImportFileRoleCue     = "cue"
+	AlbumImportFileRoleCover   = "cover"
+
+	AlbumImportFileUploadStatusUploading  = "uploading"
+	AlbumImportFileUploadStatusCompleting = "completing"
+	AlbumImportFileUploadStatusUploaded   = "uploaded"
+	AlbumImportFileUploadStatusFailed     = "failed"
+
+	AlbumImportFileProcessingStatusPending = "pending"
+	AlbumImportFileProcessingStatusFailed  = "failed"
+
+	AlbumImportJobStatusQueued   = "queued"
+	AlbumImportJobStatusFailed   = "failed"
+	AlbumImportJobStatusCanceled = "canceled"
 
 	AlbumImportStageUpload      = "upload"
 	AlbumImportStageQueued      = "queued"

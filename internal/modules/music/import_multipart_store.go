@@ -18,6 +18,7 @@ type albumImportMultipartStore interface {
 	CreateMultipartUpload(key string, contentType string) (string, error)
 	PresignUploadPart(key string, uploadID string, partNumber int, expires time.Duration) (string, error)
 	CompleteMultipartUpload(key string, uploadID string, parts []AlbumImportMultipartPartDTO) error
+	ObjectSize(key string) (int64, error)
 	AbortMultipartUpload(key string, uploadID string) error
 	OpenObject(key string) (io.ReadCloser, error)
 	DeleteObject(key string) error
@@ -29,7 +30,10 @@ type s3AlbumImportMultipartStore struct {
 }
 
 func newS3AlbumImportMultipartStore(client *s3.S3) albumImportMultipartStore {
-	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	bucket := strings.TrimSpace(os.Getenv("MUSIC_SOURCE_BUCKET"))
+	if bucket == "" {
+		bucket = strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	}
 	if client == nil || bucket == "" {
 		return nil
 	}
@@ -82,6 +86,17 @@ func (s *s3AlbumImportMultipartStore) CompleteMultipartUpload(key string, upload
 		},
 	})
 	return err
+}
+
+func (s *s3AlbumImportMultipartStore) ObjectSize(key string) (int64, error) {
+	out, err := s.client.HeadObject(&s3.HeadObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return aws.Int64Value(out.ContentLength), nil
 }
 
 func (s *s3AlbumImportMultipartStore) AbortMultipartUpload(key string, uploadID string) error {

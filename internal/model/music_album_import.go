@@ -29,23 +29,27 @@ func (AlbumImportSession) TableName() string {
 
 type AlbumImportFile struct {
 	Base
-	ImportID         uuid.UUID `json:"import_id" gorm:"type:uuid;not null;index"`
-	RelativePath     string    `json:"relative_path" gorm:"not null;default:''"`
-	FileName         string    `json:"file_name" gorm:"not null"`
-	Role             string    `json:"role" gorm:"not null;default:'unknown'"`
-	DetectedFormat   string    `json:"detected_format"`
-	ContentType      string    `json:"content_type"`
-	Size             int64     `json:"size" gorm:"not null;default:0"`
-	SourceKey        string    `json:"source_key" gorm:"type:text"`
-	PlaybackKey      string    `json:"playback_key" gorm:"type:text"`
-	UploadStatus     string    `json:"upload_status" gorm:"not null;default:'pending'"`
-	ProcessingStatus string    `json:"processing_status" gorm:"not null;default:'pending'"`
-	DiscNumber       int       `json:"disc_number" gorm:"not null;default:0"`
-	TrackNumber      int       `json:"track_number" gorm:"not null;default:0"`
-	Title            string    `json:"title"`
-	DurationSeconds  float64   `json:"duration_seconds" gorm:"not null;default:0"`
-	MetadataJSON     string    `json:"metadata" gorm:"type:text;not null;default:'{}'"`
-	ErrorMessage     string    `json:"error_message" gorm:"type:text;not null;default:''"`
+	ImportID           uuid.UUID `json:"import_id" gorm:"type:uuid;not null;index"`
+	RelativePath       string    `json:"relative_path" gorm:"not null;default:''"`
+	FileName           string    `json:"file_name" gorm:"not null"`
+	Role               string    `json:"role" gorm:"not null;default:'unknown'"`
+	DetectedFormat     string    `json:"detected_format"`
+	ContentType        string    `json:"content_type"`
+	Size               int64     `json:"size" gorm:"not null;default:0"`
+	SourceKey          string    `json:"source_key" gorm:"type:text"`
+	UploadID           string    `json:"-" gorm:"type:text"`
+	PartSize           int64     `json:"part_size" gorm:"not null;default:0"`
+	CompletedPartsJSON string    `json:"completed_parts" gorm:"type:text;not null;default:'[]'"`
+	CleanupJSON        string    `json:"-" gorm:"type:text;not null;default:'[]'"`
+	PlaybackKey        string    `json:"playback_key" gorm:"type:text"`
+	UploadStatus       string    `json:"upload_status" gorm:"not null;default:'pending'"`
+	ProcessingStatus   string    `json:"processing_status" gorm:"not null;default:'pending'"`
+	DiscNumber         int       `json:"disc_number" gorm:"not null;default:0"`
+	TrackNumber        int       `json:"track_number" gorm:"not null;default:0"`
+	Title              string    `json:"title"`
+	DurationSeconds    float64   `json:"duration_seconds" gorm:"not null;default:0"`
+	MetadataJSON       string    `json:"metadata" gorm:"type:text;not null;default:'{}'"`
+	ErrorMessage       string    `json:"error_message" gorm:"type:text;not null;default:''"`
 }
 
 func (AlbumImportFile) TableName() string {

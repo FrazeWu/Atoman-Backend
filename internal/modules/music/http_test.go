@@ -1566,7 +1566,7 @@ func TestRegisterRoutesCompletesAlbumImportMultipart(t *testing.T) {
 
 	partBody, _ := json.Marshal(CompleteAlbumImportMultipartPartInput{
 		ETag: "etag-1",
-		Size: albumImportMultipartPartSize,
+		Size: 64 * 1024 * 1024,
 	})
 	partRecorder := httptest.NewRecorder()
 	partReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+multipartState.ImportID+"/multipart/parts/1/complete", bytes.NewReader(partBody))
@@ -1591,14 +1591,14 @@ func TestRegisterRoutesCompletesAlbumImportMultipart(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Data.ImportID != multipartState.ImportID || resp.Data.Status != AlbumImportStatusReady {
+	if resp.Data.ImportID != multipartState.ImportID || resp.Data.Status != AlbumImportStatusQueued {
 		t.Fatalf("unexpected final complete response: %#v", resp.Data)
 	}
-	if resp.Data.ArchiveName != "Untrue.zip" || len(resp.Data.DerivedTracks) != 1 {
-		t.Fatalf("expected derived ready import response, got %#v", resp.Data)
+	if resp.Data.ArchiveName != "Untrue.zip" || len(resp.Data.DerivedTracks) != 0 || len(resp.Data.Files) != 1 || resp.Data.Files[0].UploadStatus != AlbumImportFileUploadStatusUploaded {
+		t.Fatalf("expected queued archive import response, got %#v", resp.Data)
 	}
-	if store.completeKey != multipartState.ObjectKey || len(store.deletedKeys) != 1 {
-		t.Fatalf("expected completed object cleanup, got %#v", store)
+	if store.completeKey != multipartState.ObjectKey || store.openCalls != 0 || len(store.deletedKeys) != 0 {
+		t.Fatalf("expected completed source object retained for worker, got %#v", store)
 	}
 }
 
