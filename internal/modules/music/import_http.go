@@ -178,13 +178,19 @@ func albumImportMultipartRouteParams(c *gin.Context) (uuid.UUID, int, bool) {
 }
 
 func (h *Handler) getAlbumImportSession(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+
 	sessionID, err := parseMusicID(c.Param("sessionId"), "sessionId")
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
 
-	session, err := h.service.GetAlbumImportSession(sessionID)
+	session, err := h.service.GetAlbumImportSessionForUser(user, sessionID)
 	if err != nil {
 		httpx.Error(c, err)
 		return

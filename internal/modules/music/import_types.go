@@ -169,6 +169,8 @@ const (
 	AlbumImportStageReady       = "ready"
 	AlbumImportStageCommitting  = "committing"
 	AlbumImportStageCompleted   = "completed"
+	AlbumImportStageFailed      = "failed"
+	AlbumImportStageCanceled    = "canceled"
 
 	AlbumImportStatusPendingUpload  = "pending_upload"
 	AlbumImportStatusUploading      = "uploading"

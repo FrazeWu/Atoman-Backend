@@ -1368,6 +1368,58 @@ func TestRegisterRoutesCreateAlbumImportSessionSupportsArchiveUpload(t *testing.
 	}
 }
 
+func TestRegisterRoutesAlbumImportGetRequiresCurrentUser(t *testing.T) {
+	service, _, owner := newMusicHTTPTestService(t)
+	session, err := service.CreateAlbumImportSession(owner, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodGet, "/api/v1/music/imports/albums/"+session.ID.String(), "")
+	assertMusicHTTPError(t, response, http.StatusUnauthorized, "auth.unauthorized")
+}
+
+func TestRegisterRoutesAlbumImportGetRejectsAnotherUser(t *testing.T) {
+	service, _, owner := newMusicHTTPTestService(t)
+	session, err := service.CreateAlbumImportSession(owner, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+	other := authctx.CurrentUser{ID: uuid.New(), Username: "other", Role: authctx.RoleUser}
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, &other), http.MethodGet, "/api/v1/music/imports/albums/"+session.ID.String(), "")
+	assertMusicHTTPError(t, response, http.StatusNotFound, "music.import_not_found")
+}
+
+func TestRegisterRoutesAlbumImportGetRejectsLegacySessionWithoutOwner(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	legacy := model.AlbumImportSession{Status: AlbumImportStatusPendingUpload, PayloadJSON: "{}"}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("create legacy album import session: %v", err)
+	}
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, &user), http.MethodGet, "/api/v1/music/imports/albums/"+legacy.ID.String(), "")
+	assertMusicHTTPError(t, response, http.StatusNotFound, "music.import_not_found")
+}
+
+func TestRegisterRoutesAlbumImportWriteRejectsAnotherUser(t *testing.T) {
+	service, _, owner := newMusicHTTPTestService(t)
+	store := &fakeAlbumImportMultipartStore{uploadID: "upload-owner"}
+	service.albumImportMultipart = store
+	session, err := service.CreateAlbumImportSession(owner, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+	other := authctx.CurrentUser{ID: uuid.New(), Username: "other", Role: authctx.RoleUser}
+	body := `{"fileName":"album.zip","fileSize":1024,"contentType":"application/zip"}`
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, &other), http.MethodPost, "/api/v1/music/imports/albums/"+session.ID.String()+"/multipart", body)
+	assertMusicHTTPError(t, response, http.StatusNotFound, "music.import_not_found")
+	if store.createCalls != 0 {
+		t.Fatalf("expected no multipart object for another user, got %d creates", store.createCalls)
+	}
+}
+
 func TestRegisterRoutesStartsAlbumImportMultipart(t *testing.T) {
 	service, _, user := newMusicHTTPTestService(t)
 	store := &fakeAlbumImportMultipartStore{uploadID: "upload-http-1"}
