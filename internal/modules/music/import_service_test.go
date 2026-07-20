@@ -232,6 +232,7 @@ func TestUpdateAlbumImportStatusAndPayloadSynchronizesSessionColumns(t *testing.
 	}{
 		{status: AlbumImportStatusUploading, wantStage: AlbumImportStageUpload, wantCurrent: 128, wantTotal: 1024},
 		{status: AlbumImportStatusUploaded, wantStage: AlbumImportStageUpload, wantCurrent: 1024, wantTotal: 1024},
+		{status: AlbumImportStatusQueued, wantStage: AlbumImportStageQueued},
 		{status: AlbumImportStatusExtracting, wantStage: AlbumImportStageExtracting},
 		{status: AlbumImportStatusReady, wantStage: AlbumImportStageReady, wantCurrent: 2, wantTotal: 2},
 	}

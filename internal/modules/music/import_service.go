@@ -563,6 +563,10 @@ func applyAlbumImportSessionState(session *model.AlbumImportSession, status stri
 		session.Stage = AlbumImportStageUpload
 		session.ProgressTotal = int64Value(payload["multipart_file_size"])
 		session.ProgressCurrent = session.ProgressTotal
+	case AlbumImportStatusQueued:
+		session.Stage = AlbumImportStageQueued
+		session.ProgressCurrent = 0
+		session.ProgressTotal = 0
 	case AlbumImportStatusExtracting:
 		session.Stage = AlbumImportStageExtracting
 		session.ProgressCurrent = 0
