@@ -203,6 +203,7 @@ const (
 	AlbumImportFileProcessingStatusFailed  = "failed"
 
 	AlbumImportJobStatusQueued   = "queued"
+	AlbumImportJobStatusRunning  = "running"
 	AlbumImportJobStatusFailed   = "failed"
 	AlbumImportJobStatusCanceled = "canceled"
 

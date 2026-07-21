@@ -58,17 +58,18 @@ func (AlbumImportFile) TableName() string {
 
 type AlbumImportJob struct {
 	Base
-	ImportID    uuid.UUID  `json:"import_id" gorm:"type:uuid;not null;uniqueIndex:idx_music_album_import_jobs_import"`
-	Status      string     `json:"status" gorm:"not null;default:'queued'"`
-	Stage       string     `json:"stage" gorm:"not null;default:'queued'"`
-	Attempts    int        `json:"attempts" gorm:"not null;default:0"`
-	MaxAttempts int        `json:"max_attempts" gorm:"not null;default:3"`
-	LockedBy    string     `json:"locked_by"`
-	LockedAt    *time.Time `json:"locked_at"`
-	HeartbeatAt *time.Time `json:"heartbeat_at"`
-	StartedAt   *time.Time `json:"started_at"`
-	FinishedAt  *time.Time `json:"finished_at"`
-	LastError   string     `json:"last_error" gorm:"type:text;not null;default:''"`
+	ImportID      uuid.UUID  `json:"import_id" gorm:"type:uuid;not null;uniqueIndex:idx_music_album_import_jobs_import"`
+	Status        string     `json:"status" gorm:"not null;default:'queued'"`
+	Stage         string     `json:"stage" gorm:"not null;default:'queued'"`
+	Attempts      int        `json:"attempts" gorm:"not null;default:0"`
+	MaxAttempts   int        `json:"max_attempts" gorm:"not null;default:3"`
+	LockedBy      string     `json:"locked_by"`
+	LockedAt      *time.Time `json:"locked_at"`
+	HeartbeatAt   *time.Time `json:"heartbeat_at"`
+	StartedAt     *time.Time `json:"started_at"`
+	FinishedAt    *time.Time `json:"finished_at"`
+	NextAttemptAt *time.Time `json:"next_attempt_at" gorm:"index"`
+	LastError     string     `json:"last_error" gorm:"type:text;not null;default:''"`
 }
 
 func (AlbumImportJob) TableName() string {

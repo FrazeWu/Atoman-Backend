@@ -91,6 +91,7 @@ func TestRunMusicAlbumImportsMigrationCreatesV2Schema(t *testing.T) {
 		"heartbeat_at",
 		"started_at",
 		"finished_at",
+		"next_attempt_at",
 		"last_error",
 	} {
 		if !db.Migrator().HasColumn("music_album_import_jobs", column) {

@@ -42,6 +42,12 @@ func newS3AlbumImportMultipartStore(client *s3.S3) albumImportMultipartStore {
 	return &s3AlbumImportMultipartStore{client: client, bucket: bucket}
 }
 
+// NewMusicImportObjectStore creates the source-object cleanup store used by
+// the independent import worker.
+func NewMusicImportObjectStore(client *s3.S3) MusicImportObjectStore {
+	return newS3AlbumImportMultipartStore(client)
+}
+
 func (s *s3AlbumImportMultipartStore) CreateMultipartUpload(key string, contentType string) (string, error) {
 	out, err := s.client.CreateMultipartUpload(&s3.CreateMultipartUploadInput{
 		Bucket:      aws.String(s.bucket),
