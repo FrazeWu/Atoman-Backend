@@ -12,9 +12,11 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
 type albumImportMultipartStore interface {
+	PutObject(key string, contentType string, body io.Reader) error
 	CreateMultipartUpload(key string, contentType string) (string, error)
 	PresignUploadPart(key string, uploadID string, partNumber int, expires time.Duration) (string, error)
 	CompleteMultipartUpload(key string, uploadID string, parts []AlbumImportMultipartPartDTO) error
@@ -50,6 +52,11 @@ func (s *s3AlbumImportMultipartStore) CreateMultipartUpload(key string, contentT
 		return "", err
 	}
 	return aws.StringValue(out.UploadId), nil
+}
+
+func (s *s3AlbumImportMultipartStore) PutObject(key string, contentType string, body io.Reader) error {
+	_, err := s3manager.NewUploaderWithClient(s.client).Upload(&s3manager.UploadInput{Bucket: aws.String(s.bucket), Key: aws.String(key), ContentType: aws.String(contentType), Body: body})
+	return err
 }
 
 func (s *s3AlbumImportMultipartStore) PresignUploadPart(key string, uploadID string, partNumber int, expires time.Duration) (string, error) {

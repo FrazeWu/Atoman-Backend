@@ -373,6 +373,9 @@ func TestCompleteAlbumImportFileRejectsActualObjectSizeMismatch(t *testing.T) {
 	if _, err := svc.CompleteAlbumImportFilePart(user, session.ID, file.ID, 1, CompleteAlbumImportMultipartPartInput{ETag: "etag", Size: 1024}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Update("expires_at", time.Now().UTC().Add(-time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
 	if _, err := svc.CompleteAlbumImportFile(user, session.ID, file.ID); err == nil {
 		t.Fatal("expected trusted object size mismatch to fail")
 	}
@@ -389,6 +392,9 @@ func TestCompleteAlbumImportFileRejectsActualObjectSizeMismatch(t *testing.T) {
 	}
 	if failedSession.Status != AlbumImportStatusFailed || failedSession.Stage != AlbumImportStageFailed || failedSession.ErrorMessage == "" {
 		t.Fatalf("size mismatch did not fail session: %#v", failedSession)
+	}
+	if failedSession.ExpiresAt == nil || failedSession.ExpiresAt.Before(time.Now().UTC().Add(6*24*time.Hour)) {
+		t.Fatalf("failed upload must retain source for seven days: %#v", failedSession.ExpiresAt)
 	}
 }
 

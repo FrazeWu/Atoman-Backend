@@ -1318,6 +1318,7 @@ func TestRegisterRoutesListAlbumsSearchesArtistNames(t *testing.T) {
 
 func TestRegisterRoutesCreateAlbumImportSessionSupportsArchiveUpload(t *testing.T) {
 	service, _, user := newMusicHTTPTestService(t)
+	service.albumImportMultipart = &fakeAlbumImportMultipartStore{}
 	r := newMusicHTTPRouter(service, &user)
 
 	createBody, _ := json.Marshal(CreateAlbumImportSessionInput{
@@ -1360,8 +1361,8 @@ func TestRegisterRoutesCreateAlbumImportSessionSupportsArchiveUpload(t *testing.
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Data.Status != AlbumImportStatusReady {
-		t.Fatalf("expected ready session, got %#v", resp.Data)
+	if resp.Data.Status != AlbumImportStatusQueued {
+		t.Fatalf("expected queued session, got %#v", resp.Data)
 	}
 	if resp.Data.ArchiveName != "Untrue.zip" {
 		t.Fatalf("expected archive name persisted, got %#v", resp.Data.ArchiveName)

@@ -315,6 +315,8 @@ func (s *Service) failRegisteredAlbumImportFiles(userID, sessionID uuid.UUID, fi
 			return err
 		}
 		session.Status, session.Stage, session.ErrorMessage = AlbumImportStatusFailed, AlbumImportStageFailed, message
+		expiresAt := albumImportFailureExpiresAt()
+		session.ExpiresAt = &expiresAt
 		return tx.Save(&session).Error
 	})
 }
@@ -503,6 +505,8 @@ func (s *Service) failAlbumImportFileUpload(userID, sessionID uuid.UUID, upload 
 		session.Status = AlbumImportStatusFailed
 		session.Stage = AlbumImportStageFailed
 		session.ErrorMessage = message
+		expiresAt := albumImportFailureExpiresAt()
+		session.ExpiresAt = &expiresAt
 		session.PayloadJSON = string(payloadJSON)
 		return tx.Save(&session).Error
 	})

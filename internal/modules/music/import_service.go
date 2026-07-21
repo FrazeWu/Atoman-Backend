@@ -178,13 +178,20 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 		return model.AlbumImportSession{}, err
 	}
 
-	body, err := io.ReadAll(reader)
-	if err != nil {
+	if err := requireAlbumImportMultipartStore(s.albumImportMultipart); err != nil {
 		return model.AlbumImportSession{}, err
 	}
-	payloadPatch, err := s.deriveAlbumImportPayload(user, strings.TrimSpace(archiveName), body)
+	archiveID := uuid.New()
+	objectKey := albumImportSourceKey(user.ID, id, archiveID, "zip")
+	limited := &albumImportLimitedReader{reader: reader, limit: albumImportUploadLimitsFromEnv().MaxFileBytes}
+	err := s.albumImportMultipart.PutObject(objectKey, "application/zip", limited)
 	if err != nil {
+		_ = s.albumImportMultipart.DeleteObject(objectKey)
 		return model.AlbumImportSession{}, err
+	}
+	if limited.exceeded {
+		_ = s.albumImportMultipart.DeleteObject(objectKey)
+		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive file size is invalid")
 	}
 
 	var out model.AlbumImportSession
@@ -197,32 +204,59 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 			return apperr.Unprocessable("music.import_invalid_status", "Import session is not pending upload")
 		}
 
-		payload := map[string]any{}
-		if strings.TrimSpace(session.PayloadJSON) != "" {
-			if err := json.Unmarshal([]byte(session.PayloadJSON), &payload); err != nil {
-				return apperr.BadRequest("validation.invalid_request", "payload is not valid JSON")
-			}
+		file := model.AlbumImportFile{Base: model.Base{ID: archiveID}, ImportID: session.ID, RelativePath: strings.TrimSpace(archiveName), FileName: strings.TrimSpace(archiveName), Role: AlbumImportFileRoleArchive, DetectedFormat: "zip", ContentType: "application/zip", SourceKey: objectKey, Size: limited.count, UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending, CompletedPartsJSON: "[]", CleanupJSON: "[]", MetadataJSON: "{}"}
+		if err := tx.Create(&file).Error; err != nil {
+			return err
 		}
-		for key, value := range payloadPatch {
-			payload[key] = value
+		payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+		if err != nil {
+			return err
 		}
-		applyAlbumImportSessionState(&session, AlbumImportStatusReady, payload)
+		payload["archive_name"] = strings.TrimSpace(archiveName)
 		payloadJSON, err := json.Marshal(payload)
 		if err != nil {
 			return err
 		}
-
 		session.PayloadJSON = string(payloadJSON)
-		if err := tx.Save(&session).Error; err != nil {
+		if err := queueAlbumImportSession(tx, &session, true); err != nil {
 			return err
 		}
 		out = session
 		return nil
 	})
 	if err != nil {
+		_ = s.albumImportMultipart.DeleteObject(objectKey)
 		return model.AlbumImportSession{}, err
 	}
 	return out, nil
+}
+
+type albumImportLimitedReader struct {
+	reader       io.Reader
+	limit, count int64
+	exceeded     bool
+}
+
+func (r *albumImportLimitedReader) Read(p []byte) (int, error) {
+	if r.exceeded {
+		return 0, errors.New("album import archive exceeds size limit")
+	}
+	remaining := r.limit - r.count
+	if remaining <= 0 {
+		var one [1]byte
+		n, err := r.reader.Read(one[:])
+		if n > 0 {
+			r.exceeded = true
+			return 0, errors.New("album import archive exceeds size limit")
+		}
+		return n, err
+	}
+	if int64(len(p)) > remaining {
+		p = p[:remaining]
+	}
+	n, err := r.reader.Read(p)
+	r.count += int64(n)
+	return n, err
 }
 
 func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UUID, input StartAlbumImportMultipartInput) (AlbumImportMultipartDTO, error) {
@@ -598,7 +632,7 @@ func (s *Service) failLegacyAlbumImportUpload(userID, sessionID, fileID uuid.UUI
 			return result.Error
 		}
 		return tx.Model(&model.AlbumImportSession{}).Where("id = ? AND user_id = ?", sessionID, userID).Updates(map[string]any{
-			"status": AlbumImportStatusFailed, "stage": AlbumImportStageFailed, "error_message": message, "payload_json": string(payloadJSON),
+			"status": AlbumImportStatusFailed, "stage": AlbumImportStageFailed, "error_message": message, "payload_json": string(payloadJSON), "expires_at": albumImportFailureExpiresAt(),
 		}).Error
 	})
 }
@@ -654,6 +688,8 @@ func applyAlbumImportSessionState(session *model.AlbumImportSession, status stri
 	if status == AlbumImportStatusFailed {
 		session.Stage = AlbumImportStageFailed
 		session.ErrorMessage = strings.TrimSpace(stringValue(payload["error_message"]))
+		expiresAt := albumImportFailureExpiresAt()
+		session.ExpiresAt = &expiresAt
 		return
 	}
 
@@ -705,6 +741,8 @@ func applyAlbumImportSessionState(session *model.AlbumImportSession, status stri
 		session.Stage = AlbumImportStageCanceled
 	}
 }
+
+func albumImportFailureExpiresAt() time.Time { return time.Now().UTC().Add(7 * 24 * time.Hour) }
 
 func albumImportCompletedPartBytes(value any) int64 {
 	var total int64
