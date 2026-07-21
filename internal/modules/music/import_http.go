@@ -45,6 +45,8 @@ func (h *Handler) uploadAlbumImportArchive(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	limits := albumImportUploadLimitsFromEnv()
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limits.MaxFileBytes+1024*1024)
 
 	file, header, err := c.Request.FormFile("archive")
 	if err != nil {

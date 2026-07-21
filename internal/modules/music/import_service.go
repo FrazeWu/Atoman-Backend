@@ -189,15 +189,21 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 	limited := &albumImportLimitedReader{reader: reader, limit: albumImportUploadLimitsFromEnv().MaxFileBytes}
 	err := s.albumImportMultipart.PutObject(objectKey, "application/zip", limited)
 	if err != nil {
-		s.deleteAlbumImportSessionObjectOrRecord(id, objectKey)
+		if cleanupErr := s.deleteAlbumImportSessionObjectOrRecord(id, objectKey); cleanupErr != nil {
+			return model.AlbumImportSession{}, cleanupErr
+		}
 		return model.AlbumImportSession{}, err
 	}
 	if limited.exceeded {
-		s.deleteAlbumImportSessionObjectOrRecord(id, objectKey)
+		if cleanupErr := s.deleteAlbumImportSessionObjectOrRecord(id, objectKey); cleanupErr != nil {
+			return model.AlbumImportSession{}, cleanupErr
+		}
 		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive file size is invalid")
 	}
 	if limited.count <= 0 {
-		s.deleteAlbumImportSessionObjectOrRecord(id, objectKey)
+		if cleanupErr := s.deleteAlbumImportSessionObjectOrRecord(id, objectKey); cleanupErr != nil {
+			return model.AlbumImportSession{}, cleanupErr
+		}
 		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive file size is invalid")
 	}
 
@@ -232,16 +238,19 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 		return nil
 	})
 	if err != nil {
-		s.deleteAlbumImportSessionObjectOrRecord(id, objectKey)
+		if cleanupErr := s.deleteAlbumImportSessionObjectOrRecord(id, objectKey); cleanupErr != nil {
+			return model.AlbumImportSession{}, cleanupErr
+		}
 		return model.AlbumImportSession{}, err
 	}
 	return out, nil
 }
 
-func (s *Service) deleteAlbumImportSessionObjectOrRecord(sessionID uuid.UUID, key string) {
+func (s *Service) deleteAlbumImportSessionObjectOrRecord(sessionID uuid.UUID, key string) error {
 	if err := s.albumImportMultipart.DeleteObject(key); err != nil {
-		_ = recordAlbumImportSessionCleanupTarget(s.db, sessionID, albumImportCleanupTarget{Action: "delete", Key: key})
+		return recordAlbumImportSessionCleanupTarget(s.db, sessionID, albumImportCleanupTarget{Action: "delete", Key: key})
 	}
+	return nil
 }
 
 type albumImportLimitedReader struct {

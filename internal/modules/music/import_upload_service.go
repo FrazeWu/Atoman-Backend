@@ -890,9 +890,9 @@ func loadAlbumImportSessionForUpdate(db *gorm.DB, sessionID, userID uuid.UUID) (
 	return session, err
 }
 
-func (s *Service) cleanupAlbumImportObject(file model.AlbumImportFile) {
+func (s *Service) cleanupAlbumImportObject(file model.AlbumImportFile) error {
 	if s.albumImportMultipart == nil || file.SourceKey == "" {
-		return
+		return nil
 	}
 	target := albumImportCleanupTarget{Key: file.SourceKey}
 	var err error
@@ -905,17 +905,19 @@ func (s *Service) cleanupAlbumImportObject(file model.AlbumImportFile) {
 		err = s.albumImportMultipart.AbortMultipartUpload(file.SourceKey, file.UploadID)
 	}
 	if err != nil && target.Action != "" {
-		_ = recordAlbumImportCleanupTarget(s.db, file.ID, target)
+		return recordAlbumImportCleanupTarget(s.db, file.ID, target)
 	}
+	return nil
 }
 
-func (s *Service) abortAlbumImportMultipartOrRecord(sessionID uuid.UUID, file model.AlbumImportFile) {
+func (s *Service) abortAlbumImportMultipartOrRecord(sessionID uuid.UUID, file model.AlbumImportFile) error {
 	if s.albumImportMultipart == nil || file.SourceKey == "" || file.UploadID == "" {
-		return
+		return nil
 	}
 	if err := s.albumImportMultipart.AbortMultipartUpload(file.SourceKey, file.UploadID); err != nil {
-		_ = recordAlbumImportSessionCleanupTarget(s.db, sessionID, albumImportCleanupTarget{Action: "abort", Key: file.SourceKey, UploadID: file.UploadID})
+		return recordAlbumImportSessionCleanupTarget(s.db, sessionID, albumImportCleanupTarget{Action: "abort", Key: file.SourceKey, UploadID: file.UploadID})
 	}
+	return nil
 }
 
 func recordAlbumImportCleanupTarget(db *gorm.DB, fileID uuid.UUID, target albumImportCleanupTarget) error {
