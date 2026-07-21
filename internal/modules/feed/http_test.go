@@ -21,6 +21,11 @@ import (
 	"gorm.io/gorm"
 )
 
+type timelineUpdatesHandlerResponse struct {
+	HasUpdates bool      `json:"has_updates"`
+	CheckedAt  time.Time `json:"checked_at"`
+}
+
 func signedFeedHTTPTokenForTest(t *testing.T, db *gorm.DB, user authctx.CurrentUser) string {
 	t.Helper()
 	if err := db.AutoMigrate(&model.AuthSession{}); err != nil {
@@ -505,9 +510,15 @@ func TestGetSubscribedFeedHandlerReturnsPostEngagementCounts(t *testing.T) {
 				Link  string `json:"link"`
 			} `json:"feed_item"`
 		} `json:"data"`
+		Meta struct {
+			CheckedAt time.Time `json:"checked_at"`
+		} `json:"meta"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Meta.CheckedAt.IsZero() {
+		t.Fatal("expected timeline response to include a server checked_at cursor")
 	}
 
 	var foundPost bool
@@ -528,6 +539,63 @@ func TestGetSubscribedFeedHandlerReturnsPostEngagementCounts(t *testing.T) {
 	}
 	if !foundPost || !foundExternalItem {
 		t.Fatalf("expected subscribed post and unchanged external feed item, got %s", rr.Body.String())
+	}
+}
+
+func TestTimelineUpdatesHandlerReturnsBaselineAndSubscribedRSSUpdates(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+	var subscription model.Subscription
+	if err := db.Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+		Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", user.ID, "external_rss").
+		First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	token := signedFeedHTTPTokenForTest(t, db, user)
+	baselineReq := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline/updates", nil)
+	baselineReq.Header.Set("Authorization", "Bearer "+token)
+	baselineRecorder := httptest.NewRecorder()
+	router.ServeHTTP(baselineRecorder, baselineReq)
+	if baselineRecorder.Code != http.StatusOK {
+		t.Fatalf("baseline status=%d body=%s", baselineRecorder.Code, baselineRecorder.Body.String())
+	}
+	var baseline struct {
+		Data timelineUpdatesHandlerResponse `json:"data"`
+	}
+	if err := json.Unmarshal(baselineRecorder.Body.Bytes(), &baseline); err != nil {
+		t.Fatalf("decode baseline: %v", err)
+	}
+	if baseline.Data.HasUpdates || baseline.Data.CheckedAt.IsZero() {
+		t.Fatalf("unexpected baseline response: %#v", baseline.Data)
+	}
+
+	if err := db.Create(&model.FeedItem{
+		FeedSourceID: subscription.FeedSourceID,
+		GUID:         "timeline-update-item",
+		Title:        "Timeline update item",
+		Link:         "https://example.com/items/timeline-update",
+		FetchedAt:    baseline.Data.CheckedAt.Add(time.Second),
+	}).Error; err != nil {
+		t.Fatalf("create fresh feed item: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline/updates?since="+baseline.Data.CheckedAt.Format(time.RFC3339Nano), nil)
+	request.Header.Set("Authorization", "Bearer "+token)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("updates status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		Data timelineUpdatesHandlerResponse `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode updates: %v", err)
+	}
+	if !payload.Data.HasUpdates || payload.Data.CheckedAt.IsZero() {
+		t.Fatalf("unexpected updates response: %#v", payload.Data)
 	}
 }
 

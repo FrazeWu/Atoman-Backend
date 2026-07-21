@@ -333,6 +333,83 @@ func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 	}
 }
 
+func TestHasExternalFeedUpdatesScopesToCurrentUsersSubscriptions(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	since := time.Now().Add(-time.Minute).UTC()
+
+	otherSource := model.FeedSource{
+		SourceType: "external_rss",
+		RssURL:     "https://other.example.com/feed.xml",
+		Hash:       "other-feed-updates-source",
+		Title:      "Other Feed",
+	}
+	if err := db.Create(&otherSource).Error; err != nil {
+		t.Fatalf("create unrelated source: %v", err)
+	}
+	if err := db.Create(&model.FeedItem{
+		FeedSourceID: otherSource.ID,
+		GUID:         "other-fresh-item",
+		Title:        "Other fresh item",
+		Link:         "https://other.example.com/posts/1",
+		FetchedAt:    time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create unrelated item: %v", err)
+	}
+
+	hasUpdates, err := service.HasExternalFeedUpdates(user, FeedQuery{}, since)
+	if err != nil {
+		t.Fatalf("check updates without subscribed fresh items: %v", err)
+	}
+	if hasUpdates {
+		t.Fatal("unsubscribed sources must not produce updates")
+	}
+
+	var subscription model.Subscription
+	if err := db.Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+		Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", user.ID, "external_rss").
+		First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+	if err := db.Create(&model.FeedItem{
+		FeedSourceID: subscription.FeedSourceID,
+		GUID:         "subscribed-fresh-item",
+		Title:        "Subscribed fresh item",
+		Link:         "https://example.com/items/fresh",
+		FetchedAt:    time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create subscribed item: %v", err)
+	}
+
+	hasUpdates, err = service.HasExternalFeedUpdates(user, FeedQuery{SourceID: subscription.ID}, since)
+	if err != nil {
+		t.Fatalf("check subscribed source updates: %v", err)
+	}
+	if !hasUpdates {
+		t.Fatal("expected a subscribed fresh item to produce an update")
+	}
+
+	if err := db.Model(&model.Subscription{}).
+		Where("id = ?", subscription.ID).
+		Update("is_muted", true).Error; err != nil {
+		t.Fatalf("mute subscribed source: %v", err)
+	}
+	hasUpdates, err = service.HasExternalFeedUpdates(user, FeedQuery{}, since)
+	if err != nil {
+		t.Fatalf("check muted subscription updates: %v", err)
+	}
+	if hasUpdates {
+		t.Fatal("muted sources must not produce a global timeline update")
+	}
+
+	hasUpdates, err = service.HasExternalFeedUpdates(user, FeedQuery{SourceID: subscription.ID}, since)
+	if err != nil {
+		t.Fatalf("check muted source updates: %v", err)
+	}
+	if !hasUpdates {
+		t.Fatal("a single source timeline must continue to report its own updates")
+	}
+}
+
 func TestSyncSubscriptionChecksOwnershipAndReturnsSyncResult(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	var source model.FeedSource

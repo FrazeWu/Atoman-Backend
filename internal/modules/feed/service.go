@@ -116,6 +116,37 @@ func (s *Service) SyncAllSubscriptions(user authctx.CurrentUser) (SubscriptionSy
 	return summary, nil
 }
 
+func (s *Service) HasExternalFeedUpdates(user authctx.CurrentUser, query FeedQuery, since time.Time) (bool, error) {
+	if user.ID == uuid.Nil {
+		return false, apperr.Unauthorized("Login required")
+	}
+	query.SourceType = "external_rss"
+	subscriptions, err := s.repo.ListSubscriptionsWithSources(user.ID, query)
+	if err != nil {
+		return false, err
+	}
+	sourceIDs := make([]uuid.UUID, 0, len(subscriptions))
+	for _, subscription := range subscriptions {
+		if query.SourceID == uuid.Nil && subscription.IsMuted {
+			continue
+		}
+		if subscription.FeedSource != nil && subscription.FeedSource.SourceType == "external_rss" {
+			sourceIDs = append(sourceIDs, subscription.FeedSourceID)
+		}
+	}
+	sourceIDs = dedupeUUIDs(sourceIDs)
+	if len(sourceIDs) == 0 {
+		return false, nil
+	}
+	var count int64
+	if err := s.db.Model(&model.FeedItem{}).
+		Where("feed_source_id IN ? AND fetched_at > ?", sourceIDs, since).
+		Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (s *Service) syncLoadedSubscription(subscription model.Subscription) (SubscriptionSyncResult, error) {
 	result := SubscriptionSyncResult{
 		SubscriptionID: subscription.ID,

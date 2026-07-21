@@ -40,7 +40,17 @@ type TimelinePostDTO struct {
 
 type TimelineListResponseDTO struct {
 	Data []TimelineItemDTO `json:"data"`
-	Meta httpx.PageMeta    `json:"meta"`
+	Meta TimelineMeta      `json:"meta"`
+}
+
+type TimelineMeta struct {
+	httpx.PageMeta
+	CheckedAt time.Time `json:"checked_at"`
+}
+
+type TimelineUpdatesResponse struct {
+	HasUpdates bool      `json:"has_updates"`
+	CheckedAt  time.Time `json:"checked_at"`
 }
 
 type ToggleStateDTO struct {

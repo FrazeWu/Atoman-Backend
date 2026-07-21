@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"atoman/internal/middleware"
 	studioapi "atoman/internal/modules/studio"
@@ -43,6 +44,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/timeline/mark-unread", h.markUnread)
 		protected.POST("/timeline/mark-all-read", h.markAllRead)
 		protected.POST("/timeline/mark-all-unread", h.markAllUnread)
+		protected.GET("/timeline/updates", h.getTimelineUpdates)
 		protected.POST("/timeline/star", h.toggleStar)
 		protected.POST("/events/read", h.recordReadEvent)
 		protected.GET("/reading-list", h.listReadingList)
@@ -166,6 +168,7 @@ func (h *Handler) syncAllSubscriptions(c *gin.Context) {
 // @Router /api/v1/feed/timeline [get]
 func (h *Handler) getSubscribedFeed(c *gin.Context) {
 	user, _ := authctx.Current(c)
+	checkedAt := time.Now().UTC()
 	query, err := queryFromContext(c)
 	if err != nil {
 		httpx.Error(c, err)
@@ -182,7 +185,7 @@ func (h *Handler) getSubscribedFeed(c *gin.Context) {
 			httpx.Error(c, err)
 			return
 		}
-		httpx.List(c, items, normalizedPageFromQuery(c), normalizedPageSizeFromQuery(c), total)
+		writeTimelineList(c, items, normalizedPageFromQuery(c), normalizedPageSizeFromQuery(c), total, checkedAt)
 		return
 	}
 	items, total, err := h.service.GetSubscribedFeed(user, query)
@@ -190,7 +193,63 @@ func (h *Handler) getSubscribedFeed(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.List(c, items, normalizedPageFromQuery(c), normalizedPageSizeFromQuery(c), total)
+	writeTimelineList(c, items, normalizedPageFromQuery(c), normalizedPageSizeFromQuery(c), total, checkedAt)
+}
+
+// getTimelineUpdates godoc
+// @Summary 检查订阅时间线更新
+// @Description 检查当前用户订阅的外部 RSS 是否在指定游标后产生新内容。
+// @Tags feed
+// @Produce json
+// @Param since query string false "上次服务端检查时间（RFC3339）"
+// @Param source_id query string false "订阅 UUID"
+// @Param group_id query string false "分组 UUID"
+// @Success 200 {object} TimelineUpdatesResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/timeline/updates [get]
+func (h *Handler) getTimelineUpdates(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	checkedAt := time.Now().UTC()
+	rawSince := strings.TrimSpace(c.Query("since"))
+	if rawSince == "" {
+		httpx.OK(c, http.StatusOK, TimelineUpdatesResponse{CheckedAt: checkedAt})
+		return
+	}
+	since, err := time.Parse(time.RFC3339Nano, rawSince)
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "since must be an RFC3339 timestamp"))
+		return
+	}
+	query, err := queryFromContext(c)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	hasUpdates, err := h.service.HasExternalFeedUpdates(user, query, since)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, TimelineUpdatesResponse{HasUpdates: hasUpdates, CheckedAt: checkedAt})
+}
+
+func writeTimelineList(c *gin.Context, items []TimelineItemDTO, page, pageSize int, total int64, checkedAt time.Time) {
+	httpx.OKMeta(c, http.StatusOK, items, TimelineMeta{
+		PageMeta: httpx.PageMeta{
+			Page:     page,
+			PageSize: pageSize,
+			Total:    total,
+			HasMore:  int64(page*pageSize) < total,
+		},
+		CheckedAt: checkedAt,
+	})
 }
 
 func (h *Handler) getExploreFeed(c *gin.Context) {
