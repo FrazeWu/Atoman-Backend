@@ -39,8 +39,17 @@ func main() {
 	worker := music.NewImportWorker(db, store, workerIDFromEnv())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if err := runWorker(ctx, worker, nil); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runWorker(ctx context.Context, worker *music.ImportWorker, processor music.ImportProcessor) error {
+	if processor == nil {
+		return errors.New("music import processor is not configured")
+	}
 	for {
-		processed, err := worker.RunOnce(ctx, nil)
+		processed, err := worker.RunOnce(ctx, processor)
 		if err != nil {
 			log.Printf("music import worker: %v", err)
 		}
@@ -49,7 +58,7 @@ func main() {
 		}
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-time.After(5 * time.Second):
 		}
 	}
