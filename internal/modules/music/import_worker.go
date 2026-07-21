@@ -34,14 +34,15 @@ type ImportProcessor interface {
 }
 
 type ImportWorker struct {
-	db       *gorm.DB
-	store    MusicImportObjectStore
-	workerID string
-	now      func() time.Time
+	db                *gorm.DB
+	store             MusicImportObjectStore
+	workerID          string
+	now               func() time.Time
+	heartbeatInterval time.Duration
 }
 
 func NewImportWorker(db *gorm.DB, store MusicImportObjectStore, workerID string) *ImportWorker {
-	return &ImportWorker{db: db, store: store, workerID: strings.TrimSpace(workerID), now: func() time.Time { return time.Now().UTC() }}
+	return &ImportWorker{db: db, store: store, workerID: strings.TrimSpace(workerID), now: func() time.Time { return time.Now().UTC() }, heartbeatInterval: 30 * time.Second}
 }
 
 func (w *ImportWorker) Claim(ctx context.Context) (model.AlbumImportJob, bool, error) {
@@ -180,25 +181,45 @@ func (w *ImportWorker) RunOnce(ctx context.Context, processor ImportProcessor) (
 	if err := w.CleanupExpired(ctx); err != nil {
 		return false, err
 	}
+	if processor == nil {
+		return false, nil
+	}
 	job, ok, err := w.Claim(ctx)
 	if err != nil || !ok {
 		return false, err
 	}
-	if processor == nil {
-		// The command may run before media support ships: put the job back untouched.
-		result := w.db.WithContext(ctx).Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND locked_by = ?", job.ID, AlbumImportJobStatusRunning, w.workerID).Updates(map[string]any{"status": AlbumImportJobStatusQueued, "stage": AlbumImportStageQueued, "attempts": gorm.Expr("attempts - 1"), "locked_by": "", "locked_at": nil, "heartbeat_at": nil})
-		if result.Error != nil {
-			return false, result.Error
-		}
-		if result.RowsAffected == 0 {
-			return false, errors.New("music import job is not held by this worker")
-		}
-		return false, nil
-	}
-	if err := processor.Process(ctx, job, func() error { return w.Heartbeat(ctx, job.ID) }); err != nil {
+	if err := w.processWithHeartbeat(ctx, processor, job); err != nil {
 		return true, w.Retry(ctx, job.ID, err)
 	}
 	return true, w.Complete(ctx, job.ID)
+}
+
+func (w *ImportWorker) processWithHeartbeat(ctx context.Context, processor ImportProcessor, job model.AlbumImportJob) error {
+	interval := w.heartbeatInterval
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+	ticker := time.NewTicker(interval)
+	done := make(chan struct{})
+	heartbeatDone := make(chan struct{})
+	go func() {
+		defer close(heartbeatDone)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_ = w.Heartbeat(ctx, job.ID)
+			}
+		}
+	}()
+	err := processor.Process(ctx, job, func() error { return w.Heartbeat(ctx, job.ID) })
+	close(done)
+	<-heartbeatDone
+	return err
 }
 
 func (w *ImportWorker) CleanupExpired(ctx context.Context) error {

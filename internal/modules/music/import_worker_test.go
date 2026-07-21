@@ -225,8 +225,33 @@ func TestImportWorkerRunOnceWithoutProcessorDoesNotConsumeAttempt(t *testing.T) 
 	if err := db.First(&stored, "id = ?", job.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status != AlbumImportJobStatusQueued || stored.Attempts != 0 || stored.NextAttemptAt != nil {
+	if stored.Status != AlbumImportJobStatusQueued || stored.Attempts != 0 || stored.NextAttemptAt != nil || stored.StartedAt != nil {
 		t.Fatalf("placeholder consumed job: %#v", stored)
+	}
+}
+
+func TestImportWorkerRunOnceWithoutProcessorStillCleansExpiredSession(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	expires := time.Now().UTC().Add(-time.Minute)
+	session := model.AlbumImportSession{Status: AlbumImportStatusCanceled, ExpiresAt: &expires, PayloadJSON: `{"cleanup_targets":[{"action":"delete","key":"expired"}]}`}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := &importWorkerStore{}
+	processed, err := NewImportWorker(db, store, "worker").RunOnce(context.Background(), nil)
+	if err != nil || processed {
+		t.Fatalf("run once: processed=%v err=%v", processed, err)
+	}
+	if len(store.deleted) != 1 || store.deleted[0] != "expired" {
+		t.Fatalf("cleanup was skipped: %v", store.deleted)
+	}
+	var stored model.AlbumImportJob
+	if err := db.First(&stored, "id = ?", job.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Attempts != 0 || stored.StartedAt != nil {
+		t.Fatalf("nil processor claimed job: %#v", stored)
 	}
 }
 
@@ -351,5 +376,32 @@ func TestImportWorkerProcessorReceivesWorkingHeartbeat(t *testing.T) {
 	}
 	if stored.HeartbeatAt == nil {
 		t.Fatal("processor heartbeat did not update lease")
+	}
+}
+
+func TestImportWorkerAutomaticallyHeartbeatsBlockingProcessor(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	w := NewImportWorker(db, nil, "worker")
+	w.heartbeatInterval = 5 * time.Millisecond
+	processor := importProcessorFunc(func(ctx context.Context, claimed model.AlbumImportJob, heartbeat func() error) error {
+		if err := db.Model(&model.AlbumImportJob{}).Where("id = ?", claimed.ID).Update("heartbeat_at", nil).Error; err != nil {
+			return err
+		}
+		deadline := time.Now().Add(time.Second)
+		for time.Now().Before(deadline) {
+			var job model.AlbumImportJob
+			if err := db.First(&job, "id = ?", claimed.ID).Error; err != nil {
+				return err
+			}
+			if job.HeartbeatAt != nil {
+				return nil
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		return errors.New("automatic heartbeat was not written")
+	})
+	if _, err := w.RunOnce(context.Background(), processor); err != nil {
+		t.Fatal(err)
 	}
 }

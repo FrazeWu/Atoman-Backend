@@ -39,14 +39,18 @@ func main() {
 	worker := music.NewImportWorker(db, store, workerIDFromEnv())
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := runWorker(ctx, worker, nil); err != nil {
+	if err := runWorker(ctx, worker, nil, workerPollIntervalFromEnv()); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func runWorker(ctx context.Context, worker *music.ImportWorker, processor music.ImportProcessor) error {
-	if processor == nil {
-		return errors.New("music import processor is not configured")
+type workerRunner interface {
+	RunOnce(context.Context, music.ImportProcessor) (bool, error)
+}
+
+func runWorker(ctx context.Context, worker workerRunner, processor music.ImportProcessor, pollInterval time.Duration) error {
+	if pollInterval <= 0 {
+		pollInterval = 5 * time.Second
 	}
 	for {
 		processed, err := worker.RunOnce(ctx, processor)
@@ -59,9 +63,21 @@ func runWorker(ctx context.Context, worker *music.ImportWorker, processor music.
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(5 * time.Second):
+		case <-time.After(pollInterval):
 		}
 	}
+}
+
+func workerPollIntervalFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("MUSIC_IMPORT_WORKER_POLL_INTERVAL"))
+	if raw == "" {
+		return 5 * time.Second
+	}
+	interval, err := time.ParseDuration(raw)
+	if err != nil || interval <= 0 {
+		return 5 * time.Second
+	}
+	return interval
 }
 
 func requiredWorkerConfig() error {
