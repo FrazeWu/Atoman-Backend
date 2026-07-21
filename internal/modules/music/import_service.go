@@ -189,15 +189,15 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 	limited := &albumImportLimitedReader{reader: reader, limit: albumImportUploadLimitsFromEnv().MaxFileBytes}
 	err := s.albumImportMultipart.PutObject(objectKey, "application/zip", limited)
 	if err != nil {
-		_ = s.albumImportMultipart.DeleteObject(objectKey)
+		s.deleteAlbumImportSessionObjectOrRecord(id, objectKey)
 		return model.AlbumImportSession{}, err
 	}
 	if limited.exceeded {
-		_ = s.albumImportMultipart.DeleteObject(objectKey)
+		s.deleteAlbumImportSessionObjectOrRecord(id, objectKey)
 		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive file size is invalid")
 	}
 	if limited.count <= 0 {
-		_ = s.albumImportMultipart.DeleteObject(objectKey)
+		s.deleteAlbumImportSessionObjectOrRecord(id, objectKey)
 		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive file size is invalid")
 	}
 
@@ -232,10 +232,16 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 		return nil
 	})
 	if err != nil {
-		_ = s.albumImportMultipart.DeleteObject(objectKey)
+		s.deleteAlbumImportSessionObjectOrRecord(id, objectKey)
 		return model.AlbumImportSession{}, err
 	}
 	return out, nil
+}
+
+func (s *Service) deleteAlbumImportSessionObjectOrRecord(sessionID uuid.UUID, key string) {
+	if err := s.albumImportMultipart.DeleteObject(key); err != nil {
+		_ = recordAlbumImportSessionCleanupTarget(s.db, sessionID, albumImportCleanupTarget{Action: "delete", Key: key})
+	}
 }
 
 type albumImportLimitedReader struct {

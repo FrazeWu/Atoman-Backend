@@ -1333,6 +1333,26 @@ func TestUploadAlbumImportArchiveRejectsNonZipAndEmptyStreamsBeforeQueuing(t *te
 	}
 }
 
+func TestUploadAlbumImportArchiveRecordsCleanupWhenEmptyStreamDeleteFails(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{deleteErr: errors.New("delete failed")}
+	svc.albumImportMultipart = store
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.UploadAlbumImportArchive(user, session.ID, "album.zip", strings.NewReader("")); err == nil {
+		t.Fatal("expected empty stream error")
+	}
+	var persisted model.AlbumImportSession
+	if err := db.First(&persisted, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(persisted.PayloadJSON, "cleanup_targets") || len(store.deletedKeys) != 1 || !strings.Contains(persisted.PayloadJSON, store.deletedKeys[0]) {
+		t.Fatalf("failed delete was not recorded: session=%s store=%#v", persisted.PayloadJSON, store)
+	}
+}
+
 func TestUploadAlbumImportArchiveQueuesCoverSourceWithoutDeriving(t *testing.T) {
 	testQueuedArchiveUploadContract(t, AlbumImportPayload{Artist: AlbumImportArtistPayload{Name: "Burial"}}, "Untrue.zip", map[string]string{"cover.jpg": "cover-bytes"})
 	return
