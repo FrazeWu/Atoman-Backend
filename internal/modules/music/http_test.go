@@ -1369,6 +1369,47 @@ func TestRegisterRoutesCreateAlbumImportSessionSupportsArchiveUpload(t *testing.
 	}
 }
 
+func TestArchiveUploadRouteRejectsMultipartBodyOverLimitBeforeStorage(t *testing.T) {
+	t.Setenv(albumImportMaxFileBytesEnv, "64")
+	service, db, user := newMusicHTTPTestService(t)
+	store := &fakeAlbumImportMultipartStore{}
+	service.albumImportMultipart = store
+	session, err := service.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("archive", "album.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(bytes.Repeat([]byte("x"), 1024*1024+128)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+session.ID.String()+"/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected oversized request rejection, got %d: %s", w.Code, w.Body.String())
+	}
+	var jobs, files int64
+	if err := db.Model(&model.AlbumImportJob{}).Where("import_id = ?", session.ID).Count(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.AlbumImportFile{}).Where("import_id = ?", session.ID).Count(&files).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(store.objectBody) != 0 || jobs != 0 || files != 0 {
+		t.Fatalf("handler must reject before storage: body=%d jobs=%d files=%d", len(store.objectBody), jobs, files)
+	}
+}
+
 func TestRegisterRoutesAlbumImportGetRequiresCurrentUser(t *testing.T) {
 	service, _, owner := newMusicHTTPTestService(t)
 	session, err := service.CreateAlbumImportSession(owner, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload})
