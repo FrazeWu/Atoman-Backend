@@ -103,6 +103,46 @@ func TestImportWorkerClaimDoesNotDuplicateJob(t *testing.T) {
 	}
 }
 
+func TestImportWorkerClaimRecoversExpiredLease(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	expired := time.Now().UTC().Add(-time.Hour)
+	if err := db.Model(&model.AlbumImportJob{}).Where("id = ?", job.ID).Updates(map[string]any{"status": AlbumImportJobStatusRunning, "locked_by": "crashed", "locked_at": expired, "heartbeat_at": expired, "attempts": 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	w := NewImportWorker(db, nil, "replacement")
+	w.leaseTimeout = time.Minute
+	claimed, ok, err := w.Claim(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("claim recovered lease: ok=%v err=%v", ok, err)
+	}
+	if claimed.ID != job.ID || claimed.Attempts != 2 || claimed.LockedBy != "replacement" {
+		t.Fatalf("unexpected reclaimed job: %#v", claimed)
+	}
+}
+
+func TestImportWorkerLeaseRecoveryFailsAtAttemptLimit(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	expired := time.Now().UTC().Add(-time.Hour)
+	if err := db.Model(&model.AlbumImportJob{}).Where("id = ?", job.ID).Updates(map[string]any{"status": AlbumImportJobStatusRunning, "locked_by": "crashed", "locked_at": expired, "heartbeat_at": expired, "attempts": 2, "max_attempts": 2}).Error; err != nil {
+		t.Fatal(err)
+	}
+	w := NewImportWorker(db, nil, "replacement")
+	w.leaseTimeout = time.Minute
+	_, ok, err := w.Claim(context.Background())
+	if err != nil || ok {
+		t.Fatalf("limited lease claim: ok=%v err=%v", ok, err)
+	}
+	var stored model.AlbumImportJob
+	var session model.AlbumImportSession
+	_ = db.First(&stored, "id = ?", job.ID).Error
+	_ = db.First(&session, "id = ?", job.ImportID).Error
+	if stored.Status != AlbumImportJobStatusFailed || stored.LockedBy != "" || session.Status != AlbumImportStatusNeedsAttention {
+		t.Fatalf("expired lease not failed: job=%#v session=%#v", stored, session)
+	}
+}
+
 func TestImportWorkerDoesNotClaimCanceledSession(t *testing.T) {
 	db := newImportWorkerTestDB(t)
 	createImportWorkerJob(t, db, AlbumImportStatusCanceled)
@@ -210,6 +250,34 @@ func TestImportWorkerCleanupRemovesCanceledFileSourceWithoutRecordedTarget(t *te
 	}
 	if len(store.deleted) != 1 || store.deleted[0] != "uploaded.flac" {
 		t.Fatalf("source object was not deleted: %v", store.deleted)
+	}
+}
+
+func TestImportWorkerCleanupSkipsSessionCommittedAfterScan(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	expires := time.Now().UTC().Add(-time.Minute)
+	session := model.AlbumImportSession{Status: AlbumImportStatusCanceled, ExpiresAt: &expires, PayloadJSON: `{"cleanup_targets":[{"action":"delete","key":"must-keep"}]}`}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := &importWorkerStore{}
+	w := NewImportWorker(db, store, "worker")
+	w.beforeCleanupSession = func(id uuid.UUID) {
+		committed := time.Now().UTC()
+		_ = db.Model(&model.AlbumImportSession{}).Where("id = ?", id).Updates(map[string]any{"committed_at": committed, "status": AlbumImportStatusCommitted}).Error
+	}
+	if err := w.CleanupExpired(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.deleted) != 0 {
+		t.Fatalf("committed source was deleted: %v", store.deleted)
+	}
+	var retained model.AlbumImportSession
+	if err := db.First(&retained, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if retained.CommittedAt == nil {
+		t.Fatal("session commit was lost")
 	}
 }
 

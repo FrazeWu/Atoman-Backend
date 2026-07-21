@@ -34,15 +34,17 @@ type ImportProcessor interface {
 }
 
 type ImportWorker struct {
-	db                *gorm.DB
-	store             MusicImportObjectStore
-	workerID          string
-	now               func() time.Time
-	heartbeatInterval time.Duration
+	db                   *gorm.DB
+	store                MusicImportObjectStore
+	workerID             string
+	now                  func() time.Time
+	heartbeatInterval    time.Duration
+	leaseTimeout         time.Duration
+	beforeCleanupSession func(uuid.UUID)
 }
 
 func NewImportWorker(db *gorm.DB, store MusicImportObjectStore, workerID string) *ImportWorker {
-	return &ImportWorker{db: db, store: store, workerID: strings.TrimSpace(workerID), now: func() time.Time { return time.Now().UTC() }, heartbeatInterval: 30 * time.Second}
+	return &ImportWorker{db: db, store: store, workerID: strings.TrimSpace(workerID), now: func() time.Time { return time.Now().UTC() }, heartbeatInterval: 30 * time.Second, leaseTimeout: 5 * time.Minute}
 }
 
 func (w *ImportWorker) Claim(ctx context.Context) (model.AlbumImportJob, bool, error) {
@@ -53,6 +55,9 @@ func (w *ImportWorker) Claim(ctx context.Context) (model.AlbumImportJob, bool, e
 		return model.AlbumImportJob{}, false, errors.New("music import worker id is required")
 	}
 	now := w.now()
+	if err := w.recoverExpiredLeases(ctx, now); err != nil {
+		return model.AlbumImportJob{}, false, err
+	}
 	var candidates []model.AlbumImportJob
 	err := w.db.WithContext(ctx).Where("status = ? AND (next_attempt_at IS NULL OR next_attempt_at <= ?)", AlbumImportJobStatusQueued, now).Order("created_at ASC").Limit(16).Find(&candidates).Error
 	if err != nil {
@@ -76,6 +81,56 @@ func (w *ImportWorker) Claim(ctx context.Context) (model.AlbumImportJob, bool, e
 		return claimed, true, nil
 	}
 	return model.AlbumImportJob{}, false, nil
+}
+
+func (w *ImportWorker) recoverExpiredLeases(ctx context.Context, now time.Time) error {
+	timeout := w.leaseTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	cutoff := now.Add(-timeout)
+	var jobs []model.AlbumImportJob
+	if err := w.db.WithContext(ctx).Where("status = ? AND ((heartbeat_at IS NOT NULL AND heartbeat_at <= ?) OR (heartbeat_at IS NULL AND locked_at <= ?))", AlbumImportJobStatusRunning, cutoff, cutoff).Find(&jobs).Error; err != nil {
+		return err
+	}
+	for _, candidate := range jobs {
+		if err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var job model.AlbumImportJob
+			if err := tx.First(&job, "id = ?", candidate.ID).Error; err != nil {
+				return err
+			}
+			if job.Status != AlbumImportJobStatusRunning || (!leaseExpired(job, cutoff)) {
+				return nil
+			}
+			var session model.AlbumImportSession
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status IN ?", job.ImportID, activeImportSessionStatuses).First(&session).Error; err != nil {
+				return nil
+			}
+			if job.Attempts >= job.MaxAttempts {
+				expires := now.Add(importWorkerRetention)
+				result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND ((heartbeat_at IS NOT NULL AND heartbeat_at <= ?) OR (heartbeat_at IS NULL AND locked_at <= ?))", job.ID, AlbumImportJobStatusRunning, cutoff, cutoff).Updates(map[string]any{"status": AlbumImportJobStatusFailed, "stage": AlbumImportStageFailed, "last_error": "worker lease expired", "locked_by": "", "locked_at": nil, "heartbeat_at": nil, "finished_at": now})
+				if result.Error != nil || result.RowsAffected == 0 {
+					return result.Error
+				}
+				return tx.Model(&model.AlbumImportSession{}).Where("id = ? AND status IN ?", session.ID, activeImportSessionStatuses).Updates(map[string]any{"status": AlbumImportStatusNeedsAttention, "stage": AlbumImportStageFailed, "error_message": "worker lease expired", "expires_at": expires}).Error
+			}
+			result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND ((heartbeat_at IS NOT NULL AND heartbeat_at <= ?) OR (heartbeat_at IS NULL AND locked_at <= ?))", job.ID, AlbumImportJobStatusRunning, cutoff, cutoff).Updates(map[string]any{"status": AlbumImportJobStatusQueued, "stage": AlbumImportStageQueued, "locked_by": "", "locked_at": nil, "heartbeat_at": nil, "next_attempt_at": now})
+			if result.Error != nil || result.RowsAffected == 0 {
+				return result.Error
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func leaseExpired(job model.AlbumImportJob, cutoff time.Time) bool {
+	if job.HeartbeatAt != nil {
+		return !job.HeartbeatAt.After(cutoff)
+	}
+	return job.LockedAt != nil && !job.LockedAt.After(cutoff)
 }
 
 func (w *ImportWorker) Heartbeat(ctx context.Context, jobID uuid.UUID) error {
@@ -235,17 +290,39 @@ func (w *ImportWorker) CleanupExpired(ctx context.Context) error {
 		return err
 	}
 	for _, session := range sessions {
-		if err := w.cleanupSession(ctx, &session); err != nil {
+		if w.beforeCleanupSession != nil {
+			w.beforeCleanupSession(session.ID)
+		}
+		var cleanupErr error
+		if err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var locked model.AlbumImportSession
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Files").Where("id = ? AND expires_at <= ? AND committed_at IS NULL", session.ID, now).First(&locked).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if err := w.cleanupSession(ctx, tx, &locked); err != nil {
+				cleanupErr = err
+				return nil
+			}
+			result := tx.Where("id = ? AND committed_at IS NULL", locked.ID).Delete(&model.AlbumImportSession{})
+			if result.Error != nil {
+				return result.Error
+			}
+			return nil
+		}); err != nil {
 			return fmt.Errorf("clean up import %s: %w", session.ID, err)
 		}
-		if err := w.db.WithContext(ctx).Delete(&session).Error; err != nil {
-			return err
+		if cleanupErr != nil {
+			return fmt.Errorf("clean up import %s: %w", session.ID, cleanupErr)
 		}
 	}
 	return nil
 }
 
-func (w *ImportWorker) cleanupSession(ctx context.Context, session *model.AlbumImportSession) error {
+func (w *ImportWorker) cleanupSession(ctx context.Context, db *gorm.DB, session *model.AlbumImportSession) error {
 	payload, targets, err := cleanupPayload(session.PayloadJSON)
 	if err != nil {
 		return err
@@ -261,7 +338,7 @@ func (w *ImportWorker) cleanupSession(ctx context.Context, session *model.AlbumI
 		if err != nil {
 			return err
 		}
-		if err := w.db.WithContext(ctx).Model(session).Update("payload_json", string(encoded)).Error; err != nil {
+		if err := db.WithContext(ctx).Model(session).Update("payload_json", string(encoded)).Error; err != nil {
 			return err
 		}
 		session.PayloadJSON = string(encoded)
@@ -284,12 +361,12 @@ func (w *ImportWorker) cleanupSession(ctx context.Context, session *model.AlbumI
 			if err != nil {
 				return err
 			}
-			if err := w.db.WithContext(ctx).Model(file).Update("cleanup_json", string(encoded)).Error; err != nil {
+			if err := db.WithContext(ctx).Model(file).Update("cleanup_json", string(encoded)).Error; err != nil {
 				return err
 			}
 			file.CleanupJSON = string(encoded)
 			if completed.Key == file.SourceKey && (completed.Action == "delete" || completed.Action == "abort") {
-				if err := w.db.WithContext(ctx).Model(file).Updates(map[string]any{"source_key": "", "upload_id": ""}).Error; err != nil {
+				if err := db.WithContext(ctx).Model(file).Updates(map[string]any{"source_key": "", "upload_id": ""}).Error; err != nil {
 					return err
 				}
 				file.SourceKey, file.UploadID = "", ""
@@ -299,7 +376,7 @@ func (w *ImportWorker) cleanupSession(ctx context.Context, session *model.AlbumI
 			if err := cleanupTarget(w.store, importCleanupTarget{Action: "delete", Key: file.SourceKey}); err != nil {
 				return err
 			}
-			if err := w.db.WithContext(ctx).Model(file).Update("source_key", "").Error; err != nil {
+			if err := db.WithContext(ctx).Model(file).Update("source_key", "").Error; err != nil {
 				return err
 			}
 			file.SourceKey = ""
@@ -307,7 +384,7 @@ func (w *ImportWorker) cleanupSession(ctx context.Context, session *model.AlbumI
 			if err := cleanupTarget(w.store, importCleanupTarget{Action: "abort", Key: file.SourceKey, UploadID: file.UploadID}); err != nil {
 				return err
 			}
-			if err := w.db.WithContext(ctx).Model(file).Updates(map[string]any{"source_key": "", "upload_id": ""}).Error; err != nil {
+			if err := db.WithContext(ctx).Model(file).Updates(map[string]any{"source_key": "", "upload_id": ""}).Error; err != nil {
 				return err
 			}
 			file.SourceKey, file.UploadID = "", ""
