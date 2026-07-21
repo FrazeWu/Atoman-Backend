@@ -243,7 +243,49 @@ func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UU
 	}
 
 	var out AlbumImportMultipartDTO
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	var createdUpload *model.AlbumImportFile
+	var overwrittenUpload *model.AlbumImportFile
+	var preparedArchiveID uuid.UUID
+	var preparedObjectKey, preparedUploadID, preparedContentType string
+	preflight, err := s.GetAlbumImportSessionForUser(user, id)
+	if err != nil {
+		return AlbumImportMultipartDTO{}, err
+	}
+	if !isAlbumImportMultipartStartStatus(preflight.Status) {
+		return AlbumImportMultipartDTO{}, apperr.Unprocessable("music.import_invalid_status", "Import session cannot start upload")
+	}
+	preflightPayload, err := readAlbumImportPayloadMap(preflight.PayloadJSON)
+	if err != nil {
+		return AlbumImportMultipartDTO{}, err
+	}
+	preflightState := albumImportMultipartStateFromPayload(preflightPayload)
+	var preflightArchive *model.AlbumImportFile
+	for index := range preflight.Files {
+		if preflight.Files[index].Role == AlbumImportFileRoleArchive {
+			preflightArchive = &preflight.Files[index]
+			break
+		}
+	}
+	if preflightArchive != nil && preflightArchive.UploadStatus == AlbumImportFileUploadStatusCompleting {
+		return AlbumImportMultipartDTO{}, apperr.Unprocessable("music.import_invalid_status", "Album import file is completing upload")
+	}
+	if !(preflightState.FileName == fileName && preflightState.FileSize == input.FileSize && preflightState.UploadID != "" && preflightState.ObjectKey != "") {
+		preparedArchiveID = uuid.New()
+		if preflightArchive != nil {
+			preparedArchiveID = preflightArchive.ID
+		}
+		preparedObjectKey = albumImportSourceKey(user.ID, id, preparedArchiveID, "zip")
+		preparedContentType = strings.TrimSpace(input.ContentType)
+		if preparedContentType == "" {
+			preparedContentType = "application/zip"
+		}
+		preparedUploadID, err = s.albumImportMultipart.CreateMultipartUpload(preparedObjectKey, preparedContentType)
+		if err != nil {
+			return AlbumImportMultipartDTO{}, err
+		}
+		createdUpload = &model.AlbumImportFile{SourceKey: preparedObjectKey, UploadID: preparedUploadID}
+	}
+	err = s.db.Transaction(func(tx *gorm.DB) error {
 		session, err := loadAlbumImportSessionForUpdate(tx, id, user.ID)
 		if err != nil {
 			return err
@@ -262,7 +304,10 @@ func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UU
 			return fileErr
 		}
 		if fileErr == gorm.ErrRecordNotFound {
-			archiveFile.ID = uuid.New()
+			archiveFile.ID = preparedArchiveID
+		}
+		if fileErr == nil && archiveFile.UploadStatus == AlbumImportFileUploadStatusCompleting {
+			return apperr.Unprocessable("music.import_invalid_status", "Album import file is completing upload")
 		}
 		state := albumImportMultipartStateFromPayload(payload)
 		if state.FileName == fileName && state.FileSize == input.FileSize && state.UploadID != "" && state.ObjectKey != "" {
@@ -283,21 +328,16 @@ func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UU
 			out = buildAlbumImportMultipartDTO(session.ID, state)
 			return nil
 		}
+		if fileErr == nil && archiveFile.SourceKey != "" && archiveFile.UploadID != "" {
+			previous := archiveFile
+			overwrittenUpload = &previous
+		}
 
-		objectKey := albumImportSourceKey(user.ID, session.ID, archiveFile.ID, "zip")
-		contentType := strings.TrimSpace(input.ContentType)
-		if contentType == "" {
-			contentType = "application/zip"
-		}
-		uploadID, err := s.albumImportMultipart.CreateMultipartUpload(objectKey, contentType)
-		if err != nil {
-			return err
-		}
 		state = albumImportMultipartState{
 			FileName:       fileName,
 			FileSize:       input.FileSize,
-			ObjectKey:      objectKey,
-			UploadID:       uploadID,
+			ObjectKey:      preparedObjectKey,
+			UploadID:       preparedUploadID,
 			PartSize:       albumImportMultipartPartSize,
 			CompletedParts: []AlbumImportMultipartPartDTO{},
 		}
@@ -312,14 +352,20 @@ func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UU
 		if err := tx.Save(&session).Error; err != nil {
 			return err
 		}
-		if err := saveLegacyAlbumImportFile(tx, &archiveFile, session.ID, state, contentType); err != nil {
+		if err := saveLegacyAlbumImportFile(tx, &archiveFile, session.ID, state, preparedContentType); err != nil {
 			return err
 		}
 		out = buildAlbumImportMultipartDTO(session.ID, state)
 		return nil
 	})
 	if err != nil {
+		if createdUpload != nil {
+			s.abortAlbumImportMultipartOrRecord(id, *createdUpload)
+		}
 		return AlbumImportMultipartDTO{}, err
+	}
+	if overwrittenUpload != nil {
+		s.cleanupAlbumImportObject(*overwrittenUpload)
 	}
 	return out, nil
 }
@@ -487,7 +533,10 @@ func (s *Service) CompleteAlbumImportMultipart(user authctx.CurrentUser, id uuid
 	}
 	if err := s.reconcileAlbumImportObject(upload, parts); err != nil {
 		if errors.Is(err, errAlbumImportObjectSizeMismatch) {
-			_ = s.failLegacyAlbumImportUpload(user.ID, id, upload.ID, payload, "uploaded file size does not match")
+			if err := s.failLegacyAlbumImportUpload(user.ID, id, upload.ID, payload, "uploaded file size does not match"); err != nil {
+				return model.AlbumImportSession{}, err
+			}
+			s.deleteAlbumImportObjectOrRecord(upload)
 			return model.AlbumImportSession{}, apperr.Unprocessable("music.import_file_size_mismatch", "Uploaded file size does not match")
 		}
 		return model.AlbumImportSession{}, err

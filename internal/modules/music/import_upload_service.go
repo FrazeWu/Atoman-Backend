@@ -22,17 +22,20 @@ import (
 const (
 	defaultAlbumImportMaxTotalBytes int64 = 10 * 1024 * 1024 * 1024
 	defaultAlbumImportMaxFileBytes  int64 = 4 * 1024 * 1024 * 1024
-	defaultAlbumImportMaxFiles            = 500
+	defaultAlbumImportMaxFiles            = 5000
+	defaultAlbumImportMaxTracks           = 300
 
 	albumImportMaxTotalBytesEnv = "MUSIC_ALBUM_IMPORT_MAX_TOTAL_BYTES"
 	albumImportMaxFileBytesEnv  = "MUSIC_ALBUM_IMPORT_MAX_FILE_BYTES"
 	albumImportMaxFilesEnv      = "MUSIC_ALBUM_IMPORT_MAX_FILES"
+	albumImportMaxTracksEnv     = "MUSIC_ALBUM_IMPORT_MAX_TRACKS"
 )
 
 type albumImportUploadLimits struct {
 	MaxTotalBytes int64
 	MaxFileBytes  int64
 	MaxFiles      int
+	MaxTracks     int
 }
 
 type normalizedAlbumImportFile struct {
@@ -54,6 +57,7 @@ func albumImportUploadLimitsFromEnv() albumImportUploadLimits {
 		MaxTotalBytes: positiveInt64Env(albumImportMaxTotalBytesEnv, defaultAlbumImportMaxTotalBytes),
 		MaxFileBytes:  positiveInt64Env(albumImportMaxFileBytesEnv, defaultAlbumImportMaxFileBytes),
 		MaxFiles:      int(positiveInt64Env(albumImportMaxFilesEnv, defaultAlbumImportMaxFiles)),
+		MaxTracks:     int(positiveInt64Env(albumImportMaxTracksEnv, defaultAlbumImportMaxTracks)),
 	}
 }
 
@@ -67,7 +71,7 @@ func positiveInt64Env(key string, fallback int64) int64 {
 
 func detectAlbumImportFileRole(fileName string) (string, string, error) {
 	lower := strings.ToLower(strings.TrimSpace(fileName))
-	archives := []string{"tar.bz2", "tar.gz", "tar.xz", "tbz2", "tgz", "txz", "zip", "rar", "7z", "tar"}
+	archives := []string{"tar.bz2", "tar.gz", "tar.xz", "tgz", "zip", "rar", "7z", "tar"}
 	for _, format := range archives {
 		if strings.HasSuffix(lower, "."+format) {
 			return AlbumImportFileRoleArchive, format, nil
@@ -75,7 +79,7 @@ func detectAlbumImportFileRole(fileName string) (string, string, error) {
 	}
 	audio := map[string]bool{
 		"mp3": true, "flac": true, "wav": true, "m4a": true, "aac": true, "ogg": true,
-		"opus": true, "aiff": true, "aif": true, "wma": true, "ape": true,
+		"opus": true, "aiff": true, "aif": true, "wma": true, "ape": true, "alac": true,
 	}
 	covers := map[string]bool{
 		"jpg": true, "jpeg": true, "png": true, "webp": true, "avif": true,
@@ -103,6 +107,8 @@ func normalizeAlbumImportFiles(input []AlbumImportFileInput, limits albumImportU
 	var totalSize int64
 	hasFolder := false
 	archiveCount := 0
+	trackCount := 0
+	folderRoot := ""
 	for _, raw := range input {
 		fileName := strings.TrimSpace(raw.FileName)
 		relativePath := strings.ReplaceAll(strings.TrimSpace(raw.RelativePath), `\`, "/")
@@ -130,6 +136,11 @@ func normalizeAlbumImportFiles(input []AlbumImportFileInput, limits albumImportU
 		}
 		if role == AlbumImportFileRoleArchive {
 			archiveCount++
+		} else if role == AlbumImportFileRoleAudio {
+			trackCount++
+			if trackCount > limits.MaxTracks {
+				return nil, "", apperr.BadRequest("validation.invalid_request", "album import track count is invalid")
+			}
 		}
 		totalSize += raw.FileSize
 		hasFolder = hasFolder || strings.Contains(relativePath, "/")
@@ -151,6 +162,17 @@ func normalizeAlbumImportFiles(input []AlbumImportFileInput, limits albumImportU
 		return files, AlbumImportInputModeArchive, nil
 	}
 	if hasFolder {
+		for _, file := range files {
+			segments := strings.Split(file.RelativePath, "/")
+			if len(segments) < 2 {
+				return nil, "", apperr.BadRequest("validation.invalid_request", "folder import must use one album root")
+			}
+			if folderRoot == "" {
+				folderRoot = segments[0]
+			} else if segments[0] != folderRoot {
+				return nil, "", apperr.BadRequest("validation.invalid_request", "folder import must use one album root")
+			}
+		}
 		return files, AlbumImportInputModeFolder, nil
 	}
 	return files, AlbumImportInputModeFiles, nil
@@ -190,7 +212,6 @@ func (s *Service) RegisterAlbumImportFiles(user authctx.CurrentUser, id uuid.UUI
 			return apperr.Unprocessable("music.import_invalid_status", "Import session cannot register files")
 		}
 
-		var totalSize int64
 		for _, descriptor := range files {
 			file := model.AlbumImportFile{
 				ImportID:           session.ID,
@@ -209,21 +230,61 @@ func (s *Service) RegisterAlbumImportFiles(user authctx.CurrentUser, id uuid.UUI
 			}
 			file.ID = uuid.New()
 			file.SourceKey = albumImportSourceKey(user.ID, session.ID, file.ID, descriptor.Format)
-			contentType := descriptor.ContentType
-			if contentType == "" {
-				contentType = "application/octet-stream"
-			}
-			file.UploadID, err = s.albumImportMultipart.CreateMultipartUpload(file.SourceKey, contentType)
-			if err != nil {
-				return err
-			}
-			createdUploads = append(createdUploads, file)
 			if err := tx.Create(&file).Error; err != nil {
 				return err
 			}
-			totalSize += file.Size
+			createdUploads = append(createdUploads, file)
 		}
 		session.InputMode = inputMode
+		session.Stage = AlbumImportStageUpload
+		session.ProgressCurrent = 0
+		session.ProgressTotal = 0
+		if err := tx.Save(&session).Error; err != nil {
+			return err
+		}
+		out = session
+		out.Files = createdUploads
+		return nil
+	})
+	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	for index := range createdUploads {
+		contentType := createdUploads[index].ContentType
+		if contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		uploadID, createErr := s.albumImportMultipart.CreateMultipartUpload(createdUploads[index].SourceKey, contentType)
+		if createErr != nil {
+			for _, file := range createdUploads[:index] {
+				s.abortAlbumImportMultipartOrRecord(id, file)
+			}
+			if err := s.failRegisteredAlbumImportFiles(user.ID, id, createdUploads, createErr.Error()); err != nil {
+				return model.AlbumImportSession{}, err
+			}
+			return model.AlbumImportSession{}, createErr
+		}
+		createdUploads[index].UploadID = uploadID
+	}
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		session, err := loadAlbumImportSessionForUpdate(tx, id, user.ID)
+		if err != nil {
+			return err
+		}
+		if session.Status != AlbumImportStatusPendingUpload {
+			return apperr.Unprocessable("music.import_invalid_status", "Import session cannot register files")
+		}
+		var totalSize int64
+		for _, file := range createdUploads {
+			result := tx.Model(&model.AlbumImportFile{}).Where("id = ? AND import_id = ? AND upload_id = ?", file.ID, id, "").Update("upload_id", file.UploadID)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return apperr.Unprocessable("music.import_invalid_status", "Import session cannot register files")
+			}
+			totalSize += file.Size
+		}
 		session.Status = AlbumImportStatusUploading
 		session.Stage = AlbumImportStageUpload
 		session.ProgressCurrent = 0
@@ -237,11 +298,25 @@ func (s *Service) RegisterAlbumImportFiles(user authctx.CurrentUser, id uuid.UUI
 	})
 	if err != nil {
 		for _, file := range createdUploads {
-			_ = s.albumImportMultipart.AbortMultipartUpload(file.SourceKey, file.UploadID)
+			s.abortAlbumImportMultipartOrRecord(id, file)
 		}
 		return model.AlbumImportSession{}, err
 	}
 	return out, nil
+}
+
+func (s *Service) failRegisteredAlbumImportFiles(userID, sessionID uuid.UUID, files []model.AlbumImportFile, message string) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		session, err := loadAlbumImportSessionForUpdate(tx, sessionID, userID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&model.AlbumImportFile{}).Where("import_id = ?", sessionID).Updates(map[string]any{"upload_status": AlbumImportFileUploadStatusFailed, "error_message": message}).Error; err != nil {
+			return err
+		}
+		session.Status, session.Stage, session.ErrorMessage = AlbumImportStatusFailed, AlbumImportStageFailed, message
+		return tx.Save(&session).Error
+	})
 }
 
 func (s *Service) CreateAlbumImportFilePartUpload(user authctx.CurrentUser, sessionID, fileID uuid.UUID, partNumber int, _ CreateAlbumImportMultipartPartInput) (AlbumImportMultipartPartUploadDTO, error) {
@@ -367,9 +442,10 @@ func (s *Service) CompleteAlbumImportFile(user authctx.CurrentUser, sessionID, f
 	}
 	if err := s.reconcileAlbumImportObject(upload, parts); err != nil {
 		if errors.Is(err, errAlbumImportObjectSizeMismatch) {
-			_ = s.db.Model(&model.AlbumImportFile{}).Where("id = ? AND import_id = ? AND source_key = ? AND upload_status = ?", fileID, sessionID, upload.SourceKey, AlbumImportFileUploadStatusCompleting).Updates(map[string]any{
-				"upload_status": AlbumImportFileUploadStatusFailed, "error_message": "uploaded file size does not match",
-			}).Error
+			if err := s.failAlbumImportFileUpload(user.ID, sessionID, upload, "uploaded file size does not match"); err != nil {
+				return AlbumImportFileDTO{}, err
+			}
+			s.deleteAlbumImportObjectOrRecord(upload)
 			return AlbumImportFileDTO{}, apperr.Unprocessable("music.import_file_size_mismatch", "Uploaded file size does not match")
 		}
 		return AlbumImportFileDTO{}, err
@@ -400,6 +476,38 @@ func (s *Service) CompleteAlbumImportFile(user authctx.CurrentUser, sessionID, f
 	return buildAlbumImportFileDTO(upload), nil
 }
 
+func (s *Service) failAlbumImportFileUpload(userID, sessionID uuid.UUID, upload model.AlbumImportFile, message string) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		session, err := loadAlbumImportSessionForUpdate(tx, sessionID, userID)
+		if err != nil {
+			return err
+		}
+		result := tx.Model(&model.AlbumImportFile{}).Where("id = ? AND import_id = ? AND source_key = ? AND upload_status = ?", upload.ID, sessionID, upload.SourceKey, AlbumImportFileUploadStatusCompleting).Updates(map[string]any{
+			"upload_status": AlbumImportFileUploadStatusFailed, "error_message": message,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return apperr.Unprocessable("music.import_invalid_status", "Album import file upload changed")
+		}
+		payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+		if err != nil {
+			return err
+		}
+		payload["error_message"] = message
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		session.Status = AlbumImportStatusFailed
+		session.Stage = AlbumImportStageFailed
+		session.ErrorMessage = message
+		session.PayloadJSON = string(payloadJSON)
+		return tx.Save(&session).Error
+	})
+}
+
 func (s *Service) reconcileAlbumImportObject(file model.AlbumImportFile, parts []AlbumImportMultipartPartDTO) error {
 	size, headErr := s.albumImportMultipart.ObjectSize(file.SourceKey)
 	if headErr != nil {
@@ -418,12 +526,15 @@ func (s *Service) reconcileAlbumImportObject(file model.AlbumImportFile, parts [
 		}
 	}
 	if size != file.Size {
-		if err := s.albumImportMultipart.DeleteObject(file.SourceKey); err != nil {
-			_ = recordAlbumImportCleanupTarget(s.db, file.ID, albumImportCleanupTarget{Action: "delete", Key: file.SourceKey})
-		}
 		return errAlbumImportObjectSizeMismatch
 	}
 	return nil
+}
+
+func (s *Service) deleteAlbumImportObjectOrRecord(file model.AlbumImportFile) {
+	if err := s.albumImportMultipart.DeleteObject(file.SourceKey); err != nil {
+		_ = recordAlbumImportCleanupTarget(s.db, file.ID, albumImportCleanupTarget{Action: "delete", Key: file.SourceKey})
+	}
 }
 
 func (s *Service) CompleteAlbumImportSession(user authctx.CurrentUser, sessionID uuid.UUID) (model.AlbumImportSession, error) {
@@ -485,9 +596,23 @@ func (s *Service) CancelAlbumImportSession(user authctx.CurrentUser, sessionID u
 			files = nil
 			return nil
 		}
+		for _, file := range session.Files {
+			if file.UploadStatus == AlbumImportFileUploadStatusCompleting {
+				return apperr.Unprocessable("music.import_invalid_status", "Import session has a file completing upload")
+			}
+		}
+		for _, file := range session.Files {
+			if file.UploadStatus != AlbumImportFileUploadStatusUploaded && file.SourceKey != "" && file.UploadID != "" {
+				if err := requireAlbumImportMultipartStore(s.albumImportMultipart); err != nil {
+					return err
+				}
+				break
+			}
+		}
 		files = append([]model.AlbumImportFile{}, session.Files...)
+		expiresAt := time.Now().UTC().Add(7 * 24 * time.Hour)
 		if err := tx.Model(&model.AlbumImportSession{}).Where("id = ? AND user_id = ?", sessionID, user.ID).Updates(map[string]any{
-			"status": AlbumImportStatusCanceled, "stage": AlbumImportStageCanceled, "error_message": "",
+			"status": AlbumImportStatusCanceled, "stage": AlbumImportStageCanceled, "error_message": "", "expires_at": expiresAt,
 		}).Error; err != nil {
 			return err
 		}
@@ -542,7 +667,14 @@ func (s *Service) RetryAlbumImportFile(user authctx.CurrentUser, sessionID, file
 	if user.ID == uuid.Nil {
 		return model.AlbumImportSession{}, apperr.Unauthorized("Login required")
 	}
-	err := s.db.Transaction(func(tx *gorm.DB) error {
+	session, file, err := loadAlbumImportFileForUser(s.db, user.ID, sessionID, fileID)
+	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	if file.UploadStatus == AlbumImportFileUploadStatusFailed {
+		return s.retryAlbumImportFileUpload(user, session, file)
+	}
+	err = s.db.Transaction(func(tx *gorm.DB) error {
 		session, file, err := loadAlbumImportFileForUser(tx, user.ID, sessionID, fileID)
 		if err != nil {
 			return err
@@ -564,6 +696,64 @@ func (s *Service) RetryAlbumImportFile(user authctx.CurrentUser, sessionID, file
 		return model.AlbumImportSession{}, err
 	}
 	return loadAlbumImportSession(s.db, sessionID, &user.ID)
+}
+
+func (s *Service) retryAlbumImportFileUpload(user authctx.CurrentUser, session model.AlbumImportSession, file model.AlbumImportFile) (model.AlbumImportSession, error) {
+	if session.Status != AlbumImportStatusFailed && session.Status != AlbumImportStatusNeedsAttention {
+		return model.AlbumImportSession{}, apperr.Unprocessable("music.import_invalid_status", "Album import file cannot be retried")
+	}
+	if err := requireAlbumImportMultipartStore(s.albumImportMultipart); err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	newSourceKey := albumImportSourceKey(user.ID, session.ID, file.ID, file.DetectedFormat)
+	contentType := strings.TrimSpace(file.ContentType)
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	newUploadID, err := s.albumImportMultipart.CreateMultipartUpload(newSourceKey, contentType)
+	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	oldFile := file
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		lockedSession, lockedFile, err := loadAlbumImportFileForUser(tx, user.ID, session.ID, file.ID)
+		if err != nil {
+			return err
+		}
+		if (lockedSession.Status != AlbumImportStatusFailed && lockedSession.Status != AlbumImportStatusNeedsAttention) || lockedFile.UploadStatus != AlbumImportFileUploadStatusFailed || lockedFile.SourceKey != file.SourceKey {
+			return apperr.Unprocessable("music.import_invalid_status", "Album import file cannot be retried")
+		}
+		lockedFile.SourceKey = newSourceKey
+		lockedFile.UploadID = newUploadID
+		lockedFile.PartSize = albumImportMultipartPartSize
+		lockedFile.CompletedPartsJSON = "[]"
+		lockedFile.UploadStatus = AlbumImportFileUploadStatusUploading
+		lockedFile.ProcessingStatus = AlbumImportFileProcessingStatusPending
+		lockedFile.ErrorMessage = ""
+		if err := tx.Save(&lockedFile).Error; err != nil {
+			return err
+		}
+		payload, err := readAlbumImportPayloadMap(lockedSession.PayloadJSON)
+		if err != nil {
+			return err
+		}
+		delete(payload, "error_message")
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		lockedSession.Status = AlbumImportStatusUploading
+		lockedSession.Stage = AlbumImportStageUpload
+		lockedSession.ErrorMessage = ""
+		lockedSession.PayloadJSON = string(payloadJSON)
+		return refreshAlbumImportUploadProgress(tx, &lockedSession)
+	})
+	if err != nil {
+		s.abortAlbumImportMultipartOrRecord(session.ID, model.AlbumImportFile{SourceKey: newSourceKey, UploadID: newUploadID})
+		return model.AlbumImportSession{}, err
+	}
+	s.cleanupAlbumImportObject(oldFile)
+	return loadAlbumImportSession(s.db, session.ID, &user.ID)
 }
 
 func (s *Service) ReplaceAlbumImportFile(user authctx.CurrentUser, sessionID, fileID uuid.UUID, input AlbumImportFileInput) (AlbumImportFileDTO, error) {
@@ -665,7 +855,7 @@ func (s *Service) ReplaceAlbumImportFile(user authctx.CurrentUser, sessionID, fi
 		return nil
 	})
 	if err != nil {
-		_ = s.albumImportMultipart.AbortMultipartUpload(newSourceKey, newUploadID)
+		s.abortAlbumImportMultipartOrRecord(sessionID, model.AlbumImportFile{SourceKey: newSourceKey, UploadID: newUploadID})
 		return AlbumImportFileDTO{}, err
 	}
 	s.cleanupAlbumImportObject(oldFile)
@@ -715,6 +905,15 @@ func (s *Service) cleanupAlbumImportObject(file model.AlbumImportFile) {
 	}
 }
 
+func (s *Service) abortAlbumImportMultipartOrRecord(sessionID uuid.UUID, file model.AlbumImportFile) {
+	if s.albumImportMultipart == nil || file.SourceKey == "" || file.UploadID == "" {
+		return
+	}
+	if err := s.albumImportMultipart.AbortMultipartUpload(file.SourceKey, file.UploadID); err != nil {
+		_ = recordAlbumImportSessionCleanupTarget(s.db, sessionID, albumImportCleanupTarget{Action: "abort", Key: file.SourceKey, UploadID: file.UploadID})
+	}
+}
+
 func recordAlbumImportCleanupTarget(db *gorm.DB, fileID uuid.UUID, target albumImportCleanupTarget) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		var file model.AlbumImportFile
@@ -731,6 +930,31 @@ func recordAlbumImportCleanupTarget(db *gorm.DB, fileID uuid.UUID, target albumI
 			return err
 		}
 		return tx.Unscoped().Model(&model.AlbumImportFile{}).Where("id = ?", fileID).Update("cleanup_json", string(encoded)).Error
+	})
+}
+
+func recordAlbumImportSessionCleanupTarget(db *gorm.DB, sessionID uuid.UUID, target albumImportCleanupTarget) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		var session model.AlbumImportSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&session, "id = ?", sessionID).Error; err != nil {
+			return err
+		}
+		payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+		if err != nil {
+			return err
+		}
+		targets := []albumImportCleanupTarget{}
+		if rawTargets, ok := payload["cleanup_targets"]; ok {
+			raw, _ := json.Marshal(rawTargets)
+			_ = json.Unmarshal(raw, &targets)
+		}
+		targets = append(targets, target)
+		payload["cleanup_targets"] = targets
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&model.AlbumImportSession{}).Where("id = ?", sessionID).Update("payload_json", string(encoded)).Error
 	})
 }
 

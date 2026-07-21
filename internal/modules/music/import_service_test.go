@@ -1568,6 +1568,9 @@ type fakeAlbumImportMultipartStore struct {
 	objectBody []byte
 
 	createCalls int
+	createErr   error
+	createErrAt int
+	onCreate    func()
 
 	createKey            string
 	createContentType    string
@@ -1581,6 +1584,7 @@ type fakeAlbumImportMultipartStore struct {
 	completedSize        int64
 	abortedKeys          []string
 	abortedUploadIDs     []string
+	abortErr             error
 	openCalls            int
 	headCalls            int
 	objectCompleted      bool
@@ -1591,8 +1595,14 @@ type fakeAlbumImportMultipartStore struct {
 
 func (f *fakeAlbumImportMultipartStore) CreateMultipartUpload(key string, contentType string) (string, error) {
 	f.createCalls++
+	if f.onCreate != nil {
+		f.onCreate()
+	}
 	f.createKey = key
 	f.createContentType = contentType
+	if f.createErr != nil && (f.createErrAt == 0 || f.createCalls == f.createErrAt) {
+		return "", f.createErr
+	}
 	if f.uploadID == "" {
 		return "upload-test", nil
 	}
@@ -1637,7 +1647,7 @@ func (f *fakeAlbumImportMultipartStore) ObjectSize(_ string) (int64, error) {
 func (f *fakeAlbumImportMultipartStore) AbortMultipartUpload(key string, uploadID string) error {
 	f.abortedKeys = append(f.abortedKeys, key)
 	f.abortedUploadIDs = append(f.abortedUploadIDs, uploadID)
-	return nil
+	return f.abortErr
 }
 
 func (f *fakeAlbumImportMultipartStore) OpenObject(_ string) (io.ReadCloser, error) {

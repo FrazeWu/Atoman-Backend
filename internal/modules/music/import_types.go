@@ -171,6 +171,18 @@ type AlbumImportDTO struct {
 	ErrorMessage      string                 `json:"errorMessage"`
 }
 
+type AlbumImportResponse struct {
+	Data AlbumImportDTO `json:"data"`
+}
+
+type AlbumImportFileResponse struct {
+	Data AlbumImportFileDTO `json:"data"`
+}
+
+type AlbumImportMultipartPartUploadResponse struct {
+	Data AlbumImportMultipartPartUploadDTO `json:"data"`
+}
+
 const (
 	AlbumImportInputModeAuto    = "auto"
 	AlbumImportInputModeArchive = "archive"

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func TestRegisterAlbumImportFilesDetectsSupportedRolesAndInputModes(t *testing.T) {
@@ -41,8 +43,8 @@ func TestRegisterAlbumImportFilesDetectsSupportedRolesAndInputModes(t *testing.T
 		{
 			name: "folder",
 			files: []AlbumImportFileInput{
-				albumImportFileInput("CD1/01.opus", 1024),
-				albumImportFileInput("CD2/01.aiff", 1024),
+				albumImportFileInput("Album/CD1/01.opus", 1024),
+				albumImportFileInput("Album/CD2/01.aiff", 1024),
 			},
 			wantMode: AlbumImportInputModeFolder,
 			roles:    []string{AlbumImportFileRoleAudio, AlbumImportFileRoleAudio},
@@ -82,15 +84,90 @@ func TestRegisterAlbumImportFilesDetectsSupportedRolesAndInputModes(t *testing.T
 	}
 }
 
+func TestRegisterAlbumImportFilesPersistsCleanupWhenDatabaseAndAbortFail(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{abortErr: errors.New("abort failed")}
+	svc.albumImportMultipart = store
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callback := "test:fail_album_import_file_writeback"
+	if err := db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == (model.AlbumImportFile{}).TableName() {
+			tx.AddError(errors.New("file writeback failed"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callback) })
+
+	if _, err := svc.RegisterAlbumImportFiles(user, session.ID, RegisterAlbumImportFilesInput{Files: []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)}}); err == nil {
+		t.Fatal("expected file insert failure")
+	}
+	if len(store.abortedKeys) != 1 {
+		t.Fatalf("expected created multipart to be aborted, got %#v", store)
+	}
+	var persisted model.AlbumImportSession
+	if err := db.First(&persisted, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(persisted.PayloadJSON, "cleanup_targets") || !strings.Contains(persisted.PayloadJSON, store.abortedKeys[0]) {
+		t.Fatalf("failed abort was not persisted on session: %s", persisted.PayloadJSON)
+	}
+}
+
+func TestRegisterAlbumImportFilesAbortsCreatedUploadsWhenStorageCreationFails(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{createErr: errors.New("storage create failed"), createErrAt: 2}
+	svc.albumImportMultipart = store
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RegisterAlbumImportFiles(user, session.ID, RegisterAlbumImportFilesInput{Files: []AlbumImportFileInput{albumImportFileInput("one.flac", 1024), albumImportFileInput("two.flac", 1024)}}); err == nil {
+		t.Fatal("expected storage creation failure")
+	}
+	var persisted model.AlbumImportSession
+	if err := db.Preload("Files").First(&persisted, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(store.abortedKeys) != 1 || persisted.Status != AlbumImportStatusFailed || len(persisted.Files) != 2 || persisted.Files[0].UploadStatus != AlbumImportFileUploadStatusFailed {
+		t.Fatalf("failed registration left completable session: %#v", persisted)
+	}
+}
+
+func TestRegisterAlbumImportFilesCreatesMultipartAfterPreparationTransaction(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &fakeAlbumImportMultipartStore{onCreate: func() {
+		var prepared model.AlbumImportSession
+		if err := db.Preload("Files").First(&prepared, "id = ?", session.ID).Error; err != nil {
+			t.Errorf("read prepared state: %v", err)
+			return
+		}
+		if prepared.Status != AlbumImportStatusPendingUpload || len(prepared.Files) != 1 || prepared.Files[0].UploadID != "" {
+			t.Errorf("multipart creation occurred before preparation committed: %#v", prepared)
+		}
+	}}
+	svc.albumImportMultipart = store
+	if _, err := svc.RegisterAlbumImportFiles(user, session.ID, RegisterAlbumImportFilesInput{Files: []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDetectAlbumImportFileRoleSupportsConfiguredWhitelist(t *testing.T) {
 	tests := map[string]string{
 		"zip": AlbumImportFileRoleArchive, "rar": AlbumImportFileRoleArchive, "7z": AlbumImportFileRoleArchive,
 		"tar": AlbumImportFileRoleArchive, "tar.gz": AlbumImportFileRoleArchive, "tgz": AlbumImportFileRoleArchive,
-		"tar.bz2": AlbumImportFileRoleArchive, "tbz2": AlbumImportFileRoleArchive, "tar.xz": AlbumImportFileRoleArchive, "txz": AlbumImportFileRoleArchive,
+		"tar.bz2": AlbumImportFileRoleArchive, "tar.xz": AlbumImportFileRoleArchive,
 		"mp3": AlbumImportFileRoleAudio, "flac": AlbumImportFileRoleAudio, "wav": AlbumImportFileRoleAudio,
 		"m4a": AlbumImportFileRoleAudio, "aac": AlbumImportFileRoleAudio, "ogg": AlbumImportFileRoleAudio,
 		"opus": AlbumImportFileRoleAudio, "aiff": AlbumImportFileRoleAudio, "aif": AlbumImportFileRoleAudio,
-		"wma": AlbumImportFileRoleAudio, "ape": AlbumImportFileRoleAudio,
+		"wma": AlbumImportFileRoleAudio, "ape": AlbumImportFileRoleAudio, "alac": AlbumImportFileRoleAudio,
 		"cue": AlbumImportFileRoleCue,
 		"jpg": AlbumImportFileRoleCover, "jpeg": AlbumImportFileRoleCover, "png": AlbumImportFileRoleCover,
 		"webp": AlbumImportFileRoleCover, "avif": AlbumImportFileRoleCover, "heic": AlbumImportFileRoleCover,
@@ -106,6 +183,11 @@ func TestDetectAlbumImportFileRoleSupportsConfiguredWhitelist(t *testing.T) {
 	}
 	if _, _, err := detectAlbumImportFileRole("album.exe"); err == nil {
 		t.Fatal("expected unsupported type to fail")
+	}
+	for _, extension := range []string{"tbz2", "txz"} {
+		if _, _, err := detectAlbumImportFileRole("album." + extension); err == nil {
+			t.Fatalf("expected unconfirmed alias .%s to fail", extension)
+		}
 	}
 }
 
@@ -125,6 +207,8 @@ func TestRegisterAlbumImportFilesRejectsInvalidDescriptors(t *testing.T) {
 		{name: "unsupported", files: []AlbumImportFileInput{albumImportFileInput("notes.txt", 1)}},
 		{name: "archive mixed with audio", files: []AlbumImportFileInput{albumImportFileInput("album.zip", 1), albumImportFileInput("track.flac", 1)}},
 		{name: "multiple archives", files: []AlbumImportFileInput{albumImportFileInput("one.zip", 1), albumImportFileInput("two.rar", 1)}},
+		{name: "multiple folder roots", files: []AlbumImportFileInput{albumImportFileInput("AlbumA/01.flac", 1), albumImportFileInput("AlbumB/02.flac", 1)}},
+		{name: "folder mixed with flat", files: []AlbumImportFileInput{albumImportFileInput("Album/01.flac", 1), albumImportFileInput("02.flac", 1)}},
 	}
 
 	for _, test := range tests {
@@ -154,10 +238,12 @@ func TestRegisterAlbumImportFilesEnforcesConfigurableLimits(t *testing.T) {
 	}{
 		{name: "default single file", files: []AlbumImportFileInput{albumImportFileInput("track.flac", 4*gib+1)}},
 		{name: "default total", files: []AlbumImportFileInput{albumImportFileInput("one.flac", 4*gib), albumImportFileInput("two.flac", 4*gib), albumImportFileInput("three.flac", 2*gib+1)}},
-		{name: "default count", files: albumImportFileInputs(501)},
+		{name: "default count", files: albumImportFileInputs(5001)},
+		{name: "default track count", files: albumImportFileInputs(301)},
 		{name: "overridden file bytes", files: []AlbumImportFileInput{albumImportFileInput("track.flac", 1025)}, env: map[string]string{albumImportMaxFileBytesEnv: "1024"}},
 		{name: "overridden total bytes", files: []AlbumImportFileInput{albumImportFileInput("one.flac", 600), albumImportFileInput("two.flac", 425)}, env: map[string]string{albumImportMaxTotalBytesEnv: "1024"}},
 		{name: "overridden count", files: albumImportFileInputs(3), env: map[string]string{albumImportMaxFilesEnv: "2"}},
+		{name: "overridden track count", files: albumImportFileInputs(3), env: map[string]string{albumImportMaxTracksEnv: "2"}},
 	}
 
 	for _, test := range tests {
@@ -185,8 +271,9 @@ func TestAlbumImportUploadLimitsInvalidEnvironmentFallsBackToDefaults(t *testing
 	t.Setenv(albumImportMaxTotalBytesEnv, "invalid")
 	t.Setenv(albumImportMaxFileBytesEnv, "-1")
 	t.Setenv(albumImportMaxFilesEnv, "0")
+	t.Setenv(albumImportMaxTracksEnv, "invalid")
 	limits := albumImportUploadLimitsFromEnv()
-	if limits.MaxTotalBytes != defaultAlbumImportMaxTotalBytes || limits.MaxFileBytes != defaultAlbumImportMaxFileBytes || limits.MaxFiles != defaultAlbumImportMaxFiles {
+	if limits.MaxTotalBytes != defaultAlbumImportMaxTotalBytes || limits.MaxFileBytes != defaultAlbumImportMaxFileBytes || limits.MaxFiles != defaultAlbumImportMaxFiles || limits.MaxTracks != defaultAlbumImportMaxTracks {
 		t.Fatalf("unexpected fallback limits: %#v", limits)
 	}
 }
@@ -296,6 +383,69 @@ func TestCompleteAlbumImportFileRejectsActualObjectSizeMismatch(t *testing.T) {
 	if persisted.UploadStatus != AlbumImportFileUploadStatusFailed || len(store.deletedKeys) != 1 || store.deletedKeys[0] != file.SourceKey || store.headCalls == 0 {
 		t.Fatalf("size mismatch was not rejected and cleaned: file=%#v store=%#v", persisted, store)
 	}
+	var failedSession model.AlbumImportSession
+	if err := db.First(&failedSession, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if failedSession.Status != AlbumImportStatusFailed || failedSession.Stage != AlbumImportStageFailed || failedSession.ErrorMessage == "" {
+		t.Fatalf("size mismatch did not fail session: %#v", failedSession)
+	}
+}
+
+func TestCompleteAlbumImportFileKeepsObjectWhenFailureStateCannotPersist(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{objectSizeOverride: 2048}
+	svc.albumImportMultipart = store
+	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)})
+	if _, err := svc.CompleteAlbumImportFilePart(user, session.ID, file.ID, 1, CompleteAlbumImportMultipartPartInput{ETag: "etag", Size: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	callback := "test:fail_new_size_mismatch_state"
+	if err := db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == (model.AlbumImportSession{}).TableName() {
+			tx.AddError(errors.New("failure state write failed"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callback) })
+	if _, err := svc.CompleteAlbumImportFile(user, session.ID, file.ID); err == nil || len(store.deletedKeys) != 0 {
+		t.Fatalf("must retain object when failure state write fails: err=%v deleted=%#v", err, store.deletedKeys)
+	}
+}
+
+func TestRetryAlbumImportFileRecreatesMultipartAfterUploadSizeMismatch(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{objectSizeOverride: 2048}
+	svc.albumImportMultipart = store
+	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)})
+	if _, err := svc.CompleteAlbumImportFilePart(user, session.ID, file.ID, 1, CompleteAlbumImportMultipartPartInput{ETag: "etag", Size: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CompleteAlbumImportFile(user, session.ID, file.ID); err == nil {
+		t.Fatal("expected upload size mismatch")
+	}
+	store.objectCompleted = false
+	store.objectSizeOverride = 0
+
+	retrying, err := svc.RetryAlbumImportFile(user, session.ID, file.ID)
+	if err != nil {
+		t.Fatalf("retry failed upload: %v", err)
+	}
+	if retrying.Status != AlbumImportStatusUploading || retrying.Stage != AlbumImportStageUpload || retrying.ErrorMessage != "" || len(retrying.Files) != 1 {
+		t.Fatalf("unexpected retry session: %#v", retrying)
+	}
+	retried := retrying.Files[0]
+	if retried.UploadStatus != AlbumImportFileUploadStatusUploading || retried.SourceKey == file.SourceKey || retried.ErrorMessage != "" || len(buildAlbumImportFileDTO(retried).CompletedParts) != 0 || store.createCalls != 2 {
+		t.Fatalf("failed upload was not rebuilt: file=%#v store=%#v", retried, store)
+	}
+	var jobs int64
+	if err := db.Model(&model.AlbumImportJob{}).Where("import_id = ?", session.ID).Count(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if jobs != 0 {
+		t.Fatalf("upload retry must wait for completion before queueing, got %d jobs", jobs)
+	}
 }
 
 func TestCompleteAlbumImportFileRecoversCompletedObjectFromCompletingState(t *testing.T) {
@@ -391,7 +541,12 @@ func TestCancelAlbumImportSessionAbortsOnlyUnfinishedFiles(t *testing.T) {
 	if err := db.Model(&files[0]).Update("upload_status", AlbumImportFileUploadStatusUploaded).Error; err != nil {
 		t.Fatal(err)
 	}
+	expiredAt := time.Now().UTC().Add(-time.Hour)
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Update("expires_at", expiredAt).Error; err != nil {
+		t.Fatal(err)
+	}
 
+	cancelStartedAt := time.Now().UTC()
 	canceled, err := svc.CancelAlbumImportSession(user, session.ID)
 	if err != nil {
 		t.Fatalf("cancel session: %v", err)
@@ -402,8 +557,56 @@ func TestCancelAlbumImportSessionAbortsOnlyUnfinishedFiles(t *testing.T) {
 	if len(store.abortedKeys) != 1 || store.abortedKeys[0] != files[1].SourceKey {
 		t.Fatalf("expected only unfinished upload aborted, got %#v", store.abortedKeys)
 	}
+	var persisted model.AlbumImportSession
+	if err := db.Preload("Files").First(&persisted, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	minimumExpiresAt := cancelStartedAt.Add(7*24*time.Hour - time.Hour)
+	if len(persisted.Files) != 2 || persisted.ExpiresAt == nil || persisted.ExpiresAt.Before(minimumExpiresAt) || len(store.deletedKeys) != 0 {
+		t.Fatalf("canceled import must retain sources for seven-day cleanup: session=%#v store=%#v", persisted, store)
+	}
 	if _, err := svc.CompleteAlbumImportSession(user, session.ID); err == nil {
 		t.Fatal("canceled session must not complete")
+	}
+}
+
+func TestCancelAlbumImportSessionRequiresStorageForUnfinishedMultipart(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
+	session, _ := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)})
+	svc.albumImportMultipart = nil
+
+	_, err := svc.CancelAlbumImportSession(user, session.ID)
+	appErr := apperr.FromError(err)
+	if appErr == nil || appErr.HTTPStatus != http.StatusServiceUnavailable || appErr.Code != "storage.unavailable" {
+		t.Fatalf("expected storage.unavailable 503, got %#v", appErr)
+	}
+	var persisted model.AlbumImportSession
+	if err := db.Preload("Files").First(&persisted, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != AlbumImportStatusUploading || persisted.Stage != AlbumImportStageUpload || len(persisted.Files) != 1 || persisted.Files[0].UploadStatus != AlbumImportFileUploadStatusUploading {
+		t.Fatalf("storage failure must leave import uploading: %#v", persisted)
+	}
+}
+
+func TestCancelAlbumImportSessionRejectsCompletingFile(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{}
+	svc.albumImportMultipart = store
+	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)})
+	if err := db.Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Update("upload_status", AlbumImportFileUploadStatusCompleting).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CancelAlbumImportSession(user, session.ID); err == nil {
+		t.Fatal("expected cancel to reject completing file")
+	}
+	var persisted model.AlbumImportSession
+	if err := db.First(&persisted, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != AlbumImportStatusUploading || len(store.abortedKeys) != 0 || len(store.deletedKeys) != 0 {
+		t.Fatalf("cancel raced with completing upload: session=%#v store=%#v", persisted, store)
 	}
 }
 
@@ -601,6 +804,37 @@ func TestReplaceAlbumImportFilePersistsFailedCleanupForSameFormatAndSize(t *test
 	}
 }
 
+func TestReplaceAlbumImportFilePersistsNewUploadCleanupWhenDatabaseAndAbortFail(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{}
+	svc.albumImportMultipart = store
+	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{albumImportFileInput("old.flac", 1024)})
+	store.abortErr = errors.New("abort failed")
+	callback := "test:fail_album_import_file_replace"
+	if err := db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == (model.AlbumImportFile{}).TableName() {
+			tx.AddError(errors.New("file update failed"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callback) })
+
+	if _, err := svc.ReplaceAlbumImportFile(user, session.ID, file.ID, albumImportFileInput("new.flac", 1024)); err == nil {
+		t.Fatal("expected replacement database failure")
+	}
+	if len(store.abortedKeys) != 1 || store.abortedKeys[0] != store.createKey {
+		t.Fatalf("new multipart was not aborted: %#v", store)
+	}
+	var persisted model.AlbumImportSession
+	if err := db.First(&persisted, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(persisted.PayloadJSON, "cleanup_targets") || !strings.Contains(persisted.PayloadJSON, store.createKey) {
+		t.Fatalf("failed replacement cleanup was not persisted: %s", persisted.PayloadJSON)
+	}
+}
+
 func TestDeleteAlbumImportFilePersistsFailedCleanupOnSoftDeletedRow(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	store := &fakeAlbumImportMultipartStore{deleteErr: errors.New("cleanup failed")}
@@ -772,6 +1006,114 @@ func TestLegacyAlbumImportMultipartRejectsActualSizeAndCanRestart(t *testing.T) 
 	}
 	if store.createCalls != 2 {
 		t.Fatalf("expected a new multipart upload after mismatch, got %d", store.createCalls)
+	}
+}
+
+func TestLegacyAlbumImportMultipartKeepsObjectWhenFailureStateCannotPersist(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{objectSizeOverride: 2048}
+	svc.albumImportMultipart = store
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{FileName: "album.zip", FileSize: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.CompleteAlbumImportMultipartPart(user, session.ID, 1, CompleteAlbumImportMultipartPartInput{ETag: "etag", Size: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	callback := "test:fail_legacy_size_mismatch_state"
+	if err := db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == (model.AlbumImportSession{}).TableName() {
+			tx.AddError(errors.New("failure state write failed"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callback) })
+	if _, err := svc.CompleteAlbumImportMultipart(user, session.ID); err == nil || len(store.deletedKeys) != 0 {
+		t.Fatalf("must retain object when failure state write fails: err=%v deleted=%#v", err, store.deletedKeys)
+	}
+}
+
+func TestLegacyAlbumImportMultipartPersistsCleanupWhenDatabaseAndAbortFail(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{abortErr: errors.New("abort failed")}
+	svc.albumImportMultipart = store
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callback := "test:fail_legacy_album_import_file_create"
+	if err := db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == (model.AlbumImportFile{}).TableName() {
+			tx.AddError(errors.New("legacy file insert failed"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callback) })
+
+	if _, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{FileName: "album.zip", FileSize: 1024}); err == nil {
+		t.Fatal("expected legacy database failure")
+	}
+	if len(store.abortedKeys) != 1 {
+		t.Fatalf("legacy multipart was not aborted: %#v", store)
+	}
+	var persisted model.AlbumImportSession
+	if err := db.First(&persisted, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(persisted.PayloadJSON, "cleanup_targets") || !strings.Contains(persisted.PayloadJSON, store.abortedKeys[0]) {
+		t.Fatalf("legacy cleanup failure was not persisted: %s", persisted.PayloadJSON)
+	}
+}
+
+func TestLegacyAlbumImportMultipartAbortsOverwrittenUpload(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{}
+	svc.albumImportMultipart = store
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{FileName: "first.zip", FileSize: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{FileName: "second.zip", FileSize: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	if len(store.abortedKeys) != 1 || store.abortedKeys[0] != first.ObjectKey {
+		t.Fatalf("overwritten legacy upload was not aborted: %#v", store.abortedKeys)
+	}
+}
+
+func TestLegacyAlbumImportMultipartRejectsReplacementWhileArchiveCompleting(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{}
+	svc.albumImportMultipart = store
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{FileName: "first.zip", FileSize: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.AlbumImportFile{}).Where("import_id = ?", session.ID).Update("upload_status", AlbumImportFileUploadStatusCompleting).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{FileName: "second.zip", FileSize: 1024}); err == nil || store.createCalls != 1 {
+		t.Fatalf("completing upload must not be replaced: err=%v store=%#v", err, store)
+	}
+	var persisted model.AlbumImportFile
+	if err := db.First(&persisted, "import_id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if persisted.SourceKey != first.ObjectKey || persisted.UploadID == "" {
+		t.Fatalf("completing archive was overwritten: %#v", persisted)
 	}
 }
 
