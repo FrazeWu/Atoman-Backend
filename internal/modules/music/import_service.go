@@ -174,6 +174,9 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 	if strings.TrimSpace(archiveName) == "" {
 		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive file name is required")
 	}
+	if strings.ToLower(filepath.Ext(strings.TrimSpace(archiveName))) != ".zip" {
+		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive must be a zip file")
+	}
 	if _, err := s.GetAlbumImportSessionForUser(user, id); err != nil {
 		return model.AlbumImportSession{}, err
 	}
@@ -190,6 +193,10 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 		return model.AlbumImportSession{}, err
 	}
 	if limited.exceeded {
+		_ = s.albumImportMultipart.DeleteObject(objectKey)
+		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive file size is invalid")
+	}
+	if limited.count <= 0 {
 		_ = s.albumImportMultipart.DeleteObject(objectKey)
 		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive file size is invalid")
 	}

@@ -1303,135 +1303,245 @@ func TestUploadAlbumImportArchiveRejectsActualStreamSizeOverLimit(t *testing.T) 
 	}
 }
 
-func TestUploadAlbumImportArchiveStoresDerivedCoverInS3(t *testing.T) {
-	t.Skip("archive derivation now runs asynchronously from the queued source object")
-	svc, _, user := newMusicTestService(t)
-	var uploadedPath string
-	var uploadedContentType string
-	svc.s3 = fakeMusicImportS3Client(t, &uploadedPath, &uploadedContentType)
-	t.Setenv("STORAGE_TYPE", "s3")
-	t.Setenv("S3_BUCKET", "atoman-test")
-	t.Setenv("S3_URL_PREFIX", "http://localhost:9100/atoman-dev")
-
-	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
-		Status: AlbumImportStatusPendingUpload,
-		Payload: AlbumImportPayload{
-			Artist: AlbumImportArtistPayload{Name: "Burial"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-
-	archiveBody := newImportTestZipArchive(t, map[string]string{
-		"cover.jpg": "cover-bytes",
-	})
-
-	updated, err := svc.UploadAlbumImportArchive(user, session.ID, "Untrue.zip", bytes.NewReader(archiveBody))
-	if err != nil {
-		t.Fatalf("upload archive: %v", err)
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(updated.PayloadJSON), &payload); err != nil {
-		t.Fatalf("unmarshal payload json: %v", err)
-	}
-
-	derivedCover, _ := payload["derived_cover"].(string)
-	if derivedCover == "" {
-		t.Fatalf("expected derived_cover from s3 upload, got %#v", payload["derived_cover"])
-	}
-	if !strings.HasPrefix(derivedCover, "http://localhost:9100/atoman-dev/music/covers/uploads/users/") {
-		t.Fatalf("unexpected derived_cover %q", derivedCover)
-	}
-	if uploadedPath == "" || uploadedContentType != "image/jpeg" {
-		t.Fatalf("expected s3 upload, got path=%q contentType=%q", uploadedPath, uploadedContentType)
+func TestUploadAlbumImportArchiveRejectsNonZipAndEmptyStreamsBeforeQueuing(t *testing.T) {
+	for _, test := range []struct {
+		name, archive string
+		body          io.Reader
+	}{
+		{"non zip", "album.rar", strings.NewReader("data")},
+		{"empty", "album.zip", strings.NewReader("")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc, db, user := newMusicTestService(t)
+			store := &fakeAlbumImportMultipartStore{}
+			svc.albumImportMultipart = store
+			session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := svc.UploadAlbumImportArchive(user, session.ID, test.archive, test.body); err == nil {
+				t.Fatal("expected validation error")
+			}
+			var jobs int64
+			if err := db.Model(&model.AlbumImportJob{}).Where("import_id = ?", session.ID).Count(&jobs).Error; err != nil {
+				t.Fatal(err)
+			}
+			if jobs != 0 || len(store.objectBody) != 0 {
+				t.Fatalf("invalid archive must not be stored or queued: jobs=%d body=%q", jobs, store.objectBody)
+			}
+		})
 	}
 }
 
-func TestUploadAlbumImportArchiveStoresDerivedAudioInS3AndCommitPersistsSongURLs(t *testing.T) {
-	t.Skip("archive derivation now runs asynchronously from the queued source object")
-	svc, db, user := newMusicTestService(t)
-	var uploadedPath string
-	var uploadedContentType string
-	svc.s3 = fakeMusicImportS3Client(t, &uploadedPath, &uploadedContentType)
-	t.Setenv("STORAGE_TYPE", "s3")
-	t.Setenv("S3_BUCKET", "atoman-test")
-	t.Setenv("S3_URL_PREFIX", "http://localhost:9100/atoman-dev")
+func TestUploadAlbumImportArchiveQueuesCoverSourceWithoutDeriving(t *testing.T) {
+	testQueuedArchiveUploadContract(t, AlbumImportPayload{Artist: AlbumImportArtistPayload{Name: "Burial"}}, "Untrue.zip", map[string]string{"cover.jpg": "cover-bytes"})
+	return
+	/*
+		svc, _, user := newMusicTestService(t)
+		var uploadedPath string
+		var uploadedContentType string
+		svc.s3 = fakeMusicImportS3Client(t, &uploadedPath, &uploadedContentType)
+		t.Setenv("STORAGE_TYPE", "s3")
+		t.Setenv("S3_BUCKET", "atoman-test")
+		t.Setenv("S3_URL_PREFIX", "http://localhost:9100/atoman-dev")
 
-	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
-		Status: AlbumImportStatusPendingUpload,
-		Payload: AlbumImportPayload{
-			Artist: AlbumImportArtistPayload{Name: "Ye"},
-			Album:  AlbumImportAlbumPayload{Title: "2049"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-
-	archiveBody := newImportTestZipArchive(t, map[string]string{
-		"01 - Bound 2049.mp3":  "audio-1",
-		"02 - Jesus Walks.mp3": "audio-2",
-	})
-
-	updated, err := svc.UploadAlbumImportArchive(user, session.ID, "2049.zip", bytes.NewReader(archiveBody))
-	if err != nil {
-		t.Fatalf("upload archive: %v", err)
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(updated.PayloadJSON), &payload); err != nil {
-		t.Fatalf("unmarshal payload json: %v", err)
-	}
-	derivedTracks, ok := payload["derived_tracks"].([]any)
-	if !ok || len(derivedTracks) != 2 {
-		t.Fatalf("expected 2 derived tracks, got %#v", payload["derived_tracks"])
-	}
-	for _, rawTrack := range derivedTracks {
-		trackMap, ok := rawTrack.(map[string]any)
-		if !ok {
-			t.Fatalf("expected track map, got %#v", rawTrack)
-		}
-		if stringValue(trackMap["audio_key"]) == "" || stringValue(trackMap["audio_url"]) == "" {
-			t.Fatalf("expected audio upload metadata on derived track, got %#v", trackMap)
-		}
-	}
-
-	if _, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{Name: "Ye"},
-		Album: AlbumImportAlbumPayload{
-			Title:       "2049",
-			ReleaseYear: 2026,
-			Tracks: []AlbumImportTrackPayload{
-				{Title: "Bound 2049", TrackNumber: 1},
-				{Title: "Jesus Walks", TrackNumber: 2},
+		session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+			Status: AlbumImportStatusPendingUpload,
+			Payload: AlbumImportPayload{
+				Artist: AlbumImportArtistPayload{Name: "Burial"},
 			},
-		},
-	}); err != nil {
-		t.Fatalf("commit session: %v", err)
-	}
+		})
+		if err != nil {
+			t.Fatalf("create session: %v", err)
+		}
 
-	var songs []model.Song
-	if err := db.Joins("JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
-		Where("\"Albums\".title = ?", "2049").
-		Order("\"Songs\".track_number ASC").
-		Find(&songs).Error; err != nil {
-		t.Fatalf("load songs: %v", err)
-	}
-	if len(songs) != 2 {
-		t.Fatalf("expected 2 songs, got %#v", songs)
-	}
-	for _, song := range songs {
-		if song.AudioURL == "" {
-			t.Fatalf("expected persisted song audio url, got %#v", song)
+		archiveBody := newImportTestZipArchive(t, map[string]string{
+			"cover.jpg": "cover-bytes",
+		})
+
+		updated, err := svc.UploadAlbumImportArchive(user, session.ID, "Untrue.zip", bytes.NewReader(archiveBody))
+		if err != nil {
+			t.Fatalf("upload archive: %v", err)
 		}
-		if !strings.HasPrefix(song.AudioURL, "http://localhost:9100/atoman-dev/music/albums/") {
-			t.Fatalf("unexpected persisted song audio url %q", song.AudioURL)
+
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(updated.PayloadJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload json: %v", err)
 		}
+
+		derivedCover, _ := payload["derived_cover"].(string)
+		if derivedCover == "" {
+			t.Fatalf("expected derived_cover from s3 upload, got %#v", payload["derived_cover"])
+		}
+		if !strings.HasPrefix(derivedCover, "http://localhost:9100/atoman-dev/music/covers/uploads/users/") {
+			t.Fatalf("unexpected derived_cover %q", derivedCover)
+		}
+		if uploadedPath == "" || uploadedContentType != "image/jpeg" {
+			t.Fatalf("expected s3 upload, got path=%q contentType=%q", uploadedPath, uploadedContentType)
+		}
+	*/
+}
+
+func TestUploadAlbumImportArchiveQueuesAudioSourceAndPreservesMetadata(t *testing.T) {
+	testQueuedArchiveUploadContract(t, AlbumImportPayload{Artist: AlbumImportArtistPayload{Name: "Ye"}, Album: AlbumImportAlbumPayload{Title: "2049"}}, "2049.zip", map[string]string{"01 - Bound 2049.mp3": "audio-1"})
+	return
+	/*
+			svc, db, user := newMusicTestService(t)
+			var uploadedPath string
+			var uploadedContentType string
+			svc.s3 = fakeMusicImportS3Client(t, &uploadedPath, &uploadedContentType)
+			t.Setenv("STORAGE_TYPE", "s3")
+			t.Setenv("S3_BUCKET", "atoman-test")
+			t.Setenv("S3_URL_PREFIX", "http://localhost:9100/atoman-dev")
+
+			session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+				Status: AlbumImportStatusPendingUpload,
+				Payload: AlbumImportPayload{
+					Artist: AlbumImportArtistPayload{Name: "Ye"},
+					Album:  AlbumImportAlbumPayload{Title: "2049"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("create session: %v", err)
+			}
+
+			archiveBody := newImportTestZipArchive(t, map[string]string{
+				"01 - Bound 2049.mp3":  "audio-1",
+				"02 - Jesus Walks.mp3": "audio-2",
+			})
+
+			updated, err := svc.UploadAlbumImportArchive(user, session.ID, "2049.zip", bytes.NewReader(archiveBody))
+			if err != nil {
+				t.Fatalf("upload archive: %v", err)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(updated.PayloadJSON), &payload); err != nil {
+				t.Fatalf("unmarshal payload json: %v", err)
+			}
+			derivedTracks, ok := payload["derived_tracks"].([]any)
+			if !ok || len(derivedTracks) != 2 {
+				t.Fatalf("expected 2 derived tracks, got %#v", payload["derived_tracks"])
+			}
+			for _, rawTrack := range derivedTracks {
+				trackMap, ok := rawTrack.(map[string]any)
+				if !ok {
+					t.Fatalf("expected track map, got %#v", rawTrack)
+				}
+				if stringValue(trackMap["audio_key"]) == "" || stringValue(trackMap["audio_url"]) == "" {
+					t.Fatalf("expected audio upload metadata on derived track, got %#v", trackMap)
+				}
+			}
+
+			if _, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+				Artist: AlbumImportArtistPayload{Name: "Ye"},
+				Album: AlbumImportAlbumPayload{
+					Title:       "2049",
+					ReleaseYear: 2026,
+					Tracks: []AlbumImportTrackPayload{
+						{Title: "Bound 2049", TrackNumber: 1},
+						{Title: "Jesus Walks", TrackNumber: 2},
+					},
+				},
+			}); err != nil {
+				t.Fatalf("commit session: %v", err)
+			}
+
+			var songs []model.Song
+			if err := db.Joins("JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
+				Where("\"Albums\".title = ?", "2049").
+				Order("\"Songs\".track_number ASC").
+				Find(&songs).Error; err != nil {
+				t.Fatalf("load songs: %v", err)
+			}
+			if len(songs) != 2 {
+				t.Fatalf("expected 2 songs, got %#v", songs)
+			}
+			for _, song := range songs {
+				if song.AudioURL == "" {
+					t.Fatalf("expected persisted song audio url, got %#v", song)
+				}
+				if !strings.HasPrefix(song.AudioURL, "http://localhost:9100/atoman-dev/music/albums/") {
+					t.Fatalf("unexpected persisted song audio url %q", song.AudioURL)
+				}
+			}
+			if uploadedPath == "" || uploadedContentType == "" {
+				t.Fatalf("expected s3 audio upload, got path=%q contentType=%q", uploadedPath, uploadedContentType)
+			}
+		}
+
+		func testQueuedArchiveUploadContract(t *testing.T, submitted AlbumImportPayload, archiveName string, entries map[string]string) {
+			t.Helper()
+			svc, db, user := newMusicTestService(t)
+			svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
+			session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload, Payload: submitted})
+			if err != nil {
+				t.Fatal(err)
+			}
+			updated, err := svc.UploadAlbumImportArchive(user, session.ID, archiveName, bytes.NewReader(newImportTestZipArchive(t, entries)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, err := readAlbumImportPayloadMap(updated.PayloadJSON)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.Status != AlbumImportStatusQueued || payload["archive_name"] != archiveName || payload["derived_tracks"] != nil || payload["derived_cover"] != nil {
+				t.Fatalf("request must only queue source: %#v", updated)
+			}
+			artist, _ := payload["artist"].(map[string]any)
+			album, _ := payload["album"].(map[string]any)
+			if stringValue(artist["name"]) != submitted.Artist.Name || stringValue(album["title"]) != submitted.Album.Title {
+				t.Fatalf("submitted metadata was lost: %#v", payload)
+			}
+			var files []model.AlbumImportFile
+			var jobs []model.AlbumImportJob
+			if err := db.Where("import_id = ?", session.ID).Find(&files).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Where("import_id = ?", session.ID).Find(&jobs).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(files) != 1 || files[0].UploadStatus != AlbumImportFileUploadStatusUploaded || len(jobs) != 1 || jobs[0].Status != AlbumImportJobStatusQueued {
+				t.Fatalf("queued source state invalid: files=%#v jobs=%#v", files, jobs)
+			}
+	*/
+}
+
+func testQueuedArchiveUploadContract(t *testing.T, submitted AlbumImportPayload, archiveName string, entries map[string]string) {
+	t.Helper()
+	svc, db, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload, Payload: submitted})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if uploadedPath == "" || uploadedContentType == "" {
-		t.Fatalf("expected s3 audio upload, got path=%q contentType=%q", uploadedPath, uploadedContentType)
+	updated, err := svc.UploadAlbumImportArchive(user, session.ID, archiveName, bytes.NewReader(newImportTestZipArchive(t, entries)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := readAlbumImportPayloadMap(updated.PayloadJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != AlbumImportStatusQueued || payload["archive_name"] != archiveName || payload["derived_tracks"] != nil || payload["derived_cover"] != nil {
+		t.Fatalf("request must only queue source: %#v", updated)
+	}
+	artist, _ := payload["artist"].(map[string]any)
+	album, _ := payload["album"].(map[string]any)
+	if stringValue(artist["name"]) != submitted.Artist.Name || stringValue(album["title"]) != submitted.Album.Title {
+		t.Fatalf("submitted metadata was lost: %#v", payload)
+	}
+	var files []model.AlbumImportFile
+	var jobs []model.AlbumImportJob
+	if err := db.Where("import_id = ?", session.ID).Find(&files).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("import_id = ?", session.ID).Find(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].UploadStatus != AlbumImportFileUploadStatusUploaded || len(jobs) != 1 || jobs[0].Status != AlbumImportJobStatusQueued {
+		t.Fatalf("queued source state invalid: files=%#v jobs=%#v", files, jobs)
 	}
 }
 
