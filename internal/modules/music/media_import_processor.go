@@ -1,6 +1,8 @@
 package music
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,10 +14,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"atoman/internal/model"
 
 	"github.com/google/uuid"
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"gorm.io/gorm"
 )
 
@@ -49,12 +53,190 @@ func ValidateMediaToolchain(runner MediaCommandRunner) error {
 	if runner == nil {
 		return errors.New("media command runner is required")
 	}
-	for _, tool := range []string{"ffmpeg", "ffprobe", "7zz"} {
+	for _, tool := range []string{"ffmpeg", "ffprobe"} {
 		if _, err := runner.LookPath(tool); err != nil {
 			return errMissingMediaTool{name: tool}
 		}
 	}
 	return nil
+}
+
+func ValidateArchiveToolchain(runner MediaCommandRunner) error {
+	if runner == nil {
+		return errors.New("media command runner is required")
+	}
+	if _, err := runner.LookPath("7zz"); err != nil {
+		return errMissingMediaTool{name: "7zz"}
+	}
+	return nil
+}
+
+type archiveListEntry struct {
+	path       string
+	size       int64
+	packedSize int64
+	attributes string
+}
+
+// validateArchiveListing accepts only ordinary, bounded relative archive entries.
+func validateArchiveListing(raw []byte) error {
+	entries := []archiveListEntry{}
+	entry := archiveListEntry{}
+	flush := func() error {
+		if entry.path == "" {
+			return nil
+		}
+		if filepath.IsAbs(entry.path) || strings.HasPrefix(entry.path, `\\`) || regexp.MustCompile(`^[A-Za-z]:`).MatchString(entry.path) {
+			return fmt.Errorf("unsafe archive path %q", entry.path)
+		}
+		clean := filepath.Clean(strings.ReplaceAll(entry.path, `\\`, "/"))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+			return fmt.Errorf("unsafe archive path %q", entry.path)
+		}
+		attrs := strings.ToLower(entry.attributes)
+		if strings.Contains(attrs, "l") || strings.Contains(attrs, "symlink") || strings.Contains(attrs, "reparse") {
+			return fmt.Errorf("unsafe archive entry %q", entry.path)
+		}
+		entries = append(entries, entry)
+		entry = archiveListEntry{}
+		return nil
+	}
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			if err := flush(); err != nil {
+				return err
+			}
+			continue
+		}
+		key, value, ok := strings.Cut(line, " = ")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "Path":
+			entry.path = strings.TrimSpace(value)
+		case "Size":
+			entry.size, _ = strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		case "Packed Size":
+			entry.packedSize, _ = strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		case "Attributes":
+			entry.attributes = strings.TrimSpace(value)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if err := flush(); err != nil {
+		return err
+	}
+	var total int64
+	for _, item := range entries {
+		if len(entries) > mediaArchiveMaxEntries {
+			return errors.New("archive has too many entries")
+		}
+		if item.size < 0 || item.packedSize < 0 {
+			return errors.New("invalid archive size")
+		}
+		if item.packedSize == 0 && item.size > 0 || item.packedSize > 0 && item.size > item.packedSize*mediaArchiveMaxRatio {
+			return fmt.Errorf("archive compression ratio is too high for %q", item.path)
+		}
+		total += item.size
+		if total > mediaArchiveMaxBytes {
+			return errors.New("archive expands beyond size limit")
+		}
+	}
+	return nil
+}
+
+type cueTrack struct {
+	file         string
+	number       int
+	title        string
+	startSeconds float64
+}
+
+func parseCUE(raw []byte) ([]cueTrack, error) {
+	if !utf8.Valid(raw) {
+		decoded, err := simplifiedchinese.GBK.NewDecoder().Bytes(raw)
+		if err != nil {
+			return nil, fmt.Errorf("decode CUE: %w", err)
+		}
+		raw = decoded
+	}
+	var file string
+	tracks := []cueTrack{}
+	var current *cueTrack
+	scanner := bufio.NewScanner(bytes.NewReader(raw))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		keyword, rest, ok := strings.Cut(line, " ")
+		if !ok {
+			continue
+		}
+		switch strings.ToUpper(keyword) {
+		case "FILE":
+			file = cueValue(rest)
+		case "TRACK":
+			fields := strings.Fields(rest)
+			if len(fields) == 0 {
+				continue
+			}
+			number, err := strconv.Atoi(fields[0])
+			if err != nil {
+				continue
+			}
+			tracks = append(tracks, cueTrack{file: file, number: number})
+			current = &tracks[len(tracks)-1]
+		case "TITLE":
+			if current != nil {
+				current.title = cueValue(rest)
+			}
+		case "INDEX":
+			fields := strings.Fields(rest)
+			if current == nil || len(fields) != 2 || fields[0] != "01" {
+				continue
+			}
+			parts := strings.Split(fields[1], ":")
+			if len(parts) != 3 {
+				continue
+			}
+			minutes, e1 := strconv.Atoi(parts[0])
+			seconds, e2 := strconv.Atoi(parts[1])
+			frames, e3 := strconv.Atoi(parts[2])
+			if e1 == nil && e2 == nil && e3 == nil && seconds < 60 && frames < 75 {
+				current.startSeconds = float64(minutes*60+seconds) + float64(frames)/75
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	valid := tracks[:0]
+	for _, track := range tracks {
+		if track.file != "" {
+			valid = append(valid, track)
+		}
+	}
+	if len(valid) == 0 {
+		return nil, errors.New("CUE has no playable tracks")
+	}
+	return valid, nil
+}
+
+func cueValue(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.HasPrefix(value, "\"") {
+		if end := strings.Index(value[1:], "\""); end >= 0 {
+			return value[1 : end+1]
+		}
+	}
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }
 
 type mediaImportStore interface {
@@ -78,12 +260,20 @@ func (p *MediaImportProcessor) Process(ctx context.Context, job model.AlbumImpor
 	if p == nil || p.db == nil || p.store == nil {
 		return errors.New("media import processor dependencies are required")
 	}
-	if err := ValidateMediaToolchain(p.runner); err != nil {
-		return err
-	}
 	var session model.AlbumImportSession
 	if err := p.db.WithContext(ctx).Preload("Files").First(&session, "id = ?", job.ImportID).Error; err != nil {
 		return err
+	}
+	if err := ValidateMediaToolchain(p.runner); err != nil {
+		return err
+	}
+	for _, file := range session.Files {
+		if file.Role == AlbumImportFileRoleArchive && file.UploadStatus == AlbumImportFileUploadStatusUploaded {
+			if err := ValidateArchiveToolchain(p.runner); err != nil {
+				return err
+			}
+			return p.processArchive(ctx, session, file, heartbeat)
+		}
 	}
 	files := make([]model.AlbumImportFile, 0)
 	for _, file := range session.Files {
@@ -119,6 +309,174 @@ func (p *MediaImportProcessor) Process(ctx context.Context, job model.AlbumImpor
 	return nil
 }
 
+func (p *MediaImportProcessor) processArchive(ctx context.Context, session model.AlbumImportSession, archive model.AlbumImportFile, heartbeat func() error) error {
+	dir, err := os.MkdirTemp("", "atoman-archive-import-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+	archivePath := filepath.Join(dir, "source."+safeMediaExtension(archive.DetectedFormat))
+	if err := p.downloadSource(archivePath, archive.SourceKey); err != nil {
+		return err
+	}
+	if err := p.setSession(ctx, session.ID, AlbumImportStatusExtracting, AlbumImportStageExtracting, 0, 1); err != nil {
+		return err
+	}
+	listing, err := p.runner.Run(ctx, "7zz", "l", "-slt", archivePath)
+	if err != nil {
+		return fmt.Errorf("list archive %s: %w", archive.FileName, err)
+	}
+	if err := validateArchiveListing(listing); err != nil {
+		return err
+	}
+	extracted := filepath.Join(dir, "extracted")
+	if _, err := p.runner.Run(ctx, "7zz", "x", "-y", "-o"+extracted, archivePath); err != nil {
+		return fmt.Errorf("extract archive %s: %w", archive.FileName, err)
+	}
+	return p.processExtractedTree(ctx, session.ID, extracted, heartbeat)
+}
+
+func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, sessionID uuid.UUID, root string, heartbeat func() error) error {
+	type localAudio struct{ path, relative string }
+	audios := []localAudio{}
+	cues := []string{}
+	cover := ""
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return fmt.Errorf("unsafe extracted symlink %q", path)
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		role, _, err := detectAlbumImportFileRole(filepath.Base(path))
+		if err != nil {
+			return nil
+		}
+		switch role {
+		case AlbumImportFileRoleAudio:
+			audios = append(audios, localAudio{path, relative})
+		case AlbumImportFileRoleCue:
+			cues = append(cues, path)
+		case AlbumImportFileRoleCover:
+			if cover == "" {
+				cover = path
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	if cover != "" {
+		_ = p.processCover(ctx, sessionID, cover)
+	}
+	processed := 0
+	used := map[string]bool{}
+	for _, cuePath := range cues {
+		raw, err := os.ReadFile(cuePath)
+		if err != nil {
+			continue
+		}
+		tracks, err := parseCUE(raw)
+		if err != nil {
+			continue
+		}
+		for _, audio := range audios {
+			if filepath.Base(audio.path) != filepath.Base(tracks[0].file) || filepath.Dir(audio.path) != filepath.Dir(cuePath) {
+				continue
+			}
+			if err := p.processCUEAudio(ctx, sessionID, audio.path, audio.relative, tracks); err == nil {
+				processed += len(tracks)
+				used[audio.path] = true
+			}
+		}
+	}
+	for _, audio := range audios {
+		if used[audio.path] {
+			continue
+		}
+		if heartbeat != nil {
+			if err := heartbeat(); err != nil {
+				return err
+			}
+		}
+		file := model.AlbumImportFile{ImportID: sessionID, RelativePath: audio.relative, FileName: filepath.Base(audio.path), Role: AlbumImportFileRoleAudio, DetectedFormat: strings.TrimPrefix(strings.ToLower(filepath.Ext(audio.path)), "."), UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
+		if err := p.db.WithContext(ctx).Create(&file).Error; err != nil {
+			return err
+		}
+		if err := p.processLocalAudio(ctx, sessionID, &file, audio.path, "", 0, 0); err != nil {
+			_ = p.failFile(ctx, file.ID, err)
+			continue
+		}
+		processed++
+	}
+	if processed == 0 {
+		return errors.New("no audio tracks were processed successfully")
+	}
+	return p.setSession(ctx, sessionID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(processed), int64(processed))
+}
+
+func (p *MediaImportProcessor) processCUEAudio(ctx context.Context, sessionID uuid.UUID, sourcePath, relativePath string, tracks []cueTrack) error {
+	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", sourcePath)
+	if err != nil {
+		return err
+	}
+	duration, _ := parseProbe(probe)
+	for index, track := range tracks {
+		end := duration
+		if index+1 < len(tracks) {
+			end = tracks[index+1].startSeconds
+		}
+		if end <= track.startSeconds {
+			return errors.New("invalid CUE track range")
+		}
+		file := model.AlbumImportFile{ImportID: sessionID, RelativePath: relativePath, FileName: fmt.Sprintf("%02d - %s.mp3", track.number, track.title), Role: AlbumImportFileRoleAudio, DetectedFormat: "mp3", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
+		if err := p.db.WithContext(ctx).Create(&file).Error; err != nil {
+			return err
+		}
+		if err := p.processLocalAudio(ctx, sessionID, &file, sourcePath, track.title, track.number, track.startSeconds, end); err != nil {
+			_ = p.failFile(ctx, file.ID, err)
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *MediaImportProcessor) processCover(ctx context.Context, sessionID uuid.UUID, source string) error {
+	output := filepath.Join(filepath.Dir(source), ".atoman-cover.webp")
+	if _, err := p.runner.Run(ctx, "ffmpeg", "-y", "-i", source, "-c:v", "libwebp", output); err != nil {
+		return err
+	}
+	file, err := os.Open(output)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	key := "music/album-imports/playback/sessions/" + sessionID.String() + "/cover/" + uuid.NewString() + ".webp"
+	if err := p.store.PutObject(key, "image/webp", file); err != nil {
+		return err
+	}
+	var session model.AlbumImportSession
+	if err := p.db.WithContext(ctx).First(&session, "id = ?", sessionID).Error; err != nil {
+		return err
+	}
+	payload := map[string]any{}
+	_ = json.Unmarshal([]byte(session.PayloadJSON), &payload)
+	payload["cover_key"] = key
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return p.db.WithContext(ctx).Model(&session).Update("payload_json", string(encoded)).Error
+}
+
 func (p *MediaImportProcessor) processAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile) error {
 	dir, err := os.MkdirTemp("", "atoman-media-import-*")
 	if err != nil {
@@ -129,13 +487,27 @@ func (p *MediaImportProcessor) processAudio(ctx context.Context, sessionID uuid.
 	if err := p.downloadSource(sourcePath, file.SourceKey); err != nil {
 		return err
 	}
+	return p.processLocalAudio(ctx, sessionID, file, sourcePath, "", 0, 0)
+}
+
+func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile, sourcePath, overrideTitle string, overrideTrack int, rangeSeconds ...float64) error {
 	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration:format_tags=title", "-of", "json", sourcePath)
 	if err != nil {
 		return fmt.Errorf("ffprobe %s: %w", file.FileName, err)
 	}
 	duration, taggedTitle := parseProbe(probe)
+	dir, err := os.MkdirTemp("", "atoman-media-output-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
 	outputPath := filepath.Join(dir, "playback.mp3")
-	if _, err := p.runner.Run(ctx, "ffmpeg", "-y", "-i", sourcePath, "-vn", "-c:a", "libmp3lame", "-b:a", "320k", outputPath); err != nil {
+	args := []string{"-y"}
+	if len(rangeSeconds) == 2 {
+		args = append(args, "-ss", strconv.FormatFloat(rangeSeconds[0], 'f', -1, 64), "-to", strconv.FormatFloat(rangeSeconds[1], 'f', -1, 64))
+	}
+	args = append(args, "-i", sourcePath, "-vn", "-c:a", "libmp3lame", "-b:a", "320k", outputPath)
+	if _, err := p.runner.Run(ctx, "ffmpeg", args...); err != nil {
 		return fmt.Errorf("ffmpeg %s: %w", file.FileName, err)
 	}
 	output, err := os.Open(outputPath)
@@ -148,10 +520,16 @@ func (p *MediaImportProcessor) processAudio(ctx context.Context, sessionID uuid.
 		return err
 	}
 	title := taggedTitle
+	if overrideTitle != "" {
+		title = overrideTitle
+	}
 	if title == "" {
 		title = titleFromFileName(file.FileName)
 	}
 	disc, track := discAndTrackFromPath(file.RelativePath)
+	if overrideTrack > 0 {
+		track = overrideTrack
+	}
 	return p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Updates(map[string]any{
 		"playback_key": playbackKey, "title": title, "disc_number": disc, "track_number": track,
 		"duration_seconds": duration, "processing_status": "completed", "error_message": "",

@@ -41,8 +41,6 @@ func main() {
 	mediaStore := music.NewMusicImportMediaStore(client)
 	if mediaStore == nil {
 		log.Printf("music import worker: playback storage unavailable; queued jobs will not be claimed")
-	} else if err := music.ValidateMediaToolchain(music.NewSystemMediaCommandRunner()); err != nil {
-		log.Printf("music import worker: %v; queued jobs will not be claimed", err)
 	} else {
 		processor = music.NewMediaImportProcessor(db, mediaStore, music.NewSystemMediaCommandRunner(), os.Getenv("MUSIC_PLAYBACK_URL_PREFIX"))
 	}
