@@ -37,9 +37,18 @@ func main() {
 		log.Fatal("MUSIC_SOURCE_BUCKET or S3_BUCKET is required")
 	}
 	worker := music.NewImportWorker(db, store, workerIDFromEnv())
+	var processor music.ImportProcessor
+	mediaStore := music.NewMusicImportMediaStore(client)
+	if mediaStore == nil {
+		log.Printf("music import worker: playback storage unavailable; queued jobs will not be claimed")
+	} else if err := music.ValidateMediaToolchain(music.NewSystemMediaCommandRunner()); err != nil {
+		log.Printf("music import worker: %v; queued jobs will not be claimed", err)
+	} else {
+		processor = music.NewMediaImportProcessor(db, mediaStore, music.NewSystemMediaCommandRunner(), os.Getenv("MUSIC_PLAYBACK_URL_PREFIX"))
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := runWorker(ctx, worker, nil, workerPollIntervalFromEnv()); err != nil {
+	if err := runWorker(ctx, worker, processor, workerPollIntervalFromEnv()); err != nil {
 		log.Fatal(err)
 	}
 }

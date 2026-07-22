@@ -31,6 +31,27 @@ type s3AlbumImportMultipartStore struct {
 	bucket string
 }
 
+type s3MediaImportStore struct{ source, playback albumImportMultipartStore }
+
+func NewMusicImportMediaStore(client *s3.S3) mediaImportStore {
+	source := newS3AlbumImportMultipartStore(client)
+	bucket := strings.TrimSpace(os.Getenv("MUSIC_PLAYBACK_BUCKET"))
+	if bucket == "" {
+		bucket = strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	}
+	if source == nil || bucket == "" {
+		return nil
+	}
+	return &s3MediaImportStore{source: source, playback: &s3AlbumImportMultipartStore{client: client, bucket: bucket}}
+}
+
+func (s *s3MediaImportStore) OpenObject(key string) (io.ReadCloser, error) {
+	return s.source.OpenObject(key)
+}
+func (s *s3MediaImportStore) PutObject(key, contentType string, body io.Reader) error {
+	return s.playback.PutObject(key, contentType, body)
+}
+
 func newS3AlbumImportMultipartStore(client *s3.S3) albumImportMultipartStore {
 	bucket := strings.TrimSpace(os.Getenv("MUSIC_SOURCE_BUCKET"))
 	if bucket == "" {

@@ -27,3 +27,21 @@ func TestNewS3AlbumImportMultipartStoreUsesSourceBucketWithLegacyFallback(t *tes
 		})
 	}
 }
+
+func TestNewMusicImportMediaStoreUsesDedicatedPlaybackBucketWithFallback(t *testing.T) {
+	t.Setenv("MUSIC_SOURCE_BUCKET", "source")
+	t.Setenv("MUSIC_PLAYBACK_BUCKET", "playback")
+	t.Setenv("S3_BUCKET", "legacy")
+	store, ok := NewMusicImportMediaStore(&s3.S3{}).(*s3MediaImportStore)
+	source, sourceOK := store.source.(*s3AlbumImportMultipartStore)
+	playback, playbackOK := store.playback.(*s3AlbumImportMultipartStore)
+	if !ok || !sourceOK || !playbackOK || source.bucket != "source" || playback.bucket != "playback" {
+		t.Fatalf("unexpected dedicated store: %#v", store)
+	}
+	t.Setenv("MUSIC_PLAYBACK_BUCKET", "")
+	store = NewMusicImportMediaStore(&s3.S3{}).(*s3MediaImportStore)
+	playback = store.playback.(*s3AlbumImportMultipartStore)
+	if playback.bucket != "legacy" {
+		t.Fatalf("fallback bucket = %q", playback.bucket)
+	}
+}

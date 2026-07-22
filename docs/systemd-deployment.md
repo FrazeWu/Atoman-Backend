@@ -71,6 +71,7 @@ User=fa
 Group=fa
 WorkingDirectory=/home/fa/Atoman-Backend
 EnvironmentFile=/home/fa/Atoman-Backend/.env.prod
+# Requires ffmpeg, ffprobe and 7zz on PATH. Set MUSIC_PLAYBACK_BUCKET and MUSIC_PLAYBACK_URL_PREFIX.
 ExecStart=/home/fa/Atoman-Backend/music_import_worker
 Restart=always
 RestartSec=5
