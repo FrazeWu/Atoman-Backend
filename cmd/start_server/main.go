@@ -60,6 +60,9 @@ func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 	if err := migrations.RunAuthOAuthMigration(db); err != nil {
 		return fmt.Errorf("migrate oauth auth schema: %w", err)
 	}
+	if err := migrations.RunDebateWikiMigration(db); err != nil {
+		return fmt.Errorf("migrate debate wiki schema: %w", err)
+	}
 	models = append(models,
 		&model.ForumGroup{},
 		&model.ForumGroupMember{},
@@ -75,9 +78,9 @@ func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
 		&model.CommentTimeAnchor{},
 		&model.CommentPublishRecord{},
 		&model.TimelineRevisionProposal{},
-		&model.DebateArgumentDetail{},
-		&model.DebateArgumentReference{},
-		&model.DebateArgumentDebateRef{},
+		&model.DebateConclusionEvent{},
+		&model.DebateRevisionReference{},
+		&model.DebateVote{},
 		&model.DebateRelation{},
 	)
 	if err := db.AutoMigrate(models...); err != nil {
@@ -599,8 +602,9 @@ func main() {
 			&model.AuditLog{},
 			&model.Debate{},
 			&model.DebateVote{},
-			&model.VoteHistory{},
-			&model.DebateConcludeVote{},
+			&model.DebateConclusionEvent{},
+			&model.DebateRevisionReference{},
+			&model.DebateRelation{},
 			&model.EmailVerificationCode{},
 			&model.TimelineEvent{},
 			&model.TimelinePerson{},
@@ -672,7 +676,7 @@ func main() {
 VALUES ('forum.solved_auto_threshold', '10', '回复点赞数达到该值时自动标记为解决方案', NOW())
 ON CONFLICT (key) DO NOTHING`)
 		db.Exec(`INSERT INTO site_settings (key, value, description, updated_at)
-VALUES ('site.module_access', '{"modules":{"feed":{"visible":true,"features":{"subscription.manage":true}},"music":{"visible":true,"features":{"music.submit":true,"music.review":true}},"blog":{"visible":true,"features":{"post.create":true,"channel.manage":true}},"forum":{"visible":true,"features":{"topic.create":true,"category.request":true}},"debate":{"visible":true,"features":{"debate.create":true,"argument.create":true}},"timeline":{"visible":true,"features":{"timeline.edit":true}},"podcast":{"visible":true,"features":{"podcast.publish":true}},"video":{"visible":true,"features":{"video.publish":true}}}}', '模块可见性与功能开放配置', NOW())
+VALUES ('site.module_access', '{"modules":{"feed":{"visible":true,"features":{"subscription.manage":true}},"music":{"visible":true,"features":{"music.submit":true,"music.review":true}},"blog":{"visible":true,"features":{"post.create":true,"channel.manage":true}},"forum":{"visible":true,"features":{"topic.create":true,"category.request":true}},"debate":{"visible":true,"features":{"debate.create":true,"debate.edit":true}},"timeline":{"visible":true,"features":{"timeline.edit":true}},"podcast":{"visible":true,"features":{"podcast.publish":true}},"video":{"visible":true,"features":{"video.publish":true}}}}', '模块可见性与功能开放配置', NOW())
 ON CONFLICT (key) DO NOTHING`)
 
 		log.Println("Running blog channel field backfill...")

@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -13,677 +12,396 @@ import (
 	"github.com/google/uuid"
 )
 
-type Handler struct {
-	service *Service
-}
+type Handler struct{ service *Service }
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
-	group.GET("/debate/topics", h.listDebates)
-	group.GET("/debate/topics/search", h.searchDebates)
-	group.GET("/debate/topics/:debateID", h.getDebate)
-	group.POST("/debate/topics", h.createLegacyDebate)
-	group.PUT("/debate/topics/:debateID", h.updateLegacyDebate)
-	group.DELETE("/debate/topics/:debateID", h.deleteLegacyDebate)
-	group.POST("/debate/topics/:debateID/conclude", h.concludeLegacyDebate)
-	group.POST("/debate/topics/:debateID/reopen", h.reopenLegacyDebate)
-	group.POST("/debates", h.createDebate)
-	group.GET("/debates/:debateID/relations", h.getDebateRelations)
-	group.GET("/debates/:debateID/arguments", h.listArguments)
-	group.POST("/debates/:debateID/arguments", h.createLegacyArgument)
-	group.POST("/debate-relations", h.createDebateRelation)
-	group.DELETE("/debate-relations/:relationID", h.deleteDebateRelation)
-	group.PATCH("/debate-arguments/:argumentID", h.updateLegacyArgument)
-	group.DELETE("/debate-arguments/:argumentID", h.deleteLegacyArgument)
-	group.POST("/debate-arguments/:argumentID/reference", h.addArgumentReference)
-	group.DELETE("/debate-arguments/:argumentID/reference/:referenceID", h.removeArgumentReference)
-	group.POST("/debate-arguments/:argumentID/debate-reference", h.addDebateReference)
-	group.DELETE("/debate-arguments/:argumentID/debate-reference/:debateRefID", h.removeDebateReference)
-	group.POST("/debate-arguments/:argumentID/fold", h.foldArgument)
-	group.DELETE("/debate-arguments/:argumentID/fold", h.unfoldArgument)
+	topics := group.Group("/debate/topics")
+	topics.GET("", h.list)
+	topics.POST("", h.create)
+	topics.GET("/:id", h.get)
+	topics.PUT("/:id", h.save)
+	topics.POST("/:id/archive", h.archive)
+	topics.GET("/:id/revisions", h.listRevisions)
+	topics.GET("/:id/revisions/:revisionID", h.getRevision)
+	topics.GET("/:id/revisions/:revisionID/diff", h.diffRevision)
+	topics.POST("/:id/revisions/:revisionID/revert", h.revertRevision)
+	topics.POST("/:id/references/:relationID/reconfirm", h.reconfirm)
+	topics.PUT("/:id/protection", h.putProtection)
+	topics.DELETE("/:id/protection", h.deleteProtection)
+	group.GET("/debates/:id/relations", h.graph)
 }
 
-// getDebateRelations godoc
-// @Summary Get the debate tree or connected relation graph
+// list godoc
+// @Summary List debate topics
 // @Tags Debate
 // @Produce json
-// @Param debateID path string true "Debate ID"
-// @Param view query string false "tree or graph" default(tree)
-// @Success 200 {object} handlers.DebateGraphResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/debates/{debateID}/relations [get]
-func (h *Handler) getDebateRelations(c *gin.Context) {
-	debateID, err := uuid.Parse(c.Param("debateID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateID must be a valid uuid"))
-		return
-	}
-	graph, err := h.service.GetDebateGraph(debateID, c.Query("view"))
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, graph)
-}
-
-// createDebateRelation godoc
-// @Summary Connect a concluded debate to another debate
-// @Tags Debate
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param body body CreateRelationRequest true "Debate relation"
-// @Success 201 {object} handlers.DebateRelationResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 409 {object} handlers.ErrorResponse
-// @Router /api/v1/debate-relations [post]
-func (h *Handler) createDebateRelation(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	var req CreateRelationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
-	}
-	relation, err := h.service.CreateRelation(user, req)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusCreated, relation)
-}
-
-// deleteDebateRelation godoc
-// @Summary Delete a debate relation
-// @Tags Debate
-// @Produce json
-// @Security BearerAuth
-// @Param relationID path string true "Relation ID"
-// @Success 200 {object} handlers.MessageResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 403 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/debate-relations/{relationID} [delete]
-func (h *Handler) deleteDebateRelation(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	relationID, err := uuid.Parse(c.Param("relationID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "relationID must be a valid uuid"))
-		return
-	}
-	if err := h.service.DeleteRelation(user, relationID); err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "Relation deleted"})
-}
-
-func (h *Handler) listDebates(c *gin.Context) {
-	query := ListDebatesQuery{
-		Status:   c.Query("status"),
-		Tag:      c.Query("tag"),
-		Page:     page(c),
-		PageSize: pageSize(c),
-	}
-	debates, total, err := h.service.ListDebates(query)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	items, err := h.service.debateDTOs(h.service.db, debates)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.List(c, items, query.Page, query.PageSize, total)
-}
-
-func (h *Handler) searchDebates(c *gin.Context) {
-	query := ListDebatesQuery{
-		Status:   c.Query("status"),
-		Search:   c.Query("q"),
-		Page:     page(c),
-		PageSize: pageSize(c),
-	}
-	debates, total, err := h.service.ListDebates(query)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	items, err := h.service.debateDTOs(h.service.db, debates)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.List(c, items, query.Page, query.PageSize, total)
-}
-
-func (h *Handler) getDebate(c *gin.Context) {
-	debateID, err := uuid.Parse(c.Param("debateID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateID must be a valid uuid"))
-		return
-	}
-	debate, err := h.service.GetDebate(debateID)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	item, err := h.service.debateDTO(h.service.db, debate)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, item)
-}
-
-// listArguments godoc
-// @Summary List typed debate arguments
-// @Tags Debate
-// @Produce json
-// @Param debateID path string true "Debate ID"
-// @Param page query int false "Page"
-// @Param page_size query int false "Page size"
-// @Success 200 {object} handlers.DebateArgumentListResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/debates/{debateID}/arguments [get]
-func (h *Handler) listArguments(c *gin.Context) {
-	debateID, err := uuid.Parse(c.Param("debateID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateID must be a valid uuid"))
-		return
-	}
+// @Param status query string false "Status"
+// @Param search query string false "Search"
+// @Param tag query string false "Tag"
+// @Success 200 {object} handlers.DebateListResponse
+// @Router /api/v1/debate/topics [get]
+func (h *Handler) list(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
-	arguments, total, err := h.service.ListArguments(debateID, page, pageSize)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	userVotes := map[string]int{}
-	if user, ok := authctx.Current(c); ok {
-		userVotes, err = h.service.ListArgumentVotes(user.ID, debateID)
-		if err != nil {
-			httpx.Error(c, comment.AppError(err))
-			return
-		}
-	}
-	items, err := h.service.argumentDTOs(h.service.db, arguments)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OKMeta(c, http.StatusOK, items, gin.H{
-		"page": page, "page_size": pageSize, "total": total,
-		"has_more": int64(page*pageSize) < total, "user_votes": userVotes,
+	items, total, err := h.service.ListDebates(ListDebatesQuery{
+		Status: c.Query("status"), Search: c.Query("search"), Tag: c.Query("tag"), Page: page, PageSize: pageSize,
 	})
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, items, page, pageSize, total)
 }
 
-// createDebate godoc
-// @Summary Create a debate
+// create godoc
+// @Summary Create a debate topic
 // @Tags Debate
 // @Accept json
 // @Produce json
 // @Security BearerAuth
 // @Param body body CreateDebateRequest true "Debate"
 // @Success 201 {object} handlers.DebateResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Router /api/v1/debates [post]
-func (h *Handler) createDebate(c *gin.Context) {
-	user, ok := authctx.Current(c)
+// @Router /api/v1/debate/topics [post]
+func (h *Handler) create(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
 	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
 	var req CreateDebateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+	if !bindJSON(c, &req) {
 		return
 	}
-	debate, err := h.service.CreateDebate(user, req)
+	created, err := h.service.CreateDebate(user, req)
 	if err != nil {
-		httpx.Error(c, comment.AppError(err))
+		httpx.Error(c, err)
 		return
 	}
-	item, err := h.service.debateDTO(h.service.db, debate)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusCreated, item)
+	httpx.OK(c, http.StatusCreated, created)
 }
 
-func (h *Handler) createLegacyDebate(c *gin.Context) {
-	h.createDebate(c)
-}
-
-func (h *Handler) updateLegacyDebate(c *gin.Context) {
-	user, ok := authctx.Current(c)
+// get godoc
+// @Summary Get a debate topic
+// @Tags Debate
+// @Produce json
+// @Param id path string true "Debate ID"
+// @Success 200 {object} handlers.DebateResponse
+// @Router /api/v1/debate/topics/{id} [get]
+func (h *Handler) get(c *gin.Context) {
+	id, ok := parseID(c, "id")
 	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	debateID, err := uuid.Parse(c.Param("debateID"))
+	item, err := h.service.GetDebate(id)
 	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateID must be a valid uuid"))
-		return
-	}
-	var req CreateDebateRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
-	}
-	debate, err := h.service.UpdateDebate(user, debateID, req)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	item, err := h.service.debateDTO(h.service.db, debate)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
+		httpx.Error(c, err)
 		return
 	}
 	httpx.OK(c, http.StatusOK, item)
 }
 
-func (h *Handler) deleteLegacyDebate(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	debateID, err := uuid.Parse(c.Param("debateID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateID must be a valid uuid"))
-		return
-	}
-	if err := h.service.DeleteDebate(user, debateID); err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "Debate deleted"})
-}
-
-// createLegacyArgument godoc
-// @Summary Create a typed debate argument
+// save godoc
+// @Summary Save a debate wiki revision
 // @Tags Debate
 // @Accept json
 // @Produce json
 // @Security BearerAuth
-// @Param debateID path string true "Debate ID"
-// @Param body body CreateArgumentRequest true "Argument"
-// @Success 201 {object} handlers.DebateArgumentResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/debates/{debateID}/arguments [post]
-func (h *Handler) createLegacyArgument(c *gin.Context) {
-	user, ok := authctx.Current(c)
+// @Param id path string true "Debate ID"
+// @Param body body SaveWikiRequest true "Revision"
+// @Success 200 {object} handlers.DebateResponse
+// @Router /api/v1/debate/topics/{id} [put]
+func (h *Handler) save(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
 	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	debateID, err := uuid.Parse(c.Param("debateID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateID must be a valid uuid"))
-		return
-	}
-	var req CreateArgumentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
-	}
-	req.DebateID = debateID
-	argument, err := h.service.CreateArgument(user, req)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	item, err := h.service.argumentDTO(h.service.db, argument)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusCreated, item)
-}
-
-func (h *Handler) concludeLegacyDebate(c *gin.Context) {
-	user, ok := authctx.Current(c)
+	id, ok := parseID(c, "id")
 	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	debateID, err := uuid.Parse(c.Param("debateID"))
+	var req SaveWikiRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	item, err := h.service.SaveWiki(user, id, req)
 	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateID must be a valid uuid"))
-		return
-	}
-	var req struct {
-		ConclusionType    string `json:"conclusion_type"`
-		ConclusionSummary string `json:"conclusion_summary"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
-	}
-	debate, err := h.service.ConcludeDebate(user, debateID, req.ConclusionType, req.ConclusionSummary)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, debate)
-}
-
-func (h *Handler) reopenLegacyDebate(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	debateID, err := uuid.Parse(c.Param("debateID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateID must be a valid uuid"))
-		return
-	}
-	debate, err := h.service.ReopenDebate(user, debateID)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, debate)
-}
-
-// updateLegacyArgument godoc
-// @Summary Update a typed debate argument
-// @Tags Debate
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param argumentID path string true "Argument ID"
-// @Param body body CreateArgumentRequest true "Argument"
-// @Success 200 {object} handlers.DebateArgumentResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 403 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/debate-arguments/{argumentID} [patch]
-func (h *Handler) updateLegacyArgument(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	argumentID, err := uuid.Parse(c.Param("argumentID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "argumentID must be a valid uuid"))
-		return
-	}
-	var req CreateArgumentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
-	}
-	argument, err := h.service.UpdateArgument(user, argumentID, req)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	item, err := h.service.argumentDTO(h.service.db, argument)
-	if err != nil {
-		httpx.Error(c, comment.AppError(err))
+		httpx.Error(c, err)
 		return
 	}
 	httpx.OK(c, http.StatusOK, item)
 }
 
-// deleteLegacyArgument godoc
-// @Summary Delete a typed debate argument
+// archive godoc
+// @Summary Archive a debate topic
 // @Tags Debate
 // @Produce json
 // @Security BearerAuth
-// @Param argumentID path string true "Argument ID"
-// @Success 200 {object} handlers.MessageResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Failure 403 {object} handlers.ErrorResponse
-// @Failure 404 {object} handlers.ErrorResponse
-// @Router /api/v1/debate-arguments/{argumentID} [delete]
-func (h *Handler) deleteLegacyArgument(c *gin.Context) {
-	user, ok := authctx.Current(c)
+// @Param id path string true "Debate ID"
+// @Success 200 {object} handlers.DebateResponse
+// @Router /api/v1/debate/topics/{id}/archive [post]
+func (h *Handler) archive(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
 	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	argumentID, err := uuid.Parse(c.Param("argumentID"))
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	item, err := h.service.ArchiveDebate(user, id)
 	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "argumentID must be a valid uuid"))
+		httpx.Error(c, err)
 		return
 	}
-	if err := h.service.DeleteArgument(user, argumentID); err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "Argument deleted"})
+	httpx.OK(c, http.StatusOK, item)
 }
 
-// addArgumentReference godoc
-// @Summary Add an argument reference
+// listRevisions godoc
+// @Summary List debate revisions
+// @Tags Debate
+// @Produce json
+// @Param id path string true "Debate ID"
+// @Success 200 {object} handlers.DebateRevisionListResponse
+// @Router /api/v1/debate/topics/{id}/revisions [get]
+func (h *Handler) listRevisions(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	items, err := h.service.ListRevisions(id)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, items)
+}
+
+// getRevision godoc
+// @Summary Get a debate revision
+// @Tags Debate
+// @Produce json
+// @Param id path string true "Debate ID"
+// @Param revisionID path string true "Revision ID"
+// @Success 200 {object} handlers.DebateRevisionResponse
+// @Router /api/v1/debate/topics/{id}/revisions/{revisionID} [get]
+func (h *Handler) getRevision(c *gin.Context) {
+	id, revisionID, ok := parseTwoIDs(c, "id", "revisionID")
+	if !ok {
+		return
+	}
+	item, err := h.service.GetRevision(id, revisionID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
+}
+
+// diffRevision godoc
+// @Summary Diff two debate revisions
+// @Tags Debate
+// @Produce json
+// @Param id path string true "Debate ID"
+// @Param revisionID path string true "Revision ID"
+// @Param against query string true "Other revision ID"
+// @Success 200 {object} handlers.DebateRevisionDiffResponse
+// @Router /api/v1/debate/topics/{id}/revisions/{revisionID}/diff [get]
+func (h *Handler) diffRevision(c *gin.Context) {
+	id, revisionID, ok := parseTwoIDs(c, "id", "revisionID")
+	if !ok {
+		return
+	}
+	against, err := uuid.Parse(c.Query("against"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "against must be a valid uuid"))
+		return
+	}
+	item, err := h.service.DiffRevisions(id, revisionID, against)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
+}
+
+// revertRevision godoc
+// @Summary Revert to a debate revision
 // @Tags Debate
 // @Accept json
 // @Produce json
 // @Security BearerAuth
-// @Param argumentID path string true "Argument ID"
-// @Param body body ReferenceRequest true "Reference"
-// @Success 200 {object} handlers.MessageResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Router /api/v1/debate-arguments/{argumentID}/reference [post]
-func (h *Handler) addArgumentReference(c *gin.Context) {
+// @Param id path string true "Debate ID"
+// @Param revisionID path string true "Revision ID"
+// @Param body body RevertRevisionRequest true "Revert"
+// @Success 200 {object} handlers.DebateResponse
+// @Router /api/v1/debate/topics/{id}/revisions/{revisionID}/revert [post]
+func (h *Handler) revertRevision(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, revisionID, ok := parseTwoIDs(c, "id", "revisionID")
+	if !ok {
+		return
+	}
+	var req RevertRevisionRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	item, err := h.service.RevertRevision(user, id, revisionID, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
+}
+
+// reconfirm godoc
+// @Summary Reconfirm a stale debate reference
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Param relationID path string true "Relation ID"
+// @Param body body ReconfirmReferenceRequest true "Reconfirmation"
+// @Success 200 {object} handlers.DebateResponse
+// @Router /api/v1/debate/topics/{id}/references/{relationID}/reconfirm [post]
+func (h *Handler) reconfirm(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, relationID, ok := parseTwoIDs(c, "id", "relationID")
+	if !ok {
+		return
+	}
+	var req ReconfirmReferenceRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	item, err := h.service.ReconfirmReference(user, id, relationID, req)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
+}
+
+// putProtection godoc
+// @Summary Protect a debate topic
+// @Tags Debate
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Param body body ProtectionRequest true "Protection"
+// @Success 200 {object} handlers.DebateMessageResponse
+// @Router /api/v1/debate/topics/{id}/protection [put]
+func (h *Handler) putProtection(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	var req ProtectionRequest
+	if !bindJSON(c, &req) {
+		return
+	}
+	if err := h.service.SetProtection(user, id, req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "Protection updated"})
+}
+
+// deleteProtection godoc
+// @Summary Remove debate protection
+// @Tags Debate
+// @Produce json
+// @Security BearerAuth
+// @Param id path string true "Debate ID"
+// @Success 200 {object} handlers.DebateMessageResponse
+// @Router /api/v1/debate/topics/{id}/protection [delete]
+func (h *Handler) deleteProtection(c *gin.Context) {
+	user, ok := requireCurrentUser(c)
+	if !ok {
+		return
+	}
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteProtection(user, id); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "Protection removed"})
+}
+
+// graph godoc
+// @Summary Get the read-only debate graph
+// @Tags Debate
+// @Produce json
+// @Param id path string true "Debate ID"
+// @Param view query string false "tree or graph"
+// @Param depth query int false "Depth"
+// @Success 200 {object} handlers.DebateGraphResponse
+// @Router /api/v1/debates/{id}/relations [get]
+func (h *Handler) graph(c *gin.Context) {
+	id, ok := parseID(c, "id")
+	if !ok {
+		return
+	}
+	depth := 0
+	if raw := c.Query("depth"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "depth must be a positive integer"))
+			return
+		}
+		depth = parsed
+	}
+	graph, err := h.service.GetDebateGraph(id, c.Query("view"), depth)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, graph)
+}
+
+func requireCurrentUser(c *gin.Context) (authctx.CurrentUser, bool) {
 	user, ok := authctx.Current(c)
 	if !ok {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
 	}
-	argumentID, err := uuid.Parse(c.Param("argumentID"))
+	return user, ok
+}
+
+func parseID(c *gin.Context, name string) (uuid.UUID, bool) {
+	id, err := uuid.Parse(c.Param(name))
 	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "argumentID must be a valid uuid"))
-		return
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", name+" must be a valid uuid"))
+		return uuid.Nil, false
 	}
-	var req ReferenceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
+	return id, true
+}
+
+func parseTwoIDs(c *gin.Context, first, second string) (uuid.UUID, uuid.UUID, bool) {
+	firstID, ok := parseID(c, first)
+	if !ok {
+		return uuid.Nil, uuid.Nil, false
+	}
+	secondID, ok := parseID(c, second)
+	return firstID, secondID, ok
+}
+
+func bindJSON(c *gin.Context, target any) bool {
+	if err := c.ShouldBindJSON(target); err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
+		return false
 	}
-	if err := h.service.AddArgumentReference(user, argumentID, req.ReferenceID); err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "Reference added"})
-}
-
-// removeArgumentReference godoc
-// @Summary Remove an argument reference
-// @Tags Debate
-// @Produce json
-// @Security BearerAuth
-// @Param argumentID path string true "Argument ID"
-// @Param referenceID path string true "Referenced argument ID"
-// @Success 200 {object} handlers.MessageResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Router /api/v1/debate-arguments/{argumentID}/reference/{referenceID} [delete]
-func (h *Handler) removeArgumentReference(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	argumentID, err := uuid.Parse(c.Param("argumentID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "argumentID must be a valid uuid"))
-		return
-	}
-	referenceID, err := uuid.Parse(c.Param("referenceID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "referenceID must be a valid uuid"))
-		return
-	}
-	if err := h.service.RemoveArgumentReference(user, argumentID, referenceID); err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "Reference removed"})
-}
-
-// addDebateReference godoc
-// @Summary Add a debate reference
-// @Tags Debate
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param argumentID path string true "Argument ID"
-// @Param body body DebateReferenceRequest true "Debate reference"
-// @Success 200 {object} handlers.MessageResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Router /api/v1/debate-arguments/{argumentID}/debate-reference [post]
-func (h *Handler) addDebateReference(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	argumentID, err := uuid.Parse(c.Param("argumentID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "argumentID must be a valid uuid"))
-		return
-	}
-	var req DebateReferenceRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return
-	}
-	if err := h.service.AddDebateReference(user, argumentID, req.DebateID); err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "Debate reference added"})
-}
-
-// removeDebateReference godoc
-// @Summary Remove a debate reference
-// @Tags Debate
-// @Produce json
-// @Security BearerAuth
-// @Param argumentID path string true "Argument ID"
-// @Param debateRefID path string true "Referenced debate ID"
-// @Success 200 {object} handlers.MessageResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Router /api/v1/debate-arguments/{argumentID}/debate-reference/{debateRefID} [delete]
-func (h *Handler) removeDebateReference(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	argumentID, err := uuid.Parse(c.Param("argumentID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "argumentID must be a valid uuid"))
-		return
-	}
-	debateID, err := uuid.Parse(c.Param("debateRefID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "debateRefID must be a valid uuid"))
-		return
-	}
-	if err := h.service.RemoveDebateReference(user, argumentID, debateID); err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "Debate reference removed"})
-}
-
-// foldArgument godoc
-// @Summary Fold a debate argument
-// @Tags Debate
-// @Accept json
-// @Produce json
-// @Security BearerAuth
-// @Param argumentID path string true "Argument ID"
-// @Param body body handlers.FoldArgumentInput false "Fold note"
-// @Success 200 {object} handlers.MessageResponse
-// @Failure 403 {object} handlers.ErrorResponse
-// @Router /api/v1/debate-arguments/{argumentID}/fold [post]
-func (h *Handler) foldArgument(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	argumentID, err := uuid.Parse(c.Param("argumentID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "argumentID must be a valid uuid"))
-		return
-	}
-	var req struct {
-		FoldNote string `json:"fold_note"`
-	}
-	_ = c.ShouldBindJSON(&req)
-	if err := h.service.FoldArgument(user, argumentID, req.FoldNote); err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "folded"})
-}
-
-// unfoldArgument godoc
-// @Summary Unfold a debate argument
-// @Tags Debate
-// @Produce json
-// @Security BearerAuth
-// @Param argumentID path string true "Argument ID"
-// @Success 200 {object} handlers.MessageResponse
-// @Failure 403 {object} handlers.ErrorResponse
-// @Router /api/v1/debate-arguments/{argumentID}/fold [delete]
-func (h *Handler) unfoldArgument(c *gin.Context) {
-	user, ok := authctx.Current(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	argumentID, err := uuid.Parse(c.Param("argumentID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "argumentID must be a valid uuid"))
-		return
-	}
-	if err := h.service.UnfoldArgument(user, argumentID); err != nil {
-		httpx.Error(c, comment.AppError(err))
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"message": "unfolded"})
-}
-
-func page(c *gin.Context) int {
-	value, err := strconv.Atoi(c.DefaultQuery("page", "1"))
-	if err != nil || value < 1 {
-		return 1
-	}
-	return value
-}
-
-func pageSize(c *gin.Context) int {
-	value, err := strconv.Atoi(c.DefaultQuery("limit", "20"))
-	if err != nil || value < 1 {
-		return 20
-	}
-	if value > 100 {
-		return 100
-	}
-	return value
+	return true
 }

@@ -1,8 +1,6 @@
 package model
 
 import (
-	"time"
-
 	"github.com/google/uuid"
 	"github.com/lib/pq"
 )
@@ -10,134 +8,88 @@ import (
 // Debate represents a structured debate topic
 type Debate struct {
 	Base
-	UserID            uuid.UUID      `json:"user_id" gorm:"type:uuid;not null;index"`
-	User              *User          `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	Title             string         `json:"title" gorm:"not null"`
-	Description       string         `json:"description" gorm:"type:text"`
-	Content           string         `json:"content" gorm:"type:text"`
-	Status            string         `json:"status" gorm:"default:'open'"`
-	Tags              pq.StringArray `json:"tags" gorm:"type:text[]" swaggertype:"array,string"`
-	ViewCount         int            `json:"view_count" gorm:"default:0"`
-	ArgumentCount     int            `json:"argument_count" gorm:"default:0"`
-	VoteCount         int            `json:"vote_count" gorm:"default:0"`
-	ConclusionType    string         `json:"conclusion_type" gorm:"default:''"`
-	ConclusionSummary string         `json:"conclusion_summary" gorm:"type:text"`
-	ConcludeVoteCount int            `json:"conclude_vote_count" gorm:"default:0"`
-	ConcludeThreshold int            `json:"conclude_threshold" gorm:"default:10"`
-	CreatedAt         time.Time      `json:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at"`
-	ConcludedAt       *time.Time     `json:"concluded_at,omitempty"`
+	UserID                   uuid.UUID      `json:"user_id" gorm:"type:uuid;not null;index"`
+	User                     *User          `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	Title                    string         `json:"title" gorm:"not null"`
+	Description              string         `json:"description" gorm:"type:text"`
+	Content                  string         `json:"content" gorm:"type:text"`
+	Status                   string         `json:"status" gorm:"default:'active'"`
+	Tags                     pq.StringArray `json:"tags" gorm:"type:text[]" swaggertype:"array,string"`
+	ViewCount                int            `json:"view_count" gorm:"default:0"`
+	CurrentRevisionID        *uuid.UUID     `json:"current_revision_id,omitempty" gorm:"type:uuid;index"`
+	CurrentConclusionEventID *uuid.UUID     `json:"current_conclusion_event_id,omitempty" gorm:"type:uuid;index"`
+	ConclusionType           string         `json:"conclusion_type" gorm:"default:''"`
 }
 
 func (Debate) TableName() string { return "debates" }
 
 const (
-	DebateRelationSupport = "support"
-	DebateRelationOppose  = "oppose"
+	DebateRelationSupport     = "support"
+	DebateRelationOppose      = "oppose"
+	DebateRelationActive      = "active"
+	DebateRelationStale       = "stale"
+	DebateRelationUnavailable = "unavailable"
+	DebateStatusActive        = "active"
+	DebateStatusArchived      = "archived"
+	DebateVoteYes             = "yes"
+	DebateVoteNo              = "no"
 )
 
-// DebateRelation connects a concluded debate node to the debate it supports or opposes.
+// DebateRelation projects a debate citation from the referenced source to the
+// current target revision.
 type DebateRelation struct {
 	Base
-	SourceDebateID uuid.UUID `json:"source_debate_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_relation_pair,priority:1"`
-	SourceDebate   *Debate   `json:"source_debate,omitempty" gorm:"foreignKey:SourceDebateID"`
-	TargetDebateID uuid.UUID `json:"target_debate_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_relation_pair,priority:2"`
-	TargetDebate   *Debate   `json:"target_debate,omitempty" gorm:"foreignKey:TargetDebateID"`
-	Stance         string    `json:"stance" gorm:"type:varchar(16);not null"`
-	UserID         uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
-	User           *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	SourceDebateID          uuid.UUID `json:"source_debate_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_relation_pair,priority:1,where:deleted_at IS NULL"`
+	SourceDebate            *Debate   `json:"source_debate,omitempty" gorm:"foreignKey:SourceDebateID"`
+	TargetDebateID          uuid.UUID `json:"target_debate_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_relation_pair,priority:2,where:deleted_at IS NULL"`
+	TargetDebate            *Debate   `json:"target_debate,omitempty" gorm:"foreignKey:TargetDebateID"`
+	Stance                  string    `json:"stance" gorm:"type:varchar(16);not null"`
+	TargetRevisionID        uuid.UUID `json:"target_revision_id" gorm:"type:uuid;not null;index"`
+	SourceConclusionEventID uuid.UUID `json:"source_conclusion_event_id" gorm:"type:uuid;not null;index"`
+	Status                  string    `json:"status" gorm:"type:varchar(16);not null;default:'active';index"`
 }
 
 func (DebateRelation) TableName() string { return "debate_relations" }
 
-// ArgumentType represents the type of argument
-type ArgumentType string
-
-type ArgumentMention struct {
-	UserID uuid.UUID `json:"user_id"`
-	Start  int       `json:"start"`
-	End    int       `json:"end"`
-}
-
-type ArgumentAttachment struct {
-	ID          uuid.UUID `json:"id"`
-	URL         string    `json:"url"`
-	ContentType string    `json:"content_type"`
-	Position    int       `json:"position"`
-}
-
-const (
-	ArgumentTypeSupport  ArgumentType = "support"
-	ArgumentTypeOppose   ArgumentType = "oppose"
-	ArgumentTypeNeutral  ArgumentType = "neutral"
-	ArgumentTypeEvidence ArgumentType = "evidence"
-	ArgumentTypeQuestion ArgumentType = "question"
-	ArgumentTypeCounter  ArgumentType = "counter"
-)
-
-// DebateArgumentDTO is the typed API representation backed by comment_entries.
-type DebateArgumentDTO struct {
-	Base
-	DebateID          uuid.UUID           `json:"debate_id" gorm:"type:uuid;not null;index"`
-	Debate            *Debate             `json:"debate,omitempty" gorm:"foreignKey:DebateID"`
-	ParentID          *uuid.UUID          `json:"parent_id" gorm:"type:uuid;index"`
-	Parent            *DebateArgumentDTO  `json:"parent,omitempty" gorm:"-"`
-	UserID            uuid.UUID           `json:"user_id" gorm:"type:uuid;not null;index"`
-	User              *User               `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	Content           string              `json:"content" gorm:"type:text;not null"`
-	ArgumentType      ArgumentType        `json:"argument_type" gorm:"type:varchar(20);not null"`
-	VoteCount         int                 `json:"vote_count" gorm:"default:0"`
-	References        []DebateArgumentDTO `json:"references,omitempty" gorm:"-"`
-	ReferencedDebates []Debate            `json:"referenced_debates,omitempty" gorm:"many2many:argument_debate_refs;joinForeignKey:ArgumentID;JoinReferences:DebateID"`
-	IsConcluded       bool                `json:"is_concluded" gorm:"default:false"`
-	Conclusion        string              `json:"conclusion,omitempty" gorm:"type:text"`
-	// Evidence source fields (only used when ArgumentType == "evidence")
-	SourceURL     string `json:"source_url" gorm:"type:varchar(2048);default:''"`
-	SourceTitle   string `json:"source_title" gorm:"type:varchar(512);default:''"`
-	SourceExcerpt string `json:"source_excerpt" gorm:"type:text;default:''"`
-	// Admin moderation
-	IsFolded      bool                 `json:"is_folded" gorm:"default:false"`
-	FoldNote      string               `json:"fold_note" gorm:"type:text;default:''"` // admin note for why folded
-	Mentions      []ArgumentMention    `json:"mentions,omitempty" gorm:"-"`
-	AttachmentIDs []uuid.UUID          `json:"attachment_ids,omitempty" gorm:"-"`
-	Attachments   []ArgumentAttachment `json:"attachments,omitempty" gorm:"-"`
-	CreatedAt     time.Time            `json:"created_at"`
-	UpdatedAt     time.Time            `json:"updated_at"`
-}
-
-// DebateVote represents a real-name vote on an argument
+// DebateVote is one community yes/no vote on a debate.
 type DebateVote struct {
 	Base
-	ArgumentID uuid.UUID          `json:"argument_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_vote_argument_user,priority:1"`
-	Argument   *DebateArgumentDTO `json:"argument,omitempty" gorm:"-"`
-	UserID     uuid.UUID          `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_vote_argument_user,priority:2"`
-	User       *User              `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	VoteType   int                `json:"vote_type" gorm:"not null"`
-	CreatedAt  time.Time          `json:"created_at"`
-	UpdatedAt  time.Time          `json:"updated_at"`
+	DebateID  uuid.UUID `json:"debate_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_vote_debate_user,priority:1,where:deleted_at IS NULL"`
+	UserID    uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_vote_debate_user,priority:2,where:deleted_at IS NULL"`
+	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	Direction string    `json:"direction" gorm:"type:varchar(8);not null"`
 }
 
 func (DebateVote) TableName() string { return "debate_votes" }
 
-// VoteHistory tracks vote changes for transparency
-type VoteHistory struct {
+// DebateConclusionEvent is an immutable snapshot created when the community
+// first reaches a conclusion or later reverses it.
+type DebateConclusionEvent struct {
 	Base
-	ArgumentID  uuid.UUID `json:"argument_id" gorm:"type:uuid;not null;index"`
-	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
-	OldVoteType int       `json:"old_vote_type"`
-	NewVoteType int       `json:"new_vote_type"`
-	CreatedAt   time.Time `json:"created_at"`
+	DebateID   uuid.UUID `json:"debate_id" gorm:"type:uuid;not null;index"`
+	Direction  string    `json:"direction" gorm:"type:varchar(8);not null"`
+	YesVotes   int       `json:"yes_votes" gorm:"not null"`
+	NoVotes    int       `json:"no_votes" gorm:"not null"`
+	TotalVotes int       `json:"total_votes" gorm:"not null"`
 }
 
-func (VoteHistory) TableName() string { return "vote_histories" }
+func (DebateConclusionEvent) TableName() string { return "debate_conclusion_events" }
 
-// DebateConcludeVote tracks users who voted to conclude a debate
-type DebateConcludeVote struct {
+// DebateRevisionReference stores every resource token resolved for one
+// immutable debate revision. Occurrence keeps duplicate tokens distinct.
+type DebateRevisionReference struct {
 	Base
-	DebateID  uuid.UUID `json:"debate_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_conclude_vote_debate_user,priority:1"`
-	UserID    uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_conclude_vote_debate_user,priority:2"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	DebateID           uuid.UUID  `json:"debate_id" gorm:"type:uuid;not null;index"`
+	RevisionID         uuid.UUID  `json:"revision_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_revision_reference,priority:1"`
+	ContentReferenceID uuid.UUID  `json:"content_reference_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_debate_revision_content_reference,where:deleted_at IS NULL"`
+	Raw                string     `json:"raw" gorm:"type:text;not null"`
+	Kind               string     `json:"kind" gorm:"type:varchar(24);not null;uniqueIndex:idx_debate_revision_reference,priority:2"`
+	ResourceID         uuid.UUID  `json:"resource_id" gorm:"type:uuid;not null;uniqueIndex:idx_debate_revision_reference,priority:3"`
+	Title              string     `json:"title" gorm:"type:text;not null"`
+	Qualifier          string     `json:"qualifier" gorm:"type:varchar(16);not null;default:'';uniqueIndex:idx_debate_revision_reference,priority:4"`
+	Occurrence         int        `json:"occurrence" gorm:"not null;uniqueIndex:idx_debate_revision_reference,priority:5"`
+	State              string     `json:"state" gorm:"type:varchar(16);not null;default:'active'"`
+	RelationID         *uuid.UUID `json:"relation_id,omitempty" gorm:"type:uuid;index"`
 }
 
-func (DebateConcludeVote) TableName() string { return "debate_conclude_votes" }
+func (DebateRevisionReference) TableName() string { return "debate_revision_references" }

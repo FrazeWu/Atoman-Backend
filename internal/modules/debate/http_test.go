@@ -7,712 +7,155 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"atoman/internal/model"
-	"atoman/internal/modules/reference"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
 )
 
-func newDebateHTTPTestService(t *testing.T) (*Service, authctx.CurrentUser) {
-	t.Helper()
-
-	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.MediaAsset{}, &model.Debate{},
-		&model.DiscussionTarget{}, &model.CommentEntry{}, &model.CommentMention{},
-		&model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{}, &model.CommentPublishRecord{},
-		&model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{}, &model.DebateArgumentReference{},
-		&model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{}, &model.DebateRelation{})
-	if err := db.AutoMigrate(&model.ContentReference{}); err != nil {
-		t.Fatalf("create content reference table: %v", err)
-	}
-	if err := db.Exec(`CREATE UNIQUE INDEX uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error; err != nil {
-		t.Fatalf("create target index: %v", err)
-	}
-	if err := db.Exec(`CREATE UNIQUE INDEX uq_comment_root_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error; err != nil {
-		t.Fatalf("create floor index: %v", err)
-	}
-	if err := db.Exec(`CREATE UNIQUE INDEX uq_notification_dedup ON notifications (recipient_id, source_type, source_id) WHERE aggregation_key = '' AND deleted_at IS NULL`).Error; err != nil {
-		t.Fatalf("create notification index: %v", err)
-	}
-	if err := db.Exec(`CREATE UNIQUE INDEX uq_notification_unread_aggregate ON notifications (recipient_id, aggregation_key) WHERE aggregation_key <> '' AND read_at IS NULL AND deleted_at IS NULL`).Error; err != nil {
-		t.Fatalf("create aggregate index: %v", err)
-	}
-	if err := db.Exec(`CREATE UNIQUE INDEX uq_debate_http_content_reference_source_range ON content_references (source_type, source_id, source_field, start_offset, end_offset) WHERE deleted_at IS NULL`).Error; err != nil {
-		t.Fatalf("create content reference index: %v", err)
-	}
-
-	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
-	if err := db.Create(&user).Error; err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-
-	return NewService(db), authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: user.Role}
-}
-
-func TestRegisterRoutesMountsDebateRelationLifecycle(t *testing.T) {
+func TestRegisterRoutesMountsWikiAndReadOnlyGraphOnly(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	source, err := service.CreateDebate(user, CreateDebateRequest{Title: "来源辩题"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	source, err = service.ConcludeDebate(user, source.ID, "yes", "结论明确")
-	if err != nil {
-		t.Fatal(err)
-	}
-	target, err := service.CreateDebate(user, CreateDebateRequest{Title: "目标辩题"})
-	if err != nil {
-		t.Fatal(err)
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1"), NewService(testdb.Open(t)))
+	routes := map[string]bool{}
+	for _, route := range router.Routes() {
+		routes[route.Method+" "+route.Path] = true
 	}
 
-	router := newDebateHTTPRouter(service, &user)
-	body, _ := json.Marshal(CreateRelationRequest{
-		SourceDebateID: source.ID,
-		TargetDebateID: target.ID,
-		Stance:         "support",
-	})
-	createRecorder := httptest.NewRecorder()
-	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/debate-relations", bytes.NewReader(body))
-	createRequest.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(createRecorder, createRequest)
-	if createRecorder.Code != http.StatusCreated {
-		t.Fatalf("expected relation create status 201, got %d: %s", createRecorder.Code, createRecorder.Body.String())
+	want := []string{
+		"GET /api/v1/debate/topics", "POST /api/v1/debate/topics",
+		"GET /api/v1/debate/topics/:id", "PUT /api/v1/debate/topics/:id",
+		"POST /api/v1/debate/topics/:id/archive",
+		"GET /api/v1/debate/topics/:id/revisions",
+		"GET /api/v1/debate/topics/:id/revisions/:revisionID",
+		"GET /api/v1/debate/topics/:id/revisions/:revisionID/diff",
+		"POST /api/v1/debate/topics/:id/revisions/:revisionID/revert",
+		"POST /api/v1/debate/topics/:id/references/:relationID/reconfirm",
+		"PUT /api/v1/debate/topics/:id/protection", "DELETE /api/v1/debate/topics/:id/protection",
+		"GET /api/v1/debates/:id/relations",
 	}
-	var created struct {
-		Data model.DebateRelation `json:"data"`
+	for _, route := range want {
+		require.Truef(t, routes[route], "missing route %s", route)
 	}
-	if err := json.Unmarshal(createRecorder.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
+	removed := []string{
+		"POST /api/v1/debate/topics/:debateID/arguments",
+		"POST /api/v1/debates/:debateID/arguments",
+		"PATCH /api/v1/debate-arguments/:argumentID",
+		"POST /api/v1/debate-arguments/:argumentID/reference",
+		"POST /api/v1/debate-relations",
+		"DELETE /api/v1/debate-relations/:relationID",
+		"POST /api/v1/debate/topics/:debateID/conclude",
+		"POST /api/v1/debate/topics/:debateID/reopen",
 	}
-
-	graphRecorder := httptest.NewRecorder()
-	graphRequest := httptest.NewRequest(http.MethodGet, "/api/v1/debates/"+target.ID.String()+"/relations?view=tree", nil)
-	router.ServeHTTP(graphRecorder, graphRequest)
-	if graphRecorder.Code != http.StatusOK {
-		t.Fatalf("expected relation graph status 200, got %d: %s", graphRecorder.Code, graphRecorder.Body.String())
-	}
-	var graph struct {
-		Data DebateGraph `json:"data"`
-	}
-	if err := json.Unmarshal(graphRecorder.Body.Bytes(), &graph); err != nil {
-		t.Fatal(err)
-	}
-	if len(graph.Data.Nodes) != 2 || len(graph.Data.Relations) != 1 {
-		t.Fatalf("expected two nodes and one relation, got %s", graphRecorder.Body.String())
-	}
-
-	deleteRecorder := httptest.NewRecorder()
-	deleteRequest := httptest.NewRequest(http.MethodDelete, "/api/v1/debate-relations/"+created.Data.ID.String(), nil)
-	router.ServeHTTP(deleteRecorder, deleteRequest)
-	if deleteRecorder.Code != http.StatusOK {
-		t.Fatalf("expected relation delete status 200, got %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+	for _, route := range removed {
+		require.Falsef(t, routes[route], "legacy route must be removed: %s", route)
 	}
 }
 
-func newDebateHTTPRouter(service *Service, current *authctx.CurrentUser) *gin.Engine {
-	r := gin.New()
-	r.Use(func(c *gin.Context) {
-		if current != nil {
-			authctx.SetCurrentUser(c, *current)
+func TestWikiHTTPValidationAuthorizationAndEnvelopes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	ctx := newDebateTestContext(t)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		switch c.GetHeader("X-Test-User") {
+		case "editor":
+			authctx.SetCurrentUser(c, ctx.editor)
+		case "admin":
+			authctx.SetCurrentUser(c, ctx.admin)
 		}
 		c.Next()
 	})
-	RegisterRoutes(r.Group("/api/v1"), service)
-	return r
+	RegisterRoutes(router.Group("/api/v1"), ctx.service)
+	created := createDebateForTest(t, ctx, "HTTP", "body")
+
+	response := performDebateRequest(t, router, http.MethodPut, "/api/v1/debate/topics/"+created.ID.String(), map[string]any{}, "")
+	require.Equal(t, http.StatusUnauthorized, response.Code, response.Body.String())
+	response = performDebateRequestRaw(router, http.MethodPut, "/api/v1/debate/topics/"+created.ID.String(), []byte(`{"title":`), "editor")
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	response = performDebateRequest(t, router, http.MethodPut, "/api/v1/debate/topics/not-a-uuid", map[string]any{"title": "Bad", "edit_summary": "bad", "base_revision": created.CurrentRevisionID}, "editor")
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	response = performDebateRequest(t, router, http.MethodGet, "/api/v1/debates/"+created.ID.String()+"/relations?depth=zero", nil, "")
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+
+	saved, err := ctx.service.SaveWiki(ctx.editor, created.ID, SaveWikiRequest{Title: "New", Content: "body", EditSummary: "advance", BaseRevisionID: *created.CurrentRevisionID})
+	require.NoError(t, err)
+	response = performDebateRequest(t, router, http.MethodPut, "/api/v1/debate/topics/"+created.ID.String(), map[string]any{
+		"title": "Conflict", "content": "body", "edit_summary": "stale", "base_revision": created.CurrentRevisionID,
+	}, "editor")
+	require.Equal(t, http.StatusConflict, response.Code, response.Body.String())
+	var conflict struct {
+		Error struct {
+			Details map[string]any `json:"details"`
+		} `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &conflict))
+	require.Equal(t, created.CurrentRevisionID.String(), conflict.Error.Details["base_revision_id"])
+	require.Equal(t, saved.CurrentRevisionID.String(), conflict.Error.Details["current_revision_id"])
+
+	response = performDebateRequest(t, router, http.MethodPut, "/api/v1/debate/topics/"+created.ID.String(), map[string]any{
+		"title": "HTTP saved", "content": "body", "edit_summary": "save", "base_revision": saved.CurrentRevisionID,
+	}, "editor")
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assertDebateDataEnvelope(t, response)
 }
 
-func TestRegisterRoutesMountsListDetailSearchAndArgumentList(t *testing.T) {
+func TestWikiHTTPAdminAuthorization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Router Debate", Description: "Body"})
-	if err != nil {
-		t.Fatalf("create debate: %v", err)
-	}
-	if _, err := service.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "Argument", ArgumentType: string(model.ArgumentTypeSupport)}); err != nil {
-		t.Fatalf("create argument: %v", err)
-	}
-
-	r := newDebateHTTPRouter(service, &user)
-
-	cases := []string{
-		"/api/v1/debate/topics",
-		"/api/v1/debate/topics/" + debate.ID.String(),
-		"/api/v1/debate/topics/search?q=Router",
-		"/api/v1/debates/" + debate.ID.String() + "/arguments",
-	}
-
-	for _, path := range cases {
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodGet, path, nil)
-		r.ServeHTTP(w, req)
-		if w.Code == http.StatusNotFound {
-			t.Fatalf("expected route %s to be mounted, got 404: %s", path, w.Body.String())
+	ctx := newDebateTestContext(t)
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		if c.GetHeader("X-Test-User") == "admin" {
+			authctx.SetCurrentUser(c, ctx.admin)
+		} else if c.GetHeader("X-Test-User") == "editor" {
+			authctx.SetCurrentUser(c, ctx.editor)
 		}
-	}
-}
-
-func TestListArgumentsReturnsCurrentUserVotes(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Voting Debate", Description: "Body"})
-	if err != nil {
-		t.Fatalf("create debate: %v", err)
-	}
-	argument, err := service.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "Argument", ArgumentType: string(model.ArgumentTypeSupport)})
-	if err != nil {
-		t.Fatalf("create argument: %v", err)
-	}
-	if err := service.db.Create(&model.DebateVote{ArgumentID: argument.ID, UserID: user.ID, VoteType: 1}).Error; err != nil {
-		t.Fatalf("create vote: %v", err)
-	}
-
-	r := newDebateHTTPRouter(service, &user)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/debates/"+debate.ID.String()+"/arguments", nil)
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var response struct {
-		Meta struct {
-			UserVotes map[string]int `json:"user_votes"`
-		} `json:"meta"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if response.Meta.UserVotes[argument.ID.String()] != 1 {
-		t.Fatalf("expected current user vote for %s, got %#v", argument.ID, response.Meta.UserVotes)
-	}
-}
-
-func TestArgumentCreateAndListReturnContentReferences(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Referenced argument"})
-	if err != nil {
-		t.Fatalf("create debate: %v", err)
-	}
-	router := newDebateHTTPRouter(service, &user)
-	body := bytes.NewBufferString(`{"content":"Hello @alice","argument_type":"support"}`)
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/debates/"+debate.ID.String()+"/arguments", body)
-	request.Header.Set("Content-Type", "application/json")
-	created := httptest.NewRecorder()
-	router.ServeHTTP(created, request)
-	if created.Code != http.StatusCreated || !bytes.Contains(created.Body.Bytes(), []byte(`"content_references":[{"kind":"user","target_type":"user"`)) {
-		t.Fatalf("expected create response references, got %d: %s", created.Code, created.Body.String())
-	}
-
-	listed := httptest.NewRecorder()
-	router.ServeHTTP(listed, httptest.NewRequest(http.MethodGet, "/api/v1/debates/"+debate.ID.String()+"/arguments", nil))
-	if listed.Code != http.StatusOK || !bytes.Contains(listed.Body.Bytes(), []byte(`"content_references":[{"kind":"user","target_type":"user"`)) {
-		t.Fatalf("expected list response references, got %d: %s", listed.Code, listed.Body.String())
-	}
-}
-
-func TestListDebatesFiltersByTag(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	if _, err := service.CreateDebate(user, CreateDebateRequest{Title: "Science", Description: "Body", Tags: []string{"science"}}); err != nil {
-		t.Fatalf("create science debate: %v", err)
-	}
-	if _, err := service.CreateDebate(user, CreateDebateRequest{Title: "History", Description: "Body", Tags: []string{"history"}}); err != nil {
-		t.Fatalf("create history debate: %v", err)
-	}
-
-	r := newDebateHTTPRouter(service, &user)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/debate/topics?tag=science", nil)
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var response struct {
-		Data []model.Debate `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(response.Data) != 1 || response.Data[0].Title != "Science" {
-		t.Fatalf("expected only science debate, got %#v", response.Data)
-	}
-}
-
-func TestSearchDebatesFiltersByStatus(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	openDebate, err := service.CreateDebate(user, CreateDebateRequest{Title: "肺癌风险会不会增加？"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	concluded, err := service.CreateDebate(user, CreateDebateRequest{Title: "吸烟量会不会影响风险？"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.ConcludeDebate(user, concluded.ID, "yes", "结论明确"); err != nil {
-		t.Fatal(err)
-	}
-
-	router := newDebateHTTPRouter(service, nil)
-	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/debate/topics/search?q=%E4%BC%9A%E4%B8%8D%E4%BC%9A&status=concluded&limit=10", nil)
-	router.ServeHTTP(recorder, request)
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
-	}
-	var response struct {
-		Data []model.Debate `json:"data"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
-		t.Fatal(err)
-	}
-	if len(response.Data) != 1 || response.Data[0].ID != concluded.ID || response.Data[0].ID == openDebate.ID {
-		t.Fatalf("expected only concluded search result, got %s", recorder.Body.String())
-	}
-}
-
-func TestListAndGetDebateReturnOnlyActiveArgumentVotes(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Vote totals", Description: "Body"})
-	if err != nil {
-		t.Fatalf("create debate: %v", err)
-	}
-	activeArgument, err := service.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "Active argument", ArgumentType: string(model.ArgumentTypeSupport)})
-	if err != nil {
-		t.Fatalf("create active argument: %v", err)
-	}
-	deletedArgument, err := service.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "Deleted argument", ArgumentType: string(model.ArgumentTypeOppose)})
-	if err != nil {
-		t.Fatalf("create argument to delete: %v", err)
-	}
-
-	voter := model.User{Username: "bob", Email: "bob@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
-	if err := service.db.Create(&voter).Error; err != nil {
-		t.Fatalf("create voter: %v", err)
-	}
-	deletedVoter := model.User{Username: "carol", Email: "carol@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
-	if err := service.db.Create(&deletedVoter).Error; err != nil {
-		t.Fatalf("create voter for deleted vote: %v", err)
-	}
-
-	if err := service.db.Create(&model.DebateVote{ArgumentID: activeArgument.ID, UserID: voter.UUID, VoteType: 1}).Error; err != nil {
-		t.Fatalf("create active vote: %v", err)
-	}
-	deletedVote := model.DebateVote{ArgumentID: activeArgument.ID, UserID: deletedVoter.UUID, VoteType: -1}
-	if err := service.db.Create(&deletedVote).Error; err != nil {
-		t.Fatalf("create vote to delete: %v", err)
-	}
-	if err := service.db.Delete(&deletedVote).Error; err != nil {
-		t.Fatalf("soft delete vote: %v", err)
-	}
-	if err := service.db.Create(&model.DebateVote{ArgumentID: deletedArgument.ID, UserID: voter.UUID, VoteType: 1}).Error; err != nil {
-		t.Fatalf("create vote for deleted argument: %v", err)
-	}
-	if err := service.db.Delete(&model.CommentEntry{}, "id = ?", deletedArgument.ID).Error; err != nil {
-		t.Fatalf("soft delete argument: %v", err)
-	}
-
-	router := newDebateHTTPRouter(service, nil)
-	listRecorder := httptest.NewRecorder()
-	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/debate/topics?page=1&limit=20", nil)
-	router.ServeHTTP(listRecorder, listRequest)
-	if listRecorder.Code != http.StatusOK {
-		t.Fatalf("expected list status 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
-	}
-	var listPayload struct {
-		Data []model.Debate `json:"data"`
-		Meta struct {
-			Page     int   `json:"page"`
-			PageSize int   `json:"page_size"`
-			Total    int64 `json:"total"`
-		} `json:"meta"`
-	}
-	if err := json.Unmarshal(listRecorder.Body.Bytes(), &listPayload); err != nil {
-		t.Fatalf("decode list response: %v", err)
-	}
-	if len(listPayload.Data) != 1 || listPayload.Meta.Page != 1 || listPayload.Meta.PageSize != 20 || listPayload.Meta.Total != 1 {
-		t.Fatalf("expected unchanged list envelope, got %s", listRecorder.Body.String())
-	}
-	listed := listPayload.Data[0]
-	if listed.Title != debate.Title || listed.Status != "open" || listed.User == nil || listed.User.Username != user.Username {
-		t.Fatalf("expected original debate fields and user, got %#v", listed)
-	}
-	if listed.VoteCount != 1 {
-		t.Fatalf("expected list vote_count=1, got %d: %s", listed.VoteCount, listRecorder.Body.String())
-	}
-
-	detailRecorder := httptest.NewRecorder()
-	detailRequest := httptest.NewRequest(http.MethodGet, "/api/v1/debate/topics/"+debate.ID.String(), nil)
-	router.ServeHTTP(detailRecorder, detailRequest)
-	if detailRecorder.Code != http.StatusOK {
-		t.Fatalf("expected detail status 200, got %d: %s", detailRecorder.Code, detailRecorder.Body.String())
-	}
-	var detailPayload struct {
-		Data model.Debate `json:"data"`
-	}
-	if err := json.Unmarshal(detailRecorder.Body.Bytes(), &detailPayload); err != nil {
-		t.Fatalf("decode detail response: %v", err)
-	}
-	if detailPayload.Data.Title != debate.Title || detailPayload.Data.Status != "open" || detailPayload.Data.User == nil || detailPayload.Data.User.Username != user.Username {
-		t.Fatalf("expected original detail fields and user, got %#v", detailPayload.Data)
-	}
-	if detailPayload.Data.VoteCount != 1 {
-		t.Fatalf("expected detail vote_count=1, got %d: %s", detailPayload.Data.VoteCount, detailRecorder.Body.String())
-	}
-}
-
-func TestRegisterRoutesMountsTopicMutationAndArgumentCreate(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	r := newDebateHTTPRouter(service, &user)
-
-	createBody := map[string]any{
-		"title":       "Create Debate",
-		"description": "Body",
-		"content":     "Content",
-		"tags":        []string{"tag1"},
-	}
-	raw, _ := json.Marshal(createBody)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics", bytes.NewReader(raw))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected topic create route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	var created struct {
-		Data model.Debate `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
-	if created.Data.ID.String() == "" {
-		t.Fatalf("expected debate id in create response, got %s", w.Body.String())
-	}
-
-	updateRaw := bytes.NewBufferString(`{"title":"Updated","description":"Updated body","content":"Updated content","tags":["tag2"]}`)
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPut, "/api/v1/debate/topics/"+created.Data.ID.String(), updateRaw)
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected topic update route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	argumentRaw := bytes.NewBufferString(`{"content":"Argument","argument_type":"support"}`)
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debates/"+created.Data.ID.String()+"/arguments", argumentRaw)
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected argument create route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate/topics/"+created.Data.ID.String(), nil)
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected topic delete route to be mounted, got 404: %s", w.Body.String())
-	}
-}
-
-func TestDebateReferencesCoverDescriptionAndContentButSkipRelationTokens(t *testing.T) {
-	service, user := newDebateHTTPTestService(t)
-	target, err := service.CreateDebate(user, CreateDebateRequest{Title: "Referenced debate"})
-	if err != nil {
-		t.Fatalf("create target debate: %v", err)
-	}
-	body, _ := json.Marshal(map[string]any{
-		"title":       "Reference debate",
-		"description": "Hello @" + user.Username,
-		"content":     "See @debate:" + target.ID.String() + " but relation @debate:" + target.ID.String() + ":support",
+		c.Next()
 	})
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics", bytes.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
+	RegisterRoutes(router.Group("/api/v1"), ctx.service)
+	protected := createDebateForTest(t, ctx, "Protected", "body")
+	archived := createDebateForTest(t, ctx, "Archived", "body")
+
+	response := performDebateRequest(t, router, http.MethodPut, "/api/v1/debate/topics/"+protected.ID.String()+"/protection", map[string]any{"protection_level": "full"}, "editor")
+	require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	response = performDebateRequest(t, router, http.MethodPost, "/api/v1/debate/topics/"+archived.ID.String()+"/archive", nil, "editor")
+	require.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+
+	response = performDebateRequest(t, router, http.MethodPut, "/api/v1/debate/topics/"+protected.ID.String()+"/protection", map[string]any{"protection_level": "full"}, "admin")
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assertDebateDataEnvelope(t, response)
+	response = performDebateRequest(t, router, http.MethodPost, "/api/v1/debate/topics/"+archived.ID.String()+"/archive", nil, "admin")
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	assertDebateDataEnvelope(t, response)
+}
+
+func performDebateRequest(t *testing.T, router *gin.Engine, method, path string, body any, user string) *httptest.ResponseRecorder {
+	t.Helper()
+	var raw []byte
+	if body != nil {
+		var err error
+		raw, err = json.Marshal(body)
+		require.NoError(t, err)
+	}
+	return performDebateRequestRaw(router, method, path, raw, user)
+}
+
+func performDebateRequestRaw(router *gin.Engine, method, path string, body []byte, user string) *httptest.ResponseRecorder {
 	response := httptest.NewRecorder()
-	newDebateHTTPRouter(service, &user).ServeHTTP(response, request)
-	if response.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body.String())
+	request := httptest.NewRequest(method, path, bytes.NewReader(body))
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
 	}
-	var decoded struct {
-		Data struct {
-			ID         uuid.UUID                     `json:"id"`
-			References []reference.ResolvedReference `json:"references"`
-		} `json:"data"`
+	if user != "" {
+		request.Header.Set("X-Test-User", user)
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(decoded.Data.References) != 2 {
-		t.Fatalf("expected relation token to be skipped, got %s", response.Body.String())
-	}
-	if decoded.Data.References[0].Field != "description" || decoded.Data.References[0].TargetID != user.ID {
-		t.Fatalf("unexpected description reference: %#v", decoded.Data.References[0])
-	}
-	if decoded.Data.References[1].Field != "content" || decoded.Data.References[1].TargetID != target.ID {
-		t.Fatalf("unexpected content reference: %#v", decoded.Data.References[1])
-	}
-	var rows []model.ContentReference
-	if err := service.db.Find(&rows, "source_type = ? AND source_id = ?", "debate", decoded.Data.ID).Error; err != nil {
-		t.Fatalf("load references: %v", err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("expected two stored references, got %#v", rows)
-	}
+	router.ServeHTTP(response, request)
+	return response
 }
 
-func TestCreateDebateRejectsUnavailableReference(t *testing.T) {
-	service, user := newDebateHTTPTestService(t)
-	body, _ := json.Marshal(map[string]any{
-		"title": "Invalid reference", "content": "See @debate:" + uuid.NewString(),
-	})
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics", bytes.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
-	response := httptest.NewRecorder()
-	newDebateHTTPRouter(service, &user).ServeHTTP(response, request)
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
-	}
-	var count int64
-	if err := service.db.Model(&model.Debate{}).Where("title = ?", "Invalid reference").Count(&count).Error; err != nil {
-		t.Fatalf("count debates: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("expected invalid debate rolled back, got %d rows", count)
-	}
-}
-
-func TestDebateUpdateReadAndDeleteReferenceLifecycle(t *testing.T) {
-	service, user := newDebateHTTPTestService(t)
-	created, err := service.CreateDebate(user, CreateDebateRequest{Title: "Lifecycle", Content: "Hello @" + user.Username})
-	if err != nil {
-		t.Fatalf("create debate: %v", err)
-	}
-	target, err := service.CreateDebate(user, CreateDebateRequest{Title: "Target"})
-	if err != nil {
-		t.Fatalf("create target: %v", err)
-	}
-	router := newDebateHTTPRouter(service, &user)
-	updateBody := bytes.NewBufferString(`{"title":"Lifecycle","description":"","content":"See @debate:` + target.ID.String() + `","tags":[]}`)
-	updateRequest := httptest.NewRequest(http.MethodPut, "/api/v1/debate/topics/"+created.ID.String(), updateBody)
-	updateRequest.Header.Set("Content-Type", "application/json")
-	updated := httptest.NewRecorder()
-	router.ServeHTTP(updated, updateRequest)
-	if updated.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", updated.Code, updated.Body.String())
-	}
-	for _, path := range []string{
-		"/api/v1/debate/topics", "/api/v1/debate/topics/search?q=Lifecycle", "/api/v1/debate/topics/" + created.ID.String(),
-	} {
-		response := httptest.NewRecorder()
-		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
-		if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"references":[{"kind":"resource","target_type":"debate","target_id":"`+target.ID.String()+`"`)) {
-			t.Fatalf("expected updated references from %s, got %d: %s", path, response.Code, response.Body.String())
-		}
-	}
-	deleted := httptest.NewRecorder()
-	router.ServeHTTP(deleted, httptest.NewRequest(http.MethodDelete, "/api/v1/debate/topics/"+created.ID.String(), nil))
-	if deleted.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", deleted.Code, deleted.Body.String())
-	}
-	var count int64
-	if err := service.db.Model(&model.ContentReference{}).Where("source_type = ? AND source_id = ?", "debate", created.ID).Count(&count).Error; err != nil {
-		t.Fatalf("count references: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("expected debate references removed, got %d", count)
-	}
-}
-
-func TestRegisterRoutesMountsConcludeReopenAndArgumentMutation(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Debate", Description: "Body"})
-	if err != nil {
-		t.Fatalf("create debate: %v", err)
-	}
-	argument, err := service.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "Argument", ArgumentType: string(model.ArgumentTypeSupport)})
-	if err != nil {
-		t.Fatalf("create argument: %v", err)
-	}
-
-	r := newDebateHTTPRouter(service, &user)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics/"+debate.ID.String()+"/conclude", bytes.NewBufferString(`{"conclusion_type":"inconclusive","conclusion_summary":"done"}`))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected conclude route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	updateArgumentRaw := bytes.NewBufferString(`{"content":"Updated argument","argument_type":"support","source_url":"https://example.com"}`)
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPatch, "/api/v1/debate-arguments/"+argument.ID.String(), updateArgumentRaw)
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected argument update route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate-arguments/"+argument.ID.String(), nil)
-	r.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected argument delete route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	adminRouter := newDebateHTTPRouter(service, &authctx.CurrentUser{ID: user.ID, Username: user.Username, Role: authctx.RoleAdmin})
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics/"+debate.ID.String()+"/reopen", nil)
-	adminRouter.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected reopen route to be mounted, got 404: %s", w.Body.String())
-	}
-}
-
-func TestRegisterRoutesMountsReferenceAndFoldOperations(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Debate", Description: "Body"})
-	if err != nil {
-		t.Fatalf("create debate: %v", err)
-	}
-	argument, err := service.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "Argument", ArgumentType: string(model.ArgumentTypeSupport)})
-	if err != nil {
-		t.Fatalf("create argument: %v", err)
-	}
-	refArgument, err := service.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "Ref", ArgumentType: string(model.ArgumentTypeSupport)})
-	if err != nil {
-		t.Fatalf("create ref argument: %v", err)
-	}
-
-	adminRouter := newDebateHTTPRouter(service, &authctx.CurrentUser{ID: user.ID, Username: user.Username, Role: authctx.RoleAdmin})
-	userRouter := newDebateHTTPRouter(service, &user)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/debate-arguments/"+argument.ID.String()+"/reference", bytes.NewBufferString(`{"reference_id":"`+refArgument.ID.String()+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	userRouter.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected add reference route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate-arguments/"+argument.ID.String()+"/reference/"+refArgument.ID.String(), nil)
-	userRouter.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected remove reference route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate-arguments/"+argument.ID.String()+"/debate-reference", bytes.NewBufferString(`{"debate_id":"`+debate.ID.String()+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	userRouter.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected add debate reference route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate-arguments/"+argument.ID.String()+"/debate-reference/"+debate.ID.String(), nil)
-	userRouter.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected remove debate reference route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/debate-arguments/"+argument.ID.String()+"/fold", bytes.NewBufferString(`{"fold_note":"note"}`))
-	req.Header.Set("Content-Type", "application/json")
-	adminRouter.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected fold route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodDelete, "/api/v1/debate-arguments/"+argument.ID.String()+"/fold", nil)
-	adminRouter.ServeHTTP(w, req)
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected unfold route to be mounted, got 404: %s", w.Body.String())
-	}
-}
-
-func TestRegisterRoutesDoesNotMountLegacyArgumentAliases(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	r := newDebateHTTPRouter(service, &user)
-	for _, request := range []struct{ method, path string }{
-		{http.MethodGet, "/api/v1/debate/topics/" + uuid.NewString() + "/arguments"},
-		{http.MethodPost, "/api/v1/debate/topics/" + uuid.NewString() + "/arguments"},
-		{http.MethodPut, "/api/v1/debate/arguments/" + uuid.NewString()},
-		{http.MethodDelete, "/api/v1/debate/arguments/" + uuid.NewString()},
-	} {
-		w := httptest.NewRecorder()
-		r.ServeHTTP(w, httptest.NewRequest(request.method, request.path, nil))
-		if w.Code != http.StatusNotFound {
-			t.Fatalf("legacy route %s %s returned %d", request.method, request.path, w.Code)
-		}
-	}
-}
-
-func TestArgumentHTTPMapsCommentFailures(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	service, user := newDebateHTTPTestService(t)
-	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Errors"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := newDebateHTTPRouter(service, &user)
-	post := func(content string) *httptest.ResponseRecorder {
-		w := httptest.NewRecorder()
-		body, _ := json.Marshal(map[string]any{"content": content, "argument_type": "support"})
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/debates/"+debate.ID.String()+"/arguments", bytes.NewReader(body))
-		req.Header.Set("Content-Type", "application/json")
-		r.ServeHTTP(w, req)
-		return w
-	}
-	if got := post("").Code; got != http.StatusBadRequest {
-		t.Fatalf("empty status %d", got)
-	}
-	first := post("same")
-	if first.Code != http.StatusCreated {
-		t.Fatalf("create status %d: %s", first.Code, first.Body.String())
-	}
-	if got := post("same").Code; got != http.StatusConflict {
-		t.Fatalf("duplicate status %d", got)
-	}
-	for _, content := range []string{"two", "three", "four", "five"} {
-		if got := post(content).Code; got != http.StatusCreated {
-			t.Fatalf("create %s status %d", content, got)
-		}
-	}
-	if got := post("six").Code; got != http.StatusTooManyRequests {
-		t.Fatalf("rate status %d", got)
-	}
-
-	var created struct {
-		Data model.DebateArgumentDTO `json:"data"`
-	}
-	if err := json.Unmarshal(first.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	other := model.User{Username: "other", Email: "other@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
-	if err := service.db.Create(&other).Error; err != nil {
-		t.Fatal(err)
-	}
-	otherUser := authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: other.Role}
-	forbidden := newDebateHTTPRouter(service, &otherUser)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/debate-arguments/"+created.Data.ID.String(), bytes.NewBufferString(`{"content":"edit","argument_type":"support"}`))
-	req.Header.Set("Content-Type", "application/json")
-	forbidden.ServeHTTP(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("forbidden status %d: %s", w.Code, w.Body.String())
-	}
+func assertDebateDataEnvelope(t *testing.T, response *httptest.ResponseRecorder) {
+	t.Helper()
+	var payload map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &payload))
+	require.NotEmpty(t, payload["data"], response.Body.String())
 }

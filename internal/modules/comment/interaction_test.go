@@ -81,11 +81,7 @@ func TestDeleteRootPhysicallyDeletesMixedBuildingAndDecrementsOnlyVisibleCounter
 	require.NoError(t, ctx.db.Create(&model.CommentAttachment{CommentID: hidden.ID, MediaAssetID: asset.ID}).Error)
 	require.NoError(t, ctx.db.Create(&model.CommentTimeAnchor{CommentID: softDeleted.ID, StartOffset: 0, EndOffset: 4, Seconds: 12}).Error)
 	require.NoError(t, ctx.db.Create(&model.TimelineRevisionProposal{CommentID: root.ID, TargetKind: "event", TargetID: uuid.New(), PatchJSON: json.RawMessage(`[]`), Evidence: "source"}).Error)
-	require.NoError(t, ctx.db.Create(&model.DebateArgumentDetail{CommentID: active.ID, ArgumentType: "claim"}).Error)
-	require.NoError(t, ctx.db.Create(&model.DebateArgumentReference{CommentID: folded.ID, ReferencedCommentID: active.ID}).Error)
-	require.NoError(t, ctx.db.Create(&model.DebateArgumentDebateRef{CommentID: hidden.ID, DebateID: uuid.New()}).Error)
-	external := ctx.create(t, 0, "external root", nil)
-	require.NoError(t, ctx.db.Create(&model.DebateArgumentReference{CommentID: external.ID, ReferencedCommentID: folded.ID}).Error)
+	ctx.create(t, 0, "external root", nil)
 	var target model.DiscussionTarget
 	require.NoError(t, ctx.db.First(&target).Error)
 	require.NoError(t, ctx.db.Model(&target).Updates(map[string]any{"pinned_comment_id": root.ID, "comment_count": 4, "root_count": 2}).Error)
@@ -107,7 +103,7 @@ func TestDeleteRootPhysicallyDeletesMixedBuildingAndDecrementsOnlyVisibleCounter
 	require.Equal(t, 1, updatedTarget.RootCount)
 	require.Nil(t, updatedTarget.PinnedCommentID)
 	require.ErrorIs(t, ctx.service.Delete(ctx.users[0], root.ID), ErrCommentNotFound)
-	for _, table := range []any{&model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{}, &model.DebateArgumentReference{}, &model.DebateArgumentDebateRef{}} {
+	for _, table := range []any{&model.TimelineRevisionProposal{}} {
 		var count int64
 		require.NoError(t, ctx.db.Unscoped().Model(table).Count(&count).Error)
 		require.Zero(t, count)

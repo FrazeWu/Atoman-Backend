@@ -78,6 +78,9 @@ func runMigrations(db *gorm.DB) error {
 	if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
 		return fmt.Errorf("unified reading list migration: %w", err)
 	}
+	if err := migrations.RunDebateWikiMigration(db); err != nil {
+		return fmt.Errorf("debate wiki migration: %w", err)
+	}
 
 	if err := migrateSchema(db); err != nil {
 		return err
@@ -268,10 +271,10 @@ func migrateSchema(db *gorm.DB) error {
 		&model.PodcastEpisode{},
 		&model.PodcastEpisodeBookmark{},
 		&model.Debate{},
+		&model.DebateConclusionEvent{},
+		&model.DebateRevisionReference{},
 		&model.DebateRelation{},
 		&model.DebateVote{},
-		&model.VoteHistory{},
-		&model.DebateConcludeVote{},
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
 		&model.CommentMention{},
@@ -283,9 +286,6 @@ func migrateSchema(db *gorm.DB) error {
 		&model.ContentReference{},
 		&model.TimelineRevisionProposal{},
 		&model.TimelineRevision{},
-		&model.DebateArgumentDetail{},
-		&model.DebateArgumentReference{},
-		&model.DebateArgumentDebateRef{},
 	}
 	if !db.Migrator().HasTable(&model.ForumDraft{}) {
 		models = append(models, &model.ForumDraft{})
