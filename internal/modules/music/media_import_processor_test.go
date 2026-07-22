@@ -108,6 +108,77 @@ func TestMediaImportProcessorExtractsArchiveInTempTreeAndKeepsDiscPath(t *testin
 	}
 }
 
+func TestMediaImportProcessorArchiveRetrySkipsCompletedDerivedAudio(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	archive := model.AlbumImportFile{ImportID: session.ID, RelativePath: "album.zip", FileName: "album.zip", Role: AlbumImportFileRoleArchive, DetectedFormat: "zip", SourceKey: "source/album.zip", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
+	if err := db.Create(&archive).Error; err != nil {
+		t.Fatal(err)
+	}
+	ffmpegs := 0
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe", "7zz": "/bin/7zz"}}
+	runner.run = func(name string, args []string) ([]byte, error) {
+		if name == "7zz" && args[0] == "l" {
+			return []byte("Path = Disc 1/01 - First.flac\nSize = 4\nPacked Size = 4\n\nPath = Disc 1/02 - Second.flac\nSize = 4\nPacked Size = 4\n\n"), nil
+		}
+		if name == "7zz" && args[0] == "x" {
+			for _, arg := range args {
+				if strings.HasPrefix(arg, "-o") {
+					output := filepath.Join(strings.TrimPrefix(arg, "-o"), "Disc 1", "01 - First.flac")
+					return nil, os.MkdirAll(filepath.Dir(output), 0700)
+				}
+			}
+		}
+		if name == "ffprobe" {
+			return []byte(`{"format":{"duration":"12"}}`), nil
+		}
+		if name == "ffmpeg" {
+			ffmpegs++
+			if ffmpegs == 2 {
+				return nil, errors.New("second track transient failure")
+			}
+			for _, arg := range args {
+				if strings.HasSuffix(arg, ".mp3") {
+					return nil, os.WriteFile(arg, []byte("derived"), 0600)
+				}
+			}
+		}
+		return nil, nil
+	}
+	original := runner.run
+	runner.run = func(name string, args []string) ([]byte, error) {
+		result, err := original(name, args)
+		if name == "7zz" && len(args) > 0 && args[0] == "x" && err == nil {
+			for _, arg := range args {
+				if strings.HasPrefix(arg, "-o") {
+					_ = os.WriteFile(filepath.Join(strings.TrimPrefix(arg, "-o"), "Disc 1", "01 - First.flac"), []byte("audio"), 0600)
+					_ = os.WriteFile(filepath.Join(strings.TrimPrefix(arg, "-o"), "Disc 1", "02 - Second.flac"), []byte("audio"), 0600)
+				}
+			}
+		}
+		return result, err
+	}
+	store := &fakeMediaStore{objects: map[string][]byte{archive.SourceKey: []byte("zip")}, puts: map[string][]byte{}}
+	processor := NewMediaImportProcessor(db, store, runner, "")
+	job := model.AlbumImportJob{ImportID: session.ID}
+	if err := processor.Process(context.Background(), job, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := processor.Process(context.Background(), job, nil); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&model.AlbumImportFile{}).Where("import_id = ? AND role = ?", session.ID, AlbumImportFileRoleAudio).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 || ffmpegs != 3 || len(store.puts) != 2 {
+		t.Fatalf("archive retry duplicated completed output: records=%d ffmpegs=%d objects=%d", count, ffmpegs, len(store.puts))
+	}
+}
+
 func TestProcessCUEAudioCreatesIndependentRangesAndCueTitles(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
@@ -135,6 +206,9 @@ func TestProcessCUEAudioCreatesIndependentRangesAndCueTitles(t *testing.T) {
 	}
 	if len(files) != 2 || files[0].Title == "Tagged title" || files[0].PlaybackKey == files[1].PlaybackKey {
 		t.Fatalf("unexpected cue files: %#v", files)
+	}
+	if files[0].DurationSeconds != 10 || files[1].DurationSeconds != 113.5 {
+		t.Fatalf("CUE durations must be derived from range, got %#v", files)
 	}
 	foundRange := false
 	for _, run := range runner.runs {
@@ -341,6 +415,13 @@ func TestMediaImportProcessorRetriesUploadedCUESourceAfterAllTracksFail(t *testi
 	if source.ProcessingStatus != "completed" {
 		t.Fatalf("expected source completed after retry, got %#v", source)
 	}
+	var derivedCount int64
+	if err := db.Model(&model.AlbumImportFile{}).Where("import_id = ? AND source_key = ''", session.ID).Count(&derivedCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if derivedCount != 1 {
+		t.Fatalf("CUE retry created duplicate derived records: %d", derivedCount)
+	}
 }
 
 type fakeMediaStore struct {
@@ -374,6 +455,9 @@ func TestValidateMediaToolchainRequiresAllTools(t *testing.T) {
 func TestValidateArchiveListingRejectsDangerousEntriesAndLimits(t *testing.T) {
 	tests := []string{
 		"Path = /etc/passwd\nSize = 1\nPacked Size = 1\n",
+		"Path = \\absolute\\track.flac\nSize = 1\nPacked Size = 1\n",
+		"Path = ..\\track.flac\nSize = 1\nPacked Size = 1\n",
+		"Path = C:\\music\\track.flac\nSize = 1\nPacked Size = 1\n",
 		"Path = Disc/../../etc/passwd\nSize = 1\nPacked Size = 1\n",
 		"Path = Disc/link\nSize = 1\nPacked Size = 1\nAttributes = lrwxrwxrwx\n",
 		"Path = Disc/bomb.flac\nSize = 101\nPacked Size = 1\n",
@@ -451,6 +535,18 @@ func TestMediaImportProcessorTranscodesUploadedAudioAndUpdatesFile(t *testing.T)
 	}
 	if filepath.Ext(got.PlaybackKey) != ".mp3" {
 		t.Fatalf("playback extension = %q", filepath.Ext(got.PlaybackKey))
+	}
+	if err := processor.Process(context.Background(), job, func() error { return nil }); err != nil {
+		t.Fatalf("completed uploaded audio must be an idempotent no-op: %v", err)
+	}
+	ffmpegs := 0
+	for _, run := range runner.runs {
+		if run[0] == "ffmpeg" {
+			ffmpegs++
+		}
+	}
+	if ffmpegs != 1 || len(store.puts) != 1 {
+		t.Fatalf("completed uploaded audio was reprocessed: ffmpegs=%d objects=%d", ffmpegs, len(store.puts))
 	}
 }
 

@@ -24,6 +24,9 @@ func main() {
 	if err := requiredWorkerConfig(); err != nil {
 		log.Fatal(err)
 	}
+	if err := validateWorkerToolchain(music.NewSystemMediaCommandRunner()); err != nil {
+		log.Fatal(err)
+	}
 	db, err := gorm.Open(postgres.Open(os.Getenv("DATABASE_URL")), &gorm.Config{})
 	if err != nil {
 		log.Fatalf("connect database: %v", err)
@@ -49,6 +52,10 @@ func main() {
 	if err := runWorker(ctx, worker, processor, workerPollIntervalFromEnv()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func validateWorkerToolchain(runner music.MediaCommandRunner) error {
+	return music.ValidateMediaToolchain(runner)
 }
 
 type workerRunner interface {

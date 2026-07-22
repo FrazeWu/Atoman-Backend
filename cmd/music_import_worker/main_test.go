@@ -8,6 +8,17 @@ import (
 	"atoman/internal/modules/music"
 )
 
+type fakeMediaRunner struct{ paths map[string]string }
+
+func (r fakeMediaRunner) LookPath(name string) (string, error) {
+	if found := r.paths[name]; found != "" {
+		return found, nil
+	}
+	return "", context.DeadlineExceeded
+}
+
+func (fakeMediaRunner) Run(context.Context, string, ...string) ([]byte, error) { return nil, nil }
+
 type fakeWorkerRunner struct{ calls int }
 
 func (w *fakeWorkerRunner) RunOnce(context.Context, music.ImportProcessor) (bool, error) {
@@ -45,5 +56,14 @@ func TestRequiredWorkerConfigRejectsMissingDatabaseURL(t *testing.T) {
 	t.Setenv("DATABASE_URL", "")
 	if err := requiredWorkerConfig(); err == nil {
 		t.Fatal("expected DATABASE_URL validation error")
+	}
+}
+
+func TestValidateWorkerToolchainRequiresFFmpegAndFFprobeOnly(t *testing.T) {
+	if err := validateWorkerToolchain(fakeMediaRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}); err != nil {
+		t.Fatalf("7zz must remain archive-only: %v", err)
+	}
+	if err := validateWorkerToolchain(fakeMediaRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg"}}); err == nil {
+		t.Fatal("expected ffprobe validation error")
 	}
 }

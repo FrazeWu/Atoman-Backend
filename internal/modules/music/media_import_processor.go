@@ -87,10 +87,11 @@ func validateArchiveListing(raw []byte) error {
 		if entry.path == "" {
 			return nil
 		}
-		if filepath.IsAbs(entry.path) || strings.HasPrefix(entry.path, `\\`) || regexp.MustCompile(`^[A-Za-z]:`).MatchString(entry.path) {
+		normalizedPath := strings.ReplaceAll(entry.path, `\`, "/")
+		if strings.HasPrefix(normalizedPath, "/") || regexp.MustCompile(`^[A-Za-z]:`).MatchString(normalizedPath) {
 			return fmt.Errorf("unsafe archive path %q", entry.path)
 		}
-		clean := filepath.Clean(strings.ReplaceAll(entry.path, `\\`, "/"))
+		clean := path.Clean(normalizedPath)
 		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
 			return fmt.Errorf("unsafe archive path %q", entry.path)
 		}
@@ -282,15 +283,22 @@ func (p *MediaImportProcessor) Process(ctx context.Context, job model.AlbumImpor
 func (p *MediaImportProcessor) processUploadedFiles(ctx context.Context, session model.AlbumImportSession, heartbeat func() error) error {
 	files := make([]model.AlbumImportFile, 0)
 	cues := make([]model.AlbumImportFile, 0)
+	hasCompletedAudio := false
 	for _, file := range session.Files {
-		if file.Role == AlbumImportFileRoleAudio && file.UploadStatus == AlbumImportFileUploadStatusUploaded && file.ProcessingStatus != "completed" {
+		if file.Role == AlbumImportFileRoleAudio && file.UploadStatus == AlbumImportFileUploadStatusUploaded && file.SourceKey != "" && file.ProcessingStatus != "completed" {
 			files = append(files, file)
+		}
+		if file.Role == AlbumImportFileRoleAudio && file.UploadStatus == AlbumImportFileUploadStatusUploaded && file.SourceKey != "" && file.ProcessingStatus == "completed" {
+			hasCompletedAudio = true
 		}
 		if file.Role == AlbumImportFileRoleCue && file.UploadStatus == AlbumImportFileUploadStatusUploaded {
 			cues = append(cues, file)
 		}
 	}
 	if len(files) == 0 {
+		if hasCompletedAudio {
+			return nil
+		}
 		return errors.New("no uploaded audio files to process")
 	}
 	successes := 0
@@ -483,9 +491,13 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 				return err
 			}
 		}
-		file := model.AlbumImportFile{ImportID: sessionID, RelativePath: audio.relative, FileName: filepath.Base(audio.path), Role: AlbumImportFileRoleAudio, DetectedFormat: strings.TrimPrefix(strings.ToLower(filepath.Ext(audio.path)), "."), UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
-		if err := p.db.WithContext(ctx).Create(&file).Error; err != nil {
+		file, err := p.findOrCreateDerivedAudio(ctx, sessionID, filepath.ToSlash(audio.relative), filepath.Base(audio.path), strings.TrimPrefix(strings.ToLower(filepath.Ext(audio.path)), "."))
+		if err != nil {
 			return err
+		}
+		if file.ProcessingStatus == "completed" {
+			processed++
+			continue
 		}
 		if err := p.processLocalAudio(ctx, sessionID, &file, audio.path, "", 0, 0); err != nil {
 			_ = p.failFile(ctx, file.ID, err)
@@ -524,15 +536,19 @@ func (p *MediaImportProcessor) processCUEAudio(ctx context.Context, sessionID uu
 		if index+1 < len(tracks) {
 			end = tracks[index+1].startSeconds
 		}
-		file := model.AlbumImportFile{ImportID: sessionID, RelativePath: relativePath, FileName: fmt.Sprintf("%02d - %s.mp3", track.number, track.title), Role: AlbumImportFileRoleAudio, DetectedFormat: "mp3", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
-		if err := p.db.WithContext(ctx).Create(&file).Error; err != nil {
+		file, err := p.findOrCreateDerivedAudio(ctx, sessionID, cueTrackRelativePath(relativePath, track.number), fmt.Sprintf("%02d - %s.mp3", track.number, track.title), "mp3")
+		if err != nil {
 			return successes, err
+		}
+		if file.ProcessingStatus == "completed" {
+			successes++
+			continue
 		}
 		if end <= track.startSeconds {
 			_ = p.failFile(ctx, file.ID, errors.New("invalid CUE track range"))
 			continue
 		}
-		if err := p.processLocalAudio(ctx, sessionID, &file, sourcePath, track.title, track.number, track.startSeconds, end); err != nil {
+		if err := p.processLocalAudio(ctx, sessionID, &file, sourcePath, track.title, track.number, end-track.startSeconds, track.startSeconds, end); err != nil {
 			_ = p.failFile(ctx, file.ID, err)
 			continue
 		}
@@ -542,6 +558,23 @@ func (p *MediaImportProcessor) processCUEAudio(ctx context.Context, sessionID uu
 		return 0, errors.New("no CUE tracks were processed successfully")
 	}
 	return successes, nil
+}
+
+func cueTrackRelativePath(sourceRelativePath string, trackNumber int) string {
+	return filepath.ToSlash(sourceRelativePath) + "#cue-track-" + strconv.Itoa(trackNumber)
+}
+
+func (p *MediaImportProcessor) findOrCreateDerivedAudio(ctx context.Context, sessionID uuid.UUID, relativePath, fileName, format string) (model.AlbumImportFile, error) {
+	var file model.AlbumImportFile
+	err := p.db.WithContext(ctx).Where("import_id = ? AND relative_path = ? AND role = ?", sessionID, relativePath, AlbumImportFileRoleAudio).First(&file).Error
+	if err == nil {
+		return file, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return file, err
+	}
+	file = model.AlbumImportFile{ImportID: sessionID, RelativePath: relativePath, FileName: fileName, Role: AlbumImportFileRoleAudio, DetectedFormat: format, UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
+	return file, p.db.WithContext(ctx).Create(&file).Error
 }
 
 func (p *MediaImportProcessor) processCover(ctx context.Context, sessionID uuid.UUID, source string) error {
@@ -585,12 +618,15 @@ func (p *MediaImportProcessor) processAudio(ctx context.Context, sessionID uuid.
 	return p.processLocalAudio(ctx, sessionID, file, sourcePath, "", 0, 0)
 }
 
-func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile, sourcePath, overrideTitle string, overrideTrack int, rangeSeconds ...float64) error {
+func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile, sourcePath, overrideTitle string, overrideTrack int, knownDuration float64, rangeSeconds ...float64) error {
 	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration:format_tags=title", "-of", "json", sourcePath)
 	if err != nil {
 		return fmt.Errorf("ffprobe %s: %w", file.FileName, err)
 	}
 	duration, taggedTitle := parseProbe(probe)
+	if knownDuration > 0 {
+		duration = knownDuration
+	}
 	dir, err := os.MkdirTemp("", "atoman-media-output-*")
 	if err != nil {
 		return err
