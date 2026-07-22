@@ -35,13 +35,16 @@ func RunDebateWikiMigration(db *gorm.DB) error {
 			}
 		}
 
+		if err := addDebateReferenceLinkColumn(tx); err != nil {
+			return err
+		}
+
 		if err := tx.AutoMigrate(
 			&model.Debate{},
 			&model.Revision{},
 			&model.ContentReference{},
 			&model.ContentProtection{},
 			&model.DebateConclusionEvent{},
-			&model.DebateRevisionReference{},
 			&model.DebateRelation{},
 			&model.DebateVote{},
 		); err != nil {
@@ -54,6 +57,9 @@ func RunDebateWikiMigration(db *gorm.DB) error {
 		if err := backfillDebateRevisionContentReferences(tx); err != nil {
 			return err
 		}
+		if err := tx.AutoMigrate(&model.DebateRevisionReference{}); err != nil {
+			return err
+		}
 		if legacy {
 			return dropLegacyDebateColumns(tx)
 		}
@@ -61,9 +67,24 @@ func RunDebateWikiMigration(db *gorm.DB) error {
 	})
 }
 
+// The deployed wiki table predates content_reference_id. PostgreSQL rejects
+// adding that column as NOT NULL while old rows exist, so create it nullable,
+// backfill it, then let AutoMigrate enforce the model constraint.
+func addDebateReferenceLinkColumn(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.DebateRevisionReference{}) ||
+		db.Migrator().HasColumn(&model.DebateRevisionReference{}, "content_reference_id") {
+		return nil
+	}
+	return db.Exec("ALTER TABLE debate_revision_references ADD COLUMN content_reference_id uuid").Error
+}
+
 func backfillDebateRevisionContentReferences(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.DebateRevisionReference{}) ||
+		!db.Migrator().HasColumn(&model.DebateRevisionReference{}, "content_reference_id") {
+		return nil
+	}
 	var refs []model.DebateRevisionReference
-	if err := db.Where("content_reference_id = ?", uuid.Nil).Find(&refs).Error; err != nil {
+	if err := db.Where("content_reference_id IS NULL OR content_reference_id = ?", uuid.Nil).Find(&refs).Error; err != nil {
 		return err
 	}
 	for _, ref := range refs {
