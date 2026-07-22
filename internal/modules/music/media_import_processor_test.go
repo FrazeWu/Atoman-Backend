@@ -286,6 +286,63 @@ func TestProcessCUEAudioContinuesAfterOneTrackFails(t *testing.T) {
 	}
 }
 
+func TestMediaImportProcessorRetriesUploadedCUESourceAfterAllTracksFail(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	cue := model.AlbumImportFile{ImportID: session.ID, RelativePath: "disc.cue", FileName: "disc.cue", Role: AlbumImportFileRoleCue, DetectedFormat: "cue", SourceKey: "source/disc.cue", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
+	audio := model.AlbumImportFile{ImportID: session.ID, RelativePath: "album.flac", FileName: "album.flac", Role: AlbumImportFileRoleAudio, DetectedFormat: "flac", SourceKey: "source/album.flac", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
+	for _, file := range []*model.AlbumImportFile{&cue, &audio} {
+		if err := db.Create(file).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	attempt := 1
+	ffmpegRuns := 0
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}
+	runner.run = func(name string, args []string) ([]byte, error) {
+		if name == "ffprobe" {
+			return []byte(`{"format":{"duration":"30"}}`), nil
+		}
+		if name == "ffmpeg" {
+			ffmpegRuns++
+			if attempt == 1 {
+				return nil, errors.New("transcode failed")
+			}
+			for _, arg := range args {
+				if strings.HasSuffix(arg, ".mp3") {
+					return nil, os.WriteFile(arg, []byte("derived"), 0600)
+				}
+			}
+		}
+		return nil, nil
+	}
+	processor := NewMediaImportProcessor(db, &fakeMediaStore{objects: map[string][]byte{
+		"source/disc.cue":   []byte("FILE \"album.flac\" WAVE\nTRACK 01 AUDIO\nTITLE \"One\"\nINDEX 01 00:00:00\n"),
+		"source/album.flac": []byte("audio"),
+	}, puts: map[string][]byte{}}, runner, "")
+	job := model.AlbumImportJob{ImportID: session.ID}
+	if err := processor.Process(context.Background(), job, nil); err == nil {
+		t.Fatal("expected first CUE processing attempt to fail")
+	}
+	attempt = 2
+	if err := processor.Process(context.Background(), job, nil); err != nil {
+		t.Fatalf("expected retried CUE source to process: %v", err)
+	}
+	if ffmpegRuns != 2 {
+		t.Fatalf("expected retry to invoke ffmpeg again, runs=%d", ffmpegRuns)
+	}
+	var source model.AlbumImportFile
+	if err := db.First(&source, "id = ?", audio.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if source.ProcessingStatus != "completed" {
+		t.Fatalf("expected source completed after retry, got %#v", source)
+	}
+}
+
 type fakeMediaStore struct {
 	objects map[string][]byte
 	puts    map[string][]byte

@@ -371,8 +371,10 @@ func (p *MediaImportProcessor) processUploadedCUESources(ctx context.Context, se
 			trackCount += len(matching)
 			count, _ := p.processCUEAudio(ctx, sessionID, sourcePath, audios[index].RelativePath, matching)
 			successes += count
-			if err := p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", audios[index].ID).Updates(map[string]any{"processing_status": "completed", "error_message": ""}).Error; err != nil {
-				return nil, 0, 0, err
+			if count > 0 {
+				if err := p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", audios[index].ID).Updates(map[string]any{"processing_status": "completed", "error_message": ""}).Error; err != nil {
+					return nil, 0, 0, err
+				}
 			}
 		}
 	}
