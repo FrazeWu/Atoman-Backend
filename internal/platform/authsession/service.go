@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -34,6 +35,21 @@ type Resolved struct {
 	User    model.User
 }
 
+type Metadata struct {
+	UserAgent string
+	IPPrefix  string
+}
+
+type Item struct {
+	ID           uuid.UUID `json:"id"`
+	Kind         string    `json:"kind"`
+	DeviceName   string    `json:"device_name"`
+	IPPrefix     string    `json:"ip_prefix"`
+	CreatedAt    time.Time `json:"created_at"`
+	LastActiveAt time.Time `json:"last_active_at"`
+	Current      bool      `json:"current"`
+}
+
 type Service struct {
 	db  *gorm.DB
 	now func() time.Time
@@ -43,7 +59,7 @@ func New(db *gorm.DB) *Service {
 	return &Service{db: db, now: time.Now}
 }
 
-func (service *Service) Create(userID uuid.UUID, kind string) (Credentials, error) {
+func (service *Service) Create(userID uuid.UUID, kind string, metadata ...Metadata) (Credentials, error) {
 	token, err := randomCredential()
 	if err != nil {
 		return Credentials{}, err
@@ -56,12 +72,20 @@ func (service *Service) Create(userID uuid.UUID, kind string) (Credentials, erro
 		}
 	}
 	expiresAt := service.now().UTC().Add(TTL)
+	meta := Metadata{}
+	if len(metadata) > 0 {
+		meta = metadata[0]
+	}
+	now := service.now().UTC()
 	session := model.AuthSession{
-		UserID:    userID,
-		TokenHash: Hash(token),
-		CSRFHash:  hashOptional(csrfToken),
-		Kind:      kind,
-		ExpiresAt: expiresAt,
+		UserID:       userID,
+		TokenHash:    Hash(token),
+		CSRFHash:     hashOptional(csrfToken),
+		Kind:         kind,
+		UserAgent:    truncate(strings.TrimSpace(meta.UserAgent), 512),
+		IPPrefix:     truncate(strings.TrimSpace(meta.IPPrefix), 64),
+		LastActiveAt: now,
+		ExpiresAt:    expiresAt,
 	}
 	if err := service.db.Create(&session).Error; err != nil {
 		return Credentials{}, err
@@ -85,7 +109,24 @@ func (service *Service) Authenticate(token, kind string) (Resolved, error) {
 	if err := service.db.Where("uuid = ? AND is_active = ?", session.UserID, true).First(&user).Error; err != nil {
 		return Resolved{}, ErrInvalid
 	}
+	_ = service.db.Model(&model.AuthSession{}).Where("id = ?", session.ID).Update("last_active_at", service.now().UTC()).Error
 	return Resolved{Session: session, User: user}, nil
+}
+
+func (service *Service) List(userID uuid.UUID, currentToken string) ([]Item, error) {
+	var sessions []model.AuthSession
+	if err := service.db.Where("user_id = ? AND revoked_at IS NULL AND expires_at > ?", userID, service.now().UTC()).Order("last_active_at DESC").Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	currentHash := Hash(currentToken)
+	items := make([]Item, 0, len(sessions))
+	for _, session := range sessions {
+		items = append(items, Item{
+			ID: session.ID, Kind: session.Kind, DeviceName: deviceName(session.UserAgent), IPPrefix: session.IPPrefix,
+			CreatedAt: session.CreatedAt, LastActiveAt: session.LastActiveAt, Current: session.TokenHash == currentHash,
+		})
+	}
+	return items, nil
 }
 
 func (service *Service) VerifyCSRF(session model.AuthSession, token string) bool {
@@ -115,6 +156,20 @@ func (service *Service) RevokeID(sessionID uuid.UUID) error {
 	return service.db.Model(&model.AuthSession{}).
 		Where("id = ? AND revoked_at IS NULL", sessionID).
 		Update("revoked_at", &now).Error
+}
+
+func (service *Service) RevokeUserSession(userID, sessionID uuid.UUID) error {
+	now := service.now().UTC()
+	result := service.db.Model(&model.AuthSession{}).
+		Where("id = ? AND user_id = ? AND revoked_at IS NULL", sessionID, userID).
+		Update("revoked_at", &now)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrInvalid
+	}
+	return nil
 }
 
 func (service *Service) RevokeUser(userID uuid.UUID) error {
@@ -166,4 +221,27 @@ func hashOptional(token string) string {
 		return ""
 	}
 	return Hash(token)
+}
+
+func deviceName(userAgent string) string {
+	userAgent = strings.ToLower(userAgent)
+	switch {
+	case strings.Contains(userAgent, "iphone") || strings.Contains(userAgent, "ipad"):
+		return "iPhone 或 iPad"
+	case strings.Contains(userAgent, "android"):
+		return "Android 设备"
+	case strings.Contains(userAgent, "windows"):
+		return "Windows 浏览器"
+	case strings.Contains(userAgent, "macintosh") || strings.Contains(userAgent, "mac os"):
+		return "Mac 浏览器"
+	default:
+		return "浏览器"
+	}
+}
+
+func truncate(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[:limit]
 }

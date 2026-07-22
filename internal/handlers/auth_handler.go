@@ -76,6 +76,7 @@ func userAuthResponse(user model.User, csrfToken string) gin.H {
 			"id":                      user.ID,
 			"username":                user.Username,
 			"email":                   user.Email,
+			"has_password":            user.Password != "",
 			"role":                    user.Role,
 			"display_name":            user.DisplayName,
 			"avatar_url":              user.AvatarURL,

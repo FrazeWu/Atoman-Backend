@@ -32,6 +32,7 @@ const (
 	VerificationPurposeRegistration  = "registration"
 	VerificationPurposePasswordReset = "password_reset"
 	VerificationPurposeOAuthEmail    = "oauth_email"
+	VerificationPurposeEmailChange   = "email_change"
 )
 
 // NewEmailService creates a new email service instance
@@ -111,6 +112,8 @@ func (s *EmailService) SendVerificationCodeForPurpose(email, purpose string) (st
 		subject = "Atoman密码重置"
 	} else if purpose == VerificationPurposeOAuthEmail {
 		subject = "Atoman邮箱确认"
+	} else if purpose == VerificationPurposeEmailChange {
+		subject = "Atoman邮箱变更确认"
 	}
 	err = s.sendEmail(email, subject, s.buildVerificationEmail(code, purpose))
 	if err != nil {

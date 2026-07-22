@@ -14,6 +14,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/authsession"
+	"atoman/internal/service"
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
@@ -70,6 +71,178 @@ func TestChangePasswordKeepsCurrentSessionAndRevokesOthers(t *testing.T) {
 	}
 	if _, err := sessions.Authenticate(other.Token, authsession.KindAPI); !errors.Is(err, authsession.ErrInvalid) {
 		t.Fatalf("other session should be revoked, got %v", err)
+	}
+}
+
+func TestSetPasswordForOAuthOnlyAccountKeepsCurrentSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("FRONTEND_URL", "https://www.atoman.org")
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{})
+	user := model.User{Username: "oauth-user", Email: "oauth@example.com", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	sessions := authsession.New(db)
+	current, err := sessions.Create(user.UUID, authsession.KindWeb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := sessions.Create(user.UUID, authsession.KindAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	r := gin.New()
+	r.POST("/users/me/password", middleware.AuthMiddleware(), SetPassword(db))
+	req := httptest.NewRequest(http.MethodPost, "/users/me/password", bytes.NewBufferString(`{"password":"new-password","password_confirm":"new-password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://www.atoman.org")
+	req.Header.Set(middleware.CSRFHeaderName, current.CSRFToken)
+	req.AddCookie(&http.Cookie{Name: middleware.AuthSessionCookieName, Value: current.Token})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated model.User
+	if err := db.First(&updated, "uuid = ?", user.UUID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(updated.Password), []byte("new-password")); err != nil {
+		t.Fatalf("password was not saved: %v", err)
+	}
+	if _, err := sessions.Authenticate(current.Token, authsession.KindWeb); err != nil {
+		t.Fatalf("current session should remain valid: %v", err)
+	}
+	if _, err := sessions.Authenticate(other.Token, authsession.KindAPI); !errors.Is(err, authsession.ErrInvalid) {
+		t.Fatalf("other session should be revoked, got %v", err)
+	}
+}
+
+func TestChangeEmailVerifiesCodeAndRevokesOtherSessions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("FRONTEND_URL", "https://www.atoman.org")
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.EmailVerificationCode{})
+	hash, err := bcrypt.GenerateFromPassword([]byte("current-password"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := model.User{Username: "email-user", Email: "old@example.com", Password: string(hash), Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	code, err := service.NewEmailServiceWithoutRedis(db).SendVerificationCodeForPurpose("new@example.com", service.VerificationPurposeEmailChange)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := authsession.New(db)
+	current, err := sessions.Create(user.UUID, authsession.KindWeb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := sessions.Create(user.UUID, authsession.KindAPI)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	r := gin.New()
+	r.PUT("/users/me/email", middleware.AuthMiddleware(), ChangeEmail(db))
+	req := httptest.NewRequest(http.MethodPut, "/users/me/email", bytes.NewBufferString(`{"email":"new@example.com","code":"`+code+`","current_password":"current-password"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "https://www.atoman.org")
+	req.Header.Set(middleware.CSRFHeaderName, current.CSRFToken)
+	req.AddCookie(&http.Cookie{Name: middleware.AuthSessionCookieName, Value: current.Token})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated model.User
+	if err := db.First(&updated, "uuid = ?", user.UUID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updated.Email != "new@example.com" {
+		t.Fatalf("expected updated email, got %q", updated.Email)
+	}
+	if _, err := sessions.Authenticate(other.Token, authsession.KindAPI); !errors.Is(err, authsession.ErrInvalid) {
+		t.Fatalf("other session should be revoked, got %v", err)
+	}
+}
+
+func TestRevokeSessionRejectsCurrentSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("FRONTEND_URL", "https://www.atoman.org")
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{})
+	user := model.User{Username: "session-user", Email: "session-user@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	current, err := authsession.New(db).Create(user.UUID, authsession.KindWeb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var currentSession model.AuthSession
+	if err := db.Where("token_hash = ?", authsession.Hash(current.Token)).First(&currentSession).Error; err != nil {
+		t.Fatal(err)
+	}
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	r := gin.New()
+	r.DELETE("/users/me/sessions/:id", middleware.AuthMiddleware(), RevokeSession(db))
+	req := httptest.NewRequest(http.MethodDelete, "/users/me/sessions/"+currentSession.ID.String(), nil)
+	req.Header.Set("Origin", "https://www.atoman.org")
+	req.Header.Set(middleware.CSRFHeaderName, current.CSRFToken)
+	req.AddCookie(&http.Cookie{Name: middleware.AuthSessionCookieName, Value: current.Token})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListSecurityActivitiesOnlyReturnsCurrentUsersAuthEvents(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.AuditLog{})
+	user := model.User{Username: "activity-user", Email: "activity@example.com", Password: "hash", Role: "user", IsActive: true}
+	other := model.User{Username: "other-activity-user", Email: "other-activity@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.AuditLog{ActorID: &user.UUID, Action: "auth.password_changed", EntityType: "user", EntityID: &user.UUID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.AuditLog{ActorID: &other.UUID, Action: "auth.password_changed", EntityType: "user", EntityID: &other.UUID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	r := gin.New()
+	r.Use(func(c *gin.Context) { c.Set("user_id", user.UUID); c.Next() })
+	r.GET("/users/me/security-activities", ListSecurityActivities(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/me/security-activities", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Activities []struct {
+			Action string `json:"action"`
+		} `json:"activities"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Activities) != 1 || response.Activities[0].Action != "auth.password_changed" {
+		t.Fatalf("unexpected activities: %#v", response.Activities)
 	}
 }
 

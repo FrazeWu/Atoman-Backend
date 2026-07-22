@@ -64,3 +64,25 @@ func TestServiceRevokesSessionImmediately(t *testing.T) {
 		t.Fatalf("expected revoked session to be invalid, got %v", err)
 	}
 }
+
+func TestServiceListsSessionsWithDeviceMetadata(t *testing.T) {
+	sessions, user := newTestService(t)
+	credentials, err := sessions.Create(user.UUID, KindWeb, Metadata{
+		UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15",
+		IPPrefix:  "203.0.113.0/24",
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	items, err := sessions.List(user.UUID, credentials.Token)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one session, got %d", len(items))
+	}
+	if !items[0].Current || items[0].DeviceName == "" || items[0].IPPrefix != "203.0.113.0/24" {
+		t.Fatalf("unexpected listed session: %#v", items[0])
+	}
+}
