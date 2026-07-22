@@ -3,6 +3,8 @@ package comment
 import (
 	"time"
 
+	"atoman/internal/modules/reference"
+
 	"github.com/google/uuid"
 )
 
@@ -70,27 +72,28 @@ type UserSummaryDTO struct {
 }
 
 type CommentDTO struct {
-	ID            uuid.UUID       `json:"id"`
-	AuthorID      uuid.UUID       `json:"author_id"`
-	Author        UserSummaryDTO  `json:"author"`
-	RootID        *uuid.UUID      `json:"root_id,omitempty"`
-	ReplyToID     *uuid.UUID      `json:"reply_to_id,omitempty"`
-	ReplyToAuthor *UserSummaryDTO `json:"reply_to_author,omitempty"`
-	FloorNumber   *int            `json:"floor_number,omitempty"`
-	Content       string          `json:"content"`
-	RenderedHTML  string          `json:"rendered_html"`
-	Status        string          `json:"status"`
-	EditedAt      *time.Time      `json:"edited_at,omitempty"`
-	LikeCount     int             `json:"like_count"`
-	ReplyCount    int             `json:"reply_count"`
-	HotScore      float64         `json:"hot_score"`
-	CreatedAt     time.Time       `json:"created_at"`
-	Marked        bool            `json:"marked"`
-	Liked         bool            `json:"liked"`
-	Mentions      []MentionDTO    `json:"mentions"`
-	Attachments   []AttachmentDTO `json:"attachments"`
-	TimeAnchors   []TimeAnchorDTO `json:"time_anchors"`
-	Replies       []CommentDTO    `json:"replies"`
+	ID            uuid.UUID                     `json:"id"`
+	AuthorID      uuid.UUID                     `json:"author_id"`
+	Author        UserSummaryDTO                `json:"author"`
+	RootID        *uuid.UUID                    `json:"root_id,omitempty"`
+	ReplyToID     *uuid.UUID                    `json:"reply_to_id,omitempty"`
+	ReplyToAuthor *UserSummaryDTO               `json:"reply_to_author,omitempty"`
+	FloorNumber   *int                          `json:"floor_number,omitempty"`
+	Content       string                        `json:"content"`
+	RenderedHTML  string                        `json:"rendered_html"`
+	Status        string                        `json:"status"`
+	EditedAt      *time.Time                    `json:"edited_at,omitempty"`
+	LikeCount     int                           `json:"like_count"`
+	ReplyCount    int                           `json:"reply_count"`
+	HotScore      float64                       `json:"hot_score"`
+	CreatedAt     time.Time                     `json:"created_at"`
+	Marked        bool                          `json:"marked"`
+	Liked         bool                          `json:"liked"`
+	Mentions      []MentionDTO                  `json:"mentions"`
+	References    []reference.ResolvedReference `json:"references"`
+	Attachments   []AttachmentDTO               `json:"attachments"`
+	TimeAnchors   []TimeAnchorDTO               `json:"time_anchors"`
+	Replies       []CommentDTO                  `json:"replies"`
 }
 
 type CommentListDTO struct {

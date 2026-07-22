@@ -3,6 +3,7 @@ package forum
 import (
 	"testing"
 
+	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/modules/comment"
 	"atoman/internal/platform/authctx"
@@ -33,7 +34,11 @@ func TestUnifiedCommentsEnforceForumCategoryACLWithRealServices(t *testing.T) {
 		&model.CommentTimeAnchor{},
 		&model.CommentPublishRecord{},
 		&model.Notification{},
+		&model.ContentReference{},
 	)
+	if err := migrations.RunContentReferencesMigration(db); err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error; err != nil {
 		t.Fatal(err)
 	}

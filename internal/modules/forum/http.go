@@ -202,7 +202,12 @@ func (h *Handler) listTopics(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.List(c, topics, query.Page, query.PageSize, total)
+	items, err := h.service.topicDTOs(h.service.db, topics, currentForumUser(c))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, items, query.Page, query.PageSize, total)
 }
 
 // searchTopics godoc
@@ -227,7 +232,12 @@ func (h *Handler) searchTopics(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.List(c, topics, query.Page, query.PageSize, total)
+	items, err := h.service.topicDTOs(h.service.db, topics, currentForumUser(c))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.List(c, items, query.Page, query.PageSize, total)
 }
 
 func (h *Handler) getTopic(c *gin.Context) {
@@ -241,7 +251,12 @@ func (h *Handler) getTopic(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, topic)
+	item, err := h.service.topicDTO(h.service.db, topic, currentForumUser(c))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
 }
 
 func (h *Handler) createTopic(c *gin.Context) {
@@ -260,7 +275,12 @@ func (h *Handler) createTopic(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusCreated, topic)
+	item, err := h.service.topicDTO(h.service.db, topic, user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, item)
 }
 
 func (h *Handler) createCategoryRequest(c *gin.Context) {
@@ -303,7 +323,12 @@ func (h *Handler) updateTopic(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, topic)
+	item, err := h.service.topicDTO(h.service.db, topic, user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
 }
 
 func (h *Handler) deleteTopic(c *gin.Context) {

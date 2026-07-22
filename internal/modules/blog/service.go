@@ -13,6 +13,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/modules/recommendation"
+	"atoman/internal/modules/reference"
 	"atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
@@ -43,11 +44,67 @@ var allowedPostVisibilities = map[string]struct{}{
 }
 
 type Service struct {
-	db   *gorm.DB
-	repo *Repo
+	db         *gorm.DB
+	repo       *Repo
+	references *reference.Service
 }
 
-func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
+func NewService(db *gorm.DB) *Service {
+	return &Service{db: db, repo: NewRepo(db), references: reference.NewService(db)}
+}
+
+func (s *Service) syncPostReferences(tx *gorm.DB, post model.Post) ([]reference.ResolvedReference, error) {
+	if post.Status != "published" {
+		return nil, s.references.RemoveSource(tx, "post", post.ID)
+	}
+	audience := ""
+	if post.Visibility == "" || post.Visibility == "public" {
+		audience = reference.AudiencePublic
+	}
+	return s.references.ReplacePublished(tx, reference.Source{
+		Type: "post", ID: post.ID, ActorID: post.UserID, Audience: audience,
+		Meta: map[string]interface{}{"module": "blog", "path": "/post/" + post.ID.String()},
+	}, []reference.Field{{Name: "content", Content: post.Content}})
+}
+
+func (s *Service) postDTOs(db *gorm.DB, posts []model.Post, viewerID *uuid.UUID) ([]PostDTO, error) {
+	dtos := make([]PostDTO, len(posts))
+	ids := make([]uuid.UUID, 0, len(posts))
+	for index, post := range posts {
+		dtos[index] = PostDTO{Post: post, References: []reference.ResolvedReference{}}
+		ids = append(ids, post.ID)
+	}
+	if len(ids) == 0 {
+		return dtos, nil
+	}
+	var rows []model.ContentReference
+	if err := db.Where("source_type = ? AND source_id IN ?", "post", ids).
+		Order("source_id ASC, source_field ASC, start_offset ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	viewer := reference.Viewer{}
+	if viewerID != nil {
+		viewer.UserID = *viewerID
+	}
+	resolved, err := s.references.ResolveStoredRows(db, viewer, rows)
+	if err != nil {
+		return nil, err
+	}
+	for index := range dtos {
+		if items, ok := resolved[dtos[index].ID]; ok {
+			dtos[index].References = items
+		}
+	}
+	return dtos, nil
+}
+
+func (s *Service) postDTO(db *gorm.DB, post model.Post, viewerID *uuid.UUID) (PostDTO, error) {
+	items, err := s.postDTOs(db, []model.Post{post}, viewerID)
+	if err != nil {
+		return PostDTO{}, err
+	}
+	return items[0], nil
+}
 
 func (s *Service) GetSEOPost(id uuid.UUID) (SEOPostDTO, error) {
 	post, err := s.repo.GetPublicPublishedPost(id)
@@ -670,6 +727,20 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 			countsByPostID[count.PostID] = count
 		}
 	}
+	posts := make([]model.Post, 0, len(bookmarks))
+	for _, bookmark := range bookmarks {
+		if bookmark.Post != nil {
+			posts = append(posts, *bookmark.Post)
+		}
+	}
+	postDTOs, err := s.postDTOs(s.db, posts, &user.ID)
+	if err != nil {
+		return nil, err
+	}
+	postDTOByID := make(map[uuid.UUID]PostDTO, len(postDTOs))
+	for _, postDTO := range postDTOs {
+		postDTOByID[postDTO.ID] = postDTO
+	}
 
 	items := make([]BookmarkListItemDTO, 0, len(bookmarks))
 	for _, bookmark := range bookmarks {
@@ -678,7 +749,7 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 			count := countsByPostID[bookmark.PostID]
 			item.Bookmark.Post = nil
 			item.Post = &BookmarkPostDTO{
-				Post:          *bookmark.Post,
+				PostDTO:       postDTOByID[bookmark.PostID],
 				LikesCount:    count.LikesCount,
 				CommentsCount: count.CommentsCount,
 			}
@@ -975,6 +1046,9 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 			return err
 		}
 		if post.Status == "published" {
+			if _, err := s.syncPostReferences(tx, post); err != nil {
+				return err
+			}
 			return saveBlogPostVersion(tx, post, user.ID)
 		}
 		return nil
@@ -1061,6 +1135,9 @@ func (s *Service) RestorePostVersion(user authctx.CurrentUser, postID uuid.UUID,
 			return err
 		}
 		if err := tx.Preload("Channel").Preload("Collection").First(&restored, "id = ?", postID).Error; err != nil {
+			return err
+		}
+		if _, err := s.syncPostReferences(tx, restored); err != nil {
 			return err
 		}
 		return saveBlogPostVersion(tx, restored, user.ID)

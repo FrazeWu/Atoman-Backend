@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"atoman/internal/migrations"
 	"atoman/internal/model"
+	"atoman/internal/modules/reference"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
@@ -46,7 +48,17 @@ func newForumHTTPTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, model.User, mo
 		&model.ForumGroupMember{},
 		&model.ForumCategoryPermission{},
 		&model.ForumUserModerationAction{},
+		&model.ContentReference{},
+		&model.Notification{},
+		&model.Post{},
+		&model.PodcastEpisode{},
 	)
+	if err := migrations.RunNotificationDMIndexes(db); err != nil {
+		t.Fatalf("migrate notification indexes: %v", err)
+	}
+	if err := migrations.RunContentReferencesMigration(db); err != nil {
+		t.Fatalf("migrate content references: %v", err)
+	}
 	user := model.User{Username: "forum-owner", Email: "forum-owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
@@ -121,6 +133,114 @@ func TestCreateAndUpdateTopicPersistNormalizedTags(t *testing.T) {
 	updated, _ := decodeForumData[model.ForumTopic](t, response)
 	if got := []string(updated.Tags); len(got) != 2 || got[0] != "Rust" || got[1] != "SQLite" {
 		t.Fatalf("expected updated normalized tags, got %#v", got)
+	}
+}
+
+func TestCreateTopicPersistsAndReturnsReferences(t *testing.T) {
+	router, db, user, category := newForumHTTPTestRouter(t)
+	response := performForumRequest(t, router, http.MethodPost, "/api/v1/forum/topics", map[string]any{
+		"category_id": category.ID, "title": "Reference topic", "content": "Hello @" + user.Username,
+	})
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body.String())
+	}
+	topic, _ := decodeForumData[struct {
+		model.ForumTopic
+		References []reference.ResolvedReference `json:"references"`
+	}](t, response)
+	if len(topic.References) != 1 || topic.References[0].TargetID != user.UUID || !topic.References[0].Available {
+		t.Fatalf("unexpected references: %s", response.Body.String())
+	}
+	var rows []model.ContentReference
+	if err := db.Find(&rows, "source_type = ? AND source_id = ?", "thread", topic.ID).Error; err != nil {
+		t.Fatalf("load references: %v", err)
+	}
+	if len(rows) != 1 || rows[0].SourceField != "content" || rows[0].TargetID != user.UUID {
+		t.Fatalf("unexpected stored references: %#v", rows)
+	}
+}
+
+func TestCreateTopicRejectsUnavailableReference(t *testing.T) {
+	router, db, _, category := newForumHTTPTestRouter(t)
+	response := performForumRequest(t, router, http.MethodPost, "/api/v1/forum/topics", map[string]any{
+		"category_id": category.ID, "title": "Invalid reference", "content": "See @post:" + uuid.NewString(),
+	})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+	}
+	var count int64
+	if err := db.Model(&model.ForumTopic{}).Where("title = ?", "Invalid reference").Count(&count).Error; err != nil {
+		t.Fatalf("count topics: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected invalid topic transaction rolled back, got %d rows", count)
+	}
+}
+
+func TestUpdateAndDeleteTopicReplaceThenRemoveReferences(t *testing.T) {
+	router, db, user, category := newForumHTTPTestRouter(t)
+	created := performForumRequest(t, router, http.MethodPost, "/api/v1/forum/topics", map[string]any{
+		"category_id": category.ID, "title": "Reference topic", "content": "Hello @" + user.Username,
+	})
+	topic, _ := decodeForumData[model.ForumTopic](t, created)
+	bob := model.User{Username: "forum-bob", Email: "forum-bob@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&bob).Error; err != nil {
+		t.Fatalf("create referenced user: %v", err)
+	}
+	updated := performForumRequest(t, router, http.MethodPut, "/api/v1/forum/topics/"+topic.ID.String(), map[string]any{
+		"title": "Reference topic", "content": "Hello @" + bob.Username,
+	})
+	if updated.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", updated.Code, updated.Body.String())
+	}
+	updatedTopic, _ := decodeForumData[struct {
+		model.ForumTopic
+		References []reference.ResolvedReference `json:"references"`
+	}](t, updated)
+	if len(updatedTopic.References) != 1 || updatedTopic.References[0].TargetID != bob.UUID {
+		t.Fatalf("unexpected updated references: %s", updated.Body.String())
+	}
+	deleted := performForumRequest(t, router, http.MethodDelete, "/api/v1/forum/topics/"+topic.ID.String(), nil)
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", deleted.Code, deleted.Body.String())
+	}
+	var count int64
+	if err := db.Model(&model.ContentReference{}).Where("source_type = ? AND source_id = ?", "thread", topic.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count references: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected deleted topic references removed, got %d", count)
+	}
+}
+
+func TestTopicListSearchAndDetailReturnReferences(t *testing.T) {
+	router, _, user, category := newForumHTTPTestRouter(t)
+	created := performForumRequest(t, router, http.MethodPost, "/api/v1/forum/topics", map[string]any{
+		"category_id": category.ID, "title": "Reference needle", "content": "Hello @" + user.Username,
+	})
+	topic, _ := decodeForumData[model.ForumTopic](t, created)
+	type topicWithReferences struct {
+		model.ForumTopic
+		References []reference.ResolvedReference `json:"references"`
+	}
+	for _, path := range []string{
+		"/api/v1/forum/topics", "/api/v1/forum/search?q=needle", "/api/v1/forum/topics/" + topic.ID.String(),
+	} {
+		response := performForumRequest(t, router, http.MethodGet, path, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("expected 200 from %s, got %d: %s", path, response.Code, response.Body.String())
+		}
+		if path == "/api/v1/forum/topics/"+topic.ID.String() {
+			item, _ := decodeForumData[topicWithReferences](t, response)
+			if len(item.References) != 1 || item.References[0].TargetID != user.UUID {
+				t.Fatalf("unexpected detail references: %s", response.Body.String())
+			}
+			continue
+		}
+		items, _ := decodeForumData[[]topicWithReferences](t, response)
+		if len(items) != 1 || len(items[0].References) != 1 || items[0].References[0].TargetID != user.UUID {
+			t.Fatalf("unexpected list references from %s: %s", path, response.Body.String())
+		}
 	}
 }
 

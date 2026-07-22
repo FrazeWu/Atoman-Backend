@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/reference"
 
 	"github.com/google/uuid"
 )
@@ -58,16 +59,21 @@ type RecommendationItemDTO struct {
 }
 
 type PostListItemDTO struct {
-	model.Post
+	PostDTO
 	LikesCount     int64 `json:"likes_count"`
 	CommentsCount  int64 `json:"comments_count"`
 	BookmarksCount int64 `json:"bookmarks_count"`
 }
 
 type BookmarkPostDTO struct {
-	model.Post
+	PostDTO
 	LikesCount    int64 `json:"likes_count"`
 	CommentsCount int64 `json:"comments_count"`
+}
+
+type PostDTO struct {
+	model.Post
+	References []reference.ResolvedReference `json:"references"`
 }
 
 type BookmarkListItemDTO struct {

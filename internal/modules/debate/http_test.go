@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/reference"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
@@ -24,6 +25,9 @@ func newDebateHTTPTestService(t *testing.T) (*Service, authctx.CurrentUser) {
 		&model.CommentAttachment{}, &model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{}, &model.CommentPublishRecord{},
 		&model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{}, &model.DebateArgumentReference{},
 		&model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{}, &model.DebateRelation{})
+	if err := db.AutoMigrate(&model.ContentReference{}); err != nil {
+		t.Fatalf("create content reference table: %v", err)
+	}
 	if err := db.Exec(`CREATE UNIQUE INDEX uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error; err != nil {
 		t.Fatalf("create target index: %v", err)
 	}
@@ -35,6 +39,9 @@ func newDebateHTTPTestService(t *testing.T) (*Service, authctx.CurrentUser) {
 	}
 	if err := db.Exec(`CREATE UNIQUE INDEX uq_notification_unread_aggregate ON notifications (recipient_id, aggregation_key) WHERE aggregation_key <> '' AND read_at IS NULL AND deleted_at IS NULL`).Error; err != nil {
 		t.Fatalf("create aggregate index: %v", err)
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX uq_debate_http_content_reference_source_range ON content_references (source_type, source_id, source_field, start_offset, end_offset) WHERE deleted_at IS NULL`).Error; err != nil {
+		t.Fatalf("create content reference index: %v", err)
 	}
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
@@ -180,6 +187,30 @@ func TestListArgumentsReturnsCurrentUserVotes(t *testing.T) {
 	}
 	if response.Meta.UserVotes[argument.ID.String()] != 1 {
 		t.Fatalf("expected current user vote for %s, got %#v", argument.ID, response.Meta.UserVotes)
+	}
+}
+
+func TestArgumentCreateAndListReturnContentReferences(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, user := newDebateHTTPTestService(t)
+	debate, err := service.CreateDebate(user, CreateDebateRequest{Title: "Referenced argument"})
+	if err != nil {
+		t.Fatalf("create debate: %v", err)
+	}
+	router := newDebateHTTPRouter(service, &user)
+	body := bytes.NewBufferString(`{"content":"Hello @alice","argument_type":"support"}`)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/debates/"+debate.ID.String()+"/arguments", body)
+	request.Header.Set("Content-Type", "application/json")
+	created := httptest.NewRecorder()
+	router.ServeHTTP(created, request)
+	if created.Code != http.StatusCreated || !bytes.Contains(created.Body.Bytes(), []byte(`"content_references":[{"kind":"user","target_type":"user"`)) {
+		t.Fatalf("expected create response references, got %d: %s", created.Code, created.Body.String())
+	}
+
+	listed := httptest.NewRecorder()
+	router.ServeHTTP(listed, httptest.NewRequest(http.MethodGet, "/api/v1/debates/"+debate.ID.String()+"/arguments", nil))
+	if listed.Code != http.StatusOK || !bytes.Contains(listed.Body.Bytes(), []byte(`"content_references":[{"kind":"user","target_type":"user"`)) {
+		t.Fatalf("expected list response references, got %d: %s", listed.Code, listed.Body.String())
 	}
 }
 
@@ -389,6 +420,114 @@ func TestRegisterRoutesMountsTopicMutationAndArgumentCreate(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
 		t.Fatalf("expected topic delete route to be mounted, got 404: %s", w.Body.String())
+	}
+}
+
+func TestDebateReferencesCoverDescriptionAndContentButSkipRelationTokens(t *testing.T) {
+	service, user := newDebateHTTPTestService(t)
+	target, err := service.CreateDebate(user, CreateDebateRequest{Title: "Referenced debate"})
+	if err != nil {
+		t.Fatalf("create target debate: %v", err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"title":       "Reference debate",
+		"description": "Hello @" + user.Username,
+		"content":     "See @debate:" + target.ID.String() + " but relation @debate:" + target.ID.String() + ":support",
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	newDebateHTTPRouter(service, &user).ServeHTTP(response, request)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body.String())
+	}
+	var decoded struct {
+		Data struct {
+			ID         uuid.UUID                     `json:"id"`
+			References []reference.ResolvedReference `json:"references"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(decoded.Data.References) != 2 {
+		t.Fatalf("expected relation token to be skipped, got %s", response.Body.String())
+	}
+	if decoded.Data.References[0].Field != "description" || decoded.Data.References[0].TargetID != user.ID {
+		t.Fatalf("unexpected description reference: %#v", decoded.Data.References[0])
+	}
+	if decoded.Data.References[1].Field != "content" || decoded.Data.References[1].TargetID != target.ID {
+		t.Fatalf("unexpected content reference: %#v", decoded.Data.References[1])
+	}
+	var rows []model.ContentReference
+	if err := service.db.Find(&rows, "source_type = ? AND source_id = ?", "debate", decoded.Data.ID).Error; err != nil {
+		t.Fatalf("load references: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected two stored references, got %#v", rows)
+	}
+}
+
+func TestCreateDebateRejectsUnavailableReference(t *testing.T) {
+	service, user := newDebateHTTPTestService(t)
+	body, _ := json.Marshal(map[string]any{
+		"title": "Invalid reference", "content": "See @debate:" + uuid.NewString(),
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/debate/topics", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	newDebateHTTPRouter(service, &user).ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+	}
+	var count int64
+	if err := service.db.Model(&model.Debate{}).Where("title = ?", "Invalid reference").Count(&count).Error; err != nil {
+		t.Fatalf("count debates: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected invalid debate rolled back, got %d rows", count)
+	}
+}
+
+func TestDebateUpdateReadAndDeleteReferenceLifecycle(t *testing.T) {
+	service, user := newDebateHTTPTestService(t)
+	created, err := service.CreateDebate(user, CreateDebateRequest{Title: "Lifecycle", Content: "Hello @" + user.Username})
+	if err != nil {
+		t.Fatalf("create debate: %v", err)
+	}
+	target, err := service.CreateDebate(user, CreateDebateRequest{Title: "Target"})
+	if err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	router := newDebateHTTPRouter(service, &user)
+	updateBody := bytes.NewBufferString(`{"title":"Lifecycle","description":"","content":"See @debate:` + target.ID.String() + `","tags":[]}`)
+	updateRequest := httptest.NewRequest(http.MethodPut, "/api/v1/debate/topics/"+created.ID.String(), updateBody)
+	updateRequest.Header.Set("Content-Type", "application/json")
+	updated := httptest.NewRecorder()
+	router.ServeHTTP(updated, updateRequest)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", updated.Code, updated.Body.String())
+	}
+	for _, path := range []string{
+		"/api/v1/debate/topics", "/api/v1/debate/topics/search?q=Lifecycle", "/api/v1/debate/topics/" + created.ID.String(),
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"references":[{"kind":"resource","target_type":"debate","target_id":"`+target.ID.String()+`"`)) {
+			t.Fatalf("expected updated references from %s, got %d: %s", path, response.Code, response.Body.String())
+		}
+	}
+	deleted := httptest.NewRecorder()
+	router.ServeHTTP(deleted, httptest.NewRequest(http.MethodDelete, "/api/v1/debate/topics/"+created.ID.String(), nil))
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", deleted.Code, deleted.Body.String())
+	}
+	var count int64
+	if err := service.db.Model(&model.ContentReference{}).Where("source_type = ? AND source_id = ?", "debate", created.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count references: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected debate references removed, got %d", count)
 	}
 }
 

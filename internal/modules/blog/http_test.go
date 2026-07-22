@@ -10,7 +10,9 @@ import (
 	"time"
 
 	apidocs "atoman/docs"
+	"atoman/internal/migrations"
 	"atoman/internal/model"
+	"atoman/internal/modules/reference"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
@@ -43,7 +45,15 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
+		&model.ContentReference{},
+		&model.Notification{},
 	)
+	if err := migrations.RunNotificationDMIndexes(db); err != nil {
+		t.Fatalf("migrate notification indexes: %v", err)
+	}
+	if err := migrations.RunContentReferencesMigration(db); err != nil {
+		t.Fatalf("migrate content references: %v", err)
+	}
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: authctx.RoleUser, DisplayName: "Alice", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -899,6 +909,175 @@ func TestRegisterRoutesCreatePostReturnsCreatedPost(t *testing.T) {
 
 	if resp.Data.CollectionID == nil || *resp.Data.CollectionID != collection.ID {
 		t.Fatalf("expected created post to be assigned to collection %s, got %#v", collection.ID, resp.Data.CollectionID)
+	}
+}
+
+func TestCreateDraftAllowsIncompleteReferenceAndPublishValidatesIt(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	_, collection := createOwnedChannelAndCollection(t, service, user, "References")
+	post, err := service.CreatePost(user, CreatePostRequest{
+		Title: "Draft reference", Content: "unfinished @post:", CollectionID: collection.ID, Status: "draft",
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+
+	router := newBlogHTTPRouter(service, &user)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/publish", nil))
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid reference publish to return 400, got %d: %s", response.Code, response.Body.String())
+	}
+	var reloaded model.Post
+	if err := db.First(&reloaded, "id = ?", post.ID).Error; err != nil {
+		t.Fatalf("reload post: %v", err)
+	}
+	if reloaded.Status != "draft" {
+		t.Fatalf("expected failed publish to keep draft status, got %s", reloaded.Status)
+	}
+}
+
+func TestPublishedPostPersistsAndReturnsReferences(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "References")
+	content := "See @channel:" + channel.ID.String()
+	router := newBlogHTTPRouter(service, &user)
+	body, _ := json.Marshal(map[string]any{
+		"title": "Reference post", "content": content, "collection_id": collection.ID, "status": "published",
+	})
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body.String())
+	}
+	var decoded struct {
+		Data struct {
+			ID         uuid.UUID                     `json:"id"`
+			References []reference.ResolvedReference `json:"references"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(decoded.Data.References) != 1 || decoded.Data.References[0].TargetID != channel.ID || !decoded.Data.References[0].Available {
+		t.Fatalf("unexpected references: %s", response.Body.String())
+	}
+	var rows []model.ContentReference
+	if err := db.Find(&rows, "source_type = ? AND source_id = ?", "post", decoded.Data.ID).Error; err != nil {
+		t.Fatalf("load references: %v", err)
+	}
+	if len(rows) != 1 || rows[0].SourceField != "content" || rows[0].TargetID != channel.ID {
+		t.Fatalf("unexpected stored references: %#v", rows)
+	}
+}
+
+func TestUpdatePublishedPostReplacesReferences(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "References")
+	post, err := service.CreatePost(user, CreatePostRequest{
+		Title: "Reference post", Content: "See @channel:" + channel.ID.String(), CollectionID: collection.ID, Status: "published",
+	})
+	if err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"title": "Reference post", "content": "See @collection:" + collection.ID.String(),
+		"collection_id": collection.ID.String(), "status": "published",
+	})
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/blog/posts/"+post.ID.String(), bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	newBlogHTTPRouter(service, &user).ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var decoded struct {
+		Data struct {
+			References []reference.ResolvedReference `json:"references"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(decoded.Data.References) != 1 || decoded.Data.References[0].TargetID != collection.ID {
+		t.Fatalf("unexpected response references: %s", response.Body.String())
+	}
+	var rows []model.ContentReference
+	if err := db.Find(&rows, "source_type = ? AND source_id = ?", "post", post.ID).Error; err != nil {
+		t.Fatalf("load references: %v", err)
+	}
+	if len(rows) != 1 || rows[0].TargetID != collection.ID {
+		t.Fatalf("unexpected stored references: %#v", rows)
+	}
+}
+
+func TestUnpublishPostRemovesReferences(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "References")
+	post, err := service.CreatePost(user, CreatePostRequest{
+		Title: "Reference post", Content: "See @channel:" + channel.ID.String(), CollectionID: collection.ID, Status: "published",
+	})
+	if err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	response := httptest.NewRecorder()
+	newBlogHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/unpublish", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var count int64
+	if err := db.Model(&model.ContentReference{}).Where("source_type = ? AND source_id = ?", "post", post.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count references: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected references removed, got %d", count)
+	}
+}
+
+func TestDeletePostRemovesReferences(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "References")
+	post, err := service.CreatePost(user, CreatePostRequest{
+		Title: "Reference post", Content: "See @channel:" + channel.ID.String(), CollectionID: collection.ID, Status: "published",
+	})
+	if err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	response := httptest.NewRecorder()
+	newBlogHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodDelete, "/api/v1/blog/posts/"+post.ID.String(), nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var count int64
+	if err := db.Model(&model.ContentReference{}).Where("source_type = ? AND source_id = ?", "post", post.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count references: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected references removed, got %d", count)
+	}
+}
+
+func TestPostListAndDetailReturnReferences(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "References")
+	post, err := service.CreatePost(user, CreatePostRequest{
+		Title: "Reference post", Content: "See @channel:" + channel.ID.String(), CollectionID: collection.ID, Status: "published",
+	})
+	if err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	router := newBlogHTTPRouter(service, &user)
+	for _, path := range []string{"/api/v1/blog/posts", "/api/v1/blog/posts/" + post.ID.String()} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"references":[{"kind":"resource","target_type":"channel"`) {
+			t.Fatalf("expected references from %s, got %d: %s", path, response.Code, response.Body.String())
+		}
 	}
 }
 

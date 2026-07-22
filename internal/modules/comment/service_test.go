@@ -402,24 +402,45 @@ func TestCreateValidatesAndPersistsMentionOccurrences(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, created.Mentions, 2)
 
-	_, err = ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "bad", Mentions: []MentionInput{{UserID: ctx.users[1].ID, Start: 0, End: 3}}})
-	require.ErrorIs(t, err, ErrInvalidMention)
+	plain, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "bad", Mentions: []MentionInput{{UserID: ctx.users[1].ID, Start: 0, End: 3}}})
+	require.NoError(t, err)
+	require.Empty(t, plain.Mentions)
 	missing := uuid.New()
 	_, err = ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "@missing", Mentions: []MentionInput{{UserID: missing, Start: 0, End: 8}}})
-	require.ErrorIs(t, err, ErrInvalidMention)
+	require.Error(t, err)
 	require.NoError(t, ctx.db.Model(&model.User{}).Where("uuid = ?", ctx.users[1].ID).Update("is_active", false).Error)
 	_, err = ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "@comment-user-1", Mentions: []MentionInput{{UserID: ctx.users[1].ID, Start: 0, End: len([]rune("@comment-user-1"))}}})
-	require.ErrorIs(t, err, ErrInvalidMention)
+	require.Error(t, err)
 }
 
-func TestCreateRejectsMentionUsernameSpoofing(t *testing.T) {
+func TestCreateDerivesMentionsAndReferencesFromContent(t *testing.T) {
+	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	content := "hi @" + ctx.users[1].Username
+	created, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: content})
+
+	require.NoError(t, err)
+	require.Len(t, created.Mentions, 1)
+	require.Equal(t, ctx.users[1].ID, created.Mentions[0].UserID)
+	require.Equal(t, len([]rune("hi ")), created.Mentions[0].Start)
+	require.Len(t, created.References, 1)
+	require.Equal(t, "comment-user-1", created.References[0].Label)
+	require.True(t, created.References[0].Available)
+
+	var references []model.ContentReference
+	require.NoError(t, ctx.db.Find(&references, "source_type = ? AND source_id = ?", "comment", created.ID).Error)
+	require.Len(t, references, 1)
+	require.Equal(t, ctx.users[1].ID, references[0].TargetID)
+}
+
+func TestCreateIgnoresClientMentionSpoofingAndUsesContent(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	content := "@comment-user-2"
-	_, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{
+	created, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{
 		Content:  content,
 		Mentions: []MentionInput{{UserID: ctx.users[1].ID, Start: 0, End: len([]rune(content))}},
 	})
-	require.ErrorIs(t, err, ErrInvalidMention)
+	require.NoError(t, err)
+	require.Equal(t, []MentionDTO{{UserID: ctx.users[2].ID, Start: 0, End: len([]rune(content))}}, created.Mentions)
 }
 
 func TestCreateMentionOffsetsReferToNFCNormalizedContent(t *testing.T) {
@@ -836,7 +857,7 @@ func TestListUsesConstantQueryCount(t *testing.T) {
 	for _, root := range listed.Items {
 		require.Len(t, root.Replies, 3)
 	}
-	require.LessOrEqual(t, queries.Load(), int64(10))
+	require.LessOrEqual(t, queries.Load(), int64(11))
 }
 
 func TestCommentDTODoesNotExposeContentHash(t *testing.T) {

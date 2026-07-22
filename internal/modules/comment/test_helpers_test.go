@@ -37,6 +37,7 @@ func newCommentTestContext(t *testing.T, kind string, duration int) commentTestC
 		&model.CommentReport{},
 		&model.CommentTimeAnchor{},
 		&model.CommentPublishRecord{},
+		&model.ContentReference{},
 		&model.Notification{},
 		&model.AuditLog{},
 		&model.TimelineRevisionProposal{},
@@ -54,6 +55,7 @@ func newCommentTestContext(t *testing.T, kind string, duration int) commentTestC
 	require.NoError(t, db.Exec(`CREATE INDEX IF NOT EXISTS idx_comment_publish_duplicate_window ON comment_publish_records (author_id, target_id, content_hash, created_at)`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_notification_dedup ON notifications (recipient_id, source_type, source_id) WHERE aggregation_key = '' AND deleted_at IS NULL`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_notification_unread_aggregate ON notifications (recipient_id, aggregation_key) WHERE aggregation_key <> '' AND read_at IS NULL AND deleted_at IS NULL`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_content_reference_source_range ON content_references (source_type, source_id, source_field, start_offset, end_offset) WHERE deleted_at IS NULL`).Error)
 
 	users := make([]authctx.CurrentUser, 4)
 	for i := range users {

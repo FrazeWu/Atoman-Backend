@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/reference"
 	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
@@ -53,6 +54,7 @@ type Service struct {
 	now         func() time.Time
 	checkAbuse  bool
 	forumPolicy ForumPolicy
+	references  *reference.Service
 }
 
 func (s *Service) SetForumPolicy(policy ForumPolicy) {
@@ -60,7 +62,7 @@ func (s *Service) SetForumPolicy(policy ForumPolicy) {
 }
 
 func NewService(db *gorm.DB, registry *TargetRegistry) *Service {
-	return &Service{db: db, registry: registry, createMu: createTransactionMutex(db.Dialector.Name()), now: time.Now, checkAbuse: true}
+	return &Service{db: db, registry: registry, createMu: createTransactionMutex(db.Dialector.Name()), now: time.Now, checkAbuse: true, references: reference.NewService(db)}
 }
 
 func createTransactionMutex(dialect string) *sync.Mutex {
@@ -106,11 +108,8 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	if err != nil {
 		return CommentDTO{}, err
 	}
-	if err := s.validateMentions(s.db, normalized, input.Mentions); err != nil {
-		return CommentDTO{}, err
-	}
-
 	var created model.CommentEntry
+	var mentions []MentionInput
 	contentHash := ContentHash(normalized, input.AttachmentIDs)
 	runTransaction := func() error {
 		return s.db.Transaction(func(tx *gorm.DB) error {
@@ -166,14 +165,14 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 			if err != nil {
 				return err
 			}
-			if err := s.validateMentions(tx, normalized, input.Mentions); err != nil {
-				return err
-			}
-
 			if err := s.repo.createComment(tx, &created); err != nil {
 				return fmt.Errorf("create comment: %w", err)
 			}
-			if err := createCommentRelations(tx, created.ID, input.Mentions, assets, resolved, normalized); err != nil {
+			mentions, err = s.replaceContentReferences(tx, created, resolved, normalized)
+			if err != nil {
+				return err
+			}
+			if err := createCommentRelations(tx, created.ID, mentions, assets, resolved, normalized); err != nil {
 				return err
 			}
 			updates := map[string]any{"comment_count": gorm.Expr("comment_count + 1")}
@@ -199,7 +198,7 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 					return err
 				}
 			}
-			if err := s.notifyCreatedComment(tx, created, resolved, replyAuthorID, input.Mentions); err != nil {
+			if err := s.notifyCreatedComment(tx, created, resolved, replyAuthorID, mentions); err != nil {
 				return err
 			}
 			if !isRoot {
@@ -228,6 +227,25 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	}
 	dto.RenderedHTML = rendered
 	return dto, nil
+}
+
+func (s *Service) replaceContentReferences(tx *gorm.DB, entry model.CommentEntry, resolved ResolvedTarget, content string) ([]MentionInput, error) {
+	meta := notificationMeta(entry, resolved)
+	items, err := s.references.ReplacePublished(tx, reference.Source{
+		Type: "comment", ID: entry.ID, ActorID: entry.AuthorID, Audience: reference.AudiencePublic,
+		MentionNotificationType: NotificationTypeMention, NotificationSourceType: "comment_event",
+		SuppressMentionNotifications: true, Meta: map[string]interface{}(meta),
+	}, []reference.Field{{Name: "content", Content: content}})
+	if err != nil {
+		return nil, err
+	}
+	mentions := make([]MentionInput, 0)
+	for _, item := range items {
+		if item.TargetType == reference.TargetTypeUser {
+			mentions = append(mentions, MentionInput{UserID: item.TargetID, Start: item.Start, End: item.End})
+		}
+	}
+	return mentions, nil
 }
 
 func (s *Service) validateCreateTargetTx(tx *gorm.DB, resolved ResolvedTarget) error {
@@ -741,6 +759,7 @@ func (s *Service) entryDTOs(db *gorm.DB, entries []model.CommentEntry, viewerIDs
 			HotScore:     entry.HotScore,
 			CreatedAt:    entry.CreatedAt,
 			Mentions:     []MentionDTO{},
+			References:   []reference.ResolvedReference{},
 			Attachments:  []AttachmentDTO{},
 			TimeAnchors:  []TimeAnchorDTO{},
 			Replies:      []CommentDTO{},
@@ -800,6 +819,24 @@ func (s *Service) entryDTOs(db *gorm.DB, entries []model.CommentEntry, viewerIDs
 		dto := dtos[mention.CommentID]
 		dto.Mentions = append(dto.Mentions, MentionDTO{UserID: mention.UserID, Start: mention.StartOffset, End: mention.EndOffset})
 		dtos[mention.CommentID] = dto
+	}
+	var referenceRows []model.ContentReference
+	if err := db.Where("source_type = ? AND source_id IN ?", "comment", ids).
+		Order("source_id ASC").Order("source_field ASC").Order("start_offset ASC").Find(&referenceRows).Error; err != nil {
+		return nil, err
+	}
+	viewer := reference.Viewer{}
+	if len(viewerIDs) > 0 && viewerIDs[0] != nil {
+		viewer.UserID = *viewerIDs[0]
+	}
+	resolvedReferences, err := s.references.ResolveStoredRows(db, viewer, referenceRows)
+	if err != nil {
+		return nil, err
+	}
+	for sourceID, items := range resolvedReferences {
+		dto := dtos[sourceID]
+		dto.References = items
+		dtos[sourceID] = dto
 	}
 	var attachments []commentAttachmentRow
 	if err := db.Table("comment_attachments AS ca").

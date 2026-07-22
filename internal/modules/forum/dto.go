@@ -1,6 +1,16 @@
 package forum
 
-import "github.com/google/uuid"
+import (
+	"atoman/internal/model"
+	"atoman/internal/modules/reference"
+
+	"github.com/google/uuid"
+)
+
+type TopicDTO struct {
+	model.ForumTopic
+	References []reference.ResolvedReference `json:"references"`
+}
 
 type ListTopicsQuery struct {
 	CategoryID uuid.UUID `json:"category_id" form:"category_id"`

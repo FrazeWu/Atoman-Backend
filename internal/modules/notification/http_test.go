@@ -50,6 +50,7 @@ func TestUnreadCountsReturnsNotificationCategoriesAndDMTotal(t *testing.T) {
 		{RecipientID: user.UUID, Type: "comment_marked"},
 		{RecipientID: user.UUID, Type: "forum_follow"},
 		{RecipientID: user.UUID, Type: "comment_mention"},
+		{RecipientID: user.UUID, Type: "content_mention"},
 		{RecipientID: user.UUID, Type: "comment_reply"},
 		{RecipientID: user.UUID, Type: "collaboration.required"},
 		{RecipientID: user.UUID, Type: "future_unknown"},
@@ -92,9 +93,9 @@ func TestUnreadCountsReturnsNotificationCategoriesAndDMTotal(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	want := map[string]int64{"like": 1, "interaction": 2, "mention": 1, "reply": 1, "collaboration": 1, "system": 1, "dm": 1}
-	if response.Data.Total != 8 {
-		t.Fatalf("expected total 8, got %d", response.Data.Total)
+	want := map[string]int64{"like": 1, "interaction": 2, "mention": 2, "reply": 1, "collaboration": 1, "system": 1, "dm": 1}
+	if response.Data.Total != 9 {
+		t.Fatalf("expected total 9, got %d", response.Data.Total)
 	}
 	for category, count := range want {
 		if response.Data.Items[category] != count {

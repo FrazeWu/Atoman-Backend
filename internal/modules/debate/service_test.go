@@ -23,11 +23,13 @@ func seededDebateCommentService(t *testing.T) (*Service, *gorm.DB, authctx.Curre
 		&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentTimeAnchor{},
 		&model.CommentLike{}, &model.CommentReport{}, &model.CommentPublishRecord{}, &model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{},
 		&model.DebateArgumentReference{}, &model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{}, &model.DebateRelation{},
+		&model.ContentReference{},
 	)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_comment_root_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_notification_dedup ON notifications (recipient_id, source_type, source_id) WHERE aggregation_key = '' AND deleted_at IS NULL`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_notification_unread_aggregate ON notifications (recipient_id, aggregation_key) WHERE aggregation_key <> '' AND read_at IS NULL AND deleted_at IS NULL`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_debate_content_reference_source_range ON content_references (source_type, source_id, source_field, start_offset, end_offset) WHERE deleted_at IS NULL`).Error)
 	owner := model.User{Username: "owner", Email: "owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	require.NoError(t, db.Create(&owner).Error)
 	user := authctx.CurrentUser{ID: owner.UUID, Username: owner.Username, Role: owner.Role}

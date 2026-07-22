@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/modules/forum_moderation"
 	"atoman/internal/platform/apperr"
@@ -79,8 +80,12 @@ func newForumConcurrencyPostgresDB(t *testing.T) *gorm.DB {
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
 		&model.CommentLike{},
+		&model.ContentReference{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
+	}
+	if err := migrations.RunContentReferencesMigration(db); err != nil {
+		t.Fatalf("migrate content references: %v", err)
 	}
 	return db
 }

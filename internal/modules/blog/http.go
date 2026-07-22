@@ -756,8 +756,13 @@ func (h *Handler) listPosts(c *gin.Context) {
 		return
 	}
 
+	postDTOs, err := h.service.postDTOs(h.service.db, posts, currentViewerID(c))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	items := make([]PostListItemDTO, 0, len(posts))
-	for _, post := range posts {
+	for index, post := range posts {
 		likes, err := h.service.CountPostLikes(post.ID)
 		if err != nil {
 			httpx.Error(c, err)
@@ -776,7 +781,7 @@ func (h *Handler) listPosts(c *gin.Context) {
 			httpx.Error(c, err)
 			return
 		}
-		items = append(items, PostListItemDTO{Post: post, LikesCount: likes, CommentsCount: comments, BookmarksCount: bookmarks})
+		items = append(items, PostListItemDTO{PostDTO: postDTOs[index], LikesCount: likes, CommentsCount: comments, BookmarksCount: bookmarks})
 	}
 
 	httpx.List(c, items, page, pageSize, total)
@@ -926,15 +931,20 @@ func (h *Handler) getPost(c *gin.Context) {
 		}
 	}
 
+	postDTO, err := h.service.postDTO(h.service.db, post, viewerID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	httpx.OK(c, http.StatusOK, struct {
-		model.Post
+		PostDTO
 		Liked                 bool  `json:"liked"`
 		LikesCount            int64 `json:"likes_count"`
 		CommentsCount         int64 `json:"comments_count"`
 		BookmarksCount        int64 `json:"bookmarks_count"`
 		ChannelFollowersCount int64 `json:"channel_followers_count"`
 	}{
-		Post:                  post,
+		PostDTO:               postDTO,
 		Liked:                 liked,
 		LikesCount:            likesCount,
 		CommentsCount:         commentsCount,
@@ -1034,7 +1044,12 @@ func (h *Handler) createPost(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusCreated, post)
+	postDTO, err := h.service.postDTO(h.service.db, post, &user.ID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, postDTO)
 }
 
 // listPostVersions godoc
@@ -1096,7 +1111,12 @@ func (h *Handler) restorePostVersion(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, post)
+	postDTO, err := h.service.postDTO(h.service.db, post, &user.ID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, postDTO)
 }
 
 func (h *Handler) updatePost(c *gin.Context) {
@@ -1216,6 +1236,9 @@ func (h *Handler) updatePost(c *gin.Context) {
 		if err := tx.Preload("Channel").Preload("Collection").First(&post, "id = ?", post.ID).Error; err != nil {
 			return err
 		}
+		if _, err := h.service.syncPostReferences(tx, post); err != nil {
+			return err
+		}
 		if post.Status == "published" {
 			return saveBlogPostVersion(tx, post, user.ID)
 		}
@@ -1224,7 +1247,12 @@ func (h *Handler) updatePost(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, post)
+	postDTO, err := h.service.postDTO(h.service.db, post, &user.ID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, postDTO)
 }
 
 func (h *Handler) deletePost(c *gin.Context) {
@@ -1253,7 +1281,12 @@ func (h *Handler) deletePost(c *gin.Context) {
 		httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to delete this post"))
 		return
 	}
-	if err := h.service.db.Delete(&post).Error; err != nil {
+	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
+		if err := h.service.references.RemoveSource(tx, "post", post.ID); err != nil {
+			return err
+		}
+		return tx.Delete(&post).Error
+	}); err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -1474,6 +1507,12 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 			updates["published_at"] = time.Now().UTC()
 		}
 		if err := tx.Model(&post).Updates(updates).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&post, "id = ?", post.ID).Error; err != nil {
+			return err
+		}
+		if _, err := h.service.syncPostReferences(tx, post); err != nil {
 			return err
 		}
 		if status != "published" || wasPublished {

@@ -106,9 +106,6 @@ func (s *Service) EditWithExtension(user authctx.CurrentUser, commentID uuid.UUI
 	if err != nil {
 		return CommentDTO{}, err
 	}
-	if err := s.validateMentions(s.db, normalized, input.Mentions); err != nil {
-		return CommentDTO{}, err
-	}
 	located, _, resolved, err := s.resolveCommentMutation(viewerFromUser(user), commentID)
 	if err != nil {
 		return CommentDTO{}, err
@@ -147,7 +144,8 @@ func (s *Service) EditWithExtension(user authctx.CurrentUser, commentID uuid.UUI
 			if err != nil {
 				return err
 			}
-			if err := s.validateMentions(tx, normalized, input.Mentions); err != nil {
+			mentions, err := s.replaceContentReferences(tx, entry, resolved, normalized)
+			if err != nil {
 				return err
 			}
 			for _, relation := range []any{&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentTimeAnchor{}} {
@@ -155,10 +153,10 @@ func (s *Service) EditWithExtension(user authctx.CurrentUser, commentID uuid.UUI
 					return fmt.Errorf("replace comment relations: %w", err)
 				}
 			}
-			if err := createCommentRelations(tx, entry.ID, input.Mentions, assets, resolved, normalized); err != nil {
+			if err := createCommentRelations(tx, entry.ID, mentions, assets, resolved, normalized); err != nil {
 				return err
 			}
-			if err := s.notifyNewEditMentions(tx, entry, resolved, user.ID, input.Mentions); err != nil {
+			if err := s.notifyNewEditMentions(tx, entry, resolved, user.ID, mentions); err != nil {
 				return err
 			}
 			now := s.now()
@@ -560,6 +558,9 @@ func deleteCommentRelations(tx *gorm.DB, ids []uuid.UUID) error {
 		if err := tx.Unscoped().Where("comment_id IN ?", ids).Delete(relation).Error; err != nil {
 			return fmt.Errorf("delete comment relations: %w", err)
 		}
+	}
+	if err := tx.Unscoped().Where("source_type = ? AND source_id IN ?", "comment", ids).Delete(&model.ContentReference{}).Error; err != nil {
+		return fmt.Errorf("delete comment content references: %w", err)
 	}
 	if err := deleteCommentExtensionRelations(tx, ids); err != nil {
 		return err

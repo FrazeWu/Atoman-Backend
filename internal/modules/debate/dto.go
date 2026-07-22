@@ -3,6 +3,7 @@ package debate
 import (
 	"atoman/internal/model"
 	"atoman/internal/modules/comment"
+	"atoman/internal/modules/reference"
 
 	"github.com/google/uuid"
 )
@@ -13,6 +14,16 @@ type ListDebatesQuery struct {
 	Tag      string
 	Page     int
 	PageSize int
+}
+
+type DebateDTO struct {
+	model.Debate
+	References []reference.ResolvedReference `json:"references"`
+}
+
+type ArgumentDTO struct {
+	model.DebateArgumentDTO
+	ContentReferences []reference.ResolvedReference `json:"content_references"`
 }
 
 type CreateDebateRequest struct {

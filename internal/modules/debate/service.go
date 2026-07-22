@@ -8,6 +8,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/modules/comment"
+	"atoman/internal/modules/reference"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -18,9 +19,10 @@ import (
 )
 
 type Service struct {
-	db       *gorm.DB
-	repo     *Repo
-	comments *comment.Service
+	db         *gorm.DB
+	repo       *Repo
+	comments   *comment.Service
+	references *reference.Service
 }
 
 var validArgumentTypes = map[string]bool{"support": true, "oppose": true, "neutral": true, "evidence": true, "question": true, "counter": true}
@@ -44,7 +46,87 @@ func NewService(db *gorm.DB, services ...*comment.Service) *Service {
 	if len(services) > 0 && services[0] != nil {
 		commentService = services[0]
 	}
-	return &Service{db: db, repo: NewRepo(db), comments: commentService}
+	return &Service{db: db, repo: NewRepo(db), comments: commentService, references: reference.NewService(db)}
+}
+
+func (s *Service) syncDebateReferences(tx *gorm.DB, debate model.Debate) ([]reference.ResolvedReference, error) {
+	return s.references.ReplacePublished(tx, reference.Source{
+		Type: "debate", ID: debate.ID, ActorID: debate.UserID, Audience: reference.AudiencePublic,
+		Meta: map[string]interface{}{"module": "debate", "path": "/" + debate.ID.String()},
+	}, []reference.Field{
+		{Name: "description", Content: debate.Description},
+		{Name: "content", Content: debate.Content},
+	})
+}
+
+func (s *Service) debateDTOs(db *gorm.DB, debates []model.Debate) ([]DebateDTO, error) {
+	dtos := make([]DebateDTO, len(debates))
+	ids := make([]uuid.UUID, 0, len(debates))
+	for index, debate := range debates {
+		dtos[index] = DebateDTO{Debate: debate, References: []reference.ResolvedReference{}}
+		ids = append(ids, debate.ID)
+	}
+	if len(ids) == 0 {
+		return dtos, nil
+	}
+	var rows []model.ContentReference
+	if err := db.Where("source_type = ? AND source_id IN ?", "debate", ids).
+		Order("source_id ASC, source_field DESC, start_offset ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	resolved, err := s.references.ResolveStoredRows(db, reference.Viewer{}, rows)
+	if err != nil {
+		return nil, err
+	}
+	for index := range dtos {
+		if items, ok := resolved[dtos[index].ID]; ok {
+			dtos[index].References = items
+		}
+	}
+	return dtos, nil
+}
+
+func (s *Service) debateDTO(db *gorm.DB, debate model.Debate) (DebateDTO, error) {
+	items, err := s.debateDTOs(db, []model.Debate{debate})
+	if err != nil {
+		return DebateDTO{}, err
+	}
+	return items[0], nil
+}
+
+func (s *Service) argumentDTOs(db *gorm.DB, arguments []model.DebateArgumentDTO) ([]ArgumentDTO, error) {
+	dtos := make([]ArgumentDTO, len(arguments))
+	ids := make([]uuid.UUID, 0, len(arguments))
+	for index, argument := range arguments {
+		dtos[index] = ArgumentDTO{DebateArgumentDTO: argument, ContentReferences: []reference.ResolvedReference{}}
+		ids = append(ids, argument.ID)
+	}
+	if len(ids) == 0 {
+		return dtos, nil
+	}
+	var rows []model.ContentReference
+	if err := db.Where("source_type = ? AND source_id IN ?", "comment", ids).
+		Order("source_id ASC, source_field ASC, start_offset ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	resolved, err := s.references.ResolveStoredRows(db, reference.Viewer{}, rows)
+	if err != nil {
+		return nil, err
+	}
+	for index := range dtos {
+		if items, ok := resolved[dtos[index].ID]; ok {
+			dtos[index].ContentReferences = items
+		}
+	}
+	return dtos, nil
+}
+
+func (s *Service) argumentDTO(db *gorm.DB, argument model.DebateArgumentDTO) (ArgumentDTO, error) {
+	items, err := s.argumentDTOs(db, []model.DebateArgumentDTO{argument})
+	if err != nil {
+		return ArgumentDTO{}, err
+	}
+	return items[0], nil
 }
 
 func (s *Service) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error) {
@@ -85,7 +167,13 @@ func (s *Service) CreateDebate(user authctx.CurrentUser, req CreateDebateRequest
 		Status:            "open",
 		ConcludeThreshold: 10,
 	}
-	if err := s.repo.CreateDebate(&debate); err != nil {
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := NewRepo(tx).CreateDebate(&debate); err != nil {
+			return err
+		}
+		_, err := s.syncDebateReferences(tx, debate)
+		return err
+	}); err != nil {
 		return model.Debate{}, err
 	}
 	return s.repo.GetDebate(debate.ID)
@@ -109,7 +197,14 @@ func (s *Service) UpdateDebate(user authctx.CurrentUser, debateID uuid.UUID, req
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, "id = ?", debateID).Error; err != nil {
 			return err
 		}
-		return tx.Model(&locked).Updates(map[string]any{"title": title, "description": strings.TrimSpace(req.Description), "content": strings.TrimSpace(req.Content), "tags": req.Tags}).Error
+		if err := tx.Model(&locked).Updates(map[string]any{"title": title, "description": strings.TrimSpace(req.Description), "content": strings.TrimSpace(req.Content), "tags": req.Tags}).Error; err != nil {
+			return err
+		}
+		if err := tx.First(&locked, "id = ?", debateID).Error; err != nil {
+			return err
+		}
+		_, err := s.syncDebateReferences(tx, locked)
+		return err
 	})
 	if err != nil {
 		return model.Debate{}, err
@@ -126,6 +221,9 @@ func (s *Service) DeleteDebate(user authctx.CurrentUser, debateID uuid.UUID) err
 		return apperr.Forbidden("debate.forbidden", "Not authorized")
 	}
 	return s.comments.DeleteTarget(comment.TargetRef{Kind: comment.TargetKindDebate, ResourceID: debateID}, func(tx *gorm.DB) error {
+		if err := s.references.RemoveSource(tx, "debate", debateID); err != nil {
+			return err
+		}
 		if err := tx.Unscoped().Where("source_debate_id = ? OR target_debate_id = ?", debateID, debateID).
 			Delete(&model.DebateRelation{}).Error; err != nil {
 			return err

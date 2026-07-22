@@ -25,7 +25,7 @@ func categoryForType(notificationType string) string {
 		return "like"
 	case "comment_marked", "forum_follow", "forum_solved":
 		return "interaction"
-	case "comment_mention", "forum_mention":
+	case "comment_mention", "forum_mention", "content_mention":
 		return "mention"
 	case "comment_reply", "forum_reply", "forum_topic_comment":
 		return "reply"

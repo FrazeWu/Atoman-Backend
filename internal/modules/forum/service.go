@@ -10,6 +10,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/modules/comment"
 	"atoman/internal/modules/forum_moderation"
+	"atoman/internal/modules/reference"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	coreservice "atoman/internal/service"
@@ -20,13 +21,64 @@ import (
 )
 
 type Service struct {
-	db    *gorm.DB
-	repo  *Repo
-	trust *coreservice.ForumTrustService
+	db         *gorm.DB
+	repo       *Repo
+	trust      *coreservice.ForumTrustService
+	references *reference.Service
 }
 
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db, repo: NewRepo(db), trust: coreservice.NewForumTrustService(db)}
+	return &Service{db: db, repo: NewRepo(db), trust: coreservice.NewForumTrustService(db), references: reference.NewService(db)}
+}
+
+func (s *Service) syncTopicReferences(tx *gorm.DB, topic model.ForumTopic) ([]reference.ResolvedReference, error) {
+	var permissionCount int64
+	if err := tx.Model(&model.ForumCategoryPermission{}).Where("category_id = ?", topic.CategoryID).Count(&permissionCount).Error; err != nil {
+		return nil, err
+	}
+	audience := ""
+	if permissionCount == 0 {
+		audience = reference.AudiencePublic
+	}
+	return s.references.ReplacePublished(tx, reference.Source{
+		Type: "thread", ID: topic.ID, ActorID: topic.UserID, Audience: audience,
+		Meta: map[string]interface{}{"module": "forum", "path": "/topic/" + topic.ID.String()},
+	}, []reference.Field{{Name: "content", Content: topic.Content}})
+}
+
+func (s *Service) topicDTOs(db *gorm.DB, topics []model.ForumTopic, user authctx.CurrentUser) ([]TopicDTO, error) {
+	dtos := make([]TopicDTO, len(topics))
+	ids := make([]uuid.UUID, 0, len(topics))
+	for index, topic := range topics {
+		dtos[index] = TopicDTO{ForumTopic: topic, References: []reference.ResolvedReference{}}
+		ids = append(ids, topic.ID)
+	}
+	if len(ids) == 0 {
+		return dtos, nil
+	}
+	var rows []model.ContentReference
+	if err := db.Where("source_type = ? AND source_id IN ?", "thread", ids).
+		Order("source_id ASC, source_field ASC, start_offset ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	resolved, err := s.references.ResolveStoredRows(db, reference.Viewer{UserID: user.ID}, rows)
+	if err != nil {
+		return nil, err
+	}
+	for index := range dtos {
+		if items, ok := resolved[dtos[index].ID]; ok {
+			dtos[index].References = items
+		}
+	}
+	return dtos, nil
+}
+
+func (s *Service) topicDTO(db *gorm.DB, topic model.ForumTopic, user authctx.CurrentUser) (TopicDTO, error) {
+	items, err := s.topicDTOs(db, []model.ForumTopic{topic}, user)
+	if err != nil {
+		return TopicDTO{}, err
+	}
+	return items[0], nil
 }
 
 func (s *Service) ListCategories(user authctx.CurrentUser) ([]model.ForumCategory, error) {
@@ -126,7 +178,11 @@ func (s *Service) CreateTopic(user authctx.CurrentUser, req CreateTopicRequest) 
 		if err := s.trust.WithDB(tx).CheckCreateTopic(user, title, content); err != nil {
 			return err
 		}
-		return NewRepo(tx).CreateTopic(&topic)
+		if err := NewRepo(tx).CreateTopic(&topic); err != nil {
+			return err
+		}
+		_, err := s.syncTopicReferences(tx, topic)
+		return err
 	})
 	if err != nil {
 		return model.ForumTopic{}, err
@@ -227,7 +283,11 @@ func (s *Service) UpdateTopic(user authctx.CurrentUser, topicID uuid.UUID, req U
 		if tags != nil {
 			locked.Tags = *tags
 		}
-		return NewRepo(tx).SaveTopic(&locked)
+		if err := NewRepo(tx).SaveTopic(&locked); err != nil {
+			return err
+		}
+		_, err = s.syncTopicReferences(tx, locked)
+		return err
 	})
 	if err != nil {
 		return model.ForumTopic{}, err
@@ -243,7 +303,12 @@ func (s *Service) DeleteTopic(user authctx.CurrentUser, topicID uuid.UUID) error
 	if err := requireTopicOwner(user, topic.UserID); err != nil {
 		return err
 	}
-	return s.repo.DeleteTopic(topicID)
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := s.references.RemoveSource(tx, "thread", topicID); err != nil {
+			return err
+		}
+		return NewRepo(tx).DeleteTopic(topicID)
+	})
 }
 
 func (s *Service) ListDrafts(user authctx.CurrentUser) ([]model.ForumDraft, error) {

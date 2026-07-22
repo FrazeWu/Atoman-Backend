@@ -139,7 +139,12 @@ func (h *Handler) listDebates(c *gin.Context) {
 		httpx.Error(c, comment.AppError(err))
 		return
 	}
-	httpx.List(c, debates, query.Page, query.PageSize, total)
+	items, err := h.service.debateDTOs(h.service.db, debates)
+	if err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.List(c, items, query.Page, query.PageSize, total)
 }
 
 func (h *Handler) searchDebates(c *gin.Context) {
@@ -154,7 +159,12 @@ func (h *Handler) searchDebates(c *gin.Context) {
 		httpx.Error(c, comment.AppError(err))
 		return
 	}
-	httpx.List(c, debates, query.Page, query.PageSize, total)
+	items, err := h.service.debateDTOs(h.service.db, debates)
+	if err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.List(c, items, query.Page, query.PageSize, total)
 }
 
 func (h *Handler) getDebate(c *gin.Context) {
@@ -168,7 +178,12 @@ func (h *Handler) getDebate(c *gin.Context) {
 		httpx.Error(c, comment.AppError(err))
 		return
 	}
-	httpx.OK(c, http.StatusOK, debate)
+	item, err := h.service.debateDTO(h.service.db, debate)
+	if err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
 }
 
 // listArguments godoc
@@ -202,7 +217,12 @@ func (h *Handler) listArguments(c *gin.Context) {
 			return
 		}
 	}
-	httpx.OKMeta(c, http.StatusOK, arguments, gin.H{
+	items, err := h.service.argumentDTOs(h.service.db, arguments)
+	if err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.OKMeta(c, http.StatusOK, items, gin.H{
 		"page": page, "page_size": pageSize, "total": total,
 		"has_more": int64(page*pageSize) < total, "user_votes": userVotes,
 	})
@@ -235,7 +255,12 @@ func (h *Handler) createDebate(c *gin.Context) {
 		httpx.Error(c, comment.AppError(err))
 		return
 	}
-	httpx.OK(c, http.StatusCreated, debate)
+	item, err := h.service.debateDTO(h.service.db, debate)
+	if err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.OK(c, http.StatusCreated, item)
 }
 
 func (h *Handler) createLegacyDebate(c *gin.Context) {
@@ -263,7 +288,12 @@ func (h *Handler) updateLegacyDebate(c *gin.Context) {
 		httpx.Error(c, comment.AppError(err))
 		return
 	}
-	httpx.OK(c, http.StatusOK, debate)
+	item, err := h.service.debateDTO(h.service.db, debate)
+	if err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
 }
 
 func (h *Handler) deleteLegacyDebate(c *gin.Context) {
@@ -319,7 +349,12 @@ func (h *Handler) createLegacyArgument(c *gin.Context) {
 		httpx.Error(c, comment.AppError(err))
 		return
 	}
-	httpx.OK(c, http.StatusCreated, argument)
+	item, err := h.service.argumentDTO(h.service.db, argument)
+	if err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.OK(c, http.StatusCreated, item)
 }
 
 func (h *Handler) concludeLegacyDebate(c *gin.Context) {
@@ -403,7 +438,12 @@ func (h *Handler) updateLegacyArgument(c *gin.Context) {
 		httpx.Error(c, comment.AppError(err))
 		return
 	}
-	httpx.OK(c, http.StatusOK, argument)
+	item, err := h.service.argumentDTO(h.service.db, argument)
+	if err != nil {
+		httpx.Error(c, comment.AppError(err))
+		return
+	}
+	httpx.OK(c, http.StatusOK, item)
 }
 
 // deleteLegacyArgument godoc

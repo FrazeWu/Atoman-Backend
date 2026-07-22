@@ -21,10 +21,12 @@ func seededTimelineProposalService(t *testing.T) (*TimelineRevisionProposalServi
 		&model.DiscussionTarget{}, &model.CommentEntry{}, &model.CommentMention{}, &model.CommentAttachment{},
 		&model.CommentLike{}, &model.CommentReport{}, &model.CommentTimeAnchor{}, &model.CommentPublishRecord{},
 		&model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{},
+		&model.ContentReference{},
 	)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_timeline_test_target ON discussion_targets (kind, resource_key)`).Error)
 	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_timeline_test_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error)
 	require.NoError(t, db.Exec(`CREATE INDEX idx_timeline_test_publish ON comment_publish_records (author_id, created_at)`).Error)
+	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_timeline_test_content_reference ON content_references (source_type, source_id, source_field, start_offset, end_offset) WHERE deleted_at IS NULL`).Error)
 	ownerModel := model.User{Username: "timeline-owner", Email: "owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	require.NoError(t, db.Create(&ownerModel).Error)
 	owner := authctx.CurrentUser{ID: ownerModel.UUID, Username: ownerModel.Username, Role: ownerModel.Role}
