@@ -3,6 +3,7 @@ package music
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -125,7 +126,7 @@ func TestProcessCUEAudioCreatesIndependentRangesAndCueTitles(t *testing.T) {
 	store := &fakeMediaStore{objects: map[string][]byte{}, puts: map[string][]byte{}}
 	processor := NewMediaImportProcessor(db, store, runner, "")
 	tracks := []cueTrack{{file: "album.flac", number: 1, title: "Cue One", startSeconds: 0}, {file: "album.flac", number: 2, title: "Cue Two", startSeconds: 10}}
-	if err := processor.processCUEAudio(context.Background(), session.ID, source, "Disc 1/album.flac", tracks); err != nil {
+	if _, err := processor.processCUEAudio(context.Background(), session.ID, source, "Disc 1/album.flac", tracks); err != nil {
 		t.Fatal(err)
 	}
 	var files []model.AlbumImportFile
@@ -143,6 +144,145 @@ func TestProcessCUEAudioCreatesIndependentRangesAndCueTitles(t *testing.T) {
 	}
 	if !foundRange {
 		t.Fatalf("missing CUE ffmpeg ranges: %#v", runner.runs)
+	}
+}
+
+func TestMediaImportProcessorSplitsUploadedFolderCUESources(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{InputMode: AlbumImportInputModeFolder, Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	gbkCue, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte("FILE \"audio/album.flac\" WAVE\nTRACK 01 AUDIO\nTITLE \"第一首\"\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nTITLE \"第二首\"\nINDEX 01 00:10:00\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := []model.AlbumImportFile{
+		{ImportID: session.ID, RelativePath: "Album/Disc 1/disc.cue", FileName: "disc.cue", Role: AlbumImportFileRoleCue, DetectedFormat: "cue", SourceKey: "source/disc-1.cue", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending},
+		{ImportID: session.ID, RelativePath: "Album/Disc 1/audio/album.flac", FileName: "album.flac", Role: AlbumImportFileRoleAudio, DetectedFormat: "flac", SourceKey: "source/disc-1.flac", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending},
+		{ImportID: session.ID, RelativePath: "Album/Disc 2/disc.cue", FileName: "disc.cue", Role: AlbumImportFileRoleCue, DetectedFormat: "cue", SourceKey: "source/disc-2.cue", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending},
+		{ImportID: session.ID, RelativePath: "Album/Disc 2/album.flac", FileName: "album.flac", Role: AlbumImportFileRoleAudio, DetectedFormat: "flac", SourceKey: "source/disc-2.flac", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending},
+	}
+	for index := range files {
+		if err := db.Create(&files[index]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}
+	store := &fakeMediaStore{objects: map[string][]byte{
+		"source/disc-1.cue": gbkCue, "source/disc-1.flac": []byte("audio"),
+		"source/disc-2.cue": []byte("FILE \"album.flac\" WAVE\nTRACK 01 AUDIO\nTITLE \"Disc Two\"\nINDEX 01 00:00:00\n"), "source/disc-2.flac": []byte("audio"),
+	}, puts: map[string][]byte{}}
+	if err := NewMediaImportProcessor(db, store, runner, "").Process(context.Background(), model.AlbumImportJob{ImportID: session.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	var derived []model.AlbumImportFile
+	if err := db.Where("import_id = ? AND role = ? AND playback_key <> ''", session.ID, AlbumImportFileRoleAudio).Find(&derived).Error; err != nil {
+		t.Fatal(err)
+	}
+	titles := map[string]bool{}
+	keys := map[string]bool{}
+	discTwo := false
+	for _, derivedFile := range derived {
+		titles[derivedFile.Title] = true
+		keys[derivedFile.PlaybackKey] = true
+		discTwo = discTwo || derivedFile.DiscNumber == 2
+	}
+	if len(derived) != 3 || titles["Tagged title"] || len(keys) != 3 || !discTwo {
+		t.Fatalf("unexpected CUE-derived files: %#v", derived)
+	}
+	var storedSession model.AlbumImportSession
+	if err := db.First(&storedSession, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if storedSession.ProgressCurrent != 3 || storedSession.ProgressTotal != 3 {
+		t.Fatalf("unexpected CUE progress: %#v", storedSession)
+	}
+	ffmpegs := 0
+	for _, run := range runner.runs {
+		if run[0] == "ffmpeg" {
+			ffmpegs++
+			if !containsMediaArg(run, "-ss") || !containsMediaArg(run, "-to") {
+				t.Fatalf("whole source was transcoded instead of CUE split: %#v", runner.runs)
+			}
+		}
+	}
+	if ffmpegs != 3 {
+		t.Fatalf("expected exactly three CUE splits, got %#v", runner.runs)
+	}
+}
+
+func TestMediaImportProcessorFallsBackWhenUploadedCUEHasNoMatchingAudio(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	files := []model.AlbumImportFile{
+		{ImportID: session.ID, RelativePath: "disc.cue", FileName: "disc.cue", Role: AlbumImportFileRoleCue, DetectedFormat: "cue", SourceKey: "source/disc.cue", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending},
+		{ImportID: session.ID, RelativePath: "album.flac", FileName: "album.flac", Role: AlbumImportFileRoleAudio, DetectedFormat: "flac", SourceKey: "source/album.flac", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending},
+	}
+	for index := range files {
+		if err := db.Create(&files[index]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}
+	store := &fakeMediaStore{objects: map[string][]byte{"source/disc.cue": []byte("FILE \"missing.flac\" WAVE\nTRACK 01 AUDIO\nINDEX 01 00:00:00\n"), "source/album.flac": []byte("audio")}, puts: map[string][]byte{}}
+	if err := NewMediaImportProcessor(db, store, runner, "").Process(context.Background(), model.AlbumImportJob{ImportID: session.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range runner.runs {
+		if run[0] == "ffmpeg" && (containsMediaArg(run, "-ss") || containsMediaArg(run, "-to")) {
+			t.Fatalf("unmatched CUE must fall back to whole-file processing: %#v", runner.runs)
+		}
+	}
+}
+
+func TestProcessCUEAudioContinuesAfterOneTrackFails(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "album.flac")
+	if err := os.WriteFile(source, []byte("audio"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}
+	runner.run = func(name string, args []string) ([]byte, error) {
+		if name == "ffprobe" {
+			return []byte(`{"format":{"duration":"30"}}`), nil
+		}
+		if name == "ffmpeg" && len(args) > 1 {
+			for index, arg := range args[:len(args)-1] {
+				if arg == "-ss" && args[index+1] == "10" {
+					return nil, errors.New("second track failed")
+				}
+			}
+		}
+		for _, arg := range args {
+			if strings.HasSuffix(arg, ".mp3") {
+				return nil, os.WriteFile(arg, []byte("derived"), 0600)
+			}
+		}
+		return nil, nil
+	}
+	processor := NewMediaImportProcessor(db, &fakeMediaStore{objects: map[string][]byte{}, puts: map[string][]byte{}}, runner, "")
+	count, err := processor.processCUEAudio(context.Background(), session.ID, source, "Disc 1/album.flac", []cueTrack{{file: "album.flac", number: 1, title: "One", startSeconds: 0}, {file: "album.flac", number: 2, title: "Two", startSeconds: 10}})
+	if err != nil || count != 1 {
+		t.Fatalf("expected one successful CUE track, count=%d err=%v", count, err)
+	}
+	var tracks []model.AlbumImportFile
+	if err := db.Where("import_id = ? AND role = ?", session.ID, AlbumImportFileRoleAudio).Order("track_number").Find(&tracks).Error; err != nil {
+		t.Fatal(err)
+	}
+	statuses := map[string]string{}
+	for _, track := range tracks {
+		statuses[track.FileName] = track.ProcessingStatus
+	}
+	if len(tracks) != 2 || statuses["01 - One.mp3"] != "completed" || statuses["02 - Two.mp3"] != AlbumImportFileProcessingStatusFailed {
+		t.Fatalf("expected completed and failed CUE tracks, got %#v", tracks)
 	}
 }
 

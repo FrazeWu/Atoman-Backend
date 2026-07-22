@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -275,20 +276,37 @@ func (p *MediaImportProcessor) Process(ctx context.Context, job model.AlbumImpor
 			return p.processArchive(ctx, session, file, heartbeat)
 		}
 	}
+	return p.processUploadedFiles(ctx, session, heartbeat)
+}
+
+func (p *MediaImportProcessor) processUploadedFiles(ctx context.Context, session model.AlbumImportSession, heartbeat func() error) error {
 	files := make([]model.AlbumImportFile, 0)
+	cues := make([]model.AlbumImportFile, 0)
 	for _, file := range session.Files {
 		if file.Role == AlbumImportFileRoleAudio && file.UploadStatus == AlbumImportFileUploadStatusUploaded && file.ProcessingStatus != "completed" {
 			files = append(files, file)
+		}
+		if file.Role == AlbumImportFileRoleCue && file.UploadStatus == AlbumImportFileUploadStatusUploaded {
+			cues = append(cues, file)
 		}
 	}
 	if len(files) == 0 {
 		return errors.New("no uploaded audio files to process")
 	}
-	if err := p.setSession(ctx, session.ID, AlbumImportStatusAnalyzing, AlbumImportStageAnalyzing, 0, int64(len(files))); err != nil {
+	successes := 0
+	used, cueSuccesses, cueTracks, err := p.processUploadedCUESources(ctx, session.ID, files, cues)
+	if err != nil {
 		return err
 	}
-	successes := 0
+	total := int64(len(files) - len(used) + cueTracks)
+	if err := p.setSession(ctx, session.ID, AlbumImportStatusAnalyzing, AlbumImportStageAnalyzing, 0, total); err != nil {
+		return err
+	}
+	successes += cueSuccesses
 	for index := range files {
+		if used[files[index].ID] {
+			continue
+		}
 		if heartbeat != nil {
 			if err := heartbeat(); err != nil {
 				return err
@@ -299,14 +317,66 @@ func (p *MediaImportProcessor) Process(ctx context.Context, job model.AlbumImpor
 			continue
 		}
 		successes++
-		if err := p.setSession(ctx, session.ID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(successes), int64(len(files))); err != nil {
+		if err := p.setSession(ctx, session.ID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(successes), total); err != nil {
 			return err
 		}
 	}
 	if successes == 0 {
 		return errors.New("no audio tracks were processed successfully")
 	}
-	return nil
+	return p.setSession(ctx, session.ID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(successes), total)
+}
+
+func (p *MediaImportProcessor) processUploadedCUESources(ctx context.Context, sessionID uuid.UUID, audios, cues []model.AlbumImportFile) (map[uuid.UUID]bool, int, int, error) {
+	used := map[uuid.UUID]bool{}
+	successes := 0
+	trackCount := 0
+	if len(audios) == 0 || len(cues) == 0 {
+		return used, successes, trackCount, nil
+	}
+	dir, err := os.MkdirTemp("", "atoman-cue-import-*")
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	defer os.RemoveAll(dir)
+	for _, cue := range cues {
+		cuePath := filepath.Join(dir, "cues", filepath.FromSlash(cue.RelativePath))
+		if err := os.MkdirAll(filepath.Dir(cuePath), 0700); err != nil {
+			return nil, 0, 0, err
+		}
+		if err := p.downloadSource(cuePath, cue.SourceKey); err != nil {
+			continue
+		}
+		raw, err := os.ReadFile(cuePath)
+		if err != nil {
+			continue
+		}
+		tracks, err := parseCUE(raw)
+		if err != nil {
+			continue
+		}
+		for index := range audios {
+			matching := cueTracksForAudio(cue.RelativePath, audios[index].RelativePath, tracks)
+			if len(matching) == 0 || used[audios[index].ID] {
+				continue
+			}
+			sourcePath := filepath.Join(dir, "audio", filepath.FromSlash(audios[index].RelativePath))
+			if err := os.MkdirAll(filepath.Dir(sourcePath), 0700); err != nil {
+				return nil, 0, 0, err
+			}
+			if err := p.downloadSource(sourcePath, audios[index].SourceKey); err != nil {
+				continue
+			}
+			used[audios[index].ID] = true
+			trackCount += len(matching)
+			count, _ := p.processCUEAudio(ctx, sessionID, sourcePath, audios[index].RelativePath, matching)
+			successes += count
+			if err := p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", audios[index].ID).Updates(map[string]any{"processing_status": "completed", "error_message": ""}).Error; err != nil {
+				return nil, 0, 0, err
+			}
+		}
+	}
+	return used, successes, trackCount, nil
 }
 
 func (p *MediaImportProcessor) processArchive(ctx context.Context, session model.AlbumImportSession, archive model.AlbumImportFile, heartbeat func() error) error {
@@ -388,14 +458,18 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 		if err != nil {
 			continue
 		}
+		cueRelative, err := filepath.Rel(root, cuePath)
+		if err != nil {
+			return err
+		}
 		for _, audio := range audios {
-			if filepath.Base(audio.path) != filepath.Base(tracks[0].file) || filepath.Dir(audio.path) != filepath.Dir(cuePath) {
+			matching := cueTracksForAudio(filepath.ToSlash(cueRelative), filepath.ToSlash(audio.relative), tracks)
+			if len(matching) == 0 || used[audio.path] {
 				continue
 			}
-			if err := p.processCUEAudio(ctx, sessionID, audio.path, audio.relative, tracks); err == nil {
-				processed += len(tracks)
-				used[audio.path] = true
-			}
+			used[audio.path] = true
+			count, _ := p.processCUEAudio(ctx, sessionID, audio.path, audio.relative, matching)
+			processed += count
 		}
 	}
 	for _, audio := range audios {
@@ -423,30 +497,49 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 	return p.setSession(ctx, sessionID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(processed), int64(processed))
 }
 
-func (p *MediaImportProcessor) processCUEAudio(ctx context.Context, sessionID uuid.UUID, sourcePath, relativePath string, tracks []cueTrack) error {
+func cueTracksForAudio(cueRelativePath, audioRelativePath string, tracks []cueTrack) []cueTrack {
+	cueDirectory := path.Dir(path.Clean(strings.ReplaceAll(cueRelativePath, `\`, "/")))
+	audioPath := path.Clean(strings.ReplaceAll(audioRelativePath, `\`, "/"))
+	matching := make([]cueTrack, 0, len(tracks))
+	for _, track := range tracks {
+		cueFile := strings.ReplaceAll(track.file, `\`, "/")
+		if path.Clean(path.Join(cueDirectory, cueFile)) == audioPath {
+			matching = append(matching, track)
+		}
+	}
+	return matching
+}
+
+func (p *MediaImportProcessor) processCUEAudio(ctx context.Context, sessionID uuid.UUID, sourcePath, relativePath string, tracks []cueTrack) (int, error) {
 	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", sourcePath)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	duration, _ := parseProbe(probe)
+	successes := 0
 	for index, track := range tracks {
 		end := duration
 		if index+1 < len(tracks) {
 			end = tracks[index+1].startSeconds
 		}
-		if end <= track.startSeconds {
-			return errors.New("invalid CUE track range")
-		}
 		file := model.AlbumImportFile{ImportID: sessionID, RelativePath: relativePath, FileName: fmt.Sprintf("%02d - %s.mp3", track.number, track.title), Role: AlbumImportFileRoleAudio, DetectedFormat: "mp3", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
 		if err := p.db.WithContext(ctx).Create(&file).Error; err != nil {
-			return err
+			return successes, err
+		}
+		if end <= track.startSeconds {
+			_ = p.failFile(ctx, file.ID, errors.New("invalid CUE track range"))
+			continue
 		}
 		if err := p.processLocalAudio(ctx, sessionID, &file, sourcePath, track.title, track.number, track.startSeconds, end); err != nil {
 			_ = p.failFile(ctx, file.ID, err)
-			return err
+			continue
 		}
+		successes++
 	}
-	return nil
+	if successes == 0 {
+		return 0, errors.New("no CUE tracks were processed successfully")
+	}
+	return successes, nil
 }
 
 func (p *MediaImportProcessor) processCover(ctx context.Context, sessionID uuid.UUID, source string) error {
