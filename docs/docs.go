@@ -307,6 +307,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
                         "description": "report ID",
                         "name": "id",
                         "in": "path",
@@ -344,7 +351,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.ErrorResponse"
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
                         }
                     }
                 }
@@ -6241,6 +6248,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
                         "description": "channel ID",
                         "name": "id",
                         "in": "path",
@@ -6278,7 +6292,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.ErrorResponse"
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
                         }
                     }
                 }
@@ -6302,54 +6316,11 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "conversation ID",
-                        "name": "id",
-                        "in": "path",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
                         "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/dm.ConversationResponse"
-                        }
                     },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/dm.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/dm.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/dm.ErrorResponse"
-                        }
-                    }
-                }
-            },
-            "delete": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
-                "tags": [
-                    "dm"
-                ],
-                "summary": "Unblock DM conversation",
-                "parameters": [
                     {
                         "type": "string",
                         "description": "conversation ID",
@@ -6380,7 +6351,64 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Unblock DM conversation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "conversation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ConversationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
                             "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
                         }
                     }
                 }
@@ -6465,6 +6493,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
                         "description": "conversation ID",
                         "name": "id",
                         "in": "path",
@@ -6502,7 +6537,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.ErrorResponse"
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
                         }
                     },
                     "429": {
@@ -6530,6 +6565,13 @@ const docTemplate = `{
                 ],
                 "summary": "Mark DM conversation read",
                 "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
                     {
                         "type": "string",
                         "description": "conversation ID",
@@ -6560,7 +6602,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.ErrorResponse"
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
                         }
                     }
                 }
@@ -6586,6 +6628,13 @@ const docTemplate = `{
                 "summary": "Upload private DM image",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
                         "type": "file",
                         "description": "image",
                         "name": "image",
@@ -6610,6 +6659,12 @@ const docTemplate = `{
                         "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
                         }
                     }
                 }
@@ -6784,6 +6839,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
                         "description": "message ID",
                         "name": "id",
                         "in": "path",
@@ -6821,7 +6883,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.ErrorResponse"
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
                         }
                     },
                     "404": {
@@ -6884,6 +6946,13 @@ const docTemplate = `{
                 "summary": "Update DM permission",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
                         "description": "permission",
                         "name": "input",
                         "in": "body",
@@ -6915,7 +6984,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.ErrorResponse"
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
                         }
                     }
                 }
@@ -7000,6 +7069,13 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
                         "description": "target type",
                         "name": "type",
                         "in": "path",
@@ -7044,7 +7120,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.ErrorResponse"
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
                         }
                     },
                     "404": {
@@ -17935,6 +18011,17 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "direction": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.CSRFErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "error": {
                     "type": "string"
                 }
             }

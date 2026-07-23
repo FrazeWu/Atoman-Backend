@@ -700,6 +700,13 @@ definitions:
       direction:
         type: string
     type: object
+  dm.CSRFErrorResponse:
+    properties:
+      code:
+        type: string
+      error:
+        type: string
+    type: object
   dm.ConversationDTO:
     properties:
       blocked:
@@ -5428,6 +5435,11 @@ paths:
     put:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
       - description: report ID
         in: path
         name: id
@@ -5455,7 +5467,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.ErrorResponse'
+            $ref: '#/definitions/dm.CSRFErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9184,6 +9196,11 @@ paths:
     put:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
       - description: channel ID
         in: path
         name: id
@@ -9211,7 +9228,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.ErrorResponse'
+            $ref: '#/definitions/dm.CSRFErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9222,6 +9239,11 @@ paths:
     delete:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
       - description: conversation ID
         in: path
         name: id
@@ -9243,7 +9265,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.ErrorResponse'
+            $ref: '#/definitions/dm.CSRFErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9253,6 +9275,11 @@ paths:
     put:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
       - description: conversation ID
         in: path
         name: id
@@ -9274,7 +9301,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.ErrorResponse'
+            $ref: '#/definitions/dm.CSRFErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9323,6 +9350,11 @@ paths:
     post:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
       - description: conversation ID
         in: path
         name: id
@@ -9350,7 +9382,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.ErrorResponse'
+            $ref: '#/definitions/dm.CSRFErrorResponse'
         "429":
           description: Too Many Requests
           schema:
@@ -9365,6 +9397,11 @@ paths:
     put:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
       - description: conversation ID
         in: path
         name: id
@@ -9386,7 +9423,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.ErrorResponse'
+            $ref: '#/definitions/dm.CSRFErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9399,6 +9436,11 @@ paths:
       - multipart/form-data
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
       - description: image
         in: formData
         name: image
@@ -9417,6 +9459,10 @@ paths:
           description: Unauthorized
           schema:
             $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.CSRFErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9519,6 +9565,11 @@ paths:
     post:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
       - description: message ID
         in: path
         name: id
@@ -9546,7 +9597,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.ErrorResponse'
+            $ref: '#/definitions/dm.CSRFErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -9581,6 +9632,11 @@ paths:
     put:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
       - description: permission
         in: body
         name: input
@@ -9603,7 +9659,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.ErrorResponse'
+            $ref: '#/definitions/dm.CSRFErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9652,6 +9708,11 @@ paths:
     post:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
       - description: target type
         in: path
         name: type
@@ -9684,7 +9745,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.ErrorResponse'
+            $ref: '#/definitions/dm.CSRFErrorResponse'
         "404":
           description: Not Found
           schema:

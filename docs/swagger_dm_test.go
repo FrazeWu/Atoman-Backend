@@ -13,7 +13,11 @@ func TestSwaggerDocumentsDMRequestsResponsesAndParameters(t *testing.T) {
 	}
 	var document struct {
 		Paths map[string]map[string]struct {
-			Parameters  []any                 `json:"parameters"`
+			Parameters []struct {
+				Name     string `json:"name"`
+				In       string `json:"in"`
+				Required bool   `json:"required"`
+			} `json:"parameters"`
 			Responses   map[string]any        `json:"responses"`
 			Security    []map[string][]string `json:"security"`
 			Description string                `json:"description"`
@@ -36,5 +40,17 @@ func TestSwaggerDocumentsDMRequestsResponsesAndParameters(t *testing.T) {
 	settings := document.Paths["/api/v1/dm/settings"]["put"]
 	if _, ok := settings.Responses["400"]; !ok || len(settings.Security) != 2 || settings.Description == "" {
 		t.Fatalf("settings mutation lacks documented errors, auth, or csrf requirement: %#v", settings)
+	}
+	foundCSRF := false
+	for _, param := range settings.Parameters {
+		if param.Name == "X-CSRF-Token" && param.In == "header" && param.Required {
+			foundCSRF = true
+		}
+	}
+	if !foundCSRF {
+		t.Fatal("settings mutation csrf header is missing or optional")
+	}
+	if _, ok := document.Definitions["dm.CSRFErrorResponse"]; !ok {
+		t.Fatal("csrf error schema missing")
 	}
 }

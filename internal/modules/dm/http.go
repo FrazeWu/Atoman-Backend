@@ -184,13 +184,14 @@ func (h *Handler) input(c *gin.Context) (SendInput, bool) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Description Cookie authentication requires X-CSRF-Token and a trusted Origin.
+// @Param X-CSRF-Token header string true "CSRF token for cookie authentication"
 // @Param type path string true "target type"
 // @Param id path string true "target ID"
 // @Param input body SendInput true "message"
 // @Success 201 {object} MessageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} CSRFErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 429 {object} ErrorResponse
 // @Router /api/v1/dm/targets/{type}/{id}/messages [post]
@@ -220,12 +221,13 @@ func (h *Handler) sendToTarget(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Description Cookie authentication requires X-CSRF-Token and a trusted Origin.
+// @Param X-CSRF-Token header string true "CSRF token for cookie authentication"
 // @Param id path string true "conversation ID"
 // @Param input body SendInput true "message"
 // @Success 201 {object} MessageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} CSRFErrorResponse
 // @Failure 429 {object} ErrorResponse
 // @Router /api/v1/dm/conversations/{id}/messages [post]
 func (h *Handler) sendInConversation(c *gin.Context) {
@@ -283,11 +285,12 @@ func (h *Handler) listMessages(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Description Cookie authentication requires X-CSRF-Token and a trusted Origin.
+// @Param X-CSRF-Token header string true "CSRF token for cookie authentication"
 // @Param id path string true "conversation ID"
 // @Success 200 {object} ReadResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} CSRFErrorResponse
 // @Router /api/v1/dm/conversations/{id}/read [put]
 func (h *Handler) markRead(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -311,11 +314,12 @@ func (h *Handler) markRead(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Description Cookie authentication requires X-CSRF-Token and a trusted Origin.
+// @Param X-CSRF-Token header string true "CSRF token for cookie authentication"
 // @Param id path string true "conversation ID"
 // @Success 200 {object} ConversationResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} CSRFErrorResponse
 // @Router /api/v1/dm/conversations/{id}/block [put]
 func (h *Handler) block(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -339,11 +343,12 @@ func (h *Handler) block(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Description Cookie authentication requires X-CSRF-Token and a trusted Origin.
+// @Param X-CSRF-Token header string true "CSRF token for cookie authentication"
 // @Param id path string true "conversation ID"
 // @Success 200 {object} ConversationResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} CSRFErrorResponse
 // @Router /api/v1/dm/conversations/{id}/block [delete]
 func (h *Handler) unblock(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -367,11 +372,13 @@ func (h *Handler) unblock(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Description Cookie authentication requires X-CSRF-Token and a trusted Origin.
+// @Param X-CSRF-Token header string true "CSRF token for cookie authentication"
 // @Accept mpfd
 // @Param image formData file true "image"
 // @Success 201 {object} ImageResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
+// @Failure 403 {object} CSRFErrorResponse
 // @Router /api/v1/dm/images [post]
 func (h *Handler) uploadImage(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -430,12 +437,13 @@ func (h *Handler) openImage(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Description Cookie authentication requires X-CSRF-Token and a trusted Origin.
+// @Param X-CSRF-Token header string true "CSRF token for cookie authentication"
 // @Param id path string true "message ID"
 // @Param input body ReportInput true "report"
 // @Success 201 {object} ReportReceiptResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} CSRFErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 409 {object} ErrorResponse
 // @Router /api/v1/dm/messages/{id}/reports [post]
@@ -489,12 +497,13 @@ func (h *Handler) listReports(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Description Cookie authentication requires X-CSRF-Token and a trusted Origin.
+// @Param X-CSRF-Token header string true "CSRF token for cookie authentication"
 // @Param id path string true "report ID"
 // @Param input body ReviewReportInput true "review"
 // @Success 200 {object} ReportResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} CSRFErrorResponse
 // @Router /api/v1/admin/dm/reports/{id} [put]
 func (h *Handler) reviewReport(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -543,11 +552,12 @@ func (h *Handler) getSettings(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Description Cookie authentication requires X-CSRF-Token and a trusted Origin.
+// @Param X-CSRF-Token header string true "CSRF token for cookie authentication"
 // @Param input body PermissionDTO true "permission"
 // @Success 200 {object} PermissionResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} CSRFErrorResponse
 // @Router /api/v1/dm/settings [put]
 func (h *Handler) updateSettings(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -599,12 +609,13 @@ func (h *Handler) getChannelSettings(c *gin.Context) {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Description Cookie authentication requires X-CSRF-Token and a trusted Origin.
+// @Param X-CSRF-Token header string true "CSRF token for cookie authentication"
 // @Param id path string true "channel ID"
 // @Param input body PermissionDTO true "permission"
 // @Success 200 {object} PermissionResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
-// @Failure 403 {object} ErrorResponse
+// @Failure 403 {object} CSRFErrorResponse
 // @Router /api/v1/dm/channels/{id}/settings [put]
 func (h *Handler) updateChannelSettings(c *gin.Context) {
 	actor, ok := h.actor(c)

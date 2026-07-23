@@ -98,6 +98,12 @@ type ErrorResponse struct {
 	} `json:"error"`
 }
 
+// CSRFErrorResponse matches the stable middleware response for rejected web mutations.
+type CSRFErrorResponse struct {
+	Code  string `json:"code"`
+	Error string `json:"error"`
+}
+
 type ReadResultDTO struct {
 	ConversationUnread int64 `json:"conversation_unread"`
 	MailboxUnread      int64 `json:"mailbox_unread"`
