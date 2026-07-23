@@ -244,8 +244,6 @@ func migrateSchema(db *gorm.DB) error {
 		&model.ReadingListItem{},
 		&model.SourceReadEvent{},
 		&model.Notification{},
-		&model.DMConversation{},
-		&model.DMMessage{},
 		&model.Revision{},
 		&model.EditConflict{},
 		&model.ContentProtection{},
@@ -304,6 +302,9 @@ func migrateSchema(db *gorm.DB) error {
 
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {
 		return fmt.Errorf("notification/dm index migration: %w", err)
+	}
+	if err := migrations.RunDMV2Migration(db); err != nil {
+		return fmt.Errorf("dm v2 migration: %w", err)
 	}
 	if err := migrations.RunContentReferencesMigration(db); err != nil {
 		return fmt.Errorf("content references migration: %w", err)

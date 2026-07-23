@@ -17,19 +17,5 @@ func RunNotificationDMIndexes(db *gorm.DB) error {
 		}
 	}
 
-	if db.Migrator().HasTable("dm_conversations") {
-		if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_dm_conversation ON dm_conversations (participant_a, participant_b)`).Error; err != nil {
-			return err
-		}
-	}
-	if db.Migrator().HasTable("dm_messages") {
-		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_dm_message_conv_created ON dm_messages (conversation_id, created_at)`).Error; err != nil {
-			return err
-		}
-		if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_dm_message_conv_sender_read ON dm_messages (conversation_id, sender_id, read_at)`).Error; err != nil {
-			return err
-		}
-	}
-
 	return nil
 }

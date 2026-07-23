@@ -102,6 +102,16 @@ func runMusicBookmarkStartupMigration(db *gorm.DB) error {
 	return migrations.RunMusicBookmarksPlaylistsMigration(db)
 }
 
+func runStartupDMV2Migration(db *gorm.DB) error {
+	if err := migrations.RunNotificationDMIndexes(db); err != nil {
+		return fmt.Errorf("notification/dm index migration: %w", err)
+	}
+	if err := migrations.RunDMV2Migration(db); err != nil {
+		return fmt.Errorf("dm v2 migration: %w", err)
+	}
+	return nil
+}
+
 func ensureSoftDeleteColumns(db *gorm.DB) {
 	softDeleteModels := []interface{}{
 		&model.User{},
@@ -596,8 +606,6 @@ func main() {
 			&model.ForumBookmark{},
 			&model.ForumDraft{},
 			&model.Notification{},
-			&model.DMConversation{},
-			&model.DMMessage{},
 			&model.ActivityLog{},
 			&model.AuditLog{},
 			&model.Debate{},
@@ -661,11 +669,11 @@ func main() {
 		log.Println("Migration step completed: blog interaction unique indexes")
 		log.Println("Database migrations completed")
 
-		log.Println("Migration step: notification/dm indexes")
-		if err := migrations.RunNotificationDMIndexes(db); err != nil {
-			log.Printf("WARN: notification/dm index migration failed: %v", err)
+		log.Println("Migration step: notification/dm indexes and dm v2")
+		if err := runStartupDMV2Migration(db); err != nil {
+			fatalLogger.Fatal("Failed to run notification/dm indexes and dm v2 migration: ", err)
 		}
-		log.Println("Migration step completed: notification/dm indexes")
+		log.Println("Migration step completed: notification/dm indexes and dm v2")
 		log.Println("Migration step: music bookmarks playlists")
 		if err := runMusicBookmarkStartupMigration(db); err != nil {
 			fatalLogger.Fatal("Failed to run music bookmarks playlists migration: ", err)
