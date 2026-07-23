@@ -3,6 +3,7 @@ package docs
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -49,6 +50,9 @@ func TestSwaggerDocumentsDMRequestsResponsesAndParameters(t *testing.T) {
 	}
 	if !foundCSRF {
 		t.Fatal("settings mutation csrf header is missing or optional")
+	}
+	if !strings.Contains(settings.Description, "dm.CSRFErrorResponse") {
+		t.Fatal("settings mutation does not document csrf error schema")
 	}
 	if _, ok := document.Definitions["dm.CSRFErrorResponse"]; !ok {
 		t.Fatal("csrf error schema missing")

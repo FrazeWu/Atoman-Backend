@@ -96,6 +96,9 @@ type ErrorResponse struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	} `json:"error"`
+	// CSRFError keeps the alternate middleware payload schema visible in Swagger 2.
+	// The operation description identifies when this alternative is returned.
+	CSRFError *CSRFErrorResponse `json:"csrf_error,omitempty"`
 }
 
 // CSRFErrorResponse matches the stable middleware response for rejected web mutations.

@@ -299,7 +299,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm-admin"
                 ],
@@ -351,7 +351,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -6240,7 +6240,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm"
                 ],
@@ -6292,7 +6292,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -6308,7 +6308,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm"
                 ],
@@ -6351,7 +6351,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -6365,7 +6365,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm"
                 ],
@@ -6408,7 +6408,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -6485,7 +6485,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm"
                 ],
@@ -6537,7 +6537,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     },
                     "429": {
@@ -6559,7 +6559,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm"
                 ],
@@ -6602,7 +6602,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -6618,7 +6618,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -6664,7 +6664,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -6831,7 +6831,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm"
                 ],
@@ -6883,7 +6883,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     },
                     "404": {
@@ -6939,7 +6939,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm"
                 ],
@@ -6984,7 +6984,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -7061,7 +7061,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm"
                 ],
@@ -7120,7 +7120,7 @@ const docTemplate = `{
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     },
                     "404": {
@@ -18085,6 +18085,14 @@ const docTemplate = `{
         "dm.ErrorResponse": {
             "type": "object",
             "properties": {
+                "csrf_error": {
+                    "description": "CSRFError keeps the alternate middleware payload schema visible in Swagger 2.\nThe operation description identifies when this alternative is returned.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                        }
+                    ]
+                },
                 "error": {
                     "type": "object",
                     "properties": {

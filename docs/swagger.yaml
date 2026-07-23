@@ -745,6 +745,12 @@ definitions:
     type: object
   dm.ErrorResponse:
     properties:
+      csrf_error:
+        allOf:
+        - $ref: '#/definitions/dm.CSRFErrorResponse'
+        description: |-
+          CSRFError keeps the alternate middleware payload schema visible in Swagger 2.
+          The operation description identifies when this alternative is returned.
       error:
         properties:
           code:
@@ -5434,6 +5440,7 @@ paths:
   /api/v1/admin/dm/reports/{id}:
     put:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
       - description: CSRF token for cookie authentication
         in: header
@@ -5467,7 +5474,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.CSRFErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9195,6 +9202,7 @@ paths:
       - dm
     put:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
       - description: CSRF token for cookie authentication
         in: header
@@ -9228,7 +9236,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.CSRFErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9238,6 +9246,7 @@ paths:
   /api/v1/dm/conversations/{id}/block:
     delete:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
       - description: CSRF token for cookie authentication
         in: header
@@ -9265,7 +9274,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.CSRFErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9274,6 +9283,7 @@ paths:
       - dm
     put:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
       - description: CSRF token for cookie authentication
         in: header
@@ -9301,7 +9311,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.CSRFErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9349,6 +9359,7 @@ paths:
       - dm
     post:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
       - description: CSRF token for cookie authentication
         in: header
@@ -9382,7 +9393,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.CSRFErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
         "429":
           description: Too Many Requests
           schema:
@@ -9396,6 +9407,7 @@ paths:
   /api/v1/dm/conversations/{id}/read:
     put:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
       - description: CSRF token for cookie authentication
         in: header
@@ -9423,7 +9435,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.CSRFErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9435,6 +9447,7 @@ paths:
       consumes:
       - multipart/form-data
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
       - description: CSRF token for cookie authentication
         in: header
@@ -9462,7 +9475,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.CSRFErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9564,6 +9577,7 @@ paths:
   /api/v1/dm/messages/{id}/reports:
     post:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
       - description: CSRF token for cookie authentication
         in: header
@@ -9597,7 +9611,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.CSRFErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
         "404":
           description: Not Found
           schema:
@@ -9631,6 +9645,7 @@ paths:
       - dm
     put:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
       - description: CSRF token for cookie authentication
         in: header
@@ -9659,7 +9674,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.CSRFErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9707,6 +9722,7 @@ paths:
   /api/v1/dm/targets/{type}/{id}/messages:
     post:
       description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
       - description: CSRF token for cookie authentication
         in: header
@@ -9745,7 +9761,7 @@ paths:
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/dm.CSRFErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
         "404":
           description: Not Found
           schema:
