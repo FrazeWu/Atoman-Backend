@@ -137,8 +137,8 @@ func runMigrations(db *gorm.DB) error {
 		return fmt.Errorf("revision unique indexes migration: %w", err)
 	}
 
-	if err := migrations.RunMusicAlbumImportsMigration(db); err != nil {
-		return fmt.Errorf("music album imports migration: %w", err)
+	if err := migrations.RunMusicAlbumImportV2Migration(db); err != nil {
+		return fmt.Errorf("music album import v2 migration: %w", err)
 	}
 
 	if err := migrations.RunMusicArtistExtendedFieldsMigration(db); err != nil {
@@ -220,6 +220,9 @@ func migrateSchema(db *gorm.DB) error {
 		&model.MusicEditVote{},
 		&model.MusicEditDecision{},
 		&model.MusicEditChange{},
+		&model.AlbumImportSession{},
+		&model.AlbumImportFile{},
+		&model.AlbumImportJob{},
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
 		&model.SongBookmark{},

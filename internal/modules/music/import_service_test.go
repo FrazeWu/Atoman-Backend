@@ -15,13 +15,288 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/authctx"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+func TestBuildAlbumImportMultipartDTOSerializesEmptyCompletedPartsAsArray(t *testing.T) {
+	dto := buildAlbumImportMultipartDTO(model.AlbumImportSession{}.ID, albumImportMultipartState{})
+
+	body, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatalf("marshal multipart DTO: %v", err)
+	}
+	if !strings.Contains(string(body), `"completedParts":[]`) {
+		t.Fatalf("expected completedParts to be an array, got %s", body)
+	}
+}
+
+func TestBuildAlbumImportDTOSerializesV2ListsAsArrays(t *testing.T) {
+	dto := buildAlbumImportDTO(model.AlbumImportSession{})
+	body, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatalf("marshal album import DTO: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal album import DTO: %v", err)
+	}
+	for _, field := range []string{"files", "tracks", "errors"} {
+		values, ok := payload[field].([]any)
+		if !ok || values == nil {
+			t.Fatalf("expected %s to be an array, got %s", field, body)
+		}
+	}
+	for _, field := range []string{"inputMode", "stage", "progress"} {
+		if _, ok := payload[field]; !ok {
+			t.Fatalf("expected %s field, got %s", field, body)
+		}
+	}
+}
+
+func TestCreateAlbumImportSessionStoresOwnerAndExpiration(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+	})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+	if session.UserID == nil || *session.UserID != user.ID {
+		t.Fatalf("expected owner %s, got %#v", user.ID, session.UserID)
+	}
+	if session.InputMode != AlbumImportInputModeAuto || session.Stage != AlbumImportStageUpload {
+		t.Fatalf("expected auto/upload defaults, got %q/%q", session.InputMode, session.Stage)
+	}
+	if session.ExpiresAt == nil || session.ExpiresAt.Before(time.Now().UTC().Add(6*24*time.Hour)) {
+		t.Fatalf("expected expiration about seven days ahead, got %#v", session.ExpiresAt)
+	}
+}
+
+func TestBuildAlbumImportDTOMapsV2StateAndFiles(t *testing.T) {
+	session := model.AlbumImportSession{
+		InputMode:       AlbumImportInputModeAuto,
+		Status:          AlbumImportStatusExtracting,
+		Stage:           AlbumImportStageAnalyzing,
+		ProgressCurrent: 2,
+		ProgressTotal:   5,
+		PayloadJSON:     "{}",
+		ErrorMessage:    "archive warning",
+		Files: []model.AlbumImportFile{{
+			FileName:         "01 - Track.flac",
+			Role:             "audio",
+			DetectedFormat:   "flac",
+			UploadStatus:     "uploaded",
+			ProcessingStatus: "failed",
+			ErrorMessage:     "transcode failed",
+		}},
+	}
+
+	dto := buildAlbumImportDTO(session)
+	if dto.InputMode != session.InputMode || dto.Stage != session.Stage {
+		t.Fatalf("expected mode/stage %q/%q, got %q/%q", session.InputMode, session.Stage, dto.InputMode, dto.Stage)
+	}
+	if dto.Progress.Current != 2 || dto.Progress.Total != 5 {
+		t.Fatalf("expected progress 2/5, got %#v", dto.Progress)
+	}
+	if len(dto.Files) != 1 || dto.Files[0].FileName != "01 - Track.flac" {
+		t.Fatalf("expected mapped file, got %#v", dto.Files)
+	}
+	if len(dto.Errors) != 2 {
+		t.Fatalf("expected session and file errors, got %#v", dto.Errors)
+	}
+}
+
+func TestGetAlbumImportSessionPreloadsFilesAndJob(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusPendingUpload,
+	})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+	if err := db.Create(&model.AlbumImportFile{
+		ImportID:         session.ID,
+		FileName:         "album.flac",
+		Role:             "audio",
+		UploadStatus:     "uploaded",
+		ProcessingStatus: "pending",
+	}).Error; err != nil {
+		t.Fatalf("create album import file: %v", err)
+	}
+	if err := db.Create(&model.AlbumImportJob{
+		ImportID:    session.ID,
+		Status:      "queued",
+		Stage:       AlbumImportStageAnalyzing,
+		MaxAttempts: 3,
+	}).Error; err != nil {
+		t.Fatalf("create album import job: %v", err)
+	}
+
+	loaded, err := svc.GetAlbumImportSession(session.ID)
+	if err != nil {
+		t.Fatalf("get album import session: %v", err)
+	}
+	if len(loaded.Files) != 1 || loaded.Job == nil {
+		t.Fatalf("expected preloaded files and job, got files=%#v job=%#v", loaded.Files, loaded.Job)
+	}
+}
+
+func TestAlbumImportUserOperationsRejectAnotherUsersSession(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(*Service, authctx.CurrentUser, uuid.UUID) error
+	}{
+		{
+			name: "archive upload",
+			call: func(svc *Service, user authctx.CurrentUser, id uuid.UUID) error {
+				archive := newImportTestZipArchive(t, map[string]string{"01 - Track.mp3": ""})
+				_, err := svc.UploadAlbumImportArchive(user, id, "album.zip", bytes.NewReader(archive))
+				return err
+			},
+		},
+		{
+			name: "multipart start",
+			call: func(svc *Service, user authctx.CurrentUser, id uuid.UUID) error {
+				_, err := svc.StartAlbumImportMultipart(user, id, StartAlbumImportMultipartInput{FileName: "album.zip", FileSize: 1024})
+				return err
+			},
+		},
+		{
+			name: "multipart part upload",
+			call: func(svc *Service, user authctx.CurrentUser, id uuid.UUID) error {
+				_, err := svc.CreateAlbumImportMultipartPartUpload(user, id, 1, CreateAlbumImportMultipartPartInput{PartSize: 1024})
+				return err
+			},
+		},
+		{
+			name: "multipart part complete",
+			call: func(svc *Service, user authctx.CurrentUser, id uuid.UUID) error {
+				_, err := svc.CompleteAlbumImportMultipartPart(user, id, 1, CompleteAlbumImportMultipartPartInput{ETag: "etag-1", Size: 1024})
+				return err
+			},
+		},
+		{
+			name: "multipart complete",
+			call: func(svc *Service, user authctx.CurrentUser, id uuid.UUID) error {
+				_, err := svc.CompleteAlbumImportMultipart(user, id)
+				return err
+			},
+		},
+		{
+			name: "commit",
+			call: func(svc *Service, user authctx.CurrentUser, id uuid.UUID) error {
+				_, err := svc.CommitAlbumImportSession(user, id, CommitAlbumImportSessionInput{
+					Artist: AlbumImportArtistPayload{Name: "Other Artist"},
+					Album:  AlbumImportAlbumPayload{Title: "Other Album"},
+				})
+				return err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			svc, _, owner := newMusicTestService(t)
+			svc.albumImportMultipart = &fakeAlbumImportMultipartStore{uploadID: "upload-owner"}
+			session, err := svc.CreateAlbumImportSession(owner, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload})
+			if err != nil {
+				t.Fatalf("create owner session: %v", err)
+			}
+			other := authctx.CurrentUser{ID: uuid.New(), Username: "other", Role: authctx.RoleUser}
+
+			err = test.call(svc, other, session.ID)
+			var appErr *apperr.AppError
+			if !errors.As(err, &appErr) || appErr.Code != "music.import_not_found" {
+				t.Fatalf("expected hidden owner session, got %v", err)
+			}
+		})
+	}
+}
+
+func TestUpdateAlbumImportStatusAndPayloadSynchronizesSessionColumns(t *testing.T) {
+	tests := []struct {
+		status      string
+		wantStage   string
+		wantCurrent int64
+		wantTotal   int64
+		wantError   string
+	}{
+		{status: AlbumImportStatusUploading, wantStage: AlbumImportStageUpload, wantCurrent: 128, wantTotal: 1024},
+		{status: AlbumImportStatusUploaded, wantStage: AlbumImportStageUpload, wantCurrent: 1024, wantTotal: 1024},
+		{status: AlbumImportStatusQueued, wantStage: AlbumImportStageQueued},
+		{status: AlbumImportStatusExtracting, wantStage: AlbumImportStageExtracting},
+		{status: AlbumImportStatusReady, wantStage: AlbumImportStageReady, wantCurrent: 2, wantTotal: 2},
+	}
+
+	for _, test := range tests {
+		t.Run(test.status, func(t *testing.T) {
+			svc, db, _ := newMusicTestService(t)
+			session := model.AlbumImportSession{
+				Status:          AlbumImportStatusPendingUpload,
+				Stage:           "stale",
+				ProgressCurrent: 7,
+				ProgressTotal:   10,
+				PayloadJSON:     "{}",
+				ErrorMessage:    "stale error",
+			}
+			if err := db.Create(&session).Error; err != nil {
+				t.Fatalf("create session: %v", err)
+			}
+			payload := map[string]any{
+				"multipart_file_size": float64(1024),
+				"multipart_completed_parts": []map[string]any{{
+					"partNumber": float64(1), "etag": "etag-1", "size": float64(128),
+				}},
+				"derived_tracks": []map[string]any{{"title": "One"}, {"title": "Two"}},
+			}
+
+			updated, err := svc.updateAlbumImportStatusAndPayload(session.ID, test.status, payload)
+			if err != nil {
+				t.Fatalf("update import status: %v", err)
+			}
+			if updated.Stage != test.wantStage || updated.ProgressCurrent != test.wantCurrent || updated.ProgressTotal != test.wantTotal || updated.ErrorMessage != test.wantError {
+				t.Fatalf("unexpected synchronized state: %#v", updated)
+			}
+		})
+	}
+}
+
+func TestMarkAlbumImportFailedSynchronizesFailureColumns(t *testing.T) {
+	svc, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{
+		Status:          AlbumImportStatusUploading,
+		Stage:           AlbumImportStageUpload,
+		ProgressCurrent: 128,
+		ProgressTotal:   1024,
+		PayloadJSON:     "{}",
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	if err := svc.markAlbumImportFailed(session.ID, "upload failed"); err != nil {
+		t.Fatalf("mark import failed: %v", err)
+	}
+	var stored model.AlbumImportSession
+	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("load failed session: %v", err)
+	}
+	if stored.Status != AlbumImportStatusFailed || stored.Stage != "failed" || stored.ErrorMessage != "upload failed" {
+		t.Fatalf("unexpected failure state: %#v", stored)
+	}
+	if stored.ProgressCurrent != 128 || stored.ProgressTotal != 1024 {
+		t.Fatalf("expected failure to preserve progress, got %#v", stored)
+	}
+}
 
 func TestStartAlbumImportMultipartRejectsOversizedArchive(t *testing.T) {
 	svc, _, user := newMusicTestService(t)
@@ -54,7 +329,7 @@ func TestStartAlbumImportMultipartRejectsOversizedArchive(t *testing.T) {
 }
 
 func TestStartAlbumImportMultipartRestoresExistingUploadStateForSameFile(t *testing.T) {
-	svc, _, user := newMusicTestService(t)
+	svc, db, user := newMusicTestService(t)
 	store := &fakeAlbumImportMultipartStore{uploadID: "upload-1"}
 	svc.albumImportMultipart = store
 
@@ -76,11 +351,24 @@ func TestStartAlbumImportMultipartRestoresExistingUploadStateForSameFile(t *test
 	if err != nil {
 		t.Fatalf("start multipart: %v", err)
 	}
+	var uploading model.AlbumImportSession
+	if err := db.First(&uploading, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("load uploading session: %v", err)
+	}
+	if uploading.Stage != AlbumImportStageUpload || uploading.ProgressCurrent != 0 || uploading.ProgressTotal != 64*1024*1024 || uploading.ErrorMessage != "" {
+		t.Fatalf("unexpected uploading state: %#v", uploading)
+	}
 	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 2, CompleteAlbumImportMultipartPartInput{
 		ETag: "etag-2",
 		Size: albumImportMultipartPartSize,
 	}); err != nil {
 		t.Fatalf("complete part: %v", err)
+	}
+	if err := db.First(&uploading, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("reload uploading session: %v", err)
+	}
+	if uploading.ProgressCurrent != albumImportMultipartPartSize || uploading.ProgressTotal != 64*1024*1024 {
+		t.Fatalf("unexpected multipart byte progress: %#v", uploading)
 	}
 
 	restored, err := svc.StartAlbumImportMultipart(user, session.ID, StartAlbumImportMultipartInput{
@@ -342,7 +630,7 @@ func TestCompleteAlbumImportMultipartPartReplacesAndSortsParts(t *testing.T) {
 	}
 }
 
-func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDeletesObject(t *testing.T) {
+func TestCompleteAlbumImportMultipartCompletesSortedPartsAndQueuesWorker(t *testing.T) {
 	svc, _, user := newMusicTestService(t)
 	archiveBody := newImportTestZipArchive(t, map[string]string{
 		"02 - Archangel.flac": "",
@@ -372,13 +660,13 @@ func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDelet
 	}
 	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 2, CompleteAlbumImportMultipartPartInput{
 		ETag: "etag-2",
-		Size: albumImportMultipartPartSize,
+		Size: 2 * albumImportMultipartPartSize,
 	}); err != nil {
 		t.Fatalf("complete part 2: %v", err)
 	}
 	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 1, CompleteAlbumImportMultipartPartInput{
 		ETag: "etag-1",
-		Size: albumImportMultipartPartSize,
+		Size: 2 * albumImportMultipartPartSize,
 	}); err != nil {
 		t.Fatalf("complete part 1: %v", err)
 	}
@@ -387,8 +675,11 @@ func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDelet
 	if err != nil {
 		t.Fatalf("complete multipart: %v", err)
 	}
-	if updated.Status != AlbumImportStatusReady {
-		t.Fatalf("expected ready status, got %#v", updated)
+	if updated.Status != AlbumImportStatusQueued {
+		t.Fatalf("expected queued status, got %#v", updated)
+	}
+	if updated.Stage != AlbumImportStageQueued || updated.ErrorMessage != "" || updated.Job == nil || updated.Job.Status != AlbumImportJobStatusQueued {
+		t.Fatalf("unexpected queued state: %#v", updated)
 	}
 	if store.completeKey != started.ObjectKey || store.completeUploadID != "upload-1" {
 		t.Fatalf("unexpected complete call key=%q uploadID=%q", store.completeKey, store.completeUploadID)
@@ -396,8 +687,8 @@ func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDelet
 	if fmt.Sprint(store.completedPartNumbers) != "[1 2]" {
 		t.Fatalf("expected sorted completed parts [1 2], got %#v", store.completedPartNumbers)
 	}
-	if len(store.deletedKeys) != 1 || store.deletedKeys[0] != started.ObjectKey {
-		t.Fatalf("expected original archive deleted, got %#v", store.deletedKeys)
+	if store.openCalls != 0 || len(store.deletedKeys) != 0 {
+		t.Fatalf("expected source object to be retained for worker, got %#v", store)
 	}
 
 	var payload map[string]any
@@ -407,18 +698,12 @@ func TestCompleteAlbumImportMultipartCompletesSortedPartsExtractsArchiveAndDelet
 	if payload["archive_name"] != "Untrue.zip" {
 		t.Fatalf("expected archive_name preserved, got %#v", payload["archive_name"])
 	}
-	if stringValue(payload["multipart_upload_id"]) != "" {
-		t.Fatalf("expected multipart_upload_id removed, got %#v", payload["multipart_upload_id"])
+	if _, ok := payload["derived_tracks"]; ok {
+		t.Fatalf("HTTP completion must not derive tracks, got %#v", payload["derived_tracks"])
 	}
-	derivedTracks, ok := payload["derived_tracks"].([]any)
-	if !ok || len(derivedTracks) != 2 {
-		t.Fatalf("expected 2 derived tracks, got %#v", payload["derived_tracks"])
-	}
-	assertDerivedTrackPresent(t, derivedTracks, "Untitled", 1)
-	assertDerivedTrackPresent(t, derivedTracks, "Archangel", 2)
 }
 
-func TestCompleteAlbumImportMultipartKeepsReadyWhenCleanupDeleteFails(t *testing.T) {
+func TestCompleteAlbumImportMultipartDoesNotDeleteSourceObject(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	archiveBody := newImportTestZipArchive(t, map[string]string{
 		"01 - Untitled.mp3": "",
@@ -447,7 +732,7 @@ func TestCompleteAlbumImportMultipartKeepsReadyWhenCleanupDeleteFails(t *testing
 	}
 	if _, err := svc.CompleteAlbumImportMultipartPart(user, session.ID, 1, CompleteAlbumImportMultipartPartInput{
 		ETag: "etag-1",
-		Size: albumImportMultipartPartSize,
+		Size: 4 * albumImportMultipartPartSize,
 	}); err != nil {
 		t.Fatalf("complete part 1: %v", err)
 	}
@@ -456,26 +741,24 @@ func TestCompleteAlbumImportMultipartKeepsReadyWhenCleanupDeleteFails(t *testing
 	if err != nil {
 		t.Fatalf("complete multipart should ignore cleanup failure: %v", err)
 	}
-	if updated.Status != AlbumImportStatusReady {
-		t.Fatalf("expected returned session ready, got %#v", updated)
+	if updated.Status != AlbumImportStatusQueued {
+		t.Fatalf("expected returned session queued, got %#v", updated)
 	}
 
 	var stored model.AlbumImportSession
 	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
 		t.Fatalf("load stored session: %v", err)
 	}
-	if stored.Status != AlbumImportStatusReady {
-		t.Fatalf("expected stored session to remain ready, got %#v", stored)
+	if stored.Status != AlbumImportStatusQueued {
+		t.Fatalf("expected stored session to remain queued, got %#v", stored)
 	}
 	payload, err := readAlbumImportPayloadMap(stored.PayloadJSON)
 	if err != nil {
 		t.Fatalf("read payload: %v", err)
 	}
-	derivedTracks, ok := payload["derived_tracks"].([]any)
-	if !ok || len(derivedTracks) != 1 {
-		t.Fatalf("expected derived tracks preserved, got %#v", payload["derived_tracks"])
+	if store.openCalls != 0 || len(store.deletedKeys) != 0 {
+		t.Fatalf("source object should not be read or deleted, got %#v", store)
 	}
-	assertDerivedTrackPresent(t, derivedTracks, "Untitled", 1)
 	if stringValue(payload["error_message"]) != "" {
 		t.Fatalf("expected no error_message after cleanup failure, got %#v", payload["error_message"])
 	}
@@ -503,6 +786,7 @@ func TestCompleteAlbumImportMultipartRejectsMissingArchiveName(t *testing.T) {
 		t.Fatalf("marshal payload: %v", err)
 	}
 	session := model.AlbumImportSession{
+		UserID:      &user.ID,
 		Status:      AlbumImportStatusUploading,
 		PayloadJSON: string(payloadJSON),
 	}
@@ -587,6 +871,9 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	if committed.Status != AlbumImportStatusCommitted {
 		t.Fatalf("expected committed status, got %#v", committed)
 	}
+	if committed.Stage != AlbumImportStageCompleted || committed.ProgressCurrent != 1 || committed.ProgressTotal != 1 || committed.ErrorMessage != "" {
+		t.Fatalf("unexpected committed state: %#v", committed)
+	}
 
 	var artist model.Artist
 	if err := db.Where("name = ?", "FKA twigs").First(&artist).Error; err != nil {
@@ -664,7 +951,7 @@ func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	session := model.AlbumImportSession{Status: AlbumImportStatusReady, PayloadJSON: string(payloadJSON)}
+	session := model.AlbumImportSession{UserID: &user.ID, Status: AlbumImportStatusReady, PayloadJSON: string(payloadJSON)}
 	if err := db.Create(&session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -890,6 +1177,7 @@ func TestCommitAlbumImportSessionUsesResolvedSourceKindsAndTrackNumberAwareAudio
 		t.Fatalf("marshal session payload: %v", err)
 	}
 	session := model.AlbumImportSession{
+		UserID:      &user.ID,
 		Status:      AlbumImportStatusReady,
 		PayloadJSON: string(payloadJSON),
 	}
@@ -935,8 +1223,9 @@ func TestCommitAlbumImportSessionUsesResolvedSourceKindsAndTrackNumberAwareAudio
 	}
 }
 
-func TestUploadAlbumImportArchiveTransitionsPendingUploadToReady(t *testing.T) {
-	svc, _, user := newMusicTestService(t)
+func TestUploadAlbumImportArchiveQueuesSourceWithoutDerivingIt(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
 
 	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
 		Status: AlbumImportStatusPendingUpload,
@@ -959,8 +1248,11 @@ func TestUploadAlbumImportArchiveTransitionsPendingUploadToReady(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upload archive: %v", err)
 	}
-	if updated.Status != AlbumImportStatusReady {
-		t.Fatalf("expected ready status, got %#v", updated)
+	if updated.Status != AlbumImportStatusQueued {
+		t.Fatalf("expected queued status, got %#v", updated)
+	}
+	if updated.Stage != AlbumImportStageQueued || updated.ProgressCurrent != 0 || updated.ProgressTotal != 0 || updated.ErrorMessage != "" {
+		t.Fatalf("unexpected direct upload queued state: %#v", updated)
 	}
 
 	var payload map[string]any
@@ -968,150 +1260,308 @@ func TestUploadAlbumImportArchiveTransitionsPendingUploadToReady(t *testing.T) {
 		t.Fatalf("unmarshal payload json: %v", err)
 	}
 
-	if payload["archive_name"] != archiveName {
-		t.Fatalf("expected archive_name %q, got %#v", archiveName, payload["archive_name"])
+	if _, ok := payload["derived_tracks"]; ok {
+		t.Fatalf("direct upload must not derive tracks: %#v", payload)
 	}
-	if payload["derived_album_title"] != "Untrue (Deluxe)" {
-		t.Fatalf("expected derived_album_title, got %#v", payload["derived_album_title"])
+	var files []model.AlbumImportFile
+	if err := db.Where("import_id = ?", session.ID).Find(&files).Error; err != nil {
+		t.Fatal(err)
 	}
-	derivedTracks, ok := payload["derived_tracks"].([]any)
-	if !ok {
-		t.Fatalf("expected derived_tracks array, got %#v", payload["derived_tracks"])
+	if len(files) != 1 || files[0].Role != AlbumImportFileRoleArchive || files[0].UploadStatus != AlbumImportFileUploadStatusUploaded {
+		t.Fatalf("archive source not persisted: %#v", files)
 	}
-	if len(derivedTracks) != 2 {
-		t.Fatalf("expected 2 derived tracks, got %#v", derivedTracks)
+	var jobs []model.AlbumImportJob
+	if err := db.Where("import_id = ?", session.ID).Find(&jobs).Error; err != nil {
+		t.Fatal(err)
 	}
-	assertDerivedTrackPresent(t, derivedTracks, "Untitled", 1)
-	assertDerivedTrackPresent(t, derivedTracks, "Archangel", 2)
-}
-
-func TestUploadAlbumImportArchiveStoresDerivedCoverInS3(t *testing.T) {
-	svc, _, user := newMusicTestService(t)
-	var uploadedPath string
-	var uploadedContentType string
-	svc.s3 = fakeMusicImportS3Client(t, &uploadedPath, &uploadedContentType)
-	t.Setenv("STORAGE_TYPE", "s3")
-	t.Setenv("S3_BUCKET", "atoman-test")
-	t.Setenv("S3_URL_PREFIX", "http://localhost:9100/atoman-dev")
-
-	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
-		Status: AlbumImportStatusPendingUpload,
-		Payload: AlbumImportPayload{
-			Artist: AlbumImportArtistPayload{Name: "Burial"},
-		},
-	})
-	if err != nil {
-		t.Fatalf("create session: %v", err)
-	}
-
-	archiveBody := newImportTestZipArchive(t, map[string]string{
-		"cover.jpg": "cover-bytes",
-	})
-
-	updated, err := svc.UploadAlbumImportArchive(user, session.ID, "Untrue.zip", bytes.NewReader(archiveBody))
-	if err != nil {
-		t.Fatalf("upload archive: %v", err)
-	}
-
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(updated.PayloadJSON), &payload); err != nil {
-		t.Fatalf("unmarshal payload json: %v", err)
-	}
-
-	derivedCover, _ := payload["derived_cover"].(string)
-	if derivedCover == "" {
-		t.Fatalf("expected derived_cover from s3 upload, got %#v", payload["derived_cover"])
-	}
-	if !strings.HasPrefix(derivedCover, "http://localhost:9100/atoman-dev/music/covers/uploads/users/") {
-		t.Fatalf("unexpected derived_cover %q", derivedCover)
-	}
-	if uploadedPath == "" || uploadedContentType != "image/jpeg" {
-		t.Fatalf("expected s3 upload, got path=%q contentType=%q", uploadedPath, uploadedContentType)
+	if len(jobs) != 1 || jobs[0].Status != AlbumImportJobStatusQueued {
+		t.Fatalf("archive upload was not queued: %#v", jobs)
 	}
 }
 
-func TestUploadAlbumImportArchiveStoresDerivedAudioInS3AndCommitPersistsSongURLs(t *testing.T) {
+func TestUploadAlbumImportArchiveRejectsActualStreamSizeOverLimit(t *testing.T) {
+	t.Setenv(albumImportMaxFileBytesEnv, "4")
 	svc, db, user := newMusicTestService(t)
-	var uploadedPath string
-	var uploadedContentType string
-	svc.s3 = fakeMusicImportS3Client(t, &uploadedPath, &uploadedContentType)
-	t.Setenv("STORAGE_TYPE", "s3")
-	t.Setenv("S3_BUCKET", "atoman-test")
-	t.Setenv("S3_URL_PREFIX", "http://localhost:9100/atoman-dev")
-
-	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
-		Status: AlbumImportStatusPendingUpload,
-		Payload: AlbumImportPayload{
-			Artist: AlbumImportArtistPayload{Name: "Ye"},
-			Album:  AlbumImportAlbumPayload{Title: "2049"},
-		},
-	})
+	store := &fakeAlbumImportMultipartStore{}
+	svc.albumImportMultipart = store
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
 	if err != nil {
-		t.Fatalf("create session: %v", err)
+		t.Fatal(err)
 	}
+	if _, err := svc.UploadAlbumImportArchive(user, session.ID, "album.zip", strings.NewReader("12345")); err == nil {
+		t.Fatal("expected streamed size limit error")
+	}
+	if len(store.deletedKeys) != 1 {
+		t.Fatalf("oversized source must be cleaned up: %#v", store.deletedKeys)
+	}
+	var files int64
+	if err := db.Model(&model.AlbumImportFile{}).Where("import_id = ?", session.ID).Count(&files).Error; err != nil {
+		t.Fatal(err)
+	}
+	if files != 0 {
+		t.Fatalf("oversized source must not create file: %d", files)
+	}
+}
 
-	archiveBody := newImportTestZipArchive(t, map[string]string{
-		"01 - Bound 2049.mp3":  "audio-1",
-		"02 - Jesus Walks.mp3": "audio-2",
-	})
+func TestUploadAlbumImportArchiveRejectsNonZipAndEmptyStreamsBeforeQueuing(t *testing.T) {
+	for _, test := range []struct {
+		name, archive string
+		body          io.Reader
+	}{
+		{"non zip", "album.rar", strings.NewReader("data")},
+		{"empty", "album.zip", strings.NewReader("")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			svc, db, user := newMusicTestService(t)
+			store := &fakeAlbumImportMultipartStore{}
+			svc.albumImportMultipart = store
+			session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := svc.UploadAlbumImportArchive(user, session.ID, test.archive, test.body); err == nil {
+				t.Fatal("expected validation error")
+			}
+			var jobs int64
+			if err := db.Model(&model.AlbumImportJob{}).Where("import_id = ?", session.ID).Count(&jobs).Error; err != nil {
+				t.Fatal(err)
+			}
+			if jobs != 0 || len(store.objectBody) != 0 {
+				t.Fatalf("invalid archive must not be stored or queued: jobs=%d body=%q", jobs, store.objectBody)
+			}
+		})
+	}
+}
 
-	updated, err := svc.UploadAlbumImportArchive(user, session.ID, "2049.zip", bytes.NewReader(archiveBody))
+func TestUploadAlbumImportArchiveRecordsCleanupWhenEmptyStreamDeleteFails(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	store := &fakeAlbumImportMultipartStore{deleteErr: errors.New("delete failed")}
+	svc.albumImportMultipart = store
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
 	if err != nil {
-		t.Fatalf("upload archive: %v", err)
+		t.Fatal(err)
 	}
+	if _, err := svc.UploadAlbumImportArchive(user, session.ID, "album.zip", strings.NewReader("")); err == nil {
+		t.Fatal("expected empty stream error")
+	}
+	var persisted model.AlbumImportSession
+	if err := db.First(&persisted, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(persisted.PayloadJSON, "cleanup_targets") || len(store.deletedKeys) != 1 || !strings.Contains(persisted.PayloadJSON, store.deletedKeys[0]) {
+		t.Fatalf("failed delete was not recorded: session=%s store=%#v", persisted.PayloadJSON, store)
+	}
+}
 
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(updated.PayloadJSON), &payload); err != nil {
-		t.Fatalf("unmarshal payload json: %v", err)
-	}
-	derivedTracks, ok := payload["derived_tracks"].([]any)
-	if !ok || len(derivedTracks) != 2 {
-		t.Fatalf("expected 2 derived tracks, got %#v", payload["derived_tracks"])
-	}
-	for _, rawTrack := range derivedTracks {
-		trackMap, ok := rawTrack.(map[string]any)
-		if !ok {
-			t.Fatalf("expected track map, got %#v", rawTrack)
-		}
-		if stringValue(trackMap["audio_key"]) == "" || stringValue(trackMap["audio_url"]) == "" {
-			t.Fatalf("expected audio upload metadata on derived track, got %#v", trackMap)
-		}
-	}
+func TestUploadAlbumImportArchiveQueuesCoverSourceWithoutDeriving(t *testing.T) {
+	testQueuedArchiveUploadContract(t, AlbumImportPayload{Artist: AlbumImportArtistPayload{Name: "Burial"}}, "Untrue.zip", map[string]string{"cover.jpg": "cover-bytes"})
+	return
+	/*
+		svc, _, user := newMusicTestService(t)
+		var uploadedPath string
+		var uploadedContentType string
+		svc.s3 = fakeMusicImportS3Client(t, &uploadedPath, &uploadedContentType)
+		t.Setenv("STORAGE_TYPE", "s3")
+		t.Setenv("S3_BUCKET", "atoman-test")
+		t.Setenv("S3_URL_PREFIX", "http://localhost:9100/atoman-dev")
 
-	if _, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{Name: "Ye"},
-		Album: AlbumImportAlbumPayload{
-			Title:       "2049",
-			ReleaseYear: 2026,
-			Tracks: []AlbumImportTrackPayload{
-				{Title: "Bound 2049", TrackNumber: 1},
-				{Title: "Jesus Walks", TrackNumber: 2},
+		session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+			Status: AlbumImportStatusPendingUpload,
+			Payload: AlbumImportPayload{
+				Artist: AlbumImportArtistPayload{Name: "Burial"},
 			},
-		},
-	}); err != nil {
-		t.Fatalf("commit session: %v", err)
-	}
+		})
+		if err != nil {
+			t.Fatalf("create session: %v", err)
+		}
 
-	var songs []model.Song
-	if err := db.Joins("JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
-		Where("\"Albums\".title = ?", "2049").
-		Order("\"Songs\".track_number ASC").
-		Find(&songs).Error; err != nil {
-		t.Fatalf("load songs: %v", err)
-	}
-	if len(songs) != 2 {
-		t.Fatalf("expected 2 songs, got %#v", songs)
-	}
-	for _, song := range songs {
-		if song.AudioURL == "" {
-			t.Fatalf("expected persisted song audio url, got %#v", song)
+		archiveBody := newImportTestZipArchive(t, map[string]string{
+			"cover.jpg": "cover-bytes",
+		})
+
+		updated, err := svc.UploadAlbumImportArchive(user, session.ID, "Untrue.zip", bytes.NewReader(archiveBody))
+		if err != nil {
+			t.Fatalf("upload archive: %v", err)
 		}
-		if !strings.HasPrefix(song.AudioURL, "http://localhost:9100/atoman-dev/music/albums/") {
-			t.Fatalf("unexpected persisted song audio url %q", song.AudioURL)
+
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(updated.PayloadJSON), &payload); err != nil {
+			t.Fatalf("unmarshal payload json: %v", err)
 		}
+
+		derivedCover, _ := payload["derived_cover"].(string)
+		if derivedCover == "" {
+			t.Fatalf("expected derived_cover from s3 upload, got %#v", payload["derived_cover"])
+		}
+		if !strings.HasPrefix(derivedCover, "http://localhost:9100/atoman-dev/music/covers/uploads/users/") {
+			t.Fatalf("unexpected derived_cover %q", derivedCover)
+		}
+		if uploadedPath == "" || uploadedContentType != "image/jpeg" {
+			t.Fatalf("expected s3 upload, got path=%q contentType=%q", uploadedPath, uploadedContentType)
+		}
+	*/
+}
+
+func TestUploadAlbumImportArchiveQueuesAudioSourceAndPreservesMetadata(t *testing.T) {
+	testQueuedArchiveUploadContract(t, AlbumImportPayload{Artist: AlbumImportArtistPayload{Name: "Ye"}, Album: AlbumImportAlbumPayload{Title: "2049"}}, "2049.zip", map[string]string{"01 - Bound 2049.mp3": "audio-1"})
+	return
+	/*
+			svc, db, user := newMusicTestService(t)
+			var uploadedPath string
+			var uploadedContentType string
+			svc.s3 = fakeMusicImportS3Client(t, &uploadedPath, &uploadedContentType)
+			t.Setenv("STORAGE_TYPE", "s3")
+			t.Setenv("S3_BUCKET", "atoman-test")
+			t.Setenv("S3_URL_PREFIX", "http://localhost:9100/atoman-dev")
+
+			session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+				Status: AlbumImportStatusPendingUpload,
+				Payload: AlbumImportPayload{
+					Artist: AlbumImportArtistPayload{Name: "Ye"},
+					Album:  AlbumImportAlbumPayload{Title: "2049"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("create session: %v", err)
+			}
+
+			archiveBody := newImportTestZipArchive(t, map[string]string{
+				"01 - Bound 2049.mp3":  "audio-1",
+				"02 - Jesus Walks.mp3": "audio-2",
+			})
+
+			updated, err := svc.UploadAlbumImportArchive(user, session.ID, "2049.zip", bytes.NewReader(archiveBody))
+			if err != nil {
+				t.Fatalf("upload archive: %v", err)
+			}
+
+			var payload map[string]any
+			if err := json.Unmarshal([]byte(updated.PayloadJSON), &payload); err != nil {
+				t.Fatalf("unmarshal payload json: %v", err)
+			}
+			derivedTracks, ok := payload["derived_tracks"].([]any)
+			if !ok || len(derivedTracks) != 2 {
+				t.Fatalf("expected 2 derived tracks, got %#v", payload["derived_tracks"])
+			}
+			for _, rawTrack := range derivedTracks {
+				trackMap, ok := rawTrack.(map[string]any)
+				if !ok {
+					t.Fatalf("expected track map, got %#v", rawTrack)
+				}
+				if stringValue(trackMap["audio_key"]) == "" || stringValue(trackMap["audio_url"]) == "" {
+					t.Fatalf("expected audio upload metadata on derived track, got %#v", trackMap)
+				}
+			}
+
+			if _, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+				Artist: AlbumImportArtistPayload{Name: "Ye"},
+				Album: AlbumImportAlbumPayload{
+					Title:       "2049",
+					ReleaseYear: 2026,
+					Tracks: []AlbumImportTrackPayload{
+						{Title: "Bound 2049", TrackNumber: 1},
+						{Title: "Jesus Walks", TrackNumber: 2},
+					},
+				},
+			}); err != nil {
+				t.Fatalf("commit session: %v", err)
+			}
+
+			var songs []model.Song
+			if err := db.Joins("JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
+				Where("\"Albums\".title = ?", "2049").
+				Order("\"Songs\".track_number ASC").
+				Find(&songs).Error; err != nil {
+				t.Fatalf("load songs: %v", err)
+			}
+			if len(songs) != 2 {
+				t.Fatalf("expected 2 songs, got %#v", songs)
+			}
+			for _, song := range songs {
+				if song.AudioURL == "" {
+					t.Fatalf("expected persisted song audio url, got %#v", song)
+				}
+				if !strings.HasPrefix(song.AudioURL, "http://localhost:9100/atoman-dev/music/albums/") {
+					t.Fatalf("unexpected persisted song audio url %q", song.AudioURL)
+				}
+			}
+			if uploadedPath == "" || uploadedContentType == "" {
+				t.Fatalf("expected s3 audio upload, got path=%q contentType=%q", uploadedPath, uploadedContentType)
+			}
+		}
+
+		func testQueuedArchiveUploadContract(t *testing.T, submitted AlbumImportPayload, archiveName string, entries map[string]string) {
+			t.Helper()
+			svc, db, user := newMusicTestService(t)
+			svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
+			session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload, Payload: submitted})
+			if err != nil {
+				t.Fatal(err)
+			}
+			updated, err := svc.UploadAlbumImportArchive(user, session.ID, archiveName, bytes.NewReader(newImportTestZipArchive(t, entries)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			payload, err := readAlbumImportPayloadMap(updated.PayloadJSON)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if updated.Status != AlbumImportStatusQueued || payload["archive_name"] != archiveName || payload["derived_tracks"] != nil || payload["derived_cover"] != nil {
+				t.Fatalf("request must only queue source: %#v", updated)
+			}
+			artist, _ := payload["artist"].(map[string]any)
+			album, _ := payload["album"].(map[string]any)
+			if stringValue(artist["name"]) != submitted.Artist.Name || stringValue(album["title"]) != submitted.Album.Title {
+				t.Fatalf("submitted metadata was lost: %#v", payload)
+			}
+			var files []model.AlbumImportFile
+			var jobs []model.AlbumImportJob
+			if err := db.Where("import_id = ?", session.ID).Find(&files).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Where("import_id = ?", session.ID).Find(&jobs).Error; err != nil {
+				t.Fatal(err)
+			}
+			if len(files) != 1 || files[0].UploadStatus != AlbumImportFileUploadStatusUploaded || len(jobs) != 1 || jobs[0].Status != AlbumImportJobStatusQueued {
+				t.Fatalf("queued source state invalid: files=%#v jobs=%#v", files, jobs)
+			}
+	*/
+}
+
+func testQueuedArchiveUploadContract(t *testing.T, submitted AlbumImportPayload, archiveName string, entries map[string]string) {
+	t.Helper()
+	svc, db, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload, Payload: submitted})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if uploadedPath == "" || uploadedContentType == "" {
-		t.Fatalf("expected s3 audio upload, got path=%q contentType=%q", uploadedPath, uploadedContentType)
+	updated, err := svc.UploadAlbumImportArchive(user, session.ID, archiveName, bytes.NewReader(newImportTestZipArchive(t, entries)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := readAlbumImportPayloadMap(updated.PayloadJSON)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != AlbumImportStatusQueued || payload["archive_name"] != archiveName || payload["derived_tracks"] != nil || payload["derived_cover"] != nil {
+		t.Fatalf("request must only queue source: %#v", updated)
+	}
+	artist, _ := payload["artist"].(map[string]any)
+	album, _ := payload["album"].(map[string]any)
+	if stringValue(artist["name"]) != submitted.Artist.Name || stringValue(album["title"]) != submitted.Album.Title {
+		t.Fatalf("submitted metadata was lost: %#v", payload)
+	}
+	var files []model.AlbumImportFile
+	var jobs []model.AlbumImportJob
+	if err := db.Where("import_id = ?", session.ID).Find(&files).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("import_id = ?", session.ID).Find(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 || files[0].UploadStatus != AlbumImportFileUploadStatusUploaded || len(jobs) != 1 || jobs[0].Status != AlbumImportJobStatusQueued {
+		t.Fatalf("queued source state invalid: files=%#v jobs=%#v", files, jobs)
 	}
 }
 
@@ -1277,6 +1727,9 @@ type fakeAlbumImportMultipartStore struct {
 	objectBody []byte
 
 	createCalls int
+	createErr   error
+	createErrAt int
+	onCreate    func()
 
 	createKey            string
 	createContentType    string
@@ -1285,19 +1738,40 @@ type fakeAlbumImportMultipartStore struct {
 	presignPartNumber    int
 	completeKey          string
 	completeUploadID     string
+	completeCalls        int
 	completedPartNumbers []int
+	completedSize        int64
+	abortedKeys          []string
+	abortedUploadIDs     []string
+	abortErr             error
+	openCalls            int
+	headCalls            int
+	objectCompleted      bool
+	objectSizeOverride   int64
 	deletedKeys          []string
 	deleteErr            error
 }
 
 func (f *fakeAlbumImportMultipartStore) CreateMultipartUpload(key string, contentType string) (string, error) {
 	f.createCalls++
+	if f.onCreate != nil {
+		f.onCreate()
+	}
 	f.createKey = key
 	f.createContentType = contentType
+	if f.createErr != nil && (f.createErrAt == 0 || f.createCalls == f.createErrAt) {
+		return "", f.createErr
+	}
 	if f.uploadID == "" {
 		return "upload-test", nil
 	}
 	return f.uploadID, nil
+}
+
+func (f *fakeAlbumImportMultipartStore) PutObject(_ string, _ string, body io.Reader) error {
+	data, err := io.ReadAll(body)
+	f.objectBody = data
+	return err
 }
 
 func (f *fakeAlbumImportMultipartStore) PresignUploadPart(key string, uploadID string, partNumber int, _ time.Duration) (string, error) {
@@ -1311,20 +1785,38 @@ func (f *fakeAlbumImportMultipartStore) PresignUploadPart(key string, uploadID s
 }
 
 func (f *fakeAlbumImportMultipartStore) CompleteMultipartUpload(key string, uploadID string, parts []AlbumImportMultipartPartDTO) error {
+	f.completeCalls++
+	f.objectCompleted = true
 	f.completeKey = key
 	f.completeUploadID = uploadID
 	f.completedPartNumbers = nil
+	f.completedSize = 0
 	for _, part := range parts {
 		f.completedPartNumbers = append(f.completedPartNumbers, part.PartNumber)
+		f.completedSize += part.Size
 	}
 	return nil
 }
 
-func (f *fakeAlbumImportMultipartStore) AbortMultipartUpload(_ string, _ string) error {
-	return nil
+func (f *fakeAlbumImportMultipartStore) ObjectSize(_ string) (int64, error) {
+	f.headCalls++
+	if !f.objectCompleted {
+		return 0, errors.New("object not found")
+	}
+	if f.objectSizeOverride > 0 {
+		return f.objectSizeOverride, nil
+	}
+	return f.completedSize, nil
+}
+
+func (f *fakeAlbumImportMultipartStore) AbortMultipartUpload(key string, uploadID string) error {
+	f.abortedKeys = append(f.abortedKeys, key)
+	f.abortedUploadIDs = append(f.abortedUploadIDs, uploadID)
+	return f.abortErr
 }
 
 func (f *fakeAlbumImportMultipartStore) OpenObject(_ string) (io.ReadCloser, error) {
+	f.openCalls++
 	return io.NopCloser(bytes.NewReader(f.objectBody)), nil
 }
 

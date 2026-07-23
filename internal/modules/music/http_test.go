@@ -41,6 +41,8 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.PlaylistSong{},
 		&model.MusicListeningHistory{},
 		&model.AlbumImportSession{},
+		&model.AlbumImportFile{},
+		&model.AlbumImportJob{},
 		&model.MusicEdit{},
 		&model.MusicEditVote{},
 		&model.MusicEditDecision{},
@@ -1316,6 +1318,7 @@ func TestRegisterRoutesListAlbumsSearchesArtistNames(t *testing.T) {
 
 func TestRegisterRoutesCreateAlbumImportSessionSupportsArchiveUpload(t *testing.T) {
 	service, _, user := newMusicHTTPTestService(t)
+	service.albumImportMultipart = &fakeAlbumImportMultipartStore{}
 	r := newMusicHTTPRouter(service, &user)
 
 	createBody, _ := json.Marshal(CreateAlbumImportSessionInput{
@@ -1358,11 +1361,104 @@ func TestRegisterRoutesCreateAlbumImportSessionSupportsArchiveUpload(t *testing.
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Data.Status != AlbumImportStatusReady {
-		t.Fatalf("expected ready session, got %#v", resp.Data)
+	if resp.Data.Status != AlbumImportStatusQueued {
+		t.Fatalf("expected queued session, got %#v", resp.Data)
 	}
 	if resp.Data.ArchiveName != "Untrue.zip" {
 		t.Fatalf("expected archive name persisted, got %#v", resp.Data.ArchiveName)
+	}
+}
+
+func TestArchiveUploadRouteRejectsMultipartBodyOverLimitBeforeStorage(t *testing.T) {
+	t.Setenv(albumImportMaxFileBytesEnv, "64")
+	service, db, user := newMusicHTTPTestService(t)
+	store := &fakeAlbumImportMultipartStore{}
+	service.albumImportMultipart = store
+	session, err := service.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("archive", "album.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(bytes.Repeat([]byte("x"), 1024*1024+128)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+session.ID.String()+"/upload", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("expected oversized request rejection, got %d: %s", w.Code, w.Body.String())
+	}
+	var jobs, files int64
+	if err := db.Model(&model.AlbumImportJob{}).Where("import_id = ?", session.ID).Count(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.AlbumImportFile{}).Where("import_id = ?", session.ID).Count(&files).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(store.objectBody) != 0 || jobs != 0 || files != 0 {
+		t.Fatalf("handler must reject before storage: body=%d jobs=%d files=%d", len(store.objectBody), jobs, files)
+	}
+}
+
+func TestRegisterRoutesAlbumImportGetRequiresCurrentUser(t *testing.T) {
+	service, _, owner := newMusicHTTPTestService(t)
+	session, err := service.CreateAlbumImportSession(owner, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodGet, "/api/v1/music/imports/albums/"+session.ID.String(), "")
+	assertMusicHTTPError(t, response, http.StatusUnauthorized, "auth.unauthorized")
+}
+
+func TestRegisterRoutesAlbumImportGetRejectsAnotherUser(t *testing.T) {
+	service, _, owner := newMusicHTTPTestService(t)
+	session, err := service.CreateAlbumImportSession(owner, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+	other := authctx.CurrentUser{ID: uuid.New(), Username: "other", Role: authctx.RoleUser}
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, &other), http.MethodGet, "/api/v1/music/imports/albums/"+session.ID.String(), "")
+	assertMusicHTTPError(t, response, http.StatusNotFound, "music.import_not_found")
+}
+
+func TestRegisterRoutesAlbumImportGetRejectsLegacySessionWithoutOwner(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	legacy := model.AlbumImportSession{Status: AlbumImportStatusPendingUpload, PayloadJSON: "{}"}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatalf("create legacy album import session: %v", err)
+	}
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, &user), http.MethodGet, "/api/v1/music/imports/albums/"+legacy.ID.String(), "")
+	assertMusicHTTPError(t, response, http.StatusNotFound, "music.import_not_found")
+}
+
+func TestRegisterRoutesAlbumImportWriteRejectsAnotherUser(t *testing.T) {
+	service, _, owner := newMusicHTTPTestService(t)
+	store := &fakeAlbumImportMultipartStore{uploadID: "upload-owner"}
+	service.albumImportMultipart = store
+	session, err := service.CreateAlbumImportSession(owner, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+	other := authctx.CurrentUser{ID: uuid.New(), Username: "other", Role: authctx.RoleUser}
+	body := `{"fileName":"album.zip","fileSize":1024,"contentType":"application/zip"}`
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, &other), http.MethodPost, "/api/v1/music/imports/albums/"+session.ID.String()+"/multipart", body)
+	assertMusicHTTPError(t, response, http.StatusNotFound, "music.import_not_found")
+	if store.createCalls != 0 {
+		t.Fatalf("expected no multipart object for another user, got %d creates", store.createCalls)
 	}
 }
 
@@ -1512,7 +1608,7 @@ func TestRegisterRoutesCompletesAlbumImportMultipart(t *testing.T) {
 
 	partBody, _ := json.Marshal(CompleteAlbumImportMultipartPartInput{
 		ETag: "etag-1",
-		Size: albumImportMultipartPartSize,
+		Size: 64 * 1024 * 1024,
 	})
 	partRecorder := httptest.NewRecorder()
 	partReq := httptest.NewRequest(http.MethodPost, "/api/v1/music/imports/albums/"+multipartState.ImportID+"/multipart/parts/1/complete", bytes.NewReader(partBody))
@@ -1537,14 +1633,14 @@ func TestRegisterRoutesCompletesAlbumImportMultipart(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Data.ImportID != multipartState.ImportID || resp.Data.Status != AlbumImportStatusReady {
+	if resp.Data.ImportID != multipartState.ImportID || resp.Data.Status != AlbumImportStatusQueued {
 		t.Fatalf("unexpected final complete response: %#v", resp.Data)
 	}
-	if resp.Data.ArchiveName != "Untrue.zip" || len(resp.Data.DerivedTracks) != 1 {
-		t.Fatalf("expected derived ready import response, got %#v", resp.Data)
+	if resp.Data.ArchiveName != "Untrue.zip" || len(resp.Data.DerivedTracks) != 0 || len(resp.Data.Files) != 1 || resp.Data.Files[0].UploadStatus != AlbumImportFileUploadStatusUploaded {
+		t.Fatalf("expected queued archive import response, got %#v", resp.Data)
 	}
-	if store.completeKey != multipartState.ObjectKey || len(store.deletedKeys) != 1 {
-		t.Fatalf("expected completed object cleanup, got %#v", store)
+	if store.completeKey != multipartState.ObjectKey || store.openCalls != 0 || len(store.deletedKeys) != 0 {
+		t.Fatalf("expected completed source object retained for worker, got %#v", store)
 	}
 }
 

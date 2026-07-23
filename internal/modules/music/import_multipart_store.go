@@ -12,12 +12,15 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
 type albumImportMultipartStore interface {
+	PutObject(key string, contentType string, body io.Reader) error
 	CreateMultipartUpload(key string, contentType string) (string, error)
 	PresignUploadPart(key string, uploadID string, partNumber int, expires time.Duration) (string, error)
 	CompleteMultipartUpload(key string, uploadID string, parts []AlbumImportMultipartPartDTO) error
+	ObjectSize(key string) (int64, error)
 	AbortMultipartUpload(key string, uploadID string) error
 	OpenObject(key string) (io.ReadCloser, error)
 	DeleteObject(key string) error
@@ -28,12 +31,42 @@ type s3AlbumImportMultipartStore struct {
 	bucket string
 }
 
+type s3MediaImportStore struct{ source, playback albumImportMultipartStore }
+
+func NewMusicImportMediaStore(client *s3.S3) mediaImportStore {
+	source := newS3AlbumImportMultipartStore(client)
+	bucket := strings.TrimSpace(os.Getenv("MUSIC_PLAYBACK_BUCKET"))
+	if bucket == "" {
+		bucket = strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	}
+	if source == nil || bucket == "" {
+		return nil
+	}
+	return &s3MediaImportStore{source: source, playback: &s3AlbumImportMultipartStore{client: client, bucket: bucket}}
+}
+
+func (s *s3MediaImportStore) OpenObject(key string) (io.ReadCloser, error) {
+	return s.source.OpenObject(key)
+}
+func (s *s3MediaImportStore) PutObject(key, contentType string, body io.Reader) error {
+	return s.playback.PutObject(key, contentType, body)
+}
+
 func newS3AlbumImportMultipartStore(client *s3.S3) albumImportMultipartStore {
-	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	bucket := strings.TrimSpace(os.Getenv("MUSIC_SOURCE_BUCKET"))
+	if bucket == "" {
+		bucket = strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	}
 	if client == nil || bucket == "" {
 		return nil
 	}
 	return &s3AlbumImportMultipartStore{client: client, bucket: bucket}
+}
+
+// NewMusicImportObjectStore creates the source-object cleanup store used by
+// the independent import worker.
+func NewMusicImportObjectStore(client *s3.S3) MusicImportObjectStore {
+	return newS3AlbumImportMultipartStore(client)
 }
 
 func (s *s3AlbumImportMultipartStore) CreateMultipartUpload(key string, contentType string) (string, error) {
@@ -46,6 +79,11 @@ func (s *s3AlbumImportMultipartStore) CreateMultipartUpload(key string, contentT
 		return "", err
 	}
 	return aws.StringValue(out.UploadId), nil
+}
+
+func (s *s3AlbumImportMultipartStore) PutObject(key string, contentType string, body io.Reader) error {
+	_, err := s3manager.NewUploaderWithClient(s.client).Upload(&s3manager.UploadInput{Bucket: aws.String(s.bucket), Key: aws.String(key), ContentType: aws.String(contentType), Body: body})
+	return err
 }
 
 func (s *s3AlbumImportMultipartStore) PresignUploadPart(key string, uploadID string, partNumber int, expires time.Duration) (string, error) {
@@ -82,6 +120,17 @@ func (s *s3AlbumImportMultipartStore) CompleteMultipartUpload(key string, upload
 		},
 	})
 	return err
+}
+
+func (s *s3AlbumImportMultipartStore) ObjectSize(key string) (int64, error) {
+	out, err := s.client.HeadObject(&s3.HeadObjectInput{
+		Bucket: aws.String(s.bucket),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return aws.Int64Value(out.ContentLength), nil
 }
 
 func (s *s3AlbumImportMultipartStore) AbortMultipartUpload(key string, uploadID string) error {

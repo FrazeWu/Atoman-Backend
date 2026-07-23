@@ -23,6 +23,7 @@ This deployment path runs the Go backend directly on the host and keeps Nginx on
 ```bash
 cd /home/fa/Atoman-Backend
 go build -o start_server ./cmd/start_server
+go build -o music_import_worker ./cmd/music_import_worker
 ```
 
 ## Install systemd unit
@@ -54,6 +55,32 @@ WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload
 sudo systemctl enable --now atoman-backend
+```
+
+Install the album import worker separately so queued imports and expired source-object cleanup continue when the HTTP service is idle:
+
+```bash
+sudo tee /etc/systemd/system/atoman-music-import-worker.service >/dev/null <<'EOF'
+[Unit]
+Description=Atoman Music Import Worker
+After=network.target atoman-backend.service
+
+[Service]
+Type=simple
+User=fa
+Group=fa
+WorkingDirectory=/home/fa/Atoman-Backend
+EnvironmentFile=/home/fa/Atoman-Backend/.env.prod
+# Requires ffmpeg, ffprobe and 7zz on PATH. Set MUSIC_PLAYBACK_BUCKET and MUSIC_PLAYBACK_URL_PREFIX.
+ExecStart=/home/fa/Atoman-Backend/music_import_worker
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl daemon-reload
+sudo systemctl enable --now atoman-music-import-worker
 ```
 
 ## Check service status
