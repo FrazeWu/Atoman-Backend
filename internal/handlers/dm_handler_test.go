@@ -88,6 +88,38 @@ func TestLegacyDMHandlerSendsAfterDMV2Migration(t *testing.T) {
 		if response.Code != http.StatusCreated {
 			t.Fatalf("send %q: expected 201, got %d: %s", content, response.Code, response.Body.String())
 		}
+		var payload struct {
+			Data map[string]json.RawMessage `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode send %q response: %v", content, err)
+		}
+		for _, field := range []string{"conversation_id", "sender_id", "read_at"} {
+			if _, ok := payload.Data[field]; !ok {
+				t.Fatalf("send %q response missing legacy field %q: %s", content, field, response.Body.String())
+			}
+		}
+	}
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/v1/dm/conversations/"+recipient.Username, nil)
+	getRequest.Header.Set("Authorization", dmAuthHeader(t, db, sender))
+	getResponse := httptest.NewRecorder()
+	r.ServeHTTP(getResponse, getRequest)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("get messages: expected 200, got %d: %s", getResponse.Code, getResponse.Body.String())
+	}
+	var listPayload struct {
+		Data []map[string]json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(getResponse.Body.Bytes(), &listPayload); err != nil {
+		t.Fatalf("decode message list: %v", err)
+	}
+	if len(listPayload.Data) != 2 {
+		t.Fatalf("message list length = %d", len(listPayload.Data))
+	}
+	for _, field := range []string{"conversation_id", "sender_id", "read_at"} {
+		if _, ok := listPayload.Data[0][field]; !ok {
+			t.Fatalf("message list missing legacy field %q: %s", field, getResponse.Body.String())
+		}
 	}
 
 	participantA, participantB := normalizeConversationParticipants(sender.UUID, recipient.UUID)

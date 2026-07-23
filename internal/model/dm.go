@@ -34,9 +34,9 @@ func (DMConversation) TableName() string { return "dm_conversations" }
 
 type DMMessage struct {
 	Base
-	ConversationID uuid.UUID `json:"-" gorm:"type:uuid;not null;index"`
+	ConversationID uuid.UUID `json:"conversation_id" gorm:"type:uuid;not null;index"`
 	SenderType     string    `json:"-" gorm:"type:varchar(16);not null;default:'user'"`
-	SenderID       uuid.UUID `json:"-" gorm:"type:uuid;not null;index"`
+	SenderID       uuid.UUID `json:"sender_id" gorm:"type:uuid;not null;index"`
 	// Deprecated: retained only while the legacy DM handler is still compiled.
 	Sender          *User      `json:"sender,omitempty" gorm:"foreignKey:SenderID;references:UUID"`
 	ActorUserID     uuid.UUID  `json:"-" gorm:"type:uuid;not null;index"`
@@ -45,7 +45,7 @@ type DMMessage struct {
 	ImageID         *uuid.UUID `json:"-" gorm:"type:uuid"`
 	// Deprecated: legacy data remains in this column until image migration runs.
 	ImageURL string     `json:"image_url" gorm:"column:image_url"`
-	ReadAt   *time.Time `json:"-"`
+	ReadAt   *time.Time `json:"read_at"`
 }
 
 func (DMMessage) TableName() string { return "dm_messages" }

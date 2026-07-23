@@ -40,6 +40,64 @@ func TestRunDMV2PostgresConstraintsAndIndexes(t *testing.T) {
 	}
 }
 
+func TestRunDMV2PostgresUpgradesLegacyTables(t *testing.T) {
+	db := openDMV2Postgres(t)
+	if err := db.AutoMigrate(&legacyDMConversation{}, &legacyDMMessage{}); err != nil {
+		t.Fatalf("create legacy dm tables: %v", err)
+	}
+	first, second := uuid.New(), uuid.New()
+	if first.String() > second.String() {
+		first, second = second, first
+	}
+	conversationID, messageID := uuid.New(), uuid.New()
+	if err := db.Create(&legacyDMConversation{ID: conversationID, ParticipantA: first, ParticipantB: second}).Error; err != nil {
+		t.Fatalf("seed legacy conversation: %v", err)
+	}
+	if err := db.Create(&legacyDMMessage{ID: messageID, ConversationID: conversationID, SenderID: first, Content: "legacy"}).Error; err != nil {
+		t.Fatalf("seed legacy message: %v", err)
+	}
+	for _, statement := range []string{
+		`ALTER TABLE dm_messages ADD COLUMN actor_user_id uuid`,
+		`ALTER TABLE dm_messages ADD COLUMN client_message_id uuid`,
+		`UPDATE dm_messages SET actor_user_id = '00000000-0000-0000-0000-000000000000', client_message_id = '00000000-0000-0000-0000-000000000000'`,
+	} {
+		if err := db.Exec(statement).Error; err != nil {
+			t.Fatalf("prepare legacy zero uuid values: %v", err)
+		}
+	}
+
+	if err := RunDMV2Migration(db); err != nil {
+		t.Fatalf("upgrade legacy dm tables: %v", err)
+	}
+	var message model.DMMessage
+	if err := db.First(&message, "id = ?", messageID).Error; err != nil {
+		t.Fatalf("load upgraded message: %v", err)
+	}
+	if message.SenderType != model.DMPartyUser || message.ActorUserID != first || message.ClientMessageID != messageID {
+		t.Fatalf("upgraded message fields = %#v", message)
+	}
+	for table, columns := range map[string][]string{
+		"dm_conversations": {"participant_a_type", "participant_b_type"},
+		"dm_messages":      {"sender_type", "actor_user_id", "client_message_id"},
+	} {
+		for _, column := range columns {
+			var notNull bool
+			if err := db.Raw(`SELECT attnotnull FROM pg_attribute WHERE attrelid = ?::regclass AND attname = ?`, table, column).Scan(&notNull).Error; err != nil || !notNull {
+				t.Fatalf("%s.%s should be NOT NULL, value=%v err=%v", table, column, notNull, err)
+			}
+		}
+	}
+	if err := db.Exec(`INSERT INTO dm_messages (id, conversation_id, sender_type, sender_id, client_message_id, content, created_at, updated_at) VALUES (?, ?, 'user', ?, ?, 'missing actor', NOW(), NOW())`, uuid.New(), conversationID, first, uuid.New()).Error; err == nil {
+		t.Fatal("expected actor_user_id NOT NULL constraint")
+	}
+	if err := db.Exec(`INSERT INTO dm_conversations (id, participant_a_type, participant_a, participant_b_type, participant_b, created_at, updated_at) VALUES (?, 'user', ?, 'user', ?, NOW(), NOW())`, uuid.New(), first, second).Error; err == nil {
+		t.Fatal("expected typed conversation unique index")
+	}
+	if err := db.Exec(`INSERT INTO dm_conversations (id, participant_a_type, participant_a, participant_b_type, participant_b, created_at, updated_at) VALUES (?, 'channel', ?, 'user', ?, NOW(), NOW())`, uuid.New(), first, second).Error; err == nil {
+		t.Fatal("expected participant type check constraint")
+	}
+}
+
 func openDMV2Postgres(t *testing.T) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
