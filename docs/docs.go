@@ -250,7 +250,28 @@ const docTemplate = `{
                     "dm-admin"
                 ],
                 "summary": "List DM reports",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReportsResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/admin/dm/reports/{id}": {
@@ -264,7 +285,32 @@ const docTemplate = `{
                     "dm-admin"
                 ],
                 "summary": "Review DM report",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "report ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "review",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReviewReportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReportResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/admin/music/entries": {
@@ -6102,7 +6148,23 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Get channel DM permission",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionResponse"
+                        }
+                    }
+                }
             },
             "put": {
                 "security": [
@@ -6114,7 +6176,32 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Update channel DM permission",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "permission",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionDTO"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/dm/conversations/{id}/block": {
@@ -6128,7 +6215,23 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Block DM conversation",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "conversation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ConversationResponse"
+                        }
+                    }
+                }
             },
             "delete": {
                 "security": [
@@ -6140,7 +6243,23 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Unblock DM conversation",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "conversation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ConversationResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/dm/conversations/{id}/messages": {
@@ -6154,7 +6273,35 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "List DM messages",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "conversation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "cursor",
+                        "name": "before",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.MessagesResponse"
+                        }
+                    }
+                }
             },
             "post": {
                 "security": [
@@ -6166,7 +6313,32 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Send DM in conversation",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "conversation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "message",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.SendInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dm.MessageResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/dm/conversations/{id}/read": {
@@ -6180,7 +6352,23 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Mark DM conversation read",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "conversation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReadResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/dm/images": {
@@ -6190,11 +6378,30 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
+                "consumes": [
+                    "multipart/form-data"
+                ],
                 "tags": [
                     "dm"
                 ],
                 "summary": "Upload private DM image",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "file",
+                        "description": "image",
+                        "name": "image",
+                        "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ImageResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/dm/images/{id}/content": {
@@ -6208,7 +6415,23 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Read private DM image",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "image ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/dm/mailboxes": {
@@ -6222,7 +6445,14 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "DM mailboxes",
-                "responses": {}
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.MailboxesResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/dm/mailboxes/{type}/{id}/conversations": {
@@ -6236,7 +6466,42 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "DM mailbox conversations",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "party type",
+                        "name": "type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "mailbox ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ConversationsResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/dm/messages/{id}/reports": {
@@ -6250,7 +6515,32 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Report DM message",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "message ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "report",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReportReceiptResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/dm/settings": {
@@ -6264,7 +6554,14 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Get DM permission",
-                "responses": {}
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionResponse"
+                        }
+                    }
+                }
             },
             "put": {
                 "security": [
@@ -6276,7 +6573,25 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Update DM permission",
-                "responses": {}
+                "parameters": [
+                    {
+                        "description": "permission",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionDTO"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/dm/targets/{type}/{id}/conversation": {
@@ -6290,7 +6605,33 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Find DM target conversation",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "target type",
+                        "name": "type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "target ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ConversationResponse"
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
             }
         },
         "/api/v1/dm/targets/{type}/{id}/messages": {
@@ -6304,7 +6645,39 @@ const docTemplate = `{
                     "dm"
                 ],
                 "summary": "Send DM to target",
-                "responses": {}
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "target type",
+                        "name": "type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "target ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "message",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.SendInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dm.MessageResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/feed/explore": {
@@ -17180,6 +17553,349 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "direction": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ConversationDTO": {
+            "type": "object",
+            "properties": {
+                "blocked": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_message_at": {
+                    "type": "string"
+                },
+                "last_message_preview": {
+                    "type": "string"
+                },
+                "participant_a": {
+                    "$ref": "#/definitions/dm.PartyDTO"
+                },
+                "participant_b": {
+                    "$ref": "#/definitions/dm.PartyDTO"
+                },
+                "unread": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dm.ConversationPageDTO": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dm.ConversationDTO"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ConversationResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ConversationDTO"
+                }
+            }
+        },
+        "dm.ConversationsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ConversationPageDTO"
+                }
+            }
+        },
+        "dm.ImageDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ImageResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ImageDTO"
+                }
+            }
+        },
+        "dm.MailboxDTO": {
+            "type": "object",
+            "properties": {
+                "party": {
+                    "$ref": "#/definitions/dm.PartyDTO"
+                },
+                "unread": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dm.MailboxesResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dm.MailboxDTO"
+                    }
+                }
+            }
+        },
+        "dm.MessageDTO": {
+            "type": "object",
+            "properties": {
+                "client_message_id": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "conversation_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_id": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "sender_id": {
+                    "type": "string"
+                },
+                "sender_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.MessagePageDTO": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dm.MessageDTO"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.MessageDTO"
+                }
+            }
+        },
+        "dm.MessagesResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.MessagePageDTO"
+                }
+            }
+        },
+        "dm.PartyDTO": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.PermissionDTO": {
+            "type": "object",
+            "properties": {
+                "permission": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.PermissionResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.PermissionDTO"
+                }
+            }
+        },
+        "dm.ReadResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ReadResultDTO"
+                }
+            }
+        },
+        "dm.ReadResultDTO": {
+            "type": "object",
+            "properties": {
+                "conversation_unread": {
+                    "type": "integer"
+                },
+                "dm_unread": {
+                    "type": "integer"
+                },
+                "mailbox_unread": {
+                    "type": "integer"
+                },
+                "total_unread": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dm.ReportDTO": {
+            "type": "object",
+            "properties": {
+                "conversation_context": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "has_snapshot_image": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "reported_actor_user_id": {
+                    "type": "string"
+                },
+                "reporter_user_id": {
+                    "type": "string"
+                },
+                "reviewed_at": {
+                    "type": "string"
+                },
+                "reviewed_by_user_id": {
+                    "type": "string"
+                },
+                "snapshot_content": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ReportInput": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ReportPageDTO": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dm.ReportDTO"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ReportReceiptDTO": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ReportReceiptResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ReportReceiptDTO"
+                }
+            }
+        },
+        "dm.ReportResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ReportDTO"
+                }
+            }
+        },
+        "dm.ReportsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ReportPageDTO"
+                }
+            }
+        },
+        "dm.ReviewReportInput": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.SendInput": {
+            "type": "object",
+            "properties": {
+                "client_message_id": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "image_id": {
+                    "type": "string"
+                },
+                "image_url": {
                     "type": "string"
                 }
             }

@@ -188,51 +188,51 @@ func NewService(repo *Repo, images ImageStore, publisher Publisher, unread SiteU
 	return &Service{repo: repo, images: images, publish: publisher, unread: unread}
 }
 
-func (s *Service) GetUserSettings(ctx context.Context, actor authctx.CurrentUser) (permissionDTO, error) {
+func (s *Service) GetUserSettings(ctx context.Context, actor authctx.CurrentUser) (PermissionDTO, error) {
 	if actor.ID == uuid.Nil {
-		return permissionDTO{}, ErrConversationForbidden
+		return PermissionDTO{}, ErrConversationForbidden
 	}
 	permission, err := NewRepo(s.repo.db.WithContext(ctx)).RecipientPermission(TargetRef{Type: model.DMPartyUser, ID: actor.ID})
-	return permissionDTO{Permission: permission}, err
+	return PermissionDTO{Permission: permission}, err
 }
 
-func (s *Service) UpdateUserSettings(ctx context.Context, actor authctx.CurrentUser, permission string) (permissionDTO, error) {
+func (s *Service) UpdateUserSettings(ctx context.Context, actor authctx.CurrentUser, permission string) (PermissionDTO, error) {
 	if actor.ID == uuid.Nil || !validUserPermission(permission) {
-		return permissionDTO{}, ErrPermissionDenied
+		return PermissionDTO{}, ErrPermissionDenied
 	}
 	settings := model.UserSettings{UserID: actor.ID}
 	if err := s.repo.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&settings).Error; err != nil {
-		return permissionDTO{}, err
+		return PermissionDTO{}, err
 	}
 	if err := s.repo.db.WithContext(ctx).Model(&settings).Update("dm_permission", permission).Error; err != nil {
-		return permissionDTO{}, err
+		return PermissionDTO{}, err
 	}
-	return permissionDTO{Permission: permission}, nil
+	return PermissionDTO{Permission: permission}, nil
 }
 
-func (s *Service) GetChannelSettings(ctx context.Context, actor authctx.CurrentUser, channelID uuid.UUID) (permissionDTO, error) {
+func (s *Service) GetChannelSettings(ctx context.Context, actor authctx.CurrentUser, channelID uuid.UUID) (PermissionDTO, error) {
 	if err := NewRepo(s.repo.db.WithContext(ctx)).AuthorizeMailbox(actor.ID, TargetRef{Type: model.DMPartyChannel, ID: channelID}); err != nil {
-		return permissionDTO{}, err
+		return PermissionDTO{}, err
 	}
 	permission, err := NewRepo(s.repo.db.WithContext(ctx)).RecipientPermission(TargetRef{Type: model.DMPartyChannel, ID: channelID})
-	return permissionDTO{Permission: permission}, err
+	return PermissionDTO{Permission: permission}, err
 }
 
-func (s *Service) UpdateChannelSettings(ctx context.Context, actor authctx.CurrentUser, channelID uuid.UUID, permission string) (permissionDTO, error) {
+func (s *Service) UpdateChannelSettings(ctx context.Context, actor authctx.CurrentUser, channelID uuid.UUID, permission string) (PermissionDTO, error) {
 	if !validChannelPermission(permission) {
-		return permissionDTO{}, ErrPermissionDenied
+		return PermissionDTO{}, ErrPermissionDenied
 	}
 	if err := NewRepo(s.repo.db.WithContext(ctx)).AuthorizeMailbox(actor.ID, TargetRef{Type: model.DMPartyChannel, ID: channelID}); err != nil {
-		return permissionDTO{}, err
+		return PermissionDTO{}, err
 	}
 	settings := model.DMChannelSettings{ChannelID: channelID}
 	if err := s.repo.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&settings).Error; err != nil {
-		return permissionDTO{}, err
+		return PermissionDTO{}, err
 	}
 	if err := s.repo.db.WithContext(ctx).Model(&settings).Update("permission", permission).Error; err != nil {
-		return permissionDTO{}, err
+		return PermissionDTO{}, err
 	}
-	return permissionDTO{Permission: permission}, nil
+	return PermissionDTO{Permission: permission}, nil
 }
 
 func validUserPermission(value string) bool {
@@ -244,6 +244,7 @@ func validChannelPermission(value string) bool {
 
 func (s *Service) SendToTarget(ctx context.Context, actorUserID uuid.UUID, target TargetRef, input SendInput) (MessageDTO, error) {
 	var result MessageDTO
+	created := false
 	err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		repo := NewRepo(tx)
 		if existing, err := repo.FindMessageByClientID(actorUserID, input.ClientMessageID); err == nil {
@@ -272,13 +273,13 @@ func (s *Service) SendToTarget(ctx context.Context, actorUserID uuid.UUID, targe
 			return err
 		}
 		sender := SenderIdentity{SenderType: model.DMPartyUser, SenderID: actorUserID, ActorUserID: actorUserID}
-		return s.sendWithPolicy(repo, access, sender, input, &result)
+		return s.sendWithPolicy(repo, access, sender, input, &result, &created)
 	})
 	if err != nil {
 		return result, err
 	}
 	result, err = s.messageDTO(ctx, model.DMMessage{Base: model.Base{ID: result.ID, CreatedAt: result.CreatedAt}, ConversationID: result.ConversationID, SenderType: result.SenderType, SenderID: result.SenderID, ClientMessageID: result.ClientMessageID, Content: result.Content, ImageID: result.ImageID})
-	if err == nil {
+	if err == nil && created {
 		s.publishMessageCreated(ctx, result)
 	}
 	return result, err
@@ -286,6 +287,7 @@ func (s *Service) SendToTarget(ctx context.Context, actorUserID uuid.UUID, targe
 
 func (s *Service) SendInConversation(ctx context.Context, actorUserID, conversationID uuid.UUID, input SendInput) (MessageDTO, error) {
 	var result MessageDTO
+	created := false
 	err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		repo := NewRepo(tx)
 		if existing, err := repo.FindMessageByClientID(actorUserID, input.ClientMessageID); err == nil {
@@ -302,13 +304,13 @@ func (s *Service) SendInConversation(ctx context.Context, actorUserID, conversat
 		if err != nil {
 			return err
 		}
-		return s.sendWithPolicy(repo, access, sender, input, &result)
+		return s.sendWithPolicy(repo, access, sender, input, &result, &created)
 	})
 	if err != nil {
 		return result, err
 	}
 	result, err = s.messageDTO(ctx, model.DMMessage{Base: model.Base{ID: result.ID, CreatedAt: result.CreatedAt}, ConversationID: result.ConversationID, SenderType: result.SenderType, SenderID: result.SenderID, ClientMessageID: result.ClientMessageID, Content: result.Content, ImageID: result.ImageID})
-	if err == nil {
+	if err == nil && created {
 		s.publishMessageCreated(ctx, result)
 	}
 	return result, err
@@ -476,7 +478,7 @@ func (s *Service) ReviewReport(ctx context.Context, actor authctx.CurrentUser, r
 	return result, err
 }
 
-func (s *Service) sendWithPolicy(repo *Repo, access ConversationAccess, sender SenderIdentity, input SendInput, result *MessageDTO) error {
+func (s *Service) sendWithPolicy(repo *Repo, access ConversationAccess, sender SenderIdentity, input SendInput, result *MessageDTO, created *bool) error {
 	if err := repo.LockActor(sender.ActorUserID); err != nil {
 		return err
 	}
@@ -550,7 +552,7 @@ func (s *Service) sendWithPolicy(repo *Repo, access ConversationAccess, sender S
 			return ErrRateLimited
 		}
 	}
-	return s.createMessage(repo, access.Conversation, sender, input, result)
+	return s.createMessage(repo, access.Conversation, sender, input, result, created)
 }
 
 func (s *Service) GetTargetConversation(ctx context.Context, actorUserID uuid.UUID, target TargetRef) (ConversationDTO, error) {
@@ -636,7 +638,7 @@ func (s *Service) imageDTO(ctx context.Context, image model.DMImage) (ImageDTO, 
 	return ImageDTO{ID: image.ID, URL: url}, nil
 }
 
-func (s *Service) createMessage(repo *Repo, conversation model.DMConversation, sender SenderIdentity, input SendInput, result *MessageDTO) error {
+func (s *Service) createMessage(repo *Repo, conversation model.DMConversation, sender SenderIdentity, input SendInput, result *MessageDTO, createdResult *bool) error {
 	content := strings.TrimSpace(input.Content)
 	if utf8.RuneCountInString(content) > 4000 || (content == "" && input.ImageID == nil) || strings.TrimSpace(input.ImageURL) != "" {
 		return ErrImageInvalid
@@ -655,6 +657,7 @@ func (s *Service) createMessage(repo *Repo, conversation model.DMConversation, s
 		*result = messageDTO(stored)
 		return nil
 	}
+	*createdResult = true
 	preview := content
 	if preview == "" {
 		preview = "[图片]"

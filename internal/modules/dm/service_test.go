@@ -47,7 +47,8 @@ func TestServiceIdentity(t *testing.T) {
 func TestSendIdempotency(t *testing.T) {
 	db := testDB(t)
 	actor, recipient := testUser(t, db), testUser(t, db)
-	service := NewService(NewRepo(db), nil, nil, nil)
+	publisher := &recordingPublisher{}
+	service := NewService(NewRepo(db), nil, publisher, nil)
 	input := SendInput{Content: "same", ClientMessageID: uuid.New()}
 
 	first, err := service.SendToTarget(context.Background(), actor, TargetRef{Type: model.DMPartyUser, ID: recipient}, input)
@@ -58,10 +59,28 @@ func TestSendIdempotency(t *testing.T) {
 	if err != nil || first.ID != second.ID {
 		t.Fatalf("expected idempotent result: %#v %#v %v", first, second, err)
 	}
+	if len(publisher.events) != 4 {
+		t.Fatalf("expected events only for the first create, got %d", len(publisher.events))
+	}
+	created, ok := publisher.events[0].payload.(MessageCreatedEventDTO)
+	if !ok || created.Message.ID != first.ID || created.Conversation.ID != first.ConversationID || created.Mailbox.Party.ID == uuid.Nil {
+		t.Fatalf("unexpected created event payload: %#v", publisher.events[0].payload)
+	}
 	var count int64
 	if err := db.Model(&model.DMMessage{}).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("expected one stored message, got %d: %v", count, err)
 	}
+}
+
+type recordedDMEvent struct {
+	userID  uuid.UUID
+	event   string
+	payload any
+}
+type recordingPublisher struct{ events []recordedDMEvent }
+
+func (p *recordingPublisher) Push(userID uuid.UUID, event string, payload any) {
+	p.events = append(p.events, recordedDMEvent{userID: userID, event: event, payload: payload})
 }
 
 func TestServiceRejectsSelfAndOwnedChannelTargets(t *testing.T) {

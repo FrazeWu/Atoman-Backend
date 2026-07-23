@@ -45,6 +45,53 @@ type PageDTO[T any] struct {
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
+// HTTP response envelopes are explicit so generated OpenAPI never degrades to responses: {}.
+type MailboxesResponse struct {
+	Data []MailboxDTO `json:"data"`
+}
+type ConversationsResponse struct {
+	Data ConversationPageDTO `json:"data"`
+}
+type ConversationPageDTO struct {
+	Items      []ConversationDTO `json:"items"`
+	NextCursor string            `json:"next_cursor,omitempty"`
+}
+type MessagesResponse struct {
+	Data MessagePageDTO `json:"data"`
+}
+type MessagePageDTO struct {
+	Items      []MessageDTO `json:"items"`
+	NextCursor string       `json:"next_cursor,omitempty"`
+}
+type ConversationResponse struct {
+	Data ConversationDTO `json:"data"`
+}
+type MessageResponse struct {
+	Data MessageDTO `json:"data"`
+}
+type ReadResponse struct {
+	Data ReadResultDTO `json:"data"`
+}
+type ImageResponse struct {
+	Data ImageDTO `json:"data"`
+}
+type ReportReceiptResponse struct {
+	Data ReportReceiptDTO `json:"data"`
+}
+type ReportsResponse struct {
+	Data ReportPageDTO `json:"data"`
+}
+type ReportPageDTO struct {
+	Items      []ReportDTO `json:"items"`
+	NextCursor string      `json:"next_cursor,omitempty"`
+}
+type ReportResponse struct {
+	Data ReportDTO `json:"data"`
+}
+type PermissionResponse struct {
+	Data PermissionDTO `json:"data"`
+}
+
 type ReadResultDTO struct {
 	ConversationUnread int64 `json:"conversation_unread"`
 	MailboxUnread      int64 `json:"mailbox_unread"`
@@ -74,6 +121,10 @@ type SendInput struct {
 type ReportInput struct {
 	Reason string `json:"reason"`
 	Detail string `json:"detail"`
+}
+
+type PermissionDTO struct {
+	Permission string `json:"permission"`
 }
 
 type ReviewReportInput struct {

@@ -83,6 +83,7 @@ func (h *Handler) fail(c *gin.Context, err error) {
 // @Summary DM mailboxes
 // @Tags dm
 // @Security BearerAuth
+// @Success 200 {object} MailboxesResponse
 // @Router /api/v1/dm/mailboxes [get]
 func (h *Handler) listMailboxes(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -100,6 +101,11 @@ func (h *Handler) listMailboxes(c *gin.Context) {
 // @Summary DM mailbox conversations
 // @Tags dm
 // @Security BearerAuth
+// @Param type path string true "party type"
+// @Param id path string true "mailbox ID"
+// @Param cursor query string false "cursor"
+// @Param limit query int false "limit"
+// @Success 200 {object} ConversationsResponse
 // @Router /api/v1/dm/mailboxes/{type}/{id}/conversations [get]
 func (h *Handler) listConversations(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -121,6 +127,10 @@ func (h *Handler) listConversations(c *gin.Context) {
 // @Summary Find DM target conversation
 // @Tags dm
 // @Security BearerAuth
+// @Param type path string true "target type"
+// @Param id path string true "target ID"
+// @Success 200 {object} ConversationResponse
+// @Success 204
 // @Router /api/v1/dm/targets/{type}/{id}/conversation [get]
 func (h *Handler) getTargetConversation(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -162,6 +172,10 @@ func (h *Handler) input(c *gin.Context) (SendInput, bool) {
 // @Summary Send DM to target
 // @Tags dm
 // @Security BearerAuth
+// @Param type path string true "target type"
+// @Param id path string true "target ID"
+// @Param input body SendInput true "message"
+// @Success 201 {object} MessageResponse
 // @Router /api/v1/dm/targets/{type}/{id}/messages [post]
 func (h *Handler) sendToTarget(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -187,6 +201,9 @@ func (h *Handler) sendToTarget(c *gin.Context) {
 // @Summary Send DM in conversation
 // @Tags dm
 // @Security BearerAuth
+// @Param id path string true "conversation ID"
+// @Param input body SendInput true "message"
+// @Success 201 {object} MessageResponse
 // @Router /api/v1/dm/conversations/{id}/messages [post]
 func (h *Handler) sendInConversation(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -212,6 +229,10 @@ func (h *Handler) sendInConversation(c *gin.Context) {
 // @Summary List DM messages
 // @Tags dm
 // @Security BearerAuth
+// @Param id path string true "conversation ID"
+// @Param before query string false "cursor"
+// @Param limit query int false "limit"
+// @Success 200 {object} MessagesResponse
 // @Router /api/v1/dm/conversations/{id}/messages [get]
 func (h *Handler) listMessages(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -233,6 +254,8 @@ func (h *Handler) listMessages(c *gin.Context) {
 // @Summary Mark DM conversation read
 // @Tags dm
 // @Security BearerAuth
+// @Param id path string true "conversation ID"
+// @Success 200 {object} ReadResponse
 // @Router /api/v1/dm/conversations/{id}/read [put]
 func (h *Handler) markRead(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -254,6 +277,8 @@ func (h *Handler) markRead(c *gin.Context) {
 // @Summary Block DM conversation
 // @Tags dm
 // @Security BearerAuth
+// @Param id path string true "conversation ID"
+// @Success 200 {object} ConversationResponse
 // @Router /api/v1/dm/conversations/{id}/block [put]
 func (h *Handler) block(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -275,6 +300,8 @@ func (h *Handler) block(c *gin.Context) {
 // @Summary Unblock DM conversation
 // @Tags dm
 // @Security BearerAuth
+// @Param id path string true "conversation ID"
+// @Success 200 {object} ConversationResponse
 // @Router /api/v1/dm/conversations/{id}/block [delete]
 func (h *Handler) unblock(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -296,6 +323,9 @@ func (h *Handler) unblock(c *gin.Context) {
 // @Summary Upload private DM image
 // @Tags dm
 // @Security BearerAuth
+// @Accept mpfd
+// @Param image formData file true "image"
+// @Success 201 {object} ImageResponse
 // @Router /api/v1/dm/images [post]
 func (h *Handler) uploadImage(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -324,6 +354,8 @@ func (h *Handler) uploadImage(c *gin.Context) {
 // @Summary Read private DM image
 // @Tags dm
 // @Security BearerAuth
+// @Param id path string true "image ID"
+// @Success 200 {file} file
 // @Router /api/v1/dm/images/{id}/content [get]
 func (h *Handler) openImage(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -346,6 +378,9 @@ func (h *Handler) openImage(c *gin.Context) {
 // @Summary Report DM message
 // @Tags dm
 // @Security BearerAuth
+// @Param id path string true "message ID"
+// @Param input body ReportInput true "report"
+// @Success 201 {object} ReportReceiptResponse
 // @Router /api/v1/dm/messages/{id}/reports [post]
 func (h *Handler) report(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -372,6 +407,9 @@ func (h *Handler) report(c *gin.Context) {
 // @Summary List DM reports
 // @Tags dm-admin
 // @Security BearerAuth
+// @Param cursor query string false "cursor"
+// @Param limit query int false "limit"
+// @Success 200 {object} ReportsResponse
 // @Router /api/v1/admin/dm/reports [get]
 func (h *Handler) listReports(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -389,6 +427,9 @@ func (h *Handler) listReports(c *gin.Context) {
 // @Summary Review DM report
 // @Tags dm-admin
 // @Security BearerAuth
+// @Param id path string true "report ID"
+// @Param input body ReviewReportInput true "review"
+// @Success 200 {object} ReportResponse
 // @Router /api/v1/admin/dm/reports/{id} [put]
 func (h *Handler) reviewReport(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -412,13 +453,10 @@ func (h *Handler) reviewReport(c *gin.Context) {
 	httpx.OK(c, 200, data)
 }
 
-type permissionDTO struct {
-	Permission string `json:"permission"`
-}
-
 // @Summary Get DM permission
 // @Tags dm
 // @Security BearerAuth
+// @Success 200 {object} PermissionResponse
 // @Router /api/v1/dm/settings [get]
 func (h *Handler) getSettings(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -436,13 +474,15 @@ func (h *Handler) getSettings(c *gin.Context) {
 // @Summary Update DM permission
 // @Tags dm
 // @Security BearerAuth
+// @Param input body PermissionDTO true "permission"
+// @Success 200 {object} PermissionResponse
 // @Router /api/v1/dm/settings [put]
 func (h *Handler) updateSettings(c *gin.Context) {
 	actor, ok := h.actor(c)
 	if !ok {
 		return
 	}
-	var input permissionDTO
+	var input PermissionDTO
 	if err := c.ShouldBindJSON(&input); err != nil {
 		h.fail(c, ErrPermissionDenied)
 		return
@@ -458,6 +498,8 @@ func (h *Handler) updateSettings(c *gin.Context) {
 // @Summary Get channel DM permission
 // @Tags dm
 // @Security BearerAuth
+// @Param id path string true "channel ID"
+// @Success 200 {object} PermissionResponse
 // @Router /api/v1/dm/channels/{id}/settings [get]
 func (h *Handler) getChannelSettings(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -479,6 +521,9 @@ func (h *Handler) getChannelSettings(c *gin.Context) {
 // @Summary Update channel DM permission
 // @Tags dm
 // @Security BearerAuth
+// @Param id path string true "channel ID"
+// @Param input body PermissionDTO true "permission"
+// @Success 200 {object} PermissionResponse
 // @Router /api/v1/dm/channels/{id}/settings [put]
 func (h *Handler) updateChannelSettings(c *gin.Context) {
 	actor, ok := h.actor(c)
@@ -489,7 +534,7 @@ func (h *Handler) updateChannelSettings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	var input permissionDTO
+	var input PermissionDTO
 	if err := c.ShouldBindJSON(&input); err != nil {
 		h.fail(c, ErrPermissionDenied)
 		return

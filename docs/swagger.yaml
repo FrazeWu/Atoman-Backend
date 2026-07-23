@@ -700,6 +700,226 @@ definitions:
       direction:
         type: string
     type: object
+  dm.ConversationDTO:
+    properties:
+      blocked:
+        type: boolean
+      id:
+        type: string
+      last_message_at:
+        type: string
+      last_message_preview:
+        type: string
+      participant_a:
+        $ref: '#/definitions/dm.PartyDTO'
+      participant_b:
+        $ref: '#/definitions/dm.PartyDTO'
+      unread:
+        type: integer
+    type: object
+  dm.ConversationPageDTO:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dm.ConversationDTO'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  dm.ConversationResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ConversationDTO'
+    type: object
+  dm.ConversationsResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ConversationPageDTO'
+    type: object
+  dm.ImageDTO:
+    properties:
+      id:
+        type: string
+      url:
+        type: string
+    type: object
+  dm.ImageResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ImageDTO'
+    type: object
+  dm.MailboxDTO:
+    properties:
+      party:
+        $ref: '#/definitions/dm.PartyDTO'
+      unread:
+        type: integer
+    type: object
+  dm.MailboxesResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/dm.MailboxDTO'
+        type: array
+    type: object
+  dm.MessageDTO:
+    properties:
+      client_message_id:
+        type: string
+      content:
+        type: string
+      conversation_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      image_id:
+        type: string
+      image_url:
+        type: string
+      sender_id:
+        type: string
+      sender_type:
+        type: string
+    type: object
+  dm.MessagePageDTO:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dm.MessageDTO'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  dm.MessageResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.MessageDTO'
+    type: object
+  dm.MessagesResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.MessagePageDTO'
+    type: object
+  dm.PartyDTO:
+    properties:
+      avatar_url:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      type:
+        type: string
+    type: object
+  dm.PermissionDTO:
+    properties:
+      permission:
+        type: string
+    type: object
+  dm.PermissionResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.PermissionDTO'
+    type: object
+  dm.ReadResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ReadResultDTO'
+    type: object
+  dm.ReadResultDTO:
+    properties:
+      conversation_unread:
+        type: integer
+      dm_unread:
+        type: integer
+      mailbox_unread:
+        type: integer
+      total_unread:
+        type: integer
+    type: object
+  dm.ReportDTO:
+    properties:
+      conversation_context:
+        type: string
+      created_at:
+        type: string
+      detail:
+        type: string
+      has_snapshot_image:
+        type: boolean
+      id:
+        type: string
+      message_id:
+        type: string
+      reason:
+        type: string
+      reported_actor_user_id:
+        type: string
+      reporter_user_id:
+        type: string
+      reviewed_at:
+        type: string
+      reviewed_by_user_id:
+        type: string
+      snapshot_content:
+        type: string
+      status:
+        type: string
+    type: object
+  dm.ReportInput:
+    properties:
+      detail:
+        type: string
+      reason:
+        type: string
+    type: object
+  dm.ReportPageDTO:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dm.ReportDTO'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  dm.ReportReceiptDTO:
+    properties:
+      status:
+        type: string
+    type: object
+  dm.ReportReceiptResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ReportReceiptDTO'
+    type: object
+  dm.ReportResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ReportDTO'
+    type: object
+  dm.ReportsResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ReportPageDTO'
+    type: object
+  dm.ReviewReportInput:
+    properties:
+      status:
+        type: string
+    type: object
+  dm.SendInput:
+    properties:
+      client_message_id:
+        type: string
+      content:
+        type: string
+      image_id:
+        type: string
+      image_url:
+        type: string
+    type: object
   feed.AutoSubscriptionAddRequest:
     properties:
       candidate_feed_url:
@@ -5166,7 +5386,20 @@ paths:
       - comment-admin
   /api/v1/admin/dm/reports:
     get:
-      responses: {}
+      parameters:
+      - description: cursor
+        in: query
+        name: cursor
+        type: string
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ReportsResponse'
       security:
       - BearerAuth: []
       summary: List DM reports
@@ -5174,7 +5407,23 @@ paths:
       - dm-admin
   /api/v1/admin/dm/reports/{id}:
     put:
-      responses: {}
+      parameters:
+      - description: report ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: review
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.ReviewReportInput'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ReportResponse'
       security:
       - BearerAuth: []
       summary: Review DM report
@@ -8870,14 +9119,40 @@ paths:
       - comments
   /api/v1/dm/channels/{id}/settings:
     get:
-      responses: {}
+      parameters:
+      - description: channel ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.PermissionResponse'
       security:
       - BearerAuth: []
       summary: Get channel DM permission
       tags:
       - dm
     put:
-      responses: {}
+      parameters:
+      - description: channel ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: permission
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.PermissionDTO'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.PermissionResponse'
       security:
       - BearerAuth: []
       summary: Update channel DM permission
@@ -8885,14 +9160,34 @@ paths:
       - dm
   /api/v1/dm/conversations/{id}/block:
     delete:
-      responses: {}
+      parameters:
+      - description: conversation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ConversationResponse'
       security:
       - BearerAuth: []
       summary: Unblock DM conversation
       tags:
       - dm
     put:
-      responses: {}
+      parameters:
+      - description: conversation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ConversationResponse'
       security:
       - BearerAuth: []
       summary: Block DM conversation
@@ -8900,14 +9195,48 @@ paths:
       - dm
   /api/v1/dm/conversations/{id}/messages:
     get:
-      responses: {}
+      parameters:
+      - description: conversation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: cursor
+        in: query
+        name: before
+        type: string
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.MessagesResponse'
       security:
       - BearerAuth: []
       summary: List DM messages
       tags:
       - dm
     post:
-      responses: {}
+      parameters:
+      - description: conversation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: message
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.SendInput'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dm.MessageResponse'
       security:
       - BearerAuth: []
       summary: Send DM in conversation
@@ -8915,7 +9244,17 @@ paths:
       - dm
   /api/v1/dm/conversations/{id}/read:
     put:
-      responses: {}
+      parameters:
+      - description: conversation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ReadResponse'
       security:
       - BearerAuth: []
       summary: Mark DM conversation read
@@ -8923,7 +9262,19 @@ paths:
       - dm
   /api/v1/dm/images:
     post:
-      responses: {}
+      consumes:
+      - multipart/form-data
+      parameters:
+      - description: image
+        in: formData
+        name: image
+        required: true
+        type: file
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dm.ImageResponse'
       security:
       - BearerAuth: []
       summary: Upload private DM image
@@ -8931,7 +9282,17 @@ paths:
       - dm
   /api/v1/dm/images/{id}/content:
     get:
-      responses: {}
+      parameters:
+      - description: image ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
       security:
       - BearerAuth: []
       summary: Read private DM image
@@ -8939,7 +9300,11 @@ paths:
       - dm
   /api/v1/dm/mailboxes:
     get:
-      responses: {}
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.MailboxesResponse'
       security:
       - BearerAuth: []
       summary: DM mailboxes
@@ -8947,7 +9312,30 @@ paths:
       - dm
   /api/v1/dm/mailboxes/{type}/{id}/conversations:
     get:
-      responses: {}
+      parameters:
+      - description: party type
+        in: path
+        name: type
+        required: true
+        type: string
+      - description: mailbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: cursor
+        in: query
+        name: cursor
+        type: string
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ConversationsResponse'
       security:
       - BearerAuth: []
       summary: DM mailbox conversations
@@ -8955,7 +9343,23 @@ paths:
       - dm
   /api/v1/dm/messages/{id}/reports:
     post:
-      responses: {}
+      parameters:
+      - description: message ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: report
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.ReportInput'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dm.ReportReceiptResponse'
       security:
       - BearerAuth: []
       summary: Report DM message
@@ -8963,14 +9367,29 @@ paths:
       - dm
   /api/v1/dm/settings:
     get:
-      responses: {}
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.PermissionResponse'
       security:
       - BearerAuth: []
       summary: Get DM permission
       tags:
       - dm
     put:
-      responses: {}
+      parameters:
+      - description: permission
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.PermissionDTO'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.PermissionResponse'
       security:
       - BearerAuth: []
       summary: Update DM permission
@@ -8978,7 +9397,24 @@ paths:
       - dm
   /api/v1/dm/targets/{type}/{id}/conversation:
     get:
-      responses: {}
+      parameters:
+      - description: target type
+        in: path
+        name: type
+        required: true
+        type: string
+      - description: target ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ConversationResponse'
+        "204":
+          description: No Content
       security:
       - BearerAuth: []
       summary: Find DM target conversation
@@ -8986,7 +9422,28 @@ paths:
       - dm
   /api/v1/dm/targets/{type}/{id}/messages:
     post:
-      responses: {}
+      parameters:
+      - description: target type
+        in: path
+        name: type
+        required: true
+        type: string
+      - description: target ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: message
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.SendInput'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dm.MessageResponse'
       security:
       - BearerAuth: []
       summary: Send DM to target
