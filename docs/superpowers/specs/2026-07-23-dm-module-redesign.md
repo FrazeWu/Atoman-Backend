@@ -77,9 +77,9 @@ user:<id> <-> channel:<id>
 type DMConversation struct {
     model.Base
     ParticipantAType string
-    ParticipantAID   uuid.UUID
+    ParticipantA     uuid.UUID
     ParticipantBType string
-    ParticipantBID   uuid.UUID
+    ParticipantB     uuid.UUID
 
     LastMessageAt      *time.Time
     LastMessagePreview string
