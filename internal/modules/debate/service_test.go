@@ -1,12 +1,14 @@
 package debate
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
-	"atoman/internal/modules/comment"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
@@ -15,449 +17,425 @@ import (
 	"gorm.io/gorm"
 )
 
-func seededDebateCommentService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, model.Debate) {
+type debateTestContext struct {
+	db      *gorm.DB
+	service *Service
+	owner   authctx.CurrentUser
+	editor  authctx.CurrentUser
+	admin   authctx.CurrentUser
+}
+
+func newDebateTestContext(t *testing.T) debateTestContext {
 	t.Helper()
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.MediaAsset{}, &model.Debate{}, &model.DiscussionTarget{}, &model.CommentEntry{},
-		&model.CommentMention{}, &model.CommentAttachment{}, &model.CommentTimeAnchor{},
-		&model.CommentLike{}, &model.CommentReport{}, &model.CommentPublishRecord{}, &model.Notification{}, &model.AuditLog{}, &model.TimelineRevisionProposal{}, &model.DebateArgumentDetail{},
-		&model.DebateArgumentReference{}, &model.DebateArgumentDebateRef{}, &model.DebateVote{}, &model.VoteHistory{}, &model.DebateRelation{},
-		&model.ContentReference{},
+		&model.User{}, &model.Debate{}, &model.Revision{}, &model.ContentProtection{},
+		&model.DebateConclusionEvent{}, &model.DebateRevisionReference{}, &model.DebateRelation{}, &model.DebateVote{}, &model.ContentReference{},
+		&model.Post{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.FeedSource{}, &model.FeedItem{},
+		&model.Artist{}, &model.Album{}, &model.Song{}, &model.Playlist{}, &model.PodcastEpisode{},
+		&model.Video{}, &model.TimelinePerson{}, &model.TimelineEvent{}, &model.Channel{}, &model.Collection{},
+		&model.DiscussionTarget{}, &model.CommentEntry{},
 	)
-	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_discussion_target_kind_key ON discussion_targets (kind, resource_key)`).Error)
-	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_comment_root_floor ON comment_entries (target_id, floor_number) WHERE floor_number IS NOT NULL AND deleted_at IS NULL`).Error)
-	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_notification_dedup ON notifications (recipient_id, source_type, source_id) WHERE aggregation_key = '' AND deleted_at IS NULL`).Error)
-	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_notification_unread_aggregate ON notifications (recipient_id, aggregation_key) WHERE aggregation_key <> '' AND read_at IS NULL AND deleted_at IS NULL`).Error)
-	require.NoError(t, db.Exec(`CREATE UNIQUE INDEX uq_debate_content_reference_source_range ON content_references (source_type, source_id, source_field, start_offset, end_offset) WHERE deleted_at IS NULL`).Error)
-	owner := model.User{Username: "owner", Email: "owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
-	require.NoError(t, db.Create(&owner).Error)
-	user := authctx.CurrentUser{ID: owner.UUID, Username: owner.Username, Role: owner.Role}
-	debate := model.Debate{UserID: owner.UUID, Title: "Typed debate", Status: "open"}
-	require.NoError(t, db.Create(&debate).Error)
-	comments := comment.NewService(db, comment.NewTargetRegistry(db))
-	return NewService(db, comments), db, user, debate
-}
-
-func TestCreateRelationRequiresConcludedBinarySource(t *testing.T) {
-	svc, db, user, target := seededDebateCommentService(t)
-	source := model.Debate{UserID: user.ID, Title: "来源辩题", Status: "open"}
-	require.NoError(t, db.Create(&source).Error)
-
-	_, err := svc.CreateRelation(user, CreateRelationRequest{
-		SourceDebateID: source.ID,
-		TargetDebateID: target.ID,
-		Stance:         "support",
-	})
-	require.Error(t, err)
-
-	require.NoError(t, db.Model(&source).Updates(map[string]any{
-		"status": "concluded", "conclusion_type": "inconclusive",
-	}).Error)
-	_, err = svc.CreateRelation(user, CreateRelationRequest{
-		SourceDebateID: source.ID,
-		TargetDebateID: target.ID,
-		Stance:         "support",
-	})
-	require.Error(t, err)
-
-	require.NoError(t, db.Model(&source).Update("conclusion_type", "yes").Error)
-	relation, err := svc.CreateRelation(user, CreateRelationRequest{
-		SourceDebateID: source.ID,
-		TargetDebateID: target.ID,
-		Stance:         "support",
-	})
-	require.NoError(t, err)
-	require.Equal(t, source.ID, relation.SourceDebateID)
-	require.Equal(t, target.ID, relation.TargetDebateID)
-	require.Equal(t, "support", relation.Stance)
-	require.Equal(t, user.ID, relation.UserID)
-}
-
-func TestCreateRelationRejectsInvalidAndDuplicateLinks(t *testing.T) {
-	svc, db, user, target := seededDebateCommentService(t)
-	require.NoError(t, db.Model(&target).Updates(map[string]any{
-		"status": "concluded", "conclusion_type": "yes",
-	}).Error)
-
-	for _, request := range []CreateRelationRequest{
-		{SourceDebateID: target.ID, TargetDebateID: target.ID, Stance: "support"},
-		{SourceDebateID: target.ID, TargetDebateID: uuid.New(), Stance: "neutral"},
-	} {
-		_, err := svc.CreateRelation(user, request)
-		require.Error(t, err)
+	users := []model.User{
+		{UUID: uuid.New(), Username: "owner", Email: "owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true},
+		{UUID: uuid.New(), Username: "editor", Email: "editor@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true},
+		{UUID: uuid.New(), Username: "admin", Email: "admin@example.com", Password: "hash", Role: authctx.RoleAdmin, IsActive: true},
 	}
-
-	other := model.Debate{UserID: user.ID, Title: "目标辩题", Status: "open"}
-	require.NoError(t, db.Create(&other).Error)
-	request := CreateRelationRequest{SourceDebateID: target.ID, TargetDebateID: other.ID, Stance: "oppose"}
-	_, err := svc.CreateRelation(user, request)
-	require.NoError(t, err)
-	_, err = svc.CreateRelation(user, request)
-	require.Error(t, err)
-}
-
-func TestGetDebateGraphUsesIncomingLinksForTreeAndAllLinksForGraph(t *testing.T) {
-	svc, db, user, root := seededDebateCommentService(t)
-	require.NoError(t, db.Model(&root).Updates(map[string]any{
-		"status": "concluded", "conclusion_type": "yes",
-	}).Error)
-
-	child := model.Debate{UserID: user.ID, Title: "直接支撑", Status: "concluded", ConclusionType: "yes"}
-	grandchild := model.Debate{UserID: user.ID, Title: "间接反驳", Status: "concluded", ConclusionType: "no"}
-	parent := model.Debate{UserID: user.ID, Title: "上游目标", Status: "open"}
-	require.NoError(t, db.Create(&child).Error)
-	require.NoError(t, db.Create(&grandchild).Error)
-	require.NoError(t, db.Create(&parent).Error)
-
-	for _, request := range []CreateRelationRequest{
-		{SourceDebateID: child.ID, TargetDebateID: root.ID, Stance: "support"},
-		{SourceDebateID: grandchild.ID, TargetDebateID: child.ID, Stance: "oppose"},
-		{SourceDebateID: root.ID, TargetDebateID: parent.ID, Stance: "support"},
-	} {
-		_, err := svc.CreateRelation(user, request)
-		require.NoError(t, err)
+	require.NoError(t, db.Create(&users).Error)
+	return debateTestContext{
+		db: db, service: NewService(db),
+		owner:  authctx.CurrentUser{ID: users[0].UUID, Username: users[0].Username, Role: users[0].Role},
+		editor: authctx.CurrentUser{ID: users[1].UUID, Username: users[1].Username, Role: users[1].Role},
+		admin:  authctx.CurrentUser{ID: users[2].UUID, Username: users[2].Username, Role: users[2].Role},
 	}
+}
 
-	tree, err := svc.GetDebateGraph(root.ID, "tree")
+func createDebateForTest(t *testing.T, ctx debateTestContext, title, content string) DebateDTO {
+	t.Helper()
+	created, err := ctx.service.CreateDebate(ctx.owner, CreateDebateRequest{Title: title, Description: "summary", Content: content, Tags: []string{"tag"}})
 	require.NoError(t, err)
-	require.ElementsMatch(t, []uuid.UUID{root.ID, child.ID, grandchild.ID}, debateIDs(tree.Nodes))
-	require.Len(t, tree.Relations, 2)
-
-	graph, err := svc.GetDebateGraph(root.ID, "graph")
-	require.NoError(t, err)
-	require.ElementsMatch(t, []uuid.UUID{root.ID, child.ID, grandchild.ID, parent.ID}, debateIDs(graph.Nodes))
-	require.Len(t, graph.Relations, 3)
+	return created
 }
 
-func TestConcludeDebateRejectsNonBinaryConclusion(t *testing.T) {
-	svc, _, user, debate := seededDebateCommentService(t)
-	_, err := svc.ConcludeDebate(user, debate.ID, "inconclusive", "仍无定论")
-	require.Error(t, err)
+func TestCreateDebateCreatesCurrentVersionOneInOneTransaction(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	created := createDebateForTest(t, ctx, "Topic", "Body")
+
+	require.Equal(t, model.DebateStatusActive, created.Status)
+	require.NotNil(t, created.CurrentRevisionID)
+	var revision model.Revision
+	require.NoError(t, ctx.db.First(&revision, "id = ?", *created.CurrentRevisionID).Error)
+	require.Equal(t, 1, revision.VersionNumber)
+	require.Equal(t, "creation", revision.EditType)
+	require.Equal(t, "approved", revision.Status)
+	require.True(t, revision.IsCurrent)
+	require.Equal(t, ctx.owner.ID, revision.EditorID)
 }
 
-func debateIDs(debates []model.Debate) []uuid.UUID {
-	ids := make([]uuid.UUID, 0, len(debates))
-	for _, debate := range debates {
-		ids = append(ids, debate.ID)
-	}
-	return ids
-}
+func TestSaveWikiStoresConcludedDebateReferenceInUnifiedReferences(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	source := createDebateForTest(t, ctx, "Source", "body")
+	target := createDebateForTest(t, ctx, "Target", "body")
+	setConclusionForTest(t, ctx.db, source.ID, model.DebateVoteYes)
 
-func TestCreateArgumentWritesCommentAndTypedDetail(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	mentioned := model.User{Username: "bob", Email: "bob@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
-	require.NoError(t, db.Create(&mentioned).Error)
-	got, err := svc.CreateArgument(user, CreateArgumentRequest{
-		DebateID: debate.ID, Content: "@bob evidence", ArgumentType: "evidence", SourceURL: "https://example.com",
-		Mentions: []comment.MentionInput{{UserID: mentioned.UUID, Start: 0, End: 4}},
+	content := "See @debate:" + source.ID.String() + ":support"
+	saved, err := ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{
+		Title: "Target", Content: content, EditSummary: "cite conclusion", BaseRevisionID: *target.CurrentRevisionID,
 	})
 	require.NoError(t, err)
+	require.Len(t, saved.References, 1)
+	require.Equal(t, "debate", saved.References[0].Target.Type)
+	require.Equal(t, source.ID, saved.References[0].Target.ID)
+	require.NotNil(t, saved.References[0].Relation)
+	require.Equal(t, "support", saved.References[0].Relation.Stance)
 
-	var entry model.CommentEntry
-	require.NoError(t, db.First(&entry, "id = ?", got.ID).Error)
-	var detail model.DebateArgumentDetail
-	require.NoError(t, db.First(&detail, "comment_id = ?", got.ID).Error)
-	require.Equal(t, "evidence", detail.ArgumentType)
-	require.Equal(t, got.ID, detail.CommentID)
-	var mention model.CommentMention
-	require.NoError(t, db.First(&mention, "comment_id = ?", got.ID).Error)
-	require.Equal(t, mentioned.UUID, mention.UserID)
+	var stored model.ContentReference
+	require.NoError(t, ctx.db.First(&stored, "source_type = ? AND source_id = ?", "debate_revision", *saved.CurrentRevisionID).Error)
+	require.Equal(t, "content", stored.SourceField)
+	require.Equal(t, source.ID, stored.TargetID)
+
+	var extension model.DebateRevisionReference
+	require.NoError(t, ctx.db.First(&extension, "revision_id = ?", *saved.CurrentRevisionID).Error)
+	require.Equal(t, stored.ID, extension.ContentReferenceID)
 }
 
-func TestListArgumentsExcludesModerationHiddenComments(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+func TestCreateAndSaveWikiValidateTitleSummaryAndOptimisticLock(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	_, err := ctx.service.CreateDebate(ctx.owner, CreateDebateRequest{Title: "@post:" + uuid.NewString(), Content: "Body"})
+	requireAppError(t, err, "debate.title_reference", 400)
+
+	created := createDebateForTest(t, ctx, "Topic", "Body")
+	_, err = ctx.service.SaveWiki(ctx.editor, created.ID, SaveWikiRequest{Title: "Edited", Description: "New", Content: "Body 2", Tags: []string{"new"}, EditSummary: "", BaseRevisionID: *created.CurrentRevisionID})
+	requireAppError(t, err, "validation.invalid_request", 400)
+
+	saved, err := ctx.service.SaveWiki(ctx.editor, created.ID, SaveWikiRequest{Title: "Edited", Description: "New", Content: "Body 2", Tags: []string{"new"}, EditSummary: "Improve", BaseRevisionID: *created.CurrentRevisionID})
 	require.NoError(t, err)
-	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Update("status", "hidden").Error)
-	arguments, _, err := svc.ListArguments(debate.ID)
-	require.NoError(t, err)
-	require.Empty(t, arguments)
+	require.Equal(t, "Edited", saved.Title)
+	require.NotEqual(t, created.CurrentRevisionID, saved.CurrentRevisionID)
+
+	var revisions []model.Revision
+	require.NoError(t, ctx.db.Where("content_type = ? AND content_id = ?", debateContentType, created.ID).Order("version_number").Find(&revisions).Error)
+	require.Len(t, revisions, 2)
+	require.False(t, revisions[0].IsCurrent)
+	require.True(t, revisions[1].IsCurrent)
+	require.Equal(t, revisions[0].ID, *revisions[1].PreviousRevisionID)
+	require.Equal(t, 2, revisions[1].VersionNumber)
+
+	_, err = ctx.service.SaveWiki(ctx.owner, created.ID, SaveWikiRequest{Title: "Conflict", EditSummary: "Old base", BaseRevisionID: *created.CurrentRevisionID})
+	var appErr *apperr.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, "debate.edit_conflict", appErr.Code)
+	require.Equal(t, created.CurrentRevisionID.String(), fmt.Sprint(appErr.Details["base_revision_id"]))
+	require.Equal(t, saved.CurrentRevisionID.String(), fmt.Sprint(appErr.Details["current_revision_id"]))
 }
 
-func TestCreateArgumentRollsBackCommentWhenDetailFails(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	require.NoError(t, db.Callback().Create().Before("gorm:create").Register("reject_argument_detail", func(tx *gorm.DB) {
-		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "debate_argument_details" {
-			tx.AddError(errors.New("detail failed"))
+func TestWikiProtectionAndArchiveRules(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	created := createDebateForTest(t, ctx, "Topic", "Body")
+	expires := time.Now().Add(time.Hour)
+	require.NoError(t, ctx.service.SetProtection(ctx.admin, created.ID, ProtectionRequest{ProtectionLevel: "full", Reason: "locked", ExpiresAt: &expires}))
+
+	_, err := ctx.service.SaveWiki(ctx.editor, created.ID, SaveWikiRequest{Title: "Blocked", EditSummary: "edit", BaseRevisionID: *created.CurrentRevisionID})
+	requireAppError(t, err, "debate.protected", 403)
+	adminSaved, err := ctx.service.SaveWiki(ctx.admin, created.ID, SaveWikiRequest{Title: "Admin edit", Description: "summary", Content: "body", EditSummary: "admin", BaseRevisionID: *created.CurrentRevisionID})
+	require.NoError(t, err)
+
+	archived, err := ctx.service.ArchiveDebate(ctx.admin, created.ID)
+	require.NoError(t, err)
+	require.Equal(t, model.DebateStatusArchived, archived.Status)
+	_, err = ctx.service.SaveWiki(ctx.admin, created.ID, SaveWikiRequest{Title: "No", EditSummary: "archived", BaseRevisionID: *adminSaved.CurrentRevisionID})
+	requireAppError(t, err, "debate.archived", 409)
+	_, err = ctx.service.ArchiveDebate(ctx.owner, created.ID)
+	requireAppError(t, err, "debate.admin_required", 403)
+}
+
+func TestSaveWikiLocksDebatesInStableOrder(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	low := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	middle := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	high := uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	seedDebateWithID(t, ctx, low, "Low")
+	seedDebateWithID(t, ctx, middle, "Middle")
+	target := seedDebateWithID(t, ctx, high, "Target")
+	setConclusionForTest(t, ctx.db, low, model.DebateVoteYes)
+	setConclusionForTest(t, ctx.db, middle, model.DebateVoteYes)
+	locked := captureLockedDebateIDs(t, ctx.db)
+
+	_, err := ctx.service.SaveWiki(ctx.editor, high, SaveWikiRequest{
+		Title: "Target", Content: "@debate:" + middle.String() + ":support @debate:" + low.String() + ":support",
+		EditSummary: "ordered locks", BaseRevisionID: *target.CurrentRevisionID,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{low, middle, high}, *locked)
+}
+
+func TestReconfirmLocksDebatesBeforeRelationInStableOrder(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	sourceID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	targetID := uuid.MustParse("00000000-0000-0000-0000-000000000003")
+	seedDebateWithID(t, ctx, sourceID, "Source")
+	target := seedDebateWithID(t, ctx, targetID, "Target")
+	setConclusionForTest(t, ctx.db, sourceID, model.DebateVoteYes)
+	relation := insertRelationForTest(t, ctx.db, sourceID, targetID, model.DebateRelationSupport, *target.CurrentRevisionID)
+	require.NoError(t, ctx.db.Model(&relation).Update("status", model.DebateRelationStale).Error)
+	locked := captureLockedDebateIDs(t, ctx.db)
+
+	_, err := ctx.service.ReconfirmReference(ctx.editor, targetID, relation.ID, ReconfirmReferenceRequest{
+		BaseRevisionID: *target.CurrentRevisionID, EditSummary: "reconfirm",
+	})
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{sourceID, targetID}, *locked)
+}
+
+func TestProtectionMutationsLockDebate(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	created := createDebateForTest(t, ctx, "Protected", "body")
+
+	locked := captureLockedDebateIDs(t, ctx.db)
+	require.NoError(t, ctx.service.SetProtection(ctx.admin, created.ID, ProtectionRequest{ProtectionLevel: "full"}))
+	require.Equal(t, []uuid.UUID{created.ID}, *locked)
+
+	locked = captureLockedDebateIDs(t, ctx.db)
+	require.NoError(t, ctx.service.DeleteProtection(ctx.admin, created.ID))
+	require.Equal(t, []uuid.UUID{created.ID}, *locked)
+}
+
+func TestRevertAndReconfirmRejectMissingBaseRevision(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	created := createDebateForTest(t, ctx, "Topic", "body")
+	revision, err := ctx.service.GetRevision(created.ID, *created.CurrentRevisionID)
+	require.NoError(t, err)
+
+	_, err = ctx.service.RevertRevision(ctx.editor, created.ID, revision.ID, RevertRevisionRequest{EditSummary: "revert"})
+	requireAppError(t, err, "validation.invalid_request", 400)
+	_, err = ctx.service.ReconfirmReference(ctx.editor, created.ID, uuid.New(), ReconfirmReferenceRequest{EditSummary: "reconfirm"})
+	requireAppError(t, err, "validation.invalid_request", 400)
+}
+
+func TestArchiveMakesActiveOutboundRelationsUnavailable(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	source := createDebateForTest(t, ctx, "Source", "source")
+	target := createDebateForTest(t, ctx, "Target", "target")
+	setConclusionForTest(t, ctx.db, source.ID, model.DebateVoteYes)
+	relation := insertRelationForTest(t, ctx.db, source.ID, target.ID, model.DebateRelationSupport, *target.CurrentRevisionID)
+
+	_, err := ctx.service.ArchiveDebate(ctx.admin, source.ID)
+	require.NoError(t, err)
+	var stored model.DebateRelation
+	require.NoError(t, ctx.db.First(&stored, "id = ?", relation.ID).Error)
+	require.Equal(t, model.DebateRelationUnavailable, stored.Status)
+}
+
+func TestRevisionListReadDiffAndRevert(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	created := createDebateForTest(t, ctx, "One", "Body 1")
+	second, err := ctx.service.SaveWiki(ctx.editor, created.ID, SaveWikiRequest{Title: "Two", Description: "summary 2", Content: "Body 2", Tags: []string{"two"}, EditSummary: "second", BaseRevisionID: *created.CurrentRevisionID})
+	require.NoError(t, err)
+
+	revisions, err := ctx.service.ListRevisions(created.ID)
+	require.NoError(t, err)
+	require.Len(t, revisions, 2)
+	one, err := ctx.service.GetRevision(created.ID, revisions[1].ID)
+	require.NoError(t, err)
+	require.Equal(t, "One", one.Snapshot.Title)
+	diff, err := ctx.service.DiffRevisions(created.ID, revisions[0].ID, revisions[1].ID)
+	require.NoError(t, err)
+	require.True(t, diff.Changes["title"].Changed)
+	require.True(t, diff.Changes["description"].Changed)
+	require.True(t, diff.Changes["content"].Changed)
+	require.True(t, diff.Changes["tags"].Changed)
+
+	reverted, err := ctx.service.RevertRevision(ctx.editor, created.ID, revisions[1].ID, RevertRevisionRequest{BaseRevisionID: *second.CurrentRevisionID, EditSummary: "restore"})
+	require.NoError(t, err)
+	require.Equal(t, "One", reverted.Title)
+	current, err := ctx.service.GetRevision(created.ID, *reverted.CurrentRevisionID)
+	require.NoError(t, err)
+	require.Equal(t, 3, current.VersionNumber)
+	require.Equal(t, "revert", current.EditType)
+}
+
+func TestDebateReferencesProjectRelationsRejectConflictAndCycle(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	a := createDebateForTest(t, ctx, "A", "A")
+	b := createDebateForTest(t, ctx, "B", "B")
+	setConclusionForTest(t, ctx.db, a.ID, model.DebateVoteYes)
+	setConclusionForTest(t, ctx.db, b.ID, model.DebateVoteNo)
+
+	refB := "@debate:" + b.ID.String() + ":support"
+	a2, err := ctx.service.SaveWiki(ctx.editor, a.ID, SaveWikiRequest{Title: "A", Description: "summary", Content: refB + " and " + refB, EditSummary: "cite B twice", BaseRevisionID: *a.CurrentRevisionID})
+	require.NoError(t, err)
+	require.Len(t, a2.References, 2)
+	var relations []model.DebateRelation
+	require.NoError(t, ctx.db.Find(&relations).Error)
+	require.Len(t, relations, 1)
+	require.Equal(t, b.ID, relations[0].SourceDebateID)
+	require.Equal(t, a.ID, relations[0].TargetDebateID)
+	revision, err := ctx.service.GetRevision(a.ID, *a2.CurrentRevisionID)
+	require.NoError(t, err)
+	require.Len(t, revision.References, 2)
+	require.Equal(t, "B", revision.References[0].Title)
+
+	_, err = ctx.service.SaveWiki(ctx.editor, a.ID, SaveWikiRequest{Title: "A", Content: refB + " @debate:" + b.ID.String() + ":oppose", EditSummary: "conflict", BaseRevisionID: *a2.CurrentRevisionID})
+	requireAppError(t, err, "debate.reference_conflict", 409)
+
+	_, err = ctx.service.SaveWiki(ctx.editor, b.ID, SaveWikiRequest{Title: "B", Content: "@debate:" + a.ID.String() + ":support", EditSummary: "cycle", BaseRevisionID: *b.CurrentRevisionID})
+	var appErr *apperr.AppError
+	require.ErrorAs(t, err, &appErr)
+	require.Equal(t, "debate.reference_cycle", appErr.Code)
+	require.NotEmpty(t, appErr.Details["path"])
+}
+
+func TestSaveWikiRollsBackRevisionDebateAndRelationsWhenReferenceSnapshotFails(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	oldSource := createDebateForTest(t, ctx, "Old source", "old")
+	newSource := createDebateForTest(t, ctx, "New source", "new")
+	setConclusionForTest(t, ctx.db, oldSource.ID, model.DebateVoteYes)
+	setConclusionForTest(t, ctx.db, newSource.ID, model.DebateVoteNo)
+	target := createDebateForTest(t, ctx, "Target", "body")
+	oldRaw := "@debate:" + oldSource.ID.String() + ":support"
+	before, err := ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Before", Content: oldRaw, EditSummary: "old ref", BaseRevisionID: *target.CurrentRevisionID})
+	require.NoError(t, err)
+	require.Len(t, before.References, 1)
+
+	injected := errors.New("injected reference snapshot failure")
+	callback := "test:fail-debate-reference-create"
+	require.NoError(t, ctx.db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "debate_revision_references" {
+			tx.AddError(injected)
 		}
 	}))
-	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
-	require.ErrorContains(t, err, "detail failed")
-	var count int64
-	require.NoError(t, db.Model(&model.CommentEntry{}).Count(&count).Error)
-	require.Zero(t, count)
+	t.Cleanup(func() { _ = ctx.db.Callback().Create().Remove(callback) })
+	newRaw := "@debate:" + newSource.ID.String() + ":oppose"
+	_, err = ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "After", Content: newRaw, EditSummary: "new ref", BaseRevisionID: *before.CurrentRevisionID})
+	require.ErrorIs(t, err, injected)
+	require.NoError(t, ctx.db.Callback().Create().Remove(callback))
+
+	var stored model.Debate
+	require.NoError(t, ctx.db.First(&stored, "id = ?", target.ID).Error)
+	require.Equal(t, "Before", stored.Title)
+	require.Equal(t, oldRaw, stored.Content)
+	require.Equal(t, before.CurrentRevisionID, stored.CurrentRevisionID)
+	var revisions []model.Revision
+	require.NoError(t, ctx.db.Where("content_type = ? AND content_id = ?", debateContentType, target.ID).Order("version_number").Find(&revisions).Error)
+	require.Len(t, revisions, 2)
+	require.True(t, revisions[1].IsCurrent)
+	var refs []model.DebateRevisionReference
+	require.NoError(t, ctx.db.Find(&refs).Error)
+	require.Len(t, refs, 1)
+	require.Equal(t, oldSource.ID, refs[0].ResourceID)
+	var relations []model.DebateRelation
+	require.NoError(t, ctx.db.Where("target_debate_id = ?", target.ID).Find(&relations).Error)
+	require.Len(t, relations, 1)
+	require.Equal(t, oldSource.ID, relations[0].SourceDebateID)
+	require.Equal(t, *before.CurrentRevisionID, relations[0].TargetRevisionID)
 }
 
-func TestArgumentRepliesReferencesAndFoldingUseCommentIDs(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	root, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "root", ArgumentType: "support"})
+func TestStaleReferencesCanBeInheritedAndReconfirmed(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	source := createDebateForTest(t, ctx, "Source", "source")
+	target := createDebateForTest(t, ctx, "Target", "target")
+	firstEvent := setConclusionForTest(t, ctx.db, source.ID, model.DebateVoteYes)
+	raw := "@debate:" + source.ID.String() + ":support"
+	target2, err := ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Target", Content: raw, EditSummary: "cite", BaseRevisionID: *target.CurrentRevisionID})
 	require.NoError(t, err)
-	child, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ParentID: &root.ID, Content: "child", ArgumentType: "counter"})
-	require.NoError(t, err)
-	grandchild, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ParentID: &child.ID, Content: "nested reply", ArgumentType: "question"})
-	require.NoError(t, err)
-	var childEntry, grandchildEntry model.CommentEntry
-	require.NoError(t, db.First(&childEntry, "id = ?", child.ID).Error)
-	require.NoError(t, db.First(&grandchildEntry, "id = ?", grandchild.ID).Error)
-	require.Equal(t, root.ID, *childEntry.RootID)
-	require.Equal(t, root.ID, *grandchildEntry.RootID)
-	require.NoError(t, svc.AddArgumentReference(user, child.ID, root.ID))
-	var relation model.DebateArgumentReference
-	require.NoError(t, db.First(&relation, "comment_id = ? AND referenced_comment_id = ?", child.ID, root.ID).Error)
+	require.Len(t, target2.References, 1)
+	relationID := *target2.References[0].RelationID
+	require.NoError(t, ctx.db.Model(&model.DebateRelation{}).Where("id = ?", relationID).Update("status", model.DebateRelationStale).Error)
+	require.NoError(t, ctx.db.Model(&model.Debate{}).Where("id = ?", source.ID).Update("status", model.DebateStatusArchived).Error)
 
-	admin := user
-	admin.Role = authctx.RoleAdmin
-	require.NoError(t, svc.FoldArgument(admin, root.ID, "duplicate"))
-	loaded, err := svc.GetArgument(root.ID)
+	inherited, err := ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Target updated", Content: raw, EditSummary: "copy stale", BaseRevisionID: *target2.CurrentRevisionID})
 	require.NoError(t, err)
-	require.True(t, loaded.IsFolded)
-	require.Equal(t, "duplicate", loaded.FoldNote)
+	require.Equal(t, model.DebateRelationStale, inherited.References[0].State)
+	_, err = ctx.service.SaveWiki(ctx.editor, target.ID, SaveWikiRequest{Title: "Target", Content: raw + " " + raw, EditSummary: "new invalid", BaseRevisionID: *inherited.CurrentRevisionID})
+	requireAppError(t, err, "debate.reference_unavailable", 400)
+
+	require.NoError(t, ctx.db.Model(&model.Debate{}).Where("id = ?", source.ID).Update("status", model.DebateStatusActive).Error)
+	latestEvent := setConclusionForTest(t, ctx.db, source.ID, model.DebateVoteNo)
+	reconfirmed, err := ctx.service.ReconfirmReference(ctx.editor, target.ID, relationID, ReconfirmReferenceRequest{BaseRevisionID: *inherited.CurrentRevisionID, EditSummary: "refresh source"})
+	require.NoError(t, err)
+	require.NotEqual(t, inherited.CurrentRevisionID, reconfirmed.CurrentRevisionID)
+	var relation model.DebateRelation
+	require.NoError(t, ctx.db.First(&relation, "id = ?", relationID).Error)
+	require.Equal(t, model.DebateRelationActive, relation.Status)
+	require.Equal(t, latestEvent.ID, relation.SourceConclusionEventID)
+	require.NotEqual(t, firstEvent.ID, relation.SourceConclusionEventID)
 }
 
-func TestCreateArgumentRejectsConcludedDebate(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	require.NoError(t, db.Model(&debate).Update("status", "concluded").Error)
-	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "late", ArgumentType: "support"})
+func TestGetDebateGraphTreeAndGraphViews(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	root := createDebateForTest(t, ctx, "Root", "root")
+	support := createDebateForTest(t, ctx, "Support", "support")
+	oppose := createDebateForTest(t, ctx, "Oppose", "oppose")
+	far := createDebateForTest(t, ctx, "Far", "far")
+	for _, item := range []DebateDTO{support, oppose, far} {
+		setConclusionForTest(t, ctx.db, item.ID, model.DebateVoteYes)
+	}
+	insertRelationForTest(t, ctx.db, support.ID, root.ID, model.DebateRelationSupport, *root.CurrentRevisionID)
+	insertRelationForTest(t, ctx.db, oppose.ID, root.ID, model.DebateRelationOppose, *root.CurrentRevisionID)
+	insertRelationForTest(t, ctx.db, far.ID, support.ID, model.DebateRelationSupport, *support.CurrentRevisionID)
+
+	tree, err := ctx.service.GetDebateGraph(root.ID, "tree", 1)
+	require.NoError(t, err)
+	require.Len(t, tree.Nodes, 2)
+	require.Len(t, tree.Relations, 1)
+	require.Equal(t, []uuid.UUID{support.ID}, tree.ExpandableNodeIDs)
+	graph, err := ctx.service.GetDebateGraph(root.ID, "graph", 1)
+	require.NoError(t, err)
+	require.Len(t, graph.Nodes, 3)
+	require.Len(t, graph.Relations, 2)
+}
+
+func setConclusionForTest(t *testing.T, db *gorm.DB, debateID uuid.UUID, direction string) model.DebateConclusionEvent {
+	t.Helper()
+	event := model.DebateConclusionEvent{DebateID: debateID, Direction: direction, YesVotes: 8, NoVotes: 2, TotalVotes: 10}
+	require.NoError(t, db.Create(&event).Error)
+	require.NoError(t, db.Model(&model.Debate{}).Where("id = ?", debateID).Updates(map[string]any{"conclusion_type": direction, "current_conclusion_event_id": event.ID}).Error)
+	return event
+}
+
+func insertRelationForTest(t *testing.T, db *gorm.DB, sourceID, targetID uuid.UUID, stance string, revisionID uuid.UUID) model.DebateRelation {
+	t.Helper()
+	var source model.Debate
+	require.NoError(t, db.First(&source, "id = ?", sourceID).Error)
+	relation := model.DebateRelation{SourceDebateID: sourceID, TargetDebateID: targetID, Stance: stance, TargetRevisionID: revisionID, SourceConclusionEventID: *source.CurrentConclusionEventID, Status: model.DebateRelationActive}
+	require.NoError(t, db.Create(&relation).Error)
+	return relation
+}
+
+func requireAppError(t *testing.T, err error, code string, status int) {
+	t.Helper()
 	require.Error(t, err)
-	var count int64
-	require.NoError(t, db.Model(&model.CommentEntry{}).Count(&count).Error)
-	require.Zero(t, count)
+	var appErr *apperr.AppError
+	require.True(t, errors.As(err, &appErr))
+	require.Equal(t, code, appErr.Code)
+	require.Equal(t, status, appErr.HTTPStatus)
 }
 
-func TestUpdateArgumentPreservesConclusion(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
+func seedDebateWithID(t *testing.T, ctx debateTestContext, id uuid.UUID, title string) DebateDTO {
+	t.Helper()
+	debate := model.Debate{Base: model.Base{ID: id}, UserID: ctx.owner.ID, Title: title, Content: title, Status: model.DebateStatusActive}
+	require.NoError(t, ctx.db.Create(&debate).Error)
+	snapshot, err := json.Marshal(DebateSnapshot{Title: title, Content: title, Tags: []string{}})
 	require.NoError(t, err)
-	require.NoError(t, db.Model(&model.DebateArgumentDetail{}).Where("comment_id = ?", created.ID).Update("conclusion", "accepted").Error)
-	updated, err := svc.UpdateArgument(user, created.ID, CreateArgumentRequest{Content: "updated", ArgumentType: "evidence"})
-	require.NoError(t, err)
-	require.Equal(t, "accepted", updated.Conclusion)
-	require.NotEqual(t, uuid.Nil, updated.ID)
+	revision := model.Revision{ContentType: debateContentType, ContentID: debate.ID, VersionNumber: 1, ContentSnapshot: snapshot, EditorID: ctx.owner.ID, EditSummary: "Created", EditType: "creation", Status: "approved", IsCurrent: true}
+	require.NoError(t, ctx.db.Create(&revision).Error)
+	require.NoError(t, ctx.db.Model(&debate).Update("current_revision_id", revision.ID).Error)
+	debate.CurrentRevisionID = &revision.ID
+	return DebateDTO{Debate: debate}
 }
 
-func TestDeleteArgumentRemovesTypedVotesAndReferences(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	root, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "root", ArgumentType: "support"})
-	require.NoError(t, err)
-	child, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ParentID: &root.ID, Content: "child", ArgumentType: "counter"})
-	require.NoError(t, err)
-	require.NoError(t, db.Create(&model.DebateVote{ArgumentID: child.ID, UserID: user.ID, VoteType: 1}).Error)
-	require.NoError(t, db.Create(&model.DebateArgumentReference{CommentID: child.ID, ReferencedCommentID: root.ID}).Error)
-	require.NoError(t, svc.DeleteArgument(user, root.ID))
-	var votes, references int64
-	require.NoError(t, db.Model(&model.DebateVote{}).Where("argument_id IN ?", []uuid.UUID{root.ID, child.ID}).Count(&votes).Error)
-	require.NoError(t, db.Model(&model.DebateArgumentReference{}).Where("comment_id IN ? OR referenced_comment_id IN ?", []uuid.UUID{root.ID, child.ID}, []uuid.UUID{root.ID, child.ID}).Count(&references).Error)
-	require.Zero(t, votes)
-	require.Zero(t, references)
-	var refreshed model.Debate
-	require.NoError(t, db.First(&refreshed, "id = ?", debate.ID).Error)
-	require.Zero(t, refreshed.ArgumentCount)
-}
-
-func TestUpdateArgumentRollsBackCoreEditWhenDetailUpdateFails(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "before", ArgumentType: "support"})
-	require.NoError(t, err)
-	require.NoError(t, db.Callback().Update().Before("gorm:update").Register("reject_argument_detail_update", func(tx *gorm.DB) {
-		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "debate_argument_details" {
-			tx.AddError(errors.New("detail update failed"))
+func captureLockedDebateIDs(t *testing.T, db *gorm.DB) *[]uuid.UUID {
+	t.Helper()
+	locked := []uuid.UUID{}
+	callback := "test:capture_locked_debates:" + uuid.NewString()
+	require.NoError(t, db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Clauses["FOR"]; !ok {
+			return
+		}
+		if debate, ok := tx.Statement.Dest.(*model.Debate); ok && debate.ID != uuid.Nil {
+			locked = append(locked, debate.ID)
 		}
 	}))
-	_, err = svc.UpdateArgument(user, created.ID, CreateArgumentRequest{Content: "after", ArgumentType: "evidence"})
-	require.ErrorContains(t, err, "detail update failed")
-	var stored model.CommentEntry
-	require.NoError(t, db.First(&stored, "id = ?", created.ID).Error)
-	require.Equal(t, "before", stored.Content)
-}
-
-func TestDebateCreatorCanDeleteAnotherUsersArgument(t *testing.T) {
-	svc, db, owner, debate := seededDebateCommentService(t)
-	authorModel := model.User{Username: "author", Email: "author@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
-	require.NoError(t, db.Create(&authorModel).Error)
-	author := authctx.CurrentUser{ID: authorModel.UUID, Username: authorModel.Username, Role: authorModel.Role}
-	created, err := svc.CreateArgument(author, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
-	require.NoError(t, err)
-	require.NoError(t, svc.DeleteArgument(owner, created.ID))
-}
-
-func TestDeleteArgumentRollsBackWhenArgumentCountIsInconsistent(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
-	require.NoError(t, err)
-	require.NoError(t, db.Model(&model.Debate{}).Where("id = ?", debate.ID).Update("argument_count", 0).Error)
-	require.Error(t, svc.DeleteArgument(user, created.ID))
-	var count int64
-	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Count(&count).Error)
-	require.Equal(t, int64(1), count)
-}
-
-func TestCreateAndEditImageOnlyArgument(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	asset := model.MediaAsset{UserID: &user.ID, Purpose: "comment.image", URL: "https://cdn.example/image.png", Key: "comments/image.png", ContentType: "image/png", Size: 10}
-	require.NoError(t, db.Create(&asset).Error)
-	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ArgumentType: "evidence", AttachmentIDs: []uuid.UUID{asset.ID}})
-	require.NoError(t, err)
-	require.Empty(t, created.Content)
-	require.Len(t, created.Attachments, 1)
-	updated, err := svc.UpdateArgument(user, created.ID, CreateArgumentRequest{ArgumentType: "support", AttachmentIDs: []uuid.UUID{asset.ID}})
-	require.NoError(t, err)
-	require.Empty(t, updated.Content)
-	require.Equal(t, asset.ID, updated.Attachments[0].ID)
-}
-
-func TestCreateAndEditArgumentRejectEmptyContentAndAttachments(t *testing.T) {
-	svc, _, user, debate := seededDebateCommentService(t)
-	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ArgumentType: "support"})
-	require.Error(t, err)
-	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
-	require.NoError(t, err)
-	_, err = svc.UpdateArgument(user, created.ID, CreateArgumentRequest{ArgumentType: "support"})
-	require.Error(t, err)
-}
-
-func TestListArgumentsLoadsAttachmentsInOneOrderedQuery(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	assets := make([]model.MediaAsset, 2)
-	for index := range assets {
-		assets[index] = model.MediaAsset{UserID: &user.ID, Purpose: "comment.image", URL: "https://cdn.example/" + string(rune('a'+index)), Key: "comments/" + string(rune('a'+index)), ContentType: "image/png", Size: 10}
-		require.NoError(t, db.Create(&assets[index]).Error)
-	}
-	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ArgumentType: "support", AttachmentIDs: []uuid.UUID{assets[1].ID, assets[0].ID}})
-	require.NoError(t, err)
-	arguments, _, err := svc.ListArguments(debate.ID)
-	require.NoError(t, err)
-	require.Equal(t, []uuid.UUID{assets[1].ID, assets[0].ID}, []uuid.UUID{arguments[0].Attachments[0].ID, arguments[0].Attachments[1].ID})
-}
-
-func TestArgumentMetadataValidationAndAutoFoldMapping(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "bad", ArgumentType: "unknown"})
-	require.Error(t, err)
-	_, err = svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "bad", ArgumentType: "evidence", SourceURL: "javascript:alert(1)"})
-	require.Error(t, err)
-	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "ok", ArgumentType: "support"})
-	require.NoError(t, err)
-	require.NoError(t, db.Model(&model.CommentEntry{}).Where("id = ?", created.ID).Update("status", "auto_folded").Error)
-	loaded, err := svc.GetArgument(created.ID)
-	require.NoError(t, err)
-	require.True(t, loaded.IsFolded)
-}
-
-func TestModerationDeleteDecrementsArgumentCount(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	created, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "claim", ArgumentType: "support"})
-	require.NoError(t, err)
-	admin := user
-	admin.Role = authctx.RoleAdmin
-	require.NoError(t, svc.comments.Moderate(admin, created.ID, comment.ModerateInput{Action: comment.ModerationDelete, Reason: "remove"}))
-	var refreshed model.Debate
-	require.NoError(t, db.First(&refreshed, "id = ?", debate.ID).Error)
-	require.Zero(t, refreshed.ArgumentCount)
-}
-
-func TestDeleteDebateRemovesCommentTargetAndTypedRelations(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	root, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: "root", ArgumentType: "support"})
-	require.NoError(t, err)
-	_, err = svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, ParentID: &root.ID, Content: "child", ArgumentType: "counter"})
-	require.NoError(t, err)
-	require.NoError(t, db.Create(&model.DebateVote{ArgumentID: root.ID, UserID: user.ID, VoteType: 1}).Error)
-	require.NoError(t, svc.DeleteDebate(user, debate.ID))
-	for _, table := range []any{&model.Debate{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.DebateArgumentDetail{}, &model.DebateVote{}} {
-		var count int64
-		require.NoError(t, db.Model(table).Count(&count).Error)
-		require.Zero(t, count)
-	}
-}
-
-func TestDeleteDebateRemovesNodeRelations(t *testing.T) {
-	svc, db, user, source := seededDebateCommentService(t)
-	require.NoError(t, db.Model(&source).Updates(map[string]any{
-		"status": "concluded", "conclusion_type": "yes",
-	}).Error)
-	target := model.Debate{UserID: user.ID, Title: "保留的目标", Status: "open"}
-	require.NoError(t, db.Create(&target).Error)
-	_, err := svc.CreateRelation(user, CreateRelationRequest{
-		SourceDebateID: source.ID,
-		TargetDebateID: target.ID,
-		Stance:         "support",
-	})
-	require.NoError(t, err)
-
-	require.NoError(t, svc.DeleteDebate(user, source.ID))
-	var count int64
-	require.NoError(t, db.Model(&model.DebateRelation{}).Count(&count).Error)
-	require.Zero(t, count)
-}
-
-func TestDeleteRelationRequiresCreatorOrAdmin(t *testing.T) {
-	svc, db, user, source := seededDebateCommentService(t)
-	require.NoError(t, db.Model(&source).Updates(map[string]any{
-		"status": "concluded", "conclusion_type": "yes",
-	}).Error)
-	target := model.Debate{UserID: user.ID, Title: "目标", Status: "open"}
-	require.NoError(t, db.Create(&target).Error)
-	relation, err := svc.CreateRelation(user, CreateRelationRequest{
-		SourceDebateID: source.ID,
-		TargetDebateID: target.ID,
-		Stance:         "oppose",
-	})
-	require.NoError(t, err)
-
-	other := authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser}
-	require.Error(t, svc.DeleteRelation(other, relation.ID))
-	admin := other
-	admin.Role = authctx.RoleAdmin
-	require.NoError(t, svc.DeleteRelation(admin, relation.ID))
-	_, err = svc.CreateRelation(user, CreateRelationRequest{
-		SourceDebateID: source.ID,
-		TargetDebateID: target.ID,
-		Stance:         "oppose",
-	})
-	require.NoError(t, err)
-}
-
-func TestListArgumentsUsesBoundedQueryCount(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	for index := 0; index < 5; index++ {
-		_, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: fmt.Sprintf("claim-%d", index), ArgumentType: "support"})
-		require.NoError(t, err)
-	}
-	queries := 0
-	require.NoError(t, db.Callback().Query().After("gorm:query").Register("count-debate-list-query", func(*gorm.DB) { queries++ }))
-	require.NoError(t, db.Callback().Raw().After("gorm:raw").Register("count-debate-list-raw", func(*gorm.DB) { queries++ }))
-	require.NoError(t, db.Callback().Row().After("gorm:row").Register("count-debate-list-row", func(*gorm.DB) { queries++ }))
-	t.Cleanup(func() {
-		_ = db.Callback().Query().Remove("count-debate-list-query")
-		_ = db.Callback().Raw().Remove("count-debate-list-raw")
-		_ = db.Callback().Row().Remove("count-debate-list-row")
-	})
-	arguments, _, err := svc.ListArguments(debate.ID)
-	require.NoError(t, err)
-	require.Len(t, arguments, 5)
-	require.Positive(t, queries)
-	require.LessOrEqual(t, queries, 12)
-}
-
-func TestListArgumentsPaginatesAndKeepsCrossPageReferences(t *testing.T) {
-	svc, db, user, debate := seededDebateCommentService(t)
-	created := make([]model.DebateArgumentDTO, 0, 6)
-	for index := 0; index < 6; index++ {
-		argument, err := svc.CreateArgument(user, CreateArgumentRequest{DebateID: debate.ID, Content: fmt.Sprintf("page-%d", index), ArgumentType: "support"})
-		require.NoError(t, err)
-		created = append(created, argument)
-		require.NoError(t, db.Where("author_id = ?", user.ID).Delete(&model.CommentPublishRecord{}).Error)
-	}
-	require.NoError(t, svc.AddArgumentReference(user, created[5].ID, created[0].ID))
-	first, total, err := svc.ListArguments(debate.ID, 1, 5)
-	require.NoError(t, err)
-	require.Len(t, first, 5)
-	require.Equal(t, int64(6), total)
-	second, total, err := svc.ListArguments(debate.ID, 2, 5)
-	require.NoError(t, err)
-	require.Len(t, second, 1)
-	require.Equal(t, int64(6), total)
-	require.Len(t, second[0].References, 1)
-	require.Equal(t, created[0].ID, second[0].References[0].ID)
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callback) })
+	return &locked
 }

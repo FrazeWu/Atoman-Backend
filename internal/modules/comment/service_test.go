@@ -135,23 +135,18 @@ func TestCreateWithExtensionCommitsCommentAndExtensionTogether(t *testing.T) {
 	require.Equal(t, "ok", stored.Value)
 }
 
-func TestDebateCommentsRequireArgumentExtension(t *testing.T) {
+func TestDebateCommentsUseGenericCommentFlow(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindDebate, 0)
 
-	_, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "plain root"})
-	require.ErrorIs(t, err, ErrInvalidContent)
-
-	root, err := ctx.service.CreateWithExtension(ctx.users[0], ctx.target, CreateCommentInput{Content: "typed argument"}, func(tx *gorm.DB, entry *model.CommentEntry) error {
-		return tx.Create(&model.DebateArgumentDetail{CommentID: entry.ID, ArgumentType: "support"}).Error
-	})
+	root, err := ctx.service.Create(ctx.users[0], ctx.target, CreateCommentInput{Content: "plain root"})
 	require.NoError(t, err)
 
 	_, err = ctx.service.Create(ctx.users[1], ctx.target, CreateCommentInput{Content: "plain reply", ReplyToID: &root.ID})
-	require.ErrorIs(t, err, ErrInvalidContent)
+	require.NoError(t, err)
 
 	var count int64
 	require.NoError(t, ctx.db.Model(&model.CommentEntry{}).Count(&count).Error)
-	require.EqualValues(t, 1, count)
+	require.EqualValues(t, 2, count)
 }
 
 func TestCreateValidatesAuthenticationTargetAndReply(t *testing.T) {

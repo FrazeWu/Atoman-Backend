@@ -127,9 +127,6 @@ func migrateUnifiedCommentSchema(t *testing.T) *gorm.DB {
 		&model.CommentTimeAnchor{},
 		&model.CommentPublishRecord{},
 		&model.TimelineRevisionProposal{},
-		&model.DebateArgumentDetail{},
-		&model.DebateArgumentReference{},
-		&model.DebateArgumentDebateRef{},
 	)
 
 	if err := RunUnifiedCommentIndexes(db); err != nil {

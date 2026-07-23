@@ -125,9 +125,10 @@ func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T)
 		&model.CommentTimeAnchor{},
 		&model.CommentPublishRecord{},
 		&model.TimelineRevisionProposal{},
-		&model.DebateArgumentDetail{},
-		&model.DebateArgumentReference{},
-		&model.DebateArgumentDebateRef{},
+		&model.Debate{},
+		&model.DebateConclusionEvent{},
+		&model.DebateRevisionReference{},
+		&model.DebateVote{},
 		&model.DebateRelation{},
 	}
 	for _, schemaModel := range models {
