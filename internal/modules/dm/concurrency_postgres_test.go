@@ -85,9 +85,12 @@ func concurrentDMSends(t *testing.T, send func() (MessageDTO, error)) [2]dmSendR
 
 func newDMPostgresDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
-		t.Skip("TEST_POSTGRES_DSN is not configured")
+		dsn = os.Getenv("TEST_POSTGRES_DSN")
+	}
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL or TEST_POSTGRES_DSN is not configured")
 	}
 	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{DisableAutomaticPing: true})
 	if err != nil {
