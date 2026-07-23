@@ -19,6 +19,9 @@ import (
 func TestConcurrentTargetSendsCreateOneConversationInPostgres(t *testing.T) {
 	db := newDMPostgresDB(t)
 	actor, recipient := createDMPostgresUser(t, db), createDMPostgresUser(t, db)
+	if err := db.Create(&model.UserSettings{UserID: recipient, DMPermission: model.DMPermissionAnyone}).Error; err != nil {
+		t.Fatal(err)
+	}
 	service := NewService(NewRepo(db), nil, nil, nil)
 
 	results := concurrentDMSends(t, func(ctx context.Context) (MessageDTO, error) {
@@ -41,6 +44,9 @@ func TestConcurrentTargetSendsCreateOneConversationInPostgres(t *testing.T) {
 func TestConcurrentIdempotentSendsCreateOneMessageInPostgres(t *testing.T) {
 	db := newDMPostgresDB(t)
 	actor, recipient, clientID := createDMPostgresUser(t, db), createDMPostgresUser(t, db), uuid.New()
+	if err := db.Create(&model.UserSettings{UserID: recipient, DMPermission: model.DMPermissionAnyone}).Error; err != nil {
+		t.Fatal(err)
+	}
 	service := NewService(NewRepo(db), nil, nil, nil)
 
 	results := concurrentDMSends(t, func(ctx context.Context) (MessageDTO, error) {
@@ -131,7 +137,7 @@ func newDMPostgresDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.DMConversation{}, &model.DMMessage{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.UserSettings{}, &model.DMChannelSettings{}, &model.UserBlock{}, &model.Follow{}, &model.DMConversation{}, &model.DMMessage{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Exec("CREATE UNIQUE INDEX uq_dm_conversation_typed ON dm_conversations (participant_a_type, participant_a, participant_b_type, participant_b) WHERE deleted_at IS NULL").Error; err != nil {

@@ -194,7 +194,8 @@ func (s *Service) SendToTarget(ctx context.Context, actorUserID uuid.UUID, targe
 		if err != nil {
 			return err
 		}
-		return s.createMessage(repo, access.Conversation, SenderIdentity{SenderType: model.DMPartyUser, SenderID: actorUserID, ActorUserID: actorUserID}, input, &result)
+		sender := SenderIdentity{SenderType: model.DMPartyUser, SenderID: actorUserID, ActorUserID: actorUserID}
+		return s.sendWithPolicy(repo, access, sender, input, &result)
 	})
 	return result, err
 }
@@ -217,9 +218,128 @@ func (s *Service) SendInConversation(ctx context.Context, actorUserID, conversat
 		if err != nil {
 			return err
 		}
-		return s.createMessage(repo, access.Conversation, sender, input, &result)
+		return s.sendWithPolicy(repo, access, sender, input, &result)
 	})
 	return result, err
+}
+
+func (s *Service) BlockConversation(ctx context.Context, actor authctx.CurrentUser, conversationID uuid.UUID) (ConversationDTO, error) {
+	var conversation model.DMConversation
+	err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		repo := NewRepo(tx)
+		access, err := repo.GetConversationForActor(conversationID, actor.ID)
+		if err != nil {
+			return err
+		}
+		otherUserID, err := repo.OtherUserForConversation(access, actor.ID)
+		if err != nil {
+			return err
+		}
+		if err := repo.BlockUser(actor.ID, otherUserID); err != nil {
+			return err
+		}
+		conversation = access.Conversation
+		return nil
+	})
+	return conversationDTO(conversation), err
+}
+
+func (s *Service) UnblockConversation(ctx context.Context, actor authctx.CurrentUser, conversationID uuid.UUID) (ConversationDTO, error) {
+	var conversation model.DMConversation
+	err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		repo := NewRepo(tx)
+		access, err := repo.GetConversationForActor(conversationID, actor.ID)
+		if err != nil {
+			return err
+		}
+		otherUserID, err := repo.OtherUserForConversation(access, actor.ID)
+		if err != nil {
+			return err
+		}
+		if err := repo.UnblockUser(actor.ID, otherUserID); err != nil {
+			return err
+		}
+		conversation = access.Conversation
+		return nil
+	})
+	return conversationDTO(conversation), err
+}
+
+func (s *Service) sendWithPolicy(repo *Repo, access ConversationAccess, sender SenderIdentity, input SendInput, result *MessageDTO) error {
+	if err := repo.LockActor(sender.ActorUserID); err != nil {
+		return err
+	}
+	if existing, err := repo.FindMessageByClientID(sender.ActorUserID, input.ClientMessageID); err == nil {
+		*result = messageDTO(existing)
+		return nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	recipient, err := RecipientForSender(access.Conversation, sender)
+	if err != nil {
+		return err
+	}
+	recipientTarget, err := repo.ResolveTarget(recipient)
+	if err != nil {
+		return err
+	}
+	blocked, err := repo.IsBlocked(sender.ActorUserID, recipientTarget.OwnerUserID)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return ErrBlocked
+	}
+	permission, err := repo.RecipientPermission(recipient)
+	if err != nil {
+		return err
+	}
+	if permission == model.DMPermissionClosed {
+		return ErrPermissionDenied
+	}
+	if permission == model.DMPermissionFollowingOnly && sender.SenderType == model.DMPartyUser && recipient.Type == model.DMPartyUser {
+		following, err := repo.IsFollowing(recipient.ID, sender.ActorUserID)
+		if err != nil {
+			return err
+		}
+		if !following {
+			return ErrPermissionDenied
+		}
+	}
+	if permission == model.DMPermissionOneBeforeReply {
+		senderCount, err := repo.CountMessagesFromSender(access.Conversation.ID, sender)
+		if err != nil {
+			return err
+		}
+		recipientCount, err := repo.CountMessagesFromSender(access.Conversation.ID, SenderIdentity{SenderType: recipient.Type, SenderID: recipient.ID})
+		if err != nil {
+			return err
+		}
+		if senderCount > 0 && recipientCount == 0 {
+			return ErrWaitingReply
+		}
+	}
+	messages, err := repo.CountActorMessagesSince(sender.ActorUserID, time.Now().Add(-time.Minute))
+	if err != nil {
+		return err
+	}
+	if messages >= 30 {
+		return ErrRateLimited
+	}
+	senderCount, err := repo.CountMessagesFromSender(access.Conversation.ID, sender)
+	if err != nil {
+		return err
+	}
+	if senderCount == 0 {
+		targets, err := repo.CountActorInitiatedTargetsSince(sender.ActorUserID, time.Now().Add(-time.Hour))
+		if err != nil {
+			return err
+		}
+		if targets >= 10 {
+			return ErrRateLimited
+		}
+	}
+	return s.createMessage(repo, access.Conversation, sender, input, result)
 }
 
 func (s *Service) GetTargetConversation(ctx context.Context, actorUserID uuid.UUID, target TargetRef) (ConversationDTO, error) {

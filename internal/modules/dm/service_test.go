@@ -88,7 +88,7 @@ func testDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.Channel{}, &model.DMConversation{}, &model.DMMessage{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Channel{}, &model.UserSettings{}, &model.DMChannelSettings{}, &model.UserBlock{}, &model.Follow{}, &model.DMConversation{}, &model.DMMessage{}); err != nil {
 		t.Fatal(err)
 	}
 	return db

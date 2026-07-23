@@ -59,6 +59,16 @@ func ResolveSender(actorUserID uuid.UUID, conversation model.DMConversation, cha
 	return SenderIdentity{}, ErrConversationForbidden
 }
 
+func RecipientForSender(conversation model.DMConversation, sender SenderIdentity) (TargetRef, error) {
+	if sender.SenderType == conversation.ParticipantAType && sender.SenderID == conversation.ParticipantA {
+		return TargetRef{Type: conversation.ParticipantBType, ID: conversation.ParticipantB}, nil
+	}
+	if sender.SenderType == conversation.ParticipantBType && sender.SenderID == conversation.ParticipantB {
+		return TargetRef{Type: conversation.ParticipantAType, ID: conversation.ParticipantA}, nil
+	}
+	return TargetRef{}, ErrConversationForbidden
+}
+
 func validParty(party TargetRef) bool {
 	return party.ID != uuid.Nil && (party.Type == model.DMPartyUser || party.Type == model.DMPartyChannel)
 }

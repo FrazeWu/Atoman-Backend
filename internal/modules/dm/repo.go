@@ -126,6 +126,108 @@ func (r *Repo) CreateMessage(message *model.DMMessage) (model.DMMessage, bool, e
 	return existing, false, nil
 }
 
+func (r *Repo) RecipientPermission(recipient TargetRef) (string, error) {
+	switch recipient.Type {
+	case model.DMPartyUser:
+		settings := model.UserSettings{UserID: recipient.ID}
+		if err := r.db.FirstOrCreate(&settings, model.UserSettings{UserID: recipient.ID}).Error; err != nil {
+			return "", err
+		}
+		if settings.DMPermission == "" {
+			return model.DMPermissionOneBeforeReply, nil
+		}
+		return settings.DMPermission, nil
+	case model.DMPartyChannel:
+		settings := model.DMChannelSettings{ChannelID: recipient.ID}
+		if err := r.db.FirstOrCreate(&settings, model.DMChannelSettings{ChannelID: recipient.ID}).Error; err != nil {
+			return "", err
+		}
+		if settings.Permission == "" {
+			return model.DMPermissionOneBeforeReply, nil
+		}
+		return settings.Permission, nil
+	default:
+		return "", ErrTargetNotFound
+	}
+}
+
+func (r *Repo) IsFollowing(followerID, followingID uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.Model(&model.Follow{}).Where("follower_id = ? AND following_id = ?", followerID, followingID).Count(&count).Error
+	return count > 0, err
+}
+
+func (r *Repo) IsBlocked(firstUserID, secondUserID uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.Model(&model.UserBlock{}).Where("(blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)", firstUserID, secondUserID, secondUserID, firstUserID).Count(&count).Error
+	return count > 0, err
+}
+
+func (r *Repo) CountMessagesFromSender(conversationID uuid.UUID, sender SenderIdentity) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.DMMessage{}).Where("conversation_id = ? AND sender_type = ? AND sender_id = ?", conversationID, sender.SenderType, sender.SenderID).Count(&count).Error
+	return count, err
+}
+
+func (r *Repo) CountActorMessagesSince(actorID uuid.UUID, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.Model(&model.DMMessage{}).Where("actor_user_id = ? AND created_at >= ?", actorID, since).Count(&count).Error
+	return count, err
+}
+
+func (r *Repo) CountActorInitiatedTargetsSince(actorID uuid.UUID, since time.Time) (int64, error) {
+	var count int64
+	err := r.db.Raw(`
+		SELECT COUNT(*)
+		FROM dm_conversations conversation
+		WHERE EXISTS (
+			SELECT 1 FROM dm_messages message
+			WHERE message.conversation_id = conversation.id
+				AND message.actor_user_id = ?
+				AND message.created_at >= ?
+				AND NOT EXISTS (
+					SELECT 1 FROM dm_messages earlier
+					WHERE earlier.conversation_id = message.conversation_id
+						AND (earlier.created_at < message.created_at OR (earlier.created_at = message.created_at AND earlier.id < message.id))
+				)
+		)
+	`, actorID, since).Scan(&count).Error
+	return count, err
+}
+
+func (r *Repo) LockActor(actorID uuid.UUID) error {
+	var user model.User
+	return r.db.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, "uuid = ?", actorID).Error
+}
+
+func (r *Repo) BlockUser(blockerID, blockedID uuid.UUID) error {
+	return r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.UserBlock{BlockerID: blockerID, BlockedID: blockedID}).Error
+}
+
+func (r *Repo) UnblockUser(blockerID, blockedID uuid.UUID) error {
+	return r.db.Where("blocker_id = ? AND blocked_id = ?", blockerID, blockedID).Delete(&model.UserBlock{}).Error
+}
+
+func (r *Repo) OtherUserForConversation(access ConversationAccess, actorID uuid.UUID) (uuid.UUID, error) {
+	conversation := access.Conversation
+	if conversation.ParticipantBType == model.DMPartyChannel {
+		if actorID == conversation.ParticipantA {
+			return access.ChannelOwnerID, nil
+		}
+		if actorID == access.ChannelOwnerID {
+			return conversation.ParticipantA, nil
+		}
+		return uuid.Nil, ErrConversationForbidden
+	}
+	if actorID == conversation.ParticipantA {
+		return conversation.ParticipantB, nil
+	}
+	if actorID == conversation.ParticipantB {
+		return conversation.ParticipantA, nil
+	}
+	return uuid.Nil, ErrConversationForbidden
+}
+
 func (r *Repo) FindMessageByClientID(actorUserID, clientMessageID uuid.UUID) (model.DMMessage, error) {
 	var message model.DMMessage
 	err := r.db.Where("actor_user_id = ? AND client_message_id = ?", actorUserID, clientMessageID).First(&message).Error
