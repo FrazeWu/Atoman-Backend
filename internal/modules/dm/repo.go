@@ -171,7 +171,11 @@ func (r *Repo) ListMailboxConversations(actorID uuid.UUID, mailbox TargetRef, cu
 		db = db.Where("participant_b_type = ? AND participant_b = ?", model.DMPartyChannel, mailbox.ID)
 	}
 	if cursor != nil {
-		db = db.Where("(last_message_at < ?) OR (last_message_at = ? AND id < ?)", cursor.At, cursor.At, cursor.ID)
+		if cursor.Null {
+			db = db.Where("last_message_at IS NULL AND id < ?", cursor.ID)
+		} else {
+			db = db.Where("last_message_at IS NULL OR (last_message_at < ?) OR (last_message_at = ? AND id < ?)", cursor.At, cursor.At, cursor.ID)
+		}
 	}
 	var conversations []model.DMConversation
 	err := db.Order("last_message_at DESC NULLS LAST, id DESC").Limit(limit + 1).Find(&conversations).Error

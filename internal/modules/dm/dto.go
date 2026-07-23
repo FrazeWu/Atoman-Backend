@@ -34,8 +34,9 @@ type ConversationDTO struct {
 }
 
 type Cursor struct {
-	At time.Time `json:"at"`
-	ID uuid.UUID `json:"id"`
+	At   time.Time `json:"at"`
+	ID   uuid.UUID `json:"id"`
+	Null bool      `json:"null,omitempty"`
 }
 
 type PageDTO[T any] struct {
@@ -80,7 +81,7 @@ func decodeCursor(value string) (Cursor, error) {
 		return Cursor{}, apperr.BadRequest("validation.invalid_request", "cursor is invalid")
 	}
 	var cursor Cursor
-	if err := json.Unmarshal(data, &cursor); err != nil || cursor.At.IsZero() || cursor.ID == uuid.Nil {
+	if err := json.Unmarshal(data, &cursor); err != nil || (!cursor.Null && cursor.At.IsZero()) || cursor.ID == uuid.Nil {
 		return Cursor{}, apperr.BadRequest("validation.invalid_request", "cursor is invalid")
 	}
 	return cursor, nil

@@ -58,6 +58,40 @@ func TestConversationCursorAndMailboxAccess(t *testing.T) {
 	_ = third
 }
 
+func TestConversationCursorPaginatesNullLastMessageAtWithoutDuplicates(t *testing.T) {
+	db := testDB(t)
+	actor := testUser(t, db)
+	for range 5 {
+		conversation := model.DMConversation{ParticipantAType: model.DMPartyUser, ParticipantA: actor, ParticipantBType: model.DMPartyUser, ParticipantB: uuid.New()}
+		if err := db.Create(&conversation).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	service := NewService(NewRepo(db), nil, nil, nil)
+	cursor := ""
+	seen := make(map[uuid.UUID]struct{})
+	for pageNumber := 0; pageNumber < 3; pageNumber++ {
+		page, err := service.ListConversations(context.Background(), authctx.CurrentUser{ID: actor}, TargetRef{Type: model.DMPartyUser, ID: actor}, cursor, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) == 0 {
+			t.Fatalf("page %d unexpectedly empty", pageNumber)
+		}
+		for _, conversation := range page.Items {
+			if _, exists := seen[conversation.ID]; exists {
+				t.Fatalf("conversation %s appeared more than once", conversation.ID)
+			}
+			seen[conversation.ID] = struct{}{}
+		}
+		cursor = page.NextCursor
+	}
+	if len(seen) != 5 || cursor != "" {
+		t.Fatalf("expected all five null-timestamp conversations exactly once, got %d with cursor %q", len(seen), cursor)
+	}
+}
+
 func TestMessageCursorReturnsNewestWindowInChronologicalOrder(t *testing.T) {
 	db := testDB(t)
 	actor, other := testUser(t, db), testUser(t, db)

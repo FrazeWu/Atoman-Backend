@@ -73,6 +73,8 @@ func (s *Service) ListConversations(ctx context.Context, actor authctx.CurrentUs
 		last := conversations[len(conversations)-1]
 		if last.LastMessageAt != nil {
 			page.NextCursor = encodeCursor(Cursor{At: *last.LastMessageAt, ID: last.ID})
+		} else {
+			page.NextCursor = encodeCursor(Cursor{ID: last.ID, Null: true})
 		}
 	}
 	for _, conversation := range conversations {
