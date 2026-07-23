@@ -169,6 +169,12 @@ func (r *Repo) IsBlocked(firstUserID, secondUserID uuid.UUID) (bool, error) {
 	return count > 0, err
 }
 
+func (r *Repo) HasBlockedUser(blockerID, blockedID uuid.UUID) (bool, error) {
+	var count int64
+	err := r.db.Model(&model.UserBlock{}).Where("blocker_id = ? AND blocked_id = ?", blockerID, blockedID).Count(&count).Error
+	return count > 0, err
+}
+
 func (r *Repo) CountMessagesFromSender(conversationID uuid.UUID, sender SenderIdentity) (int64, error) {
 	var count int64
 	err := r.db.Model(&model.DMMessage{}).Where("conversation_id = ? AND sender_type = ? AND sender_id = ?", conversationID, sender.SenderType, sender.SenderID).Count(&count).Error
@@ -247,7 +253,7 @@ func (r *Repo) IsConversationBlockedForActor(conversation model.DMConversation, 
 	if err != nil {
 		return false, err
 	}
-	return r.IsBlocked(actorID, otherUserID)
+	return r.HasBlockedUser(actorID, otherUserID)
 }
 
 func (r *Repo) FindMessageByClientID(actorUserID, clientMessageID uuid.UUID) (model.DMMessage, error) {

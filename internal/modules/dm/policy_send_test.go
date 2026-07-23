@@ -154,12 +154,22 @@ func TestConversationBlockedStateUsesRealUsers(t *testing.T) {
 		t.Fatalf("user mailbox blocked state = %#v, %v", conversations, err)
 	}
 	conversations, err = service.ListConversations(context.Background(), authctx.CurrentUser{ID: owner}, TargetRef{Type: model.DMPartyChannel, ID: channelID}, "", 30)
-	if err != nil || len(conversations.Items) != 1 || !conversations.Items[0].Blocked {
-		t.Fatalf("channel mailbox blocked state = %#v, %v", conversations, err)
+	if err != nil || len(conversations.Items) != 1 || conversations.Items[0].Blocked {
+		t.Fatalf("channel mailbox must not expose the other user's block = %#v, %v", conversations, err)
 	}
 	unblocked, err := service.UnblockConversation(context.Background(), authctx.CurrentUser{ID: user}, message.ConversationID)
 	if err != nil || unblocked.Blocked {
 		t.Fatalf("unblock result = %#v, %v", unblocked, err)
+	}
+	if err := db.Create(&model.UserBlock{BlockerID: owner, BlockedID: user}).Error; err != nil {
+		t.Fatal(err)
+	}
+	conversations, err = service.ListConversations(context.Background(), authctx.CurrentUser{ID: user}, TargetRef{Type: model.DMPartyUser, ID: user}, "", 30)
+	if err != nil || len(conversations.Items) != 1 || conversations.Items[0].Blocked {
+		t.Fatalf("other user's block must stay private = %#v, %v", conversations, err)
+	}
+	if _, err := service.SendInConversation(context.Background(), user, message.ConversationID, SendInput{Content: "blocked", ClientMessageID: uuid.New()}); !errors.Is(err, ErrBlocked) {
+		t.Fatalf("other user's block must reject sending: %v", err)
 	}
 }
 
