@@ -236,6 +236,34 @@
                 }
             }
         },
+        "/api/v1/admin/dm/reports": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm-admin"
+                ],
+                "summary": "List DM reports",
+                "responses": {}
+            }
+        },
+        "/api/v1/admin/dm/reports/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm-admin"
+                ],
+                "summary": "Review DM report",
+                "responses": {}
+            }
+        },
         "/api/v1/admin/music/entries": {
             "get": {
                 "security": [
@@ -6060,312 +6088,220 @@
                 }
             }
         },
-        "/api/v1/dm/conversations": {
+        "/api/v1/dm/channels/{id}/settings": {
             "get": {
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
                     }
-                ],
-                "description": "返回当前用户的私信会话列表和未读计数。",
-                "produces": [
-                    "application/json"
                 ],
                 "tags": [
                     "dm"
                 ],
-                "summary": "获取私信会话列表",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DMConversationListResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
+                "summary": "Get channel DM permission",
+                "responses": {}
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
                     }
-                }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Update channel DM permission",
+                "responses": {}
             }
         },
-        "/api/v1/dm/conversations/{username}": {
-            "get": {
+        "/api/v1/dm/conversations/{id}/block": {
+            "put": {
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
                     }
-                ],
-                "description": "按对方用户名获取私信会话消息，支持分页并返回固定 page_size。",
-                "produces": [
-                    "application/json"
                 ],
                 "tags": [
                     "dm"
                 ],
-                "summary": "获取会话消息列表",
-                "parameters": [
+                "summary": "Block DM conversation",
+                "responses": {}
+            },
+            "delete": {
+                "security": [
                     {
-                        "type": "string",
-                        "description": "对方用户名",
-                        "name": "username",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "integer",
-                        "default": 1,
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
+                        "BearerAuth": []
                     }
                 ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DMMessageListResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Unblock DM conversation",
+                "responses": {}
+            }
+        },
+        "/api/v1/dm/conversations/{id}/messages": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
                     }
-                }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "List DM messages",
+                "responses": {}
             },
             "post": {
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
                     }
-                ],
-                "description": "向指定用户名发送文本或图片私信。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
                 ],
                 "tags": [
                     "dm"
                 ],
-                "summary": "发送私信",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "对方用户名",
-                        "name": "username",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "私信输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DMSendInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.DMMessageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
+                "summary": "Send DM in conversation",
+                "responses": {}
             }
         },
-        "/api/v1/dm/conversations/{username}/read": {
+        "/api/v1/dm/conversations/{id}/read": {
             "put": {
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
                     }
-                ],
-                "description": "将与指定用户名的会话中对方发来的未读消息全部标记为已读。",
-                "produces": [
-                    "application/json"
                 ],
                 "tags": [
                     "dm"
                 ],
-                "summary": "标记会话已读",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "对方用户名",
-                        "name": "username",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.BoolStatusResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
+                "summary": "Mark DM conversation read",
+                "responses": {}
             }
         },
-        "/api/v1/dm/unread-count": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "返回当前用户的未读私信数量。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "dm"
-                ],
-                "summary": "获取未读私信数",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CountResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/dm/upload": {
+        "/api/v1/dm/images": {
             "post": {
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
                     }
-                ],
-                "description": "上传一张私信图片，支持 JPEG、PNG、GIF、WebP，最大 10MB。",
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
                 ],
                 "tags": [
                     "dm"
                 ],
-                "summary": "上传私信图片",
-                "parameters": [
+                "summary": "Upload private DM image",
+                "responses": {}
+            }
+        },
+        "/api/v1/dm/images/{id}/content": {
+            "get": {
+                "security": [
                     {
-                        "type": "file",
-                        "description": "图片文件",
-                        "name": "image",
-                        "in": "formData",
-                        "required": true
+                        "BearerAuth": []
                     }
                 ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ImageUploadResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Read private DM image",
+                "responses": {}
+            }
+        },
+        "/api/v1/dm/mailboxes": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
                     }
-                }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "DM mailboxes",
+                "responses": {}
+            }
+        },
+        "/api/v1/dm/mailboxes/{type}/{id}/conversations": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "DM mailbox conversations",
+                "responses": {}
+            }
+        },
+        "/api/v1/dm/messages/{id}/reports": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Report DM message",
+                "responses": {}
+            }
+        },
+        "/api/v1/dm/settings": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Get DM permission",
+                "responses": {}
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Update DM permission",
+                "responses": {}
+            }
+        },
+        "/api/v1/dm/targets/{type}/{id}/conversation": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Find DM target conversation",
+                "responses": {}
+            }
+        },
+        "/api/v1/dm/targets/{type}/{id}/messages": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Send DM to target",
+                "responses": {}
             }
         },
         "/api/v1/feed/explore": {
@@ -8330,6 +8266,66 @@
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/timeline/updates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "检查当前用户订阅的外部 RSS 是否在指定游标后产生新内容。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "检查订阅时间线更新",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "上次服务端检查时间（RFC3339）",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "订阅 UUID",
+                        "name": "source_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "分组 UUID",
+                        "name": "group_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.TimelineUpdatesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
                         }
@@ -15114,7 +15110,7 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "返回当前登录用户的隐私与私信设置。",
+                "description": "返回当前登录用户的隐私设置。",
                 "produces": [
                     "application/json"
                 ],
@@ -15140,7 +15136,7 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "更新私密资料开关和私信权限设置。",
+                "description": "更新私密资料开关。",
                 "consumes": [
                     "application/json"
                 ],
@@ -16935,25 +16931,71 @@
         "debate.DebateReferenceDTO": {
             "type": "object",
             "properties": {
-                "kind": {
+                "end": {
+                    "type": "integer"
+                },
+                "field": {
                     "type": "string"
                 },
-                "qualifier": {
+                "id": {
                     "type": "string"
                 },
                 "raw": {
                     "type": "string"
                 },
-                "relation_id": {
+                "relation": {
+                    "$ref": "#/definitions/debate.DebateReferenceRelationDTO"
+                },
+                "start": {
+                    "type": "integer"
+                },
+                "target": {
+                    "$ref": "#/definitions/debate.DebateReferenceTargetDTO"
+                }
+            }
+        },
+        "debate.DebateReferenceRelationDTO": {
+            "type": "object",
+            "properties": {
+                "conclusion_direction": {
                     "type": "string"
                 },
-                "resource_id": {
+                "conclusion_event_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "stance": {
                     "type": "string"
                 },
                 "state": {
                     "type": "string"
+                }
+            }
+        },
+        "debate.DebateReferenceTargetDTO": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
                 },
-                "title": {
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "module": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "subtitle": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }
@@ -17842,7 +17884,27 @@
                     }
                 },
                 "meta": {
-                    "$ref": "#/definitions/httpx.PageMeta"
+                    "$ref": "#/definitions/feed.TimelineMeta"
+                }
+            }
+        },
+        "feed.TimelineMeta": {
+            "type": "object",
+            "properties": {
+                "checked_at": {
+                    "type": "string"
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -17945,6 +18007,17 @@
                 "total": {
                     "type": "integer",
                     "example": 20
+                }
+            }
+        },
+        "feed.TimelineUpdatesResponse": {
+            "type": "object",
+            "properties": {
+                "checked_at": {
+                    "type": "string"
+                },
+                "has_updates": {
+                    "type": "boolean"
                 }
             }
         },
@@ -18258,15 +18331,6 @@
                 }
             }
         },
-        "handlers.CountResponse": {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer",
-                    "example": 8
-                }
-            }
-        },
         "handlers.CreateEventInput": {
             "type": "object",
             "required": [
@@ -18396,93 +18460,6 @@
                 },
                 "edit_summary": {
                     "type": "string"
-                }
-            }
-        },
-        "handlers.DMConversationItemResponse": {
-            "type": "object",
-            "properties": {
-                "conversation_id": {
-                    "type": "string",
-                    "format": "uuid",
-                    "example": "018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"
-                },
-                "last_message_at": {
-                    "type": "string",
-                    "format": "date-time",
-                    "example": "2026-05-25T11:00:00Z"
-                },
-                "other_user_id": {
-                    "type": "string",
-                    "format": "uuid",
-                    "example": "018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8b"
-                },
-                "other_username": {
-                    "type": "string",
-                    "example": "alice"
-                },
-                "preview": {
-                    "type": "string",
-                    "example": "Hello there"
-                },
-                "unread_count": {
-                    "type": "integer",
-                    "example": 2
-                }
-            }
-        },
-        "handlers.DMConversationListResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.DMConversationItemResponse"
-                    }
-                }
-            }
-        },
-        "handlers.DMMessageListResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.DMMessage"
-                    }
-                },
-                "page": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "page_size": {
-                    "type": "integer",
-                    "example": 30
-                },
-                "total": {
-                    "type": "integer",
-                    "example": 30
-                }
-            }
-        },
-        "handlers.DMMessageResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/model.DMMessage"
-                }
-            }
-        },
-        "handlers.DMSendInput": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "example": "Hi there"
-                },
-                "image_url": {
-                    "type": "string",
-                    "example": "https://cdn.example.com/dm.png"
                 }
             }
         },
@@ -18819,15 +18796,6 @@
             "properties": {
                 "data": {
                     "$ref": "#/definitions/model.ForumUserModerationAction"
-                }
-            }
-        },
-        "handlers.ImageUploadResponse": {
-            "type": "object",
-            "properties": {
-                "image_url": {
-                    "type": "string",
-                    "example": "https://cdn.example.com/uploaded.png"
                 }
             }
         },
@@ -19874,9 +19842,6 @@
         "handlers.UserSettingsInput": {
             "type": "object",
             "properties": {
-                "dm_permission": {
-                    "type": "string"
-                },
                 "private_profile": {
                     "type": "boolean"
                 }
@@ -19886,7 +19851,12 @@
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/model.UserSettings"
+                    "type": "object",
+                    "properties": {
+                        "private_profile": {
+                            "type": "boolean"
+                        }
+                    }
                 },
                 "message": {
                     "type": "string",
@@ -20631,38 +20601,6 @@
                     "type": "string"
                 },
                 "reason": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.DMMessage": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "conversation_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "image_url": {
-                    "type": "string"
-                },
-                "read_at": {
-                    "type": "string"
-                },
-                "sender": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "sender_id": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -22101,20 +22039,6 @@
                     "type": "string"
                 },
                 "website": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.UserSettings": {
-            "type": "object",
-            "properties": {
-                "dm_permission": {
-                    "type": "string"
-                },
-                "private_profile": {
-                    "type": "boolean"
-                },
-                "user_id": {
                     "type": "string"
                 }
             }

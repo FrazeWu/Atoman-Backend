@@ -8,6 +8,7 @@ import (
 	"atoman/internal/modules/comment"
 	"atoman/internal/modules/debate"
 	"atoman/internal/modules/debate_voting"
+	"atoman/internal/modules/dm"
 	"atoman/internal/modules/feed"
 	"atoman/internal/modules/forum"
 	"atoman/internal/modules/forum_engagement"
@@ -40,7 +41,9 @@ func RegisterV1Routes(
 	reference.RegisterRoutes(group, reference.NewService(db))
 	blog.RegisterRoutes(group.Group("/blog"), blog.NewService(db))
 	feed.RegisterRoutes(group.Group("/feed"), feed.NewService(db))
-	notification.RegisterRoutes(group, notification.NewService(db))
+	notificationService := notification.NewService(db)
+	notification.RegisterRoutes(group, notificationService)
+	dm.RegisterRoutes(group, dm.NewService(dm.NewRepo(db), dm.NewImageStoreFromEnv(s3Client), dm.UserHubPublisher{Hub: userHub}, notificationService))
 	forumGroup := group.Group("/forum")
 	forum.RegisterRoutes(forumGroup, forumService)
 	forum_engagement.RegisterRoutes(forumGroup, forum_engagement.NewService(db))
@@ -69,7 +72,6 @@ func RegisterV1Routes(
 	handlers.SetupArtistWikiRoutes(r, db)
 	handlers.SetupCorrectionRoutes(r, db, s3Client)
 	handlers.SetupEntryStatusRoutes(r, db)
-	handlers.SetupDMRoutes(r, db, userHub, s3Client)
 	handlers.SetupTimelineRoutes(r, db)
 	handlers.SetupVideoRoutes(r, db, s3Client)
 	handlers.SetupRevisionRoutes(r, db)

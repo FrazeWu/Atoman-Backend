@@ -102,8 +102,10 @@ type UserListResponse struct {
 }
 
 type UserSettingsResponse struct {
-	Data    model.UserSettings `json:"data"`
-	Message string             `json:"message" example:"ok"`
+	Data struct {
+		PrivateProfile bool `json:"private_profile"`
+	} `json:"data"`
+	Message string `json:"message" example:"ok"`
 }
 
 type SearchUserSummary struct {
@@ -494,39 +496,6 @@ type NotificationListResponse struct {
 
 type CountResponse struct {
 	Count int64 `json:"count" example:"8"`
-}
-
-type DMConversationItemResponse struct {
-	ConversationID string `json:"conversation_id" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
-	OtherUsername  string `json:"other_username" example:"alice"`
-	OtherUserID    string `json:"other_user_id" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8b"`
-	LastMessageAt  string `json:"last_message_at,omitempty" format:"date-time" example:"2026-05-25T11:00:00Z"`
-	Preview        string `json:"preview" example:"Hello there"`
-	UnreadCount    int64  `json:"unread_count" example:"2"`
-}
-
-type DMConversationListResponse struct {
-	Data []DMConversationItemResponse `json:"data"`
-}
-
-type DMMessageListResponse struct {
-	Data     []model.DMMessage `json:"data"`
-	Total    int64             `json:"total" example:"30"`
-	Page     int               `json:"page" example:"1"`
-	PageSize int               `json:"page_size" example:"30"`
-}
-
-type DMMessageResponse struct {
-	Data model.DMMessage `json:"data"`
-}
-
-type DMSendInput struct {
-	Content  string `json:"content" example:"Hi there"`
-	ImageURL string `json:"image_url" example:"https://cdn.example.com/dm.png"`
-}
-
-type ImageUploadResponse struct {
-	ImageURL string `json:"image_url" example:"https://cdn.example.com/uploaded.png"`
 }
 
 type ConflictWithIDResponse struct {

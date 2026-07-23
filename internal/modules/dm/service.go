@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type ImageStore interface {
@@ -28,7 +29,7 @@ type ImageStore interface {
 }
 
 type Publisher interface {
-	PublishDM(ctx context.Context, message MessageDTO) error
+	Push(userID uuid.UUID, event string, payload any)
 }
 
 type SiteUnreadCounter interface {
@@ -169,7 +170,11 @@ func (s *Service) MarkRead(ctx context.Context, actor authctx.CurrentUser, conve
 			return ReadResultDTO{}, err
 		}
 	}
-	return ReadResultDTO{ConversationUnread: conversationUnread, MailboxUnread: mailboxUnread, DMUnread: dmUnread, TotalUnread: totalUnread}, nil
+	result := ReadResultDTO{ConversationUnread: conversationUnread, MailboxUnread: mailboxUnread, DMUnread: dmUnread, TotalUnread: totalUnread}
+	if s.publish != nil {
+		s.publish.Push(actor.ID, "dm.message.read", MessageReadEventDTO{ConversationID: conversationID.String(), ReadAt: time.Now().UTC().Format(time.RFC3339Nano), Mailbox: MailboxDTO{Party: PartyDTO{Type: mailbox.Type, ID: mailbox.ID}, Unread: mailboxUnread}, DMUnread: dmUnread, TotalUnread: totalUnread})
+	}
+	return result, nil
 }
 
 type Service struct {
@@ -181,6 +186,60 @@ type Service struct {
 
 func NewService(repo *Repo, images ImageStore, publisher Publisher, unread SiteUnreadCounter) *Service {
 	return &Service{repo: repo, images: images, publish: publisher, unread: unread}
+}
+
+func (s *Service) GetUserSettings(ctx context.Context, actor authctx.CurrentUser) (permissionDTO, error) {
+	if actor.ID == uuid.Nil {
+		return permissionDTO{}, ErrConversationForbidden
+	}
+	permission, err := NewRepo(s.repo.db.WithContext(ctx)).RecipientPermission(TargetRef{Type: model.DMPartyUser, ID: actor.ID})
+	return permissionDTO{Permission: permission}, err
+}
+
+func (s *Service) UpdateUserSettings(ctx context.Context, actor authctx.CurrentUser, permission string) (permissionDTO, error) {
+	if actor.ID == uuid.Nil || !validUserPermission(permission) {
+		return permissionDTO{}, ErrPermissionDenied
+	}
+	settings := model.UserSettings{UserID: actor.ID}
+	if err := s.repo.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&settings).Error; err != nil {
+		return permissionDTO{}, err
+	}
+	if err := s.repo.db.WithContext(ctx).Model(&settings).Update("dm_permission", permission).Error; err != nil {
+		return permissionDTO{}, err
+	}
+	return permissionDTO{Permission: permission}, nil
+}
+
+func (s *Service) GetChannelSettings(ctx context.Context, actor authctx.CurrentUser, channelID uuid.UUID) (permissionDTO, error) {
+	if err := NewRepo(s.repo.db.WithContext(ctx)).AuthorizeMailbox(actor.ID, TargetRef{Type: model.DMPartyChannel, ID: channelID}); err != nil {
+		return permissionDTO{}, err
+	}
+	permission, err := NewRepo(s.repo.db.WithContext(ctx)).RecipientPermission(TargetRef{Type: model.DMPartyChannel, ID: channelID})
+	return permissionDTO{Permission: permission}, err
+}
+
+func (s *Service) UpdateChannelSettings(ctx context.Context, actor authctx.CurrentUser, channelID uuid.UUID, permission string) (permissionDTO, error) {
+	if !validChannelPermission(permission) {
+		return permissionDTO{}, ErrPermissionDenied
+	}
+	if err := NewRepo(s.repo.db.WithContext(ctx)).AuthorizeMailbox(actor.ID, TargetRef{Type: model.DMPartyChannel, ID: channelID}); err != nil {
+		return permissionDTO{}, err
+	}
+	settings := model.DMChannelSettings{ChannelID: channelID}
+	if err := s.repo.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&settings).Error; err != nil {
+		return permissionDTO{}, err
+	}
+	if err := s.repo.db.WithContext(ctx).Model(&settings).Update("permission", permission).Error; err != nil {
+		return permissionDTO{}, err
+	}
+	return permissionDTO{Permission: permission}, nil
+}
+
+func validUserPermission(value string) bool {
+	return value == model.DMPermissionOneBeforeReply || value == model.DMPermissionFollowingOnly || value == model.DMPermissionAnyone
+}
+func validChannelPermission(value string) bool {
+	return value == model.DMPermissionOneBeforeReply || value == model.DMPermissionAnyone || value == model.DMPermissionClosed
 }
 
 func (s *Service) SendToTarget(ctx context.Context, actorUserID uuid.UUID, target TargetRef, input SendInput) (MessageDTO, error) {
@@ -218,7 +277,11 @@ func (s *Service) SendToTarget(ctx context.Context, actorUserID uuid.UUID, targe
 	if err != nil {
 		return result, err
 	}
-	return s.messageDTO(ctx, model.DMMessage{Base: model.Base{ID: result.ID, CreatedAt: result.CreatedAt}, ConversationID: result.ConversationID, SenderType: result.SenderType, SenderID: result.SenderID, ClientMessageID: result.ClientMessageID, Content: result.Content, ImageID: result.ImageID})
+	result, err = s.messageDTO(ctx, model.DMMessage{Base: model.Base{ID: result.ID, CreatedAt: result.CreatedAt}, ConversationID: result.ConversationID, SenderType: result.SenderType, SenderID: result.SenderID, ClientMessageID: result.ClientMessageID, Content: result.Content, ImageID: result.ImageID})
+	if err == nil {
+		s.publishMessageCreated(ctx, result)
+	}
+	return result, err
 }
 
 func (s *Service) SendInConversation(ctx context.Context, actorUserID, conversationID uuid.UUID, input SendInput) (MessageDTO, error) {
@@ -244,7 +307,11 @@ func (s *Service) SendInConversation(ctx context.Context, actorUserID, conversat
 	if err != nil {
 		return result, err
 	}
-	return s.messageDTO(ctx, model.DMMessage{Base: model.Base{ID: result.ID, CreatedAt: result.CreatedAt}, ConversationID: result.ConversationID, SenderType: result.SenderType, SenderID: result.SenderID, ClientMessageID: result.ClientMessageID, Content: result.Content, ImageID: result.ImageID})
+	result, err = s.messageDTO(ctx, model.DMMessage{Base: model.Base{ID: result.ID, CreatedAt: result.CreatedAt}, ConversationID: result.ConversationID, SenderType: result.SenderType, SenderID: result.SenderID, ClientMessageID: result.ClientMessageID, Content: result.Content, ImageID: result.ImageID})
+	if err == nil {
+		s.publishMessageCreated(ctx, result)
+	}
+	return result, err
 }
 
 func (s *Service) BlockConversation(ctx context.Context, actor authctx.CurrentUser, conversationID uuid.UUID) (ConversationDTO, error) {
@@ -618,6 +685,55 @@ func (s *Service) messageDTO(ctx context.Context, message model.DMMessage) (Mess
 	}
 	dto.ImageURL = imageDTO.URL
 	return dto, nil
+}
+
+func (s *Service) publishMessageCreated(ctx context.Context, message MessageDTO) {
+	if s.publish == nil {
+		return
+	}
+	repo := NewRepo(s.repo.db.WithContext(ctx))
+	var conversation model.DMConversation
+	if err := repo.db.First(&conversation, "id = ?", message.ConversationID).Error; err != nil {
+		return
+	}
+	conversationDTO := conversationDTO(conversation)
+	users := map[uuid.UUID]struct{}{message.SenderID: {}}
+	channelOwner := uuid.Nil
+	if conversation.ParticipantBType == model.DMPartyChannel {
+		resolved, err := repo.ResolveTarget(TargetRef{Type: model.DMPartyChannel, ID: conversation.ParticipantB})
+		if err != nil {
+			return
+		}
+		channelOwner = resolved.OwnerUserID
+		users[conversation.ParticipantA] = struct{}{}
+		users[channelOwner] = struct{}{}
+	} else {
+		users[conversation.ParticipantA] = struct{}{}
+		users[conversation.ParticipantB] = struct{}{}
+	}
+	for userID := range users {
+		mailbox := TargetRef{Type: model.DMPartyUser, ID: userID}
+		if conversation.ParticipantBType == model.DMPartyChannel && userID == channelOwner {
+			mailbox = TargetRef{Type: model.DMPartyChannel, ID: conversation.ParticipantB}
+		}
+		mailboxUnread, err := repo.CountUnreadForMailbox(userID, mailbox)
+		if err != nil {
+			continue
+		}
+		dmUnread, err := repo.CountUnreadDM(userID)
+		if err != nil {
+			continue
+		}
+		totalUnread := dmUnread
+		if s.unread != nil {
+			if value, err := s.unread.CountSiteUnread(userID); err == nil {
+				totalUnread = value
+			}
+		}
+		payload := MessageCreatedEventDTO{Message: message, Conversation: conversationDTO, Mailbox: MailboxDTO{Party: PartyDTO{Type: mailbox.Type, ID: mailbox.ID}, Unread: mailboxUnread}, DMUnread: dmUnread, TotalUnread: totalUnread}
+		s.publish.Push(userID, "dm.message.created", payload)
+		s.publish.Push(userID, "dm.mailbox.updated", MailboxUpdatedEventDTO{Mailbox: payload.Mailbox, DMUnread: dmUnread, TotalUnread: totalUnread})
+	}
 }
 func conversationDTO(conversation model.DMConversation) ConversationDTO {
 	return ConversationDTO{ID: conversation.ID, ParticipantA: PartyDTO{Type: conversation.ParticipantAType, ID: conversation.ParticipantA}, ParticipantB: PartyDTO{Type: conversation.ParticipantBType, ID: conversation.ParticipantB}, LastMessageAt: conversation.LastMessageAt, LastMessagePreview: conversation.LastMessagePreview}
