@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -21,7 +23,133 @@ type Publisher interface {
 }
 
 type SiteUnreadCounter interface {
-	IncrementDM(ctx context.Context, userID uuid.UUID) error
+	CountSiteUnread(userID uuid.UUID) (int64, error)
+}
+
+func (s *Service) ListMailboxes(ctx context.Context, actor authctx.CurrentUser) ([]MailboxDTO, error) {
+	if actor.ID == uuid.Nil {
+		return nil, ErrConversationForbidden
+	}
+	repo := NewRepo(s.repo.db.WithContext(ctx))
+	userUnread, err := repo.CountUnreadForMailbox(actor.ID, TargetRef{Type: model.DMPartyUser, ID: actor.ID})
+	if err != nil {
+		return nil, err
+	}
+	mailboxes := []MailboxDTO{{Party: PartyDTO{Type: model.DMPartyUser, ID: actor.ID, Name: actor.Username}, Unread: userUnread}}
+	channels, err := repo.ListOwnedChannels(actor.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, channel := range channels {
+		unread, err := repo.CountUnreadForMailbox(actor.ID, TargetRef{Type: model.DMPartyChannel, ID: channel.ID})
+		if err != nil {
+			return nil, err
+		}
+		mailboxes = append(mailboxes, MailboxDTO{Party: PartyDTO{Type: model.DMPartyChannel, ID: channel.ID, Name: channel.Name, AvatarURL: channel.CoverURL}, Unread: unread})
+	}
+	return mailboxes, nil
+}
+
+func (s *Service) ListConversations(ctx context.Context, actor authctx.CurrentUser, mailbox TargetRef, encodedCursor string, limit int) (PageDTO[ConversationDTO], error) {
+	repo := NewRepo(s.repo.db.WithContext(ctx))
+	if err := repo.AuthorizeMailbox(actor.ID, mailbox); err != nil {
+		return PageDTO[ConversationDTO]{}, err
+	}
+	var cursor *Cursor
+	if encodedCursor != "" {
+		value, err := decodeCursor(encodedCursor)
+		if err != nil {
+			return PageDTO[ConversationDTO]{}, err
+		}
+		cursor = &value
+	}
+	conversations, err := repo.ListMailboxConversations(actor.ID, mailbox, cursor, normalizeLimit(limit))
+	if err != nil {
+		return PageDTO[ConversationDTO]{}, err
+	}
+	page := PageDTO[ConversationDTO]{Items: make([]ConversationDTO, 0, len(conversations))}
+	if len(conversations) > normalizeLimit(limit) {
+		conversations = conversations[:normalizeLimit(limit)]
+		last := conversations[len(conversations)-1]
+		if last.LastMessageAt != nil {
+			page.NextCursor = encodeCursor(Cursor{At: *last.LastMessageAt, ID: last.ID})
+		}
+	}
+	for _, conversation := range conversations {
+		unread, err := repo.CountUnreadForConversation(actor.ID, conversation)
+		if err != nil {
+			return PageDTO[ConversationDTO]{}, err
+		}
+		dto := conversationDTO(conversation)
+		dto.Unread = unread
+		page.Items = append(page.Items, dto)
+	}
+	return page, nil
+}
+
+func (s *Service) ListMessages(ctx context.Context, actor authctx.CurrentUser, conversationID uuid.UUID, encodedBefore string, limit int) (PageDTO[MessageDTO], error) {
+	repo := NewRepo(s.repo.db.WithContext(ctx))
+	if _, err := repo.GetConversationForActor(conversationID, actor.ID); err != nil {
+		return PageDTO[MessageDTO]{}, err
+	}
+	var before *Cursor
+	if encodedBefore != "" {
+		value, err := decodeCursor(encodedBefore)
+		if err != nil {
+			return PageDTO[MessageDTO]{}, err
+		}
+		before = &value
+	}
+	limit = normalizeLimit(limit)
+	messages, err := repo.ListMessages(conversationID, before, limit)
+	if err != nil {
+		return PageDTO[MessageDTO]{}, err
+	}
+	page := PageDTO[MessageDTO]{Items: make([]MessageDTO, 0, len(messages))}
+	if len(messages) > limit {
+		messages = messages[:limit]
+		last := messages[len(messages)-1]
+		page.NextCursor = encodeCursor(Cursor{At: last.CreatedAt, ID: last.ID})
+	}
+	for index := len(messages) - 1; index >= 0; index-- {
+		page.Items = append(page.Items, messageDTO(messages[index]))
+	}
+	return page, nil
+}
+
+func (s *Service) MarkRead(ctx context.Context, actor authctx.CurrentUser, conversationID uuid.UUID) (ReadResultDTO, error) {
+	repo := NewRepo(s.repo.db.WithContext(ctx))
+	access, err := repo.GetConversationForActor(conversationID, actor.ID)
+	if err != nil {
+		return ReadResultDTO{}, err
+	}
+	if err := repo.MarkConversationRead(actor.ID, access.Conversation, time.Now()); err != nil {
+		return ReadResultDTO{}, err
+	}
+	conversationUnread, err := repo.CountUnreadForConversation(actor.ID, access.Conversation)
+	if err != nil {
+		return ReadResultDTO{}, err
+	}
+	mailbox := TargetRef{Type: model.DMPartyUser, ID: actor.ID}
+	if access.Conversation.ParticipantBType == model.DMPartyChannel && access.Conversation.ParticipantA != actor.ID {
+		mailbox = TargetRef{Type: model.DMPartyChannel, ID: access.Conversation.ParticipantB}
+	}
+	mailboxUnread, err := repo.CountUnreadForMailbox(actor.ID, mailbox)
+	if err != nil {
+		return ReadResultDTO{}, err
+	}
+	dmUnread, err := repo.CountUnreadDM(actor.ID)
+	if err != nil {
+		return ReadResultDTO{}, err
+	}
+	totalUnread := dmUnread
+	if s.unread != nil {
+		totalUnread, err = s.unread.CountSiteUnread(actor.ID)
+		if err != nil {
+			return ReadResultDTO{}, err
+		}
+	}
+	return ReadResultDTO{ConversationUnread: conversationUnread, MailboxUnread: mailboxUnread, DMUnread: dmUnread, TotalUnread: totalUnread}, nil
 }
 
 type Service struct {

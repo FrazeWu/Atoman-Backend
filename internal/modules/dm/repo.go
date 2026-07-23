@@ -2,6 +2,7 @@ package dm
 
 import (
 	"errors"
+	"time"
 
 	"atoman/internal/model"
 
@@ -133,4 +134,120 @@ func (r *Repo) FindMessageByClientID(actorUserID, clientMessageID uuid.UUID) (mo
 
 func (r *Repo) UpdateConversationPreview(conversationID uuid.UUID, preview string) error {
 	return r.db.Model(&model.DMConversation{}).Where("id = ?", conversationID).Updates(map[string]any{"last_message_at": gorm.Expr("CURRENT_TIMESTAMP"), "last_message_preview": preview}).Error
+}
+
+func (r *Repo) ListOwnedChannels(userID uuid.UUID) ([]model.Channel, error) {
+	var channels []model.Channel
+	err := r.db.Where("user_id = ?", userID).Order("name ASC, id ASC").Find(&channels).Error
+	return channels, err
+}
+
+func (r *Repo) AuthorizeMailbox(actorID uuid.UUID, mailbox TargetRef) error {
+	switch mailbox.Type {
+	case model.DMPartyUser:
+		if mailbox.ID != actorID {
+			return ErrConversationForbidden
+		}
+		return nil
+	case model.DMPartyChannel:
+		var channel model.Channel
+		if err := r.db.Where("id = ? AND user_id = ?", mailbox.ID, actorID).First(&channel).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrConversationForbidden
+			}
+			return err
+		}
+		return nil
+	default:
+		return ErrConversationForbidden
+	}
+}
+
+func (r *Repo) ListMailboxConversations(actorID uuid.UUID, mailbox TargetRef, cursor *Cursor, limit int) ([]model.DMConversation, error) {
+	db := r.db.Model(&model.DMConversation{})
+	if mailbox.Type == model.DMPartyUser {
+		db = db.Where("(participant_b_type = ? AND (participant_a = ? OR participant_b = ?)) OR (participant_b_type = ? AND participant_a = ?)", model.DMPartyUser, actorID, actorID, model.DMPartyChannel, actorID)
+	} else {
+		db = db.Where("participant_b_type = ? AND participant_b = ?", model.DMPartyChannel, mailbox.ID)
+	}
+	if cursor != nil {
+		db = db.Where("(last_message_at < ?) OR (last_message_at = ? AND id < ?)", cursor.At, cursor.At, cursor.ID)
+	}
+	var conversations []model.DMConversation
+	err := db.Order("last_message_at DESC NULLS LAST, id DESC").Limit(limit + 1).Find(&conversations).Error
+	return conversations, err
+}
+
+func (r *Repo) ListMessages(conversationID uuid.UUID, before *Cursor, limit int) ([]model.DMMessage, error) {
+	db := r.db.Where("conversation_id = ?", conversationID)
+	if before != nil {
+		db = db.Where("(created_at < ?) OR (created_at = ? AND id < ?)", before.At, before.At, before.ID)
+	}
+	var messages []model.DMMessage
+	err := db.Order("created_at DESC, id DESC").Limit(limit + 1).Find(&messages).Error
+	return messages, err
+}
+
+func (r *Repo) CountUnreadForConversation(actorID uuid.UUID, conversation model.DMConversation) (int64, error) {
+	db := r.db.Model(&model.DMMessage{}).Where("conversation_id = ? AND read_at IS NULL", conversation.ID)
+	if conversation.ParticipantBType == model.DMPartyChannel {
+		if conversation.ParticipantA == actorID {
+			db = db.Where("sender_type = ?", model.DMPartyChannel)
+		} else {
+			db = db.Where("sender_type = ?", model.DMPartyUser)
+		}
+	} else {
+		db = db.Where("sender_type = ? AND sender_id != ?", model.DMPartyUser, actorID)
+	}
+	var count int64
+	return count, db.Count(&count).Error
+}
+
+func (r *Repo) CountUnreadForMailbox(actorID uuid.UUID, mailbox TargetRef) (int64, error) {
+	conversations, err := r.ListMailboxConversations(actorID, mailbox, nil, 1000000)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, conversation := range conversations {
+		count, err := r.CountUnreadForConversation(actorID, conversation)
+		if err != nil {
+			return 0, err
+		}
+		total += count
+	}
+	return total, nil
+}
+
+func (r *Repo) CountUnreadDM(actorID uuid.UUID) (int64, error) {
+	mailboxes, err := r.ListOwnedChannels(actorID)
+	if err != nil {
+		return 0, err
+	}
+	total, err := r.CountUnreadForMailbox(actorID, TargetRef{Type: model.DMPartyUser, ID: actorID})
+	if err != nil {
+		return 0, err
+	}
+	for _, mailbox := range mailboxes {
+		count, err := r.CountUnreadForMailbox(actorID, TargetRef{Type: model.DMPartyChannel, ID: mailbox.ID})
+		if err != nil {
+			return 0, err
+		}
+		total += count
+	}
+	return total, nil
+}
+
+func (r *Repo) MarkConversationRead(actorID uuid.UUID, conversation model.DMConversation, readAt time.Time) error {
+	db := r.db.Model(&model.DMMessage{}).Where("conversation_id = ? AND read_at IS NULL", conversation.ID)
+	if conversation.ParticipantBType == model.DMPartyChannel {
+		if conversation.ParticipantA == actorID {
+			db = db.Where("sender_type = ?", model.DMPartyChannel)
+		} else {
+			db = db.Where("sender_type = ?", model.DMPartyUser)
+		}
+	} else {
+		db = db.Where("sender_type = ? AND sender_id != ?", model.DMPartyUser, actorID)
+	}
+	return db.Update("read_at", readAt).Error
 }

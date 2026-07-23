@@ -59,8 +59,13 @@ func (r *Repo) CountUnreadDM(recipientID uuid.UUID) (int64, error) {
 	var count int64
 	err := r.db.Model(&model.DMMessage{}).
 		Joins("JOIN dm_conversations ON dm_conversations.id = dm_messages.conversation_id").
-		Where("dm_messages.sender_id != ? AND dm_messages.read_at IS NULL", recipientID).
-		Where("dm_conversations.participant_a = ? OR dm_conversations.participant_b = ?", recipientID, recipientID).
+		Joins("LEFT JOIN channels ON channels.id = dm_conversations.participant_b AND dm_conversations.participant_b_type = ?", model.DMPartyChannel).
+		Where("dm_messages.read_at IS NULL").
+		Where(`
+			(dm_conversations.participant_b_type = ? AND (dm_conversations.participant_a = ? OR dm_conversations.participant_b = ?) AND dm_messages.sender_id != ?)
+			OR (dm_conversations.participant_b_type = ? AND dm_conversations.participant_a = ? AND dm_messages.sender_type = ?)
+			OR (dm_conversations.participant_b_type = ? AND channels.user_id = ? AND dm_messages.sender_type = ?)
+		`, model.DMPartyUser, recipientID, recipientID, recipientID, model.DMPartyChannel, recipientID, model.DMPartyChannel, model.DMPartyChannel, recipientID, model.DMPartyUser).
 		Count(&count).Error
 	return count, err
 }

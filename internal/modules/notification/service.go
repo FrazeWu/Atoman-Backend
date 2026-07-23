@@ -86,6 +86,14 @@ func (s *Service) GetUnreadCounts(user authctx.CurrentUser) (UnreadCountsDTO, er
 	return UnreadCountsDTO{Total: total, Items: items}, nil
 }
 
+func (s *Service) CountSiteUnread(userID uuid.UUID) (int64, error) {
+	counts, err := s.GetUnreadCounts(authctx.CurrentUser{ID: userID})
+	if err != nil {
+		return 0, err
+	}
+	return counts.Total, nil
+}
+
 func (s *Service) MarkRead(user authctx.CurrentUser, notificationID uuid.UUID) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
