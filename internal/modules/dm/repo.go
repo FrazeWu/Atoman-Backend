@@ -130,7 +130,10 @@ func (r *Repo) RecipientPermission(recipient TargetRef) (string, error) {
 	switch recipient.Type {
 	case model.DMPartyUser:
 		settings := model.UserSettings{UserID: recipient.ID}
-		if err := r.db.FirstOrCreate(&settings, model.UserSettings{UserID: recipient.ID}).Error; err != nil {
+		if err := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&settings).Error; err != nil {
+			return "", err
+		}
+		if err := r.db.First(&settings, "user_id = ?", recipient.ID).Error; err != nil {
 			return "", err
 		}
 		if settings.DMPermission == "" {
@@ -139,7 +142,10 @@ func (r *Repo) RecipientPermission(recipient TargetRef) (string, error) {
 		return settings.DMPermission, nil
 	case model.DMPartyChannel:
 		settings := model.DMChannelSettings{ChannelID: recipient.ID}
-		if err := r.db.FirstOrCreate(&settings, model.DMChannelSettings{ChannelID: recipient.ID}).Error; err != nil {
+		if err := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&settings).Error; err != nil {
+			return "", err
+		}
+		if err := r.db.First(&settings, "channel_id = ?", recipient.ID).Error; err != nil {
 			return "", err
 		}
 		if settings.Permission == "" {
@@ -226,6 +232,22 @@ func (r *Repo) OtherUserForConversation(access ConversationAccess, actorID uuid.
 		return conversation.ParticipantA, nil
 	}
 	return uuid.Nil, ErrConversationForbidden
+}
+
+func (r *Repo) IsConversationBlockedForActor(conversation model.DMConversation, actorID uuid.UUID) (bool, error) {
+	access := ConversationAccess{Conversation: conversation}
+	if conversation.ParticipantBType == model.DMPartyChannel {
+		resolved, err := r.ResolveTarget(TargetRef{Type: model.DMPartyChannel, ID: conversation.ParticipantB})
+		if err != nil {
+			return false, err
+		}
+		access.ChannelOwnerID = resolved.OwnerUserID
+	}
+	otherUserID, err := r.OtherUserForConversation(access, actorID)
+	if err != nil {
+		return false, err
+	}
+	return r.IsBlocked(actorID, otherUserID)
 }
 
 func (r *Repo) FindMessageByClientID(actorUserID, clientMessageID uuid.UUID) (model.DMMessage, error) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -63,6 +64,58 @@ func TestConcurrentIdempotentSendsCreateOneMessageInPostgres(t *testing.T) {
 	var count int64
 	if err := db.Model(&model.DMMessage{}).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("expected one message, got %d: %v", count, err)
+	}
+}
+
+func TestRecipientPermissionInitializesConcurrentlyInPostgres(t *testing.T) {
+	db := newDMPostgresDB(t)
+	firstActor, secondActor, recipient := createDMPostgresUser(t, db), createDMPostgresUser(t, db), createDMPostgresUser(t, db)
+	service := NewService(NewRepo(db), nil, nil, nil)
+	var next uint32
+
+	results := concurrentDMSends(t, func(ctx context.Context) (MessageDTO, error) {
+		actor := firstActor
+		if atomic.AddUint32(&next, 1) == 2 {
+			actor = secondActor
+		}
+		return service.SendToTarget(ctx, actor, TargetRef{Type: model.DMPartyUser, ID: recipient}, SendInput{Content: "hello", ClientMessageID: uuid.New()})
+	})
+	for _, result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent permission initialization failed: %v", result.err)
+		}
+	}
+	var count int64
+	if err := db.Model(&model.UserSettings{}).Where("user_id = ?", recipient).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("recipient settings count = %d, %v", count, err)
+	}
+}
+
+func TestChannelRecipientPermissionInitializesConcurrentlyInPostgres(t *testing.T) {
+	db := newDMPostgresDB(t)
+	firstActor, secondActor, owner := createDMPostgresUser(t, db), createDMPostgresUser(t, db), createDMPostgresUser(t, db)
+	channelID := uuid.New()
+	if err := db.Create(&model.Channel{Base: model.Base{ID: channelID}, UserID: &owner, Name: "channel-" + channelID.String(), Slug: "channel-" + channelID.String()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(NewRepo(db), nil, nil, nil)
+	var next uint32
+
+	results := concurrentDMSends(t, func(ctx context.Context) (MessageDTO, error) {
+		actor := firstActor
+		if atomic.AddUint32(&next, 1) == 2 {
+			actor = secondActor
+		}
+		return service.SendToTarget(ctx, actor, TargetRef{Type: model.DMPartyChannel, ID: channelID}, SendInput{Content: "hello", ClientMessageID: uuid.New()})
+	})
+	for _, result := range results {
+		if result.err != nil {
+			t.Fatalf("concurrent channel permission initialization failed: %v", result.err)
+		}
+	}
+	var count int64
+	if err := db.Model(&model.DMChannelSettings{}).Where("channel_id = ?", channelID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("channel settings count = %d, %v", count, err)
 	}
 }
 
@@ -137,7 +190,7 @@ func newDMPostgresDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.UserSettings{}, &model.DMChannelSettings{}, &model.UserBlock{}, &model.Follow{}, &model.DMConversation{}, &model.DMMessage{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.Channel{}, &model.UserSettings{}, &model.DMChannelSettings{}, &model.UserBlock{}, &model.Follow{}, &model.DMConversation{}, &model.DMMessage{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Exec("CREATE UNIQUE INDEX uq_dm_conversation_typed ON dm_conversations (participant_a_type, participant_a, participant_b_type, participant_b) WHERE deleted_at IS NULL").Error; err != nil {

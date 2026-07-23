@@ -31,6 +31,7 @@ type ConversationDTO struct {
 	LastMessageAt      *time.Time `json:"last_message_at,omitempty"`
 	LastMessagePreview string     `json:"last_message_preview"`
 	Unread             int64      `json:"unread"`
+	Blocked            bool       `json:"blocked"`
 }
 
 type Cursor struct {

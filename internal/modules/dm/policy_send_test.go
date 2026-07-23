@@ -133,6 +133,36 @@ func TestBlockPolicyAndConversationBlock(t *testing.T) {
 	}
 }
 
+func TestConversationBlockedStateUsesRealUsers(t *testing.T) {
+	db := testDB(t)
+	user, owner := testUser(t, db), testUser(t, db)
+	channelID := uuid.New()
+	if err := db.Create(&model.Channel{Base: model.Base{ID: channelID}, UserID: &owner, Name: "channel-" + channelID.String(), Slug: "channel-" + channelID.String()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := NewService(NewRepo(db), nil, nil, nil)
+	message, err := service.SendToTarget(context.Background(), user, TargetRef{Type: model.DMPartyChannel, ID: channelID}, SendInput{Content: "first", ClientMessageID: uuid.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := service.BlockConversation(context.Background(), authctx.CurrentUser{ID: user}, message.ConversationID)
+	if err != nil || !blocked.Blocked {
+		t.Fatalf("block result = %#v, %v", blocked, err)
+	}
+	conversations, err := service.ListConversations(context.Background(), authctx.CurrentUser{ID: user}, TargetRef{Type: model.DMPartyUser, ID: user}, "", 30)
+	if err != nil || len(conversations.Items) != 1 || !conversations.Items[0].Blocked {
+		t.Fatalf("user mailbox blocked state = %#v, %v", conversations, err)
+	}
+	conversations, err = service.ListConversations(context.Background(), authctx.CurrentUser{ID: owner}, TargetRef{Type: model.DMPartyChannel, ID: channelID}, "", 30)
+	if err != nil || len(conversations.Items) != 1 || !conversations.Items[0].Blocked {
+		t.Fatalf("channel mailbox blocked state = %#v, %v", conversations, err)
+	}
+	unblocked, err := service.UnblockConversation(context.Background(), authctx.CurrentUser{ID: user}, message.ConversationID)
+	if err != nil || unblocked.Blocked {
+		t.Fatalf("unblock result = %#v, %v", unblocked, err)
+	}
+}
+
 func TestOneBeforeReplyAllowsSenderAfterReply(t *testing.T) {
 	db := testDB(t)
 	actor, recipient := testUser(t, db), testUser(t, db)

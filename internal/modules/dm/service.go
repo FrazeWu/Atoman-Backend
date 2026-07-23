@@ -82,8 +82,13 @@ func (s *Service) ListConversations(ctx context.Context, actor authctx.CurrentUs
 		if err != nil {
 			return PageDTO[ConversationDTO]{}, err
 		}
+		blocked, err := repo.IsConversationBlockedForActor(conversation, actor.ID)
+		if err != nil {
+			return PageDTO[ConversationDTO]{}, err
+		}
 		dto := conversationDTO(conversation)
 		dto.Unread = unread
+		dto.Blocked = blocked
 		page.Items = append(page.Items, dto)
 	}
 	return page, nil
@@ -224,7 +229,7 @@ func (s *Service) SendInConversation(ctx context.Context, actorUserID, conversat
 }
 
 func (s *Service) BlockConversation(ctx context.Context, actor authctx.CurrentUser, conversationID uuid.UUID) (ConversationDTO, error) {
-	var conversation model.DMConversation
+	var result ConversationDTO
 	err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		repo := NewRepo(tx)
 		access, err := repo.GetConversationForActor(conversationID, actor.ID)
@@ -238,14 +243,19 @@ func (s *Service) BlockConversation(ctx context.Context, actor authctx.CurrentUs
 		if err := repo.BlockUser(actor.ID, otherUserID); err != nil {
 			return err
 		}
-		conversation = access.Conversation
+		blocked, err := repo.IsConversationBlockedForActor(access.Conversation, actor.ID)
+		if err != nil {
+			return err
+		}
+		result = conversationDTO(access.Conversation)
+		result.Blocked = blocked
 		return nil
 	})
-	return conversationDTO(conversation), err
+	return result, err
 }
 
 func (s *Service) UnblockConversation(ctx context.Context, actor authctx.CurrentUser, conversationID uuid.UUID) (ConversationDTO, error) {
-	var conversation model.DMConversation
+	var result ConversationDTO
 	err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		repo := NewRepo(tx)
 		access, err := repo.GetConversationForActor(conversationID, actor.ID)
@@ -259,10 +269,15 @@ func (s *Service) UnblockConversation(ctx context.Context, actor authctx.Current
 		if err := repo.UnblockUser(actor.ID, otherUserID); err != nil {
 			return err
 		}
-		conversation = access.Conversation
+		blocked, err := repo.IsConversationBlockedForActor(access.Conversation, actor.ID)
+		if err != nil {
+			return err
+		}
+		result = conversationDTO(access.Conversation)
+		result.Blocked = blocked
 		return nil
 	})
-	return conversationDTO(conversation), err
+	return result, err
 }
 
 func (s *Service) sendWithPolicy(repo *Repo, access ConversationAccess, sender SenderIdentity, input SendInput, result *MessageDTO) error {
