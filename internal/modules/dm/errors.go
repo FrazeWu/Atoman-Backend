@@ -13,4 +13,5 @@ var (
 	ErrRateLimited           = errors.New("dm rate limited")
 	ErrMessageNotFound       = errors.New("dm message not found")
 	ErrAlreadyReported       = errors.New("dm already reported")
+	ErrStorageUnavailable    = errors.New("dm storage unavailable")
 )

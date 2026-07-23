@@ -1,8 +1,12 @@
 package dm
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,7 +19,11 @@ import (
 )
 
 type ImageStore interface {
-	GetImage(ctx context.Context, actorUserID, imageID uuid.UUID) (model.DMImage, error)
+	Put(ctx context.Context, objectKey, contentType string, body io.Reader, size int64) error
+	Open(ctx context.Context, objectKey string) (io.ReadCloser, error)
+	SignedURL(ctx context.Context, objectKey string, ttl time.Duration) (string, error)
+	Delete(ctx context.Context, objectKey string) error
+	IsLocal() bool
 }
 
 type Publisher interface {
@@ -119,7 +127,11 @@ func (s *Service) ListMessages(ctx context.Context, actor authctx.CurrentUser, c
 		page.NextCursor = encodeCursor(Cursor{At: last.CreatedAt, ID: last.ID})
 	}
 	for index := len(messages) - 1; index >= 0; index-- {
-		page.Items = append(page.Items, messageDTO(messages[index]))
+		dto, err := s.messageDTO(ctx, messages[index])
+		if err != nil {
+			return PageDTO[MessageDTO]{}, err
+		}
+		page.Items = append(page.Items, dto)
 	}
 	return page, nil
 }
@@ -202,7 +214,10 @@ func (s *Service) SendToTarget(ctx context.Context, actorUserID uuid.UUID, targe
 		sender := SenderIdentity{SenderType: model.DMPartyUser, SenderID: actorUserID, ActorUserID: actorUserID}
 		return s.sendWithPolicy(repo, access, sender, input, &result)
 	})
-	return result, err
+	if err != nil {
+		return result, err
+	}
+	return s.messageDTO(ctx, model.DMMessage{Base: model.Base{ID: result.ID, CreatedAt: result.CreatedAt}, ConversationID: result.ConversationID, SenderType: result.SenderType, SenderID: result.SenderID, ClientMessageID: result.ClientMessageID, Content: result.Content, ImageID: result.ImageID})
 }
 
 func (s *Service) SendInConversation(ctx context.Context, actorUserID, conversationID uuid.UUID, input SendInput) (MessageDTO, error) {
@@ -225,7 +240,10 @@ func (s *Service) SendInConversation(ctx context.Context, actorUserID, conversat
 		}
 		return s.sendWithPolicy(repo, access, sender, input, &result)
 	})
-	return result, err
+	if err != nil {
+		return result, err
+	}
+	return s.messageDTO(ctx, model.DMMessage{Base: model.Base{ID: result.ID, CreatedAt: result.CreatedAt}, ConversationID: result.ConversationID, SenderType: result.SenderType, SenderID: result.SenderID, ClientMessageID: result.ClientMessageID, Content: result.Content, ImageID: result.ImageID})
 }
 
 func (s *Service) BlockConversation(ctx context.Context, actor authctx.CurrentUser, conversationID uuid.UUID) (ConversationDTO, error) {
@@ -373,13 +391,82 @@ func (s *Service) GetTargetConversation(ctx context.Context, actorUserID uuid.UU
 	return conversationDTO(conversation), nil
 }
 
+const maxDMImageSize = 10 * 1024 * 1024
+
+var allowedDMImageTypes = map[string]string{
+	"image/jpeg": ".jpg",
+	"image/png":  ".png",
+	"image/webp": ".webp",
+}
+
+type ImageDTO struct {
+	ID  uuid.UUID `json:"id"`
+	URL string    `json:"url"`
+}
+
+func (s *Service) UploadImage(ctx context.Context, actor authctx.CurrentUser, body io.Reader, declaredType string, declaredSize int64) (ImageDTO, error) {
+	if s.images == nil || actor.ID == uuid.Nil || declaredSize <= 0 || declaredSize > maxDMImageSize {
+		return ImageDTO{}, ErrImageInvalid
+	}
+	declaredType = strings.TrimSpace(declaredType)
+	ext, ok := allowedDMImageTypes[declaredType]
+	if !ok {
+		return ImageDTO{}, ErrImageInvalid
+	}
+	data, err := io.ReadAll(io.LimitReader(body, maxDMImageSize+1))
+	if err != nil || len(data) == 0 || len(data) > maxDMImageSize || int64(len(data)) != declaredSize || http.DetectContentType(data) != declaredType {
+		return ImageDTO{}, ErrImageInvalid
+	}
+	image := model.DMImage{UploadedByUserID: actor.ID, ContentType: declaredType, SizeBytes: int64(len(data))}
+	image.ID = uuid.New()
+	image.ObjectKey = path.Join("images", actor.ID.String(), image.ID.String()+ext)
+	if err := s.images.Put(ctx, image.ObjectKey, image.ContentType, bytes.NewReader(data), image.SizeBytes); err != nil {
+		return ImageDTO{}, err
+	}
+	if err := s.repo.db.WithContext(ctx).Create(&image).Error; err != nil {
+		_ = s.images.Delete(ctx, image.ObjectKey)
+		return ImageDTO{}, err
+	}
+	return s.imageDTO(ctx, image)
+}
+
+func (s *Service) OpenImage(ctx context.Context, actor authctx.CurrentUser, imageID uuid.UUID) (io.ReadCloser, string, error) {
+	if s.images == nil || actor.ID == uuid.Nil {
+		return nil, "", ErrConversationForbidden
+	}
+	image, err := s.repo.FindReadableImage(actor.ID, imageID)
+	if err != nil {
+		return nil, "", err
+	}
+	body, err := s.images.Open(ctx, image.ObjectKey)
+	if err != nil {
+		return nil, "", err
+	}
+	return body, image.ContentType, nil
+}
+
+func (s *Service) imageDTO(ctx context.Context, image model.DMImage) (ImageDTO, error) {
+	if s.images.IsLocal() {
+		return ImageDTO{ID: image.ID, URL: "/api/v1/dm/images/" + image.ID.String() + "/content"}, nil
+	}
+	url, err := s.images.SignedURL(ctx, image.ObjectKey, 5*time.Minute)
+	if err != nil {
+		return ImageDTO{}, err
+	}
+	return ImageDTO{ID: image.ID, URL: url}, nil
+}
+
 func (s *Service) createMessage(repo *Repo, conversation model.DMConversation, sender SenderIdentity, input SendInput, result *MessageDTO) error {
 	content := strings.TrimSpace(input.Content)
-	imageURL := strings.TrimSpace(input.ImageURL)
-	if utf8.RuneCountInString(content) > 4000 || (content == "" && input.ImageID == nil && imageURL == "") {
+	if utf8.RuneCountInString(content) > 4000 || (content == "" && input.ImageID == nil) || strings.TrimSpace(input.ImageURL) != "" {
 		return ErrImageInvalid
 	}
-	message := model.DMMessage{ConversationID: conversation.ID, SenderType: sender.SenderType, SenderID: sender.SenderID, ActorUserID: sender.ActorUserID, ClientMessageID: input.ClientMessageID, Content: content, ImageID: input.ImageID, ImageURL: imageURL}
+	if input.ImageID != nil {
+		if _, err := repo.LockUsableImage(sender.ActorUserID, *input.ImageID); err != nil {
+			return err
+		}
+	}
+	message := model.DMMessage{ConversationID: conversation.ID, SenderType: sender.SenderType, SenderID: sender.SenderID, ActorUserID: sender.ActorUserID, ClientMessageID: input.ClientMessageID, Content: content, ImageID: input.ImageID}
 	stored, created, err := repo.CreateMessage(&message)
 	if err != nil {
 		return err
@@ -400,7 +487,24 @@ func (s *Service) createMessage(repo *Repo, conversation model.DMConversation, s
 }
 
 func messageDTO(message model.DMMessage) MessageDTO {
-	return MessageDTO{ID: message.ID, ConversationID: message.ConversationID, SenderType: message.SenderType, SenderID: message.SenderID, ClientMessageID: message.ClientMessageID, Content: message.Content, ImageID: message.ImageID, ImageURL: message.ImageURL, CreatedAt: message.CreatedAt}
+	return MessageDTO{ID: message.ID, ConversationID: message.ConversationID, SenderType: message.SenderType, SenderID: message.SenderID, ClientMessageID: message.ClientMessageID, Content: message.Content, ImageID: message.ImageID, CreatedAt: message.CreatedAt}
+}
+
+func (s *Service) messageDTO(ctx context.Context, message model.DMMessage) (MessageDTO, error) {
+	dto := messageDTO(message)
+	if message.ImageID == nil {
+		return dto, nil
+	}
+	var image model.DMImage
+	if err := s.repo.db.WithContext(ctx).First(&image, "id = ?", *message.ImageID).Error; err != nil {
+		return MessageDTO{}, err
+	}
+	imageDTO, err := s.imageDTO(ctx, image)
+	if err != nil {
+		return MessageDTO{}, err
+	}
+	dto.ImageURL = imageDTO.URL
+	return dto, nil
 }
 func conversationDTO(conversation model.DMConversation) ConversationDTO {
 	return ConversationDTO{ID: conversation.ID, ParticipantA: PartyDTO{Type: conversation.ParticipantAType, ID: conversation.ParticipantA}, ParticipantB: PartyDTO{Type: conversation.ParticipantBType, ID: conversation.ParticipantB}, LastMessageAt: conversation.LastMessageAt, LastMessagePreview: conversation.LastMessagePreview}

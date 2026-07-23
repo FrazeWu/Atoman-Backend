@@ -262,6 +262,49 @@ func (r *Repo) FindMessageByClientID(actorUserID, clientMessageID uuid.UUID) (mo
 	return message, err
 }
 
+func (r *Repo) LockUsableImage(actorUserID, imageID uuid.UUID) (model.DMImage, error) {
+	var image model.DMImage
+	err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND uploaded_by_user_id = ?", imageID, actorUserID).First(&image).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.DMImage{}, ErrImageInvalid
+		}
+		return model.DMImage{}, err
+	}
+	var used int64
+	if err := r.db.Model(&model.DMMessage{}).Where("image_id = ?", imageID).Count(&used).Error; err != nil {
+		return model.DMImage{}, err
+	}
+	if used != 0 {
+		return model.DMImage{}, ErrImageInvalid
+	}
+	return image, nil
+}
+
+func (r *Repo) FindReadableImage(actorUserID, imageID uuid.UUID) (model.DMImage, error) {
+	var image model.DMImage
+	if err := r.db.First(&image, "id = ?", imageID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.DMImage{}, ErrImageInvalid
+		}
+		return model.DMImage{}, err
+	}
+	if image.UploadedByUserID == actorUserID {
+		return image, nil
+	}
+	var message model.DMMessage
+	if err := r.db.Where("image_id = ?", imageID).First(&message).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.DMImage{}, ErrConversationForbidden
+		}
+		return model.DMImage{}, err
+	}
+	if _, err := r.GetConversationForActor(message.ConversationID, actorUserID); err != nil {
+		return model.DMImage{}, err
+	}
+	return image, nil
+}
+
 func (r *Repo) UpdateConversationPreview(conversationID uuid.UUID, preview string) error {
 	return r.db.Model(&model.DMConversation{}).Where("id = ?", conversationID).Updates(map[string]any{"last_message_at": gorm.Expr("CURRENT_TIMESTAMP"), "last_message_preview": preview}).Error
 }
