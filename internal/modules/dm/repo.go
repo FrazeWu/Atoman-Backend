@@ -2,7 +2,6 @@ package dm
 
 import (
 	"errors"
-	"fmt"
 
 	"atoman/internal/model"
 
@@ -78,13 +77,12 @@ func (r *Repo) FindOrCreateConversation(first, second TargetRef) (model.DMConver
 		return model.DMConversation{}, err
 	}
 	conversation := model.DMConversation{ParticipantAType: first.Type, ParticipantA: first.ID, ParticipantBType: second.Type, ParticipantB: second.ID}
-	if err := r.db.Create(&conversation).Error; err != nil {
-		// The typed unique index decides the winner under concurrent creation.
-		found, findErr := r.FindConversation(first, second)
-		if findErr == nil {
-			return found, nil
-		}
-		return model.DMConversation{}, fmt.Errorf("create conversation: %w", err)
+	result := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&conversation)
+	if result.Error != nil {
+		return model.DMConversation{}, result.Error
+	}
+	if result.RowsAffected == 0 {
+		return r.FindConversation(first, second)
 	}
 	return conversation, nil
 }
@@ -112,7 +110,20 @@ func (r *Repo) GetConversationForActor(conversationID, actorUserID uuid.UUID) (C
 	return access, nil
 }
 
-func (r *Repo) CreateMessage(message *model.DMMessage) error { return r.db.Create(message).Error }
+func (r *Repo) CreateMessage(message *model.DMMessage) (model.DMMessage, bool, error) {
+	result := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(message)
+	if result.Error != nil {
+		return model.DMMessage{}, false, result.Error
+	}
+	if result.RowsAffected > 0 {
+		return *message, true, nil
+	}
+	existing, err := r.FindMessageByClientID(message.ActorUserID, message.ClientMessageID)
+	if err != nil {
+		return model.DMMessage{}, false, err
+	}
+	return existing, false, nil
+}
 
 func (r *Repo) FindMessageByClientID(actorUserID, clientMessageID uuid.UUID) (model.DMMessage, error) {
 	var message model.DMMessage

@@ -115,8 +115,13 @@ func (s *Service) createMessage(repo *Repo, conversation model.DMConversation, s
 		return ErrImageInvalid
 	}
 	message := model.DMMessage{ConversationID: conversation.ID, SenderType: sender.SenderType, SenderID: sender.SenderID, ActorUserID: sender.ActorUserID, ClientMessageID: input.ClientMessageID, Content: content, ImageID: input.ImageID, ImageURL: imageURL}
-	if err := repo.CreateMessage(&message); err != nil {
+	stored, created, err := repo.CreateMessage(&message)
+	if err != nil {
 		return err
+	}
+	if !created {
+		*result = messageDTO(stored)
+		return nil
 	}
 	preview := content
 	if preview == "" {
@@ -125,7 +130,7 @@ func (s *Service) createMessage(repo *Repo, conversation model.DMConversation, s
 	if err := repo.UpdateConversationPreview(conversation.ID, truncateRunes(preview, 100)); err != nil {
 		return err
 	}
-	*result = messageDTO(message)
+	*result = messageDTO(stored)
 	return nil
 }
 
