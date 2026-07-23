@@ -48,7 +48,11 @@ func collectLegacyDMImages(db *gorm.DB, config LegacyDMImageMigrationConfig) ([]
 		item := legacyDMImage{message: message}
 		switch {
 		case strings.HasPrefix(rawURL, "/uploads/dm/images/"):
-			item.local = filepath.Join(config.UploadsRoot, filepath.FromSlash(strings.TrimPrefix(rawURL, "/uploads/")))
+			localPath, err := legacyDMLocalImagePath(config.UploadsRoot, rawURL)
+			if err != nil {
+				return nil, fmt.Errorf("message %s has invalid local image URL", message.ID)
+			}
+			item.local = localPath
 			if info, err := os.Stat(item.local); err != nil || info.IsDir() {
 				return nil, fmt.Errorf("message %s local image unavailable", message.ID)
 			}
@@ -64,6 +68,26 @@ func collectLegacyDMImages(db *gorm.DB, config LegacyDMImageMigrationConfig) ([]
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func legacyDMLocalImagePath(uploadsRoot, rawURL string) (string, error) {
+	decoded, err := url.PathUnescape(rawURL)
+	if err != nil || !strings.HasPrefix(decoded, "/uploads/dm/images/") {
+		return "", fmt.Errorf("invalid local image URL")
+	}
+	base, err := filepath.Abs(filepath.Join(uploadsRoot, "dm", "images"))
+	if err != nil {
+		return "", err
+	}
+	relative := filepath.FromSlash(strings.TrimPrefix(decoded, "/uploads/dm/images/"))
+	candidate, err := filepath.Abs(filepath.Join(base, relative))
+	if err != nil {
+		return "", err
+	}
+	if candidate == base || !strings.HasPrefix(candidate, base+string(filepath.Separator)) {
+		return "", fmt.Errorf("local image URL escapes DM image root")
+	}
+	return candidate, nil
 }
 
 func MigrateLegacyDMImages(ctx context.Context, db *gorm.DB, store dm.ImageStore, config LegacyDMImageMigrationConfig, publicS3 *s3.S3) error {
@@ -109,7 +133,9 @@ func MigrateLegacyDMImages(ctx context.Context, db *gorm.DB, store dm.ImageStore
 			}
 			return nil
 		}); err != nil {
-			_ = store.Delete(ctx, image.ObjectKey)
+			if cleanupErr := store.Delete(ctx, image.ObjectKey); cleanupErr != nil {
+				return fmt.Errorf("%w; cleanup private image: %w", err, cleanupErr)
+			}
 			return err
 		}
 	}

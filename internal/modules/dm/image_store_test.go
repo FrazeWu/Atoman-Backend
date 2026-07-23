@@ -12,6 +12,7 @@ import (
 	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func TestUploadImageSniffsBytesAndStoresPrivateObject(t *testing.T) {
@@ -49,6 +50,33 @@ func TestUploadImageRejectsSpoofedType(t *testing.T) {
 	_, err := service.UploadImage(context.Background(), authctx.CurrentUser{ID: testUser(t, db)}, bytes.NewReader([]byte("not an image")), "image/png", int64(len("not an image")))
 	if !errors.Is(err, ErrImageInvalid) {
 		t.Fatalf("expected invalid image, got %v", err)
+	}
+}
+
+func TestUploadImageReturnsCleanupFailureAfterDatabaseFailure(t *testing.T) {
+	db := testDB(t)
+	if err := db.AutoMigrate(&model.DMImage{}); err != nil {
+		t.Fatal(err)
+	}
+	databaseErr := errors.New("database write failed")
+	cleanupErr := errors.New("private object cleanup failed")
+	callback := "test:dm_image_create_failure"
+	if err := db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+		if _, ok := tx.Statement.Dest.(*model.DMImage); ok {
+			tx.AddError(databaseErr)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callback) })
+	store := &memoryImageStore{local: true, deleteErr: cleanupErr}
+	service := NewService(NewRepo(db), store, nil, nil)
+	_, err := service.UploadImage(context.Background(), authctx.CurrentUser{ID: testUser(t, db)}, bytes.NewReader(validDMPNG()), "image/png", int64(len(validDMPNG())))
+	if !errors.Is(err, databaseErr) || !errors.Is(err, cleanupErr) {
+		t.Fatalf("expected database and cleanup failures, got %v", err)
+	}
+	if store.deleteCalls != 1 {
+		t.Fatalf("expected cleanup attempt, got %d", store.deleteCalls)
 	}
 }
 
@@ -106,8 +134,10 @@ func TestOpenImageAllowsOwnerOrConversationParticipant(t *testing.T) {
 }
 
 type memoryImageStore struct {
-	local   bool
-	objects map[string][]byte
+	local       bool
+	objects     map[string][]byte
+	deleteCalls int
+	deleteErr   error
 }
 
 func (s *memoryImageStore) Put(_ context.Context, key, _ string, body io.Reader, _ int64) error {
@@ -133,6 +163,10 @@ func (s *memoryImageStore) SignedURL(_ context.Context, key string, _ time.Durat
 	return "https://private.test/" + key, nil
 }
 func (s *memoryImageStore) Delete(_ context.Context, key string) error {
+	s.deleteCalls++
+	if s.deleteErr != nil {
+		return s.deleteErr
+	}
 	delete(s.objects, key)
 	return nil
 }

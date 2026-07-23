@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"path"
@@ -424,7 +425,9 @@ func (s *Service) UploadImage(ctx context.Context, actor authctx.CurrentUser, bo
 		return ImageDTO{}, err
 	}
 	if err := s.repo.db.WithContext(ctx).Create(&image).Error; err != nil {
-		_ = s.images.Delete(ctx, image.ObjectKey)
+		if cleanupErr := s.images.Delete(ctx, image.ObjectKey); cleanupErr != nil {
+			return ImageDTO{}, fmt.Errorf("%w; cleanup private image: %w", err, cleanupErr)
+		}
 		return ImageDTO{}, err
 	}
 	return s.imageDTO(ctx, image)
