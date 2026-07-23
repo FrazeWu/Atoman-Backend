@@ -8,6 +8,8 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -15,12 +17,14 @@ import (
 	"time"
 
 	"atoman/internal/middleware"
+	"atoman/internal/migrations"
 	"atoman/internal/model"
 
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
+	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
@@ -49,13 +53,8 @@ func newDMTestRouterWithS3(t *testing.T, s3Client *s3.S3) (*gin.Engine, *gorm.DB
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_dm_conversation
-		ON dm_conversations (participant_a, participant_b)`).Error; err != nil {
-		t.Fatalf("create dm conversation index: %v", err)
-	}
-	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_dm_message_conv_sender_read
-		ON dm_messages (conversation_id, sender_id, read_at)`).Error; err != nil {
-		t.Fatalf("create dm message index: %v", err)
+	if err := migrations.RunDMV2Migration(db); err != nil {
+		t.Fatalf("run dm v2 migration: %v", err)
 	}
 	middleware.SetAuthDB(db)
 
@@ -72,6 +71,103 @@ func newDMTestRouterWithS3(t *testing.T, s3Client *s3.S3) (*gin.Engine, *gorm.DB
 	r := gin.New()
 	SetupDMRoutes(r, db, nil, s3Client)
 	return r, db, sender, recipient
+}
+
+func TestLegacyDMHandlerSendsAfterDMV2Migration(t *testing.T) {
+	r, db, sender, recipient := newDMTestRouter(t)
+	if err := db.Create(&model.UserSettings{UserID: recipient.UUID, DMPermission: model.DMPermissionAnyone}).Error; err != nil {
+		t.Fatalf("set recipient dm permission: %v", err)
+	}
+
+	for _, content := range []string{"first", "second"} {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/dm/conversations/"+recipient.Username, bytes.NewBufferString(`{"content":"`+content+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", dmAuthHeader(t, db, sender))
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, req)
+		if response.Code != http.StatusCreated {
+			t.Fatalf("send %q: expected 201, got %d: %s", content, response.Code, response.Body.String())
+		}
+	}
+
+	participantA, participantB := normalizeConversationParticipants(sender.UUID, recipient.UUID)
+	var conversation model.DMConversation
+	if err := db.Where("participant_a_type = ? AND participant_a = ? AND participant_b_type = ? AND participant_b = ?", model.DMPartyUser, participantA, model.DMPartyUser, participantB).First(&conversation).Error; err != nil {
+		t.Fatalf("load typed conversation: %v", err)
+	}
+	var messages []model.DMMessage
+	if err := db.Where("conversation_id = ?", conversation.ID).Order("created_at ASC").Find(&messages).Error; err != nil {
+		t.Fatalf("load messages: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("message count = %d, want 2", len(messages))
+	}
+	for _, message := range messages {
+		if message.SenderType != model.DMPartyUser || message.ActorUserID != sender.UUID || message.ClientMessageID == uuid.Nil {
+			t.Fatalf("unexpected v2 message fields: %#v", message)
+		}
+	}
+}
+
+func TestLegacyDMHandlerTypedConflictTargetPostgres(t *testing.T) {
+	db := openDMHandlerPostgres(t)
+	if err := migrations.RunDMV2Migration(db); err != nil {
+		t.Fatalf("run dm v2 migration: %v", err)
+	}
+	h := &dmHandler{db: db}
+	first, second := uuid.New(), uuid.New()
+	if _, err := h.getOrCreateConversation(first, second); err != nil {
+		t.Fatalf("create typed conversation: %v", err)
+	}
+	if _, err := h.getOrCreateConversation(first, second); err != nil {
+		t.Fatalf("reuse typed conversation: %v", err)
+	}
+	var count int64
+	if err := db.Model(&model.DMConversation{}).Count(&count).Error; err != nil {
+		t.Fatalf("count typed conversations: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("typed conflict target created %d conversations, want 1", count)
+	}
+}
+
+func openDMHandlerPostgres(t *testing.T) *gorm.DB {
+	t.Helper()
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL is not configured")
+	}
+	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("open postgres: %v", err)
+	}
+	sqlDB, err := admin.DB()
+	if err != nil {
+		t.Fatalf("open postgres db: %v", err)
+	}
+	if err := sqlDB.Ping(); err != nil {
+		t.Fatalf("ping postgres: %v", err)
+	}
+	schema := "dm_handler_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	if err := admin.Exec("CREATE SCHEMA " + schema).Error; err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec("DROP SCHEMA IF EXISTS " + schema + " CASCADE").Error
+		_ = sqlDB.Close()
+	})
+	parsed, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatalf("parse postgres url: %v", err)
+	}
+	query := parsed.Query()
+	query.Set("search_path", schema+",public")
+	parsed.RawQuery = query.Encode()
+	db, err := gorm.Open(postgres.Open(parsed.String()), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open schema postgres: %v", err)
+	}
+	return db
 }
 
 func TestSendMessageIsRejectedWhenEitherUserBlockedTheOther(t *testing.T) {
@@ -278,10 +374,13 @@ func TestGetMessagesReadsNormalizedConversationInBothDirectionsWithPagination(t 
 		}
 		message := model.DMMessage{
 			ConversationID: conversation.ID,
+			SenderType:     model.DMPartyUser,
 			SenderID:       senderID,
+			ActorUserID:    senderID,
 			Content:        fmt.Sprintf("message-%02d", i),
 		}
 		message.ID = uuid.MustParse(fmt.Sprintf("00000000-0000-0000-0000-%012x", i+1))
+		message.ClientMessageID = message.ID
 		message.CreatedAt = createdAt
 		if err := db.Create(&message).Error; err != nil {
 			t.Fatalf("create message %d: %v", i, err)

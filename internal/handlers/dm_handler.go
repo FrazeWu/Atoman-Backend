@@ -90,7 +90,7 @@ func (h *dmHandler) listConversations(c *gin.Context) {
 	}
 
 	var conversations []model.DMConversation
-	if err := h.db.Where("participant_a = ? OR participant_b = ?", userID, userID).
+	if err := h.db.Where("participant_a_type = ? AND participant_b_type = ? AND (participant_a = ? OR participant_b = ?)", model.DMPartyUser, model.DMPartyUser, userID, userID).
 		Order("last_message_at DESC NULLS LAST").
 		Find(&conversations).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch conversations"})
@@ -252,10 +252,13 @@ func (h *dmHandler) sendMessage(c *gin.Context) {
 		conversationID = conversation.ID
 
 		message = model.DMMessage{
-			ConversationID: conversation.ID,
-			SenderID:       senderID,
-			Content:        input.Content,
-			ImageURL:       input.ImageURL,
+			ConversationID:  conversation.ID,
+			SenderType:      model.DMPartyUser,
+			SenderID:        senderID,
+			ActorUserID:     senderID,
+			ClientMessageID: uuid.New(),
+			Content:         input.Content,
+			ImageURL:        input.ImageURL,
 		}
 		if err := tx.Create(&message).Error; err != nil {
 			return err
@@ -478,16 +481,16 @@ func (h *dmHandler) findUserByUsername(c *gin.Context, username string) (*model.
 func (h *dmHandler) getOrCreateConversation(userA, userB uuid.UUID) (*model.DMConversation, error) {
 	participantA, participantB := normalizeConversationParticipants(userA, userB)
 	var conversation model.DMConversation
-	err := h.db.Where("participant_a = ? AND participant_b = ?", participantA, participantB).First(&conversation).Error
+	err := h.db.Where("participant_a_type = ? AND participant_a = ? AND participant_b_type = ? AND participant_b = ?", model.DMPartyUser, participantA, model.DMPartyUser, participantB).First(&conversation).Error
 	if err == nil {
 		return &conversation, nil
 	}
 	if err != nil && err != gorm.ErrRecordNotFound {
 		return nil, err
 	}
-	conversation = model.DMConversation{ParticipantA: participantA, ParticipantB: participantB}
+	conversation = model.DMConversation{ParticipantAType: model.DMPartyUser, ParticipantA: participantA, ParticipantBType: model.DMPartyUser, ParticipantB: participantB}
 	if err := h.db.Create(&conversation).Error; err != nil {
-		if err2 := h.db.Where("participant_a = ? AND participant_b = ?", participantA, participantB).First(&conversation).Error; err2 == nil {
+		if err2 := h.db.Where("participant_a_type = ? AND participant_a = ? AND participant_b_type = ? AND participant_b = ?", model.DMPartyUser, participantA, model.DMPartyUser, participantB).First(&conversation).Error; err2 == nil {
 			return &conversation, nil
 		}
 		return nil, err
@@ -498,7 +501,7 @@ func (h *dmHandler) getOrCreateConversation(userA, userB uuid.UUID) (*model.DMCo
 func (h *dmHandler) findConversation(userA, userB uuid.UUID) (*model.DMConversation, error) {
 	participantA, participantB := normalizeConversationParticipants(userA, userB)
 	var conversation model.DMConversation
-	err := h.db.Where("participant_a = ? AND participant_b = ?", participantA, participantB).First(&conversation).Error
+	err := h.db.Where("participant_a_type = ? AND participant_a = ? AND participant_b_type = ? AND participant_b = ?", model.DMPartyUser, participantA, model.DMPartyUser, participantB).First(&conversation).Error
 	if err != nil {
 		return nil, err
 	}
@@ -567,7 +570,7 @@ func (h *dmHandler) getOrCreateConversationTx(tx *gorm.DB, userA, userB uuid.UUI
 	}
 
 	var conversation model.DMConversation
-	err := query.Where("participant_a = ? AND participant_b = ?", participantA, participantB).First(&conversation).Error
+	err := query.Where("participant_a_type = ? AND participant_a = ? AND participant_b_type = ? AND participant_b = ?", model.DMPartyUser, participantA, model.DMPartyUser, participantB).First(&conversation).Error
 	if err == nil {
 		return &conversation, nil
 	}
@@ -575,10 +578,11 @@ func (h *dmHandler) getOrCreateConversationTx(tx *gorm.DB, userA, userB uuid.UUI
 		return nil, err
 	}
 
-	conversation = model.DMConversation{ParticipantA: participantA, ParticipantB: participantB}
+	conversation = model.DMConversation{ParticipantAType: model.DMPartyUser, ParticipantA: participantA, ParticipantBType: model.DMPartyUser, ParticipantB: participantB}
 	result := tx.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "participant_a"}, {Name: "participant_b"}},
-		DoNothing: true,
+		Columns:     []clause.Column{{Name: "participant_a_type"}, {Name: "participant_a"}, {Name: "participant_b_type"}, {Name: "participant_b"}},
+		TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Expr{SQL: "deleted_at IS NULL"}}},
+		DoNothing:   true,
 	}).Create(&conversation)
 	if result.Error != nil {
 		return nil, result.Error
@@ -591,7 +595,7 @@ func (h *dmHandler) getOrCreateConversationTx(tx *gorm.DB, userA, userB uuid.UUI
 	if forUpdate && tx.Dialector.Name() != "sqlite" {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
-	if err := query.Where("participant_a = ? AND participant_b = ?", participantA, participantB).First(&conversation).Error; err != nil {
+	if err := query.Where("participant_a_type = ? AND participant_a = ? AND participant_b_type = ? AND participant_b = ?", model.DMPartyUser, participantA, model.DMPartyUser, participantB).First(&conversation).Error; err != nil {
 		return nil, err
 	}
 	return &conversation, nil

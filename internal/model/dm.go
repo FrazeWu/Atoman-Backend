@@ -38,13 +38,13 @@ type DMMessage struct {
 	SenderType     string    `json:"-" gorm:"type:varchar(16);not null;default:'user'"`
 	SenderID       uuid.UUID `json:"-" gorm:"type:uuid;not null;index"`
 	// Deprecated: retained only while the legacy DM handler is still compiled.
-	Sender          *User      `json:"-" gorm:"foreignKey:SenderID;references:UUID"`
+	Sender          *User      `json:"sender,omitempty" gorm:"foreignKey:SenderID;references:UUID"`
 	ActorUserID     uuid.UUID  `json:"-" gorm:"type:uuid;not null;index"`
 	ClientMessageID uuid.UUID  `json:"-" gorm:"type:uuid;not null"`
-	Content         string     `json:"-" gorm:"type:text"`
+	Content         string     `json:"content" gorm:"type:text"`
 	ImageID         *uuid.UUID `json:"-" gorm:"type:uuid"`
 	// Deprecated: legacy data remains in this column until image migration runs.
-	ImageURL string     `json:"-" gorm:"column:image_url"`
+	ImageURL string     `json:"image_url" gorm:"column:image_url"`
 	ReadAt   *time.Time `json:"-"`
 }
 
