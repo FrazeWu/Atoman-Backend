@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 
@@ -20,8 +21,8 @@ func TestConcurrentTargetSendsCreateOneConversationInPostgres(t *testing.T) {
 	actor, recipient := createDMPostgresUser(t, db), createDMPostgresUser(t, db)
 	service := NewService(NewRepo(db), nil, nil, nil)
 
-	results := concurrentDMSends(t, func() (MessageDTO, error) {
-		return service.SendToTarget(context.Background(), actor, TargetRef{Type: model.DMPartyUser, ID: recipient}, SendInput{Content: "hello", ClientMessageID: uuid.New()})
+	results := concurrentDMSends(t, func(ctx context.Context) (MessageDTO, error) {
+		return service.SendToTarget(ctx, actor, TargetRef{Type: model.DMPartyUser, ID: recipient}, SendInput{Content: "hello", ClientMessageID: uuid.New()})
 	})
 	for _, result := range results {
 		if result.err != nil {
@@ -42,8 +43,8 @@ func TestConcurrentIdempotentSendsCreateOneMessageInPostgres(t *testing.T) {
 	actor, recipient, clientID := createDMPostgresUser(t, db), createDMPostgresUser(t, db), uuid.New()
 	service := NewService(NewRepo(db), nil, nil, nil)
 
-	results := concurrentDMSends(t, func() (MessageDTO, error) {
-		return service.SendToTarget(context.Background(), actor, TargetRef{Type: model.DMPartyUser, ID: recipient}, SendInput{Content: "same", ClientMessageID: clientID})
+	results := concurrentDMSends(t, func(ctx context.Context) (MessageDTO, error) {
+		return service.SendToTarget(ctx, actor, TargetRef{Type: model.DMPartyUser, ID: recipient}, SendInput{Content: "same", ClientMessageID: clientID})
 	})
 	for _, result := range results {
 		if result.err != nil {
@@ -64,8 +65,10 @@ type dmSendResult struct {
 	err     error
 }
 
-func concurrentDMSends(t *testing.T, send func() (MessageDTO, error)) [2]dmSendResult {
+func concurrentDMSends(t *testing.T, send func(context.Context) (MessageDTO, error)) [2]dmSendResult {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	start := make(chan struct{})
 	results := make(chan dmSendResult, 2)
 	var group sync.WaitGroup
@@ -74,12 +77,21 @@ func concurrentDMSends(t *testing.T, send func() (MessageDTO, error)) [2]dmSendR
 		go func() {
 			defer group.Done()
 			<-start
-			message, err := send()
+			message, err := send(ctx)
 			results <- dmSendResult{message: message, err: err}
 		}()
 	}
 	close(start)
-	group.Wait()
+	done := make(chan struct{})
+	go func() {
+		group.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("concurrent DM sends timed out")
+	}
 	return [2]dmSendResult{<-results, <-results}
 }
 
