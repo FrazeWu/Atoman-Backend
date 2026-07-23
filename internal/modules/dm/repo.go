@@ -262,6 +262,69 @@ func (r *Repo) FindMessageByClientID(actorUserID, clientMessageID uuid.UUID) (mo
 	return message, err
 }
 
+func (r *Repo) FindMessage(messageID uuid.UUID) (model.DMMessage, error) {
+	var message model.DMMessage
+	if err := r.db.First(&message, "id = ?", messageID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.DMMessage{}, ErrMessageNotFound
+		}
+		return model.DMMessage{}, err
+	}
+	return message, nil
+}
+
+func (r *Repo) FindImage(imageID uuid.UUID) (model.DMImage, error) {
+	var image model.DMImage
+	if err := r.db.First(&image, "id = ?", imageID).Error; err != nil {
+		return model.DMImage{}, err
+	}
+	return image, nil
+}
+
+func (r *Repo) FindReportByMessageReporter(messageID, reporterID uuid.UUID) (model.DMMessageReport, error) {
+	var report model.DMMessageReport
+	if err := r.db.Where("message_id = ? AND reporter_user_id = ?", messageID, reporterID).First(&report).Error; err != nil {
+		return model.DMMessageReport{}, err
+	}
+	return report, nil
+}
+
+func (r *Repo) CreateReport(report *model.DMMessageReport) (bool, error) {
+	result := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(report)
+	return result.RowsAffected > 0, result.Error
+}
+
+func (r *Repo) ListPendingReports(cursor *Cursor, limit int) ([]model.DMMessageReport, error) {
+	db := r.db.Where("status = ?", model.DMReportPending)
+	if cursor != nil {
+		db = db.Where("created_at < ? OR (created_at = ? AND id < ?)", cursor.At, cursor.At, cursor.ID)
+	}
+	var reports []model.DMMessageReport
+	if err := db.Order("created_at DESC, id DESC").Limit(limit + 1).Find(&reports).Error; err != nil {
+		return nil, err
+	}
+	return reports, nil
+}
+
+func (r *Repo) LockPendingReport(reportID uuid.UUID) (model.DMMessageReport, error) {
+	var report model.DMMessageReport
+	if err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ?", reportID, model.DMReportPending).First(&report).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.DMMessageReport{}, ErrPermissionDenied
+		}
+		return model.DMMessageReport{}, err
+	}
+	return report, nil
+}
+
+func (r *Repo) ReviewReport(reportID, reviewerID uuid.UUID, status string, reviewedAt time.Time) error {
+	return r.db.Model(&model.DMMessageReport{}).Where("id = ? AND status = ?", reportID, model.DMReportPending).Updates(map[string]any{
+		"status":              status,
+		"reviewed_by_user_id": reviewerID,
+		"reviewed_at":         reviewedAt,
+	}).Error
+}
+
 func (r *Repo) LockUsableImage(actorUserID, imageID uuid.UUID) (model.DMImage, error) {
 	var image model.DMImage
 	err := r.db.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND uploaded_by_user_id = ?", imageID, actorUserID).First(&image).Error

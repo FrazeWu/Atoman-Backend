@@ -299,6 +299,116 @@ func (s *Service) UnblockConversation(ctx context.Context, actor authctx.Current
 	return result, err
 }
 
+func (s *Service) ReportMessage(ctx context.Context, actor authctx.CurrentUser, messageID uuid.UUID, input ReportInput) (ReportReceiptDTO, error) {
+	if !validReportInput(input) || actor.ID == uuid.Nil {
+		return ReportReceiptDTO{}, ErrPermissionDenied
+	}
+	err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		repo := NewRepo(tx)
+		message, err := repo.FindMessage(messageID)
+		if err != nil {
+			return err
+		}
+		if _, err := repo.GetConversationForActor(message.ConversationID, actor.ID); err != nil {
+			return err
+		}
+		if message.ActorUserID == actor.ID {
+			return ErrPermissionDenied
+		}
+		if _, err := repo.FindReportByMessageReporter(message.ID, actor.ID); err == nil {
+			return ErrAlreadyReported
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		report := model.DMMessageReport{
+			MessageID:           message.ID,
+			ReporterUserID:      actor.ID,
+			ReportedActorUserID: message.ActorUserID,
+			Reason:              input.Reason,
+			Detail:              input.Detail,
+			SnapshotContent:     message.Content,
+			Status:              model.DMReportPending,
+		}
+		if message.ImageID != nil {
+			image, err := repo.FindImage(*message.ImageID)
+			if err != nil {
+				return err
+			}
+			report.SnapshotImageKey = image.ObjectKey
+		}
+		created, err := repo.CreateReport(&report)
+		if err != nil {
+			return err
+		}
+		if !created {
+			return ErrAlreadyReported
+		}
+		return nil
+	})
+	if err != nil {
+		return ReportReceiptDTO{}, err
+	}
+	return ReportReceiptDTO{Status: model.DMReportPending}, nil
+}
+
+func (s *Service) ListReports(ctx context.Context, actor authctx.CurrentUser, encodedCursor string, limit int) (PageDTO[ReportDTO], error) {
+	if !canReviewReports(actor) {
+		return PageDTO[ReportDTO]{}, ErrPermissionDenied
+	}
+	var cursor *Cursor
+	if encodedCursor != "" {
+		value, err := decodeCursor(encodedCursor)
+		if err != nil {
+			return PageDTO[ReportDTO]{}, err
+		}
+		cursor = &value
+	}
+	limit = normalizeLimit(limit)
+	repo := NewRepo(s.repo.db.WithContext(ctx))
+	reports, err := repo.ListPendingReports(cursor, limit)
+	if err != nil {
+		return PageDTO[ReportDTO]{}, err
+	}
+	page := PageDTO[ReportDTO]{Items: make([]ReportDTO, 0, len(reports))}
+	if len(reports) > limit {
+		reports = reports[:limit]
+		last := reports[len(reports)-1]
+		page.NextCursor = encodeCursor(Cursor{At: last.CreatedAt, ID: last.ID})
+	}
+	for _, report := range reports {
+		dto, err := reportDTO(repo, report)
+		if err != nil {
+			return PageDTO[ReportDTO]{}, err
+		}
+		page.Items = append(page.Items, dto)
+	}
+	return page, nil
+}
+
+func (s *Service) ReviewReport(ctx context.Context, actor authctx.CurrentUser, reportID uuid.UUID, input ReviewReportInput) (ReportDTO, error) {
+	if !canReviewReports(actor) || (input.Status != model.DMReportResolved && input.Status != model.DMReportDismissed) {
+		return ReportDTO{}, ErrPermissionDenied
+	}
+	var result ReportDTO
+	err := s.repo.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		repo := NewRepo(tx)
+		report, err := repo.LockPendingReport(reportID)
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		if err := repo.ReviewReport(report.ID, actor.ID, input.Status, now); err != nil {
+			return err
+		}
+		report.Status = input.Status
+		report.ReviewedByUserID = &actor.ID
+		report.ReviewedAt = &now
+		result, err = reportDTO(repo, report)
+		return err
+	})
+	return result, err
+}
+
 func (s *Service) sendWithPolicy(repo *Repo, access ConversationAccess, sender SenderIdentity, input SendInput, result *MessageDTO) error {
 	if err := repo.LockActor(sender.ActorUserID); err != nil {
 		return err
@@ -517,4 +627,50 @@ func truncateRunes(value string, limit int) string {
 		return value
 	}
 	return string([]rune(value)[:limit])
+}
+
+func validReportInput(input ReportInput) bool {
+	if utf8.RuneCountInString(input.Detail) > 1000 {
+		return false
+	}
+	switch input.Reason {
+	case "spam", "harassment", "illegal", "privacy", "other":
+		return true
+	default:
+		return false
+	}
+}
+
+func canReviewReports(actor authctx.CurrentUser) bool {
+	return actor.ID != uuid.Nil && (actor.Role == authctx.RoleAdmin || actor.Role == authctx.RoleOwner)
+}
+
+func reportDTO(repo *Repo, report model.DMMessageReport) (ReportDTO, error) {
+	message, err := repo.FindMessage(report.MessageID)
+	if err != nil {
+		return ReportDTO{}, err
+	}
+	access, err := repo.GetConversationForActor(message.ConversationID, report.ReporterUserID)
+	if err != nil {
+		return ReportDTO{}, err
+	}
+	dto := ReportDTO{
+		ID:                  report.ID.String(),
+		MessageID:           report.MessageID.String(),
+		ReporterUserID:      report.ReporterUserID.String(),
+		ReportedActorUserID: report.ReportedActorUserID.String(),
+		Reason:              report.Reason,
+		Detail:              report.Detail,
+		SnapshotContent:     report.SnapshotContent,
+		HasSnapshotImage:    report.SnapshotImageKey != "",
+		ConversationContext: access.Conversation.ParticipantAType + ":" + access.Conversation.ParticipantA.String() + " -> " + access.Conversation.ParticipantBType + ":" + access.Conversation.ParticipantB.String(),
+		Status:              report.Status,
+		ReviewedAt:          report.ReviewedAt,
+		CreatedAt:           report.CreatedAt,
+	}
+	if report.ReviewedByUserID != nil {
+		value := report.ReviewedByUserID.String()
+		dto.ReviewedByUserID = &value
+	}
+	return dto, nil
 }

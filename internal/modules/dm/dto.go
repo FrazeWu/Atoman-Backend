@@ -71,6 +71,36 @@ type SendInput struct {
 	ImageURL        string     `json:"image_url,omitempty"`
 }
 
+type ReportInput struct {
+	Reason string `json:"reason"`
+	Detail string `json:"detail"`
+}
+
+type ReviewReportInput struct {
+	Status string `json:"status"`
+}
+
+type ReportDTO struct {
+	ID                  string     `json:"id"`
+	MessageID           string     `json:"message_id"`
+	ReporterUserID      string     `json:"reporter_user_id"`
+	ReportedActorUserID string     `json:"reported_actor_user_id"`
+	Reason              string     `json:"reason"`
+	Detail              string     `json:"detail"`
+	SnapshotContent     string     `json:"snapshot_content"`
+	HasSnapshotImage    bool       `json:"has_snapshot_image"`
+	ConversationContext string     `json:"conversation_context"`
+	Status              string     `json:"status"`
+	ReviewedByUserID    *string    `json:"reviewed_by_user_id,omitempty"`
+	ReviewedAt          *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt           time.Time  `json:"created_at"`
+}
+
+// ReportReceiptDTO deliberately excludes the report identifier. It is an audit ID.
+type ReportReceiptDTO struct {
+	Status string `json:"status"`
+}
+
 func encodeCursor(cursor Cursor) string {
 	data, _ := json.Marshal(cursor)
 	return base64.RawURLEncoding.EncodeToString(data)
