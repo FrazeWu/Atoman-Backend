@@ -244,6 +244,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
                 "tags": [
@@ -270,6 +273,18 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.ReportsResponse"
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -279,8 +294,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
                 "tags": [
                     "dm-admin"
                 ],
@@ -308,6 +327,24 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/dm.ReportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -6142,6 +6179,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
                 "tags": [
@@ -6163,6 +6203,24 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.PermissionResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             },
@@ -6170,8 +6228,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
                 "tags": [
                     "dm"
                 ],
@@ -6200,6 +6262,24 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.PermissionResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6209,8 +6289,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
                 "tags": [
                     "dm"
                 ],
@@ -6230,6 +6314,24 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.ConversationResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             },
@@ -6237,8 +6339,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
                 "tags": [
                     "dm"
                 ],
@@ -6258,6 +6364,24 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.ConversationResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6267,6 +6391,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
                 "tags": [
@@ -6300,6 +6427,24 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.MessagesResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             },
@@ -6307,8 +6452,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
                 "tags": [
                     "dm"
                 ],
@@ -6337,6 +6486,30 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.MessageResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6346,8 +6519,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
                 "tags": [
                     "dm"
                 ],
@@ -6367,6 +6544,24 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.ReadResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6376,8 +6571,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -6400,6 +6599,18 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.ImageResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6409,6 +6620,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
                 "tags": [
@@ -6430,6 +6644,24 @@ const docTemplate = `{
                         "schema": {
                             "type": "file"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6439,6 +6671,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
                 "tags": [
@@ -6451,6 +6686,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.MailboxesResponse"
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6460,6 +6701,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
                 "tags": [
@@ -6500,6 +6744,24 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.ConversationsResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6509,8 +6771,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
                 "tags": [
                     "dm"
                 ],
@@ -6539,6 +6805,36 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.ReportReceiptResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6548,6 +6844,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
                 "tags": [
@@ -6560,6 +6859,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.PermissionResponse"
                         }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             },
@@ -6567,8 +6872,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
                 "tags": [
                     "dm"
                 ],
@@ -6590,6 +6899,24 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/dm.PermissionResponse"
                         }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6599,6 +6926,9 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
                 "tags": [
@@ -6630,6 +6960,24 @@ const docTemplate = `{
                     },
                     "204": {
                         "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -6639,8 +6987,12 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
                     }
                 ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin.",
                 "tags": [
                     "dm"
                 ],
@@ -6675,6 +7027,36 @@ const docTemplate = `{
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/dm.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -17610,6 +17992,22 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/dm.ConversationPageDTO"
+                }
+            }
+        },
+        "dm.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string"
+                        },
+                        "message": {
+                            "type": "string"
+                        }
+                    }
                 }
             }
         },

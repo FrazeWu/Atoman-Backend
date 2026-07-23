@@ -736,6 +736,16 @@ definitions:
       data:
         $ref: '#/definitions/dm.ConversationPageDTO'
     type: object
+  dm.ErrorResponse:
+    properties:
+      error:
+        properties:
+          code:
+            type: string
+          message:
+            type: string
+        type: object
+    type: object
   dm.ImageDTO:
     properties:
       id:
@@ -5400,13 +5410,23 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.ReportsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: List DM reports
       tags:
       - dm-admin
   /api/v1/admin/dm/reports/{id}:
     put:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
       - description: report ID
         in: path
@@ -5424,8 +5444,21 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.ReportResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Review DM report
       tags:
       - dm-admin
@@ -9130,12 +9163,26 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.PermissionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Get channel DM permission
       tags:
       - dm
     put:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
       - description: channel ID
         in: path
@@ -9153,13 +9200,27 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.PermissionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Update channel DM permission
       tags:
       - dm
   /api/v1/dm/conversations/{id}/block:
     delete:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
       - description: conversation ID
         in: path
@@ -9171,12 +9232,26 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.ConversationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Unblock DM conversation
       tags:
       - dm
     put:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
       - description: conversation ID
         in: path
@@ -9188,8 +9263,21 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.ConversationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Block DM conversation
       tags:
       - dm
@@ -9214,12 +9302,26 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.MessagesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: List DM messages
       tags:
       - dm
     post:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
       - description: conversation ID
         in: path
@@ -9237,13 +9339,31 @@ paths:
           description: Created
           schema:
             $ref: '#/definitions/dm.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Send DM in conversation
       tags:
       - dm
   /api/v1/dm/conversations/{id}/read:
     put:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
       - description: conversation ID
         in: path
@@ -9255,8 +9375,21 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.ReadResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Mark DM conversation read
       tags:
       - dm
@@ -9264,6 +9397,7 @@ paths:
     post:
       consumes:
       - multipart/form-data
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
       - description: image
         in: formData
@@ -9275,8 +9409,17 @@ paths:
           description: Created
           schema:
             $ref: '#/definitions/dm.ImageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Upload private DM image
       tags:
       - dm
@@ -9293,8 +9436,21 @@ paths:
           description: OK
           schema:
             type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Read private DM image
       tags:
       - dm
@@ -9305,8 +9461,13 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.MailboxesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: DM mailboxes
       tags:
       - dm
@@ -9336,13 +9497,27 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.ConversationsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: DM mailbox conversations
       tags:
       - dm
   /api/v1/dm/messages/{id}/reports:
     post:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
       - description: message ID
         in: path
@@ -9360,8 +9535,29 @@ paths:
           description: Created
           schema:
             $ref: '#/definitions/dm.ReportReceiptResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Report DM message
       tags:
       - dm
@@ -9372,12 +9568,18 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.PermissionResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Get DM permission
       tags:
       - dm
     put:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
       - description: permission
         in: body
@@ -9390,8 +9592,21 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/dm.PermissionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Update DM permission
       tags:
       - dm
@@ -9415,13 +9630,27 @@ paths:
             $ref: '#/definitions/dm.ConversationResponse'
         "204":
           description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Find DM target conversation
       tags:
       - dm
   /api/v1/dm/targets/{type}/{id}/messages:
     post:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
       parameters:
       - description: target type
         in: path
@@ -9444,8 +9673,29 @@ paths:
           description: Created
           schema:
             $ref: '#/definitions/dm.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
+      - CookieAuth: []
       summary: Send DM to target
       tags:
       - dm

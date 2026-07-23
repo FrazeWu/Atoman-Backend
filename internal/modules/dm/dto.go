@@ -91,6 +91,12 @@ type ReportResponse struct {
 type PermissionResponse struct {
 	Data PermissionDTO `json:"data"`
 }
+type ErrorResponse struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
 
 type ReadResultDTO struct {
 	ConversationUnread int64 `json:"conversation_unread"`
