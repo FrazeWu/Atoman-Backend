@@ -23,8 +23,8 @@ func RunDMV2Migration(db *gorm.DB) error {
 	if db.Migrator().HasTable("dm_messages") {
 		for _, statement := range []string{
 			`UPDATE dm_messages SET sender_type = 'user' WHERE sender_type IS NULL OR sender_type = ''`,
-			`UPDATE dm_messages SET actor_user_id = sender_id WHERE actor_user_id IS NULL`,
-			`UPDATE dm_messages SET client_message_id = id WHERE client_message_id IS NULL`,
+			`UPDATE dm_messages SET actor_user_id = sender_id WHERE actor_user_id IS NULL OR actor_user_id = '00000000-0000-0000-0000-000000000000'`,
+			`UPDATE dm_messages SET client_message_id = id WHERE client_message_id IS NULL OR client_message_id = '00000000-0000-0000-0000-000000000000'`,
 		} {
 			if err := db.Exec(statement).Error; err != nil {
 				return err

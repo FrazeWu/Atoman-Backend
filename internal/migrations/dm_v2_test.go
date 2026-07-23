@@ -111,3 +111,39 @@ func TestRunDMV2MigrationCreatesFreshSchemaAndIsIdempotent(t *testing.T) {
 		t.Fatal("expected actor/client index")
 	}
 }
+
+func TestRunDMV2MigrationBackfillsZeroUUIDMessageFields(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.DMConversation{}, &model.DMMessage{})
+
+	conversationID, senderID, messageID := uuid.New(), uuid.New(), uuid.New()
+	if err := db.Create(&model.DMMessage{
+		Base:            model.Base{ID: messageID},
+		ConversationID:  conversationID,
+		SenderType:      model.DMPartyUser,
+		SenderID:        senderID,
+		ActorUserID:     uuid.Nil,
+		ClientMessageID: uuid.Nil,
+		Content:         "zero ids",
+	}).Error; err != nil {
+		t.Fatalf("seed zero uuid message: %v", err)
+	}
+
+	if err := RunDMV2Migration(db); err != nil {
+		t.Fatalf("first dm v2 migration: %v", err)
+	}
+	if err := RunDMV2Migration(db); err != nil {
+		t.Fatalf("second dm v2 migration: %v", err)
+	}
+
+	var message model.DMMessage
+	if err := db.First(&message, "id = ?", messageID).Error; err != nil {
+		t.Fatalf("load migrated message: %v", err)
+	}
+	if message.ActorUserID != senderID || message.ClientMessageID != messageID {
+		t.Fatalf("zero uuid backfill = actor %s client %s", message.ActorUserID, message.ClientMessageID)
+	}
+	if !db.Migrator().HasIndex("dm_messages", "uq_dm_actor_client_message") {
+		t.Fatal("expected actor/client unique index")
+	}
+}
