@@ -6,7 +6,25 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
+
+	"github.com/google/uuid"
 )
+
+type legacyAuthSession struct {
+	ID        uuid.UUID  `gorm:"type:uuid;primaryKey"`
+	UserID    uuid.UUID  `gorm:"type:uuid;not null;index"`
+	TokenHash string     `gorm:"size:64;not null;uniqueIndex"`
+	CSRFHash  string     `gorm:"size:64;not null;default:''"`
+	Kind      string     `gorm:"size:16;not null;index"`
+	ExpiresAt time.Time  `gorm:"not null;index"`
+	RevokedAt *time.Time `gorm:"index"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+func (legacyAuthSession) TableName() string {
+	return "auth_sessions"
+}
 
 func TestRunAuthSecurityMigrationCreatesSessionsAndCaseInsensitiveUserIndexes(t *testing.T) {
 	db := testdb.Open(t)
@@ -48,5 +66,39 @@ func TestRunAuthSecurityMigrationCreatesSessionsAndCaseInsensitiveUserIndexes(t 
 	duplicate = model.User{Username: "other", Email: "ALICE@EXAMPLE.COM", Password: "hash", IsActive: true}
 	if err := db.Create(&duplicate).Error; err == nil {
 		t.Fatal("expected case-insensitive email uniqueness violation")
+	}
+}
+
+func TestRunAuthSecurityMigrationBackfillsExistingSessions(t *testing.T) {
+	db := testdb.Open(t)
+	if err := db.AutoMigrate(&model.User{}, &legacyAuthSession{}); err != nil {
+		t.Fatal(err)
+	}
+	createdAt := time.Date(2026, time.July, 20, 12, 0, 0, 0, time.UTC)
+	legacy := legacyAuthSession{
+		ID:        uuid.New(),
+		UserID:    uuid.New(),
+		TokenHash: "token-hash",
+		Kind:      "web",
+		ExpiresAt: createdAt.Add(24 * time.Hour),
+		CreatedAt: createdAt,
+	}
+	if err := db.Create(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RunAuthSecurityMigration(db); err != nil {
+		t.Fatalf("migrate existing auth sessions: %v", err)
+	}
+
+	var migrated model.AuthSession
+	if err := db.First(&migrated, "id = ?", legacy.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !migrated.LastActiveAt.Equal(createdAt) {
+		t.Fatalf("last_active_at = %s, want %s", migrated.LastActiveAt, createdAt)
+	}
+	if migrated.UserAgent != "" || migrated.IPPrefix != "" {
+		t.Fatalf("expected empty legacy device metadata, got user_agent=%q ip_prefix=%q", migrated.UserAgent, migrated.IPPrefix)
 	}
 }
