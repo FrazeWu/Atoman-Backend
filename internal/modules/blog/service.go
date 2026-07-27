@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/recommendation"
 	"atoman/internal/modules/reference"
 	"atoman/internal/modules/studio"
@@ -1049,7 +1050,10 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 			if _, err := s.syncPostReferences(tx, post); err != nil {
 				return err
 			}
-			return saveBlogPostVersion(tx, post, user.ID)
+			if err := saveBlogPostVersion(tx, post, user.ID); err != nil {
+				return err
+			}
+			return lifecycle.NewService(tx).EnqueuePublication("blog", post.ID)
 		}
 		return nil
 	}); err != nil {

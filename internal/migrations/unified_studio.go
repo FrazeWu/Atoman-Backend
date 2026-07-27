@@ -41,6 +41,10 @@ func RunUnifiedStudioMigration(db *gorm.DB) error {
 			&model.UserStudioState{},
 			&model.StudioModuleSettings{},
 			&model.StudioMetricEvent{},
+			&model.ContentLifecycleEvent{},
+			&model.ContentProgress{},
+			&model.ContentNotificationPreference{},
+			&model.ContentPublicationEvent{},
 		); err != nil {
 			return err
 		}

@@ -31,6 +31,7 @@ func newStudioQueryFixture(t *testing.T) studioQueryFixture {
 		&model.UserStudioState{},
 		&model.StudioModuleSettings{},
 		&model.StudioMetricEvent{},
+		&model.ContentLifecycleEvent{},
 		&model.Post{},
 		&model.PostCollection{},
 		&model.PodcastEpisode{},

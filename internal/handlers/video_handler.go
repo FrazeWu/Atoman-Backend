@@ -19,8 +19,10 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/recommendation"
 	studioapi "atoman/internal/modules/studio"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/service"
 	"atoman/internal/storage"
@@ -685,9 +687,19 @@ func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 					return err
 				}
 			}
-
+			if status == "published" {
+				lifecycleService := lifecycle.NewService(tx)
+				if err := lifecycleService.ValidatePublishable("video", video.ID); err != nil {
+					return err
+				}
+				return lifecycleService.EnqueuePublication("video", video.ID)
+			}
 			return nil
 		}); err != nil {
+			if apperr.FromError(err) != nil {
+				httpx.Error(c, err)
+				return
+			}
 			c.JSON(statusCode, gin.H{"error": err.Error()})
 			return
 		}
@@ -767,6 +779,7 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 			effectiveChannelID = *input.ChannelID
 		}
 		effectiveStatus := video.Status
+		wasPublished := video.Status == "published"
 		if input.Status != nil {
 			effectiveStatus = *input.Status
 		}
@@ -836,9 +849,19 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 					}
 				}
 			}
-
+			if effectiveStatus == "published" && !wasPublished {
+				lifecycleService := lifecycle.NewService(tx)
+				if err := lifecycleService.ValidatePublishable("video", video.ID); err != nil {
+					return err
+				}
+				return lifecycleService.EnqueuePublication("video", video.ID)
+			}
 			return nil
 		}); err != nil {
+			if apperr.FromError(err) != nil {
+				httpx.Error(c, err)
+				return
+			}
 			c.JSON(statusCode, gin.H{"error": err.Error()})
 			return
 		}

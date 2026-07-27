@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -44,6 +45,43 @@ func TestStudioAnalyticsUsesEventTimeForSevenTwentyEightAndNinetyDays(t *testing
 	}
 }
 
+func TestStudioAnalyticsIncludesLifecycleFunnelEvents(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	collection := fixture.collections[ModuleBlog]
+	post := model.Post{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &collection.ID,
+		Title: "Funnel post", Content: "body", Status: "published", Visibility: "public",
+	}
+	if err := fixture.db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, metric := range []string{"impression", "open", "engaged", "complete"} {
+		event := model.ContentLifecycleEvent{
+			ChannelID: fixture.channel.ID, ContentType: "blog", ContentID: post.ID,
+			Event: metric, Source: "home", ClientEventID: metric + "-event",
+		}
+		if err := fixture.db.Create(&event).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	analytics, err := fixture.service.GetAnalytics(fixture.user, ModuleBlog, AnalyticsQuery{ChannelID: fixture.channel.ID, Range: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, metric := range []string{"impression", "open", "engaged", "complete"} {
+		if analytics.Totals[metric] != 1 {
+			t.Fatalf("expected %s total 1, got %#v", metric, analytics.Totals)
+		}
+		if analytics.Top[0].Metrics[metric] != 1 {
+			t.Fatalf("expected %s content total 1, got %#v", metric, analytics.Top[0].Metrics)
+		}
+	}
+	if len(analytics.Sources) != 1 || analytics.Sources[0].Source != "home" || analytics.Sources[0].Count != 4 {
+		t.Fatalf("expected home source count 4, got %#v", analytics.Sources)
+	}
+}
+
 func TestStudioShareRecordsEventAndRejectsPrivateContent(t *testing.T) {
 	fixture := newStudioQueryFixture(t)
 	collection := fixture.collections[ModuleBlog]
@@ -79,5 +117,33 @@ func TestStudioShareRecordsEventAndRejectsPrivateContent(t *testing.T) {
 	appErr := apperr.FromError(err)
 	if appErr == nil || appErr.HTTPStatus != 400 {
 		t.Fatalf("expected private share 400, got %v", err)
+	}
+}
+
+func TestStudioAnalyticsCalculatesReturningConsumersAcrossDays(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	collection := fixture.collections[ModuleBlog]
+	post := model.Post{UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &collection.ID, Title: "Retention", Content: "body", Status: "published", Visibility: "public"}
+	if err := fixture.db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	viewerID := fixture.foreignUser.UUID
+	for index, age := range []time.Duration{24 * time.Hour, 0} {
+		event := model.ContentLifecycleEvent{
+			Base: model.Base{CreatedAt: time.Now().UTC().Add(-age)}, UserID: &viewerID,
+			ChannelID: fixture.channel.ID, ContentType: "blog", ContentID: post.ID,
+			Event: "open", Source: "direct", ClientEventID: fmt.Sprintf("retention-%d", index),
+		}
+		if err := fixture.db.Create(&event).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	analytics, err := fixture.service.GetAnalytics(fixture.user, ModuleBlog, AnalyticsQuery{ChannelID: fixture.channel.ID, Range: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analytics.Retention.Consumers != 1 || analytics.Retention.ReturningConsumers != 1 || analytics.Retention.Rate != 100 {
+		t.Fatalf("unexpected retention: %#v", analytics.Retention)
 	}
 }

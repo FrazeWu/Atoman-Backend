@@ -34,6 +34,8 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.UserStudioState{},
 		&model.StudioMetricEvent{},
 		&model.Post{},
+		&model.PodcastEpisode{},
+		&model.ContentPublicationEvent{},
 		&model.PostCollection{},
 		&model.BlogPostVersion{},
 		&model.BlogDraft{},
@@ -1929,6 +1931,13 @@ func TestRegisterRoutesPublishPostUpdatesStatus(t *testing.T) {
 	}
 	if versionCount != 1 {
 		t.Fatalf("expected first published version, got %d", versionCount)
+	}
+	var publicationCount int64
+	if err := db.Model(&model.ContentPublicationEvent{}).Where("content_type = ? AND content_id = ?", "blog", post.ID).Count(&publicationCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if publicationCount != 1 {
+		t.Fatalf("expected one blog publication event, got %d", publicationCount)
 	}
 }
 

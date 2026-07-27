@@ -41,6 +41,7 @@ func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 		&model.UserStudioState{},
 		&model.StudioModuleSettings{},
 		&model.StudioMetricEvent{},
+		&model.ContentLifecycleEvent{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
 		&model.Subscription{},

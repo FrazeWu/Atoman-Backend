@@ -128,7 +128,7 @@ func newBlogReferencePostgresDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{},
-		&model.PodcastEpisode{}, &model.BlogPostVersion{}, &model.ContentReference{}, &model.Notification{},
+		&model.PodcastEpisode{}, &model.BlogPostVersion{}, &model.ContentPublicationEvent{}, &model.ContentReference{}, &model.Notification{},
 	))
 	require.NoError(t, migrations.RunNotificationDMIndexes(db))
 	require.NoError(t, migrations.RunContentReferencesMigration(db))
