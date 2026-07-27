@@ -77,6 +77,8 @@ type archiveListEntry struct {
 	size       int64
 	packedSize int64
 	attributes string
+	hasSize    bool
+	hasPacked  bool
 }
 
 // validateArchiveListing accepts only ordinary, bounded relative archive entries.
@@ -85,6 +87,12 @@ func validateArchiveListing(raw []byte) error {
 	entry := archiveListEntry{}
 	flush := func() error {
 		if entry.path == "" {
+			return nil
+		}
+		// 7zz -slt starts with archive metadata (including its local temp path).
+		// Real archive members always include at least one size field.
+		if !entry.hasSize && !entry.hasPacked {
+			entry = archiveListEntry{}
 			return nil
 		}
 		normalizedPath := strings.ReplaceAll(entry.path, `\`, "/")
@@ -121,8 +129,10 @@ func validateArchiveListing(raw []byte) error {
 			entry.path = strings.TrimSpace(value)
 		case "Size":
 			entry.size, _ = strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			entry.hasSize = true
 		case "Packed Size":
 			entry.packedSize, _ = strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			entry.hasPacked = true
 		case "Attributes":
 			entry.attributes = strings.TrimSpace(value)
 		}
@@ -429,11 +439,17 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 			return fmt.Errorf("unsafe extracted symlink %q", path)
 		}
 		if entry.IsDir() {
+			if entry.Name() == "__MACOSX" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		relative, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
+		}
+		if strings.HasPrefix(filepath.Base(relative), "._") {
+			return nil
 		}
 		role, _, err := detectAlbumImportFileRole(filepath.Base(path))
 		if err != nil {

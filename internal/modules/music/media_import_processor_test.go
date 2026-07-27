@@ -87,6 +87,8 @@ func TestMediaImportProcessorExtractsArchiveInTempTreeAndKeepsDiscPath(t *testin
 			for _, arg := range args {
 				if strings.HasPrefix(arg, "-o") {
 					_ = os.WriteFile(filepath.Join(strings.TrimPrefix(arg, "-o"), "Disc 2", "01 - Second.flac"), []byte("audio"), 0600)
+					_ = os.MkdirAll(filepath.Join(strings.TrimPrefix(arg, "-o"), "__MACOSX", "Disc 2"), 0700)
+					_ = os.WriteFile(filepath.Join(strings.TrimPrefix(arg, "-o"), "__MACOSX", "Disc 2", "._01 - Second.flac"), []byte("resource fork"), 0600)
 				}
 			}
 		}
@@ -474,6 +476,23 @@ func TestValidateArchiveListingRejectsDangerousEntriesAndLimits(t *testing.T) {
 	}
 	if err := validateArchiveListing([]byte(entries.String())); err == nil {
 		t.Fatal("expected entry count rejection")
+	}
+}
+
+func TestValidateArchiveListingIgnoresSevenZipArchiveHeader(t *testing.T) {
+	listing := `
+Path = /tmp/atoman-archive-import-123/source.zip
+Type = zip
+Physical Size = 1024
+
+----------
+Path = Disc 1/01 - First.flac
+Size = 100
+Packed Size = 80
+`
+
+	if err := validateArchiveListing([]byte(listing)); err != nil {
+		t.Fatalf("expected 7zz archive header to be ignored, got %v", err)
 	}
 }
 
