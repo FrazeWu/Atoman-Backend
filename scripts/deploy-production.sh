@@ -7,6 +7,8 @@ REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 
 SERVICE_NAME="${ATOMAN_SERVICE_NAME:-atoman-backend}"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+WORKER_SERVICE_NAME="${ATOMAN_MUSIC_IMPORT_WORKER_SERVICE_NAME:-atoman-music-import-worker}"
+WORKER_SERVICE_FILE="/etc/systemd/system/${WORKER_SERVICE_NAME}.service"
 ENV_FILE="${ATOMAN_ENV_FILE:-$REPO_DIR/.env.prod}"
 COMPOSE_FILE="${ATOMAN_COMPOSE_FILE:-$REPO_DIR/docker-compose.dev.yml}"
 CERT_DIR="${ATOMAN_CERT_DIR:-$REPO_DIR/nginx/ssl}"
@@ -20,6 +22,7 @@ LOCK_FILE="${ATOMAN_DEPLOY_LOCK_FILE:-/tmp/atoman-backend-deploy.lock}"
 STATE_DIR="${ATOMAN_STATE_DIR:-/var/lib/$SERVICE_NAME}"
 
 TEMP_BINARY=""
+TEMP_WORKER_BINARY=""
 BACKUP_BINARY=""
 
 log() {
@@ -48,6 +51,7 @@ EOF
 
 cleanup() {
   [[ -z "$TEMP_BINARY" ]] || rm -f "$TEMP_BINARY"
+  [[ -z "$TEMP_WORKER_BINARY" ]] || rm -f "$TEMP_WORKER_BINARY"
 }
 trap cleanup EXIT
 
@@ -145,13 +149,16 @@ start_postgres() {
 
 build_backend() {
   TEMP_BINARY="$(mktemp "$REPO_DIR/.start_server.new.XXXXXX")"
+  TEMP_WORKER_BINARY="$(mktemp "$REPO_DIR/.music_import_worker.new.XXXXXX")"
   log "Building backend"
   (
     cd "$REPO_DIR"
     go build ./...
     go build -trimpath -o "$TEMP_BINARY" ./cmd/start_server
+    go build -trimpath -o "$TEMP_WORKER_BINARY" ./cmd/music_import_worker
   )
   chmod 0755 "$TEMP_BINARY"
+  chmod 0755 "$TEMP_WORKER_BINARY"
 }
 
 install_systemd_unit() {
@@ -191,6 +198,41 @@ EOF
   rm -f "$unit_tmp"
   run_root systemctl daemon-reload
   run_root systemctl enable "$SERVICE_NAME" >/dev/null
+}
+
+install_music_import_worker_unit() {
+  local default_service_user service_user service_group unit_tmp
+  default_service_user="${SUDO_USER:-$(id -un)}"
+  service_user="${ATOMAN_SERVICE_USER:-$default_service_user}"
+  service_group="${ATOMAN_SERVICE_GROUP:-$(id -gn "$service_user")}"
+  unit_tmp="$(mktemp)"
+
+  cat >"$unit_tmp" <<EOF
+[Unit]
+Description=Atoman Music Import Worker
+After=network-online.target ${SERVICE_NAME}.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$service_user
+Group=$service_group
+WorkingDirectory=$REPO_DIR
+EnvironmentFile=$ENV_FILE
+ExecStart=$REPO_DIR/music_import_worker
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  run_root install -m 0644 "$unit_tmp" "$WORKER_SERVICE_FILE"
+  rm -f "$unit_tmp"
+  run_root systemctl daemon-reload
+  run_root systemctl enable "$WORKER_SERVICE_NAME" >/dev/null
 }
 
 install_nginx_config() {
@@ -267,14 +309,21 @@ activate_backend() {
   fi
 
   run_root install -m 0755 "$TEMP_BINARY" "$REPO_DIR/start_server"
+  run_root install -m 0755 "$TEMP_WORKER_BINARY" "$REPO_DIR/music_import_worker"
   run_root chmod 0600 "$ENV_FILE"
   install_systemd_unit
+  install_music_import_worker_unit
 
   log "Restarting $SERVICE_NAME"
   if ! run_root systemctl restart "$SERVICE_NAME"; then
     show_service_failure
     rollback_binary || true
     die "service restart failed"
+  fi
+
+  if ! run_root systemctl restart "$WORKER_SERVICE_NAME"; then
+    run_root systemctl status "$WORKER_SERVICE_NAME" --no-pager -l || true
+    die "music import worker restart failed"
   fi
 
   if ! wait_for_url "$LOCAL_HEALTH_URL"; then

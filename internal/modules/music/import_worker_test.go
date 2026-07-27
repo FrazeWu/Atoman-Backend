@@ -103,6 +103,25 @@ func TestImportWorkerClaimDoesNotDuplicateJob(t *testing.T) {
 	}
 }
 
+func TestImportWorkerFinalizesSubmittedImportAfterProcessing(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	called := uuid.Nil
+	worker := NewImportWorker(db, nil, "worker").WithCompletionFinalizer(func(_ context.Context, importID uuid.UUID) error {
+		called = importID
+		return nil
+	})
+	processed, err := worker.RunOnce(context.Background(), importProcessorFunc(func(context.Context, model.AlbumImportJob, func() error) error {
+		return nil
+	}))
+	if err != nil || !processed {
+		t.Fatalf("process job: processed=%v err=%v", processed, err)
+	}
+	if called != job.ImportID {
+		t.Fatalf("finalizer import id = %s, want %s", called, job.ImportID)
+	}
+}
+
 func TestImportWorkerClaimRecoversExpiredLease(t *testing.T) {
 	db := newImportWorkerTestDB(t)
 	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)

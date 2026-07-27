@@ -13,6 +13,7 @@ import (
 	"atoman/internal/modules/music"
 	"atoman/internal/storage"
 
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -39,7 +40,11 @@ func main() {
 	if store == nil {
 		log.Fatal("MUSIC_SOURCE_BUCKET or S3_BUCKET is required")
 	}
-	worker := music.NewImportWorker(db, store, workerIDFromEnv())
+	worker := music.NewImportWorker(db, store, workerIDFromEnv()).WithCompletionFinalizer(
+		func(_ context.Context, importID uuid.UUID) error {
+			return music.NewServiceWithS3(db, client).FinalizeSubmittedAlbumImport(importID)
+		},
+	)
 	var processor music.ImportProcessor
 	mediaStore := music.NewMusicImportMediaStore(client)
 	if mediaStore == nil {

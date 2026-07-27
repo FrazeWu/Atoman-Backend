@@ -854,7 +854,30 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			return err
 		}
 		if session.Status != AlbumImportStatusReady {
-			return apperr.Unprocessable("music.import_invalid_status", "Import session is not ready")
+			if !isAlbumImportActiveStatus(session.Status) {
+				return apperr.Unprocessable("music.import_invalid_status", "Import session cannot be submitted")
+			}
+			if strings.TrimSpace(input.Album.Title) == "" {
+				return apperr.BadRequest("validation.invalid_request", "album title is required")
+			}
+			if strings.TrimSpace(input.Artist.Name) == "" && len(input.Artists) == 0 && strings.TrimSpace(input.ArtistID) == "" {
+				return apperr.BadRequest("validation.invalid_request", "at least one artist is required")
+			}
+			payload := map[string]any{}
+			if strings.TrimSpace(session.PayloadJSON) != "" {
+				_ = json.Unmarshal([]byte(session.PayloadJSON), &payload)
+			}
+			payload["commit_request"] = input
+			encoded, err := json.Marshal(payload)
+			if err != nil {
+				return err
+			}
+			session.PayloadJSON = string(encoded)
+			if err := tx.Save(&session).Error; err != nil {
+				return err
+			}
+			out = session
+			return nil
 		}
 
 		payload := AlbumImportPayload{
@@ -1007,6 +1030,35 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 	}
 	s.deleteAlbumImportObjects(oldObjectKeys)
 	return out, nil
+}
+
+// FinalizeSubmittedAlbumImport creates a submitted album after media processing reaches ready.
+func (s *Service) FinalizeSubmittedAlbumImport(id uuid.UUID) error {
+	session, err := loadAlbumImportSession(s.db, id, nil)
+	if err != nil {
+		return err
+	}
+	if session.Status != AlbumImportStatusReady || session.UserID == nil {
+		return nil
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal([]byte(session.PayloadJSON), &payload); err != nil {
+		return err
+	}
+	rawRequest, ok := payload["commit_request"]
+	if !ok {
+		return nil
+	}
+	raw, err := json.Marshal(rawRequest)
+	if err != nil {
+		return err
+	}
+	var input CommitAlbumImportSessionInput
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return err
+	}
+	_, err = s.CommitAlbumImportSession(authctx.CurrentUser{ID: *session.UserID, Role: authctx.RoleUser}, id, input)
+	return err
 }
 
 func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string) (string, string, string, error) {
@@ -1199,6 +1251,15 @@ func normalizeAlbumImportStatus(status string) string {
 func isAlbumImportStatusAllowed(status string) bool {
 	switch status {
 	case AlbumImportStatusPendingUpload, AlbumImportStatusReady, AlbumImportStatusCommitted:
+		return true
+	default:
+		return false
+	}
+}
+
+func isAlbumImportActiveStatus(status string) bool {
+	switch status {
+	case AlbumImportStatusUploading, AlbumImportStatusQueued, AlbumImportStatusExtracting, AlbumImportStatusAnalyzing, AlbumImportStatusTranscoding:
 		return true
 	default:
 		return false

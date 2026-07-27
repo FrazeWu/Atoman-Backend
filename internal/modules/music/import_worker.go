@@ -41,10 +41,16 @@ type ImportWorker struct {
 	heartbeatInterval    time.Duration
 	leaseTimeout         time.Duration
 	beforeCleanupSession func(uuid.UUID)
+	completionFinalizer  func(context.Context, uuid.UUID) error
 }
 
 func NewImportWorker(db *gorm.DB, store MusicImportObjectStore, workerID string) *ImportWorker {
 	return &ImportWorker{db: db, store: store, workerID: strings.TrimSpace(workerID), now: func() time.Time { return time.Now().UTC() }, heartbeatInterval: 30 * time.Second, leaseTimeout: 5 * time.Minute}
+}
+
+func (w *ImportWorker) WithCompletionFinalizer(finalizer func(context.Context, uuid.UUID) error) *ImportWorker {
+	w.completionFinalizer = finalizer
+	return w
 }
 
 func (w *ImportWorker) Claim(ctx context.Context) (model.AlbumImportJob, bool, error) {
@@ -246,7 +252,15 @@ func (w *ImportWorker) RunOnce(ctx context.Context, processor ImportProcessor) (
 	if err := w.processWithHeartbeat(ctx, processor, job); err != nil {
 		return true, w.Retry(ctx, job.ID, err)
 	}
-	return true, w.Complete(ctx, job.ID)
+	if err := w.Complete(ctx, job.ID); err != nil {
+		return true, err
+	}
+	if w.completionFinalizer != nil {
+		if err := w.completionFinalizer(ctx, job.ImportID); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
 }
 
 func (w *ImportWorker) processWithHeartbeat(ctx context.Context, processor ImportProcessor, job model.AlbumImportJob) error {

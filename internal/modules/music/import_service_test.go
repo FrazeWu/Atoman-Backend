@@ -927,6 +927,73 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	}
 }
 
+func TestCommitAlbumImportSessionUploadingPersistsCommitRequest(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Updates(map[string]any{
+		"status": AlbumImportStatusUploading, "stage": AlbumImportStageUpload,
+	}).Error; err != nil {
+		t.Fatalf("set session uploading: %v", err)
+	}
+
+	queued, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artist: AlbumImportArtistPayload{Name: "Queued Artist"},
+		Album:  AlbumImportAlbumPayload{Title: "Queued Album"},
+	})
+	if err != nil {
+		t.Fatalf("request early commit: %v", err)
+	}
+	if queued.Status != AlbumImportStatusUploading || queued.CommittedAt != nil {
+		t.Fatalf("expected uploading session with deferred commit, got %#v", queued)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(queued.PayloadJSON), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if _, ok := payload["commit_request"]; !ok {
+		t.Fatalf("expected deferred commit request, got %#v", payload)
+	}
+	var albums int64
+	if err := db.Model(&model.Album{}).Count(&albums).Error; err != nil {
+		t.Fatalf("count albums: %v", err)
+	}
+	if albums != 0 {
+		t.Fatalf("expected no album before import is ready, got %d", albums)
+	}
+}
+
+func TestFinalizeSubmittedAlbumImportCommitsReadySession(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	payload, err := json.Marshal(map[string]any{"commit_request": CommitAlbumImportSessionInput{
+		Artist: AlbumImportArtistPayload{Name: "Finalized Artist"},
+		Album:  AlbumImportAlbumPayload{Title: "Finalized Album"},
+	}})
+	if err != nil {
+		t.Fatalf("encode payload: %v", err)
+	}
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Update("payload_json", string(payload)).Error; err != nil {
+		t.Fatalf("save deferred commit: %v", err)
+	}
+
+	if err := svc.FinalizeSubmittedAlbumImport(session.ID); err != nil {
+		t.Fatalf("finalize import: %v", err)
+	}
+	var albums int64
+	if err := db.Model(&model.Album{}).Where("title = ?", "Finalized Album").Count(&albums).Error; err != nil {
+		t.Fatalf("count finalized album: %v", err)
+	}
+	if albums != 1 {
+		t.Fatalf("expected finalized album, got %d", albums)
+	}
+}
+
 func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	var copiedSources []string
