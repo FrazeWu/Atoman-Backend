@@ -247,9 +247,11 @@ func TestListSecurityActivitiesOnlyReturnsCurrentUsersAuthEvents(t *testing.T) {
 }
 
 type userSettingsResponse struct {
-	Data    model.UserSettings `json:"data"`
-	Error   string             `json:"error"`
-	Message string             `json:"message"`
+	Data struct {
+		PrivateProfile bool `json:"private_profile"`
+	} `json:"data"`
+	Error   string `json:"error"`
+	Message string `json:"message"`
 }
 
 type searchUsersTestResponse struct {
@@ -342,7 +344,7 @@ func installUserSettingsCreateConflict(t *testing.T, db *gorm.DB, settings model
 func TestUpdateUserSettingsReturnsPersistedStateAfterInitialCreate(t *testing.T) {
 	r, db, user := newUserSettingsTestRouter(t)
 
-	body := bytes.NewBufferString(`{"private_profile":true,"dm_permission":"following_only"}`)
+	body := bytes.NewBufferString(`{"private_profile":true}`)
 	req := httptest.NewRequest(http.MethodPut, "/settings", body)
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -357,9 +359,6 @@ func TestUpdateUserSettingsReturnsPersistedStateAfterInitialCreate(t *testing.T)
 	if !resp.Data.PrivateProfile {
 		t.Fatalf("expected private_profile=true in response, got false")
 	}
-	if resp.Data.DMPermission != "following_only" {
-		t.Fatalf("expected dm_permission=following_only in response, got %q", resp.Data.DMPermission)
-	}
 
 	var settings model.UserSettings
 	if err := db.First(&settings, "user_id = ?", user.UUID).Error; err != nil {
@@ -367,9 +366,6 @@ func TestUpdateUserSettingsReturnsPersistedStateAfterInitialCreate(t *testing.T)
 	}
 	if !settings.PrivateProfile {
 		t.Fatalf("expected private_profile=true in db, got false")
-	}
-	if settings.DMPermission != "following_only" {
-		t.Fatalf("expected dm_permission=following_only in db, got %q", settings.DMPermission)
 	}
 }
 
@@ -642,14 +638,8 @@ func TestGetUserSettingsHandlesInitialCreateConflictIdempotently(t *testing.T) {
 	}
 
 	resp := decodeUserSettingsResponse(t, w.Body.Bytes())
-	if resp.Data.UserID != user.UUID {
-		t.Fatalf("expected response user_id=%s, got %s", user.UUID, resp.Data.UserID)
-	}
 	if !resp.Data.PrivateProfile {
 		t.Fatalf("expected private_profile=true in response, got false")
-	}
-	if resp.Data.DMPermission != "one_before_reply" {
-		t.Fatalf("expected dm_permission=one_before_reply in response, got %q", resp.Data.DMPermission)
 	}
 
 	var count int64

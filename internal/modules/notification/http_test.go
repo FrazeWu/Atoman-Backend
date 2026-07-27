@@ -32,7 +32,7 @@ func TestUnreadCountsRequiresAuthentication(t *testing.T) {
 func TestUnreadCountsReturnsNotificationCategoriesAndDMTotal(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Notification{}, &model.DMConversation{}, &model.DMMessage{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Notification{}, &model.DMConversation{}, &model.DMMessage{})
 	user := model.User{Username: "notify-count-user", Email: "notify-count@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	other := model.User{Username: "notify-count-other", Email: "notify-count-other@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&[]model.User{user, other}).Error; err != nil {
@@ -101,6 +101,52 @@ func TestUnreadCountsReturnsNotificationCategoriesAndDMTotal(t *testing.T) {
 		if response.Data.Items[category] != count {
 			t.Fatalf("expected %s count %d, got %d", category, count, response.Data.Items[category])
 		}
+	}
+}
+
+func TestUnreadCountsIncludesMessagesToOwnedChannels(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Notification{}, &model.DMConversation{}, &model.DMMessage{})
+	owner := model.User{Username: "notify-channel-owner", Email: "owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	sender := model.User{Username: "notify-channel-sender", Email: "sender@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("create users: %v", err)
+	}
+	if err := db.Create(&sender).Error; err != nil {
+		t.Fatalf("create users: %v", err)
+	}
+	channel := model.Channel{UserID: &owner.UUID, Name: "notify-owned-channel", Slug: "notify-owned-channel"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	conversation := model.DMConversation{ParticipantAType: model.DMPartyUser, ParticipantA: sender.UUID, ParticipantBType: model.DMPartyChannel, ParticipantB: channel.ID}
+	if err := db.Create(&conversation).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := db.Create(&model.DMMessage{ConversationID: conversation.ID, SenderType: model.DMPartyUser, SenderID: sender.UUID, ActorUserID: sender.UUID, Content: "unread"}).Error; err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: owner.UUID, Username: owner.Username, Role: owner.Role})
+		c.Next()
+	})
+	RegisterRoutes(r.Group("/api/v1"), NewService(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/notifications/unread-counts", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data UnreadCountsDTO `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Data.Items["dm"] != 1 || response.Data.Total != 1 {
+		t.Fatalf("expected one owned-channel unread, got %#v", response.Data)
 	}
 }
 

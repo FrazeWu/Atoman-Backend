@@ -537,19 +537,49 @@ definitions:
     type: object
   debate.DebateReferenceDTO:
     properties:
-      kind:
+      end:
+        type: integer
+      field:
         type: string
-      qualifier:
+      id:
         type: string
       raw:
         type: string
-      relation_id:
+      relation:
+        $ref: '#/definitions/debate.DebateReferenceRelationDTO'
+      start:
+        type: integer
+      target:
+        $ref: '#/definitions/debate.DebateReferenceTargetDTO'
+    type: object
+  debate.DebateReferenceRelationDTO:
+    properties:
+      conclusion_direction:
         type: string
-      resource_id:
+      conclusion_event_id:
+        type: string
+      id:
+        type: string
+      stance:
         type: string
       state:
         type: string
-      title:
+    type: object
+  debate.DebateReferenceTargetDTO:
+    properties:
+      available:
+        type: boolean
+      id:
+        type: string
+      label:
+        type: string
+      module:
+        type: string
+      path:
+        type: string
+      subtitle:
+        type: string
+      type:
         type: string
     type: object
   debate.DebateRevisionDTO:
@@ -668,6 +698,249 @@ definitions:
   debate_voting.voteRequest:
     properties:
       direction:
+        type: string
+    type: object
+  dm.CSRFErrorResponse:
+    properties:
+      code:
+        type: string
+      error:
+        type: string
+    type: object
+  dm.ConversationDTO:
+    properties:
+      blocked:
+        type: boolean
+      id:
+        type: string
+      last_message_at:
+        type: string
+      last_message_preview:
+        type: string
+      participant_a:
+        $ref: '#/definitions/dm.PartyDTO'
+      participant_b:
+        $ref: '#/definitions/dm.PartyDTO'
+      unread:
+        type: integer
+    type: object
+  dm.ConversationPageDTO:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dm.ConversationDTO'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  dm.ConversationResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ConversationDTO'
+    type: object
+  dm.ConversationsResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ConversationPageDTO'
+    type: object
+  dm.ErrorResponse:
+    properties:
+      csrf_error:
+        allOf:
+        - $ref: '#/definitions/dm.CSRFErrorResponse'
+        description: |-
+          CSRFError keeps the alternate middleware payload schema visible in Swagger 2.
+          The operation description identifies when this alternative is returned.
+      error:
+        properties:
+          code:
+            type: string
+          message:
+            type: string
+        type: object
+    type: object
+  dm.ImageDTO:
+    properties:
+      id:
+        type: string
+      url:
+        type: string
+    type: object
+  dm.ImageResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ImageDTO'
+    type: object
+  dm.MailboxDTO:
+    properties:
+      party:
+        $ref: '#/definitions/dm.PartyDTO'
+      unread:
+        type: integer
+    type: object
+  dm.MailboxesResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/dm.MailboxDTO'
+        type: array
+    type: object
+  dm.MessageDTO:
+    properties:
+      client_message_id:
+        type: string
+      content:
+        type: string
+      conversation_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      image_id:
+        type: string
+      image_url:
+        type: string
+      sender_id:
+        type: string
+      sender_type:
+        type: string
+    type: object
+  dm.MessagePageDTO:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dm.MessageDTO'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  dm.MessageResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.MessageDTO'
+    type: object
+  dm.MessagesResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.MessagePageDTO'
+    type: object
+  dm.PartyDTO:
+    properties:
+      avatar_url:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      type:
+        type: string
+    type: object
+  dm.PermissionDTO:
+    properties:
+      permission:
+        type: string
+    type: object
+  dm.PermissionResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.PermissionDTO'
+    type: object
+  dm.ReadResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ReadResultDTO'
+    type: object
+  dm.ReadResultDTO:
+    properties:
+      conversation_unread:
+        type: integer
+      dm_unread:
+        type: integer
+      mailbox_unread:
+        type: integer
+      total_unread:
+        type: integer
+    type: object
+  dm.ReportDTO:
+    properties:
+      conversation_context:
+        type: string
+      created_at:
+        type: string
+      detail:
+        type: string
+      has_snapshot_image:
+        type: boolean
+      id:
+        type: string
+      message_id:
+        type: string
+      reason:
+        type: string
+      reported_actor_user_id:
+        type: string
+      reporter_user_id:
+        type: string
+      reviewed_at:
+        type: string
+      reviewed_by_user_id:
+        type: string
+      snapshot_content:
+        type: string
+      status:
+        type: string
+    type: object
+  dm.ReportInput:
+    properties:
+      detail:
+        type: string
+      reason:
+        type: string
+    type: object
+  dm.ReportPageDTO:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/dm.ReportDTO'
+        type: array
+      next_cursor:
+        type: string
+    type: object
+  dm.ReportReceiptDTO:
+    properties:
+      status:
+        type: string
+    type: object
+  dm.ReportReceiptResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ReportReceiptDTO'
+    type: object
+  dm.ReportResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ReportDTO'
+    type: object
+  dm.ReportsResponse:
+    properties:
+      data:
+        $ref: '#/definitions/dm.ReportPageDTO'
+    type: object
+  dm.ReviewReportInput:
+    properties:
+      status:
+        type: string
+    type: object
+  dm.SendInput:
+    properties:
+      client_message_id:
+        type: string
+      content:
+        type: string
+      image_id:
+        type: string
+      image_url:
         type: string
     type: object
   feed.AutoSubscriptionAddRequest:
@@ -1142,7 +1415,20 @@ definitions:
           $ref: '#/definitions/feed.TimelineItemDTO'
         type: array
       meta:
-        $ref: '#/definitions/httpx.PageMeta'
+        $ref: '#/definitions/feed.TimelineMeta'
+    type: object
+  feed.TimelineMeta:
+    properties:
+      checked_at:
+        type: string
+      has_more:
+        type: boolean
+      page:
+        type: integer
+      page_size:
+        type: integer
+      total:
+        type: integer
     type: object
   feed.TimelinePostDTO:
     properties:
@@ -1212,6 +1498,13 @@ definitions:
       total:
         example: 20
         type: integer
+    type: object
+  feed.TimelineUpdatesResponse:
+    properties:
+      checked_at:
+        type: string
+      has_updates:
+        type: boolean
     type: object
   forum_moderation.ModeratorAssignmentInput:
     properties:
@@ -1430,12 +1723,6 @@ definitions:
         example: pending
         type: string
     type: object
-  handlers.CountResponse:
-    properties:
-      count:
-        example: 8
-        type: integer
-    type: object
   handlers.CreateEventInput:
     properties:
       category:
@@ -1525,67 +1812,6 @@ definitions:
     - base_revision
     - changes
     - edit_summary
-    type: object
-  handlers.DMConversationItemResponse:
-    properties:
-      conversation_id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
-        format: uuid
-        type: string
-      last_message_at:
-        example: "2026-05-25T11:00:00Z"
-        format: date-time
-        type: string
-      other_user_id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8b
-        format: uuid
-        type: string
-      other_username:
-        example: alice
-        type: string
-      preview:
-        example: Hello there
-        type: string
-      unread_count:
-        example: 2
-        type: integer
-    type: object
-  handlers.DMConversationListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/handlers.DMConversationItemResponse'
-        type: array
-    type: object
-  handlers.DMMessageListResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/model.DMMessage'
-        type: array
-      page:
-        example: 1
-        type: integer
-      page_size:
-        example: 30
-        type: integer
-      total:
-        example: 30
-        type: integer
-    type: object
-  handlers.DMMessageResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.DMMessage'
-    type: object
-  handlers.DMSendInput:
-    properties:
-      content:
-        example: Hi there
-        type: string
-      image_url:
-        example: https://cdn.example.com/dm.png
-        type: string
     type: object
   handlers.DebateConclusionListResponse:
     properties:
@@ -1806,12 +2032,6 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/model.ForumUserModerationAction'
-    type: object
-  handlers.ImageUploadResponse:
-    properties:
-      image_url:
-        example: https://cdn.example.com/uploaded.png
-        type: string
     type: object
   handlers.LoginInput:
     properties:
@@ -2535,15 +2755,16 @@ definitions:
     type: object
   handlers.UserSettingsInput:
     properties:
-      dm_permission:
-        type: string
       private_profile:
         type: boolean
     type: object
   handlers.UserSettingsResponse:
     properties:
       data:
-        $ref: '#/definitions/model.UserSettings'
+        properties:
+          private_profile:
+            type: boolean
+        type: object
       message:
         example: ok
         type: string
@@ -3043,27 +3264,6 @@ definitions:
         description: '''none'' / ''semi'' / ''full'''
         type: string
       reason:
-        type: string
-      updated_at:
-        type: string
-    type: object
-  model.DMMessage:
-    properties:
-      content:
-        type: string
-      conversation_id:
-        type: string
-      created_at:
-        type: string
-      id:
-        type: string
-      image_url:
-        type: string
-      read_at:
-        type: string
-      sender:
-        $ref: '#/definitions/model.User'
-      sender_id:
         type: string
       updated_at:
         type: string
@@ -4029,15 +4229,6 @@ definitions:
       uuid:
         type: string
       website:
-        type: string
-    type: object
-  model.UserSettings:
-    properties:
-      dm_permission:
-        type: string
-      private_profile:
-        type: boolean
-      user_id:
         type: string
     type: object
   model.Video:
@@ -5389,6 +5580,80 @@ paths:
       summary: 审核评论或举报
       tags:
       - comment-admin
+  /api/v1/admin/dm/reports:
+    get:
+      parameters:
+      - description: cursor
+        in: query
+        name: cursor
+        type: string
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ReportsResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: List DM reports
+      tags:
+      - dm-admin
+  /api/v1/admin/dm/reports/{id}:
+    put:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
+      parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
+      - description: report ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: review
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.ReviewReportInput'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ReportResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Review DM report
+      tags:
+      - dm-admin
   /api/v1/admin/music/entries:
     get:
       description: 管理员按类型和状态筛选音乐 wiki 条目。
@@ -9077,194 +9342,611 @@ paths:
       summary: 标记父楼
       tags:
       - comments
-  /api/v1/dm/conversations:
+  /api/v1/dm/channels/{id}/settings:
     get:
-      description: 返回当前用户的私信会话列表和未读计数。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.DMConversationListResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取私信会话列表
-      tags:
-      - dm
-  /api/v1/dm/conversations/{username}:
-    get:
-      description: 按对方用户名获取私信会话消息，支持分页并返回固定 page_size。
       parameters:
-      - description: 对方用户名
+      - description: channel ID
         in: path
-        name: username
+        name: id
         required: true
         type: string
-      - default: 1
-        description: 页码
-        in: query
-        name: page
-        type: integer
-      produces:
-      - application/json
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.DMMessageListResponse'
+            $ref: '#/definitions/dm.PermissionResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 获取会话消息列表
+      summary: Get channel DM permission
       tags:
       - dm
-    post:
-      consumes:
-      - application/json
-      description: 向指定用户名发送文本或图片私信。
+    put:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
-      - description: 对方用户名
-        in: path
-        name: username
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
         required: true
         type: string
-      - description: 私信输入
+      - description: channel ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: permission
         in: body
         name: input
         required: true
         schema:
-          $ref: '#/definitions/handlers.DMSendInput'
-      produces:
-      - application/json
+          $ref: '#/definitions/dm.PermissionDTO'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.PermissionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Update channel DM permission
+      tags:
+      - dm
+  /api/v1/dm/conversations/{id}/block:
+    delete:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
+      parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
+      - description: conversation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ConversationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Unblock DM conversation
+      tags:
+      - dm
+    put:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
+      parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
+      - description: conversation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ConversationResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Block DM conversation
+      tags:
+      - dm
+  /api/v1/dm/conversations/{id}/messages:
+    get:
+      parameters:
+      - description: conversation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: cursor
+        in: query
+        name: before
+        type: string
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.MessagesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: List DM messages
+      tags:
+      - dm
+    post:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
+      parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
+      - description: conversation ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: message
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.SendInput'
       responses:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/handlers.DMMessageResponse'
+            $ref: '#/definitions/dm.MessageResponse'
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
         "403":
           description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
+            $ref: '#/definitions/dm.ErrorResponse'
+        "429":
+          description: Too Many Requests
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 发送私信
+      summary: Send DM in conversation
       tags:
       - dm
-  /api/v1/dm/conversations/{username}/read:
+  /api/v1/dm/conversations/{id}/read:
     put:
-      description: 将与指定用户名的会话中对方发来的未读消息全部标记为已读。
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
-      - description: 对方用户名
-        in: path
-        name: username
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
         required: true
         type: string
-      produces:
-      - application/json
+      - description: conversation ID
+        in: path
+        name: id
+        required: true
+        type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.BoolStatusResponse'
-        "404":
-          description: Not Found
+            $ref: '#/definitions/dm.ReadResponse'
+        "400":
+          description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 标记会话已读
+      summary: Mark DM conversation read
       tags:
       - dm
-  /api/v1/dm/unread-count:
-    get:
-      description: 返回当前用户的未读私信数量。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.CountResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取未读私信数
-      tags:
-      - dm
-  /api/v1/dm/upload:
+  /api/v1/dm/images:
     post:
       consumes:
       - multipart/form-data
-      description: 上传一张私信图片，支持 JPEG、PNG、GIF、WebP，最大 10MB。
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
       parameters:
-      - description: 图片文件
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
+      - description: image
         in: formData
         name: image
         required: true
         type: file
-      produces:
-      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dm.ImageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Upload private DM image
+      tags:
+      - dm
+  /api/v1/dm/images/{id}/content:
+    get:
+      parameters:
+      - description: image ID
+        in: path
+        name: id
+        required: true
+        type: string
       responses:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/handlers.ImageUploadResponse'
+            type: file
         "400":
           description: Bad Request
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "503":
-          description: Service Unavailable
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
           schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
+            $ref: '#/definitions/dm.ErrorResponse'
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 上传私信图片
+      summary: Read private DM image
+      tags:
+      - dm
+  /api/v1/dm/mailboxes:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.MailboxesResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: DM mailboxes
+      tags:
+      - dm
+  /api/v1/dm/mailboxes/{type}/{id}/conversations:
+    get:
+      parameters:
+      - description: party type
+        in: path
+        name: type
+        required: true
+        type: string
+      - description: mailbox ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: cursor
+        in: query
+        name: cursor
+        type: string
+      - description: limit
+        in: query
+        name: limit
+        type: integer
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ConversationsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: DM mailbox conversations
+      tags:
+      - dm
+  /api/v1/dm/messages/{id}/reports:
+    post:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
+      parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
+      - description: message ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: report
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.ReportInput'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dm.ReportReceiptResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Report DM message
+      tags:
+      - dm
+  /api/v1/dm/settings:
+    get:
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.PermissionResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Get DM permission
+      tags:
+      - dm
+    put:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
+      parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
+      - description: permission
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.PermissionDTO'
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.PermissionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Update DM permission
+      tags:
+      - dm
+  /api/v1/dm/targets/{type}/{id}/conversation:
+    get:
+      parameters:
+      - description: target type
+        in: path
+        name: type
+        required: true
+        type: string
+      - description: target ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/dm.ConversationResponse'
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Find DM target conversation
+      tags:
+      - dm
+  /api/v1/dm/targets/{type}/{id}/messages:
+    post:
+      description: Cookie authentication requires X-CSRF-Token and a trusted Origin.
+        CSRF failures return dm.CSRFErrorResponse.
+      parameters:
+      - description: CSRF token for cookie authentication
+        in: header
+        name: X-CSRF-Token
+        required: true
+        type: string
+      - description: target type
+        in: path
+        name: type
+        required: true
+        type: string
+      - description: target ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: message
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/dm.SendInput'
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/dm.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+        "429":
+          description: Too Many Requests
+          schema:
+            $ref: '#/definitions/dm.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: Send DM to target
       tags:
       - dm
   /api/v1/feed/explore:
@@ -10480,6 +11162,43 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 切换条目星标
+      tags:
+      - feed
+  /api/v1/feed/timeline/updates:
+    get:
+      description: 检查当前用户订阅的外部 RSS 是否在指定游标后产生新内容。
+      parameters:
+      - description: 上次服务端检查时间（RFC3339）
+        in: query
+        name: since
+        type: string
+      - description: 订阅 UUID
+        in: query
+        name: source_id
+        type: string
+      - description: 分组 UUID
+        in: query
+        name: group_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.TimelineUpdatesResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 检查订阅时间线更新
       tags:
       - feed
   /api/v1/forum/category-permissions:
@@ -15434,7 +16153,7 @@ paths:
       - users
   /api/v1/users/me/settings:
     get:
-      description: 返回当前登录用户的隐私与私信设置。
+      description: 返回当前登录用户的隐私设置。
       produces:
       - application/json
       responses:
@@ -15451,7 +16170,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: 更新私密资料开关和私信权限设置。
+      description: 更新私密资料开关。
       parameters:
       - description: 用户设置
         in: body

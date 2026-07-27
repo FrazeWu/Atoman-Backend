@@ -22,7 +22,7 @@ type legacyEmailVerificationCode struct {
 
 func (legacyEmailVerificationCode) TableName() string { return "email_verification_codes" }
 
-func TestMigrateSchemaCreatesDMTablesAndUnreadCountIndexes(t *testing.T) {
+func TestMigrateSchemaCreatesDMV2(t *testing.T) {
 	db := testdb.Open(t)
 
 	if err := migrateSchema(db); err != nil {
@@ -34,6 +34,9 @@ func TestMigrateSchemaCreatesDMTablesAndUnreadCountIndexes(t *testing.T) {
 	}
 	if !db.Migrator().HasTable(&model.DMMessage{}) {
 		t.Fatal("expected dm_messages table to exist")
+	}
+	if !db.Migrator().HasTable(&model.DMImage{}) || !db.Migrator().HasTable(&model.DMChannelSettings{}) || !db.Migrator().HasTable(&model.DMMessageReport{}) {
+		t.Fatal("expected dm v2 tables to exist")
 	}
 	if !db.Migrator().HasTable(&model.UserStudioState{}) {
 		t.Fatal("expected user_studio_states table to exist")
@@ -62,6 +65,7 @@ func TestMigrateSchemaCreatesDMTablesAndUnreadCountIndexes(t *testing.T) {
 
 	assertIndexExists(t, db, "notifications", "idx_notification_recipient_read")
 	assertIndexExists(t, db, "dm_messages", "idx_dm_message_conv_sender_read")
+	assertIndexExists(t, db, "dm_conversations", "uq_dm_conversation_typed")
 }
 
 func TestMigrateSchemaCreatesOnboardingRecommendationTable(t *testing.T) {

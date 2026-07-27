@@ -90,8 +90,7 @@ type UserProfileInput struct {
 
 // UserSettingsInput represents the request body for updating user settings
 type UserSettingsInput struct {
-	PrivateProfile *bool   `json:"private_profile"`
-	DMPermission   *string `json:"dm_permission"`
+	PrivateProfile *bool `json:"private_profile"`
 }
 
 type ChangePasswordInput struct {
@@ -611,7 +610,7 @@ func UpdateUserProfile(db *gorm.DB) gin.HandlerFunc {
 // GetUserSettings returns the authenticated user's settings
 // GetUserSettings godoc
 // @Summary 获取当前用户设置
-// @Description 返回当前登录用户的隐私与私信设置。
+// @Description 返回当前登录用户的隐私设置。
 // @Tags users
 // @Produce json
 // @Success 200 {object} UserSettingsResponse
@@ -629,14 +628,14 @@ func GetUserSettings(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"data": settings, "message": "ok"})
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"private_profile": settings.PrivateProfile}, "message": "ok"})
 	}
 }
 
 // UpdateUserSettings updates the authenticated user's settings
 // UpdateUserSettings godoc
 // @Summary 更新当前用户设置
-// @Description 更新私密资料开关和私信权限设置。
+// @Description 更新私密资料开关。
 // @Tags users
 // @Accept json
 // @Produce json
@@ -668,16 +667,6 @@ func UpdateUserSettings(db *gorm.DB) gin.HandlerFunc {
 		if input.PrivateProfile != nil {
 			updates["private_profile"] = *input.PrivateProfile
 		}
-		if input.DMPermission != nil {
-			permission := strings.TrimSpace(*input.DMPermission)
-			switch permission {
-			case "anyone", "following_only", "one_before_reply":
-				updates["dm_permission"] = permission
-			default:
-				c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid dm_permission"})
-				return
-			}
-		}
 
 		if len(updates) > 0 {
 			if err := db.Model(&settings).Updates(updates).Error; err != nil {
@@ -692,7 +681,7 @@ func UpdateUserSettings(db *gorm.DB) gin.HandlerFunc {
 			}
 		}
 
-		c.JSON(http.StatusOK, gin.H{"data": settings, "message": "ok"})
+		c.JSON(http.StatusOK, gin.H{"data": gin.H{"private_profile": settings.PrivateProfile}, "message": "ok"})
 	}
 }
 

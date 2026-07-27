@@ -1,0 +1,60 @@
+package docs
+
+import (
+	"encoding/json"
+	"os"
+	"strings"
+	"testing"
+)
+
+func TestSwaggerDocumentsDMRequestsResponsesAndParameters(t *testing.T) {
+	raw, err := os.ReadFile("swagger.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		Paths map[string]map[string]struct {
+			Parameters []struct {
+				Name     string `json:"name"`
+				In       string `json:"in"`
+				Required bool   `json:"required"`
+			} `json:"parameters"`
+			Responses   map[string]any        `json:"responses"`
+			Security    []map[string][]string `json:"security"`
+			Description string                `json:"description"`
+		} `json:"paths"`
+		Definitions map[string]any `json:"definitions"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatal(err)
+	}
+	message := document.Paths["/api/v1/dm/targets/{type}/{id}/messages"]["post"]
+	if len(message.Parameters) < 3 || len(message.Responses) == 0 {
+		t.Fatalf("message operation lacks parameters or responses: %#v", message)
+	}
+	if _, ok := document.Definitions["dm.SendInput"]; !ok {
+		t.Fatal("dm.SendInput schema missing")
+	}
+	if _, ok := document.Definitions["dm.MessageResponse"]; !ok {
+		t.Fatal("dm.MessageResponse schema missing")
+	}
+	settings := document.Paths["/api/v1/dm/settings"]["put"]
+	if _, ok := settings.Responses["400"]; !ok || len(settings.Security) != 2 || settings.Description == "" {
+		t.Fatalf("settings mutation lacks documented errors, auth, or csrf requirement: %#v", settings)
+	}
+	foundCSRF := false
+	for _, param := range settings.Parameters {
+		if param.Name == "X-CSRF-Token" && param.In == "header" && param.Required {
+			foundCSRF = true
+		}
+	}
+	if !foundCSRF {
+		t.Fatal("settings mutation csrf header is missing or optional")
+	}
+	if !strings.Contains(settings.Description, "dm.CSRFErrorResponse") {
+		t.Fatal("settings mutation does not document csrf error schema")
+	}
+	if _, ok := document.Definitions["dm.CSRFErrorResponse"]; !ok {
+		t.Fatal("csrf error schema missing")
+	}
+}

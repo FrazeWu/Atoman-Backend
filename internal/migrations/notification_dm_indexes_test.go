@@ -12,27 +12,17 @@ import (
 	"gorm.io/gorm"
 )
 
-func TestRunNotificationDMIndexesCreatesExpectedIndexes(t *testing.T) {
+func TestRunNotificationDMIndexesCreatesNotificationIndexes(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Notification{}, &model.DMConversation{}, &model.DMMessage{})
+	testdb.Migrate(t, db, &model.Notification{})
 
 	if err := RunNotificationDMIndexes(db); err != nil {
 		t.Fatalf("run notification/dm indexes migration: %v", err)
 	}
 
-	if !db.Migrator().HasTable(&model.DMConversation{}) {
-		t.Fatal("expected dm_conversations table to exist")
-	}
-	if !db.Migrator().HasTable(&model.DMMessage{}) {
-		t.Fatal("expected dm_messages table to exist")
-	}
-
 	assertIndexExists(t, db, "notifications", "uq_notification_dedup")
 	assertIndexExists(t, db, "notifications", "uq_notification_unread_aggregate")
 	assertIndexExists(t, db, "notifications", "idx_notification_recipient_read")
-	assertIndexExists(t, db, "dm_conversations", "uq_dm_conversation")
-	assertIndexExists(t, db, "dm_messages", "idx_dm_message_conv_created")
-	assertIndexExists(t, db, "dm_messages", "idx_dm_message_conv_sender_read")
 }
 
 func TestRunNotificationDMIndexesAllowsEmptyDatabase(t *testing.T) {
@@ -44,7 +34,7 @@ func TestRunNotificationDMIndexesAllowsEmptyDatabase(t *testing.T) {
 
 func TestRunNotificationDMIndexesSupportsImmediateAndUnreadAggregateSemantics(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Notification{}, &model.DMConversation{}, &model.DMMessage{})
+	testdb.Migrate(t, db, &model.User{}, &model.Notification{})
 	if err := RunNotificationDMIndexes(db); err != nil {
 		t.Fatalf("first migration: %v", err)
 	}

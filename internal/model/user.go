@@ -57,7 +57,7 @@ func (Follow) TableName() string {
 type UserSettings struct {
 	UserID         uuid.UUID `json:"user_id" gorm:"type:uuid;primaryKey"`
 	PrivateProfile bool      `json:"private_profile" gorm:"default:false"`
-	DMPermission   string    `json:"dm_permission" gorm:"default:'anyone'"`
+	DMPermission   string    `json:"dm_permission" gorm:"default:'one_before_reply'"`
 }
 
 func (UserSettings) TableName() string {

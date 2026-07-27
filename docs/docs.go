@@ -239,6 +239,124 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/dm/reports": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm-admin"
+                ],
+                "summary": "List DM reports",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReportsResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/dm/reports/{id}": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
+                "tags": [
+                    "dm-admin"
+                ],
+                "summary": "Review DM report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "report ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "review",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReviewReportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/music/entries": {
             "get": {
                 "security": [
@@ -6063,7 +6181,7 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/dm/conversations": {
+        "/api/v1/dm/channels/{id}/settings": {
             "get": {
                 "security": [
                     {
@@ -6073,31 +6191,230 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "返回当前用户的私信会话列表和未读计数。",
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "dm"
                 ],
-                "summary": "获取私信会话列表",
+                "summary": "Get channel DM permission",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "channel ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.DMConversationListResponse"
+                            "$ref": "#/definitions/dm.PermissionResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Update channel DM permission",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "channel ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "permission",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionDTO"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
             }
         },
-        "/api/v1/dm/conversations/{username}": {
+        "/api/v1/dm/conversations/{id}/block": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Block DM conversation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "conversation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ConversationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Unblock DM conversation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "conversation ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ConversationResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/dm/conversations/{id}/messages": {
             "get": {
                 "security": [
                     {
@@ -6107,27 +6424,28 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "按对方用户名获取私信会话消息，支持分页并返回固定 page_size。",
-                "produces": [
-                    "application/json"
-                ],
                 "tags": [
                     "dm"
                 ],
-                "summary": "获取会话消息列表",
+                "summary": "List DM messages",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "对方用户名",
-                        "name": "username",
+                        "description": "conversation ID",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
+                        "type": "string",
+                        "description": "cursor",
+                        "name": "before",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
-                        "default": 1,
-                        "description": "页码",
-                        "name": "page",
+                        "description": "limit",
+                        "name": "limit",
                         "in": "query"
                     }
                 ],
@@ -6135,25 +6453,25 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.DMMessageListResponse"
+                            "$ref": "#/definitions/dm.MessagesResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     },
-                    "404": {
-                        "description": "Not Found",
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -6167,32 +6485,33 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "向指定用户名发送文本或图片私信。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm"
                 ],
-                "summary": "发送私信",
+                "summary": "Send DM in conversation",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "对方用户名",
-                        "name": "username",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "conversation ID",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     },
                     {
-                        "description": "私信输入",
+                        "description": "message",
                         "name": "input",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handlers.DMSendInput"
+                            "$ref": "#/definitions/dm.SendInput"
                         }
                     }
                 ],
@@ -6200,37 +6519,37 @@ const docTemplate = `{
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/handlers.DMMessageResponse"
+                            "$ref": "#/definitions/dm.MessageResponse"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     },
                     "403": {
                         "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     },
-                    "404": {
-                        "description": "Not Found",
+                    "429": {
+                        "description": "Too Many Requests",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
             }
         },
-        "/api/v1/dm/conversations/{username}/read": {
+        "/api/v1/dm/conversations/{id}/read": {
             "put": {
                 "security": [
                     {
@@ -6240,19 +6559,23 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "将与指定用户名的会话中对方发来的未读消息全部标记为已读。",
-                "produces": [
-                    "application/json"
-                ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "tags": [
                     "dm"
                 ],
-                "summary": "标记会话已读",
+                "summary": "Mark DM conversation read",
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "对方用户名",
-                        "name": "username",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "conversation ID",
+                        "name": "id",
                         "in": "path",
                         "required": true
                     }
@@ -6261,59 +6584,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.BoolStatusResponse"
+                            "$ref": "#/definitions/dm.ReadResponse"
                         }
                     },
-                    "404": {
-                        "description": "Not Found",
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
             }
         },
-        "/api/v1/dm/unread-count": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "返回当前用户的未读私信数量。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "dm"
-                ],
-                "summary": "获取未读私信数",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CountResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/dm/upload": {
+        "/api/v1/dm/images": {
             "post": {
                 "security": [
                     {
@@ -6323,23 +6618,78 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "上传一张私信图片，支持 JPEG、PNG、GIF、WebP，最大 10MB。",
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
                 "consumes": [
                     "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
                 ],
                 "tags": [
                     "dm"
                 ],
-                "summary": "上传私信图片",
+                "summary": "Upload private DM image",
                 "parameters": [
                     {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
                         "type": "file",
-                        "description": "图片文件",
+                        "description": "image",
                         "name": "image",
                         "in": "formData",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ImageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/dm/images/{id}/content": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Read private DM image",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "image ID",
+                        "name": "id",
+                        "in": "path",
                         "required": true
                     }
                 ],
@@ -6347,25 +6697,442 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ImageUploadResponse"
+                            "type": "file"
                         }
                     },
                     "400": {
                         "description": "Bad Request",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     },
-                    "500": {
-                        "description": "Internal Server Error",
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     },
-                    "503": {
-                        "description": "Service Unavailable",
+                    "403": {
+                        "description": "Forbidden",
                         "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/dm/mailboxes": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "DM mailboxes",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.MailboxesResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/dm/mailboxes/{type}/{id}/conversations": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "DM mailbox conversations",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "party type",
+                        "name": "type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "mailbox ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "cursor",
+                        "name": "cursor",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "limit",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ConversationsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/dm/messages/{id}/reports": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Report DM message",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "message ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "report",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ReportReceiptResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/dm/settings": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Get DM permission",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Update DM permission",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "description": "permission",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionDTO"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.PermissionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/dm/targets/{type}/{id}/conversation": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Find DM target conversation",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "target type",
+                        "name": "type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "target ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ConversationResponse"
+                        }
+                    },
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/dm/targets/{type}/{id}/messages": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "Cookie authentication requires X-CSRF-Token and a trusted Origin. CSRF failures return dm.CSRFErrorResponse.",
+                "tags": [
+                    "dm"
+                ],
+                "summary": "Send DM to target",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "CSRF token for cookie authentication",
+                        "name": "X-CSRF-Token",
+                        "in": "header",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "target type",
+                        "name": "type",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "target ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "message",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/dm.SendInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/dm.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    },
+                    "429": {
+                        "description": "Too Many Requests",
+                        "schema": {
+                            "$ref": "#/definitions/dm.ErrorResponse"
                         }
                     }
                 }
@@ -8333,6 +9100,66 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/timeline/updates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "检查当前用户订阅的外部 RSS 是否在指定游标后产生新内容。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "检查订阅时间线更新",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "上次服务端检查时间（RFC3339）",
+                        "name": "since",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "订阅 UUID",
+                        "name": "source_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "分组 UUID",
+                        "name": "group_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.TimelineUpdatesResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
                         }
@@ -15872,7 +16699,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "返回当前登录用户的隐私与私信设置。",
+                "description": "返回当前登录用户的隐私设置。",
                 "produces": [
                     "application/json"
                 ],
@@ -15898,7 +16725,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "更新私密资料开关和私信权限设置。",
+                "description": "更新私密资料开关。",
                 "consumes": [
                     "application/json"
                 ],
@@ -17693,25 +18520,71 @@ const docTemplate = `{
         "debate.DebateReferenceDTO": {
             "type": "object",
             "properties": {
-                "kind": {
+                "end": {
+                    "type": "integer"
+                },
+                "field": {
                     "type": "string"
                 },
-                "qualifier": {
+                "id": {
                     "type": "string"
                 },
                 "raw": {
                     "type": "string"
                 },
-                "relation_id": {
+                "relation": {
+                    "$ref": "#/definitions/debate.DebateReferenceRelationDTO"
+                },
+                "start": {
+                    "type": "integer"
+                },
+                "target": {
+                    "$ref": "#/definitions/debate.DebateReferenceTargetDTO"
+                }
+            }
+        },
+        "debate.DebateReferenceRelationDTO": {
+            "type": "object",
+            "properties": {
+                "conclusion_direction": {
                     "type": "string"
                 },
-                "resource_id": {
+                "conclusion_event_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "stance": {
                     "type": "string"
                 },
                 "state": {
                     "type": "string"
+                }
+            }
+        },
+        "debate.DebateReferenceTargetDTO": {
+            "type": "object",
+            "properties": {
+                "available": {
+                    "type": "boolean"
                 },
-                "title": {
+                "id": {
+                    "type": "string"
+                },
+                "label": {
+                    "type": "string"
+                },
+                "module": {
+                    "type": "string"
+                },
+                "path": {
+                    "type": "string"
+                },
+                "subtitle": {
+                    "type": "string"
+                },
+                "type": {
                     "type": "string"
                 }
             }
@@ -17893,6 +18766,384 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "direction": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.CSRFErrorResponse": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ConversationDTO": {
+            "type": "object",
+            "properties": {
+                "blocked": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_message_at": {
+                    "type": "string"
+                },
+                "last_message_preview": {
+                    "type": "string"
+                },
+                "participant_a": {
+                    "$ref": "#/definitions/dm.PartyDTO"
+                },
+                "participant_b": {
+                    "$ref": "#/definitions/dm.PartyDTO"
+                },
+                "unread": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dm.ConversationPageDTO": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dm.ConversationDTO"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ConversationResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ConversationDTO"
+                }
+            }
+        },
+        "dm.ConversationsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ConversationPageDTO"
+                }
+            }
+        },
+        "dm.ErrorResponse": {
+            "type": "object",
+            "properties": {
+                "csrf_error": {
+                    "description": "CSRFError keeps the alternate middleware payload schema visible in Swagger 2.\nThe operation description identifies when this alternative is returned.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/dm.CSRFErrorResponse"
+                        }
+                    ]
+                },
+                "error": {
+                    "type": "object",
+                    "properties": {
+                        "code": {
+                            "type": "string"
+                        },
+                        "message": {
+                            "type": "string"
+                        }
+                    }
+                }
+            }
+        },
+        "dm.ImageDTO": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ImageResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ImageDTO"
+                }
+            }
+        },
+        "dm.MailboxDTO": {
+            "type": "object",
+            "properties": {
+                "party": {
+                    "$ref": "#/definitions/dm.PartyDTO"
+                },
+                "unread": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dm.MailboxesResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dm.MailboxDTO"
+                    }
+                }
+            }
+        },
+        "dm.MessageDTO": {
+            "type": "object",
+            "properties": {
+                "client_message_id": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "conversation_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_id": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "sender_id": {
+                    "type": "string"
+                },
+                "sender_type": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.MessagePageDTO": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dm.MessageDTO"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.MessageResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.MessageDTO"
+                }
+            }
+        },
+        "dm.MessagesResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.MessagePageDTO"
+                }
+            }
+        },
+        "dm.PartyDTO": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.PermissionDTO": {
+            "type": "object",
+            "properties": {
+                "permission": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.PermissionResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.PermissionDTO"
+                }
+            }
+        },
+        "dm.ReadResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ReadResultDTO"
+                }
+            }
+        },
+        "dm.ReadResultDTO": {
+            "type": "object",
+            "properties": {
+                "conversation_unread": {
+                    "type": "integer"
+                },
+                "dm_unread": {
+                    "type": "integer"
+                },
+                "mailbox_unread": {
+                    "type": "integer"
+                },
+                "total_unread": {
+                    "type": "integer"
+                }
+            }
+        },
+        "dm.ReportDTO": {
+            "type": "object",
+            "properties": {
+                "conversation_context": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "detail": {
+                    "type": "string"
+                },
+                "has_snapshot_image": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "message_id": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "reported_actor_user_id": {
+                    "type": "string"
+                },
+                "reporter_user_id": {
+                    "type": "string"
+                },
+                "reviewed_at": {
+                    "type": "string"
+                },
+                "reviewed_by_user_id": {
+                    "type": "string"
+                },
+                "snapshot_content": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ReportInput": {
+            "type": "object",
+            "properties": {
+                "detail": {
+                    "type": "string"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ReportPageDTO": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/dm.ReportDTO"
+                    }
+                },
+                "next_cursor": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ReportReceiptDTO": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.ReportReceiptResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ReportReceiptDTO"
+                }
+            }
+        },
+        "dm.ReportResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ReportDTO"
+                }
+            }
+        },
+        "dm.ReportsResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "$ref": "#/definitions/dm.ReportPageDTO"
+                }
+            }
+        },
+        "dm.ReviewReportInput": {
+            "type": "object",
+            "properties": {
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
+        "dm.SendInput": {
+            "type": "object",
+            "properties": {
+                "client_message_id": {
+                    "type": "string"
+                },
+                "content": {
+                    "type": "string"
+                },
+                "image_id": {
+                    "type": "string"
+                },
+                "image_url": {
                     "type": "string"
                 }
             }
@@ -18600,7 +19851,27 @@ const docTemplate = `{
                     }
                 },
                 "meta": {
-                    "$ref": "#/definitions/httpx.PageMeta"
+                    "$ref": "#/definitions/feed.TimelineMeta"
+                }
+            }
+        },
+        "feed.TimelineMeta": {
+            "type": "object",
+            "properties": {
+                "checked_at": {
+                    "type": "string"
+                },
+                "has_more": {
+                    "type": "boolean"
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
@@ -18703,6 +19974,17 @@ const docTemplate = `{
                 "total": {
                     "type": "integer",
                     "example": 20
+                }
+            }
+        },
+        "feed.TimelineUpdatesResponse": {
+            "type": "object",
+            "properties": {
+                "checked_at": {
+                    "type": "string"
+                },
+                "has_updates": {
+                    "type": "boolean"
                 }
             }
         },
@@ -19016,15 +20298,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.CountResponse": {
-            "type": "object",
-            "properties": {
-                "count": {
-                    "type": "integer",
-                    "example": 8
-                }
-            }
-        },
         "handlers.CreateEventInput": {
             "type": "object",
             "required": [
@@ -19154,93 +20427,6 @@ const docTemplate = `{
                 },
                 "edit_summary": {
                     "type": "string"
-                }
-            }
-        },
-        "handlers.DMConversationItemResponse": {
-            "type": "object",
-            "properties": {
-                "conversation_id": {
-                    "type": "string",
-                    "format": "uuid",
-                    "example": "018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"
-                },
-                "last_message_at": {
-                    "type": "string",
-                    "format": "date-time",
-                    "example": "2026-05-25T11:00:00Z"
-                },
-                "other_user_id": {
-                    "type": "string",
-                    "format": "uuid",
-                    "example": "018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8b"
-                },
-                "other_username": {
-                    "type": "string",
-                    "example": "alice"
-                },
-                "preview": {
-                    "type": "string",
-                    "example": "Hello there"
-                },
-                "unread_count": {
-                    "type": "integer",
-                    "example": 2
-                }
-            }
-        },
-        "handlers.DMConversationListResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/handlers.DMConversationItemResponse"
-                    }
-                }
-            }
-        },
-        "handlers.DMMessageListResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.DMMessage"
-                    }
-                },
-                "page": {
-                    "type": "integer",
-                    "example": 1
-                },
-                "page_size": {
-                    "type": "integer",
-                    "example": 30
-                },
-                "total": {
-                    "type": "integer",
-                    "example": 30
-                }
-            }
-        },
-        "handlers.DMMessageResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/model.DMMessage"
-                }
-            }
-        },
-        "handlers.DMSendInput": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string",
-                    "example": "Hi there"
-                },
-                "image_url": {
-                    "type": "string",
-                    "example": "https://cdn.example.com/dm.png"
                 }
             }
         },
@@ -19577,15 +20763,6 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/model.ForumUserModerationAction"
-                }
-            }
-        },
-        "handlers.ImageUploadResponse": {
-            "type": "object",
-            "properties": {
-                "image_url": {
-                    "type": "string",
-                    "example": "https://cdn.example.com/uploaded.png"
                 }
             }
         },
@@ -20632,9 +21809,6 @@ const docTemplate = `{
         "handlers.UserSettingsInput": {
             "type": "object",
             "properties": {
-                "dm_permission": {
-                    "type": "string"
-                },
                 "private_profile": {
                     "type": "boolean"
                 }
@@ -20644,7 +21818,12 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/model.UserSettings"
+                    "type": "object",
+                    "properties": {
+                        "private_profile": {
+                            "type": "boolean"
+                        }
+                    }
                 },
                 "message": {
                     "type": "string",
@@ -21389,38 +22568,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "reason": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.DMMessage": {
-            "type": "object",
-            "properties": {
-                "content": {
-                    "type": "string"
-                },
-                "conversation_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "image_url": {
-                    "type": "string"
-                },
-                "read_at": {
-                    "type": "string"
-                },
-                "sender": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "sender_id": {
                     "type": "string"
                 },
                 "updated_at": {
@@ -22865,20 +24012,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "website": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.UserSettings": {
-            "type": "object",
-            "properties": {
-                "dm_permission": {
-                    "type": "string"
-                },
-                "private_profile": {
-                    "type": "boolean"
-                },
-                "user_id": {
                     "type": "string"
                 }
             }

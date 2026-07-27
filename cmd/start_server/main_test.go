@@ -195,6 +195,19 @@ func TestRunMusicBookmarkStartupMigrationCreatesPlaylistBookmarksOnFreshDatabase
 	}
 }
 
+func TestStartupDMV2MigrationOrder(t *testing.T) {
+	db := testdb.Open(t)
+	if err := runStartupDMV2Migration(db); err != nil {
+		t.Fatalf("run startup dm v2 migration: %v", err)
+	}
+	if !db.Migrator().HasTable(&model.DMConversation{}) || !db.Migrator().HasTable(&model.DMMessage{}) {
+		t.Fatal("expected startup migration to create dm v2 core tables")
+	}
+	if !db.Migrator().HasIndex("dm_conversations", "uq_dm_conversation_typed") {
+		t.Fatal("expected startup migration to create typed conversation index")
+	}
+}
+
 func TestRunUnifiedCommentStartupMigrationsBackfillsLegacyForumReplies(t *testing.T) {
 	db := testdb.Open(t)
 	requireLegacyForumTables(t, db)
