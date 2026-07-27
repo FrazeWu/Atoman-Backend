@@ -125,7 +125,7 @@ type AlbumImportProgressDTO struct {
 }
 
 type AlbumImportFileDTO struct {
-	ID               string                        `json:"id"`
+	ID               string                        `json:"fileId"`
 	RelativePath     string                        `json:"relativePath"`
 	FileName         string                        `json:"fileName"`
 	Role             string                        `json:"role"`

@@ -27,6 +27,9 @@ func TestRegisterRoutesAlbumImportFileUploadLifecycle(t *testing.T) {
 	if registered.Code != http.StatusOK {
 		t.Fatalf("register files: %d %s", registered.Code, registered.Body.String())
 	}
+	if !stringsContain(registered.Body.String(), `"fileId":"`) {
+		t.Fatalf("registration response must expose fileId: %s", registered.Body.String())
+	}
 	var registeredResponse struct {
 		Data AlbumImportDTO `json:"data"`
 	}
