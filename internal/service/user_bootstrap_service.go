@@ -20,6 +20,8 @@ const (
 	defaultBookmarkFolderName    = "默认收藏夹"
 	defaultChannelDescription    = "默认合集"
 	defaultCollectionName        = "默认合集"
+	minChannelSlugLength         = 2
+	maxChannelSlugLength         = 30
 )
 
 type UserBootstrapService struct {
@@ -296,7 +298,7 @@ func (s *UserBootstrapService) uniqueChannelSlug(base string) (string, error) {
 		if !errors.Is(err, ErrSiteHandleReserved) && !errors.Is(err, ErrSiteHandleTaken) {
 			return "", err
 		}
-		candidate = fmt.Sprintf("%s-%d", baseSlug, counter)
+		candidate = channelSlugWithSuffix(baseSlug, fmt.Sprintf("-%d", counter))
 		counter++
 	}
 }
@@ -321,6 +323,7 @@ func slugifyChannelName(value string) string {
 	slug := strings.ToLower(strings.TrimSpace(value))
 	var b strings.Builder
 	lastDash := false
+	hasNonASCII := false
 	for _, r := range slug {
 		switch {
 		case r >= 'a' && r <= 'z':
@@ -329,10 +332,10 @@ func slugifyChannelName(value string) string {
 		case r >= '0' && r <= '9':
 			b.WriteRune(r)
 			lastDash = false
-		case r >= '一' && r <= '龥':
-			b.WriteRune(r)
-			lastDash = false
 		default:
+			if r > 127 {
+				hasNonASCII = true
+			}
 			if b.Len() == 0 || lastDash {
 				continue
 			}
@@ -342,7 +345,26 @@ func slugifyChannelName(value string) string {
 	}
 	result := strings.Trim(b.String(), "-")
 	if result == "" {
-		return "channel"
+		result = "channel"
 	}
-	return result
+	if hasNonASCII {
+		sum := sha256.Sum256([]byte(slug))
+		suffix := hex.EncodeToString(sum[:])[:10]
+		return channelSlugWithSuffix(result, "-"+suffix)
+	}
+	return channelSlugWithSuffix(result, "")
+}
+
+func channelSlugWithSuffix(base, suffix string) string {
+	maxBaseLength := maxChannelSlugLength - len(suffix)
+	base = strings.TrimRight(base[:min(len(base), maxBaseLength)], "-")
+	if base == "" {
+		base = "channel"
+		base = base[:min(len(base), maxBaseLength)]
+	}
+	candidate := base + suffix
+	if len(candidate) < minChannelSlugLength {
+		candidate += "-channel"
+	}
+	return candidate
 }

@@ -5,6 +5,12 @@ import (
 	"testing"
 )
 
+func TestCollabMessageSizeLimitIsBounded(t *testing.T) {
+	if collabMessageSizeLimit <= 0 {
+		t.Fatal("expected a positive collaboration message size limit")
+	}
+}
+
 func TestWebSocketCheckOriginRejectsUnknownOrigin(t *testing.T) {
 	t.Setenv("ALLOWED_ORIGINS", "")
 	req, err := http.NewRequest(http.MethodGet, "/api/v1/collab/ws/room", nil)

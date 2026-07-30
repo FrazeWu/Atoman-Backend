@@ -12766,6 +12766,130 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/notifications": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "type 为精确类型筛选且优先于 category；category 可为 like、interaction、mention、reply、collaboration 或 system，system 包含未归入已知分类的开放类型。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "notifications"
+                ],
+                "summary": "获取通知列表",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "精确通知类型，优先于 category",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "通知分类",
+                        "name": "category",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/notification.NotificationDTO"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/notifications/read-all": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "type 为精确类型筛选且优先于 category；category 的 system 匹配未归入已知分类的开放类型。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "notifications"
+                ],
+                "summary": "全部标记为已读",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "精确通知类型，优先于 category",
+                        "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "通知分类",
+                        "name": "category",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/notifications/unread-counts": {
             "get": {
                 "security": [
@@ -17783,6 +17907,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/reference.ResolvedReference"
                     }
                 },
+                "scheduled_at": {
+                    "type": "string"
+                },
                 "status": {
                     "description": "draft / published",
                     "type": "string"
@@ -19921,6 +20048,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "published_at": {
+                    "type": "string"
+                },
+                "scheduled_at": {
                     "type": "string"
                 },
                 "status": {
@@ -23275,6 +23405,10 @@ const docTemplate = `{
                 }
             }
         },
+        "model.NotificationMeta": {
+            "type": "object",
+            "additionalProperties": true
+        },
         "model.PersonLocation": {
             "type": "object",
             "properties": {
@@ -23462,6 +23596,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "published_at": {
+                    "type": "string"
+                },
+                "scheduled_at": {
                     "type": "string"
                 },
                 "status": {
@@ -24055,8 +24192,14 @@ const docTemplate = `{
                 "processing_status": {
                     "type": "string"
                 },
+                "published_at": {
+                    "type": "string"
+                },
+                "scheduled_at": {
+                    "type": "string"
+                },
                 "status": {
-                    "description": "draft | published",
+                    "description": "draft | scheduled | published",
                     "type": "string"
                 },
                 "storage_type": {
@@ -24237,10 +24380,10 @@ const docTemplate = `{
                 "errorMessage": {
                     "type": "string"
                 },
-                "fileName": {
+                "fileId": {
                     "type": "string"
                 },
-                "id": {
+                "fileName": {
                     "type": "string"
                 },
                 "partSize": {
@@ -25030,6 +25173,55 @@ const docTemplate = `{
                 }
             }
         },
+        "notification.ActorDTO": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "notification.NotificationDTO": {
+            "type": "object",
+            "properties": {
+                "actor": {
+                    "$ref": "#/definitions/notification.ActorDTO"
+                },
+                "category": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "meta": {
+                    "$ref": "#/definitions/model.NotificationMeta"
+                },
+                "read_at": {
+                    "type": "string"
+                },
+                "source_id": {
+                    "type": "string"
+                },
+                "source_type": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                }
+            }
+        },
         "notification.UnreadCountsDTO": {
             "type": "object",
             "properties": {
@@ -25451,6 +25643,15 @@ const docTemplate = `{
                 "range": {
                     "type": "integer"
                 },
+                "retention": {
+                    "$ref": "#/definitions/studio.AnalyticsRetention"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/studio.AnalyticsSourceMetric"
+                    }
+                },
                 "to": {
                     "type": "string"
                 },
@@ -25472,6 +25673,31 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/studio.AnalyticsPoint"
                     }
+                }
+            }
+        },
+        "studio.AnalyticsRetention": {
+            "type": "object",
+            "properties": {
+                "consumers": {
+                    "type": "integer"
+                },
+                "rate": {
+                    "type": "integer"
+                },
+                "returning_consumers": {
+                    "type": "integer"
+                }
+            }
+        },
+        "studio.AnalyticsSourceMetric": {
+            "type": "object",
+            "properties": {
+                "count": {
+                    "type": "integer"
+                },
+                "source": {
+                    "type": "string"
                 }
             }
         },

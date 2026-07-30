@@ -349,6 +349,20 @@ func TestDeletePermissionsAllowAdminAndRequireActiveUser(t *testing.T) {
 	require.NoError(t, ctx.service.Delete(ctx.users[2], root2.ID))
 }
 
+func TestDeleteAllowsModeratorForVideoOnly(t *testing.T) {
+	video := newCommentTestContext(t, TargetKindVideo, 0)
+	videoComment := video.create(t, 1, "video comment", nil)
+	videoModerator := video.users[2]
+	videoModerator.Role = authctx.RoleModerator
+	require.NoError(t, video.service.Delete(videoModerator, videoComment.ID))
+
+	blog := newCommentTestContext(t, TargetKindBlogPost, 0)
+	blogComment := blog.create(t, 1, "blog comment", nil)
+	blogModerator := blog.users[2]
+	blogModerator.Role = authctx.RoleModerator
+	require.ErrorIs(t, blog.service.Delete(blogModerator, blogComment.ID), ErrCommentForbidden)
+}
+
 func TestLikeUnlikeAreIdempotentUpdateViewerStateAndHotScore(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
 	root := ctx.create(t, 0, "root", nil)

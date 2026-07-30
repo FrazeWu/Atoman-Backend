@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -495,26 +496,19 @@ func applyFetchedSourceUpdates(db *gorm.DB, src *model.FeedSource, sourceTitle s
 }
 
 // StartRSSCron starts a background worker that fetches all unique RSS URLs periodically
-func StartRSSCron(db *gorm.DB) {
+func StartRSSCron(ctx context.Context, db *gorm.DB) <-chan struct{} {
 	cfg := loadRSSCronConfig()
 	if !cfg.Enabled {
 		log.Println("RSS cron worker disabled by RSS_CRON_ENABLED=false")
-		return
+		done := make(chan struct{})
+		close(done)
+		return done
 	}
 
-	go func() {
-		time.Sleep(cfg.StartupDelay)
-		log.Println("Starting initial RSS sync...")
+	return startPeriodicWorker(ctx, cfg.StartupDelay, cfg.Interval, func() {
+		log.Println("Running scheduled RSS sync...")
 		syncAllRSSFeeds(db)
-
-		ticker := time.NewTicker(cfg.Interval)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			log.Println("Running scheduled RSS sync...")
-			syncAllRSSFeeds(db)
-		}
-	}()
+	})
 }
 
 func syncAllRSSFeeds(db *gorm.DB) {

@@ -27,5 +27,29 @@ func OpenDB(cfg config.DBConfig) (*gorm.DB, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open %s database: %w", dbType, err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("access %s connection pool: %w", dbType, err)
+	}
+	maxOpen := cfg.MaxOpenConns
+	if maxOpen <= 0 {
+		maxOpen = config.DefaultDBMaxOpen
+	}
+	maxIdle := cfg.MaxIdleConns
+	if maxIdle <= 0 {
+		maxIdle = config.DefaultDBMaxIdle
+	}
+	maxLifetime := cfg.ConnMaxLifetime
+	if maxLifetime <= 0 {
+		maxLifetime = config.DefaultDBLifetime
+	}
+	maxIdleTime := cfg.ConnMaxIdleTime
+	if maxIdleTime <= 0 {
+		maxIdleTime = config.DefaultDBIdleTime
+	}
+	sqlDB.SetMaxOpenConns(maxOpen)
+	sqlDB.SetMaxIdleConns(maxIdle)
+	sqlDB.SetConnMaxLifetime(maxLifetime)
+	sqlDB.SetConnMaxIdleTime(maxIdleTime)
 	return db, nil
 }

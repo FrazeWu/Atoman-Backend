@@ -1805,6 +1805,74 @@ func TestRegisterRoutesUpdatePostUpdatesOwnedPost(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesUpdatePostRejectsInvalidVisibilityWithoutChangingPrivatePost(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, _ := createOwnedChannelAndCollection(t, service, user, "Alice")
+	post := createPostRecord(t, db, user.ID, &channel.ID, "Private", "draft")
+	post.Visibility = "private"
+	if err := db.Save(&post).Error; err != nil {
+		t.Fatalf("make post private: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &user)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/blog/posts/"+post.ID.String(), bytes.NewBufferString(`{"title":"After","content":"updated body","visibility":"invalid"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	var reloaded model.Post
+	if err := db.First(&reloaded, "id = ?", post.ID).Error; err != nil {
+		t.Fatalf("reload post: %v", err)
+	}
+	if reloaded.Visibility != "private" || reloaded.Title != "Private" || reloaded.Content != post.Content {
+		t.Fatalf("expected private post to remain unchanged, got %#v", reloaded)
+	}
+}
+
+func TestRegisterRoutesUpdatePostVisibilityContract(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		body     string
+		expected string
+	}{
+		{name: "public", body: `"visibility":"public"`, expected: "public"},
+		{name: "followers", body: `"visibility":"followers"`, expected: "followers"},
+		{name: "private", body: `"visibility":"private"`, expected: "private"},
+		{name: "omitted defaults public", body: "", expected: "public"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, db, user := newBlogHTTPTestService(t)
+			channel, _ := createOwnedChannelAndCollection(t, service, user, "Alice")
+			post := createPostRecord(t, db, user.ID, &channel.ID, "Before", "draft")
+			post.Visibility = "private"
+			if err := db.Save(&post).Error; err != nil {
+				t.Fatalf("make post private: %v", err)
+			}
+
+			r := newBlogHTTPRouter(service, &user)
+			w := httptest.NewRecorder()
+			body := `{"title":"After","content":"updated body"`
+			if test.body != "" {
+				body += "," + test.body
+			}
+			body += "}"
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/blog/posts/"+post.ID.String(), bytes.NewBufferString(body))
+			req.Header.Set("Content-Type", "application/json")
+			r.ServeHTTP(w, req)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+			if updated := decodePostResponse(t, w.Body.Bytes()); updated.Visibility != test.expected {
+				t.Fatalf("expected visibility %q, got %#v", test.expected, updated)
+			}
+		})
+	}
+}
+
 func TestRegisterRoutesUpdatePostRejectsForeignCollectionWithoutChangingPost(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, defaultCollection := createOwnedChannelAndCollection(t, service, user, "Alice")

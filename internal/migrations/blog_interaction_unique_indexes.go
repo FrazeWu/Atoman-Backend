@@ -10,6 +10,14 @@ import (
 	"gorm.io/gorm"
 )
 
+type podcastEpisodeBookmarkKindColumn struct {
+	Kind string `gorm:"not null;default:'favorite'"`
+}
+
+func (podcastEpisodeBookmarkKindColumn) TableName() string {
+	return "podcast_episode_bookmarks"
+}
+
 func RunBlogInteractionUniqueIndexes(db *gorm.DB) error {
 	if !db.Migrator().HasTable("likes") &&
 		!db.Migrator().HasTable("bookmarks") &&
@@ -49,8 +57,22 @@ func RunBlogInteractionUniqueIndexes(db *gorm.DB) error {
 		}
 
 		if tx.Migrator().HasTable("podcast_episode_bookmarks") {
-			if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_podcast_episode_bookmarks_user_episode
-				ON podcast_episode_bookmarks (user_id, episode_id)
+			if !tx.Migrator().HasColumn("podcast_episode_bookmarks", "kind") {
+				if err := tx.Migrator().AddColumn(&podcastEpisodeBookmarkKindColumn{}, "Kind"); err != nil {
+					return fmt.Errorf("add podcast bookmark kind: %w", err)
+				}
+			}
+			if err := tx.Exec(`UPDATE podcast_episode_bookmarks SET kind = 'favorite' WHERE kind IS NULL OR kind = ''`).Error; err != nil {
+				return err
+			}
+			if err := deduplicatePodcastEpisodeBookmarks(tx); err != nil {
+				return fmt.Errorf("deduplicate normalized podcast episode bookmarks: %w", err)
+			}
+			if err := tx.Exec(`DROP INDEX IF EXISTS idx_podcast_episode_bookmarks_user_episode`).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_podcast_episode_bookmarks_user_episode_kind
+				ON podcast_episode_bookmarks (user_id, episode_id, kind)
 				WHERE deleted_at IS NULL`).Error; err != nil {
 				return err
 			}
@@ -125,7 +147,7 @@ WHERE b.ctid = duplicates.ctid;
 		if err := deduplicateSimpleBookmarkTablePostgres(db, "video_bookmarks", "video_id"); err != nil {
 			return fmt.Errorf("deduplicate video bookmarks: %w", err)
 		}
-		if err := deduplicateSimpleBookmarkTablePostgres(db, "podcast_episode_bookmarks", "episode_id"); err != nil {
+		if err := deduplicatePodcastEpisodeBookmarksPostgres(db); err != nil {
 			return fmt.Errorf("deduplicate podcast episode bookmarks: %w", err)
 		}
 		if err := deduplicateChannelBookmarksPostgres(db); err != nil {
@@ -177,7 +199,7 @@ WHERE rowid IN (
 		if err := deduplicateSimpleBookmarkTableSQLite(db, "video_bookmarks", "video_id"); err != nil {
 			return fmt.Errorf("deduplicate video bookmarks: %w", err)
 		}
-		if err := deduplicateSimpleBookmarkTableSQLite(db, "podcast_episode_bookmarks", "episode_id"); err != nil {
+		if err := deduplicatePodcastEpisodeBookmarksSQLite(db); err != nil {
 			return fmt.Errorf("deduplicate podcast episode bookmarks: %w", err)
 		}
 		if err := deduplicateChannelBookmarksSQLite(db); err != nil {
@@ -187,6 +209,74 @@ WHERE rowid IN (
 	default:
 		return fmt.Errorf("unsupported dialect for blog interaction dedupe: %s", db.Dialector.Name())
 	}
+}
+
+func deduplicatePodcastEpisodeBookmarks(db *gorm.DB) error {
+	switch db.Dialector.Name() {
+	case "postgres":
+		return deduplicatePodcastEpisodeBookmarksPostgres(db)
+	case "sqlite":
+		return deduplicatePodcastEpisodeBookmarksSQLite(db)
+	default:
+		return fmt.Errorf("unsupported dialect for podcast episode bookmark dedupe: %s", db.Dialector.Name())
+	}
+}
+
+func deduplicatePodcastEpisodeBookmarksPostgres(db *gorm.DB) error {
+	if !db.Migrator().HasTable("podcast_episode_bookmarks") {
+		return nil
+	}
+	if !db.Migrator().HasColumn("podcast_episode_bookmarks", "kind") {
+		return deduplicateSimpleBookmarkTablePostgres(db, "podcast_episode_bookmarks", "episode_id")
+	}
+	if err := db.Exec(`UPDATE podcast_episode_bookmarks SET kind = 'favorite' WHERE kind IS NULL OR kind = ''`).Error; err != nil {
+		return err
+	}
+	return db.Exec(`
+DELETE FROM podcast_episode_bookmarks t
+USING (
+  SELECT ctid
+  FROM (
+    SELECT ctid,
+           ROW_NUMBER() OVER (
+             PARTITION BY user_id, episode_id, kind
+             ORDER BY created_at DESC, id DESC
+           ) AS row_num
+    FROM podcast_episode_bookmarks
+    WHERE deleted_at IS NULL
+  ) ranked
+  WHERE row_num > 1
+) duplicates
+WHERE t.ctid = duplicates.ctid;
+`).Error
+}
+
+func deduplicatePodcastEpisodeBookmarksSQLite(db *gorm.DB) error {
+	if !db.Migrator().HasTable("podcast_episode_bookmarks") {
+		return nil
+	}
+	if !db.Migrator().HasColumn("podcast_episode_bookmarks", "kind") {
+		return deduplicateSimpleBookmarkTableSQLite(db, "podcast_episode_bookmarks", "episode_id")
+	}
+	if err := db.Exec(`UPDATE podcast_episode_bookmarks SET kind = 'favorite' WHERE kind IS NULL OR kind = ''`).Error; err != nil {
+		return err
+	}
+	return db.Exec(`
+DELETE FROM podcast_episode_bookmarks
+WHERE rowid IN (
+  SELECT rowid
+  FROM (
+    SELECT rowid,
+           ROW_NUMBER() OVER (
+             PARTITION BY user_id, episode_id, kind
+             ORDER BY created_at DESC, id DESC
+           ) AS row_num
+    FROM podcast_episode_bookmarks
+    WHERE deleted_at IS NULL
+  )
+  WHERE row_num > 1
+);
+`).Error
 }
 
 func deduplicateSimpleBookmarkTablePostgres(db *gorm.DB, table string, column string) error {
@@ -294,7 +384,7 @@ func IsBlogInteractionDuplicateKeyError(err error) bool {
 		return constraint == "idx_likes_user_target" ||
 			constraint == "idx_bookmarks_user_post" ||
 			constraint == "idx_video_bookmarks_user_video" ||
-			constraint == "idx_podcast_episode_bookmarks_user_episode" ||
+			constraint == "idx_podcast_episode_bookmarks_user_episode_kind" ||
 			constraint == "idx_channel_bookmarks_user_channel_kind" ||
 			(strings.Contains(detail, "user_id") && strings.Contains(detail, "target_type") && strings.Contains(detail, "target_id")) ||
 			(strings.Contains(detail, "user_id") && strings.Contains(detail, "post_id")) ||
@@ -310,7 +400,7 @@ func IsBlogInteractionDuplicateKeyError(err error) bool {
 		return constraint == "idx_likes_user_target" ||
 			constraint == "idx_bookmarks_user_post" ||
 			constraint == "idx_video_bookmarks_user_video" ||
-			constraint == "idx_podcast_episode_bookmarks_user_episode" ||
+			constraint == "idx_podcast_episode_bookmarks_user_episode_kind" ||
 			constraint == "idx_channel_bookmarks_user_channel_kind" ||
 			(strings.Contains(detail, "user_id") && strings.Contains(detail, "target_type") && strings.Contains(detail, "target_id")) ||
 			(strings.Contains(detail, "user_id") && strings.Contains(detail, "post_id")) ||
@@ -323,7 +413,7 @@ func IsBlogInteractionDuplicateKeyError(err error) bool {
 	return strings.Contains(message, "idx_likes_user_target") ||
 		strings.Contains(message, "idx_bookmarks_user_post") ||
 		strings.Contains(message, "idx_video_bookmarks_user_video") ||
-		strings.Contains(message, "idx_podcast_episode_bookmarks_user_episode") ||
+		strings.Contains(message, "idx_podcast_episode_bookmarks_user_episode_kind") ||
 		strings.Contains(message, "idx_channel_bookmarks_user_channel_kind") ||
 		(strings.Contains(message, "unique constraint failed") && strings.Contains(message, "likes.user_id")) ||
 		(strings.Contains(message, "unique constraint failed") && strings.Contains(message, "bookmarks.user_id")) ||

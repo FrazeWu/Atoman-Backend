@@ -1,7 +1,6 @@
 package notification
 
 import (
-	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -18,9 +17,12 @@ func (r *Repo) ListNotifications(recipientID uuid.UUID, query ListQuery) ([]mode
 	var notifications []model.Notification
 	var total int64
 
+	query = normalizeListQuery(query)
 	db := r.db.Model(&model.Notification{}).Where("recipient_id = ?", recipientID)
-	if notifType := strings.TrimSpace(query.Type); notifType != "" {
+	if notifType := query.Type; notifType != "" {
 		db = db.Where("type = ?", notifType)
+	} else if category := query.Category; category != "" {
+		db = filterNotificationCategory(db, category)
 	}
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -80,12 +82,25 @@ func (r *Repo) MarkRead(recipientID uuid.UUID, notificationID uuid.UUID, readAt 
 	return result.RowsAffected > 0, nil
 }
 
-func (r *Repo) MarkAllRead(recipientID uuid.UUID, notifType string, readAt time.Time) error {
+func (r *Repo) MarkAllRead(recipientID uuid.UUID, query ListQuery, readAt time.Time) error {
+	query = normalizeListQuery(query)
 	db := r.db.Model(&model.Notification{}).Where("recipient_id = ? AND read_at IS NULL", recipientID)
-	if notifType = strings.TrimSpace(notifType); notifType != "" {
-		db = db.Where("type = ?", notifType)
+	if query.Type != "" {
+		db = db.Where("type = ?", query.Type)
+	} else if query.Category != "" {
+		db = filterNotificationCategory(db, query.Category)
 	}
 	return db.Update("read_at", readAt).Error
+}
+
+func filterNotificationCategory(db *gorm.DB, category string) *gorm.DB {
+	if category == "system" {
+		return db.Where("type NOT IN ?", knownNotificationTypes)
+	}
+	if types, ok := notificationTypesByCategory[category]; ok {
+		return db.Where("type IN ?", types)
+	}
+	return db.Where("1 = 0")
 }
 
 func normalizedPage(page int) int {

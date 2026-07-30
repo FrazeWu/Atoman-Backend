@@ -166,6 +166,10 @@ func UploadAsset(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			Size:        header.Size,
 		}
 		if err := db.Create(&asset).Error; err != nil {
+			_, _ = s3Client.DeleteObject(&s3.DeleteObjectInput{
+				Bucket: aws.String(bucket),
+				Key:    aws.String(key),
+			})
 			httpx.Error(c, err)
 			return
 		}

@@ -90,7 +90,7 @@ func performAuthRequest(t *testing.T, db *gorm.DB, method string, session middle
 
 func TestAuthMiddlewareRejectsMissingCredentials(t *testing.T) {
 	w := performAuthRequest(t, newMiddlewareAuthTestDB(t), http.MethodGet, middlewareSessionFixture{}, nil)
-	if w.Code != http.StatusUnauthorized || w.Body.String() != `{"error":"Authorization required"}` {
+	if w.Code != http.StatusUnauthorized || w.Body.String() != `{"error":{"code":"auth.unauthorized","details":{},"message":"Authorization required"}}` {
 		t.Fatalf("unexpected response %d: %s", w.Code, w.Body.String())
 	}
 }

@@ -12,6 +12,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -19,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 func multipartUploadBody(t *testing.T, purpose, filename, contentType string, content []byte) (*bytes.Buffer, string) {
@@ -158,6 +160,56 @@ func TestUploadMusicAssetStoresInS3AndPersistsMediaAsset(t *testing.T) {
 	}
 	if asset.UserID == nil || *asset.UserID != user.UUID || asset.Purpose != "music.cover" || asset.URL != resp.Data.URL {
 		t.Fatalf("unexpected persisted media asset: %#v", asset)
+	}
+}
+
+func TestUploadAssetDeletesObjectWhenMediaAssetPersistenceFails(t *testing.T) {
+	t.Setenv("S3_BUCKET", "atoman-test")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
+	gin.SetMode(gin.TestMode)
+
+	var putCount, deleteCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPut:
+			putCount++
+			_, _ = io.Copy(io.Discard, r.Body)
+		case http.MethodDelete:
+			deleteCount++
+		default:
+			t.Fatalf("unexpected S3 method %s", r.Method)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	sess, err := session.NewSession(&aws.Config{
+		Region:           aws.String("us-test-1"),
+		Endpoint:         aws.String(server.URL),
+		Credentials:      credentials.NewStaticCredentials("access", "secret", ""),
+		S3ForcePathStyle: aws.Bool(true),
+	})
+	if err != nil {
+		t.Fatalf("new s3 session: %v", err)
+	}
+
+	db := testdb.Open(t) // Deliberately omit MediaAsset migration so persistence fails after upload.
+	r := gin.New()
+	r.POST("/uploads", func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser})
+		UploadAsset(db, s3.New(sess))(c)
+	})
+	body, contentType := multipartUploadBody(t, "music.cover", "avatar.png", "image/png", validPNGBytes())
+	req := httptest.NewRequest(http.MethodPost, "/uploads", body)
+	req.Header.Set("Content-Type", contentType)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected persistence failure, got %d: %s", w.Code, w.Body.String())
+	}
+	if putCount != 1 || deleteCount != 1 {
+		t.Fatalf("expected one uploaded object to be removed, got put=%d delete=%d", putCount, deleteCount)
 	}
 }
 

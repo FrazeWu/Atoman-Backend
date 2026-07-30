@@ -725,7 +725,7 @@ func (h *Handler) listPosts(c *gin.Context) {
 	var posts []model.Post
 	page, pageSize := httpx.PageParams(c)
 	query := h.service.db.Model(&model.Post{}).Preload("User").Preload("Channel").Preload("Collection").Where("status = ?", "published")
-	query = applyPostListVisibility(query, currentViewerID(c))
+	query = ApplyPublishedPostListVisibility(query, currentViewerID(c))
 
 	if userID := c.Query("user_id"); userID != "" {
 		query = query.Where("user_id = ?", userID)
@@ -788,10 +788,9 @@ func (h *Handler) listPosts(c *gin.Context) {
 	httpx.List(c, items, page, pageSize, total)
 }
 
-func applyPostListVisibility(query *gorm.DB, viewerID *uuid.UUID) *gorm.DB {
-	public := query.Where("(visibility = ? OR visibility = ?)", "", "public")
+func ApplyPublishedPostListVisibility(query *gorm.DB, viewerID *uuid.UUID) *gorm.DB {
 	if viewerID == nil {
-		return public
+		return query.Where("(posts.visibility = ? OR posts.visibility = ?)", "", "public")
 	}
 
 	subscribedChannelIDs := query.Session(&gorm.Session{NewDB: true}).
@@ -803,7 +802,7 @@ func applyPostListVisibility(query *gorm.DB, viewerID *uuid.UUID) *gorm.DB {
 		Where("feed_sources.deleted_at IS NULL AND subscriptions.deleted_at IS NULL")
 
 	return query.Where(
-		"(visibility = ? OR visibility = ? OR user_id = ? OR (visibility = ? AND channel_id IN (?)))",
+		"(posts.visibility = ? OR posts.visibility = ? OR posts.user_id = ? OR (posts.visibility = ? AND posts.channel_id IN (?)))",
 		"", "public", *viewerID, "followers", subscribedChannelIDs,
 	)
 }
@@ -866,7 +865,7 @@ func (h *Handler) getPost(c *gin.Context) {
 			return
 		}
 	} else {
-		allowed, err := canViewPublishedPost(h.service.db, viewerID, post)
+		allowed, err := CanViewPublishedPost(h.service.db, viewerID, post)
 		if err != nil {
 			httpx.Error(c, err)
 			return
@@ -962,7 +961,7 @@ func currentViewerID(c *gin.Context) *uuid.UUID {
 	return &user.ID
 }
 
-func canViewPublishedPost(db *gorm.DB, viewerID *uuid.UUID, post model.Post) (bool, error) {
+func CanViewPublishedPost(db *gorm.DB, viewerID *uuid.UUID, post model.Post) (bool, error) {
 	switch post.Visibility {
 	case "", "public":
 		return true, nil
@@ -1137,6 +1136,12 @@ func (h *Handler) updatePost(c *gin.Context) {
 	if err := bindJSON(c, &req); err != nil {
 		httpx.Error(c, err)
 		return
+	}
+	if visibility := strings.TrimSpace(req.Visibility); visibility != "" {
+		if _, ok := allowedPostVisibilities[visibility]; !ok {
+			httpx.Error(c, apperr.BadRequest("blog.invalid_visibility", "visibility is invalid"))
+			return
+		}
 	}
 
 	var post model.Post

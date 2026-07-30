@@ -135,10 +135,8 @@ func TrustedOriginMiddleware() gin.HandlerFunc {
 			c.Next()
 			return
 		}
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-			"code":  "auth.origin_invalid",
-			"error": "请求来源无效",
-		})
+		httpx.Error(c, apperr.Forbidden("auth.origin_invalid", "请求来源无效"))
+		c.Abort()
 	}
 }
 
@@ -156,10 +154,8 @@ func verifyWebRequest(c *gin.Context, resolved authsession.Resolved, credential 
 		return true
 	}
 	if !IsTrustedWebOrigin(c.GetHeader("Origin")) || !authsession.New(currentAuthDB()).VerifyCSRF(resolved.Session, c.GetHeader(CSRFHeaderName)) {
-		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-			"code":  "auth.csrf_invalid",
-			"error": "请求已失效，请刷新页面后重试",
-		})
+		httpx.Error(c, apperr.Forbidden("auth.csrf_invalid", "请求已失效，请刷新页面后重试"))
+		c.Abort()
 		return false
 	}
 	return true
@@ -169,11 +165,13 @@ func AuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		resolved, credential, ok := resolveRequestSession(c)
 		if !credential.present {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Authorization required"})
+			httpx.Error(c, apperr.Unauthorized("Authorization required"))
+			c.Abort()
 			return
 		}
 		if !ok {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			httpx.Error(c, apperr.Unauthorized("Invalid token"))
+			c.Abort()
 			return
 		}
 		if !verifyWebRequest(c, resolved, credential) {

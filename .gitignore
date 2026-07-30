@@ -14,6 +14,9 @@
 /internal/modules/music/uploads/
 log/
 start_server
+music_import_worker
+*.before-*
+*.bak
 output.txt
 nvim.log
 .claude/

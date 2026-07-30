@@ -957,6 +957,50 @@ func TestGetFeedItemSummaryFallbackWhenFullTextStatusNotSuccess(t *testing.T) {
 	}
 }
 
+func TestGetFeedItemExcludesHiddenFeedSources(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	visibleSource := seedAdminFeedSource(t, db, "Visible Source", false)
+	hiddenSource := seedAdminFeedSource(t, db, "Hidden Source", true)
+	deletedSource := seedAdminFeedSource(t, db, "Deleted Source", false)
+	visibleItem := model.FeedItem{FeedSourceID: visibleSource.ID, GUID: "visible-detail-guid", Title: "Visible Item", Summary: "visible summary", PublishedAt: now, FetchedAt: now}
+	hiddenItem := model.FeedItem{FeedSourceID: hiddenSource.ID, GUID: "hidden-detail-guid", Title: "Hidden Item", Summary: "hidden summary", FullTextHTML: "hidden full text", FullTextStatus: service.FullTextStatusSuccess, PublishedAt: now, FetchedAt: now}
+	deletedItem := model.FeedItem{FeedSourceID: deletedSource.ID, GUID: "deleted-detail-guid", Title: "Deleted Item", Summary: "deleted summary", PublishedAt: now, FetchedAt: now}
+	if err := db.Create(&visibleItem).Error; err != nil {
+		t.Fatalf("create visible item: %v", err)
+	}
+	if err := db.Create(&hiddenItem).Error; err != nil {
+		t.Fatalf("create hidden item: %v", err)
+	}
+	if err := db.Create(&deletedItem).Error; err != nil {
+		t.Fatalf("create deleted item: %v", err)
+	}
+	if err := db.Delete(&deletedSource).Error; err != nil {
+		t.Fatalf("delete source: %v", err)
+	}
+
+	r := gin.New()
+	r.GET("/api/v1/feed/items/:id", GetFeedItem(db))
+
+	visibleRequest := httptest.NewRequest(http.MethodGet, "/api/v1/feed/items/"+visibleItem.ID.String(), nil)
+	visibleResponse := httptest.NewRecorder()
+	r.ServeHTTP(visibleResponse, visibleRequest)
+	if visibleResponse.Code != http.StatusOK {
+		t.Fatalf("visible item status=%d body=%s", visibleResponse.Code, visibleResponse.Body.String())
+	}
+
+	for _, itemID := range []uuid.UUID{hiddenItem.ID, deletedItem.ID, uuid.New()} {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/feed/items/"+itemID.String(), nil)
+		response := httptest.NewRecorder()
+		r.ServeHTTP(response, request)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("unavailable item %s status=%d body=%s", itemID, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestNewExternalRSSSourceDefaultsFullTextEnabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newFeedHandlerTestDB(t)

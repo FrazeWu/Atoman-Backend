@@ -55,6 +55,7 @@ type ContentPublicationEvent struct {
 	ContentType  string     `json:"content_type" gorm:"type:varchar(16);not null;uniqueIndex:idx_content_publication,priority:1"`
 	ContentID    uuid.UUID  `json:"content_id" gorm:"type:uuid;not null;uniqueIndex:idx_content_publication,priority:2"`
 	Status       string     `json:"status" gorm:"type:varchar(16);not null;default:'pending';index"`
+	LeaseVersion int64      `json:"lease_version" gorm:"not null;default:0"`
 	Attempts     int        `json:"attempts" gorm:"not null;default:0"`
 	LastError    string     `json:"last_error" gorm:"type:text"`
 	DispatchedAt *time.Time `json:"dispatched_at,omitempty"`

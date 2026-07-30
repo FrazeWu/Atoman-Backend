@@ -215,7 +215,7 @@ func newDebateConcurrencyPostgresDB(t *testing.T) *gorm.DB {
 	})
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &model.Debate{}, &model.Revision{}, &model.ContentProtection{},
-		&model.DebateConclusionEvent{}, &model.DebateRevisionReference{}, &model.DebateRelation{}, &model.DebateVote{},
+		&model.DebateConclusionEvent{}, &model.DebateRevisionReference{}, &model.DebateRelation{}, &model.DebateVote{}, &model.ContentReference{},
 	))
 	return db
 }

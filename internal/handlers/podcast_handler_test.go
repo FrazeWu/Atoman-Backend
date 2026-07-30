@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -35,6 +36,8 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		&model.Collection{},
 		&model.Post{},
 		&model.PostCollection{},
+		&model.FeedSource{},
+		&model.Subscription{},
 		&model.PodcastEpisode{},
 		&model.ContentPublicationEvent{},
 		&model.StudioMetricEvent{},
@@ -56,7 +59,6 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 	}
 
 	r := gin.New()
-	r.Use(middleware.OptionalAuthMiddleware())
 	SetupPodcastRoutes(r, db, nil)
 	return r, db, user, channel
 }
@@ -312,6 +314,89 @@ func TestGetPodcastEpisodeAllowsPublishedOrAuthorDraftOnly(t *testing.T) {
 	}
 }
 
+func TestPodcastPublishedVisibilityAppliesToListsDetailAndRSS(t *testing.T) {
+	r, db, owner, channel := newPodcastHandlerTestDB(t)
+	follower := model.User{Username: "podcast-follower", Email: "podcast-follower@example.com", Password: "hash", Role: "user", IsActive: true}
+	require.NoError(t, db.Create(&follower).Error)
+
+	publicEpisode := createPodcastEpisodeForPostStatus(t, db, owner, channel, "published")
+	followersEpisode := createPodcastEpisodeForPostStatus(t, db, owner, channel, "published")
+	privateEpisode := createPodcastEpisodeForPostStatus(t, db, owner, channel, "published")
+	require.NoError(t, db.Model(&model.Post{}).Where("id = ?", publicEpisode.PostID).Updates(map[string]any{"title": "Public podcast", "visibility": "public"}).Error)
+	require.NoError(t, db.Model(&model.Post{}).Where("id = ?", followersEpisode.PostID).Updates(map[string]any{"title": "Followers podcast", "visibility": "followers"}).Error)
+	require.NoError(t, db.Model(&model.Post{}).Where("id = ?", privateEpisode.PostID).Updates(map[string]any{"title": "Private podcast", "visibility": "private"}).Error)
+	require.NoError(t, db.Model(&model.PodcastEpisode{}).Where("id = ?", publicEpisode.ID).Update("audio_url", "https://cdn.example.com/public.mp3").Error)
+	require.NoError(t, db.Model(&model.PodcastEpisode{}).Where("id = ?", followersEpisode.ID).Update("audio_url", "https://cdn.example.com/followers.mp3").Error)
+	require.NoError(t, db.Model(&model.PodcastEpisode{}).Where("id = ?", privateEpisode.ID).Update("audio_url", "https://cdn.example.com/private.mp3").Error)
+	publicEpisode.AudioURL = "https://cdn.example.com/public.mp3"
+	followersEpisode.AudioURL = "https://cdn.example.com/followers.mp3"
+	privateEpisode.AudioURL = "https://cdn.example.com/private.mp3"
+
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte("internal_channel:"+channel.ID.String())))
+	source := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Hash: hash, Title: channel.Name}
+	require.NoError(t, db.Create(&source).Error)
+	require.NoError(t, db.Create(&model.Subscription{UserID: follower.UUID, FeedSourceID: source.ID, Title: channel.Name}).Error)
+
+	request := func(path, authHeader string) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		if authHeader != "" {
+			req.Header.Set("Authorization", authHeader)
+		}
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	for _, path := range []string{
+		"/api/v1/podcast/episodes",
+		"/api/v1/podcast/shows/" + channel.Slug + "/episodes",
+		"/api/v1/channels/" + channel.Slug + "/rss/podcast",
+	} {
+		w := request(path, "")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Contains(t, w.Body.String(), "Public podcast")
+		require.NotContains(t, w.Body.String(), "Followers podcast")
+		require.NotContains(t, w.Body.String(), "Private podcast")
+		require.NotContains(t, w.Body.String(), followersEpisode.AudioURL)
+		require.NotContains(t, w.Body.String(), privateEpisode.AudioURL)
+	}
+
+	for _, path := range []string{
+		"/api/v1/podcast/episodes",
+		"/api/v1/podcast/shows/" + channel.Slug + "/episodes",
+	} {
+		w := request(path, podcastAuthHeader(t, db, follower))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Contains(t, w.Body.String(), "Public podcast")
+		require.Contains(t, w.Body.String(), "Followers podcast")
+		require.NotContains(t, w.Body.String(), "Private podcast")
+		require.NotContains(t, w.Body.String(), privateEpisode.AudioURL)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		episode    model.PodcastEpisode
+		authHeader string
+		want       int
+	}{
+		{name: "anonymous can read public", episode: publicEpisode, want: http.StatusOK},
+		{name: "anonymous cannot read followers", episode: followersEpisode, want: http.StatusNotFound},
+		{name: "anonymous cannot read private", episode: privateEpisode, want: http.StatusNotFound},
+		{name: "subscriber can read followers", episode: followersEpisode, authHeader: podcastAuthHeader(t, db, follower), want: http.StatusOK},
+		{name: "subscriber cannot read private", episode: privateEpisode, authHeader: podcastAuthHeader(t, db, follower), want: http.StatusNotFound},
+		{name: "author can read private", episode: privateEpisode, authHeader: podcastAuthHeader(t, db, owner), want: http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := request("/api/v1/podcast/episodes/"+tc.episode.ID.String(), tc.authHeader)
+			require.Equal(t, tc.want, w.Code, w.Body.String())
+			if tc.want == http.StatusNotFound {
+				require.NotContains(t, w.Body.String(), tc.episode.AudioURL)
+			}
+		})
+	}
+}
+
 func TestUploadPodcastCoverRejectsSpoofedPNGContent(t *testing.T) {
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
@@ -504,6 +589,62 @@ func TestCreatePodcastEpisodeBookmarkIsIdempotentWithRepeatedRequests(t *testing
 	}
 	if count != 1 {
 		t.Fatalf("expected 1 podcast episode bookmark row, got %d", count)
+	}
+	var bookmark model.PodcastEpisodeBookmark
+	if err := db.Where("user_id = ? AND episode_id = ?", user.UUID, episode.ID).First(&bookmark).Error; err != nil {
+		t.Fatalf("load bookmark: %v", err)
+	}
+	if bookmark.Kind != "favorite" {
+		t.Fatalf("expected omitted kind to default to favorite, got %q", bookmark.Kind)
+	}
+}
+
+func TestPodcastEpisodeBookmarksKeepFavoriteAndListenLaterSeparate(t *testing.T) {
+	r, db, user, channel := newPodcastHandlerTestDB(t)
+	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
+
+	for _, kind := range []string{"favorite", "listen_later", "listen_later"} {
+		body, err := json.Marshal(map[string]any{"episode_id": episode.ID, "kind": kind})
+		if err != nil {
+			t.Fatalf("marshal %s request: %v", kind, err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/bookmarks", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create %s status=%d body=%s", kind, w.Code, w.Body.String())
+		}
+	}
+
+	var count int64
+	if err := db.Model(&model.PodcastEpisodeBookmark{}).Where("user_id = ? AND episode_id = ?", user.UUID, episode.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count bookmarks: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected separate favorite and listen later rows, got %d", count)
+	}
+
+	for _, kind := range []string{"favorite", "listen_later"} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/podcast/bookmarks?kind="+kind, nil)
+		req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("list %s status=%d body=%s", kind, w.Code, w.Body.String())
+		}
+		var response struct {
+			Data []struct {
+				Kind string `json:"kind"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode %s response: %v", kind, err)
+		}
+		if len(response.Data) != 1 || response.Data[0].Kind != kind {
+			t.Fatalf("expected one %s bookmark, got %s", kind, w.Body.String())
+		}
 	}
 }
 

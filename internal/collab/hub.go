@@ -18,6 +18,8 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const collabMessageSizeLimit = 1 << 20
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
@@ -161,6 +163,7 @@ func (c *client) readPump() {
 		c.hub.leave <- c
 		c.conn.Close()
 	}()
+	c.conn.SetReadLimit(collabMessageSizeLimit)
 
 	for {
 		_, data, err := c.conn.ReadMessage()

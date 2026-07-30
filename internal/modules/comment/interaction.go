@@ -247,7 +247,8 @@ func (s *Service) DeleteWithExtension(user authctx.CurrentUser, commentID uuid.U
 			}
 			target := hierarchy.Target
 			isOwner := resolved.OwnerID != nil && *resolved.OwnerID == user.ID
-			if entry.AuthorID != user.ID && !isOwner && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+			isVideoModerator := target.Kind == TargetKindVideo && authctx.RoleAtLeast(user.Role, authctx.RoleModerator)
+			if entry.AuthorID != user.ID && !isOwner && !isVideoModerator && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
 				return ErrCommentForbidden
 			}
 

@@ -133,6 +133,37 @@ func TestStudioContentsIncludeModuleMetrics(t *testing.T) {
 	}
 }
 
+func TestStudioPodcastContentMetricsCountFavoritesOnly(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	post := model.Post{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID,
+		Title: "Measured episode", Content: "shownotes", Status: "published", Visibility: "public",
+	}
+	if err := fixture.db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	episode := model.PodcastEpisode{PostID: post.ID, ChannelID: fixture.channel.ID, AudioURL: "episode.mp3"}
+	if err := fixture.db.Create(&episode).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"favorite", "listen_later"} {
+		if err := fixture.db.Create(&model.PodcastEpisodeBookmark{UserID: fixture.foreignUser.UUID, EpisodeID: episode.ID, Kind: kind}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	items, _, err := fixture.service.ListContents(fixture.user, ModulePodcast, ContentQuery{ChannelID: fixture.channel.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != episode.ID {
+		t.Fatalf("expected measured episode, got %#v", items)
+	}
+	if got := items[0].Metrics["bookmark"]; got != 1 {
+		t.Fatalf("expected favorite bookmark count 1, got %d", got)
+	}
+}
+
 func TestStudioContentsNeverReturnAnotherOwnersContent(t *testing.T) {
 	fixture := newStudioQueryFixture(t)
 	blogCollection := fixture.collections[ModuleBlog]

@@ -376,6 +376,7 @@ func (r *Repo) ListExplorePosts(limit int, offset int) ([]model.Post, error) {
 	var posts []model.Post
 	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("status = ?", "published").
+		Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
 		Order("created_at DESC, id DESC").
 		Offset(offset).
 		Limit(limit).
@@ -387,6 +388,7 @@ func (r *Repo) ListExplorePostsAll() ([]model.Post, error) {
 	var posts []model.Post
 	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("status = ?", "published").
+		Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
 		Order("created_at DESC, id DESC").
 		Find(&posts).Error
 	return posts, err
@@ -394,7 +396,10 @@ func (r *Repo) ListExplorePostsAll() ([]model.Post, error) {
 
 func (r *Repo) CountExplorePosts() (int64, error) {
 	var count int64
-	err := r.db.Model(&model.Post{}).Where("status = ?", "published").Count(&count).Error
+	err := r.db.Model(&model.Post{}).
+		Where("status = ?", "published").
+		Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
+		Count(&count).Error
 	return count, err
 }
 

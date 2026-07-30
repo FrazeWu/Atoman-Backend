@@ -19,21 +19,34 @@ type Service struct {
 
 var notificationCategories = [...]string{"like", "interaction", "mention", "reply", "collaboration", "system"}
 
-func categoryForType(notificationType string) string {
-	switch strings.TrimSpace(notificationType) {
-	case "comment_like", "forum_like":
-		return "like"
-	case "comment_marked", "forum_follow", "forum_solved":
-		return "interaction"
-	case "comment_mention", "forum_mention", "content_mention":
-		return "mention"
-	case "comment_reply", "forum_reply", "forum_topic_comment":
-		return "reply"
-	case "collaboration.required":
-		return "collaboration"
-	default:
-		return "system"
+var notificationTypesByCategory = map[string][]string{
+	"like":          {"comment_like", "forum_like"},
+	"interaction":   {"comment_marked", "forum_follow", "forum_solved"},
+	"mention":       {"comment_mention", "forum_mention", "content_mention"},
+	"reply":         {"comment_reply", "forum_reply", "forum_topic_comment"},
+	"collaboration": {"collaboration.required"},
+}
+
+var knownNotificationTypes = knownTypes()
+
+func knownTypes() []string {
+	types := make([]string, 0)
+	for _, category := range notificationCategories {
+		types = append(types, notificationTypesByCategory[category]...)
 	}
+	return types
+}
+
+func categoryForType(notificationType string) string {
+	notificationType = strings.TrimSpace(notificationType)
+	for category, types := range notificationTypesByCategory {
+		for _, knownType := range types {
+			if notificationType == knownType {
+				return category
+			}
+		}
+	}
+	return "system"
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
@@ -42,7 +55,7 @@ func (s *Service) ListNotifications(user authctx.CurrentUser, query ListQuery) (
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
-	notifications, total, err := s.repo.ListNotifications(user.ID, query)
+	notifications, total, err := s.repo.ListNotifications(user.ID, normalizeListQuery(query))
 	if err != nil {
 		return nil, 0, err
 	}
@@ -111,11 +124,21 @@ func (s *Service) MarkRead(user authctx.CurrentUser, notificationID uuid.UUID) e
 	return nil
 }
 
-func (s *Service) MarkAllRead(user authctx.CurrentUser, notifType string) error {
+func (s *Service) MarkAllRead(user authctx.CurrentUser, query ListQuery) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
 	}
-	return s.repo.MarkAllRead(user.ID, strings.TrimSpace(notifType), time.Now())
+	return s.repo.MarkAllRead(user.ID, normalizeListQuery(query), time.Now())
+}
+
+// normalizeListQuery gives an exact notification type precedence over a category.
+func normalizeListQuery(query ListQuery) ListQuery {
+	query.Type = strings.TrimSpace(query.Type)
+	query.Category = strings.TrimSpace(query.Category)
+	if query.Type != "" {
+		query.Category = ""
+	}
+	return query
 }
 
 func toDTO(notification model.Notification) NotificationDTO {

@@ -114,14 +114,14 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 		return target(targetType, row.ID, row.Name, "music", "/playlist/"+row.ID.String()), nil
 	case "podcast":
 		var row model.Channel
-		query := r.db.Where("EXISTS (SELECT 1 FROM podcast_episodes pe JOIN posts p ON p.id = pe.post_id AND p.deleted_at IS NULL AND p.status = 'published' WHERE pe.channel_id = channels.id AND pe.deleted_at IS NULL)")
+		query := visiblePodcastChannels(r.db, viewer)
 		if err := query.First(&row, "id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
 		return target(targetType, row.ID, row.Name, "podcast", "/show/"+row.Slug), nil
 	case "episode":
 		var row model.PodcastEpisode
-		if err := r.db.Preload("Post").Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL AND posts.status = ?", "published").First(&row, "podcast_episodes.id = ?", id).Error; err != nil {
+		if err := visiblePodcastEpisodes(r.db.Preload("Post"), viewer).First(&row, "podcast_episodes.id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
 		return target(targetType, row.ID, row.Post.Title, "podcast", "/episode/"+row.ID.String()), nil
@@ -209,6 +209,8 @@ func (r *Registry) Search(viewer Viewer, targetType, query string, limit int) ([
 func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, limit int) ([]uuid.UUID, error) {
 	like := "%" + strings.ToLower(search) + "%"
 	var query *gorm.DB
+	idColumn := "id"
+	createdAtColumn := "created_at"
 	switch targetType {
 	case "post":
 		query = visibleOwned(r.db.Model(&model.Post{}).Where("status = ? AND LOWER(title) LIKE ?", "published", like), viewer, "user_id", "visibility").
@@ -221,6 +223,8 @@ func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, l
 		query = r.db.Model(&model.FeedSource{}).Where("hidden = ? AND LOWER(title) LIKE ?", false, like)
 	case "article":
 		query = r.db.Model(&model.FeedItem{}).Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id AND feed_sources.deleted_at IS NULL AND feed_sources.hidden = ?", false).Where("LOWER(feed_items.title) LIKE ?", like)
+		idColumn = "feed_items.id"
+		createdAtColumn = "feed_items.created_at"
 	case "artist":
 		query = r.db.Model(&model.Artist{}).Where("redirect_to IS NULL AND LOWER(name) LIKE ?", like)
 	case "album":
@@ -233,9 +237,11 @@ func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, l
 			query = r.db.Model(&model.Playlist{}).Where("LOWER(name) LIKE ?", like).Where("is_public = ? OR user_id = ?", true, viewer.UserID)
 		}
 	case "podcast":
-		query = r.db.Model(&model.Channel{}).Where("LOWER(name) LIKE ?", like).Where("EXISTS (SELECT 1 FROM podcast_episodes pe JOIN posts p ON p.id = pe.post_id AND p.deleted_at IS NULL AND p.status = 'published' WHERE pe.channel_id = channels.id AND pe.deleted_at IS NULL)")
+		query = visiblePodcastChannels(r.db.Model(&model.Channel{}).Where("LOWER(name) LIKE ?", like), viewer)
 	case "episode":
-		query = r.db.Model(&model.PodcastEpisode{}).Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL AND posts.status = ?", "published").Where("LOWER(posts.title) LIKE ?", like)
+		query = visiblePodcastEpisodes(r.db.Model(&model.PodcastEpisode{}), viewer).Where("LOWER(posts.title) LIKE ?", like)
+		idColumn = "podcast_episodes.id"
+		createdAtColumn = "podcast_episodes.created_at"
 	case "video":
 		query = visibleOwned(r.db.Model(&model.Video{}).Where("status = ? AND LOWER(title) LIKE ?", "published", like), viewer, "user_id", "visibility")
 	case "person":
@@ -253,7 +259,7 @@ func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, l
 		return nil, ErrTargetUnavailable
 	}
 	var ids []uuid.UUID
-	if err := query.Order("created_at DESC").Limit(limit).Pluck("id", &ids).Error; err != nil {
+	if err := query.Order(createdAtColumn+" DESC").Limit(limit).Pluck(idColumn, &ids).Error; err != nil {
 		return nil, err
 	}
 	return ids, nil
@@ -330,6 +336,28 @@ func visiblePublicOwned(query *gorm.DB, viewer Viewer) *gorm.DB {
 		return query.Where("is_public = ?", true)
 	}
 	return query.Where("is_public = ? OR user_id = ?", true, viewer.UserID)
+}
+
+func visiblePodcastChannels(query *gorm.DB, viewer Viewer) *gorm.DB {
+	visibility := "p.visibility = ?"
+	args := []interface{}{"public"}
+	if viewer.UserID != uuid.Nil {
+		visibility = "(p.visibility = ? OR p.user_id = ?)"
+		args = append(args, viewer.UserID)
+	}
+	return query.Where(`EXISTS (
+		SELECT 1 FROM podcast_episodes pe
+		JOIN posts p ON p.id = pe.post_id AND p.deleted_at IS NULL AND p.status = 'published'
+		WHERE pe.channel_id = channels.id AND pe.deleted_at IS NULL AND `+visibility+`
+	)`, args...)
+}
+
+func visiblePodcastEpisodes(query *gorm.DB, viewer Viewer) *gorm.DB {
+	query = query.Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL AND posts.status = ?", "published")
+	if viewer.UserID == uuid.Nil {
+		return query.Where("posts.visibility = ?", "public")
+	}
+	return query.Where("(posts.visibility = ? OR posts.user_id = ?)", "public", viewer.UserID)
 }
 
 func (r *Registry) visibleForumTopics(query *gorm.DB, viewer Viewer) *gorm.DB {

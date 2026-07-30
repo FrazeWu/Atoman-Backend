@@ -1,9 +1,13 @@
 package lifecycle
 
 import (
+	"errors"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
@@ -21,6 +25,25 @@ type lifecycleFixture struct {
 	post    model.Post
 }
 
+func startDispatchWorker(t *testing.T, dispatch func() error, release func()) <-chan error {
+	t.Helper()
+	result := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		result <- dispatch()
+	}()
+	t.Cleanup(func() {
+		release()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("dispatch worker did not exit during cleanup")
+		}
+	})
+	return result
+}
+
 func newLifecycleFixture(t *testing.T) lifecycleFixture {
 	t.Helper()
 	db := testdb.Open(t)
@@ -29,6 +52,9 @@ func newLifecycleFixture(t *testing.T) lifecycleFixture {
 		&model.ContentLifecycleEvent{}, &model.ContentProgress{}, &model.ContentNotificationPreference{},
 		&model.ContentPublicationEvent{}, &model.FeedSource{}, &model.Subscription{}, &model.Follow{}, &model.Notification{},
 	)
+	if err := migrations.RunNotificationDMIndexes(db); err != nil {
+		t.Fatal(err)
+	}
 	ownerModel := model.User{Username: "lifecycle-owner", Email: "lifecycle-owner@example.com", Password: "hash", IsActive: true}
 	viewerModel := model.User{Username: "lifecycle-viewer", Email: "lifecycle-viewer@example.com", Password: "hash", IsActive: true}
 	if err := db.Create(&ownerModel).Error; err != nil {
@@ -141,6 +167,675 @@ func TestDispatchPublicationNotifiesOptedInSubscribersOnce(t *testing.T) {
 	}
 	if notifications[0].Meta["path"] != "/posts/post/"+fixture.post.ID.String() {
 		t.Fatalf("unexpected notification: %#v", notifications[0])
+	}
+}
+
+func TestDispatchPendingPublicationsConcurrentlyClaimsEventBeforeNotifying(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	source := model.FeedSource{SourceType: "internal_channel", SourceID: &fixture.channel.ID, Hash: uuid.NewString(), Title: fixture.channel.Name}
+	if err := fixture.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.Subscription{UserID: fixture.viewer.ID, FeedSourceID: source.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.service.SaveNotificationPreference(fixture.viewer, NotificationPreferenceInput{
+		SourceType: "internal_channel", SourceID: fixture.channel.ID, Mode: "all",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.EnqueuePublication("blog", fixture.post.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	candidatesReady := make(chan struct{})
+	firstDeliveryCompleted := make(chan struct{})
+	var candidatesReadyOnce sync.Once
+	var firstDeliveryOnce sync.Once
+	releaseCandidateWaiters := func() {
+		candidatesReadyOnce.Do(func() { close(candidatesReady) })
+		firstDeliveryOnce.Do(func() { close(firstDeliveryCompleted) })
+	}
+	var candidateMu sync.Mutex
+	candidateCount := 0
+	callback := "test:publication_dispatch_barrier:" + uuid.NewString()
+	if err := fixture.db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != (model.ContentPublicationEvent{}).TableName() || tx.Statement.SQL.String() == "" {
+			return
+		}
+		candidateMu.Lock()
+		if candidateCount >= 2 {
+			candidateMu.Unlock()
+			return
+		}
+		candidateCount++
+		candidate := candidateCount
+		if candidate == 2 {
+			candidatesReadyOnce.Do(func() { close(candidatesReady) })
+		}
+		candidateMu.Unlock()
+		if candidate == 1 {
+			select {
+			case <-candidatesReady:
+			case <-time.After(time.Second):
+				tx.AddError(errors.New("second publication dispatch worker did not load a candidate"))
+			}
+			return
+		}
+		select {
+		case <-firstDeliveryCompleted:
+		case <-time.After(time.Second):
+			tx.AddError(errors.New("first publication dispatch worker did not deliver the candidate"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Query().Remove(callback) })
+	deliveryCallback := "test:publication_dispatch_first_delivery:" + uuid.NewString()
+	if err := fixture.db.Callback().Update().After("gorm:update").Register(deliveryCallback, func(tx *gorm.DB) {
+		if tx.Error != nil || tx.RowsAffected != 1 || tx.Statement.Schema == nil || tx.Statement.Schema.Table != (model.ContentPublicationEvent{}).TableName() {
+			return
+		}
+		updates, _ := tx.Statement.Dest.(map[string]any)
+		if updates["status"] == "delivered" {
+			firstDeliveryOnce.Do(func() { close(firstDeliveryCompleted) })
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Update().Remove(deliveryCallback) })
+	var workers sync.WaitGroup
+	errs := make(chan error, 2)
+	workers.Add(2)
+	for range 2 {
+		go func() {
+			defer workers.Done()
+			errs <- fixture.service.DispatchPendingPublications(10)
+		}()
+	}
+	workersDone := make(chan struct{})
+	go func() {
+		workers.Wait()
+		close(workersDone)
+	}()
+	t.Cleanup(func() {
+		releaseCandidateWaiters()
+		select {
+		case <-workersDone:
+		case <-time.After(time.Second):
+			t.Error("concurrent dispatch workers did not exit during cleanup")
+		}
+	})
+	<-workersDone
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var notifications []model.Notification
+	if err := fixture.db.Where("recipient_id = ? AND type = ?", fixture.viewer.ID, "content_published").Find(&notifications).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 1 {
+		t.Fatalf("expected one publication notification from concurrent workers, got %#v", notifications)
+	}
+	var event model.ContentPublicationEvent
+	if err := fixture.db.Where("content_type = ? AND content_id = ?", "blog", fixture.post.ID).First(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+	if event.Status != "delivered" || event.LeaseVersion != 1 {
+		t.Fatalf("expected concurrent event to be delivered, got %#v", event)
+	}
+}
+
+func TestDispatchPendingPublicationsScansPastContendedCandidates(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	createdAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+	posts := []model.Post{fixture.post}
+	for range 3 {
+		now := time.Now().UTC()
+		post := model.Post{
+			UserID: fixture.owner.ID, ChannelID: &fixture.channel.ID,
+			Title: "Concurrent publication", Content: "body", Status: "published", Visibility: "public", PublishedAt: &now,
+		}
+		if err := fixture.db.Create(&post).Error; err != nil {
+			t.Fatal(err)
+		}
+		posts = append(posts, post)
+	}
+	for index, post := range posts {
+		event := model.ContentPublicationEvent{
+			Base: model.Base{ID: uuid.MustParse([]string{
+				"00000000-0000-0000-0000-000000000004",
+				"00000000-0000-0000-0000-000000000003",
+				"00000000-0000-0000-0000-000000000002",
+				"00000000-0000-0000-0000-000000000001",
+			}[index])},
+			ChannelID: fixture.channel.ID, OwnerID: fixture.owner.ID,
+			ContentType: "blog", ContentID: post.ID, Status: "pending",
+		}
+		if err := fixture.db.Create(&event).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := fixture.db.Model(&event).Update("created_at", createdAt).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	laggingWorkerReadCandidates := make(chan struct{})
+	releaseLaggingWorker := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseLaggingWorker) }) }
+	callback := "test:block_lagging_publication_worker:" + uuid.NewString()
+	var blockOnce sync.Once
+	if err := fixture.db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != (model.ContentPublicationEvent{}).TableName() || tx.Statement.SQL.String() == "" {
+			return
+		}
+		blocked := false
+		blockOnce.Do(func() {
+			blocked = true
+			close(laggingWorkerReadCandidates)
+		})
+		if !blocked {
+			return
+		}
+		select {
+		case <-releaseLaggingWorker:
+		case <-time.After(time.Second):
+			tx.AddError(errors.New("lagging publication worker was not released"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Query().Remove(callback) })
+
+	laggingResult := make(chan error, 1)
+	laggingDone := make(chan struct{})
+	go func() {
+		defer close(laggingDone)
+		laggingResult <- fixture.service.DispatchPendingPublications(2)
+	}()
+	t.Cleanup(func() {
+		release()
+		select {
+		case <-laggingDone:
+		case <-time.After(time.Second):
+			t.Error("lagging publication worker did not exit during cleanup")
+		}
+	})
+	select {
+	case <-laggingWorkerReadCandidates:
+	case <-time.After(time.Second):
+		t.Fatal("lagging publication worker did not load candidates")
+	}
+
+	if err := fixture.service.DispatchPendingPublications(2); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if err := <-laggingResult; err != nil {
+		t.Fatal(err)
+	}
+
+	var delivered int64
+	if err := fixture.db.Model(&model.ContentPublicationEvent{}).Where("status = ?", "delivered").Count(&delivered).Error; err != nil {
+		t.Fatal(err)
+	}
+	if delivered != 4 {
+		t.Fatalf("expected both workers to deliver two events after contention, got %d", delivered)
+	}
+}
+
+func TestDispatchPendingPublicationsDoesNotLetExpiredLeaseOverwriteNewLease(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	event := model.ContentPublicationEvent{
+		ChannelID: fixture.channel.ID, OwnerID: fixture.owner.ID,
+		ContentType: "blog", ContentID: fixture.post.ID, Status: "pending",
+	}
+	if err := fixture.db.Create(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	firstDispatchBlocked := make(chan struct{})
+	releaseFirstDispatch := make(chan struct{})
+	var releaseFirstDispatchOnce sync.Once
+	releaseFirstDispatchFn := func() {
+		releaseFirstDispatchOnce.Do(func() { close(releaseFirstDispatch) })
+	}
+	var once sync.Once
+	callback := "test:block_first_publication_dispatch:" + uuid.NewString()
+	if err := fixture.db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != (model.Subscription{}).TableName() || tx.Statement.SQL.String() == "" {
+			return
+		}
+		blocked := false
+		once.Do(func() {
+			blocked = true
+			close(firstDispatchBlocked)
+		})
+		if !blocked {
+			return
+		}
+		<-releaseFirstDispatch
+		tx.AddError(errors.New("first worker dispatch failed"))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Query().Remove(callback) })
+
+	firstResult := make(chan error, 1)
+	firstDone := make(chan struct{})
+	t.Cleanup(func() {
+		releaseFirstDispatchFn()
+		select {
+		case <-firstDone:
+		case <-time.After(time.Second):
+			t.Error("first worker did not exit during cleanup")
+		}
+	})
+	go func() {
+		defer close(firstDone)
+		firstResult <- fixture.service.DispatchPendingPublications(1)
+	}()
+	select {
+	case <-firstDispatchBlocked:
+	case <-time.After(time.Second):
+		t.Fatal("first worker did not claim the event")
+	}
+	if err := fixture.db.Model(&model.ContentPublicationEvent{}).Where("id = ?", event.ID).Update("updated_at", time.Now().UTC().Add(-publicationProcessingTimeout-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.DispatchPendingPublications(1); err != nil {
+		t.Fatal(err)
+	}
+	releaseFirstDispatchFn()
+	if err := <-firstResult; err != nil {
+		t.Fatal(err)
+	}
+
+	var stored model.ContentPublicationEvent
+	if err := fixture.db.First(&stored, "id = ?", event.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "delivered" {
+		t.Fatalf("stale lease overwrote the recovered worker result: %#v", stored)
+	}
+}
+
+func TestDispatchPendingPublicationsDoesNotNotifyAfterLeaseIsReclaimed(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	source := model.FeedSource{SourceType: "internal_channel", SourceID: &fixture.channel.ID, Hash: uuid.NewString(), Title: fixture.channel.Name}
+	if err := fixture.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.Subscription{UserID: fixture.viewer.ID, FeedSourceID: source.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.service.SaveNotificationPreference(fixture.viewer, NotificationPreferenceInput{
+		SourceType: "internal_channel", SourceID: fixture.channel.ID, Mode: "all",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	event := model.ContentPublicationEvent{
+		ChannelID: fixture.channel.ID, OwnerID: fixture.owner.ID,
+		ContentType: "blog", ContentID: fixture.post.ID, Status: "pending",
+	}
+	if err := fixture.db.Create(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	oldWorkerReady := make(chan struct{})
+	releaseOldWorker := make(chan struct{})
+	var releaseOldWorkerOnce sync.Once
+	releaseOldWorkerFn := func() { releaseOldWorkerOnce.Do(func() { close(releaseOldWorker) }) }
+	var pauseOldWorker sync.Once
+	prefCallback := "test:pause_old_worker_before_notification:" + uuid.NewString()
+	if err := fixture.db.Callback().Query().After("gorm:query").Register(prefCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != (model.ContentNotificationPreference{}).TableName() || tx.Statement.SQL.String() == "" {
+			return
+		}
+		pause := false
+		pauseOldWorker.Do(func() {
+			pause = true
+			close(oldWorkerReady)
+		})
+		if pause {
+			<-releaseOldWorker
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Query().Remove(prefCallback) })
+
+	var notificationCreates atomic.Int32
+	createCallback := "test:count_publication_notification_creates:" + uuid.NewString()
+	if err := fixture.db.Callback().Create().Before("gorm:create").Register(createCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == (model.Notification{}).TableName() {
+			notificationCreates.Add(1)
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Create().Remove(createCallback) })
+
+	oldResult := startDispatchWorker(t, func() error {
+		return fixture.service.DispatchPendingPublications(1)
+	}, releaseOldWorkerFn)
+	select {
+	case <-oldWorkerReady:
+	case <-time.After(time.Second):
+		t.Fatal("old worker did not reach notification dispatch")
+	}
+	if err := fixture.db.Model(&model.ContentPublicationEvent{}).Where("id = ?", event.ID).
+		Update("updated_at", time.Now().UTC().Add(-publicationProcessingTimeout-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.DispatchPendingPublications(1); err != nil {
+		t.Fatal(err)
+	}
+	releaseOldWorkerFn()
+	if err := <-oldResult; err != nil {
+		t.Fatal(err)
+	}
+
+	if got := notificationCreates.Load(); got != 1 {
+		t.Fatalf("stale lease attempted %d notification writes, want 1 from the recovered worker", got)
+	}
+	var notifications int64
+	if err := fixture.db.Model(&model.Notification{}).Where("recipient_id = ? AND type = ?", fixture.viewer.ID, "content_published").Count(&notifications).Error; err != nil {
+		t.Fatal(err)
+	}
+	if notifications != 1 {
+		t.Fatalf("expected one notification from the recovered worker, got %d", notifications)
+	}
+}
+
+func TestDispatchPendingPublicationsRejectsCandidateStaleAfterRetry(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	event := model.ContentPublicationEvent{
+		ChannelID: fixture.channel.ID, OwnerID: fixture.owner.ID,
+		ContentType: "blog", ContentID: fixture.post.ID, Status: "pending",
+	}
+	if err := fixture.db.Create(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	candidateLoaded := make(chan struct{})
+	releaseCandidate := make(chan struct{})
+	var releaseCandidateOnce sync.Once
+	releaseCandidateFn := func() { releaseCandidateOnce.Do(func() { close(releaseCandidate) }) }
+	var once sync.Once
+	callback := "test:block_stale_publication_candidate:" + uuid.NewString()
+	if err := fixture.db.Callback().Query().After("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != (model.ContentPublicationEvent{}).TableName() || tx.Statement.SQL.String() == "" {
+			return
+		}
+		blocked := false
+		once.Do(func() {
+			blocked = true
+			close(candidateLoaded)
+		})
+		if !blocked {
+			return
+		}
+		select {
+		case <-releaseCandidate:
+		case <-time.After(time.Second):
+			tx.AddError(errors.New("stale publication candidate was not released"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Query().Remove(callback) })
+
+	result := startDispatchWorker(t, func() error {
+		return fixture.service.DispatchPendingPublications(1)
+	}, releaseCandidateFn)
+	select {
+	case <-candidateLoaded:
+	case <-time.After(time.Second):
+		t.Fatal("worker did not load publication candidate")
+	}
+	// Another worker claims the event, fails, and returns it to pending before this worker claims it.
+	if err := fixture.db.Model(&model.ContentPublicationEvent{}).Where("id = ?", event.ID).Updates(map[string]any{
+		"status": "processing", "lease_version": gorm.Expr("lease_version + 1"),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Model(&model.ContentPublicationEvent{}).Where("id = ?", event.ID).Update("status", "pending").Error; err != nil {
+		t.Fatal(err)
+	}
+	releaseCandidateFn()
+	if err := <-result; err != nil {
+		t.Fatal(err)
+	}
+
+	var stored model.ContentPublicationEvent
+	if err := fixture.db.First(&stored, "id = ?", event.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "pending" || stored.LeaseVersion != 1 {
+		t.Fatalf("stale candidate must not acquire a newer lease: %#v", stored)
+	}
+}
+
+func TestDispatchPublicationTreatsUniqueNotificationConflictAsSuccess(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	source := model.FeedSource{SourceType: "internal_channel", SourceID: &fixture.channel.ID, Hash: uuid.NewString(), Title: fixture.channel.Name}
+	if err := fixture.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.Subscription{UserID: fixture.viewer.ID, FeedSourceID: source.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.service.SaveNotificationPreference(fixture.viewer, NotificationPreferenceInput{SourceType: "internal_channel", SourceID: fixture.channel.ID, Mode: "all"}); err != nil {
+		t.Fatal(err)
+	}
+
+	createsReady := make(chan struct{})
+	var creates sync.Mutex
+	createCount := 0
+	callback := "test:publication_notification_create_barrier:" + uuid.NewString()
+	if err := fixture.db.Callback().Create().Before("gorm:create").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != (model.Notification{}).TableName() {
+			return
+		}
+		creates.Lock()
+		createCount++
+		if createCount == 2 {
+			close(createsReady)
+		}
+		creates.Unlock()
+		select {
+		case <-createsReady:
+		case <-time.After(time.Second):
+			tx.AddError(errors.New("notification creates did not synchronize"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Create().Remove(callback) })
+
+	event := model.ContentPublicationEvent{ChannelID: fixture.channel.ID, OwnerID: fixture.owner.ID, ContentType: "blog", ContentID: fixture.post.ID}
+	errs := make(chan error, 2)
+	for range 2 {
+		go func() { errs <- fixture.service.dispatchPublication(event) }()
+	}
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("unique notification conflict must be idempotent, got %v", err)
+		}
+	}
+}
+
+func TestDispatchPendingPublicationsReclaimsExpiredProcessingEvent(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	expiredAt := time.Now().UTC().Add(-10 * time.Minute)
+	event := model.ContentPublicationEvent{
+		ChannelID: fixture.channel.ID, OwnerID: fixture.owner.ID,
+		ContentType: "blog", ContentID: fixture.post.ID, Status: "processing",
+	}
+	if err := fixture.db.Create(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Model(&event).Update("updated_at", expiredAt).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.service.DispatchPendingPublications(10); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.db.First(&event, "id = ?", event.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if event.Status != "delivered" {
+		t.Fatalf("expected expired processing event to be delivered, got %#v", event)
+	}
+}
+
+func TestDispatchPendingPublicationsDoesNotClaimFreshProcessingEvent(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	source := model.FeedSource{SourceType: "internal_channel", SourceID: &fixture.channel.ID, Hash: uuid.NewString(), Title: fixture.channel.Name}
+	if err := fixture.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.Subscription{UserID: fixture.viewer.ID, FeedSourceID: source.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.service.SaveNotificationPreference(fixture.viewer, NotificationPreferenceInput{
+		SourceType: "internal_channel", SourceID: fixture.channel.ID, Mode: "all",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	event := model.ContentPublicationEvent{
+		ChannelID: fixture.channel.ID, OwnerID: fixture.owner.ID,
+		ContentType: "blog", ContentID: fixture.post.ID, Status: "processing",
+	}
+	if err := fixture.db.Create(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.service.DispatchPendingPublications(10); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.db.First(&event, "id = ?", event.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if event.Status != "processing" {
+		t.Fatalf("expected fresh processing event to remain processing, got %#v", event)
+	}
+	var notifications int64
+	if err := fixture.db.Model(&model.Notification{}).
+		Where("recipient_id = ? AND type = ?", fixture.viewer.ID, "content_published").Count(&notifications).Error; err != nil {
+		t.Fatal(err)
+	}
+	if notifications != 0 {
+		t.Fatalf("expected fresh processing event not to create notifications, got %d", notifications)
+	}
+}
+
+func TestDispatchPendingPublicationsFailsWhenContentIsMissing(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	event := model.ContentPublicationEvent{
+		ChannelID: fixture.channel.ID, OwnerID: fixture.owner.ID,
+		ContentType: "blog", ContentID: uuid.New(), Status: "pending",
+	}
+	if err := fixture.db.Create(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.service.DispatchPendingPublications(10); err != nil {
+		t.Fatal(err)
+	}
+
+	var stored model.ContentPublicationEvent
+	if err := fixture.db.First(&stored, "id = ?", event.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "failed" {
+		t.Fatalf("expected missing content event to be failed, got %q", stored.Status)
+	}
+	if stored.Attempts != 1 || stored.LastError != "lifecycle.content_not_found: Content not found" {
+		t.Fatalf("unexpected terminal event: %#v", stored)
+	}
+}
+
+func TestDispatchPendingPublicationsReturnsPublicationStateWritebackError(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	event := model.ContentPublicationEvent{
+		ChannelID: fixture.channel.ID, OwnerID: fixture.owner.ID,
+		ContentType: "blog", ContentID: uuid.New(), Status: "pending",
+	}
+	if err := fixture.db.Create(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	want := errors.New("publication state writeback failed")
+	claimUpdates := 0
+	stateWritebacks := 0
+	callback := "test:fail_content_publication_event_writeback"
+	if err := fixture.db.Callback().Update().Before("gorm:update").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == (model.ContentPublicationEvent{}).TableName() {
+			updates, _ := tx.Statement.Dest.(map[string]any)
+			switch updates["status"] {
+			case "processing":
+				claimUpdates++
+			case "failed":
+				stateWritebacks++
+				tx.AddError(want)
+			}
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Update().Remove(callback) })
+
+	err := fixture.service.DispatchPendingPublications(10)
+	if !errors.Is(err, want) {
+		t.Fatalf("expected publication state writeback error, got %v", err)
+	}
+	if claimUpdates != 1 || stateWritebacks != 1 {
+		t.Fatalf("expected one successful claim followed by one failed state writeback, got claims=%d writebacks=%d", claimUpdates, stateWritebacks)
+	}
+}
+
+func TestDispatchPendingPublicationsRetriesRecoverableDispatchError(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	if err := fixture.service.EnqueuePublication("blog", fixture.post.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Migrator().DropTable(&model.Subscription{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.service.DispatchPendingPublications(10); err != nil {
+		t.Fatal(err)
+	}
+
+	var event model.ContentPublicationEvent
+	if err := fixture.db.Where("content_type = ? AND content_id = ?", "blog", fixture.post.ID).First(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+	if event.Status != "pending" || event.Attempts != 1 {
+		t.Fatalf("expected recoverable failure to remain pending after one attempt, got %#v", event)
+	}
+
+	if err := fixture.db.AutoMigrate(&model.Subscription{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.DispatchPendingPublications(10); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.First(&event, "id = ?", event.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if event.Status != "delivered" || event.Attempts != 1 {
+		t.Fatalf("expected retried event to be delivered without another failed attempt, got %#v", event)
 	}
 }
 

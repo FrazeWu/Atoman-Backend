@@ -779,7 +779,7 @@ func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, fol
 			return model.Bookmark{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
 		}
 	} else {
-		allowed, err := canViewPublishedPost(s.db, &user.ID, post)
+		allowed, err := CanViewPublishedPost(s.db, &user.ID, post)
 		if err != nil {
 			return model.Bookmark{}, err
 		}
@@ -869,7 +869,7 @@ func (s *Service) ToggleLike(user authctx.CurrentUser, targetType string, target
 				return apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
 			}
 		} else {
-			allowed, err := canViewPublishedPost(s.db, &user.ID, post)
+			allowed, err := CanViewPublishedPost(s.db, &user.ID, post)
 			if err != nil {
 				return err
 			}

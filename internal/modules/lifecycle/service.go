@@ -19,6 +19,8 @@ type Service struct{ db *gorm.DB }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db} }
 
+const publicationProcessingTimeout = 5 * time.Minute
+
 type EventInput struct {
 	Module        string    `json:"module"`
 	ContentID     uuid.UUID `json:"content_id"`
@@ -431,21 +433,59 @@ func (s *Service) DispatchPendingPublications(limit int) error {
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
-	var events []model.ContentPublicationEvent
-	if err := s.db.Where("status = ?", "pending").Order("created_at ASC").Limit(limit).Find(&events).Error; err != nil {
-		return err
-	}
-	for _, event := range events {
-		if err := s.dispatchPublication(event); err != nil {
-			_ = s.db.Model(&event).Updates(map[string]any{"attempts": event.Attempts + 1, "last_error": err.Error()}).Error
-			continue
+	now := time.Now().UTC()
+	processingExpiredAt := now.Add(-publicationProcessingTimeout)
+	claimed := 0
+	var cursor *model.ContentPublicationEvent
+	for claimed < limit {
+		query := s.db.Where("status = ? OR (status = ? AND updated_at < ?)", "pending", "processing", processingExpiredAt)
+		if cursor != nil {
+			query = query.Where("created_at > ? OR (created_at = ? AND id > ?)", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
 		}
-		now := time.Now().UTC()
-		if err := s.db.Model(&event).Updates(map[string]any{"status": "delivered", "dispatched_at": &now, "last_error": ""}).Error; err != nil {
+		var events []model.ContentPublicationEvent
+		if err := query.Order("created_at ASC, id ASC").Limit(limit - claimed).Find(&events).Error; err != nil {
 			return err
+		}
+		if len(events) == 0 {
+			return nil
+		}
+		for _, event := range events {
+			cursor = &event
+			claim := s.db.Model(&model.ContentPublicationEvent{}).Where(
+				"id = ? AND lease_version = ? AND (status = ? OR (status = ? AND updated_at < ?))",
+				event.ID, event.LeaseVersion, "pending", "processing", processingExpiredAt,
+			).Updates(map[string]any{"status": "processing", "lease_version": gorm.Expr("lease_version + 1")})
+			if claim.Error != nil {
+				return claim.Error
+			}
+			if claim.RowsAffected != 1 {
+				continue
+			}
+			claimed++
+			event.LeaseVersion++
+			if err := s.dispatchPublication(event); err != nil {
+				updates := map[string]any{"status": "pending", "attempts": event.Attempts + 1, "last_error": err.Error()}
+				var appErr *apperr.AppError
+				if errors.As(err, &appErr) && appErr.Code == "lifecycle.content_not_found" {
+					updates["status"] = "failed"
+				}
+				if err := s.updatePublicationState(event, updates); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := s.updatePublicationState(event, map[string]any{"status": "delivered", "dispatched_at": &now, "last_error": ""}); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
+}
+
+func (s *Service) updatePublicationState(event model.ContentPublicationEvent, updates map[string]any) error {
+	return s.db.Model(&model.ContentPublicationEvent{}).
+		Where("id = ? AND status = ? AND lease_version = ?", event.ID, "processing", event.LeaseVersion).
+		Updates(updates).Error
 }
 
 func (s *Service) dispatchPublication(event model.ContentPublicationEvent) error {
@@ -474,23 +514,35 @@ func (s *Service) dispatchPublication(event model.ContentPublicationEvent) error
 		if enabled == 0 {
 			continue
 		}
-		var exists int64
-		if err := s.db.Model(&model.Notification{}).Where("recipient_id = ? AND source_type = ? AND source_id = ?", recipientID, "content_publication", event.ContentID).Count(&exists).Error; err != nil {
-			return err
-		}
-		if exists > 0 {
-			continue
-		}
 		actorID := event.OwnerID
 		notification := model.Notification{
 			RecipientID: recipientID, ActorID: &actorID, Type: "content_published", SourceType: "content_publication", SourceID: event.ContentID,
 			Meta: model.NotificationMeta{"module": event.ContentType, "title": content.Title, "path": content.Path, "channel_id": event.ChannelID.String()},
 		}
-		if err := s.db.Create(&notification).Error; err != nil {
+		if err := s.createPublicationNotification(event, notification); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (s *Service) createPublicationNotification(event model.ContentPublicationEvent, notification model.Notification) error {
+	if event.ID == uuid.Nil {
+		return s.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&notification).Error
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var lease model.ContentPublicationEvent
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where(
+			"id = ? AND status = ? AND lease_version = ?", event.ID, "processing", event.LeaseVersion,
+		).First(&lease).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&notification).Error
+	})
 }
 
 func (s *Service) publicationRecipients(ownerID, channelID uuid.UUID) ([]uuid.UUID, error) {

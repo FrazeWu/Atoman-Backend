@@ -99,12 +99,145 @@ func TestHotContentReturnsEmptyResponseWhenNoContentExists(t *testing.T) {
 	}
 }
 
+func TestHotContentExcludesForumTopicsFromRestrictedCategories(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.ForumCategory{},
+		&model.ForumTopic{},
+		&model.ForumGroup{},
+		&model.ForumCategoryPermission{},
+	)
+	if err := db.Exec("ALTER TABLE forum_topics ADD COLUMN reply_count integer NOT NULL DEFAULT 0").Error; err != nil {
+		t.Fatalf("add forum topic reply count: %v", err)
+	}
+
+	publicCategory := model.ForumCategory{Name: "Public"}
+	restrictedCategory := model.ForumCategory{Name: "Restricted"}
+	group := model.ForumGroup{Name: "Private readers"}
+	for _, record := range []any{&publicCategory, &restrictedCategory, &group} {
+		if err := db.Create(record).Error; err != nil {
+			t.Fatalf("create forum fixture: %v", err)
+		}
+	}
+	if err := db.Create(&model.ForumCategoryPermission{
+		CategoryID: restrictedCategory.ID,
+		GroupID:    group.ID,
+		CanView:    true,
+	}).Error; err != nil {
+		t.Fatalf("create restricted category permission: %v", err)
+	}
+
+	publicTopic := model.ForumTopic{
+		CategoryID: publicCategory.ID,
+		Title:      "Public topic",
+		Content:    "visible to everyone",
+	}
+	restrictedTopic := model.ForumTopic{
+		CategoryID: restrictedCategory.ID,
+		Title:      "Restricted topic",
+		Content:    "members only",
+		ViewCount:  100,
+	}
+	for _, topic := range []*model.ForumTopic{&publicTopic, &restrictedTopic} {
+		if err := db.Create(topic).Error; err != nil {
+			t.Fatalf("create forum topic: %v", err)
+		}
+	}
+
+	response, err := NewService(db).HotContent(4)
+	if err != nil {
+		t.Fatalf("HotContent returned error: %v", err)
+	}
+	var forumItems []HotItem
+	for _, section := range response.Sections {
+		if section.Module == "forum" {
+			forumItems = section.Items
+			break
+		}
+	}
+	if len(forumItems) != 1 || forumItems[0].ID != publicTopic.ID.String() {
+		t.Fatalf("expected only public forum topic, got %#v", forumItems)
+	}
+}
+
+func TestHotContentExcludesItemsFromUnavailableFeedSources(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{})
+
+	visibleSource := model.FeedSource{Title: "Visible feed", Hash: "portal-visible-feed"}
+	hiddenSource := model.FeedSource{Title: "Hidden feed", Hash: "portal-hidden-feed", Hidden: true}
+	deletedSource := model.FeedSource{Title: "Deleted feed", Hash: "portal-deleted-feed"}
+	for _, source := range []*model.FeedSource{&visibleSource, &hiddenSource, &deletedSource} {
+		if err := db.Create(source).Error; err != nil {
+			t.Fatalf("create feed source: %v", err)
+		}
+	}
+	if err := db.Delete(&deletedSource).Error; err != nil {
+		t.Fatalf("delete feed source: %v", err)
+	}
+
+	now := time.Now().UTC()
+	items := []model.FeedItem{
+		{FeedSourceID: visibleSource.ID, GUID: "portal-visible-item", Title: "Visible item", PublishedAt: now, FetchedAt: now},
+		{FeedSourceID: hiddenSource.ID, GUID: "portal-hidden-item", Title: "Hidden item", PublishedAt: now.Add(time.Minute), FetchedAt: now},
+		{FeedSourceID: deletedSource.ID, GUID: "portal-deleted-item", Title: "Deleted item", PublishedAt: now.Add(2 * time.Minute), FetchedAt: now},
+	}
+	if err := db.Create(&items).Error; err != nil {
+		t.Fatalf("create feed items: %v", err)
+	}
+
+	response, err := NewService(db).HotContent(4)
+	if err != nil {
+		t.Fatalf("HotContent returned error: %v", err)
+	}
+	var feedItems []HotItem
+	for _, section := range response.Sections {
+		if section.Module == "feed" {
+			feedItems = section.Items
+			break
+		}
+	}
+	if len(feedItems) != 1 || feedItems[0].ID != items[0].ID.String() {
+		t.Fatalf("expected only visible feed item, got %#v", feedItems)
+	}
+}
+
+func TestHotContentExcludesNonPublicMusicAlbums(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Artist{}, &model.Album{}, &model.AlbumArtist{})
+
+	albums := []model.Album{
+		{Title: "Public album", Status: "open", HotScore: 1},
+		{Title: "Draft album", Status: "draft", HotScore: 100},
+		{Title: "Rejected album", Status: "rejected", HotScore: 200},
+	}
+	if err := db.Create(&albums).Error; err != nil {
+		t.Fatalf("create albums: %v", err)
+	}
+
+	response, err := NewService(db).HotContent(4)
+	if err != nil {
+		t.Fatalf("HotContent returned error: %v", err)
+	}
+	var musicItems []HotItem
+	for _, section := range response.Sections {
+		if section.Module == "music" {
+			musicItems = section.Items
+			break
+		}
+	}
+	if len(musicItems) != 1 || musicItems[0].ID != albums[0].ID.String() {
+		t.Fatalf("expected only public album, got %#v", musicItems)
+	}
+}
+
 func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Post{},
 		&model.Video{},
+		&model.FeedSource{},
 		&model.FeedItem{},
 		&model.PodcastEpisode{},
 		&model.Artist{},
@@ -138,10 +271,11 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 		Visibility:  "public",
 		ViewCount:   42,
 	}
-	feedItem := model.FeedItem{
-		Title:   "Portal feed item",
-		Summary: "summary",
+	feedSource := model.FeedSource{Title: "Portal feed", Hash: "portal-path-feed"}
+	if err := db.Create(&feedSource).Error; err != nil {
+		t.Fatalf("create feed source: %v", err)
 	}
+	feedItem := model.FeedItem{FeedSourceID: feedSource.ID, Title: "Portal feed item", Summary: "summary"}
 	album := model.Album{
 		Title:    "Portal album",
 		Status:   "open",

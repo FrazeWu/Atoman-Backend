@@ -77,6 +77,14 @@ func TestRegistrySearchHonorsVisibilityAndLimit(t *testing.T) {
 	require.Equal(t, private.ID, ownerItems[0].ID)
 }
 
+func TestRegistrySearchesVisibleFeedArticlesWithQualifiedColumns(t *testing.T) {
+	db, ids := seedReferenceRegistry(t)
+	items, err := NewRegistry(db).Search(Viewer{}, "article", "Feed", 10)
+	require.NoError(t, err)
+	require.Len(t, items, 1)
+	require.Equal(t, ids["article"], items[0].ID)
+}
+
 func TestRegistryThreadResolutionHonorsForumCategoryVisibility(t *testing.T) {
 	db, _ := seedReferenceRegistry(t)
 	registry := NewRegistry(db)
@@ -136,6 +144,38 @@ func TestRegistryCommentResolutionHonorsDiscussionTargetVisibility(t *testing.T)
 	memberSearch, err := registry.Search(Viewer{UserID: member.UUID}, "comment", "Hidden comment", 10)
 	require.NoError(t, err)
 	require.Len(t, memberSearch, 1)
+}
+
+func TestRegistryHidesNonPublicPodcastReferencesFromGuests(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Post{}, &model.PodcastEpisode{})
+
+	owner := model.User{Username: "podcast-owner", Email: "podcast-owner@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, db.Create(&owner).Error)
+	channel := model.Channel{UserID: &owner.UUID, Name: "Private Podcast", Slug: "private-podcast"}
+	require.NoError(t, db.Create(&channel).Error)
+	post := model.Post{
+		UserID: owner.UUID, ChannelID: &channel.ID, Title: "Private Episode", Content: "notes",
+		Status: "published", Visibility: "private",
+	}
+	require.NoError(t, db.Create(&post).Error)
+	episode := model.PodcastEpisode{PostID: post.ID, ChannelID: channel.ID, AudioURL: "private.mp3"}
+	require.NoError(t, db.Create(&episode).Error)
+
+	registry := NewRegistry(db)
+	for targetType, id := range map[string]uuid.UUID{"podcast": channel.ID, "episode": episode.ID} {
+		_, err := registry.Resolve(Viewer{}, targetType, id)
+		require.ErrorIs(t, err, ErrTargetUnavailable)
+		guestItems, err := registry.Search(Viewer{}, targetType, "Private", 10)
+		require.NoError(t, err)
+		require.Empty(t, guestItems)
+
+		_, err = registry.Resolve(Viewer{UserID: owner.UUID}, targetType, id)
+		require.NoError(t, err)
+		ownerItems, err := registry.Search(Viewer{UserID: owner.UUID}, targetType, "Private", 10)
+		require.NoError(t, err)
+		require.Len(t, ownerItems, 1)
+	}
 }
 
 func seedReferenceRegistry(t *testing.T) (*gorm.DB, map[string]uuid.UUID) {

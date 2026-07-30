@@ -134,7 +134,7 @@ func (s *Service) hotVideos(limit int) ([]HotItem, error) {
 func (s *Service) hotMusicAlbums(limit int) ([]HotItem, error) {
 	var albums []model.Album
 	err := s.db.Preload("Artists").
-		Where("status <> ?", "closed").
+		Where("status NOT IN ?", []string{"closed", "rejected", "draft"}).
 		Order("hot_score DESC").
 		Order("updated_at DESC").
 		Limit(limit).
@@ -164,6 +164,10 @@ func (s *Service) hotMusicAlbums(limit int) ([]HotItem, error) {
 func (s *Service) hotForumTopics(limit int) ([]HotItem, error) {
 	var topics []model.ForumTopic
 	err := s.db.Where("closed = ?", false).
+		Where(`NOT EXISTS (
+			SELECT 1 FROM forum_category_permissions fcp
+			WHERE fcp.category_id = forum_topics.category_id AND fcp.deleted_at IS NULL
+		)`).
 		Order("(like_count * 3 + reply_count * 2 + view_count) DESC").
 		Order("updated_at DESC").
 		Limit(limit).
@@ -263,7 +267,8 @@ func (s *Service) hotPodcastEpisodes(limit int) ([]HotItem, error) {
 
 func (s *Service) hotFeedItems(limit int) ([]HotItem, error) {
 	var items []model.FeedItem
-	err := s.db.Order("published_at DESC").
+	err := s.db.Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id AND feed_sources.deleted_at IS NULL AND feed_sources.hidden = ?", false).
+		Order("feed_items.published_at DESC").
 		Limit(limit).
 		Find(&items).Error
 	if err != nil {

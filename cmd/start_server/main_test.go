@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +16,42 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/testdb"
 )
+
+func TestWaitForWorkersWaitsForEveryWorker(t *testing.T) {
+	firstDone := make(chan struct{})
+	secondDone := make(chan struct{})
+	result := make(chan error, 1)
+
+	go func() {
+		result <- waitForWorkers(time.Second, firstDone, secondDone)
+	}()
+
+	close(firstDone)
+	select {
+	case err := <-result:
+		t.Fatalf("waitForWorkers() returned before every worker stopped: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(secondDone)
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("waitForWorkers() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waitForWorkers() did not return after every worker stopped")
+	}
+}
+
+func TestWaitForWorkersTimesOutWhenWorkerDoesNotStop(t *testing.T) {
+	blocked := make(chan struct{})
+
+	err := waitForWorkers(20*time.Millisecond, blocked)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waitForWorkers() error = %v, want context deadline exceeded", err)
+	}
+}
 
 type legacyStartupEmailVerificationCode struct {
 	UUID      uuid.UUID `gorm:"type:uuid;primaryKey"`

@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"log"
 	"os"
 	"time"
@@ -8,9 +9,11 @@ import (
 	"gorm.io/gorm"
 )
 
-func StartWorker(db *gorm.DB) {
+func StartWorker(ctx context.Context, db *gorm.DB) <-chan struct{} {
 	if os.Getenv("CONTENT_LIFECYCLE_WORKER_ENABLED") == "false" {
-		return
+		done := make(chan struct{})
+		close(done)
+		return done
 	}
 	service := NewService(db)
 	run := func() {
@@ -22,12 +25,24 @@ func StartWorker(db *gorm.DB) {
 			log.Printf("content lifecycle publication dispatch failed: %v", err)
 		}
 	}
+	return startPeriodicLifecycleWorker(ctx, 30*time.Second, run)
+}
+
+func startPeriodicLifecycleWorker(ctx context.Context, interval time.Duration, run func()) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		run()
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for range ticker.C {
-			run()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run()
+			}
 		}
 	}()
+	return done
 }

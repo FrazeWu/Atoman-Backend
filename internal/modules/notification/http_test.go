@@ -190,3 +190,55 @@ func TestMarkAllReadReturnsRemainingUnreadTotal(t *testing.T) {
 		t.Fatalf("expected one remaining unread notification, got %d", response.Data.UnreadTotal)
 	}
 }
+
+func TestNotificationCategoryEndpointsFilterAndMarkCategory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Notification{})
+	user := model.User{Username: "notify-category-user", Email: "notify-category@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&[]model.Notification{
+		{RecipientID: user.UUID, Type: "comment_reply", SourceType: "test", SourceID: user.UUID},
+		{RecipientID: user.UUID, Type: "comment_like", SourceType: "test", SourceID: user.UUID},
+		{RecipientID: user.UUID, Type: "future.notification", SourceType: "test", SourceID: user.UUID},
+	}).Error; err != nil {
+		t.Fatalf("create notifications: %v", err)
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: user.Role})
+		c.Next()
+	})
+	RegisterRoutes(r.Group("/api/v1"), NewService(db))
+
+	list := httptest.NewRecorder()
+	r.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/notifications?category=reply", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", list.Code, list.Body.String())
+	}
+	var listed struct {
+		Data []NotificationDTO `json:"data"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(listed.Data) != 1 || listed.Data[0].Type != "comment_reply" {
+		t.Fatalf("expected only reply notification, got %#v", listed.Data)
+	}
+
+	mark := httptest.NewRecorder()
+	r.ServeHTTP(mark, httptest.NewRequest(http.MethodPut, "/api/v1/notifications/read-all?category=system", nil))
+	if mark.Code != http.StatusOK {
+		t.Fatalf("expected mark 200, got %d: %s", mark.Code, mark.Body.String())
+	}
+	var unread int64
+	if err := db.Model(&model.Notification{}).Where("recipient_id = ? AND read_at IS NULL", user.UUID).Count(&unread).Error; err != nil {
+		t.Fatalf("count unread: %v", err)
+	}
+	if unread != 2 {
+		t.Fatalf("expected two known-category notifications to remain unread, got %d", unread)
+	}
+}

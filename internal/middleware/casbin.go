@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"log"
-	"net/http"
 	"strings"
+
+	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/httpx"
 
 	"github.com/casbin/casbin/v3"
 	"github.com/casbin/casbin/v3/model"
@@ -154,16 +156,19 @@ func CasbinMiddleware() gin.HandlerFunc {
 		allowed, err := Enforcer.Enforce(role, path, method)
 		if err != nil {
 			log.Printf("Casbin error: %v", err)
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "Error checking permissions"})
+			httpx.Error(c, apperr.Internal(err))
+			c.Abort()
 			return
 		}
 
 		if !allowed {
 			if role == "anonymous" && method != "GET" && !strings.HasPrefix(path, "/api/v1/auth") {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "Login required to perform this action"})
+				httpx.Error(c, apperr.Unauthorized("Login required to perform this action"))
+				c.Abort()
 				return
 			}
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "You do not have permission to access this resource"})
+			httpx.Error(c, apperr.Forbidden("auth.forbidden", "You do not have permission to access this resource"))
+			c.Abort()
 			return
 		}
 

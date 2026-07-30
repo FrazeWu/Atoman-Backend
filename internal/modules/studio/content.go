@@ -326,7 +326,7 @@ func (s *Service) enrichContentMetrics(module Module, items []StudioContentItem)
 			return err
 		}
 	case ModulePodcast:
-		if err := s.db.Model(&model.PodcastEpisodeBookmark{}).Select("episode_id AS content_id, 'bookmark' AS metric, COUNT(*) AS count").Where("episode_id IN ?", ids).Group("episode_id").Scan(&rows).Error; err != nil {
+		if err := s.db.Model(&model.PodcastEpisodeBookmark{}).Select("episode_id AS content_id, 'bookmark' AS metric, COUNT(*) AS count").Where("episode_id IN ? AND kind = ?", ids, "favorite").Group("episode_id").Scan(&rows).Error; err != nil {
 			return err
 		}
 	case ModuleVideo:

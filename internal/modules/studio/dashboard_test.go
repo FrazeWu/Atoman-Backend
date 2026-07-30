@@ -198,6 +198,28 @@ func TestDashboardReportsUnrepliedPodcastComments(t *testing.T) {
 	t.Fatalf("expected unreplied podcast issue, got %#v", dashboard.Sections[1].Issues)
 }
 
+func TestDashboardPodcastBookmarkCountsFavoritesOnly(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	seedStudioDashboardContent(t, fixture)
+	var episode model.PodcastEpisode
+	if err := fixture.db.First(&episode).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"favorite", "listen_later"} {
+		if err := fixture.db.Create(&model.PodcastEpisodeBookmark{UserID: fixture.foreignUser.UUID, EpisodeID: episode.ID, Kind: kind}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dashboard, err := fixture.service.GetDashboard(fixture.user, fixture.channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := dashboard.Sections[1].Metrics["bookmark"]; got != 1 {
+		t.Fatalf("expected favorite bookmark count 1, got %d", got)
+	}
+}
+
 func TestDashboardDoesNotReportBlogWithManyToManyCollectionAsMissing(t *testing.T) {
 	fixture := newStudioQueryFixture(t)
 	post := model.Post{

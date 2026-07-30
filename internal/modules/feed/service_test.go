@@ -2426,3 +2426,59 @@ func TestGetExploreFeedAllowsAnonymousPublicRead(t *testing.T) {
 		}
 	}
 }
+
+func TestAnonymousFeedExposesOnlyPublicPosts(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	const search = "anonymous visibility boundary"
+
+	posts := []model.Post{
+		{UserID: user.ID, Title: search + " public", Content: "body", Status: "published", Visibility: "public"},
+		{UserID: user.ID, Title: search + " followers", Content: "body", Status: "published", Visibility: "followers"},
+		{UserID: user.ID, Title: search + " private", Content: "body", Status: "published", Visibility: "private"},
+		{UserID: user.ID, Title: search + " legacy", Content: "body", Status: "published"},
+	}
+	for i := range posts {
+		if err := db.Create(&posts[i]).Error; err != nil {
+			t.Fatalf("create %q: %v", posts[i].Title, err)
+		}
+	}
+
+	queries := []struct {
+		name string
+		load func() ([]TimelineItemDTO, int64, error)
+	}{
+		{
+			name: "explore",
+			load: func() ([]TimelineItemDTO, int64, error) {
+				return service.GetExploreFeed(authctx.CurrentUser{}, FeedQuery{Page: 1, PageSize: 100, Sort: "recent", Search: search})
+			},
+		},
+		{
+			name: "timeline",
+			load: func() ([]TimelineItemDTO, int64, error) {
+				return service.GetSubscribedFeed(authctx.CurrentUser{}, FeedQuery{Page: 1, PageSize: 100, Search: search})
+			},
+		},
+	}
+
+	for _, query := range queries {
+		t.Run(query.name, func(t *testing.T) {
+			items, _, err := query.load()
+			if err != nil {
+				t.Fatalf("load anonymous %s feed: %v", query.name, err)
+			}
+			found := make(map[uuid.UUID]bool)
+			for _, item := range items {
+				if item.Post != nil {
+					found[item.Post.ID] = true
+				}
+			}
+			if !found[posts[0].ID] || !found[posts[3].ID] {
+				t.Fatalf("anonymous %s feed must include public and legacy posts, got %#v", query.name, items)
+			}
+			if found[posts[1].ID] || found[posts[2].ID] {
+				t.Fatalf("anonymous %s feed leaked restricted posts: %#v", query.name, items)
+			}
+		})
+	}
+}

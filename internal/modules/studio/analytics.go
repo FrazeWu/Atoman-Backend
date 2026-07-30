@@ -285,7 +285,7 @@ func (s *Service) addExistingReactions(
 		}
 	case ModulePodcast:
 		var bookmarks []model.PodcastEpisodeBookmark
-		if err := s.db.Select("episode_id", "created_at").Where("episode_id IN ? AND created_at >= ? AND created_at < ?", contentIDs, from, to).Find(&bookmarks).Error; err != nil {
+		if err := s.db.Select("episode_id", "created_at").Where("episode_id IN ? AND kind = ? AND created_at >= ? AND created_at < ?", contentIDs, "favorite", from, to).Find(&bookmarks).Error; err != nil {
 			return err
 		}
 		for _, bookmark := range bookmarks {

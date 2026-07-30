@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"net/http"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -9,7 +8,9 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/httpx"
 )
 
 // AdminMiddleware ensures the current user has admin role
@@ -25,14 +26,14 @@ func AdminMiddleware(db *gorm.DB) gin.HandlerFunc {
 
 		userIDVal, ok := c.Get("user_id")
 		if !ok {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			httpx.Error(c, apperr.Unauthorized("Unauthorized"))
 			c.Abort()
 			return
 		}
 
 		userID, err := normalizeUserID(userIDVal)
 		if err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			httpx.Error(c, apperr.Unauthorized("Unauthorized"))
 			c.Abort()
 			return
 		}
@@ -40,16 +41,16 @@ func AdminMiddleware(db *gorm.DB) gin.HandlerFunc {
 		var user model.User
 		if err := findUserByContextID(db, userIDVal, userID, &user); err != nil {
 			if err == gorm.ErrRecordNotFound {
-				c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+				httpx.Error(c, apperr.Unauthorized("Unauthorized"))
 			} else {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to verify admin"})
+				httpx.Error(c, apperr.Internal(err))
 			}
 			c.Abort()
 			return
 		}
 
 		if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Admin access required"})
+			httpx.Error(c, apperr.Forbidden("auth.admin_required", "Admin access required"))
 			c.Abort()
 			return
 		}

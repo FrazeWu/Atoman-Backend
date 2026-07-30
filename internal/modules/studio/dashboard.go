@@ -160,7 +160,7 @@ func (s *Service) dashboardEngagementMetrics(userID, channelID uuid.UUID, module
 		metrics["bookmark"] = count
 	case ModulePodcast:
 		count = 0
-		if err := s.db.Model(&model.PodcastEpisodeBookmark{}).Where("episode_id IN ?", contentIDs).Count(&count).Error; err != nil {
+		if err := s.db.Model(&model.PodcastEpisodeBookmark{}).Where("episode_id IN ? AND kind = ?", contentIDs, "favorite").Count(&count).Error; err != nil {
 			return nil, err
 		}
 		metrics["bookmark"] = count

@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -11,6 +13,10 @@ const (
 	DefaultGinMode     = "debug"
 	DefaultPort        = "8080"
 	DefaultStorageType = "local"
+	DefaultDBMaxOpen   = 20
+	DefaultDBMaxIdle   = 10
+	DefaultDBLifetime  = 30 * time.Minute
+	DefaultDBIdleTime  = 5 * time.Minute
 )
 
 var defaultAllowedOrigins = []string{
@@ -30,16 +36,24 @@ type Config struct {
 }
 
 type DBConfig struct {
-	Type string
-	URL  string
+	Type            string
+	URL             string
+	MaxOpenConns    int
+	MaxIdleConns    int
+	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
 }
 
 func Load() (Config, error) {
+	dbConfig, err := loadDBConfig()
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		Env:            getEnv("ENV", DefaultEnv),
 		GinMode:        getEnv("GIN_MODE", DefaultGinMode),
 		Port:           getEnv("PORT", DefaultPort),
-		DB:             DBConfig{Type: os.Getenv("DATABASE_TYPE"), URL: os.Getenv("DATABASE_URL")},
+		DB:             dbConfig,
 		StorageType:    getEnv("STORAGE_TYPE", DefaultStorageType),
 		AllowedOrigins: append([]string(nil), defaultAllowedOrigins...),
 	}
@@ -59,6 +73,57 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func loadDBConfig() (DBConfig, error) {
+	maxOpen, err := positiveIntEnv("DATABASE_MAX_OPEN_CONNS", DefaultDBMaxOpen)
+	if err != nil {
+		return DBConfig{}, err
+	}
+	maxIdle, err := positiveIntEnv("DATABASE_MAX_IDLE_CONNS", DefaultDBMaxIdle)
+	if err != nil {
+		return DBConfig{}, err
+	}
+	maxLifetime, err := positiveDurationEnv("DATABASE_CONN_MAX_LIFETIME", DefaultDBLifetime)
+	if err != nil {
+		return DBConfig{}, err
+	}
+	maxIdleTime, err := positiveDurationEnv("DATABASE_CONN_MAX_IDLE_TIME", DefaultDBIdleTime)
+	if err != nil {
+		return DBConfig{}, err
+	}
+	return DBConfig{
+		Type:            os.Getenv("DATABASE_TYPE"),
+		URL:             os.Getenv("DATABASE_URL"),
+		MaxOpenConns:    maxOpen,
+		MaxIdleConns:    maxIdle,
+		ConnMaxLifetime: maxLifetime,
+		ConnMaxIdleTime: maxIdleTime,
+	}, nil
+}
+
+func positiveIntEnv(key string, fallback int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", key)
+	}
+	return value, nil
+}
+
+func positiveDurationEnv(key string, fallback time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration", key)
+	}
+	return value, nil
 }
 
 func DefaultAllowedOrigins() []string {

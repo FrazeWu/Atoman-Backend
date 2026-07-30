@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -71,23 +72,18 @@ func loadFullTextWorkerConfig() fullTextWorkerConfig {
 	}
 }
 
-func StartFullTextWorker(db *gorm.DB) {
+func StartFullTextWorker(ctx context.Context, db *gorm.DB) <-chan struct{} {
 	cfg := loadFullTextWorkerConfig()
 	if !cfg.Enabled {
 		log.Println("fulltext worker disabled by FULLTEXT_WORKER_ENABLED=false")
-		return
+		done := make(chan struct{})
+		close(done)
+		return done
 	}
 
-	go func() {
-		time.Sleep(cfg.StartupDelay)
+	return startPeriodicWorker(ctx, cfg.StartupDelay, cfg.Interval, func() {
 		runFullTextCycle(db, time.Now(), cfg.BatchSize)
-
-		ticker := time.NewTicker(cfg.Interval)
-		defer ticker.Stop()
-		for range ticker.C {
-			runFullTextCycle(db, time.Now(), cfg.BatchSize)
-		}
-	}()
+	})
 }
 
 func runFullTextCycle(db *gorm.DB, now time.Time, batchSize int) {

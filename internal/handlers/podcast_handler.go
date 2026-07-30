@@ -19,6 +19,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	blog "atoman/internal/modules/blog"
 	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/recommendation"
 	studioapi "atoman/internal/modules/studio"
@@ -31,10 +32,10 @@ import (
 func SetupPodcastRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	p := router.Group("/api/v1/podcast")
 	{
-		p.GET("/episodes", GetPodcastEpisodes(db))
+		p.GET("/episodes", middleware.OptionalAuthMiddleware(), GetPodcastEpisodes(db))
 		p.GET("/recommend/episodes", GetRecommendedPodcastEpisodes(db))
-		p.GET("/shows/:channelSlug/episodes", GetShowEpisodes(db))
-		p.GET("/episodes/:id", GetPodcastEpisode(db))
+		p.GET("/shows/:channelSlug/episodes", middleware.OptionalAuthMiddleware(), GetShowEpisodes(db))
+		p.GET("/episodes/:id", middleware.OptionalAuthMiddleware(), GetPodcastEpisode(db))
 		p.POST("/episodes/:id/playback", RecordPodcastPlayback(db))
 		p.GET("/bookmarks", middleware.AuthMiddleware(), GetPodcastEpisodeBookmarks(db))
 		p.POST("/bookmarks", middleware.AuthMiddleware(), CreatePodcastEpisodeBookmark(db))
@@ -297,6 +298,7 @@ func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 		var episodes []model.PodcastEpisode
 		q := db.Preload("Post.Collection").Preload("Channel").
 			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL")
+		q = blog.ApplyPublishedPostListVisibility(q, currentPodcastViewerID(c))
 		if channelID != "" {
 			q = q.Where("podcast_episodes.channel_id = ?", channelID)
 		}
@@ -332,11 +334,17 @@ func GetShowEpisodes(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		var episodes []model.PodcastEpisode
-		db.Where("podcast_episodes.channel_id = ?", channel.ID).
+		q := db.Where("podcast_episodes.channel_id = ?", channel.ID).
 			Preload("Post.Collection").Preload("Channel").
-			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
+			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL")
+		q = blog.ApplyPublishedPostListVisibility(q, currentPodcastViewerID(c))
+		err := q.
 			Order("podcast_episodes.season_number ASC, podcast_episodes.episode_number ASC").
-			Find(&episodes)
+			Find(&episodes).Error
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load show episodes"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"channel": channel, "episodes": episodes})
 	}
 }
@@ -365,6 +373,13 @@ func GetPodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
 			return
+		}
+		if ep.Post.Status == "published" {
+			allowed, err := blog.CanViewPublishedPost(db, currentPodcastViewerID(c), *ep.Post)
+			if err != nil || !allowed {
+				c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
+				return
+			}
 		}
 		c.JSON(http.StatusOK, ep)
 	}
@@ -715,11 +730,17 @@ func GetPodcastRSS(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var episodes []model.PodcastEpisode
-		db.Where("podcast_episodes.channel_id = ?", channel.ID).
+		q := db.Where("podcast_episodes.channel_id = ?", channel.ID).
 			Preload("Post.Collection").
-			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
+			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL")
+		q = blog.ApplyPublishedPostListVisibility(q, nil)
+		err := q.
 			Order("podcast_episodes.season_number ASC, podcast_episodes.episode_number ASC").
-			Limit(100).Find(&episodes)
+			Limit(100).Find(&episodes).Error
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load podcast episodes"})
+			return
+		}
 
 		scheme := c.Request.Header.Get("X-Forwarded-Proto")
 		if scheme == "" {
@@ -730,6 +751,14 @@ func GetPodcastRSS(db *gorm.DB) gin.HandlerFunc {
 		c.Header("Content-Type", "application/rss+xml; charset=utf-8")
 		c.String(http.StatusOK, buildPodcastRSS(channel, episodes, siteURL))
 	}
+}
+
+func currentPodcastViewerID(c *gin.Context) *uuid.UUID {
+	viewer, ok := authctx.Current(c)
+	if !ok || viewer.ID == uuid.Nil {
+		return nil
+	}
+	return &viewer.ID
 }
 
 func buildPodcastRSS(ch model.Channel, episodes []model.PodcastEpisode, siteURL string) string {
@@ -990,6 +1019,15 @@ func UploadPodcastCover(s3Client *s3.S3) gin.HandlerFunc {
 
 type podcastEpisodeBookmarkInput struct {
 	EpisodeID uuid.UUID `json:"episode_id" binding:"required"`
+	Kind      string    `json:"kind"`
+}
+
+func normalizePodcastEpisodeBookmarkKind(kind string) (string, bool) {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return "favorite", true
+	}
+	return kind, kind == "favorite" || kind == "listen_later"
 }
 
 type podcastShowBookmarkInput struct {
@@ -1001,8 +1039,16 @@ func GetPodcastEpisodeBookmarks(db *gorm.DB) gin.HandlerFunc {
 		userIDVal, _ := c.Get("user_id")
 		userID := userIDVal.(uuid.UUID)
 		sort := strings.TrimSpace(c.DefaultQuery("sort", "latest"))
+		kind, valid := normalizePodcastEpisodeBookmarkKind(c.Query("kind"))
+		if c.Query("kind") != "" && !valid {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid podcast bookmark kind"})
+			return
+		}
 		var bookmarks []model.PodcastEpisodeBookmark
 		query := db.Preload("Episode").Preload("Episode.Post").Preload("Episode.Channel").Where("podcast_episode_bookmarks.user_id = ?", userID)
+		if c.Query("kind") != "" {
+			query = query.Where("podcast_episode_bookmarks.kind = ?", kind)
+		}
 		if sort == "popular" {
 			query = query.
 				Joins("JOIN podcast_episodes ON podcast_episodes.id = podcast_episode_bookmarks.episode_id").
@@ -1029,6 +1075,11 @@ func CreatePodcastEpisodeBookmark(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
+		kind, valid := normalizePodcastEpisodeBookmarkKind(input.Kind)
+		if !valid {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid podcast bookmark kind"})
+			return
+		}
 
 		var episode model.PodcastEpisode
 		if err := db.First(&episode, "id = ?", input.EpisodeID).Error; err != nil {
@@ -1036,8 +1087,8 @@ func CreatePodcastEpisodeBookmark(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		bookmark := model.PodcastEpisodeBookmark{UserID: userID, EpisodeID: input.EpisodeID}
-		if err := db.Where(model.PodcastEpisodeBookmark{UserID: userID, EpisodeID: input.EpisodeID}).FirstOrCreate(&bookmark).Error; err != nil {
+		bookmark := model.PodcastEpisodeBookmark{UserID: userID, EpisodeID: input.EpisodeID, Kind: kind}
+		if err := db.Where(model.PodcastEpisodeBookmark{UserID: userID, EpisodeID: input.EpisodeID, Kind: kind}).FirstOrCreate(&bookmark).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create podcast bookmark"})
 			return
 		}

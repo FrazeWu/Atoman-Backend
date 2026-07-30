@@ -82,6 +82,46 @@ func TestStudioAnalyticsIncludesLifecycleFunnelEvents(t *testing.T) {
 	}
 }
 
+func TestStudioPodcastAnalyticsCountsFavoritesOnly(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	post := model.Post{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID,
+		Title: "Measured episode", Content: "shownotes", Status: "published", Visibility: "public",
+	}
+	if err := fixture.db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	episode := model.PodcastEpisode{PostID: post.ID, ChannelID: fixture.channel.ID, AudioURL: "episode.mp3"}
+	if err := fixture.db.Create(&episode).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, kind := range []string{"favorite", "listen_later"} {
+		bookmark := model.PodcastEpisodeBookmark{
+			Base: model.Base{CreatedAt: time.Now().UTC()}, UserID: fixture.foreignUser.UUID, EpisodeID: episode.ID, Kind: kind,
+		}
+		if err := fixture.db.Create(&bookmark).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	analytics, err := fixture.service.GetAnalytics(fixture.user, ModulePodcast, AnalyticsQuery{ChannelID: fixture.channel.ID, Range: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := analytics.Totals["bookmark"]; got != 1 {
+		t.Fatalf("expected favorite bookmark total 1, got %d", got)
+	}
+	today := time.Now().UTC().Format("2006-01-02")
+	for _, point := range analytics.Trend {
+		if point.Date == today && point.Metrics["bookmark"] != 1 {
+			t.Fatalf("expected favorite bookmark trend 1, got %#v", point)
+		}
+	}
+	if len(analytics.Top) != 1 || analytics.Top[0].ID != episode.ID || analytics.Top[0].Metrics["bookmark"] != 1 {
+		t.Fatalf("expected favorite bookmark content metric 1, got %#v", analytics.Top)
+	}
+}
+
 func TestStudioShareRecordsEventAndRejectsPrivateContent(t *testing.T) {
 	fixture := newStudioQueryFixture(t)
 	collection := fixture.collections[ModuleBlog]

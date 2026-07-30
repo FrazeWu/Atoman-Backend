@@ -3,11 +3,12 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func clearConfigEnv(t *testing.T) {
 	t.Helper()
-	for _, key := range []string{"ENV", "GIN_MODE", "PORT", "AUTH_CODE_SECRET", "DATABASE_TYPE", "DATABASE_URL", "STORAGE_TYPE", "ALLOWED_ORIGINS"} {
+	for _, key := range []string{"ENV", "GIN_MODE", "PORT", "AUTH_CODE_SECRET", "DATABASE_TYPE", "DATABASE_URL", "DATABASE_MAX_OPEN_CONNS", "DATABASE_MAX_IDLE_CONNS", "DATABASE_CONN_MAX_LIFETIME", "DATABASE_CONN_MAX_IDLE_TIME", "STORAGE_TYPE", "ALLOWED_ORIGINS"} {
 		t.Setenv(key, "")
 	}
 }
@@ -42,6 +43,12 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if cfg.DB.Type != "postgres" || cfg.DB.URL != "postgres://user:pass@localhost:5432/db" {
 		t.Fatalf("DB = %#v, want postgres URL", cfg.DB)
 	}
+	if cfg.DB.MaxOpenConns != 20 || cfg.DB.MaxIdleConns != 10 {
+		t.Fatalf("DB pool = %#v, want open=20 idle=10", cfg.DB)
+	}
+	if cfg.DB.ConnMaxLifetime != 30*time.Minute || cfg.DB.ConnMaxIdleTime != 5*time.Minute {
+		t.Fatalf("DB pool durations = %#v", cfg.DB)
+	}
 	assertOrigins(t, cfg.AllowedOrigins, DefaultAllowedOrigins())
 }
 
@@ -53,6 +60,10 @@ func TestLoadReadsConfiguredValues(t *testing.T) {
 	t.Setenv("DATABASE_TYPE", "postgres")
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/db")
 	t.Setenv("STORAGE_TYPE", "s3")
+	t.Setenv("DATABASE_MAX_OPEN_CONNS", "12")
+	t.Setenv("DATABASE_MAX_IDLE_CONNS", "6")
+	t.Setenv("DATABASE_CONN_MAX_LIFETIME", "20m")
+	t.Setenv("DATABASE_CONN_MAX_IDLE_TIME", "3m")
 
 	cfg, err := Load()
 	if err != nil {
@@ -76,6 +87,19 @@ func TestLoadReadsConfiguredValues(t *testing.T) {
 	}
 	if cfg.StorageType != "s3" {
 		t.Fatalf("StorageType = %q, want s3", cfg.StorageType)
+	}
+	if cfg.DB.MaxOpenConns != 12 || cfg.DB.MaxIdleConns != 6 || cfg.DB.ConnMaxLifetime != 20*time.Minute || cfg.DB.ConnMaxIdleTime != 3*time.Minute {
+		t.Fatalf("DB pool = %#v, want configured values", cfg.DB)
+	}
+}
+
+func TestLoadRejectsInvalidDatabasePoolConfig(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("DATABASE_MAX_OPEN_CONNS", "0")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_MAX_OPEN_CONNS") {
+		t.Fatalf("Load() error = %v, want invalid pool configuration", err)
 	}
 }
 

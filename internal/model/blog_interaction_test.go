@@ -88,11 +88,14 @@ func TestMediaBookmarksAreUniquePerUserTarget(t *testing.T) {
 		t.Fatal("expected duplicate video bookmark to fail")
 	}
 
-	if err := db.Create(&PodcastEpisodeBookmark{UserID: user.UUID, EpisodeID: episode.ID}).Error; err != nil {
+	if err := db.Create(&PodcastEpisodeBookmark{UserID: user.UUID, EpisodeID: episode.ID, Kind: "favorite"}).Error; err != nil {
 		t.Fatalf("create podcast episode bookmark: %v", err)
 	}
-	if err := db.Create(&PodcastEpisodeBookmark{UserID: user.UUID, EpisodeID: episode.ID}).Error; err == nil {
+	if err := db.Create(&PodcastEpisodeBookmark{UserID: user.UUID, EpisodeID: episode.ID, Kind: "favorite"}).Error; err == nil {
 		t.Fatal("expected duplicate podcast episode bookmark to fail")
+	}
+	if err := db.Create(&PodcastEpisodeBookmark{UserID: user.UUID, EpisodeID: episode.ID, Kind: "listen_later"}).Error; err != nil {
+		t.Fatalf("create separate listen later podcast bookmark: %v", err)
 	}
 
 	if err := db.Create(&ChannelBookmark{UserID: user.UUID, ChannelID: channel.ID, Kind: "video_channel"}).Error; err != nil {

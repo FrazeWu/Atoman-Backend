@@ -92,7 +92,7 @@ func (h *Handler) listMailboxes(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.ListMailboxes(c, actor)
+	data, err := h.service.ListMailboxes(c.Request.Context(), actor)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -122,7 +122,7 @@ func (h *Handler) listConversations(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.ListConversations(c, actor, mailbox, c.Query("cursor"), limit(c))
+	data, err := h.service.ListConversations(c.Request.Context(), actor, mailbox, c.Query("cursor"), limit(c))
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -151,7 +151,7 @@ func (h *Handler) getTargetConversation(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.GetTargetConversation(c, actor.ID, target)
+	data, err := h.service.GetTargetConversation(c.Request.Context(), actor.ID, target)
 	if errors.Is(err, ErrTargetNotFound) || errors.Is(err, ErrSelfTarget) {
 		h.fail(c, err)
 		return
@@ -208,7 +208,7 @@ func (h *Handler) sendToTarget(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.SendToTarget(c, actor.ID, target, input)
+	data, err := h.service.SendToTarget(c.Request.Context(), actor.ID, target, input)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -243,7 +243,7 @@ func (h *Handler) sendInConversation(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.SendInConversation(c, actor.ID, id, input)
+	data, err := h.service.SendInConversation(c.Request.Context(), actor.ID, id, input)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -272,7 +272,7 @@ func (h *Handler) listMessages(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.ListMessages(c, actor, id, c.Query("before"), limit(c))
+	data, err := h.service.ListMessages(c.Request.Context(), actor, id, c.Query("before"), limit(c))
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -301,7 +301,7 @@ func (h *Handler) markRead(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.MarkRead(c, actor, id)
+	data, err := h.service.MarkRead(c.Request.Context(), actor, id)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -330,7 +330,7 @@ func (h *Handler) block(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.BlockConversation(c, actor, id)
+	data, err := h.service.BlockConversation(c.Request.Context(), actor, id)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -359,7 +359,7 @@ func (h *Handler) unblock(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.UnblockConversation(c, actor, id)
+	data, err := h.service.UnblockConversation(c.Request.Context(), actor, id)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -396,7 +396,7 @@ func (h *Handler) uploadImage(c *gin.Context) {
 		return
 	}
 	defer opened.Close()
-	data, err := h.service.UploadImage(c, actor, opened, file.Header.Get("Content-Type"), file.Size)
+	data, err := h.service.UploadImage(c.Request.Context(), actor, opened, file.Header.Get("Content-Type"), file.Size)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -423,7 +423,7 @@ func (h *Handler) openImage(c *gin.Context) {
 	if !ok {
 		return
 	}
-	body, contentType, err := h.service.OpenImage(c, actor, id)
+	body, contentType, err := h.service.OpenImage(c.Request.Context(), actor, id)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -461,7 +461,7 @@ func (h *Handler) report(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "invalid report"))
 		return
 	}
-	data, err := h.service.ReportMessage(c, actor, id, input)
+	data, err := h.service.ReportMessage(c.Request.Context(), actor, id, input)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -484,7 +484,7 @@ func (h *Handler) listReports(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.ListReports(c, actor, c.Query("cursor"), limit(c))
+	data, err := h.service.ListReports(c.Request.Context(), actor, c.Query("cursor"), limit(c))
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -519,7 +519,7 @@ func (h *Handler) reviewReport(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "invalid report status"))
 		return
 	}
-	data, err := h.service.ReviewReport(c, actor, id, input)
+	data, err := h.service.ReviewReport(c.Request.Context(), actor, id, input)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -539,7 +539,7 @@ func (h *Handler) getSettings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.GetUserSettings(c, actor)
+	data, err := h.service.GetUserSettings(c.Request.Context(), actor)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -569,7 +569,7 @@ func (h *Handler) updateSettings(c *gin.Context) {
 		h.fail(c, ErrPermissionDenied)
 		return
 	}
-	data, err := h.service.UpdateUserSettings(c, actor, input.Permission)
+	data, err := h.service.UpdateUserSettings(c.Request.Context(), actor, input.Permission)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -596,7 +596,7 @@ func (h *Handler) getChannelSettings(c *gin.Context) {
 	if !ok {
 		return
 	}
-	data, err := h.service.GetChannelSettings(c, actor, id)
+	data, err := h.service.GetChannelSettings(c.Request.Context(), actor, id)
 	if err != nil {
 		h.fail(c, err)
 		return
@@ -631,7 +631,7 @@ func (h *Handler) updateChannelSettings(c *gin.Context) {
 		h.fail(c, ErrPermissionDenied)
 		return
 	}
-	data, err := h.service.UpdateChannelSettings(c, actor, id, input.Permission)
+	data, err := h.service.UpdateChannelSettings(c.Request.Context(), actor, id, input.Permission)
 	if err != nil {
 		h.fail(c, err)
 		return

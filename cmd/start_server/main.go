@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -9,8 +10,11 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"os/signal"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 
 	docs "atoman/docs"
 
@@ -22,15 +26,18 @@ import (
 	_ "github.com/lib/pq" // PostgreSQL array type support
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 
 	"atoman/internal/app"
 	"atoman/internal/collab"
+	"atoman/internal/config"
 	"atoman/internal/middleware"
+	"atoman/internal/migrationrunner"
 	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/modules/lifecycle"
+	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/httpx"
 	"atoman/internal/service"
 	"atoman/internal/storage"
 )
@@ -507,179 +514,30 @@ func main() {
 		fatalLogger.Fatal(err)
 	}
 
-	dbType := os.Getenv("DATABASE_TYPE")
-	if dbType == "" {
-		fatalLogger.Fatal("DATABASE_TYPE environment variable is required (postgres)")
+	cfg, err := config.Load()
+	if err != nil {
+		fatalLogger.Fatal(err)
 	}
+	log.Printf("Connecting to %s", databaseLogTarget(cfg.DB.Type, cfg.DB.URL))
 
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		fatalLogger.Fatal("DATABASE_URL environment variable is required")
-	}
-
-	log.Printf("Connecting to %s", databaseLogTarget(dbType, dbURL))
-
-	var dialector gorm.Dialector
-	switch dbType {
-	case "postgres", "postgresql":
-		dialector = postgres.Open(dbURL)
-	default:
-		fatalLogger.Fatal("Unsupported DATABASE_TYPE: ", dbType, " (expected: postgres)")
-	}
-
-	db, err := gorm.Open(dialector, &gorm.Config{})
+	db, err := app.OpenDB(cfg.DB)
 	if err != nil {
 		fatalLogger.Fatal("Failed to connect to database: ", err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		fatalLogger.Fatal("Failed to access database connection pool: ", err)
+	}
+	defer sqlDB.Close()
 	log.Println("Database connected successfully")
 
-	// Always run migrations on startup (AutoMigrate is idempotent)
-	{
+	if shouldRunMigrationsOnStart(cfg.Env, os.Getenv("RUN_MIGRATIONS_ON_START")) {
 		log.Println("Running database migrations...")
-
-		// Enable required PostgreSQL extensions
-		log.Println("Migration step: enable ltree extension")
-		if err := db.Exec("CREATE EXTENSION IF NOT EXISTS ltree").Error; err != nil {
-			log.Printf("WARN: failed to enable ltree extension: %v", err)
-		}
-		log.Println("Migration step completed: enable ltree extension")
-		log.Println("Migration step: prepare comment target")
-		log.Println("Migration step completed: prepare comment target")
-		log.Println("Migration step: blog collection post order")
-		if err := migrations.RunBlogCollectionPostOrderMigration(db); err != nil {
-			fatalLogger.Fatal("Failed to run blog collection post order migration: ", err)
-		}
-		log.Println("Migration step completed: blog collection post order")
-		log.Println("Migration step: content protection live unique index")
-		if err := migrations.RunContentProtectionLiveUniqueIndex(db); err != nil {
-			fatalLogger.Fatal("Failed to run content protection live unique index migration: ", err)
-		}
-		log.Println("Migration step completed: content protection live unique index")
-		log.Println("Migration step: music bookmarks and playlists")
-		if err := runMusicBookmarkStartupMigration(db); err != nil {
-			fatalLogger.Fatal("Failed to run music bookmarks and playlists migration: ", err)
-		}
-		log.Println("Migration step completed: music bookmarks and playlists")
-		log.Println("Migration step: unified reading list")
-		if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
-			fatalLogger.Fatal("Failed to run unified reading list migration: ", err)
-		}
-		log.Println("Migration step completed: unified reading list")
-		log.Println("Migration step: forum report unique index")
-		if err := migrations.RunForumReportUniqueIndex(db); err != nil {
-			fatalLogger.Fatal("Failed to prepare forum report unique index: ", err)
-		}
-		log.Println("Migration step completed: forum report unique index")
-		log.Println("Migration step: auto migrate models")
-		models := []any{
-			&model.User{},
-			&model.UserSettings{},
-			&model.Artist{},
-			&model.Album{},
-			&model.Song{},
-			&model.SongCorrection{},
-			&model.AlbumCorrection{},
-			&model.ArtistCorrection{},
-			&model.Channel{},
-			&model.Collection{},
-			&model.UserStudioState{},
-			&model.StudioModuleSettings{},
-			&model.Post{},
-			&model.PostCollection{},
-			&model.BlogDraft{},
-			&model.MediaAsset{},
-			&model.Like{},
-			&model.Bookmark{},
-			&model.BookmarkFolder{},
-			// Phase 1 compatibility models for /api/v1 feed/subscription/notification modules.
-			&model.FeedSource{},
-			&model.Subscription{},
-			&model.Follow{},
-			&model.FeedItem{},
-			&model.FeedItemRead{},
-			&model.FeedStarGroup{},
-			&model.FeedItemStar{},
-			&model.ReadingListItem{},
-			&model.SubscriptionGroup{},
-			&model.ForumCategory{},
-			&model.ForumTopic{},
-			&model.ForumLike{},
-			&model.ForumBookmark{},
-			&model.ForumDraft{},
-			&model.Notification{},
-			&model.ActivityLog{},
-			&model.AuditLog{},
-			&model.Debate{},
-			&model.DebateVote{},
-			&model.DebateConclusionEvent{},
-			&model.DebateRevisionReference{},
-			&model.DebateRelation{},
-			&model.EmailVerificationCode{},
-			&model.TimelineEvent{},
-			&model.TimelinePerson{},
-			&model.PersonLocation{},
-			&model.TimelineRevision{},
-			// Revision / wiki system
-			&model.Revision{},
-			&model.EditConflict{},
-			&model.ContentProtection{},
-			// Music wiki extensions
-			&model.ArtistAlias{},
-			&model.ArtistMerge{},
-			&model.MusicEdit{},
-			&model.MusicEditVote{},
-			&model.MusicEditDecision{},
-			&model.MusicEditChange{},
-			&model.ArtistBookmark{},
-			&model.AlbumBookmark{},
-			&model.SongBookmark{},
-			&model.Playlist{},
-			&model.PlaylistSong{},
-			// Podcast
-			&model.PodcastEpisode{},
-			// Video module
-			&model.Video{},
-			&model.VideoProcessingJob{},
-			&model.VideoTag{},
-			&model.VideoCollection{},
-			&model.VideoTagRelation{},
-			// Forum extensions
-			&model.ForumReport{},
-			&model.CategoryRequest{},
-			&model.ForumModeratorAssignment{},
-			&model.SiteSetting{},
-		}
-		if err := runUnifiedCommentStartupMigrations(db, models...); err != nil {
+		if err := migrationrunner.Run(db); err != nil {
 			fatalLogger.Fatal("Failed to run migrations: ", err)
 		}
-		log.Println("Migration step completed: auto migrate models")
-		log.Println("Migration step: unified studio")
-		if err := migrations.RunUnifiedStudioMigration(db); err != nil {
-			fatalLogger.Fatal("Failed to run unified studio migration: ", err)
-		}
-		log.Println("Migration step completed: unified studio")
-		log.Println("Migration step: clean reading list target constraints")
-		if err := migrations.RunUnifiedReadingListMigration(db); err != nil {
-			fatalLogger.Fatal("Failed to clean reading list target constraints: ", err)
-		}
-		log.Println("Migration step completed: clean reading list target constraints")
-		log.Println("Migration step: blog interaction unique indexes")
-		if err := migrations.RunBlogInteractionUniqueIndexes(db); err != nil {
-			fatalLogger.Fatal("Failed to run blog interaction unique indexes migration: ", err)
-		}
-		log.Println("Migration step completed: blog interaction unique indexes")
 		log.Println("Database migrations completed")
 
-		log.Println("Migration step: notification/dm indexes and dm v2")
-		if err := runStartupDMV2Migration(db); err != nil {
-			fatalLogger.Fatal("Failed to run notification/dm indexes and dm v2 migration: ", err)
-		}
-		log.Println("Migration step completed: notification/dm indexes and dm v2")
-		log.Println("Migration step: music bookmarks playlists")
-		if err := runMusicBookmarkStartupMigration(db); err != nil {
-			fatalLogger.Fatal("Failed to run music bookmarks playlists migration: ", err)
-		}
-		log.Println("Migration step completed: music bookmarks playlists")
 		// Seed default site settings (idempotent)
 		db.Exec(`INSERT INTO site_settings (key, value, description, updated_at)
 VALUES ('forum.solved_auto_threshold', '10', '回复点赞数达到该值时自动标记为解决方案', NOW())
@@ -701,7 +559,9 @@ ON CONFLICT (key) DO NOTHING`)
 			log.Fatal("Failed to bootstrap owner user: ", err)
 		}
 
-	} // end migrations block
+	} else {
+		log.Println("Skipping startup migrations; run cmd/migrate before starting the service")
+	}
 
 	// Initialize email service (without Redis)
 	emailService := service.NewEmailServiceWithoutRedis(db)
@@ -709,9 +569,11 @@ ON CONFLICT (key) DO NOTHING`)
 
 	s3Client := initializeStorageClient()
 
-	service.StartRSSCron(db)
-	service.StartFullTextWorker(db)
-	lifecycle.StartWorker(db)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	rssCronDone := service.StartRSSCron(ctx, db)
+	fullTextWorkerDone := service.StartFullTextWorker(ctx, db)
+	lifecycleWorkerDone := lifecycle.StartWorker(ctx, db)
 
 	log.Println("Initializing Casbin Enforcer...")
 	if err := middleware.InitCasbin(db); err != nil {
@@ -719,11 +581,13 @@ ON CONFLICT (key) DO NOTHING`)
 	}
 
 	r := gin.New()
-	r.Use(gin.Logger())
+	r.Use(middleware.RequestIDMiddleware())
+	r.Use(middleware.AccessLogMiddleware(log.New(gin.DefaultWriter, "", log.Flags())))
 	r.Use(gin.Recovery())
 	docs.SwaggerInfo.BasePath = "/api/v1"
 
 	r.Use(corsMiddleware(configuredAllowedOrigins()))
+	registerHealthRoutes(r, db)
 
 	// Add global Optional Auth and Casbin Middleware
 	r.Use(middleware.OptionalAuthMiddleware())
@@ -741,18 +605,32 @@ ON CONFLICT (key) DO NOTHING`)
 
 	// 404 handler - must be last
 	r.NoRoute(func(c *gin.Context) {
-		c.JSON(404, gin.H{"error": "Not found"})
+		httpx.Error(c, apperr.NotFound("system.not_found", "Not found"))
 	})
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
-	}
-
-	log.Printf("Server starting on port %s", port)
-	if err := r.Run(":" + port); err != nil {
+	server := newHTTPServer(":"+cfg.Port, r)
+	log.Printf("Server starting on port %s", cfg.Port)
+	if err := serveUntilShutdown(ctx, server, shutdownTimeout); err != nil {
 		fatalLogger.Fatal("Failed to start server: ", err)
 	}
+	if err := waitForWorkers(shutdownTimeout, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone); err != nil {
+		log.Printf("WARN: timed out waiting for background workers to stop: %v", err)
+	}
+	log.Println("Server stopped")
+}
+
+func waitForWorkers(timeout time.Duration, workers ...<-chan struct{}) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	for _, done := range workers {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 func databaseLogTarget(dbType string, rawURL string) string {

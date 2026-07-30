@@ -50,6 +50,21 @@ func (h *Handler) getUnreadCounts(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, counts)
 }
 
+// listNotifications godoc
+// @Summary 获取通知列表
+// @Description type 为精确类型筛选且优先于 category；category 可为 like、interaction、mention、reply、collaboration 或 system，system 包含未归入已知分类的开放类型。
+// @Tags notifications
+// @Produce json
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Param type query string false "精确通知类型，优先于 category"
+// @Param category query string false "通知分类"
+// @Success 200 {array} NotificationDTO
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/notifications [get]
 func (h *Handler) listNotifications(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -57,7 +72,7 @@ func (h *Handler) listNotifications(c *gin.Context) {
 		return
 	}
 
-	query := ListQuery{Page: normalizedPageFromQuery(c), PageSize: normalizedPageSizeFromQuery(c), Type: strings.TrimSpace(c.Query("type"))}
+	query := ListQuery{Page: normalizedPageFromQuery(c), PageSize: normalizedPageSizeFromQuery(c), Type: strings.TrimSpace(c.Query("type")), Category: strings.TrimSpace(c.Query("category"))}
 	items, total, err := h.service.ListNotifications(user, query)
 	if err != nil {
 		httpx.Error(c, err)
@@ -98,13 +113,27 @@ func (h *Handler) markRead(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
 }
 
+// markAllRead godoc
+// @Summary 全部标记为已读
+// @Description type 为精确类型筛选且优先于 category；category 的 system 匹配未归入已知分类的开放类型。
+// @Tags notifications
+// @Produce json
+// @Param type query string false "精确通知类型，优先于 category"
+// @Param category query string false "通知分类"
+// @Success 200 {object} map[string]interface{}
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/notifications/read-all [put]
 func (h *Handler) markAllRead(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	if err := h.service.MarkAllRead(user, c.Query("type")); err != nil {
+	query := ListQuery{Type: strings.TrimSpace(c.Query("type")), Category: strings.TrimSpace(c.Query("category"))}
+	if err := h.service.MarkAllRead(user, query); err != nil {
 		httpx.Error(c, err)
 		return
 	}
