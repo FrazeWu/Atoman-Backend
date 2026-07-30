@@ -40,22 +40,22 @@ func (s *Service) Create(user authctx.CurrentUser, input noteInput) (NoteDTO, er
 	}); err != nil {
 		return NoteDTO{}, err
 	}
-	return s.Get(note.ID)
+	return s.Get(note.ID, user.ID)
 }
 
-func (s *Service) List(page, pageSize int) ([]NoteDTO, int64, error) {
+func (s *Service) List(page, pageSize int, viewerID uuid.UUID) ([]NoteDTO, int64, error) {
 	var notes []model.ShortNote
 	var total int64
 	if err := s.db.Model(&model.ShortNote{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	if err := s.db.Preload("Media", func(db *gorm.DB) *gorm.DB { return db.Order("position ASC") }).
+	if err := s.db.Preload("User").Preload("Media", func(db *gorm.DB) *gorm.DB { return db.Order("position ASC") }).
 		Order("created_at DESC, id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&notes).Error; err != nil {
 		return nil, 0, err
 	}
 	items := make([]NoteDTO, 0, len(notes))
 	for _, note := range notes {
-		item, err := s.dto(note)
+		item, err := s.dto(note, viewerID)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -64,15 +64,15 @@ func (s *Service) List(page, pageSize int) ([]NoteDTO, int64, error) {
 	return items, total, nil
 }
 
-func (s *Service) Get(id uuid.UUID) (NoteDTO, error) {
+func (s *Service) Get(id, viewerID uuid.UUID) (NoteDTO, error) {
 	var note model.ShortNote
-	if err := s.db.Preload("Media", func(db *gorm.DB) *gorm.DB { return db.Order("position ASC") }).First(&note, "id = ?", id).Error; err != nil {
+	if err := s.db.Preload("User").Preload("Media", func(db *gorm.DB) *gorm.DB { return db.Order("position ASC") }).First(&note, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return NoteDTO{}, apperr.NotFound("short_note.not_found", "Short note not found")
 		}
 		return NoteDTO{}, err
 	}
-	return s.dto(note)
+	return s.dto(note, viewerID)
 }
 
 func (s *Service) Update(user authctx.CurrentUser, id uuid.UUID, input noteInput) (NoteDTO, error) {
@@ -95,7 +95,7 @@ func (s *Service) Update(user authctx.CurrentUser, id uuid.UUID, input noteInput
 	}); err != nil {
 		return NoteDTO{}, err
 	}
-	return s.Get(id)
+	return s.Get(id, user.ID)
 }
 
 func (s *Service) Delete(user authctx.CurrentUser, id uuid.UUID) error {
@@ -110,7 +110,7 @@ func (s *Service) ToggleLike(user authctx.CurrentUser, id uuid.UUID, liked bool)
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
 	}
-	if _, err := s.Get(id); err != nil {
+	if _, err := s.Get(id, user.ID); err != nil {
 		return err
 	}
 	if liked {
@@ -137,7 +137,7 @@ func (s *Service) ownedNote(user authctx.CurrentUser, id uuid.UUID) (model.Short
 	return note, nil
 }
 
-func (s *Service) dto(note model.ShortNote) (NoteDTO, error) {
+func (s *Service) dto(note model.ShortNote, viewerID uuid.UUID) (NoteDTO, error) {
 	var likesCount int64
 	if err := s.db.Model(&model.Like{}).Where("target_type = ? AND target_id = ?", "short_note", note.ID).Count(&likesCount).Error; err != nil {
 		return NoteDTO{}, err
@@ -149,11 +149,20 @@ func (s *Service) dto(note model.ShortNote) (NoteDTO, error) {
 	} else if err == nil {
 		commentsCount = target.CommentCount
 	}
+	liked := false
+	if viewerID != uuid.Nil {
+		var viewerLike model.Like
+		if err := s.db.Where("user_id = ? AND target_type = ? AND target_id = ?", viewerID, "short_note", note.ID).First(&viewerLike).Error; err == nil {
+			liked = true
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return NoteDTO{}, err
+		}
+	}
 	media := make([]MediaDTO, 0, len(note.Media))
 	for _, item := range note.Media {
 		media = append(media, MediaDTO{ID: item.ID, URL: item.URL, Position: item.Position})
 	}
-	return NoteDTO{ID: note.ID, UserID: note.UserID, Content: note.Content, Media: media, LikesCount: likesCount, CommentsCount: commentsCount, Edited: note.UpdatedAt.After(note.CreatedAt), CreatedAt: note.CreatedAt, UpdatedAt: note.UpdatedAt}, nil
+	return NoteDTO{ID: note.ID, UserID: note.UserID, User: note.User, Content: note.Content, Media: media, LikesCount: likesCount, CommentsCount: commentsCount, Liked: liked, Edited: note.UpdatedAt.After(note.CreatedAt), CreatedAt: note.CreatedAt, UpdatedAt: note.UpdatedAt}, nil
 }
 
 func validateInput(input noteInput) (string, []string, error) {

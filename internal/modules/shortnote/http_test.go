@@ -89,7 +89,7 @@ func TestShortNoteCreateAndDetailIncludesMediaAndCounts(t *testing.T) {
 		t.Fatalf("create target: %v", err)
 	}
 	w = shortNoteRequest(t, r, http.MethodGet, "/api/v1/short-notes/"+id, "")
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"likes_count":1`) || !strings.Contains(w.Body.String(), `"comments_count":3`) {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"likes_count":1`) || !strings.Contains(w.Body.String(), `"comments_count":3`) || !strings.Contains(w.Body.String(), `"liked":true`) || !strings.Contains(w.Body.String(), `"user":{"`) {
 		t.Fatalf("unexpected detail: %d %s", w.Code, w.Body.String())
 	}
 }

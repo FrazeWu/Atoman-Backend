@@ -28,7 +28,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 
 func (h *Handler) list(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.List(page, pageSize)
+	user, _ := authctx.Current(c)
+	items, total, err := h.service.List(page, pageSize, user.ID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -37,7 +38,8 @@ func (h *Handler) list(c *gin.Context) {
 }
 
 func (h *Handler) get(c *gin.Context) {
-	note, err := h.service.Get(noteID(c))
+	user, _ := authctx.Current(c)
+	note, err := h.service.Get(noteID(c), user.ID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
