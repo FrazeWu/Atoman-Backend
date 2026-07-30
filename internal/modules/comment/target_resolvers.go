@@ -28,6 +28,7 @@ func NewTargetRegistry(db *gorm.DB) *TargetRegistry {
 	resolvers := &databaseTargetResolvers{db: db}
 	return &TargetRegistry{resolvers: map[string]TargetResolver{
 		TargetKindBlogPost:       targetResolverFunc(resolvers.resolveBlogPost),
+		TargetKindShortNote:      targetResolverFunc(resolvers.resolveShortNote),
 		TargetKindVideo:          targetResolverFunc(resolvers.resolveVideo),
 		TargetKindPodcastEpisode: targetResolverFunc(resolvers.resolvePodcastEpisode),
 		TargetKindFeedArticle:    targetResolverFunc(resolvers.resolveFeedArticle),
@@ -39,6 +40,14 @@ func NewTargetRegistry(db *gorm.DB) *TargetRegistry {
 		TargetKindTimelineEvent:  targetResolverFunc(resolvers.resolveTimelineEvent),
 		TargetKindTimelinePerson: targetResolverFunc(resolvers.resolveTimelinePerson),
 	}}
+}
+
+func (r *databaseTargetResolvers) resolveShortNote(_ Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
+	var note model.ShortNote
+	if err := r.db.First(&note, "id = ?", resourceID).Error; err != nil {
+		return ResolvedTarget{}, targetLookupError(TargetKindShortNote, resourceID, err)
+	}
+	return ownedTarget(TargetKindShortNote, note.ID, note.UserID, true, 0, markLabelPinned), nil
 }
 
 func (r *databaseTargetResolvers) resolveBlogPost(viewer Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
