@@ -43,3 +43,19 @@ func TestRunCreatesCoreSchema(t *testing.T) {
 		t.Fatal("expected content publication dispatch candidate index")
 	}
 }
+
+func TestRunCreatesShortNoteSchema(t *testing.T) {
+	db := testdb.Open(t)
+
+	if err := Run(db); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	for _, schemaModel := range []any{
+		&model.ShortNote{},
+		&model.ShortNoteMedia{},
+	} {
+		if !db.Migrator().HasTable(schemaModel) {
+			t.Fatalf("expected table for %T", schemaModel)
+		}
+	}
+}
