@@ -110,6 +110,80 @@ func TestMediaImportProcessorExtractsArchiveInTempTreeAndKeepsDiscPath(t *testin
 	}
 }
 
+func TestProcessExtractedTreeFallsBackToEmbeddedAudioCover(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	first := filepath.Join(root, "01 - First.flac")
+	second := filepath.Join(root, "02 - Second.flac")
+	for _, source := range []string{first, second} {
+		if err := os.WriteFile(source, []byte("audio"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	extractAttempts := 0
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}
+	runner.run = func(name string, args []string) ([]byte, error) {
+		if name == "ffprobe" {
+			return []byte(`{"format":{"duration":"12","tags":{}}}`), nil
+		}
+		if name == "ffmpeg" && containsMediaArg(args, "-map") {
+			extractAttempts++
+			if extractAttempts == 1 {
+				return nil, errors.New("no embedded artwork")
+			}
+			return nil, os.WriteFile(args[len(args)-1], []byte("cover"), 0600)
+		}
+		output := args[len(args)-1]
+		if strings.HasSuffix(output, ".mp3") {
+			return nil, os.WriteFile(output, []byte("audio"), 0600)
+		}
+		if strings.HasSuffix(output, ".webp") {
+			return nil, os.WriteFile(output, []byte("cover"), 0600)
+		}
+		return nil, nil
+	}
+	store := &fakeMediaStore{objects: map[string][]byte{}, puts: map[string][]byte{}}
+	if err := NewMediaImportProcessor(db, store, runner, "").processExtractedTree(context.Background(), session.ID, root, nil); err != nil {
+		t.Fatal(err)
+	}
+	var stored model.AlbumImportSession
+	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored.PayloadJSON, "cover_key") || extractAttempts != 2 {
+		t.Fatalf("expected embedded cover fallback after two attempts, payload=%s attempts=%d", stored.PayloadJSON, extractAttempts)
+	}
+}
+
+func TestProcessExtractedTreePrefersExplicitCoverOverEmbeddedAudioCover(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "cover.jpg"), []byte("cover"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "01 - First.flac"), []byte("audio"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}
+	store := &fakeMediaStore{objects: map[string][]byte{}, puts: map[string][]byte{}}
+	if err := NewMediaImportProcessor(db, store, runner, "").processExtractedTree(context.Background(), session.ID, root, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range runner.runs {
+		if run[0] == "ffmpeg" && containsMediaArg(run, "-map") {
+			t.Fatalf("explicit cover must prevent embedded artwork extraction: %#v", runner.runs)
+		}
+	}
+}
+
 func TestMediaImportProcessorArchiveRetrySkipsCompletedDerivedAudio(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
@@ -137,7 +211,7 @@ func TestMediaImportProcessorArchiveRetrySkipsCompletedDerivedAudio(t *testing.T
 		if name == "ffprobe" {
 			return []byte(`{"format":{"duration":"12"}}`), nil
 		}
-		if name == "ffmpeg" {
+		if name == "ffmpeg" && strings.HasSuffix(args[len(args)-1], ".mp3") {
 			ffmpegs++
 			if ffmpegs == 2 {
 				return nil, errors.New("second track transient failure")

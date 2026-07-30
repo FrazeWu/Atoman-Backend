@@ -502,6 +502,9 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 		if used[audio.path] {
 			continue
 		}
+		if cover == "" && p.processEmbeddedCover(ctx, sessionID, audio.path) == nil {
+			cover = audio.path
+		}
 		if heartbeat != nil {
 			if err := heartbeat(); err != nil {
 				return err
@@ -619,6 +622,15 @@ func (p *MediaImportProcessor) processCover(ctx context.Context, sessionID uuid.
 		return err
 	}
 	return p.db.WithContext(ctx).Model(&session).Update("payload_json", string(encoded)).Error
+}
+
+func (p *MediaImportProcessor) processEmbeddedCover(ctx context.Context, sessionID uuid.UUID, source string) error {
+	output := filepath.Join(filepath.Dir(source), ".atoman-embedded-cover-"+uuid.NewString()+".webp")
+	defer os.Remove(output)
+	if _, err := p.runner.Run(ctx, "ffmpeg", "-y", "-i", source, "-map", "0:v:0", "-frames:v", "1", "-c:v", "libwebp", output); err != nil {
+		return err
+	}
+	return p.processCover(ctx, sessionID, output)
 }
 
 func (p *MediaImportProcessor) processAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile) error {
