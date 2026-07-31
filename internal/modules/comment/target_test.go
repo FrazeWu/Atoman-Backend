@@ -21,6 +21,7 @@ func newTargetTestRegistry(t *testing.T) (*TargetRegistry, *gorm.DB) {
 		&model.User{},
 		&model.Channel{},
 		&model.Post{},
+		&model.ShortNote{},
 		&model.Video{},
 		&model.PodcastEpisode{},
 		&model.FeedSource{},
@@ -49,6 +50,7 @@ func TestTargetRegistryRegistersExactlySupportedKinds(t *testing.T) {
 	registry, _ := newTargetTestRegistry(t)
 	want := []string{
 		TargetKindBlogPost,
+		TargetKindShortNote,
 		TargetKindVideo,
 		TargetKindPodcastEpisode,
 		TargetKindFeedArticle,
@@ -64,6 +66,19 @@ func TestTargetRegistryRegistersExactlySupportedKinds(t *testing.T) {
 	for _, kind := range want {
 		require.Contains(t, registry.resolvers, kind)
 	}
+}
+
+func TestTargetRegistryResolvesPublicShortNote(t *testing.T) {
+	registry, db := newTargetTestRegistry(t)
+	owner := createTargetTestUser(t, db, "short-note-owner")
+	note := model.ShortNote{UserID: owner.UUID, Content: "公开"}
+	require.NoError(t, db.Create(&note).Error)
+
+	resolved, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindShortNote, ResourceID: note.ID})
+	require.NoError(t, err)
+	require.True(t, resolved.Visible)
+	require.NotNil(t, resolved.OwnerID)
+	require.Equal(t, owner.UUID, *resolved.OwnerID)
 }
 
 func TestTargetRegistryRejectsUnknownKindAndNilResource(t *testing.T) {

@@ -12,6 +12,7 @@ import (
 
 const (
 	TargetKindBlogPost       = "blog_post"
+	TargetKindShortNote      = "short_note"
 	TargetKindVideo          = "video"
 	TargetKindPodcastEpisode = "podcast_episode"
 	TargetKindFeedArticle    = "feed_article"

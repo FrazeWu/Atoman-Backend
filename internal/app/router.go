@@ -18,6 +18,7 @@ import (
 	"atoman/internal/modules/notification"
 	"atoman/internal/modules/portal"
 	"atoman/internal/modules/reference"
+	"atoman/internal/modules/shortnote"
 	"atoman/internal/modules/studio"
 	"atoman/internal/service"
 
@@ -41,6 +42,7 @@ func RegisterV1Routes(
 	comment.RegisterRoutes(group, commentService)
 	reference.RegisterRoutes(group, reference.NewService(db))
 	blog.RegisterRoutes(group.Group("/blog"), blog.NewService(db))
+	shortnote.RegisterRoutes(group.Group("/short-notes"), shortnote.NewService(db))
 	feed.RegisterRoutes(group.Group("/feed"), feed.NewService(db))
 	notificationService := notification.NewService(db)
 	notification.RegisterRoutes(group, notificationService)
