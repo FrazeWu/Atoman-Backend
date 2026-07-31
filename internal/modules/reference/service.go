@@ -1,6 +1,7 @@
 package reference
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -28,6 +29,39 @@ func (s *Service) Search(viewer Viewer, targetType, query string, limit int) ([]
 		return nil, apperr.BadRequest("reference.unsupported_type", "Unsupported reference type")
 	}
 	return s.registry.Search(viewer, targetType, query, limit)
+}
+
+func (s *Service) SearchMany(ctx context.Context, viewer Viewer, targetTypes []string, query string, limit int) ([]Target, error) {
+	if len(targetTypes) == 0 {
+		return nil, apperr.BadRequest("reference.unsupported_type", "Unsupported reference type")
+	}
+	uniqueTypes := make([]string, 0, len(targetTypes))
+	seen := make(map[string]struct{}, len(targetTypes))
+	for _, targetType := range targetTypes {
+		targetType = strings.TrimSpace(targetType)
+		if targetType != TargetTypeUser && !IsSupportedResourceType(targetType) {
+			return nil, apperr.BadRequest("reference.unsupported_type", "Unsupported reference type")
+		}
+		if _, exists := seen[targetType]; exists {
+			continue
+		}
+		seen[targetType] = struct{}{}
+		uniqueTypes = append(uniqueTypes, targetType)
+	}
+
+	items := make([]Target, 0)
+	registry := NewRegistry(s.db.WithContext(ctx))
+	for _, targetType := range uniqueTypes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		matches, err := registry.Search(viewer, targetType, query, limit)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, matches...)
+	}
+	return items, nil
 }
 
 func (s *Service) ResolvePreview(viewer Viewer, content string) ([]ResolvedReference, error) {

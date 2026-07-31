@@ -26,15 +26,15 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 // @Summary 搜索引用目标
 // @Tags references
 // @Produce json
-// @Param type query string true "引用类型"
+// @Param type query []string true "引用类型，可重复传入" collectionFormat(multi)
 // @Param q query string false "搜索关键词"
-// @Param limit query int false "返回数量"
+// @Param limit query int false "每种类型返回数量"
 // @Success 200 {object} SearchResponse
 // @Failure 400 {object} ErrorResponse
 // @Router /api/v1/references/search [get]
 func (h *Handler) search(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))
-	items, err := h.service.Search(viewerFromContext(c), c.Query("type"), c.Query("q"), limit)
+	items, err := h.service.SearchMany(c.Request.Context(), viewerFromContext(c), c.QueryArray("type"), c.Query("q"), limit)
 	if err != nil {
 		httpx.Error(c, err)
 		return

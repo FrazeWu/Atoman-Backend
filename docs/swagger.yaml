@@ -13983,16 +13983,19 @@ paths:
   /api/v1/references/search:
     get:
       parameters:
-      - description: 引用类型
+      - collectionFormat: multi
+        description: 引用类型，可重复传入
         in: query
+        items:
+          type: string
         name: type
         required: true
-        type: string
+        type: array
       - description: 搜索关键词
         in: query
         name: q
         type: string
-      - description: 返回数量
+      - description: 每种类型返回数量
         in: query
         name: limit
         type: integer

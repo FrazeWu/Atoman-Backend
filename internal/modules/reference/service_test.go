@@ -1,6 +1,7 @@
 package reference
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -10,6 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestSearchManyStopsWhenRequestContextIsCanceled(t *testing.T) {
+	service, _, _, _ := seededReferenceService(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := service.SearchMany(ctx, Viewer{}, []string{"post", "thread"}, "", 2)
+
+	require.ErrorIs(t, err, context.Canceled)
+}
 
 func TestReplacePublishedPersistsOccurrencesAndNotifiesMentionedUserOnce(t *testing.T) {
 	service, db, actor, ids := seededReferenceService(t)

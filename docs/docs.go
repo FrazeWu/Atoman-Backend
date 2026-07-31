@@ -13469,8 +13469,12 @@ const docTemplate = `{
                 "summary": "搜索引用目标",
                 "parameters": [
                     {
-                        "type": "string",
-                        "description": "引用类型",
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "collectionFormat": "multi",
+                        "description": "引用类型，可重复传入",
                         "name": "type",
                         "in": "query",
                         "required": true
@@ -13483,7 +13487,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "返回数量",
+                        "description": "每种类型返回数量",
                         "name": "limit",
                         "in": "query"
                     }

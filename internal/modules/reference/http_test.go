@@ -36,6 +36,27 @@ func TestReferenceHTTPSearchAndResolve(t *testing.T) {
 	require.Contains(t, resolveResponse.Body.String(), ids["post"].String())
 }
 
+func TestReferenceHTTPSearchSupportsMultipleTypes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, _ := seedReferenceRegistry(t)
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1"), NewService(db))
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/references/search?type=post&type=thread&type=post&limit=1", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var body struct {
+		Data []Target `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
+	require.Len(t, body.Data, 2)
+	require.Equal(t, []string{"post", "thread"}, []string{body.Data[0].Type, body.Data[1].Type})
+	require.Equal(t, "Blog Post", body.Data[0].Label)
+	require.Equal(t, "Forum Thread", body.Data[1].Label)
+}
+
 func TestReferenceHTTPResolveToleratesIncompleteDraftToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db, _ := seedReferenceRegistry(t)
@@ -58,6 +79,20 @@ func TestReferenceHTTPSearchRejectsUnsupportedType(t *testing.T) {
 	RegisterRoutes(router.Group("/api/v1"), NewService(db))
 
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/references/search?type=unknown&q=x", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	require.Contains(t, response.Body.String(), `"code":"reference.unsupported_type"`)
+}
+
+func TestReferenceHTTPMultiSearchRejectsUnsupportedType(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, _ := seedReferenceRegistry(t)
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1"), NewService(db))
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/references/search?type=post&type=unknown&q=x", nil)
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
