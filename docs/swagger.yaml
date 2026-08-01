@@ -1535,6 +1535,192 @@ definitions:
       user:
         $ref: '#/definitions/handlers.AuthUserResponse'
     type: object
+  handlers.AdminAuditLogDTO:
+    properties:
+      action:
+        type: string
+      actor_id:
+        type: string
+      actor_username:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      ip_address:
+        type: string
+      metadata:
+        additionalProperties: {}
+        type: object
+      reason:
+        type: string
+      target_user_id:
+        type: string
+      target_username:
+        type: string
+    type: object
+  handlers.AdminAuditLogListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.AdminAuditLogDTO'
+        type: array
+      meta:
+        $ref: '#/definitions/httpx.PageMeta'
+    type: object
+  handlers.AdminLoginEventDTO:
+    properties:
+      created_at:
+        type: string
+      device_name:
+        type: string
+      failure_code:
+        type: string
+      id:
+        type: string
+      ip_address:
+        type: string
+      ip_prefix:
+        type: string
+      location:
+        type: string
+      method:
+        type: string
+      result:
+        type: string
+      session_id:
+        type: string
+      user_agent:
+        type: string
+    type: object
+  handlers.AdminLoginEventListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.AdminLoginEventDTO'
+        type: array
+      meta:
+        $ref: '#/definitions/httpx.PageMeta'
+    type: object
+  handlers.AdminSessionDTO:
+    properties:
+      created_at:
+        type: string
+      device_name:
+        type: string
+      id:
+        type: string
+      ip_address:
+        type: string
+      ip_prefix:
+        type: string
+      kind:
+        type: string
+      last_active_at:
+        type: string
+      location:
+        type: string
+      user_agent:
+        type: string
+    type: object
+  handlers.AdminSessionListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.AdminSessionDTO'
+        type: array
+    type: object
+  handlers.AdminUserDTO:
+    properties:
+      active_sessions:
+        type: integer
+      avatar_url:
+        type: string
+      created_at:
+        type: string
+      display_name:
+        type: string
+      email:
+        type: string
+      is_active:
+        type: boolean
+      last_login_at:
+        type: string
+      last_login_ip:
+        type: string
+      last_login_location:
+        type: string
+      role:
+        type: string
+      updated_at:
+        type: string
+      username:
+        type: string
+      uuid:
+        format: uuid
+        type: string
+    type: object
+  handlers.AdminUserDetailDTO:
+    properties:
+      active_sessions:
+        type: integer
+      auth_providers:
+        items:
+          type: string
+        type: array
+      avatar_url:
+        type: string
+      bio:
+        type: string
+      created_at:
+        type: string
+      display_name:
+        type: string
+      email:
+        type: string
+      has_password:
+        type: boolean
+      is_active:
+        type: boolean
+      last_login_at:
+        type: string
+      last_login_ip:
+        type: string
+      last_login_location:
+        type: string
+      profile_location:
+        type: string
+      role:
+        type: string
+      updated_at:
+        type: string
+      username:
+        type: string
+      uuid:
+        format: uuid
+        type: string
+      website:
+        type: string
+    type: object
+  handlers.AdminUserDetailResponse:
+    properties:
+      data:
+        $ref: '#/definitions/handlers.AdminUserDetailDTO'
+    type: object
+  handlers.AdminUserListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/handlers.AdminUserDTO'
+        type: array
+      meta:
+        $ref: '#/definitions/httpx.PageMeta'
+    type: object
+  handlers.AdminUserResponse:
+    properties:
+      data:
+        $ref: '#/definitions/handlers.AdminUserDTO'
+    type: object
   handlers.ArtistAliasInput:
     properties:
       alias:
@@ -1726,6 +1912,23 @@ definitions:
       status:
         example: pending
         type: string
+    type: object
+  handlers.CreateAdminUserInput:
+    properties:
+      display_name:
+        type: string
+      email:
+        type: string
+      password:
+        type: string
+      role:
+        type: string
+      username:
+        type: string
+    required:
+    - email
+    - password
+    - username
     type: object
   handlers.CreateEventInput:
     properties:
@@ -2373,6 +2576,13 @@ definitions:
         example: true
         type: boolean
     type: object
+  handlers.ResetAdminUserPasswordInput:
+    properties:
+      password:
+        type: string
+    required:
+    - password
+    type: object
   handlers.RevisionActionResponse:
     properties:
       data:
@@ -2545,6 +2755,22 @@ definitions:
         example: 2026
         type: integer
     type: object
+  handlers.TimelineEventListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.TimelineEvent'
+        type: array
+      limit:
+        example: 20
+        type: integer
+      page:
+        example: 1
+        type: integer
+      total:
+        example: 42
+        type: integer
+    type: object
   handlers.TimelineEventResponse:
     properties:
       data:
@@ -2595,6 +2821,24 @@ definitions:
         items:
           $ref: '#/definitions/model.TimelineRevision'
         type: array
+    type: object
+  handlers.UpdateAdminUserInput:
+    properties:
+      display_name:
+        type: string
+      email:
+        type: string
+      role:
+        type: string
+      username:
+        type: string
+    type: object
+  handlers.UpdateAdminUserStatusInput:
+    properties:
+      is_active:
+        type: boolean
+    required:
+    - is_active
     type: object
   handlers.UpdateUserRoleInput:
     properties:
@@ -6244,6 +6488,550 @@ paths:
       summary: 驳回歌曲
       tags:
       - admin
+  /api/v1/admin/user-audit-logs:
+    get:
+      parameters:
+      - default: 1
+        description: 页码
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AdminAuditLogListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员获取用户管理操作记录
+      tags:
+      - admin-users
+  /api/v1/admin/users:
+    get:
+      description: 管理员可分页搜索未删除用户，并按角色和账号状态筛选。
+      parameters:
+      - description: 用户名、邮箱或显示名
+        in: query
+        name: q
+        type: string
+      - description: 角色
+        enum:
+        - user
+        - moderator
+        - admin
+        - owner
+        in: query
+        name: role
+        type: string
+      - default: all
+        description: 账号状态
+        enum:
+        - all
+        - active
+        - inactive
+        in: query
+        name: status
+        type: string
+      - default: all
+        description: 登录时间
+        enum:
+        - all
+        - 7d
+        - inactive_30d
+        - never
+        in: query
+        name: activity
+        type: string
+      - default: 1
+        description: 页码
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 每页数量，最大 100
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AdminUserListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员获取用户列表
+      tags:
+      - admin-users
+    post:
+      consumes:
+      - application/json
+      description: 管理员只能创建普通用户，站长可创建普通用户或管理员。
+      parameters:
+      - description: 用户信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateAdminUserInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.AdminUserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员创建用户
+      tags:
+      - admin-users
+  /api/v1/admin/users/{id}:
+    delete:
+      description: 不可恢复地软删除账号，保留历史内容和用户名、邮箱占用关系。
+      parameters:
+      - description: 用户 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员删除用户
+      tags:
+      - admin-users
+    get:
+      parameters:
+      - description: 用户 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AdminUserDetailResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员获取用户详情
+      tags:
+      - admin-users
+    patch:
+      consumes:
+      - application/json
+      description: 管理员可编辑普通用户，站长还可编辑管理员和调整角色。
+      parameters:
+      - description: 用户 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 用户信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.UpdateAdminUserInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AdminUserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员编辑用户
+      tags:
+      - admin-users
+  /api/v1/admin/users/{id}/audit-logs:
+    get:
+      parameters:
+      - description: 用户 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - default: 1
+        description: 页码
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AdminAuditLogListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员获取单个用户的管理记录
+      tags:
+      - admin-users
+  /api/v1/admin/users/{id}/login-events:
+    get:
+      parameters:
+      - description: 用户 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 登录结果
+        enum:
+        - succeeded
+        - failed
+        in: query
+        name: result
+        type: string
+      - default: 1
+        description: 页码
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AdminLoginEventListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员获取用户登录记录
+      tags:
+      - admin-users
+  /api/v1/admin/users/{id}/password:
+    put:
+      consumes:
+      - application/json
+      description: 重置密码后立即撤销该用户的全部登录会话。
+      parameters:
+      - description: 用户 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 新密码
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.ResetAdminUserPasswordInput'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员重置用户密码
+      tags:
+      - admin-users
+  /api/v1/admin/users/{id}/sessions:
+    delete:
+      parameters:
+      - description: 用户 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员撤销用户全部会话
+      tags:
+      - admin-users
+    get:
+      parameters:
+      - description: 用户 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AdminSessionListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员获取用户有效会话
+      tags:
+      - admin-users
+  /api/v1/admin/users/{id}/sessions/{sessionID}:
+    delete:
+      parameters:
+      - description: 用户 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 会话 UUID
+        in: path
+        name: sessionID
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员撤销用户单个会话
+      tags:
+      - admin-users
+  /api/v1/admin/users/{id}/status:
+    put:
+      consumes:
+      - application/json
+      description: 停用账号时立即撤销该用户的全部登录会话。
+      parameters:
+      - description: 用户 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 账号状态
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.UpdateAdminUserStatusInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.AdminUserResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 管理员停用或恢复用户
+      tags:
+      - admin-users
   /api/v1/albums:
     get:
       description: 返回所有未关闭的专辑列表。
@@ -15271,6 +16059,43 @@ paths:
       tags:
       - studio
   /api/v1/timeline/events:
+    get:
+      description: 分页返回公开时间线事件，支持分类和年份范围筛选。
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: limit
+        type: integer
+      - description: 分类
+        in: query
+        name: category
+        type: string
+      - description: 起始年份
+        in: query
+        name: year_start
+        type: integer
+      - description: 结束年份
+        in: query
+        name: year_end
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.TimelineEventListResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取时间线事件列表
+      tags:
+      - timeline
     post:
       consumes:
       - application/json

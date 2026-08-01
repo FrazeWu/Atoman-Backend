@@ -51,6 +51,8 @@ func SetupUserRoutes(router *gin.Engine, db *gorm.DB) {
 			owner.PUT("/:id/role", UpdateUserRole(db))
 		}
 	}
+
+	SetupAdminUserRoutes(router, db)
 }
 
 func RequireOwner() gin.HandlerFunc {

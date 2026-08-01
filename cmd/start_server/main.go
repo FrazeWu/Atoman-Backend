@@ -581,6 +581,9 @@ ON CONFLICT (key) DO NOTHING`)
 	}
 
 	r := gin.New()
+	if err := r.SetTrustedProxies([]string{"127.0.0.1", "::1"}); err != nil {
+		fatalLogger.Fatal("Failed to configure trusted proxies: ", err)
+	}
 	r.Use(middleware.RequestIDMiddleware())
 	r.Use(middleware.AccessLogMiddleware(log.New(gin.DefaultWriter, "", log.Flags())))
 	r.Use(gin.Recovery())

@@ -33,6 +33,9 @@ func newAuthTestDB(t *testing.T) *gorm.DB {
 		&model.User{},
 		&model.UserSettings{},
 		&model.AuthSession{},
+		&model.LoginEvent{},
+		&model.ExternalIdentity{},
+		&model.AuditLog{},
 		&model.EmailVerificationCode{},
 		&model.Channel{},
 		&model.Collection{},
@@ -362,7 +365,8 @@ func TestLoginHandlerAcceptsEmailCaseInsensitively(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hash password: %v", err)
 	}
-	if err := db.Create(&model.User{Username: "alice", Email: "alice@example.com", Password: string(hash), Role: "user", IsActive: true}).Error; err != nil {
+	user := model.User{Username: "alice", Email: "alice@example.com", Password: string(hash), Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
 	r := gin.New()
@@ -370,6 +374,7 @@ func TestLoginHandlerAcceptsEmailCaseInsensitively(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(`{"username":"Alice@Example.com","password":"correct-password"}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh) Safari/605.1.15")
 	w := httptest.NewRecorder()
 
 	r.ServeHTTP(w, req)
@@ -379,6 +384,13 @@ func TestLoginHandlerAcceptsEmailCaseInsensitively(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"username":"alice"`) {
 		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+	var event model.LoginEvent
+	if err := db.Last(&event, "user_id = ?", user.UUID).Error; err != nil {
+		t.Fatalf("load login event: %v", err)
+	}
+	if event.Result != model.LoginResultSucceeded || event.Method != "password" || event.IPAddress != "192.0.2.1" || event.UserAgent == "" || event.SessionID == nil {
+		t.Fatalf("unexpected login event: %#v", event)
 	}
 }
 
@@ -623,6 +635,51 @@ func TestCheckEmailHandlerReportsRegisteredEmail(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), `"available":false`) || !strings.Contains(w.Body.String(), `"reason":"registered"`) {
 		t.Fatalf("unexpected body: %s", w.Body.String())
+	}
+}
+
+func TestDeletedAccountUsernameAndEmailRemainUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("ENV", "development")
+	t.Setenv("GIN_MODE", gin.DebugMode)
+	t.Setenv("TURNSTILE_SECRET_KEY", "")
+	db := newAuthTestDB(t)
+	deleted := model.User{Username: "retired-user", Email: "retired@example.com", Password: "hash", Role: "user", IsActive: false}
+	if err := db.Create(&deleted).Error; err != nil {
+		t.Fatalf("create deleted user: %v", err)
+	}
+	if err := db.Delete(&deleted).Error; err != nil {
+		t.Fatalf("soft delete user: %v", err)
+	}
+
+	r := gin.New()
+	r.POST("/check-email", CheckEmailHandler(db))
+	r.POST("/check-username", CheckUsernameHandler(db))
+	r.POST("/register", RegisterHandler(db, service.NewEmailServiceWithoutRedis(db)))
+
+	for _, check := range []struct {
+		path string
+		body string
+	}{
+		{path: "/check-email", body: `{"email":"RETIRED@example.com"}`},
+		{path: "/check-username", body: `{"username":"retired-user"}`},
+	} {
+		req := httptest.NewRequest(http.MethodPost, check.path, strings.NewReader(check.body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"available":false`) {
+			t.Fatalf("expected %s to report unavailable, got %d: %s", check.path, w.Code, w.Body.String())
+		}
+	}
+
+	code := seedAuthVerificationCode(t, db, deleted.Email)
+	req := httptest.NewRequest(http.MethodPost, "/register", strings.NewReader(`{"username":"retired-user","email":"retired@example.com","password":"secret123","password_confirm":"secret123","verification_code":"`+code+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected registration to reject occupied identity, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

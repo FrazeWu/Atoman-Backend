@@ -10,10 +10,12 @@ import (
 type AuthSession struct {
 	ID           uuid.UUID  `json:"id" gorm:"type:uuid;primaryKey"`
 	UserID       uuid.UUID  `json:"user_id" gorm:"type:uuid;not null;index"`
+	AuthVersion  uint       `json:"-" gorm:"not null;default:0"`
 	TokenHash    string     `json:"-" gorm:"size:64;not null;uniqueIndex"`
 	CSRFHash     string     `json:"-" gorm:"size:64;not null;default:''"`
 	Kind         string     `json:"kind" gorm:"size:16;not null;index"`
 	UserAgent    string     `json:"-" gorm:"size:512;not null;default:''"`
+	IPAddress    string     `json:"-" gorm:"size:45;not null;default:''"`
 	IPPrefix     string     `json:"-" gorm:"size:64;not null;default:''"`
 	LastActiveAt time.Time  `json:"last_active_at" gorm:"not null;index"`
 	ExpiresAt    time.Time  `json:"expires_at" gorm:"not null;index"`

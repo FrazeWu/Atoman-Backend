@@ -9,6 +9,7 @@ import (
 
 type authSessionSecurityColumns struct {
 	UserAgent    *string    `gorm:"size:512"`
+	IPAddress    *string    `gorm:"size:45"`
 	IPPrefix     *string    `gorm:"size:64"`
 	LastActiveAt *time.Time `gorm:"index"`
 }
@@ -20,7 +21,7 @@ func (authSessionSecurityColumns) TableName() string {
 func RunAuthSecurityMigration(db *gorm.DB) error {
 	if db.Migrator().HasTable(&model.AuthSession{}) {
 		columns := &authSessionSecurityColumns{}
-		for _, field := range []string{"UserAgent", "IPPrefix", "LastActiveAt"} {
+		for _, field := range []string{"UserAgent", "IPAddress", "IPPrefix", "LastActiveAt"} {
 			if !db.Migrator().HasColumn(&model.AuthSession{}, field) {
 				if err := db.Migrator().AddColumn(columns, field); err != nil {
 					return err
@@ -33,11 +34,14 @@ func RunAuthSecurityMigration(db *gorm.DB) error {
 		if err := db.Exec("UPDATE auth_sessions SET ip_prefix = '' WHERE ip_prefix IS NULL").Error; err != nil {
 			return err
 		}
+		if err := db.Exec("UPDATE auth_sessions SET ip_address = '' WHERE ip_address IS NULL").Error; err != nil {
+			return err
+		}
 		if err := db.Exec("UPDATE auth_sessions SET last_active_at = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE last_active_at IS NULL").Error; err != nil {
 			return err
 		}
 	}
-	if err := db.AutoMigrate(&model.AuthSession{}, &model.EmailVerificationCode{}); err != nil {
+	if err := db.AutoMigrate(&model.AuthSession{}, &model.LoginEvent{}, &model.EmailVerificationCode{}); err != nil {
 		return err
 	}
 	if err := db.Exec("UPDATE email_verification_codes SET used = ? WHERE LENGTH(code) <> 64", true).Error; err != nil {

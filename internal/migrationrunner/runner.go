@@ -102,7 +102,7 @@ func preparePostgresExtensions(db *gorm.DB) error {
 
 func MigrateSchema(db *gorm.DB) error {
 	models := []any{
-		&model.User{}, &model.UserSettings{}, &model.AuthSession{}, &model.EmailVerificationCode{},
+		&model.User{}, &model.UserSettings{}, &model.AuthSession{}, &model.LoginEvent{}, &model.EmailVerificationCode{},
 		&model.ExternalIdentity{}, &model.OAuthFlow{}, &model.Follow{}, &model.Channel{}, &model.Collection{},
 		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.ContentLifecycleEvent{},
 		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{},

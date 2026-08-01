@@ -6,8 +6,10 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/authlogin"
 	"atoman/internal/platform/authsession"
 	"atoman/internal/platform/oauthprovider"
+	"atoman/internal/platform/requestmeta"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -92,8 +94,24 @@ func (s *OAuthService) ProviderNames() []string {
 	return s.providers.Names()
 }
 
-func (s *OAuthService) CreateWebSession(userID uuid.UUID) (authsession.Credentials, error) {
-	return authsession.New(s.db).Create(userID, authsession.KindWeb)
+func (s *OAuthService) CreateWebSession(userID uuid.UUID, method string, info requestmeta.Info, replacedToken string) (authsession.Credentials, error) {
+	var credentials authsession.Credentials
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		created, err := authsession.New(tx).Create(userID, authsession.KindWeb, authsession.Metadata{
+			UserAgent: info.UserAgent, IPAddress: info.IPAddress, IPPrefix: info.IPPrefix,
+		})
+		if err != nil {
+			return err
+		}
+		credentials = created
+		if replacedToken != "" && replacedToken != credentials.Token {
+			if err := authsession.New(tx).Revoke(replacedToken); err != nil {
+				return err
+			}
+		}
+		return authlogin.Record(tx, userID, &credentials.SessionID, method, model.LoginResultSucceeded, "", info)
+	})
+	return credentials, err
 }
 
 func (s *OAuthService) Begin(ctx context.Context, input OAuthBeginInput) (OAuthBeginResult, error) {

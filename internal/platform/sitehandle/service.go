@@ -102,7 +102,7 @@ func (s *Service) ValidateUsernameAvailable(ctx context.Context, username string
 		return ErrReserved
 	}
 	var userCount int64
-	if err := s.db.WithContext(ctx).Model(&model.User{}).Where("LOWER(username) = ?", handle).Count(&userCount).Error; err != nil {
+	if err := s.db.WithContext(ctx).Unscoped().Model(&model.User{}).Where("LOWER(username) = ?", handle).Count(&userCount).Error; err != nil {
 		return err
 	}
 	if userCount > 0 {
@@ -127,7 +127,7 @@ func (s *Service) ValidateChannelSlugAvailable(ctx context.Context, slug string,
 		return ErrReserved
 	}
 	var userCount int64
-	if err := s.db.WithContext(ctx).Model(&model.User{}).Where("LOWER(username) = ?", handle).Count(&userCount).Error; err != nil {
+	if err := s.db.WithContext(ctx).Unscoped().Model(&model.User{}).Where("LOWER(username) = ?", handle).Count(&userCount).Error; err != nil {
 		return err
 	}
 	if userCount > 0 {

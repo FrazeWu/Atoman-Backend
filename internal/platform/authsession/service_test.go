@@ -48,6 +48,70 @@ func TestServiceStoresOnlyTokenHashes(t *testing.T) {
 	}
 }
 
+func TestServiceRejectsSessionCreatedForPreviousAuthVersion(t *testing.T) {
+	sessions, user := newTestService(t)
+
+	if err := sessions.db.Model(&user).Update("auth_version", 1).Error; err != nil {
+		t.Fatalf("advance auth version: %v", err)
+	}
+	credentials, err := sessions.CreateAtVersion(user.UUID, KindAPI, 0)
+	if err != nil {
+		t.Fatalf("create stale session: %v", err)
+	}
+
+	if _, err := sessions.Authenticate(credentials.Token, KindAPI); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected stale session to be invalid, got %v", err)
+	}
+}
+
+func TestServiceCreateUsesCurrentAuthVersion(t *testing.T) {
+	sessions, user := newTestService(t)
+	if err := sessions.db.Model(&user).Update("auth_version", 3).Error; err != nil {
+		t.Fatalf("advance auth version: %v", err)
+	}
+
+	credentials, err := sessions.Create(user.UUID, KindAPI)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	var stored model.AuthSession
+	if err := sessions.db.First(&stored, "token_hash = ?", Hash(credentials.Token)).Error; err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	if stored.AuthVersion != 3 {
+		t.Fatalf("expected auth version 3, got %d", stored.AuthVersion)
+	}
+}
+
+func TestServiceRevokeUserExceptKeepsCurrentSessionOnNewVersion(t *testing.T) {
+	sessions, user := newTestService(t)
+	current, err := sessions.Create(user.UUID, KindAPI)
+	if err != nil {
+		t.Fatalf("create current session: %v", err)
+	}
+	other, err := sessions.Create(user.UUID, KindWeb)
+	if err != nil {
+		t.Fatalf("create other session: %v", err)
+	}
+	var currentSession model.AuthSession
+	if err := sessions.db.First(&currentSession, "token_hash = ?", Hash(current.Token)).Error; err != nil {
+		t.Fatalf("load current session: %v", err)
+	}
+	if err := sessions.db.Model(&user).Update("auth_version", 1).Error; err != nil {
+		t.Fatalf("advance auth version: %v", err)
+	}
+	if err := sessions.RevokeUserExcept(user.UUID, currentSession.ID); err != nil {
+		t.Fatalf("revoke other sessions: %v", err)
+	}
+
+	if _, err := sessions.Authenticate(current.Token, KindAPI); err != nil {
+		t.Fatalf("expected current session to remain valid, got %v", err)
+	}
+	if _, err := sessions.Authenticate(other.Token, KindWeb); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("expected other session to be invalid, got %v", err)
+	}
+}
+
 func TestServiceRevokesSessionImmediately(t *testing.T) {
 	sessions, user := newTestService(t)
 	credentials, err := sessions.Create(user.UUID, KindAPI)
@@ -69,6 +133,7 @@ func TestServiceListsSessionsWithDeviceMetadata(t *testing.T) {
 	sessions, user := newTestService(t)
 	credentials, err := sessions.Create(user.UUID, KindWeb, Metadata{
 		UserAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15",
+		IPAddress: "203.0.113.19",
 		IPPrefix:  "203.0.113.0/24",
 	})
 	if err != nil {
@@ -82,7 +147,26 @@ func TestServiceListsSessionsWithDeviceMetadata(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected one session, got %d", len(items))
 	}
-	if !items[0].Current || items[0].DeviceName == "" || items[0].IPPrefix != "203.0.113.0/24" {
+	if !items[0].Current || items[0].DeviceName == "" || items[0].IPAddress != "203.0.113.19" || items[0].IPPrefix != "203.0.113.0/24" {
 		t.Fatalf("unexpected listed session: %#v", items[0])
+	}
+}
+
+func TestServiceKeepsAtMostTenActiveSessions(t *testing.T) {
+	sessions, user := newTestService(t)
+	for index := 0; index < MaxActiveSessions+3; index++ {
+		sessions.now = func() time.Time {
+			return time.Date(2026, 7, 20, 10, index, 0, 0, time.UTC)
+		}
+		if _, err := sessions.Create(user.UUID, KindWeb); err != nil {
+			t.Fatalf("create session %d: %v", index, err)
+		}
+	}
+	items, err := sessions.List(user.UUID, "")
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(items) != MaxActiveSessions {
+		t.Fatalf("expected %d active sessions, got %d", MaxActiveSessions, len(items))
 	}
 }

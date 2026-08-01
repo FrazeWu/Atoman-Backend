@@ -17,6 +17,7 @@ import (
 	"atoman/internal/platform/httpx"
 	"atoman/internal/platform/oauthprovider"
 	"atoman/internal/platform/ratelimit"
+	"atoman/internal/platform/requestmeta"
 	"atoman/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -202,7 +203,7 @@ func (h *OAuthHandler) callback(c *gin.Context) {
 		h.redirectFailure(c)
 		return
 	}
-	credentials, err := h.service.CreateWebSession(result.User.UUID)
+	credentials, err := h.service.CreateWebSession(result.User.UUID, "oauth_"+c.Param("provider"), requestmeta.FromGin(c), webSessionCookie(c))
 	if err != nil {
 		log.Printf("[OAuth] session creation failed: %v", err)
 		h.redirectFailure(c)
@@ -506,7 +507,7 @@ func (h *OAuthHandler) pendingToken(c *gin.Context) (string, bool) {
 }
 
 func (h *OAuthHandler) writeCompletion(c *gin.Context, result service.OAuthCompletionResult) {
-	credentials, err := h.service.CreateWebSession(result.User.UUID)
+	credentials, err := h.service.CreateWebSession(result.User.UUID, "oauth", requestmeta.FromGin(c), webSessionCookie(c))
 	if err != nil {
 		httpx.Error(c, apperr.Internal(err))
 		return

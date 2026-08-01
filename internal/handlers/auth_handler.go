@@ -3,19 +3,23 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authlogin"
 	"atoman/internal/platform/authsession"
 	"atoman/internal/platform/ratelimit"
+	"atoman/internal/platform/requestmeta"
 	"atoman/internal/service"
 )
 
@@ -107,6 +111,38 @@ func setAuthSessionCookie(c *gin.Context, credentials authsession.Credentials) {
 	})
 }
 
+func authSessionMetadata(info requestmeta.Info) authsession.Metadata {
+	return authsession.Metadata{UserAgent: info.UserAgent, IPAddress: info.IPAddress, IPPrefix: info.IPPrefix}
+}
+
+func recordLoginFailure(db *gorm.DB, userID uuid.UUID, method, failureCode string, info requestmeta.Info) {
+	if err := authlogin.Record(db, userID, nil, method, model.LoginResultFailed, failureCode, info); err != nil {
+		log.Printf("[Auth] failed to record login failure: %v", err)
+	}
+}
+
+func revokeReplacedWebSession(c *gin.Context, db *gorm.DB, newToken string) {
+	existing := webSessionCookie(c)
+	if existing != "" && existing != newToken {
+		_ = authsession.New(db).Revoke(existing)
+	}
+}
+
+func webSessionCookie(c *gin.Context) string {
+	existing, err := c.Cookie(authTokenCookieName)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(existing)
+}
+
+func requestIPAddress(c *gin.Context, info requestmeta.Info) string {
+	if info.IPAddress != "" {
+		return info.IPAddress
+	}
+	return c.ClientIP()
+}
+
 // RegisterInput represents user registration request
 type RegisterInput struct {
 	Username         string `json:"username" binding:"required"`
@@ -191,6 +227,7 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 	ipLimiter := ratelimit.New()
 	return func(c *gin.Context) {
 		var input RegisterInput
+		requestInfo := requestmeta.FromGin(c)
 
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -203,7 +240,7 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 			c.JSON(http.StatusBadRequest, gin.H{"code": "auth.password_invalid", "error": "密码长度需为 6–72 字节"})
 			return
 		}
-		if !allowAuthRequest(c, ipLimiter, "register:ip:"+c.ClientIP(), 10, time.Hour) ||
+		if !allowAuthRequest(c, ipLimiter, "register:ip:"+requestIPAddress(c, requestInfo), 10, time.Hour) ||
 			!allowAuthRequest(c, emailLimiter, "register:email:"+input.Email, 5, 15*time.Minute) {
 			return
 		}
@@ -222,7 +259,7 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 
 		// Check if user exists
 		var existingUser model.User
-		if err := db.Where("LOWER(username) = ? OR LOWER(email) = ?", input.Username, input.Email).First(&existingUser).Error; err == nil {
+		if err := db.Unscoped().Where("LOWER(username) = ? OR LOWER(email) = ?", input.Username, input.Email).First(&existingUser).Error; err == nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "User already exists"})
 			return
 		}
@@ -264,17 +301,18 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 			if err := service.NewUserBootstrapService(tx).EnsureDefaults(user.UUID, user.Username); err != nil {
 				return err
 			}
-			created, err := authsession.New(tx).Create(user.UUID, authsession.KindWeb)
+			created, err := authsession.New(tx).Create(user.UUID, authsession.KindWeb, authSessionMetadata(requestInfo))
 			if err != nil {
 				return err
 			}
 			credentials = created
-			return nil
+			return authlogin.Record(tx, user.UUID, &credentials.SessionID, "register", model.LoginResultSucceeded, "", requestInfo)
 		}); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create default channel"})
 			return
 		}
 
+		revokeReplacedWebSession(c, db, credentials.Token)
 		setAuthSessionCookie(c, credentials)
 		c.JSON(http.StatusCreated, userAuthResponse(user, credentials.CSRFToken))
 	}
@@ -350,6 +388,7 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 	ipLimiter := ratelimit.New()
 	return func(c *gin.Context) {
 		var input LoginInput
+		requestInfo := requestmeta.FromGin(c)
 
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -357,13 +396,18 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		normalizedLogin := strings.ToLower(strings.TrimSpace(input.Username))
-		if !allowAuthRequest(c, ipLimiter, "login:ip:"+c.ClientIP(), 20, 15*time.Minute) ||
+		if !allowAuthRequest(c, ipLimiter, "login:ip:"+requestIPAddress(c, requestInfo), 20, 15*time.Minute) ||
 			!allowAuthRequest(c, accountLimiter, "login:account:"+normalizedLogin, 10, 15*time.Minute) {
 			return
 		}
 
 		var user model.User
-		if err := db.Where("(LOWER(username) = ? OR LOWER(email) = ?) AND is_active = ?", normalizedLogin, normalizedLogin, true).First(&user).Error; err != nil {
+		if err := db.Where("LOWER(username) = ? OR LOWER(email) = ?", normalizedLogin, normalizedLogin).First(&user).Error; err != nil {
+			authError(c, http.StatusUnauthorized, authAccountNotFound, "账号不存在")
+			return
+		}
+		if !user.IsActive {
+			recordLoginFailure(db, user.UUID, "password", "account_inactive", requestInfo)
 			authError(c, http.StatusUnauthorized, authAccountNotFound, "账号不存在")
 			return
 		}
@@ -371,21 +415,32 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 			user.Role = "user"
 		}
 		if user.Password == "" {
+			recordLoginFailure(db, user.UUID, "password", string(authPasswordNotSet), requestInfo)
 			authError(c, http.StatusUnauthorized, authPasswordNotSet, "请使用第三方账号登录")
 			return
 		}
 
 		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
+			recordLoginFailure(db, user.UUID, "password", string(authPasswordMismatch), requestInfo)
 			authError(c, http.StatusUnauthorized, authPasswordMismatch, "密码不正确")
 			return
 		}
 
-		credentials, err := authsession.New(db).Create(user.UUID, authsession.KindWeb)
+		var credentials authsession.Credentials
+		err := db.Transaction(func(tx *gorm.DB) error {
+			created, err := authsession.New(tx).CreateAtVersion(user.UUID, authsession.KindWeb, user.AuthVersion, authSessionMetadata(requestInfo))
+			if err != nil {
+				return err
+			}
+			credentials = created
+			return authlogin.Record(tx, user.UUID, &credentials.SessionID, "password", model.LoginResultSucceeded, "", requestInfo)
+		})
 		if err != nil {
 			authError(c, http.StatusInternalServerError, authTokenGenerationFailed, "登录服务暂时不可用，请稍后重试")
 			return
 		}
 
+		revokeReplacedWebSession(c, db, credentials.Token)
 		setAuthSessionCookie(c, credentials)
 
 		c.JSON(http.StatusOK, userAuthResponse(user, credentials.CSRFToken))
@@ -429,18 +484,24 @@ func TokenLoginHandler(db *gorm.DB) gin.HandlerFunc {
 	ipLimiter := ratelimit.New()
 	return func(c *gin.Context) {
 		var input LoginInput
+		requestInfo := requestmeta.FromGin(c)
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
 		normalizedLogin := strings.ToLower(strings.TrimSpace(input.Username))
-		if !allowAuthRequest(c, ipLimiter, "token:ip:"+c.ClientIP(), 20, 15*time.Minute) ||
+		if !allowAuthRequest(c, ipLimiter, "token:ip:"+requestIPAddress(c, requestInfo), 20, 15*time.Minute) ||
 			!allowAuthRequest(c, accountLimiter, "token:account:"+normalizedLogin, 10, 15*time.Minute) {
 			return
 		}
 		var user model.User
-		if err := db.Where("(LOWER(username) = ? OR LOWER(email) = ?) AND is_active = ?", normalizedLogin, normalizedLogin, true).First(&user).Error; err != nil {
+		if err := db.Where("LOWER(username) = ? OR LOWER(email) = ?", normalizedLogin, normalizedLogin).First(&user).Error; err != nil {
+			authError(c, http.StatusUnauthorized, authAccountNotFound, "账号不存在")
+			return
+		}
+		if !user.IsActive {
+			recordLoginFailure(db, user.UUID, "api_token", "account_inactive", requestInfo)
 			authError(c, http.StatusUnauthorized, authAccountNotFound, "账号不存在")
 			return
 		}
@@ -448,15 +509,25 @@ func TokenLoginHandler(db *gorm.DB) gin.HandlerFunc {
 			user.Role = "user"
 		}
 		if user.Password == "" {
+			recordLoginFailure(db, user.UUID, "api_token", string(authPasswordNotSet), requestInfo)
 			authError(c, http.StatusUnauthorized, authPasswordNotSet, "请使用第三方账号登录")
 			return
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(input.Password)); err != nil {
+			recordLoginFailure(db, user.UUID, "api_token", string(authPasswordMismatch), requestInfo)
 			authError(c, http.StatusUnauthorized, authPasswordMismatch, "密码不正确")
 			return
 		}
 
-		credentials, err := authsession.New(db).Create(user.UUID, authsession.KindAPI)
+		var credentials authsession.Credentials
+		err := db.Transaction(func(tx *gorm.DB) error {
+			created, err := authsession.New(tx).CreateAtVersion(user.UUID, authsession.KindAPI, user.AuthVersion, authSessionMetadata(requestInfo))
+			if err != nil {
+				return err
+			}
+			credentials = created
+			return authlogin.Record(tx, user.UUID, &credentials.SessionID, "api_token", model.LoginResultSucceeded, "", requestInfo)
+		})
 		if err != nil {
 			authError(c, http.StatusInternalServerError, authTokenGenerationFailed, "登录服务暂时不可用，请稍后重试")
 			return
@@ -475,7 +546,7 @@ func CheckEmailHandler(db *gorm.DB) gin.HandlerFunc {
 
 		email := strings.ToLower(strings.TrimSpace(input.Email))
 		var count int64
-		if err := db.Model(&model.User{}).Where("LOWER(email) = ?", email).Count(&count).Error; err != nil {
+		if err := db.Unscoped().Model(&model.User{}).Where("LOWER(email) = ?", email).Count(&count).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to check email"})
 			return
 		}

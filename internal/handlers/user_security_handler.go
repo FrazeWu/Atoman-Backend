@@ -47,7 +47,7 @@ func SendEmailChangeCode(db *gorm.DB) gin.HandlerFunc {
 		}
 		email := strings.ToLower(strings.TrimSpace(input.Email))
 		var count int64
-		if err := db.Model(&model.User{}).Where("LOWER(email) = ?", email).Count(&count).Error; err != nil {
+		if err := db.Unscoped().Model(&model.User{}).Where("LOWER(email) = ?", email).Count(&count).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "发送验证码失败"})
 			return
 		}
@@ -147,7 +147,7 @@ func ChangeEmail(db *gorm.DB) gin.HandlerFunc {
 				return gorm.ErrRecordNotFound
 			}
 			var count int64
-			if err := tx.Model(&model.User{}).Where("LOWER(email) = ? AND uuid <> ?", email, user.UUID).Count(&count).Error; err != nil {
+			if err := tx.Unscoped().Model(&model.User{}).Where("LOWER(email) = ? AND uuid <> ?", email, user.UUID).Count(&count).Error; err != nil {
 				return err
 			}
 			if count > 0 {
