@@ -37,6 +37,7 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 		errorMessage = stringValue(payload["error_message"])
 	}
 
+	coverURL := resolveAlbumImportCoverURL(payload)
 	dto := AlbumImportDTO{
 		ImportID:  session.ID.String(),
 		Status:    session.Status,
@@ -52,7 +53,7 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 		ArchiveName:       stringValue(payload["archive_name"]),
 		UploadProgress:    floatValue(payload["upload_progress"]),
 		UploadSpeed:       floatValue(payload["upload_speed"]),
-		CoverURL:          stringValue(payload["cover_url"]),
+		CoverURL:          coverURL,
 		CoverKey:          stringValue(payload["cover_key"]),
 		DerivedAlbumTitle: stringValue(payload["derived_album_title"]),
 		DerivedCover:      stringValue(payload["derived_cover"]),

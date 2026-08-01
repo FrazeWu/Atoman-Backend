@@ -21,6 +21,7 @@ type ArtistMemberPayload struct {
 type AlbumImportArtistPayload struct {
 	Name            string                   `json:"name"`
 	LegalName       string                   `json:"legal_name"`
+	ImageURL        string                   `json:"image_url"`
 	StageNames      []ArtistStageNamePayload `json:"stage_names"`
 	BirthPlace      string                   `json:"birth_place"`
 	ArtistForm      string                   `json:"artist_form"`
@@ -31,6 +32,7 @@ type AlbumImportArtistPayload struct {
 
 type AlbumImportAlbumPayload struct {
 	Title       string                    `json:"title"`
+	CoverURL    string                    `json:"cover_url"`
 	ReleaseDate string                    `json:"release_date"`
 	ReleaseYear int                       `json:"release_year"`
 	Tracks      []AlbumImportTrackPayload `json:"tracks"`
@@ -58,6 +60,7 @@ type CommitAlbumImportArtistInput struct {
 	ArtistID        string                   `json:"artist_id"`
 	Name            string                   `json:"name"`
 	LegalName       string                   `json:"legal_name"`
+	ImageURL        string                   `json:"image_url"`
 	StageNames      []ArtistStageNamePayload `json:"stage_names"`
 	BirthPlace      string                   `json:"birth_place"`
 	ArtistForm      string                   `json:"artist_form"`

@@ -55,6 +55,7 @@ func Run(db *gorm.DB) error {
 		{"forum search indexes migration", migrations.RunForumSearchIndexes},
 		{"revision unique indexes migration", migrations.RunRevisionUniqueIndexes},
 		{"music album import v2 migration", migrations.RunMusicAlbumImportV2Migration},
+		{"music album import media migration", migrations.RunMusicAlbumImportMediaMigration},
 		{"music artist extended fields migration", migrations.RunMusicArtistExtendedFieldsMigration},
 		{"music bookmarks playlists migration", migrations.RunMusicBookmarksPlaylistsMigration},
 		{"music favorite playlist migration", migrations.RunMusicFavoritePlaylistMigration},

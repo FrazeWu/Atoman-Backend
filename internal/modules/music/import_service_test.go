@@ -115,6 +115,19 @@ func TestBuildAlbumImportDTOMapsV2StateAndFiles(t *testing.T) {
 	}
 }
 
+func TestBuildAlbumImportDTOResolvesProcessedCoverKey(t *testing.T) {
+	t.Setenv("S3_URL_PREFIX", "https://assets.atoman.test")
+	session := model.AlbumImportSession{
+		PayloadJSON: `{"cover_key":"music/album-imports/playback/sessions/import-1/cover/cover.webp"}`,
+	}
+
+	dto := buildAlbumImportDTO(session)
+	want := "https://assets.atoman.test/music/album-imports/playback/sessions/import-1/cover/cover.webp"
+	if dto.CoverURL != want {
+		t.Fatalf("expected resolved cover URL %q, got %q", want, dto.CoverURL)
+	}
+}
+
 func TestGetAlbumImportSessionPreloadsFilesAndJob(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
@@ -849,6 +862,7 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 		Artist: AlbumImportArtistPayload{
 			Name:      "FKA twigs",
 			LegalName: "Tahliah Debrett Barnett",
+			ImageURL:  "https://cdn.example.com/fka-twigs.jpg",
 			StageNames: []ArtistStageNamePayload{
 				{Name: "FKA twigs", IsPrimary: true, StartDateText: "2012"},
 				{Name: "Twigs", IsPrimary: false, EndDateText: "2012"},
@@ -857,6 +871,7 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 		},
 		Album: AlbumImportAlbumPayload{
 			Title:       "LP1",
+			CoverURL:    "https://cdn.example.com/lp1.jpg",
 			ReleaseDate: "2014-08-06",
 			ReleaseYear: 2014,
 			Tracks: []AlbumImportTrackPayload{
@@ -881,6 +896,9 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	}
 	if artist.LegalName != "Tahliah Debrett Barnett" {
 		t.Fatalf("expected legal name persisted, got %#v", artist)
+	}
+	if artist.ImageURL != "https://cdn.example.com/fka-twigs.jpg" {
+		t.Fatalf("expected artist image persisted, got %q", artist.ImageURL)
 	}
 	var stageNames []ArtistStageNamePayload
 	if err := json.Unmarshal([]byte(artist.StageNamesJSON), &stageNames); err != nil {
@@ -917,8 +935,8 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	if len(songs) != 2 {
 		t.Fatalf("expected 2 songs, got %#v", songs)
 	}
-	if album.CoverURL != "" {
-		t.Fatalf("expected empty album cover placeholder fallback, got %q", album.CoverURL)
+	if album.CoverURL != "https://cdn.example.com/lp1.jpg" {
+		t.Fatalf("expected submitted album cover, got %q", album.CoverURL)
 	}
 	for _, song := range songs {
 		if song.AudioURL != "" {
@@ -1004,10 +1022,11 @@ func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T)
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.atoman.test")
 
-	coverKey := "music/covers/uploads/users/user-1/2026/07/cover.jpg"
-	audioKey := "music/audio/uploads/users/user-1/2026/07/audio.mp3"
+	sessionID := uuid.New()
+	coverKey := "music/album-imports/playback/sessions/" + sessionID.String() + "/cover/cover.jpg"
+	audioKey := "music/album-imports/playback/sessions/" + sessionID.String() + "/files/audio.mp3"
 	payloadJSON, err := json.Marshal(map[string]any{
-		"derived_cover": "https://cdn.atoman.test/" + coverKey,
+		"cover_key": coverKey,
 		"derived_tracks": []map[string]any{{
 			"title":        "Archangel",
 			"track_number": 1,
@@ -1018,7 +1037,7 @@ func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
 	}
-	session := model.AlbumImportSession{UserID: &user.ID, Status: AlbumImportStatusReady, PayloadJSON: string(payloadJSON)}
+	session := model.AlbumImportSession{Base: model.Base{ID: sessionID}, UserID: &user.ID, Status: AlbumImportStatusReady, PayloadJSON: string(payloadJSON)}
 	if err := db.Create(&session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}

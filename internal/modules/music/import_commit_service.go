@@ -83,13 +83,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			_ = json.Unmarshal([]byte(session.PayloadJSON), &sessionPayload)
 		}
 
-		coverURL := ""
-		if sessionPayload != nil {
-			if url, ok := sessionPayload["cover_url"].(string); ok && url != "" {
-				coverURL = url
-			} else if url, ok := sessionPayload["derived_cover"].(string); ok && url != "" {
-				coverURL = url
-			}
+		coverURL := strings.TrimSpace(input.Album.CoverURL)
+		if coverURL == "" && sessionPayload != nil {
+			coverURL = resolveAlbumImportCoverURL(sessionPayload)
 		}
 
 		album := model.Album{
@@ -122,6 +118,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		promotedCoverURL, oldCoverKey, newCoverKey, err := s.promoteAlbumImportAsset(
 			album.CoverURL,
 			storage.BuildMusicAlbumCoverKey(album.ID.String(), path.Ext(album.CoverURL)),
+			id,
 		)
 		if err != nil {
 			return err
@@ -167,6 +164,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteAlbumImportAsset(
 				song.AudioURL,
 				storage.BuildMusicAlbumTrackKey(album.ID.String(), song.ID.String(), path.Ext(song.AudioURL)),
+				id,
 			)
 			if err != nil {
 				return err
@@ -243,14 +241,14 @@ func (s *Service) FinalizeSubmittedAlbumImport(id uuid.UUID) error {
 	return err
 }
 
-func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string) (string, string, string, error) {
+func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string, importID uuid.UUID) (string, string, string, error) {
 	if s.s3 == nil || !strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_TYPE")), "s3") {
 		return rawURL, "", "", nil
 	}
 	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
 	urlPrefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
 	sourceKey, ok := musicAlbumImportObjectKey(rawURL, urlPrefix)
-	if bucket == "" || urlPrefix == "" || !ok || !strings.Contains(sourceKey, "/uploads/") {
+	if bucket == "" || urlPrefix == "" || !ok || !isPromotableAlbumImportKey(sourceKey, importID) {
 		return rawURL, "", "", nil
 	}
 	escapedSource := strings.ReplaceAll(url.PathEscape(bucket+"/"+sourceKey), "%2F", "/")
@@ -262,6 +260,11 @@ func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string) (string
 		return "", "", "", err
 	}
 	return urlPrefix + "/" + destinationKey, sourceKey, destinationKey, nil
+}
+
+func isPromotableAlbumImportKey(key string, importID uuid.UUID) bool {
+	playbackPrefix := "music/album-imports/playback/sessions/" + importID.String() + "/"
+	return strings.Contains(key, "/uploads/") || strings.HasPrefix(key, playbackPrefix)
 }
 
 func musicAlbumImportObjectKey(rawURL, urlPrefix string) (string, bool) {
@@ -338,6 +341,7 @@ func resolveCommitAlbumImportArtists(tx *gorm.DB, input CommitAlbumImportSession
 			ArtistID:        input.ArtistID,
 			Name:            input.Artist.Name,
 			LegalName:       input.Artist.LegalName,
+			ImageURL:        input.Artist.ImageURL,
 			StageNames:      input.Artist.StageNames,
 			BirthPlace:      input.Artist.BirthPlace,
 			ArtistForm:      input.Artist.ArtistForm,
@@ -396,6 +400,7 @@ func buildArtistFromImportInput(input CommitAlbumImportArtistInput) (*model.Arti
 	artist := &model.Artist{
 		Name:           strings.TrimSpace(input.Name),
 		LegalName:      strings.TrimSpace(input.LegalName),
+		ImageURL:       strings.TrimSpace(input.ImageURL),
 		StageNamesJSON: mustMarshalStageNames(input.StageNames),
 		BirthPlace:     strings.TrimSpace(input.BirthPlace),
 		ArtistForm:     normalizeArtistForm(input.ArtistForm),
