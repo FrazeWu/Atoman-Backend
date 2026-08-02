@@ -154,6 +154,51 @@ func hydrateArtistStats(db *gorm.DB, artists []model.Artist) error {
 	return nil
 }
 
+// hydrateArtistDisplayImages supplies a display-only fallback for artists
+// without a dedicated portrait. It never persists the album cover as artist data.
+func hydrateArtistDisplayImages(db *gorm.DB, artists []model.Artist) error {
+	missingImageIDs := make([]uuid.UUID, 0, len(artists))
+	for _, artist := range artists {
+		if strings.TrimSpace(artist.ImageURL) == "" {
+			missingImageIDs = append(missingImageIDs, artist.ID)
+		}
+	}
+	if len(missingImageIDs) == 0 {
+		return nil
+	}
+
+	var coverRows []struct {
+		ArtistID uuid.UUID
+		CoverURL string
+	}
+	if err := db.Table("album_artists").
+		Select("album_artists.artist_id AS artist_id, \"Albums\".cover_url AS cover_url").
+		Joins("JOIN \"Albums\" ON \"Albums\".id = album_artists.album_id").
+		Where("album_artists.artist_id IN ?", missingImageIDs).
+		Where("TRIM(COALESCE(\"Albums\".cover_url, '')) <> ''").
+		Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed").
+		Order("album_artists.artist_id ASC").
+		Order("\"Albums\".release_date DESC").
+		Order("\"Albums\".created_at DESC").
+		Scan(&coverRows).Error; err != nil {
+		return err
+	}
+
+	coversByArtistID := make(map[uuid.UUID]string, len(coverRows))
+	for _, row := range coverRows {
+		if _, exists := coversByArtistID[row.ArtistID]; !exists {
+			coversByArtistID[row.ArtistID] = row.CoverURL
+		}
+	}
+	for i := range artists {
+		if strings.TrimSpace(artists[i].ImageURL) == "" {
+			artists[i].ImageURL = coversByArtistID[artists[i].ID]
+		}
+	}
+
+	return nil
+}
+
 func (h *Handler) listArtists(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
 	query := strings.TrimSpace(c.Query("q"))
@@ -178,6 +223,10 @@ func (h *Handler) listArtists(c *gin.Context) {
 		return
 	}
 	if err := hydrateArtistStats(h.service.db, artists); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := hydrateArtistDisplayImages(h.service.db, artists); err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -231,6 +280,10 @@ func (h *Handler) getArtist(c *gin.Context) {
 	}
 	artistRows := []model.Artist{artist}
 	if err := hydrateArtistStats(h.service.db, artistRows); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := hydrateArtistDisplayImages(h.service.db, artistRows); err != nil {
 		httpx.Error(c, err)
 		return
 	}

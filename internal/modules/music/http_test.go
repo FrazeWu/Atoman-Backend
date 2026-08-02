@@ -662,6 +662,52 @@ func TestRegisterRoutesListsArtistsThroughMusicV1(t *testing.T) {
 	}
 }
 
+func TestHydrateArtistDisplayImagesUsesAlbumCoverWithoutPersistingIt(t *testing.T) {
+	service, db, _ := newMusicHTTPTestService(t)
+	missingImageArtist := model.Artist{Name: "Album Cover Artist", EntryStatus: "open"}
+	portraitArtist := model.Artist{Name: "Portrait Artist", ImageURL: "/uploads/portrait.jpg", EntryStatus: "open"}
+	if err := db.Create(&missingImageArtist).Error; err != nil {
+		t.Fatalf("create artist without portrait: %v", err)
+	}
+	if err := db.Create(&portraitArtist).Error; err != nil {
+		t.Fatalf("create artist with portrait: %v", err)
+	}
+
+	coverAlbum := model.Album{Title: "Fallback Cover", CoverURL: "/uploads/album-cover.jpg", EntryStatus: "open", Status: "open"}
+	portraitAlbum := model.Album{Title: "Ignored Cover", CoverURL: "/uploads/other-cover.jpg", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&coverAlbum).Error; err != nil {
+		t.Fatalf("create fallback album: %v", err)
+	}
+	if err := db.Create(&portraitAlbum).Error; err != nil {
+		t.Fatalf("create portrait album: %v", err)
+	}
+	if err := db.Model(&coverAlbum).Association("Artists").Append(&missingImageArtist); err != nil {
+		t.Fatalf("associate fallback album: %v", err)
+	}
+	if err := db.Model(&portraitAlbum).Association("Artists").Append(&portraitArtist); err != nil {
+		t.Fatalf("associate portrait album: %v", err)
+	}
+
+	artists := []model.Artist{missingImageArtist, portraitArtist}
+	if err := hydrateArtistDisplayImages(service.db, artists); err != nil {
+		t.Fatalf("hydrate display images: %v", err)
+	}
+	if artists[0].ImageURL != "/uploads/album-cover.jpg" {
+		t.Fatalf("expected album cover fallback, got %q", artists[0].ImageURL)
+	}
+	if artists[1].ImageURL != "/uploads/portrait.jpg" {
+		t.Fatalf("expected dedicated portrait to win, got %q", artists[1].ImageURL)
+	}
+
+	var persisted model.Artist
+	if err := db.First(&persisted, "id = ?", missingImageArtist.ID).Error; err != nil {
+		t.Fatalf("reload artist: %v", err)
+	}
+	if persisted.ImageURL != "" {
+		t.Fatalf("display fallback must not persist as artist image, got %q", persisted.ImageURL)
+	}
+}
+
 func TestRegisterRoutesCreatesArtistThroughMusicV1(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	r := newMusicHTTPRouter(service, &user)

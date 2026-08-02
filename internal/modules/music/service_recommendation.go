@@ -124,8 +124,16 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 	}
 
 	artistIDs := make([]uuid.UUID, 0, len(dbArtists))
+	artists := make([]model.Artist, 0, len(dbArtists))
 	for _, art := range dbArtists {
 		artistIDs = append(artistIDs, art.ID)
+		artists = append(artists, art.Artist)
+	}
+	if err := hydrateArtistDisplayImages(s.db, artists); err != nil {
+		return nil, 0, err
+	}
+	for i := range dbArtists {
+		dbArtists[i].ImageURL = artists[i].ImageURL
 	}
 
 	artistBookmarkCounts := map[uuid.UUID]int64{}
