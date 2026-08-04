@@ -553,6 +553,14 @@ func TestValidateArchiveListingRejectsDangerousEntriesAndLimits(t *testing.T) {
 	}
 }
 
+func TestValidateArchiveListingRejectsEncryptedArchive(t *testing.T) {
+	listing := "Path = Disc/track.mp3\nSize = 1\nPacked Size = 1\nEncrypted = +\n"
+	err := validateArchiveListing([]byte(listing))
+	if err == nil || !strings.Contains(err.Error(), "压缩包已加密") {
+		t.Fatalf("expected encrypted archive rejection, got %v", err)
+	}
+}
+
 func TestValidateArchiveListingIgnoresSevenZipArchiveHeader(t *testing.T) {
 	listing := `
 Path = /tmp/atoman-archive-import-123/source.zip
@@ -640,6 +648,44 @@ func TestMediaImportProcessorTranscodesUploadedAudioAndUpdatesFile(t *testing.T)
 	}
 	if ffmpegs != 1 || len(store.puts) != 1 {
 		t.Fatalf("completed uploaded audio was reprocessed: ffmpegs=%d objects=%d", ffmpegs, len(store.puts))
+	}
+}
+
+func TestMediaImportProcessorProcessesUploadedCoverAndPersistsTracks(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	audio := model.AlbumImportFile{ImportID: session.ID, RelativePath: "01 - Intro.flac", FileName: "01 - Intro.flac", Role: AlbumImportFileRoleAudio, DetectedFormat: "flac", SourceKey: "source/intro.flac", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
+	cover := model.AlbumImportFile{ImportID: session.ID, RelativePath: "cover.png", FileName: "cover.png", Role: AlbumImportFileRoleCover, DetectedFormat: "png", SourceKey: "source/cover.png", UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending}
+	if err := db.Create(&audio).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&cover).Error; err != nil {
+		t.Fatal(err)
+	}
+	runner := &fakeMediaCommandRunner{paths: map[string]string{"ffmpeg": "/bin/ffmpeg", "ffprobe": "/bin/ffprobe"}}
+	store := &fakeMediaStore{objects: map[string][]byte{audio.SourceKey: []byte("audio"), cover.SourceKey: []byte("cover")}, puts: map[string][]byte{}}
+	processor := NewMediaImportProcessor(db, store, runner, "https://assets.example.com")
+
+	if err := processor.Process(context.Background(), model.AlbumImportJob{ImportID: session.ID}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var stored model.AlbumImportSession
+	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stored.PayloadJSON, "cover_key") || !strings.Contains(stored.PayloadJSON, "derived_tracks") {
+		t.Fatalf("expected cover and tracks in session payload, got %s", stored.PayloadJSON)
+	}
+	var storedCover model.AlbumImportFile
+	if err := db.First(&storedCover, "id = ?", cover.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if storedCover.ProcessingStatus != "completed" {
+		t.Fatalf("expected processed cover, got %#v", storedCover)
 	}
 }
 

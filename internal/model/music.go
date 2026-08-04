@@ -53,6 +53,7 @@ func (ArtistMember) TableName() string {
 type Album struct {
 	Base
 	Title         string     `json:"title" gorm:"not null"`
+	Description   string     `json:"description" gorm:"type:text"`
 	Year          int        `json:"year"`
 	ReleaseYear   int        `json:"release_year"`
 	ReleaseDate   time.Time  `json:"release_date" gorm:"type:date"`

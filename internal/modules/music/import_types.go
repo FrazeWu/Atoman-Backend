@@ -21,7 +21,10 @@ type ArtistMemberPayload struct {
 type AlbumImportArtistPayload struct {
 	Name            string                   `json:"name"`
 	LegalName       string                   `json:"legal_name"`
+	Bio             string                   `json:"bio"`
 	ImageURL        string                   `json:"image_url"`
+	Nationality     string                   `json:"nationality"`
+	BirthDate       string                   `json:"birth_date"`
 	StageNames      []ArtistStageNamePayload `json:"stage_names"`
 	BirthPlace      string                   `json:"birth_place"`
 	ArtistForm      string                   `json:"artist_form"`
@@ -32,6 +35,8 @@ type AlbumImportArtistPayload struct {
 
 type AlbumImportAlbumPayload struct {
 	Title       string                    `json:"title"`
+	Description string                    `json:"description"`
+	AlbumType   string                    `json:"album_type"`
 	CoverURL    string                    `json:"cover_url"`
 	ReleaseDate string                    `json:"release_date"`
 	ReleaseYear int                       `json:"release_year"`
@@ -50,17 +55,22 @@ type CreateAlbumImportSessionInput struct {
 }
 
 type CommitAlbumImportSessionInput struct {
-	ArtistID string                         `json:"artist_id"`
-	Artist   AlbumImportArtistPayload       `json:"artist"`
-	Artists  []CommitAlbumImportArtistInput `json:"artists"`
-	Album    AlbumImportAlbumPayload        `json:"album"`
+	ArtistID     string                         `json:"artist_id"`
+	Artist       AlbumImportArtistPayload       `json:"artist"`
+	Artists      []CommitAlbumImportArtistInput `json:"artists"`
+	ArtistSource string                         `json:"artist_source"`
+	Album        AlbumImportAlbumPayload        `json:"album"`
+	AlbumSource  string                         `json:"album_source"`
 }
 
 type CommitAlbumImportArtistInput struct {
 	ArtistID        string                   `json:"artist_id"`
 	Name            string                   `json:"name"`
 	LegalName       string                   `json:"legal_name"`
+	Bio             string                   `json:"bio"`
 	ImageURL        string                   `json:"image_url"`
+	Nationality     string                   `json:"nationality"`
+	BirthDate       string                   `json:"birth_date"`
 	StageNames      []ArtistStageNamePayload `json:"stage_names"`
 	BirthPlace      string                   `json:"birth_place"`
 	ArtistForm      string                   `json:"artist_form"`

@@ -77,6 +77,7 @@ type archiveListEntry struct {
 	size       int64
 	packedSize int64
 	attributes string
+	encrypted  bool
 	hasSize    bool
 	hasPacked  bool
 }
@@ -107,6 +108,9 @@ func validateArchiveListing(raw []byte) error {
 		if strings.Contains(attrs, "l") || strings.Contains(attrs, "symlink") || strings.Contains(attrs, "reparse") {
 			return fmt.Errorf("unsafe archive entry %q", entry.path)
 		}
+		if entry.encrypted {
+			return errors.New("压缩包已加密，请上传无密码压缩包或直接上传音频文件")
+		}
 		entries = append(entries, entry)
 		entry = archiveListEntry{}
 		return nil
@@ -135,6 +139,8 @@ func validateArchiveListing(raw []byte) error {
 			entry.hasPacked = true
 		case "Attributes":
 			entry.attributes = strings.TrimSpace(value)
+		case "Encrypted":
+			entry.encrypted = strings.TrimSpace(value) == "+"
 		}
 	}
 	if err := scanner.Err(); err != nil {
@@ -293,6 +299,7 @@ func (p *MediaImportProcessor) Process(ctx context.Context, job model.AlbumImpor
 func (p *MediaImportProcessor) processUploadedFiles(ctx context.Context, session model.AlbumImportSession, heartbeat func() error) error {
 	files := make([]model.AlbumImportFile, 0)
 	cues := make([]model.AlbumImportFile, 0)
+	var cover *model.AlbumImportFile
 	hasCompletedAudio := false
 	for _, file := range session.Files {
 		if file.Role == AlbumImportFileRoleAudio && file.UploadStatus == AlbumImportFileUploadStatusUploaded && file.SourceKey != "" && file.ProcessingStatus != "completed" {
@@ -304,10 +311,19 @@ func (p *MediaImportProcessor) processUploadedFiles(ctx context.Context, session
 		if file.Role == AlbumImportFileRoleCue && file.UploadStatus == AlbumImportFileUploadStatusUploaded {
 			cues = append(cues, file)
 		}
+		if cover == nil && file.Role == AlbumImportFileRoleCover && file.UploadStatus == AlbumImportFileUploadStatusUploaded && file.SourceKey != "" {
+			candidate := file
+			cover = &candidate
+		}
+	}
+	if cover != nil && cover.ProcessingStatus != "completed" {
+		if err := p.processUploadedCover(ctx, session.ID, *cover); err != nil {
+			_ = p.failFile(ctx, cover.ID, err)
+		}
 	}
 	if len(files) == 0 {
 		if hasCompletedAudio {
-			return nil
+			return p.persistDerivedTracks(ctx, session.ID)
 		}
 		return errors.New("no uploaded audio files to process")
 	}
@@ -341,6 +357,9 @@ func (p *MediaImportProcessor) processUploadedFiles(ctx context.Context, session
 	}
 	if successes == 0 {
 		return errors.New("no audio tracks were processed successfully")
+	}
+	if err := p.persistDerivedTracks(ctx, session.ID); err != nil {
+		return err
 	}
 	return p.setSession(ctx, session.ID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(successes), total)
 }
@@ -527,6 +546,9 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 	if processed == 0 {
 		return errors.New("no audio tracks were processed successfully")
 	}
+	if err := p.persistDerivedTracks(ctx, sessionID); err != nil {
+		return err
+	}
 	return p.setSession(ctx, sessionID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(processed), int64(processed))
 }
 
@@ -617,6 +639,63 @@ func (p *MediaImportProcessor) processCover(ctx context.Context, sessionID uuid.
 	payload := map[string]any{}
 	_ = json.Unmarshal([]byte(session.PayloadJSON), &payload)
 	payload["cover_key"] = key
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	return p.db.WithContext(ctx).Model(&session).Update("payload_json", string(encoded)).Error
+}
+
+func (p *MediaImportProcessor) processUploadedCover(ctx context.Context, sessionID uuid.UUID, cover model.AlbumImportFile) error {
+	dir, err := os.MkdirTemp("", "atoman-cover-import-*")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(dir)
+
+	source := filepath.Join(dir, "cover."+safeMediaExtension(cover.DetectedFormat))
+	if err := p.downloadSource(source, cover.SourceKey); err != nil {
+		return err
+	}
+	if err := p.processCover(ctx, sessionID, source); err != nil {
+		return err
+	}
+	return p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", cover.ID).Updates(map[string]any{
+		"processing_status": "completed",
+		"error_message":     "",
+	}).Error
+}
+
+func (p *MediaImportProcessor) persistDerivedTracks(ctx context.Context, sessionID uuid.UUID) error {
+	var session model.AlbumImportSession
+	if err := p.db.WithContext(ctx).First(&session, "id = ?", sessionID).Error; err != nil {
+		return err
+	}
+	var files []model.AlbumImportFile
+	if err := p.db.WithContext(ctx).
+		Where("import_id = ? AND role = ? AND processing_status = ? AND playback_key <> ''", sessionID, AlbumImportFileRoleAudio, "completed").
+		Order("disc_number ASC, track_number ASC, created_at ASC").
+		Find(&files).Error; err != nil {
+		return err
+	}
+
+	payload := map[string]any{}
+	_ = json.Unmarshal([]byte(session.PayloadJSON), &payload)
+	tracks := make([]map[string]any, 0, len(files))
+	for _, file := range files {
+		audioURL := ""
+		if p.urlPrefix != "" {
+			audioURL = p.urlPrefix + "/" + strings.TrimLeft(file.PlaybackKey, "/")
+		}
+		tracks = append(tracks, map[string]any{
+			"title":        file.Title,
+			"track_number": file.TrackNumber,
+			"audio_key":    file.PlaybackKey,
+			"audio_url":    audioURL,
+			"origin":       file.RelativePath,
+		})
+	}
+	payload["derived_tracks"] = tracks
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return err

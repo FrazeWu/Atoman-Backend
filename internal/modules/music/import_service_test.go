@@ -860,9 +860,12 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 
 	committed, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		Artist: AlbumImportArtistPayload{
-			Name:      "FKA twigs",
-			LegalName: "Tahliah Debrett Barnett",
-			ImageURL:  "https://cdn.example.com/fka-twigs.jpg",
+			Name:        "FKA twigs",
+			LegalName:   "Tahliah Debrett Barnett",
+			Bio:         "English singer",
+			Nationality: "British",
+			BirthDate:   "1988-01-16",
+			ImageURL:    "https://cdn.example.com/fka-twigs.jpg",
 			StageNames: []ArtistStageNamePayload{
 				{Name: "FKA twigs", IsPrimary: true, StartDateText: "2012"},
 				{Name: "Twigs", IsPrimary: false, EndDateText: "2012"},
@@ -871,6 +874,8 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 		},
 		Album: AlbumImportAlbumPayload{
 			Title:       "LP1",
+			Description: "Debut studio album",
+			AlbumType:   "ep",
 			CoverURL:    "https://cdn.example.com/lp1.jpg",
 			ReleaseDate: "2014-08-06",
 			ReleaseYear: 2014,
@@ -879,6 +884,8 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 				{Title: "Lights On", TrackNumber: 2},
 			},
 		},
+		ArtistSource: "https://example.com/fka-twigs",
+		AlbumSource:  "https://example.com/lp1",
 	})
 	if err != nil {
 		t.Fatalf("commit session: %v", err)
@@ -910,6 +917,9 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	if artist.BirthPlace != "Cheltenham, England" {
 		t.Fatalf("expected birth place persisted, got %#v", artist)
 	}
+	if artist.Bio != "English singer" || artist.Nationality != "British" || artist.BirthDate == nil || artist.BirthDate.Format("2006-01-02") != "1988-01-16" || artist.BirthYear != 1988 {
+		t.Fatalf("expected artist supplement fields persisted, got %#v", artist)
+	}
 
 	var album model.Album
 	if err := db.Preload("Artists").Where("title = ?", "LP1").First(&album).Error; err != nil {
@@ -923,6 +933,9 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	}
 	if album.Year != 2014 {
 		t.Fatalf("expected year persisted, got %#v", album)
+	}
+	if album.Description != "Debut studio album" || album.AlbumType != "ep" {
+		t.Fatalf("expected album supplement fields persisted, got %#v", album)
 	}
 	if len(album.Artists) != 1 || album.Artists[0].ID != artist.ID {
 		t.Fatalf("expected album linked to artist, got %#v", album.Artists)
@@ -942,6 +955,13 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 		if song.AudioURL != "" {
 			t.Fatalf("expected empty song audio placeholder fallback, got %q", song.AudioURL)
 		}
+	}
+	var committedPayload map[string]any
+	if err := json.Unmarshal([]byte(committed.PayloadJSON), &committedPayload); err != nil {
+		t.Fatalf("decode committed payload: %v", err)
+	}
+	if committedPayload["artist_source"] != "https://example.com/fka-twigs" || committedPayload["album_source"] != "https://example.com/lp1" {
+		t.Fatalf("expected sources persisted in import session, got %#v", committedPayload)
 	}
 }
 
@@ -1045,8 +1065,7 @@ func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T)
 	if _, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		Artist: AlbumImportArtistPayload{Name: "Burial"},
 		Album: AlbumImportAlbumPayload{
-			Title:  "Untrue",
-			Tracks: []AlbumImportTrackPayload{{Title: "Archangel", TrackNumber: 1}},
+			Title: "Untrue",
 		},
 	}); err != nil {
 		t.Fatalf("commit session: %v", err)

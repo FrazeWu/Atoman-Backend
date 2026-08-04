@@ -82,6 +82,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if strings.TrimSpace(session.PayloadJSON) != "" {
 			_ = json.Unmarshal([]byte(session.PayloadJSON), &sessionPayload)
 		}
+		if len(payload.Album.Tracks) == 0 {
+			payload.Album.Tracks = albumImportTracksFromDerived(sessionPayload)
+		}
 
 		coverURL := strings.TrimSpace(input.Album.CoverURL)
 		if coverURL == "" && sessionPayload != nil {
@@ -90,14 +93,18 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 
 		album := model.Album{
 			Title:       strings.TrimSpace(payload.Album.Title),
+			Description: strings.TrimSpace(payload.Album.Description),
 			ReleaseYear: payload.Album.ReleaseYear,
 			Year:        payload.Album.ReleaseYear,
 			CoverURL:    coverURL,
 			CoverSource: coverSourceFromURL(coverURL),
 			Status:      "open",
 			EntryStatus: "open",
-			AlbumType:   "album",
+			AlbumType:   strings.TrimSpace(payload.Album.AlbumType),
 			UploadedBy:  &user.ID,
+		}
+		if album.AlbumType == "" {
+			album.AlbumType = "album"
 		}
 		if strings.TrimSpace(payload.Album.ReleaseDate) != "" {
 			releaseDate, err := parseOptionalReleaseDate(payload.Album.ReleaseDate)
@@ -190,6 +197,8 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if sessionPayload == nil {
 			sessionPayload = map[string]any{}
 		}
+		sessionPayload["artist_source"] = strings.TrimSpace(input.ArtistSource)
+		sessionPayload["album_source"] = strings.TrimSpace(input.AlbumSource)
 		applyAlbumImportSessionState(&session, AlbumImportStatusCommitted, sessionPayload)
 		payloadJSON, err := json.Marshal(sessionPayload)
 		if err != nil {
@@ -341,7 +350,10 @@ func resolveCommitAlbumImportArtists(tx *gorm.DB, input CommitAlbumImportSession
 			ArtistID:        input.ArtistID,
 			Name:            input.Artist.Name,
 			LegalName:       input.Artist.LegalName,
+			Bio:             input.Artist.Bio,
 			ImageURL:        input.Artist.ImageURL,
+			Nationality:     input.Artist.Nationality,
+			BirthDate:       input.Artist.BirthDate,
 			StageNames:      input.Artist.StageNames,
 			BirthPlace:      input.Artist.BirthPlace,
 			ArtistForm:      input.Artist.ArtistForm,
@@ -388,6 +400,33 @@ func resolveCommitAlbumImportArtists(tx *gorm.DB, input CommitAlbumImportSession
 	return out, nil
 }
 
+func albumImportTracksFromDerived(payload map[string]any) []AlbumImportTrackPayload {
+	if payload == nil {
+		return nil
+	}
+	rawTracks, ok := payload["derived_tracks"].([]any)
+	if !ok {
+		return nil
+	}
+	tracks := make([]AlbumImportTrackPayload, 0, len(rawTracks))
+	for index, raw := range rawTracks {
+		trackMap, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		title := strings.TrimSpace(stringValue(trackMap["title"]))
+		if title == "" {
+			continue
+		}
+		trackNumber := int(int64Value(trackMap["track_number"]))
+		if trackNumber <= 0 {
+			trackNumber = index + 1
+		}
+		tracks = append(tracks, AlbumImportTrackPayload{Title: title, TrackNumber: trackNumber})
+	}
+	return tracks
+}
+
 func buildArtistFromImportInput(input CommitAlbumImportArtistInput) (*model.Artist, error) {
 	activeStartDate, err := parseOptionalDate(input.ActiveStartDate, "active_start_date")
 	if err != nil {
@@ -400,11 +439,21 @@ func buildArtistFromImportInput(input CommitAlbumImportArtistInput) (*model.Arti
 	artist := &model.Artist{
 		Name:           strings.TrimSpace(input.Name),
 		LegalName:      strings.TrimSpace(input.LegalName),
+		Bio:            strings.TrimSpace(input.Bio),
 		ImageURL:       strings.TrimSpace(input.ImageURL),
+		Nationality:    strings.TrimSpace(input.Nationality),
 		StageNamesJSON: mustMarshalStageNames(input.StageNames),
 		BirthPlace:     strings.TrimSpace(input.BirthPlace),
 		ArtistForm:     normalizeArtistForm(input.ArtistForm),
 		EntryStatus:    "open",
+	}
+	birthDate, err := parseOptionalDate(strings.TrimSpace(input.BirthDate), "birth_date")
+	if err != nil {
+		return nil, err
+	}
+	if birthDate != nil {
+		artist.BirthDate = birthDate
+		artist.BirthYear = birthDate.Year()
 	}
 	if activeStartDate != nil {
 		artist.ActiveStartDate = *activeStartDate
