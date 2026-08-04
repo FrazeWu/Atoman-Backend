@@ -268,6 +268,20 @@ func (s *Service) GetAlbumImportSessionForUser(user authctx.CurrentUser, id uuid
 	return loadAlbumImportSession(s.db, id, &user.ID)
 }
 
+func (s *Service) ListAlbumImportSessionsForUser(user authctx.CurrentUser) ([]model.AlbumImportSession, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	var sessions []model.AlbumImportSession
+	if err := s.db.Preload("Files").Preload("Job").
+		Where("user_id = ? AND created_at >= ?", user.ID, time.Now().UTC().Add(-7*24*time.Hour)).
+		Order("created_at DESC").
+		Find(&sessions).Error; err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}
+
 func loadAlbumImportSession(db *gorm.DB, id uuid.UUID, userID *uuid.UUID) (model.AlbumImportSession, error) {
 	var session model.AlbumImportSession
 	query := db.Preload("Files").Preload("Job")

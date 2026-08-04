@@ -99,7 +99,17 @@ func GetSongsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var songs []model.Song
 
-		if err := db.Where("status NOT IN ?", []string{"closed", "rejected", "draft"}).
+		query := db.Where("status NOT IN ?", []string{"closed", "rejected", "draft"})
+		if keyword := strings.TrimSpace(c.Query("q")); keyword != "" {
+			pattern := "%" + keyword + "%"
+			query = query.
+				Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
+				Joins("LEFT JOIN song_artists ON song_artists.song_id = \"Songs\".id").
+				Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = song_artists.artist_id").
+				Where("\"Songs\".title ILIKE ? OR \"Albums\".title ILIKE ? OR \"Artists\".name ILIKE ?", pattern, pattern, pattern).
+				Distinct("\"Songs\".*")
+		}
+		if err := query.
 			Preload("Album").
 			Preload("Album.Artists").
 			Preload("Artists").

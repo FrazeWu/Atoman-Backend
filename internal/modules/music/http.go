@@ -18,6 +18,7 @@ type Handler struct {
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.POST("/imports/albums", h.createAlbumImportSession)
+	group.GET("/imports/albums", h.listAlbumImportSessions)
 	group.POST("/imports/albums/:sessionId/upload", h.uploadAlbumImportArchive)
 	group.POST("/imports/albums/:sessionId/multipart", h.startAlbumImportMultipart)
 	group.POST("/imports/albums/:sessionId/multipart/parts/:partNumber", h.createAlbumImportMultipartPartUpload)

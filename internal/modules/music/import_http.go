@@ -33,6 +33,25 @@ func (h *Handler) createAlbumImportSession(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, buildAlbumImportDTO(session))
 }
 
+func (h *Handler) listAlbumImportSessions(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+
+	sessions, err := h.service.ListAlbumImportSessionsForUser(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	data := make([]AlbumImportDTO, 0, len(sessions))
+	for _, session := range sessions {
+		data = append(data, buildAlbumImportDTO(session))
+	}
+	httpx.OK(c, http.StatusOK, data)
+}
+
 func (h *Handler) uploadAlbumImportArchive(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
