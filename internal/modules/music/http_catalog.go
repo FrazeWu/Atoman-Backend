@@ -540,6 +540,36 @@ func (h *Handler) listListeningHistory(c *gin.Context) {
 	httpx.List(c, rows, page, pageSize, total)
 }
 
+// home godoc
+// @Summary 获取音乐首页内容
+// @Description 登录用户返回最近播放和基于播放/收藏艺术家的未接触专辑；其他用户返回非个性化结果。
+// @Tags music
+// @Produce json
+// @Success 200 {object} HomeResponse
+// @Router /api/v1/music/home [get]
+func (h *Handler) home(c *gin.Context) {
+	var user *authctx.CurrentUser
+	if current, ok := authctx.Current(c); ok {
+		user = &current
+	}
+	response, err := h.service.Home(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	for index := range response.RecentlyPlayed {
+		if response.RecentlyPlayed[index].Song == nil {
+			continue
+		}
+		response.RecentlyPlayed[index].Song.AudioURL = resolveMusicMediaURL(response.RecentlyPlayed[index].Song.AudioURL)
+		response.RecentlyPlayed[index].Song.CoverURL = resolveMusicMediaURL(response.RecentlyPlayed[index].Song.CoverURL)
+		if response.RecentlyPlayed[index].Song.Album != nil {
+			response.RecentlyPlayed[index].Song.Album.CoverURL = resolveMusicMediaURL(response.RecentlyPlayed[index].Song.Album.CoverURL)
+		}
+	}
+	httpx.OK(c, http.StatusOK, response)
+}
+
 func (h *Handler) getRecommendedAlbums(c *gin.Context) {
 	mode, err := parseMusicRecommendationMode(c.Query("mode"))
 	if err != nil {

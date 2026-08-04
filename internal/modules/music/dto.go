@@ -181,6 +181,12 @@ type ListeningHistoryListResponse struct {
 	Meta PaginationMetaResponse         `json:"meta"`
 }
 
+type HomeResponse struct {
+	Personalized   bool                          `json:"personalized"`
+	RecentlyPlayed []model.MusicListeningHistory `json:"recently_played"`
+	ForYou         []model.Album                 `json:"for_you"`
+}
+
 type PlaylistSongDetail struct {
 	ID          uuid.UUID `json:"id"`
 	Title       string    `json:"title"`

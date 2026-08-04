@@ -3099,3 +3099,70 @@ func TestRegisterRoutesAnonymousCanReadPublicPlaylistDetailAndSongs(t *testing.T
 		t.Fatalf("unexpected public playlist songs response: %#v %#v", songsResp.Data, songsResp.Meta)
 	}
 }
+
+func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+
+	artist := model.Artist{Name: "Home Artist"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	playedAlbum := model.Album{Title: "Already Heard", CoverURL: "/uploads/played-cover.jpg", Status: "open", EntryStatus: "open"}
+	candidateAlbum := model.Album{Title: "Try This Next", CoverURL: "/uploads/candidate-cover.jpg", Status: "open", EntryStatus: "open"}
+	if err := db.Create(&playedAlbum).Error; err != nil {
+		t.Fatalf("create played album: %v", err)
+	}
+	if err := db.Create(&candidateAlbum).Error; err != nil {
+		t.Fatalf("create candidate album: %v", err)
+	}
+	for _, album := range []*model.Album{&playedAlbum, &candidateAlbum} {
+		if err := db.Model(album).Association("Artists").Append(&artist); err != nil {
+			t.Fatalf("link album artist: %v", err)
+		}
+	}
+	playedSong := model.Song{Title: "Played Song", AudioURL: "/audio/played.mp3", AlbumID: &playedAlbum.ID, Status: "open"}
+	if err := db.Create(&playedSong).Error; err != nil {
+		t.Fatalf("create played song: %v", err)
+	}
+	candidateSong := model.Song{Title: "Candidate Song", AudioURL: "/audio/candidate.mp3", AlbumID: &candidateAlbum.ID, Status: "open"}
+	if err := db.Create(&candidateSong).Error; err != nil {
+		t.Fatalf("create candidate song: %v", err)
+	}
+	if err := db.Model(&playedSong).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("link song artist: %v", err)
+	}
+	if err := service.RecordSongPlay(&user.ID, playedSong.ID); err != nil {
+		t.Fatalf("record play: %v", err)
+	}
+
+	router := newMusicHTTPRouter(service, &user)
+	response := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/home", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected music home to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Data struct {
+			Personalized   bool `json:"personalized"`
+			RecentlyPlayed []struct {
+				Song struct {
+					ID string `json:"id"`
+				} `json:"song"`
+			} `json:"recently_played"`
+			ForYou []struct {
+				ID string `json:"id"`
+			} `json:"for_you"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode music home: %v", err)
+	}
+	if !body.Data.Personalized {
+		t.Fatal("expected home to be personalized after a recorded play")
+	}
+	if len(body.Data.RecentlyPlayed) != 1 || body.Data.RecentlyPlayed[0].Song.ID != playedSong.ID.String() {
+		t.Fatalf("unexpected recent plays: %#v", body.Data.RecentlyPlayed)
+	}
+	if len(body.Data.ForYou) != 1 || body.Data.ForYou[0].ID != candidateAlbum.ID.String() {
+		t.Fatalf("expected only unheard related album, got %#v", body.Data.ForYou)
+	}
+}
