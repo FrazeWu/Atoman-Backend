@@ -25759,6 +25759,9 @@ const docTemplate = `{
                 "status": {
                     "type": "string"
                 },
+                "targetAlbumId": {
+                    "type": "string"
+                },
                 "tracks": {
                     "type": "array",
                     "items": {

@@ -4620,6 +4620,8 @@ definitions:
         type: string
       status:
         type: string
+      targetAlbumId:
+        type: string
       tracks:
         items:
           $ref: '#/definitions/music.AlbumImportDTOTrack'

@@ -165,6 +165,7 @@ type AlbumImportErrorDTO struct {
 
 type AlbumImportDTO struct {
 	ImportID          string                 `json:"importId"`
+	TargetAlbumID     string                 `json:"targetAlbumId"`
 	Status            string                 `json:"status"`
 	InputMode         string                 `json:"inputMode"`
 	Stage             string                 `json:"stage"`

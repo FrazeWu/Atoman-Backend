@@ -39,7 +39,13 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 
 	coverURL := resolveAlbumImportCoverURL(payload)
 	dto := AlbumImportDTO{
-		ImportID:  session.ID.String(),
+		ImportID: session.ID.String(),
+		TargetAlbumID: func() string {
+			if session.TargetAlbumID == nil {
+				return ""
+			}
+			return session.TargetAlbumID.String()
+		}(),
 		Status:    session.Status,
 		InputMode: inputMode,
 		Stage:     stage,

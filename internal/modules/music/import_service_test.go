@@ -1128,6 +1128,36 @@ func TestCommitAlbumImportSessionRejectsNonReadyStatus(t *testing.T) {
 	}
 }
 
+func TestCommitAlbumImportSessionIsIdempotentAfterCommit(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	input := CommitAlbumImportSessionInput{
+		Artist: AlbumImportArtistPayload{Name: "Daft Punk"},
+		Album:  AlbumImportAlbumPayload{Title: "Discovery", Tracks: []AlbumImportTrackPayload{{Title: "One More Time", TrackNumber: 1}}},
+	}
+	first, err := svc.CommitAlbumImportSession(user, session.ID, input)
+	if err != nil {
+		t.Fatalf("first commit: %v", err)
+	}
+	second, err := svc.CommitAlbumImportSession(user, session.ID, input)
+	if err != nil {
+		t.Fatalf("repeat commit: %v", err)
+	}
+	if first.TargetAlbumID == nil || second.TargetAlbumID == nil || *first.TargetAlbumID != *second.TargetAlbumID {
+		t.Fatalf("expected the same target album, got %#v and %#v", first.TargetAlbumID, second.TargetAlbumID)
+	}
+	var albums int64
+	if err := db.Model(&model.Album{}).Where("title = ?", "Discovery").Count(&albums).Error; err != nil {
+		t.Fatalf("count albums: %v", err)
+	}
+	if albums != 1 {
+		t.Fatalf("expected one album after repeat commit, got %d", albums)
+	}
+}
+
 func TestCommitAlbumImportSessionUsesExistingArtistWhenArtistIDProvided(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 

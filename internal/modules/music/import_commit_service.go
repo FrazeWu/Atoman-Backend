@@ -35,6 +35,10 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if err != nil {
 			return err
 		}
+		if session.Status == AlbumImportStatusCommitted {
+			out = session
+			return nil
+		}
 		if session.Status != AlbumImportStatusReady {
 			if !isAlbumImportActiveStatus(session.Status) {
 				return apperr.Unprocessable("music.import_invalid_status", "Import session cannot be submitted")
@@ -122,6 +126,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if err := createAlbumImportAlbum(tx, &album); err != nil {
 			return err
 		}
+		session.TargetAlbumID = &album.ID
 		promotedCoverURL, oldCoverKey, newCoverKey, err := s.promoteAlbumImportAsset(
 			album.CoverURL,
 			storage.BuildMusicAlbumCoverKey(album.ID.String(), path.Ext(album.CoverURL)),
