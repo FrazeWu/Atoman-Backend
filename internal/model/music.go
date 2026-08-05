@@ -52,23 +52,25 @@ func (ArtistMember) TableName() string {
 
 type Album struct {
 	Base
-	Title         string     `json:"title" gorm:"not null"`
-	Description   string     `json:"description" gorm:"type:text"`
-	Year          int        `json:"year"`
-	ReleaseYear   int        `json:"release_year"`
-	ReleaseDate   time.Time  `json:"release_date" gorm:"type:date"`
-	CoverURL      string     `json:"cover_url"`
-	CoverSource   string     `json:"cover_source" gorm:"default:'local'"`
-	Status        string     `json:"status" gorm:"default:'open'"`
-	AlbumType     string     `json:"album_type" gorm:"default:'album'"`
-	HotScore      float64    `json:"hot_score" gorm:"default:0;index"`
-	EntryStatus   string     `json:"entry_status" gorm:"default:'open'"`
-	UploadedBy    *uuid.UUID `json:"uploaded_by" gorm:"type:uuid"`
-	User          *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
-	Artists       []Artist   `json:"artists,omitempty" gorm:"many2many:album_artists;"`
-	Songs         []Song     `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
-	PlayCount     int64      `json:"play_count"`
-	BookmarkCount int64      `json:"bookmark_count" gorm:"-"`
+	Title            string     `json:"title" gorm:"not null"`
+	Description      string     `json:"description" gorm:"type:text"`
+	Year             int        `json:"year"`
+	ReleaseYear      int        `json:"release_year"`
+	ReleaseDate      time.Time  `json:"release_date" gorm:"type:date"`
+	CoverURL         string     `json:"cover_url"`
+	CoverSource      string     `json:"cover_source" gorm:"default:'local'"`
+	Status           string     `json:"status" gorm:"default:'open'"`
+	AlbumType        string     `json:"album_type" gorm:"default:'album'"`
+	EditionType      string     `json:"edition_type" gorm:"default:'original'"`
+	CanonicalAlbumID *uuid.UUID `json:"canonical_album_id,omitempty" gorm:"type:uuid;index"`
+	HotScore         float64    `json:"hot_score" gorm:"default:0;index"`
+	EntryStatus      string     `json:"entry_status" gorm:"default:'open'"`
+	UploadedBy       *uuid.UUID `json:"uploaded_by" gorm:"type:uuid"`
+	User             *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
+	Artists          []Artist   `json:"artists,omitempty" gorm:"many2many:album_artists;"`
+	Songs            []Song     `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
+	PlayCount        int64      `json:"play_count"`
+	BookmarkCount    int64      `json:"bookmark_count" gorm:"-"`
 }
 
 func (Album) TableName() string {
@@ -269,6 +271,7 @@ type Playlist struct {
 	CoverURL      string    `json:"cover_url"`
 	IsPublic      bool      `json:"is_public" gorm:"default:false;index"`
 	IsFavorite    bool      `json:"is_favorite" gorm:"default:false;index"`
+	Kind          string    `json:"kind" gorm:"default:'user';index"`
 	OwnerUsername string    `json:"owner_username,omitempty" gorm:"-"`
 	SongCount     int64     `json:"song_count" gorm:"-"`
 }

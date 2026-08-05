@@ -62,6 +62,7 @@ func Run(db *gorm.DB) error {
 		{"music play counts migration", migrations.RunMusicPlayCountsMigration},
 		{"music lyrics migration", migrations.RunMusicLyricsMigration},
 		{"music listening migration", migrations.RunMusicListeningMigration},
+		{"music catalog v2 migration", migrations.RunMusicCatalogV2Migration},
 		{"unified studio migration", migrations.RunUnifiedStudioMigration},
 		{"user default resources migration", backfillUserDefaultResources},
 	}

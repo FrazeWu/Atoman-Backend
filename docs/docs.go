@@ -11962,6 +11962,26 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/home": {
+            "get": {
+                "description": "登录用户返回最近播放和基于播放/收藏艺术家的未接触专辑；其他用户返回非个性化结果。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "获取音乐首页内容",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.HomeResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/imports/albums/{sessionId}": {
             "delete": {
                 "security": [
@@ -12717,6 +12737,28 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/library": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "获取个人音乐库",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "song,album,artist,playlist",
+                        "name": "kind",
+                        "in": "query"
+                    }
+                ],
+                "responses": {}
+            }
+        },
         "/api/v1/music/lyrics/annotations/pending": {
             "get": {
                 "security": [
@@ -12815,6 +12857,29 @@ const docTemplate = `{
                         }
                     }
                 }
+            }
+        },
+        "/api/v1/music/playlists/later/{songId}": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "加入稍后播放",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 ID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {}
             }
         },
         "/api/v1/music/playlists/public": {
@@ -13066,6 +13131,54 @@ const docTemplate = `{
                         }
                     }
                 }
+            }
+        },
+        "/api/v1/music/search": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "统一搜索音乐内容",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "关键词",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "song,album,artist,playlist",
+                        "name": "type",
+                        "in": "query"
+                    }
+                ],
+                "responses": {}
+            }
+        },
+        "/api/v1/music/songs/{songId}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "获取歌曲详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 ID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {}
             }
         },
         "/api/v1/music/songs/{songId}/lyrics": {
@@ -23493,6 +23606,9 @@ const docTemplate = `{
                 "bookmark_count": {
                     "type": "integer"
                 },
+                "canonical_album_id": {
+                    "type": "string"
+                },
                 "cover_source": {
                     "type": "string"
                 },
@@ -23500,6 +23616,12 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "edition_type": {
                     "type": "string"
                 },
                 "entry_status": {
@@ -24696,6 +24818,35 @@ const docTemplate = `{
                 }
             }
         },
+        "model.MusicListeningHistory": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "last_played_at": {
+                    "type": "string"
+                },
+                "play_count": {
+                    "type": "integer"
+                },
+                "song": {
+                    "$ref": "#/definitions/model.Song"
+                },
+                "song_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "model.NotificationMeta": {
             "type": "object",
             "additionalProperties": true
@@ -24762,6 +24913,9 @@ const docTemplate = `{
                 },
                 "is_public": {
                     "type": "boolean"
+                },
+                "kind": {
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
@@ -25965,6 +26119,26 @@ const docTemplate = `{
                 },
                 "meta": {
                     "$ref": "#/definitions/music.PaginationMetaResponse"
+                }
+            }
+        },
+        "music.HomeResponse": {
+            "type": "object",
+            "properties": {
+                "for_you": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Album"
+                    }
+                },
+                "personalized": {
+                    "type": "boolean"
+                },
+                "recently_played": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.MusicListeningHistory"
+                    }
                 }
             }
         },

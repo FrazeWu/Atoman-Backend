@@ -132,6 +132,13 @@ func (s *Service) AddPlaylistSong(user authctx.CurrentUser, playlistID uuid.UUID
 		}
 		return model.PlaylistSong{}, err
 	}
+	var song model.Song
+	if err := s.db.First(&song, "id = ? AND status NOT IN ?", songID, []string{"closed", "rejected", "draft"}).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.PlaylistSong{}, apperr.NotFound("music.song_not_found", "Song not found")
+		}
+		return model.PlaylistSong{}, err
+	}
 	return s.repo.UpsertPlaylistSong(playlistID, songID)
 }
 

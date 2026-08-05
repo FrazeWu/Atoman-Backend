@@ -3182,11 +3182,17 @@ definitions:
         type: array
       bookmark_count:
         type: integer
+      canonical_album_id:
+        type: string
       cover_source:
         type: string
       cover_url:
         type: string
       created_at:
+        type: string
+      description:
+        type: string
+      edition_type:
         type: string
       entry_status:
         type: string
@@ -3984,6 +3990,25 @@ definitions:
       user_id:
         type: string
     type: object
+  model.MusicListeningHistory:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      last_played_at:
+        type: string
+      play_count:
+        type: integer
+      song:
+        $ref: '#/definitions/model.Song'
+      song_id:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
   model.NotificationMeta:
     additionalProperties: true
     type: object
@@ -4029,6 +4054,8 @@ definitions:
         type: boolean
       is_public:
         type: boolean
+      kind:
+        type: string
       name:
         type: string
       owner_username:
@@ -4827,6 +4854,19 @@ definitions:
         type: array
       meta:
         $ref: '#/definitions/music.PaginationMetaResponse'
+    type: object
+  music.HomeResponse:
+    properties:
+      for_you:
+        items:
+          $ref: '#/definitions/model.Album'
+        type: array
+      personalized:
+        type: boolean
+      recently_played:
+        items:
+          $ref: '#/definitions/model.MusicListeningHistory'
+        type: array
     type: object
   music.ListeningHistoryItemResponse:
     properties:
@@ -13269,6 +13309,19 @@ paths:
       summary: 获取最近播放
       tags:
       - music
+  /api/v1/music/home:
+    get:
+      description: 登录用户返回最近播放和基于播放/收藏艺术家的未接触专辑；其他用户返回非个性化结果。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.HomeResponse'
+      summary: 获取音乐首页内容
+      tags:
+      - music
   /api/v1/music/imports/albums/{sessionId}:
     delete:
       consumes:
@@ -13748,6 +13801,19 @@ paths:
       summary: 重试专辑导入文件
       tags:
       - music-imports
+  /api/v1/music/library:
+    get:
+      parameters:
+      - description: song,album,artist,playlist
+        in: query
+        name: kind
+        type: string
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: 获取个人音乐库
+      tags:
+      - music
   /api/v1/music/lyrics/annotations/pending:
     get:
       description: 返回当前用户创建且需要重新绑定、所属歌曲已归入专辑的歌词注释。
@@ -13919,6 +13985,20 @@ paths:
       summary: 调整歌单歌曲顺序
       tags:
       - music-playlists
+  /api/v1/music/playlists/later/{songId}:
+    post:
+      parameters:
+      - description: 歌曲 ID
+        in: path
+        name: songId
+        required: true
+        type: string
+      responses: {}
+      security:
+      - BearerAuth: []
+      summary: 加入稍后播放
+      tags:
+      - music
   /api/v1/music/playlists/public:
     get:
       description: 返回可被发现的公开歌单，匿名用户可访问。
@@ -13970,6 +14050,38 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 记录有效播放
+      tags:
+      - music
+  /api/v1/music/search:
+    get:
+      parameters:
+      - description: 关键词
+        in: query
+        name: q
+        required: true
+        type: string
+      - description: song,album,artist,playlist
+        in: query
+        name: type
+        type: string
+      produces:
+      - application/json
+      responses: {}
+      summary: 统一搜索音乐内容
+      tags:
+      - music
+  /api/v1/music/songs/{songId}:
+    get:
+      parameters:
+      - description: 歌曲 ID
+        in: path
+        name: songId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses: {}
+      summary: 获取歌曲详情
       tags:
       - music
   /api/v1/music/songs/{songId}/lyrics:

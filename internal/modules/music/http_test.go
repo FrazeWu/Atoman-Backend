@@ -164,6 +164,40 @@ func newMusicHTTPRouter(service *Service, current *authctx.CurrentUser) *gin.Eng
 	return r
 }
 
+func TestRegisterRoutesMusicSearchAndSongDetailHideNonPublicSongs(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	visible := model.Song{Title: "Visible Search Song", AudioURL: "/visible.mp3", Status: "open"}
+	draft := model.Song{Title: "Hidden Search Song", AudioURL: "/draft.mp3", Status: "draft"}
+	if err := db.Create(&visible).Error; err != nil {
+		t.Fatalf("create visible song: %v", err)
+	}
+	if err := db.Create(&draft).Error; err != nil {
+		t.Fatalf("create draft song: %v", err)
+	}
+	router := newMusicHTTPRouter(service, &user)
+
+	search := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/search?q=Search+Song", "")
+	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), visible.ID.String()) || strings.Contains(search.Body.String(), draft.ID.String()) {
+		t.Fatalf("search exposed non-public song: %d %s", search.Code, search.Body.String())
+	}
+	detail := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/songs/"+draft.ID.String(), "")
+	assertMusicHTTPError(t, detail, http.StatusNotFound, "music.song_not_found")
+}
+
+func TestRegisterRoutesMusicLaterPlaylistRejectsMissingSong(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	router := newMusicHTTPRouter(service, &user)
+	response := performMusicJSONRequest(t, router, http.MethodPost, "/api/v1/music/playlists/later/"+uuid.NewString(), "")
+	assertMusicHTTPError(t, response, http.StatusNotFound, "music.song_not_found")
+	var count int64
+	if err := db.Model(&model.Playlist{}).Where("user_id = ? AND kind = ?", user.ID, "later").Count(&count).Error; err != nil {
+		t.Fatalf("count later playlists: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("missing song created later playlist")
+	}
+}
+
 func TestRegisterRoutesMusicLyricsLifecycleMatchesFrontendContract(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	song := model.Song{Title: "HTTP Lyrics", AudioURL: "/lyrics.mp3", Status: "open"}
