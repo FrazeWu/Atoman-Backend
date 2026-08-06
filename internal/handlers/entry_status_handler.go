@@ -29,6 +29,72 @@ func SetupEntryStatusRoutes(router *gin.Engine, db *gorm.DB) {
 	admin.Use(middleware.AuthMiddleware(), middleware.AdminMiddleware(db))
 	{
 		admin.GET("/entries", ListMusicEntriesHandler(db))
+		admin.GET("/quality", ListMusicQualityIssuesHandler(db))
+	}
+}
+
+type MusicQualityIssue struct {
+	Type       string `json:"type"`
+	EntityType string `json:"entity_type"`
+	EntityID   string `json:"entity_id"`
+	Title      string `json:"title"`
+}
+
+// ListMusicQualityIssues godoc
+// @Summary 获取音乐资料问题
+// @Description 管理员查看缺失封面、曲目、音频和失败导入的音乐资料。
+// @Tags music-entry-status
+// @Produce json
+// @Param type query string false "问题类型" Enums(all,missing_cover,missing_tracks,missing_audio,import_failed)
+// @Success 200 {object} map[string]interface{}
+// @Security BearerAuth
+// @Router /api/v1/admin/music/quality [get]
+func ListMusicQualityIssuesHandler(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		filter := c.DefaultQuery("type", "all")
+		issues := make([]MusicQualityIssue, 0)
+		appendAlbums := func(issueType string, query *gorm.DB) error {
+			if filter != "all" && filter != issueType {
+				return nil
+			}
+			var albums []model.Album
+			if err := query.Limit(100).Find(&albums).Error; err != nil {
+				return err
+			}
+			for _, album := range albums {
+				issues = append(issues, MusicQualityIssue{Type: issueType, EntityType: "album", EntityID: album.ID.String(), Title: album.Title})
+			}
+			return nil
+		}
+		if err := appendAlbums("missing_cover", db.Model(&model.Album{}).Where("COALESCE(cover_url, '') = '' AND COALESCE(entry_status, '') <> 'closed'")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
+			return
+		}
+		if err := appendAlbums("missing_tracks", db.Model(&model.Album{}).Where("COALESCE(entry_status, '') <> 'closed' AND NOT EXISTS (SELECT 1 FROM \"Songs\" WHERE \"Songs\".album_id = \"Albums\".id AND \"Songs\".deleted_at IS NULL)")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
+			return
+		}
+		if filter == "all" || filter == "missing_audio" {
+			var songs []model.Song
+			if err := db.Where("COALESCE(audio_url, '') = '' AND COALESCE(status, '') <> 'closed'").Limit(100).Find(&songs).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
+				return
+			}
+			for _, song := range songs {
+				issues = append(issues, MusicQualityIssue{Type: "missing_audio", EntityType: "song", EntityID: song.ID.String(), Title: song.Title})
+			}
+		}
+		if filter == "all" || filter == "import_failed" {
+			var sessions []model.AlbumImportSession
+			if err := db.Where("status IN ?", []string{"failed", "needs_attention"}).Limit(100).Find(&sessions).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
+				return
+			}
+			for _, session := range sessions {
+				issues = append(issues, MusicQualityIssue{Type: "import_failed", EntityType: "import", EntityID: session.ID.String(), Title: session.ErrorMessage})
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"data": issues, "total": len(issues)})
 	}
 }
 
