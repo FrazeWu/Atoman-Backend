@@ -185,6 +185,14 @@ type HomeResponse struct {
 	Personalized   bool                          `json:"personalized"`
 	RecentlyPlayed []model.MusicListeningHistory `json:"recently_played"`
 	ForYou         []model.Album                 `json:"for_you"`
+	ForYouReason   string                        `json:"for_you_reason,omitempty"`
+	Sections       []MusicHomeSection            `json:"sections"`
+}
+
+type MusicHomeSection struct {
+	Key    string        `json:"key"`
+	Title  string        `json:"title"`
+	Albums []model.Album `json:"albums"`
 }
 
 type PlaylistSongDetail struct {

@@ -4863,11 +4863,17 @@ definitions:
         items:
           $ref: '#/definitions/model.Album'
         type: array
+      for_you_reason:
+        type: string
       personalized:
         type: boolean
       recently_played:
         items:
           $ref: '#/definitions/model.MusicListeningHistory'
+        type: array
+      sections:
+        items:
+          $ref: '#/definitions/music.MusicHomeSection'
         type: array
     type: object
   music.ListeningHistoryItemResponse:
@@ -4896,6 +4902,17 @@ definitions:
         type: string
     required:
     - vote
+    type: object
+  music.MusicHomeSection:
+    properties:
+      albums:
+        items:
+          $ref: '#/definitions/model.Album'
+        type: array
+      key:
+        type: string
+      title:
+        type: string
     type: object
   music.MusicLyricAnnotationDTO:
     properties:

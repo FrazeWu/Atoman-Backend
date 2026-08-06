@@ -24,7 +24,13 @@ func (s *Service) Home(user *authctx.CurrentUser) (HomeResponse, error) {
 	response := HomeResponse{
 		RecentlyPlayed: []model.MusicListeningHistory{},
 		ForYou:         []model.Album{},
+		Sections:       []MusicHomeSection{},
 	}
+	sections, err := s.homePublicSections()
+	if err != nil {
+		return response, err
+	}
+	response.Sections = sections
 	if user == nil || user.ID == uuid.Nil {
 		return response, nil
 	}
@@ -46,7 +52,49 @@ func (s *Service) Home(user *authctx.CurrentUser) (HomeResponse, error) {
 
 	response.Personalized = true
 	response.ForYou, err = s.recommendHomeAlbums(affinity, seenAlbums, seenSongs)
+	if len(response.ForYou) > 0 {
+		response.ForYouReason = "基于最近播放和收藏"
+	}
 	return response, err
+}
+
+func (s *Service) homePublicSections() ([]MusicHomeSection, error) {
+	specs := []struct {
+		key, title, order string
+	}{
+		{key: "hot", title: "热门", order: "hot_score DESC, play_count DESC, title ASC"},
+		{key: "latest", title: "最新入库", order: "created_at DESC, title ASC"},
+		{key: "random", title: "随机发现", order: "RANDOM()"},
+	}
+	sections := make([]MusicHomeSection, 0, len(specs))
+	for _, spec := range specs {
+		var albums []model.Album
+		if err := s.db.Where("COALESCE(entry_status, '') <> ? AND COALESCE(status, '') <> ?", "closed", "closed").
+			Preload("Artists").Preload("Songs").Order(spec.order).Limit(32).Find(&albums).Error; err != nil {
+			return nil, err
+		}
+		visible := make([]model.Album, 0, musicHomeForYouLimit)
+		for _, album := range albums {
+			if !isDiscoverableHomeAlbum(album) {
+				continue
+			}
+			visible = append(visible, album)
+			if len(visible) == musicHomeForYouLimit {
+				break
+			}
+		}
+		if len(visible) == 0 {
+			continue
+		}
+		if err := hydrateAlbumStats(s.db, visible); err != nil {
+			return nil, err
+		}
+		for index := range visible {
+			resolveAlbumMediaURLs(&visible[index])
+		}
+		sections = append(sections, MusicHomeSection{Key: spec.key, Title: spec.title, Albums: visible})
+	}
+	return sections, nil
 }
 
 func (s *Service) homeAffinity(userID uuid.UUID, history []model.MusicListeningHistory) (map[uuid.UUID]float64, map[uuid.UUID]struct{}, map[uuid.UUID]struct{}, error) {

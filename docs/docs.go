@@ -26134,6 +26134,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/model.Album"
                     }
                 },
+                "for_you_reason": {
+                    "type": "string"
+                },
                 "personalized": {
                     "type": "boolean"
                 },
@@ -26141,6 +26144,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/model.MusicListeningHistory"
+                    }
+                },
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.MusicHomeSection"
                     }
                 }
             }
@@ -26183,6 +26192,23 @@ const docTemplate = `{
             ],
             "properties": {
                 "vote": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.MusicHomeSection": {
+            "type": "object",
+            "properties": {
+                "albums": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Album"
+                    }
+                },
+                "key": {
+                    "type": "string"
+                },
+                "title": {
                     "type": "string"
                 }
             }
