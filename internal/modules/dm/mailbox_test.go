@@ -10,6 +10,7 @@ import (
 	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func TestMailboxesIncludeUserAndOwnedChannels(t *testing.T) {
@@ -56,6 +57,74 @@ func TestConversationCursorAndMailboxAccess(t *testing.T) {
 		t.Fatalf("expected forbidden mailbox, got %v", err)
 	}
 	_ = third
+}
+
+func TestConversationListLoadsUnreadAndBlockedStateWithFixedQueryCount(t *testing.T) {
+	db := testDB(t)
+	actor, other, owner := testUser(t, db), testUser(t, db), testUser(t, db)
+	channelID := uuid.New()
+	if err := db.Create(&model.Channel{Base: model.Base{ID: channelID}, UserID: &owner, Name: "owned", Slug: "owned-" + channelID.String()}).Error; err != nil {
+		t.Fatal(err)
+	}
+	userConversation := model.DMConversation{ParticipantAType: model.DMPartyUser, ParticipantA: actor, ParticipantBType: model.DMPartyUser, ParticipantB: other, LastMessageAt: ptrTime(time.Now())}
+	channelConversation := model.DMConversation{ParticipantAType: model.DMPartyUser, ParticipantA: actor, ParticipantBType: model.DMPartyChannel, ParticipantB: channelID, LastMessageAt: ptrTime(time.Now().Add(-time.Minute))}
+	if err := db.Create(&userConversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&channelConversation).Error; err != nil {
+		t.Fatal(err)
+	}
+	messages := []model.DMMessage{
+		{ConversationID: userConversation.ID, SenderType: model.DMPartyUser, SenderID: other, ActorUserID: other, ClientMessageID: uuid.New(), Content: "user unread"},
+		{ConversationID: channelConversation.ID, SenderType: model.DMPartyChannel, SenderID: channelID, ActorUserID: owner, ClientMessageID: uuid.New(), Content: "channel unread"},
+	}
+	if err := db.Create(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.UserBlock{BlockerID: actor, BlockedID: other}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	queryCount := 0
+	callbackName := "test:count_conversation_list_queries"
+	countQuery := func(*gorm.DB) { queryCount++ }
+	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, countQuery); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Callback().Row().Before("gorm:row").Register(callbackName, countQuery); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Query().Remove(callbackName)
+		_ = db.Callback().Row().Remove(callbackName)
+	})
+
+	page, err := NewService(NewRepo(db), nil, nil, nil).ListConversations(
+		context.Background(),
+		authctx.CurrentUser{ID: actor},
+		TargetRef{Type: model.DMPartyUser, ID: actor},
+		"",
+		30,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queryCount != 4 {
+		t.Fatalf("conversation list queries = %d, want 4", queryCount)
+	}
+	if len(page.Items) != 2 {
+		t.Fatalf("conversation count = %d, want 2", len(page.Items))
+	}
+	byID := map[uuid.UUID]ConversationDTO{}
+	for _, item := range page.Items {
+		byID[item.ID] = item
+	}
+	if item := byID[userConversation.ID]; item.Unread != 1 || !item.Blocked {
+		t.Fatalf("user conversation state = %#v", item)
+	}
+	if item := byID[channelConversation.ID]; item.Unread != 1 || item.Blocked {
+		t.Fatalf("channel conversation state = %#v", item)
+	}
 }
 
 func TestConversationCursorPaginatesNullLastMessageAtWithoutDuplicates(t *testing.T) {

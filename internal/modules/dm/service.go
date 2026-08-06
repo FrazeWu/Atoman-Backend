@@ -87,18 +87,18 @@ func (s *Service) ListConversations(ctx context.Context, actor authctx.CurrentUs
 			page.NextCursor = encodeCursor(Cursor{ID: last.ID, Null: true})
 		}
 	}
+	unreadCounts, err := repo.UnreadCountsForConversations(actor.ID, conversations)
+	if err != nil {
+		return PageDTO[ConversationDTO]{}, err
+	}
+	blockedStates, err := repo.BlockedStatesForConversations(actor.ID, conversations)
+	if err != nil {
+		return PageDTO[ConversationDTO]{}, err
+	}
 	for _, conversation := range conversations {
-		unread, err := repo.CountUnreadForConversation(actor.ID, conversation)
-		if err != nil {
-			return PageDTO[ConversationDTO]{}, err
-		}
-		blocked, err := repo.IsConversationBlockedForActor(conversation, actor.ID)
-		if err != nil {
-			return PageDTO[ConversationDTO]{}, err
-		}
 		dto := conversationDTO(conversation)
-		dto.Unread = unread
-		dto.Blocked = blocked
+		dto.Unread = unreadCounts[conversation.ID]
+		dto.Blocked = blockedStates[conversation.ID]
 		page.Items = append(page.Items, dto)
 	}
 	return page, nil

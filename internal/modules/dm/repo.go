@@ -256,6 +256,106 @@ func (r *Repo) IsConversationBlockedForActor(conversation model.DMConversation, 
 	return r.HasBlockedUser(actorID, otherUserID)
 }
 
+func (r *Repo) UnreadCountsForConversations(actorID uuid.UUID, conversations []model.DMConversation) (map[uuid.UUID]int64, error) {
+	counts := make(map[uuid.UUID]int64, len(conversations))
+	if len(conversations) == 0 {
+		return counts, nil
+	}
+
+	ids := make([]uuid.UUID, 0, len(conversations))
+	byID := make(map[uuid.UUID]model.DMConversation, len(conversations))
+	for _, conversation := range conversations {
+		ids = append(ids, conversation.ID)
+		byID[conversation.ID] = conversation
+	}
+
+	type countRow struct {
+		ConversationID uuid.UUID
+		SenderType     string
+		SenderID       uuid.UUID
+		Count          int64
+	}
+	var rows []countRow
+	if err := r.db.Model(&model.DMMessage{}).
+		Select("conversation_id, sender_type, sender_id, COUNT(*) AS count").
+		Where("conversation_id IN ? AND read_at IS NULL", ids).
+		Group("conversation_id, sender_type, sender_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+
+	for _, row := range rows {
+		conversation := byID[row.ConversationID]
+		unread := row.SenderType == model.DMPartyUser && row.SenderID != actorID
+		if conversation.ParticipantBType == model.DMPartyChannel {
+			unread = (conversation.ParticipantA == actorID && row.SenderType == model.DMPartyChannel) ||
+				(conversation.ParticipantA != actorID && row.SenderType == model.DMPartyUser)
+		}
+		if unread {
+			counts[row.ConversationID] += row.Count
+		}
+	}
+	return counts, nil
+}
+
+func (r *Repo) BlockedStatesForConversations(actorID uuid.UUID, conversations []model.DMConversation) (map[uuid.UUID]bool, error) {
+	states := make(map[uuid.UUID]bool, len(conversations))
+	if len(conversations) == 0 {
+		return states, nil
+	}
+
+	channelIDs := make([]uuid.UUID, 0)
+	for _, conversation := range conversations {
+		if conversation.ParticipantBType == model.DMPartyChannel {
+			channelIDs = append(channelIDs, conversation.ParticipantB)
+		}
+	}
+	channelOwners := make(map[uuid.UUID]uuid.UUID, len(channelIDs))
+	if len(channelIDs) > 0 {
+		var channels []model.Channel
+		if err := r.db.Select("id", "user_id").Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+			return nil, err
+		}
+		for _, channel := range channels {
+			if channel.UserID != nil {
+				channelOwners[channel.ID] = *channel.UserID
+			}
+		}
+	}
+
+	otherByConversation := make(map[uuid.UUID]uuid.UUID, len(conversations))
+	otherIDs := make([]uuid.UUID, 0, len(conversations))
+	for _, conversation := range conversations {
+		access := ConversationAccess{Conversation: conversation}
+		if conversation.ParticipantBType == model.DMPartyChannel {
+			ownerID, ok := channelOwners[conversation.ParticipantB]
+			if !ok {
+				return nil, ErrTargetNotFound
+			}
+			access.ChannelOwnerID = ownerID
+		}
+		otherID, err := r.OtherUserForConversation(access, actorID)
+		if err != nil {
+			return nil, err
+		}
+		otherByConversation[conversation.ID] = otherID
+		otherIDs = append(otherIDs, otherID)
+	}
+
+	var blocks []model.UserBlock
+	if err := r.db.Select("blocked_id").Where("blocker_id = ? AND blocked_id IN ?", actorID, otherIDs).Find(&blocks).Error; err != nil {
+		return nil, err
+	}
+	blockedUsers := make(map[uuid.UUID]struct{}, len(blocks))
+	for _, block := range blocks {
+		blockedUsers[block.BlockedID] = struct{}{}
+	}
+	for conversationID, otherID := range otherByConversation {
+		_, states[conversationID] = blockedUsers[otherID]
+	}
+	return states, nil
+}
+
 func (r *Repo) FindMessageByClientID(actorUserID, clientMessageID uuid.UUID) (model.DMMessage, error) {
 	var message model.DMMessage
 	err := r.db.Where("actor_user_id = ? AND client_message_id = ?", actorUserID, clientMessageID).First(&message).Error
