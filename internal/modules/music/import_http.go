@@ -545,6 +545,28 @@ func (h *Handler) getAlbumImportSession(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, buildAlbumImportDTO(session))
 }
 
+// repairAlbumImportSession godoc
+// @Summary 开始修复已提交的专辑导入
+// @Tags music-imports
+// @Produce json
+// @Success 200 {object} AlbumImportResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 422 {object} handlers.ErrorResponse
+// @Router /api/v1/music/imports/albums/{sessionId}/repair [post]
+func (h *Handler) repairAlbumImportSession(c *gin.Context) {
+	user, sessionID, ok := albumImportSessionRouteUser(c)
+	if !ok {
+		return
+	}
+	session, err := h.service.RepairAlbumImportSession(user, sessionID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, buildAlbumImportDTO(session))
+}
+
 func (h *Handler) commitAlbumImportSession(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {

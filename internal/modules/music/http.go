@@ -19,6 +19,7 @@ type Handler struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service, playLimiter: ratelimit.New()}
+	group.Use(musicOperationLog())
 	group.POST("/imports/albums", h.createAlbumImportSession)
 	group.GET("/imports/albums", h.listAlbumImportSessions)
 	group.POST("/imports/albums/:sessionId/upload", h.uploadAlbumImportArchive)
@@ -36,6 +37,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/imports/albums/:sessionId/complete", h.completeAlbumImportSession)
 	group.DELETE("/imports/albums/:sessionId", h.cancelAlbumImportSession)
 	group.GET("/imports/albums/:sessionId", h.getAlbumImportSession)
+	group.POST("/imports/albums/:sessionId/repair", h.repairAlbumImportSession)
 	group.POST("/imports/albums/:sessionId/commit", h.commitAlbumImportSession)
 	group.GET("/artists", h.listArtists)
 	group.GET("/search", h.search)

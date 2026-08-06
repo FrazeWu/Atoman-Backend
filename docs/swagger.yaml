@@ -5249,7 +5249,6 @@ definitions:
     properties:
       items:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       total:
@@ -5498,7 +5497,6 @@ definitions:
         type: string
       metrics:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       title:
@@ -5510,7 +5508,6 @@ definitions:
         type: string
       metrics:
         additionalProperties:
-          format: int64
           type: integer
         type: object
     type: object
@@ -5534,7 +5531,6 @@ definitions:
         type: array
       totals:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       trend:
@@ -5617,7 +5613,6 @@ definitions:
         type: array
       metrics:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       module:
@@ -5718,7 +5713,6 @@ definitions:
         type: string
       metrics:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       module:
@@ -13849,6 +13843,30 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 重试专辑导入文件
+      tags:
+      - music-imports
+  /api/v1/music/imports/albums/{sessionId}/repair:
+    post:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.AlbumImportResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 开始修复已提交的专辑导入
       tags:
       - music-imports
   /api/v1/music/library:

@@ -42,10 +42,10 @@ type MusicQualityIssue struct {
 
 // ListMusicQualityIssues godoc
 // @Summary 获取音乐资料问题
-// @Description 管理员查看缺失封面、曲目、音频和失败导入的音乐资料。
+// @Description 管理员查看缺失封面、曲目、音频、关键元数据、重复候选和失败导入的音乐资料。
 // @Tags music-entry-status
 // @Produce json
-// @Param type query string false "问题类型" Enums(all,missing_cover,missing_tracks,missing_audio,import_failed)
+// @Param type query string false "问题类型" Enums(all,missing_cover,missing_tracks,missing_audio,missing_metadata,duplicate_candidate,import_failed)
 // @Success 200 {object} map[string]interface{}
 // @Security BearerAuth
 // @Router /api/v1/admin/music/quality [get]
@@ -66,11 +66,36 @@ func ListMusicQualityIssuesHandler(db *gorm.DB) gin.HandlerFunc {
 			}
 			return nil
 		}
+		appendArtists := func(issueType string, query *gorm.DB) error {
+			if filter != "all" && filter != issueType {
+				return nil
+			}
+			var artists []model.Artist
+			if err := query.Limit(100).Find(&artists).Error; err != nil {
+				return err
+			}
+			for _, artist := range artists {
+				issues = append(issues, MusicQualityIssue{Type: issueType, EntityType: "artist", EntityID: artist.ID.String(), Title: artist.Name})
+			}
+			return nil
+		}
 		if err := appendAlbums("missing_cover", db.Model(&model.Album{}).Where("COALESCE(cover_url, '') = '' AND COALESCE(entry_status, '') <> 'closed'")); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 			return
 		}
 		if err := appendAlbums("missing_tracks", db.Model(&model.Album{}).Where("COALESCE(entry_status, '') <> 'closed' AND NOT EXISTS (SELECT 1 FROM \"Songs\" WHERE \"Songs\".album_id = \"Albums\".id AND \"Songs\".deleted_at IS NULL)")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
+			return
+		}
+		if err := appendAlbums("missing_metadata", db.Model(&model.Album{}).Where("COALESCE(entry_status, '') <> 'closed' AND (TRIM(COALESCE(title, '')) = '' OR (COALESCE(release_year, 0) = 0 AND COALESCE(year, 0) = 0) OR NOT EXISTS (SELECT 1 FROM album_artists WHERE album_artists.album_id = \"Albums\".id))")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
+			return
+		}
+		if err := appendAlbums("duplicate_candidate", db.Model(&model.Album{}).Where("COALESCE(entry_status, '') <> 'closed' AND TRIM(COALESCE(title, '')) <> '' AND EXISTS (SELECT 1 FROM \"Albums\" AS duplicate_album WHERE duplicate_album.id <> \"Albums\".id AND duplicate_album.deleted_at IS NULL AND LOWER(TRIM(duplicate_album.title)) = LOWER(TRIM(\"Albums\".title)))")); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
+			return
+		}
+		if err := appendArtists("duplicate_candidate", db.Model(&model.Artist{}).Where("TRIM(COALESCE(name, '')) <> '' AND EXISTS (SELECT 1 FROM \"Artists\" AS duplicate_artist WHERE duplicate_artist.id <> \"Artists\".id AND duplicate_artist.deleted_at IS NULL AND LOWER(TRIM(duplicate_artist.name)) = LOWER(TRIM(\"Artists\".name)))")); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 			return
 		}

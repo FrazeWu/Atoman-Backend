@@ -2,6 +2,7 @@ package music
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -50,6 +51,46 @@ func (s *Service) CompleteAlbumImportSession(user authctx.CurrentUser, sessionID
 		return nil
 	})
 	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	return loadAlbumImportSession(s.db, sessionID, &user.ID)
+}
+
+// RepairAlbumImportSession reopens one committed session so its original album
+// can be updated. Normal duplicate commit requests remain idempotent.
+func (s *Service) RepairAlbumImportSession(user authctx.CurrentUser, sessionID uuid.UUID) (model.AlbumImportSession, error) {
+	if user.ID == uuid.Nil {
+		return model.AlbumImportSession{}, apperr.Unauthorized("Login required")
+	}
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		session, err := loadAlbumImportSessionForUpdate(tx, sessionID, user.ID)
+		if err != nil {
+			return err
+		}
+		if session.Status != AlbumImportStatusCommitted || session.TargetAlbumID == nil {
+			return apperr.Unprocessable("music.import_invalid_status", "Committed import with a target album is required")
+		}
+		var album model.Album
+		if err := tx.First(&album, "id = ?", *session.TargetAlbumID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("music.album_not_found", "Target album not found")
+			}
+			return err
+		}
+		payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+		if err != nil {
+			return err
+		}
+		applyAlbumImportSessionState(&session, AlbumImportStatusReady, payload)
+		session.CommittedAt = nil
+		session.CommittedBy = nil
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		session.PayloadJSON = string(encoded)
+		return tx.Save(&session).Error
+	}); err != nil {
 		return model.AlbumImportSession{}, err
 	}
 	return loadAlbumImportSession(s.db, sessionID, &user.ID)

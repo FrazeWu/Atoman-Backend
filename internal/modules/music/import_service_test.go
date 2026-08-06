@@ -1158,6 +1158,71 @@ func TestCommitAlbumImportSessionIsIdempotentAfterCommit(t *testing.T) {
 	}
 }
 
+func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	initial := CommitAlbumImportSessionInput{
+		Artist: AlbumImportArtistPayload{Name: "Daft Punk"},
+		Album: AlbumImportAlbumPayload{Title: "Discovery", Tracks: []AlbumImportTrackPayload{
+			{Title: "One More Time", TrackNumber: 1},
+			{Title: "Aerodynamic", TrackNumber: 2},
+		}},
+	}
+	committed, err := svc.CommitAlbumImportSession(user, session.ID, initial)
+	if err != nil {
+		t.Fatalf("commit session: %v", err)
+	}
+	if committed.TargetAlbumID == nil {
+		t.Fatal("expected target album")
+	}
+
+	ready, err := svc.RepairAlbumImportSession(user, session.ID)
+	if err != nil {
+		t.Fatalf("start repair: %v", err)
+	}
+	if ready.Status != AlbumImportStatusReady || ready.TargetAlbumID == nil || *ready.TargetAlbumID != *committed.TargetAlbumID {
+		t.Fatalf("unexpected repair state: %#v", ready)
+	}
+	var artist model.Artist
+	if err := db.Joins("JOIN album_artists ON album_artists.artist_id = Artists.id").Where("album_artists.album_id = ?", *committed.TargetAlbumID).First(&artist).Error; err != nil {
+		t.Fatalf("load artist: %v", err)
+	}
+	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artists: []CommitAlbumImportArtistInput{{ArtistID: artist.ID.String()}},
+		Album: AlbumImportAlbumPayload{Title: "Discovery (Remastered)", Description: "Updated metadata", Tracks: []AlbumImportTrackPayload{
+			{Title: "One More Time (Remastered)", TrackNumber: 1},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("submit repair: %v", err)
+	}
+
+	var album model.Album
+	if err := db.First(&album, "id = ?", *committed.TargetAlbumID).Error; err != nil {
+		t.Fatalf("load target album: %v", err)
+	}
+	if album.Title != "Discovery (Remastered)" || album.Description != "Updated metadata" {
+		t.Fatalf("expected original album updated, got %#v", album)
+	}
+	var songs []model.Song
+	if err := db.Where("album_id = ?", album.ID).Order("track_number ASC").Find(&songs).Error; err != nil {
+		t.Fatalf("load songs: %v", err)
+	}
+	if len(songs) != 1 || songs[0].Title != "One More Time (Remastered)" {
+		t.Fatalf("expected repaired tracks, got %#v", songs)
+	}
+	var count int64
+	if err := db.Model(&model.Album{}).Count(&count).Error; err != nil {
+		t.Fatalf("count albums: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("repair created duplicate albums: %d", count)
+	}
+}
+
 func TestCommitAlbumImportSessionUsesExistingArtistWhenArtistIDProvided(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 

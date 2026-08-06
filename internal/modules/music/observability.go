@@ -1,0 +1,45 @@
+package music
+
+import (
+	"log"
+	"strings"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+func musicOperationLog() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		startedAt := time.Now()
+		c.Next()
+		operation := musicOperation(c.Request.URL.Path)
+		if operation == "" {
+			return
+		}
+		status := c.Writer.Status()
+		log.Printf(
+			"music_operation=%q request_id=%q method=%q status=%d duration_ms=%d failed=%t",
+			operation,
+			c.GetString("request_id"),
+			c.Request.Method,
+			status,
+			time.Since(startedAt).Milliseconds(),
+			status >= 400,
+		)
+	}
+}
+
+func musicOperation(path string) string {
+	switch {
+	case strings.Contains(path, "/music/search"):
+		return "search"
+	case strings.Contains(path, "/music/imports/"):
+		return "import"
+	case strings.HasSuffix(path, "/music/plays"):
+		return "play"
+	case strings.Contains(path, "/music/recommend/"):
+		return "recommend"
+	default:
+		return ""
+	}
+}

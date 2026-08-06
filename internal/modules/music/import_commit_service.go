@@ -2,6 +2,7 @@ package music
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/url"
 	"os"
@@ -123,31 +124,54 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				album.Year = album.ReleaseYear
 			}
 		}
-		if err := createAlbumImportAlbum(tx, &album); err != nil {
-			return err
-		}
-		session.TargetAlbumID = &album.ID
-		promotedCoverURL, oldCoverKey, newCoverKey, err := s.promoteAlbumImportAsset(
-			album.CoverURL,
-			storage.BuildMusicAlbumCoverKey(album.ID.String(), path.Ext(album.CoverURL)),
-			id,
-		)
-		if err != nil {
-			return err
-		}
-		if newCoverKey != "" {
-			album.CoverURL = promotedCoverURL
-			album.CoverSource = "s3"
-			oldObjectKeys = append(oldObjectKeys, oldCoverKey)
-			newObjectKeys = append(newObjectKeys, newCoverKey)
-			if err := tx.Model(&album).Updates(map[string]any{
-				"cover_url":    album.CoverURL,
-				"cover_source": album.CoverSource,
-			}).Error; err != nil {
+		isRepair := session.TargetAlbumID != nil
+		if isRepair {
+			var existing model.Album
+			if err := tx.First(&existing, "id = ?", *session.TargetAlbumID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return apperr.NotFound("music.album_not_found", "Target album not found")
+				}
 				return err
 			}
+			existing.Title = album.Title
+			existing.Description = album.Description
+			existing.ReleaseYear = album.ReleaseYear
+			existing.Year = album.Year
+			existing.ReleaseDate = album.ReleaseDate
+			existing.CoverURL = album.CoverURL
+			existing.CoverSource = album.CoverSource
+			existing.AlbumType = album.AlbumType
+			album = existing
+			if err := tx.Save(&album).Error; err != nil {
+				return err
+			}
+		} else {
+			if err := createAlbumImportAlbum(tx, &album); err != nil {
+				return err
+			}
+			session.TargetAlbumID = &album.ID
+			promotedCoverURL, oldCoverKey, newCoverKey, err := s.promoteAlbumImportAsset(
+				album.CoverURL,
+				storage.BuildMusicAlbumCoverKey(album.ID.String(), path.Ext(album.CoverURL)),
+				id,
+			)
+			if err != nil {
+				return err
+			}
+			if newCoverKey != "" {
+				album.CoverURL = promotedCoverURL
+				album.CoverSource = "s3"
+				oldObjectKeys = append(oldObjectKeys, oldCoverKey)
+				newObjectKeys = append(newObjectKeys, newCoverKey)
+				if err := tx.Model(&album).Updates(map[string]any{
+					"cover_url":    album.CoverURL,
+					"cover_source": album.CoverSource,
+				}).Error; err != nil {
+					return err
+				}
+			}
 		}
-		if err := tx.Model(&album).Association("Artists").Append(artists); err != nil {
+		if err := tx.Model(&album).Association("Artists").Replace(artists); err != nil {
 			return err
 		}
 
@@ -158,8 +182,26 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				rawDerivedTracks = derivedTracks
 			}
 		}
+		var existingSongs []model.Song
+		if isRepair {
+			if err := tx.Where("album_id = ?", album.ID).Order("track_number ASC, created_at ASC").Find(&existingSongs).Error; err != nil {
+				return err
+			}
+		}
 		for index, track := range payload.Album.Tracks {
 			audioURL := matchDerivedTrackAudio(rawDerivedTracks, track, index, usedDerivedTrackIndexes)
+			if index < len(existingSongs) {
+				song := existingSongs[index]
+				song.Title = strings.TrimSpace(track.Title)
+				song.TrackNumber = track.TrackNumber
+				if err := tx.Save(&song).Error; err != nil {
+					return err
+				}
+				if err := tx.Model(&song).Association("Artists").Replace(artists); err != nil {
+					return err
+				}
+				continue
+			}
 
 			song := model.Song{
 				Title:       strings.TrimSpace(track.Title),
@@ -195,6 +237,13 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}
 			if err := tx.Model(&song).Association("Artists").Append(artists); err != nil {
 				return err
+			}
+		}
+		if len(payload.Album.Tracks) < len(existingSongs) {
+			for _, song := range existingSongs[len(payload.Album.Tracks):] {
+				if err := tx.Delete(&song).Error; err != nil {
+					return err
+				}
 			}
 		}
 
