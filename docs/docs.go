@@ -422,6 +422,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/music/quality": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "管理员查看缺失封面、曲目、音频和失败导入的音乐资料。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-entry-status"
+                ],
+                "summary": "获取音乐资料问题",
+                "parameters": [
+                    {
+                        "enum": [
+                            "all",
+                            "missing_cover",
+                            "missing_tracks",
+                            "missing_audio",
+                            "import_failed"
+                        ],
+                        "type": "string",
+                        "description": "问题类型",
+                        "name": "type",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/reviews/album-corrections": {
             "get": {
                 "security": [
