@@ -196,7 +196,8 @@ func (s *Service) RetryAlbumImportFile(user authctx.CurrentUser, sessionID, file
 		if err != nil {
 			return err
 		}
-		if (session.Status != AlbumImportStatusFailed && session.Status != AlbumImportStatusNeedsAttention) || file.UploadStatus != AlbumImportFileUploadStatusUploaded || (file.ProcessingStatus != AlbumImportFileProcessingStatusFailed && file.ErrorMessage == "") {
+		hasProcessingError := file.ProcessingStatus == AlbumImportFileProcessingStatusFailed || file.ErrorMessage != "" || session.ErrorMessage != ""
+		if (session.Status != AlbumImportStatusFailed && session.Status != AlbumImportStatusNeedsAttention) || file.UploadStatus != AlbumImportFileUploadStatusUploaded || !hasProcessingError {
 			return apperr.Unprocessable("music.import_invalid_status", "Album import file cannot be retried")
 		}
 		file.ProcessingStatus = AlbumImportFileProcessingStatusPending

@@ -731,6 +731,44 @@ func TestRetryAlbumImportFileReusesAndResetsFailedJob(t *testing.T) {
 	}
 }
 
+func TestRetryAlbumImportFileRequeuesSessionLevelProcessingFailure(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
+	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{albumImportFileInput("album.zip", 1024)})
+	job := model.AlbumImportJob{
+		ImportID: session.ID, Status: AlbumImportJobStatusFailed, Stage: AlbumImportStageFailed,
+		Attempts: 3, MaxAttempts: 3, LastError: "no space left on device",
+	}
+	if err := db.Create(&job).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Updates(map[string]any{
+		"upload_status": AlbumImportFileUploadStatusUploaded, "processing_status": AlbumImportFileProcessingStatusPending,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Updates(map[string]any{
+		"status": AlbumImportStatusNeedsAttention, "stage": AlbumImportStageFailed, "error_message": "no space left on device",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	queued, err := svc.RetryAlbumImportFile(user, session.ID, file.ID)
+	if err != nil {
+		t.Fatalf("retry session-level failure: %v", err)
+	}
+	if queued.Status != AlbumImportStatusQueued || queued.ErrorMessage != "" {
+		t.Fatalf("expected clean queued session, got %#v", queued)
+	}
+	var retriedJob model.AlbumImportJob
+	if err := db.First(&retriedJob, "import_id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if retriedJob.Status != AlbumImportJobStatusQueued || retriedJob.Attempts != 0 || retriedJob.LastError != "" {
+		t.Fatalf("job was not reset: %#v", retriedJob)
+	}
+}
+
 func TestReplaceAlbumImportFileResetsRecordAndCreatesNewMultipart(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	store := &fakeAlbumImportMultipartStore{}
