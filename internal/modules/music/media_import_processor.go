@@ -25,9 +25,12 @@ import (
 )
 
 const (
-	mediaArchiveMaxBytes   int64 = 30 * 1024 * 1024 * 1024
-	mediaArchiveMaxEntries       = 5000
-	mediaArchiveMaxRatio   int64 = 100
+	mediaArchiveMaxBytes        int64 = 30 * 1024 * 1024 * 1024
+	mediaArchiveMaxEntries            = 5000
+	mediaArchiveMaxRatio        int64 = 100
+	embeddedCoverMinDimension         = 300
+	embeddedCoverMinAspectRatio       = 0.8
+	embeddedCoverMaxAspectRatio       = 1.25
 )
 
 // MediaCommandRunner isolates external binaries so processing remains unit-testable.
@@ -709,6 +712,18 @@ func (p *MediaImportProcessor) processEmbeddedCover(ctx context.Context, session
 	if _, err := p.runner.Run(ctx, "ffmpeg", "-y", "-i", source, "-map", "0:v:0", "-frames:v", "1", "-c:v", "libwebp", output); err != nil {
 		return err
 	}
+	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", output)
+	if err != nil {
+		return err
+	}
+	width, height := parseImageDimensions(probe)
+	if width < embeddedCoverMinDimension || height < embeddedCoverMinDimension {
+		return fmt.Errorf("embedded artwork is too small: %dx%d", width, height)
+	}
+	aspectRatio := float64(width) / float64(height)
+	if aspectRatio < embeddedCoverMinAspectRatio || aspectRatio > embeddedCoverMaxAspectRatio {
+		return fmt.Errorf("embedded artwork has invalid aspect ratio: %dx%d", width, height)
+	}
 	return p.processCover(ctx, sessionID, output)
 }
 
@@ -827,6 +842,19 @@ func parseProbe(raw []byte) (float64, string) {
 	}
 	duration, _ := strconv.ParseFloat(probe.Format.Duration, 64)
 	return duration, strings.TrimSpace(probe.Format.Tags["title"])
+}
+
+func parseImageDimensions(raw []byte) (int, int) {
+	var probe struct {
+		Streams []struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		} `json:"streams"`
+	}
+	if json.Unmarshal(raw, &probe) != nil || len(probe.Streams) == 0 {
+		return 0, 0
+	}
+	return probe.Streams[0].Width, probe.Streams[0].Height
 }
 
 func titleFromFileName(name string) string {
