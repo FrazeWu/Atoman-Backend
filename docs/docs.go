@@ -23633,6 +23633,12 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "other_versions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Album"
+                    }
+                },
                 "play_count": {
                     "type": "integer"
                 },

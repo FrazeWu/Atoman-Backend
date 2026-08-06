@@ -472,7 +472,20 @@ func (h *Handler) getAlbum(c *gin.Context) {
 		return
 	}
 	album = albumRows[0]
+	canonicalID := album.ID
+	if album.CanonicalAlbumID != nil {
+		canonicalID = *album.CanonicalAlbumID
+	}
+	if err := h.service.db.Where("id <> ? AND (id = ? OR canonical_album_id = ?)", album.ID, canonicalID, canonicalID).
+		Where("COALESCE(entry_status, '') <> ? AND COALESCE(status, '') <> ?", "closed", "closed").
+		Preload("Artists").Order("edition_type ASC, release_date DESC, title ASC").Find(&album.OtherVersions).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	resolveAlbumMediaURLs(&album)
+	for index := range album.OtherVersions {
+		resolveAlbumMediaURLs(&album.OtherVersions[index])
+	}
 	httpx.OK(c, http.StatusOK, album)
 }
 

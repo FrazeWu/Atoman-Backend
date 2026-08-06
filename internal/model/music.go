@@ -69,6 +69,7 @@ type Album struct {
 	User             *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
 	Artists          []Artist   `json:"artists,omitempty" gorm:"many2many:album_artists;"`
 	Songs            []Song     `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
+	OtherVersions    []Album    `json:"other_versions,omitempty" gorm:"-"`
 	PlayCount        int64      `json:"play_count"`
 	BookmarkCount    int64      `json:"bookmark_count" gorm:"-"`
 }
