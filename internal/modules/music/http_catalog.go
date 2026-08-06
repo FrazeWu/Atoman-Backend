@@ -267,7 +267,7 @@ func (h *Handler) getArtist(c *gin.Context) {
 	}
 
 	var artist model.Artist
-	query := h.service.db.Preload("Aliases").Preload("Albums.Artists")
+	query := h.service.db.Preload("Aliases").Preload("Albums.Artists").Preload("Albums.Songs")
 	if h.service.db.Migrator().HasTable(&model.ArtistMember{}) {
 		query = query.Preload("MemberRelations.MemberArtist")
 	}
@@ -292,7 +292,7 @@ func (h *Handler) getArtist(c *gin.Context) {
 
 	artist.ImageURL = resolveMusicMediaURL(artist.ImageURL)
 	for i := range artist.Albums {
-		artist.Albums[i].CoverURL = resolveMusicMediaURL(artist.Albums[i].CoverURL)
+		resolveAlbumMediaURLs(&artist.Albums[i])
 		for j := range artist.Albums[i].Artists {
 			artist.Albums[i].Artists[j].ImageURL = resolveMusicMediaURL(artist.Albums[i].Artists[j].ImageURL)
 		}

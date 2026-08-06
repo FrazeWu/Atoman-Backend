@@ -945,6 +945,51 @@ func TestRegisterRoutesGetArtistReturnsGroupedMembersForGroupArtist(t *testing.T
 	}
 }
 
+func TestRegisterRoutesGetArtistIncludesAlbumSongs(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Track Count Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	album := model.Album{Title: "Track Count Album", Status: "open", EntryStatus: "open", Artists: []model.Artist{artist}}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	songs := []model.Song{
+		{Title: "Track One", AudioURL: "/audio/one.mp3", Status: "open", AlbumID: &album.ID},
+		{Title: "Track Two", AudioURL: "/audio/two.mp3", Status: "open", AlbumID: &album.ID},
+	}
+	if err := db.Create(&songs).Error; err != nil {
+		t.Fatalf("create songs: %v", err)
+	}
+
+	router := newMusicHTTPRouter(service, &user)
+	response := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/artists/"+artist.ID.String(), "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		Data struct {
+			Albums []struct {
+				ID    string `json:"id"`
+				Songs []struct {
+					ID string `json:"id"`
+				} `json:"songs"`
+			} `json:"albums"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode artist response: %v", err)
+	}
+	if len(payload.Data.Albums) != 1 || payload.Data.Albums[0].ID != album.ID.String() {
+		t.Fatalf("unexpected artist albums: %#v", payload.Data.Albums)
+	}
+	if len(payload.Data.Albums[0].Songs) != len(songs) {
+		t.Fatalf("album songs = %d, want %d", len(payload.Data.Albums[0].Songs), len(songs))
+	}
+}
+
 func TestRegisterRoutesGetArtistStillReturnsArtistWhenArtistMembersTableMissing(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Legacy Artist", EntryStatus: "open"}
