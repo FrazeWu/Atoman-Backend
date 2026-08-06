@@ -120,6 +120,9 @@ func normalizeAlbumImportFiles(input []AlbumImportFileInput, limits albumImportU
 		if relativePath == "." || path.Base(relativePath) != fileName {
 			return nil, "", apperr.BadRequest("validation.invalid_request", "album import relative path is invalid")
 		}
+		if shouldIgnoreAlbumImportPath(relativePath) {
+			continue
+		}
 		if raw.FileSize <= 0 || raw.FileSize > limits.MaxFileBytes || totalSize > limits.MaxTotalBytes-raw.FileSize {
 			return nil, "", apperr.BadRequest("validation.invalid_request", "album import file size is invalid")
 		}
@@ -146,6 +149,9 @@ func normalizeAlbumImportFiles(input []AlbumImportFileInput, limits albumImportU
 			},
 			Role: role, Format: format,
 		})
+	}
+	if len(files) == 0 {
+		return nil, "", apperr.BadRequest("validation.invalid_request", "no supported album import files found")
 	}
 
 	if archiveCount > 0 {

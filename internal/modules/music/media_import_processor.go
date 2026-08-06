@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -330,6 +331,9 @@ func (p *MediaImportProcessor) processUploadedFiles(ctx context.Context, session
 		}
 		return errors.New("no uploaded audio files to process")
 	}
+	sort.SliceStable(files, func(i, j int) bool {
+		return albumImportTrackPathLess(files[i].RelativePath, files[j].RelativePath)
+	})
 	successes := 0
 	used, cueSuccesses, cueTracks, err := p.processUploadedCUESources(ctx, session.ID, files, cues)
 	if err != nil {
@@ -460,17 +464,24 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 		if entry.Type()&os.ModeSymlink != 0 {
 			return fmt.Errorf("unsafe extracted symlink %q", path)
 		}
-		if entry.IsDir() {
-			if entry.Name() == "__MACOSX" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
 		relative, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
-		if strings.HasPrefix(filepath.Base(relative), "._") {
+		if entry.IsDir() {
+			if relative != "." && shouldIgnoreAlbumImportPath(relative) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if shouldIgnoreAlbumImportPath(relative) {
+			return nil
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() || info.Size() == 0 {
 			return nil
 		}
 		role, _, err := detectAlbumImportFileRole(filepath.Base(path))
@@ -492,6 +503,10 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 	if err != nil {
 		return err
 	}
+	sort.SliceStable(audios, func(i, j int) bool {
+		return albumImportTrackPathLess(audios[i].relative, audios[j].relative)
+	})
+	sort.Strings(cues)
 	if cover != "" {
 		_ = p.processCover(ctx, sessionID, cover)
 	}
@@ -691,6 +706,7 @@ func (p *MediaImportProcessor) persistDerivedTracks(ctx context.Context, session
 			audioURL = p.urlPrefix + "/" + strings.TrimLeft(file.PlaybackKey, "/")
 		}
 		tracks = append(tracks, map[string]any{
+			"file_id":      file.ID.String(),
 			"title":        file.Title,
 			"track_number": file.TrackNumber,
 			"audio_key":    file.PlaybackKey,
@@ -741,11 +757,12 @@ func (p *MediaImportProcessor) processAudio(ctx context.Context, sessionID uuid.
 }
 
 func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile, sourcePath, overrideTitle string, overrideTrack int, knownDuration float64, rangeSeconds ...float64) error {
-	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration:format_tags=title", "-of", "json", sourcePath)
+	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", sourcePath)
 	if err != nil {
 		return fmt.Errorf("ffprobe %s: %w", file.FileName, err)
 	}
-	duration, taggedTitle := parseProbe(probe)
+	metadata := parseAudioProbe(probe)
+	duration, taggedTitle := metadata.duration, metadata.title
 	if knownDuration > 0 {
 		duration = knownDuration
 	}
@@ -780,12 +797,19 @@ func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID 
 		title = titleFromFileName(file.FileName)
 	}
 	disc, track := discAndTrackFromPath(file.RelativePath)
+	if metadata.discNumber > 0 {
+		disc = metadata.discNumber
+	}
+	if metadata.trackNumber > 0 {
+		track = metadata.trackNumber
+	}
 	if overrideTrack > 0 {
 		track = overrideTrack
 	}
+	metadataJSON, _ := json.Marshal(metadata.archiveMetadata())
 	return p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Updates(map[string]any{
 		"playback_key": playbackKey, "title": title, "disc_number": disc, "track_number": track,
-		"duration_seconds": duration, "processing_status": "completed", "error_message": "",
+		"duration_seconds": duration, "metadata_json": string(metadataJSON), "processing_status": "completed", "error_message": "",
 	}).Error
 }
 
@@ -831,17 +855,90 @@ func mediaPlaybackKey(sessionID, fileID uuid.UUID, kind, extension string) strin
 }
 
 func parseProbe(raw []byte) (float64, string) {
+	metadata := parseAudioProbe(raw)
+	return metadata.duration, metadata.title
+}
+
+type audioProbeMetadata struct {
+	duration    float64
+	title       string
+	discNumber  int
+	trackNumber int
+	container   string
+	codec       string
+	bitRate     int
+	sampleRate  int
+	bitDepth    int
+	channels    int
+}
+
+func parseAudioProbe(raw []byte) audioProbeMetadata {
 	var probe struct {
 		Format struct {
-			Duration string            `json:"duration"`
-			Tags     map[string]string `json:"tags"`
+			Duration   string            `json:"duration"`
+			FormatName string            `json:"format_name"`
+			BitRate    string            `json:"bit_rate"`
+			Tags       map[string]string `json:"tags"`
 		} `json:"format"`
+		Streams []struct {
+			CodecName        string `json:"codec_name"`
+			SampleRate       string `json:"sample_rate"`
+			BitsPerRawSample string `json:"bits_per_raw_sample"`
+			BitsPerSample    string `json:"bits_per_sample"`
+			Channels         int    `json:"channels"`
+			BitRate          string `json:"bit_rate"`
+		} `json:"streams"`
 	}
 	if json.Unmarshal(raw, &probe) != nil {
-		return 0, ""
+		return audioProbeMetadata{}
 	}
 	duration, _ := strconv.ParseFloat(probe.Format.Duration, 64)
-	return duration, strings.TrimSpace(probe.Format.Tags["title"])
+	metadata := audioProbeMetadata{duration: duration, container: strings.TrimSpace(probe.Format.FormatName)}
+	metadata.bitRate, _ = strconv.Atoi(probe.Format.BitRate)
+	if len(probe.Streams) > 0 {
+		stream := probe.Streams[0]
+		metadata.codec = strings.TrimSpace(stream.CodecName)
+		metadata.sampleRate, _ = strconv.Atoi(stream.SampleRate)
+		metadata.bitDepth, _ = strconv.Atoi(stream.BitsPerRawSample)
+		if metadata.bitDepth == 0 {
+			metadata.bitDepth, _ = strconv.Atoi(stream.BitsPerSample)
+		}
+		metadata.channels = stream.Channels
+		if metadata.bitRate == 0 {
+			metadata.bitRate, _ = strconv.Atoi(stream.BitRate)
+		}
+	}
+	for key, value := range probe.Format.Tags {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "title":
+			metadata.title = strings.TrimSpace(value)
+		case "track", "tracknumber", "track_number":
+			metadata.trackNumber = albumImportTagNumber(value)
+		case "disc", "discnumber", "disc_number":
+			metadata.discNumber = albumImportTagNumber(value)
+		}
+	}
+	return metadata
+}
+
+func (m audioProbeMetadata) archiveMetadata() map[string]any {
+	return map[string]any{
+		"container":   m.container,
+		"codec":       m.codec,
+		"bit_rate":    m.bitRate,
+		"sample_rate": m.sampleRate,
+		"bit_depth":   m.bitDepth,
+		"channels":    m.channels,
+	}
+}
+
+func albumImportTagNumber(value string) int {
+	matched := regexp.MustCompile(`^\s*(\d+)`).FindStringSubmatch(value)
+	if len(matched) != 2 {
+		return 0
+	}
+	number, _ := strconv.Atoi(matched[1])
+	return number
 }
 
 func parseImageDimensions(raw []byte) (int, int) {
@@ -858,9 +955,8 @@ func parseImageDimensions(raw []byte) (int, int) {
 }
 
 func titleFromFileName(name string) string {
-	base := strings.TrimSuffix(filepath.Base(name), filepath.Ext(name))
-	base = regexp.MustCompile(`^\s*\d+\s*[-._ ]+`).ReplaceAllString(base, "")
-	return strings.TrimSpace(base)
+	title, _, _ := albumImportTrackInfoFromFileName(name)
+	return title
 }
 
 func discAndTrackFromPath(relativePath string) (int, int) {
@@ -871,10 +967,56 @@ func discAndTrackFromPath(relativePath string) (int, int) {
 			disc = parsed
 		}
 	}
-	base := filepath.Base(relativePath)
-	matched = regexp.MustCompile(`^\s*(\d+)`).FindStringSubmatch(base)
-	if len(matched) == 2 {
-		track, _ = strconv.Atoi(matched[1])
+	_, fileDisc, fileTrack := albumImportTrackInfoFromFileName(filepath.Base(relativePath))
+	if fileDisc > 0 {
+		disc = fileDisc
+	}
+	if fileTrack > 0 {
+		track = fileTrack
 	}
 	return disc, track
+}
+
+func albumImportTrackInfoFromFileName(name string) (string, int, int) {
+	base := strings.TrimSpace(strings.TrimSuffix(filepath.Base(name), filepath.Ext(name)))
+	multiDisc := regexp.MustCompile(`(?i)^\s*(\d{1,2})\s*[-_.]\s*(\d{1,3})(?:\s*[-_.]\s*|\s+)(.+?)\s*$`).FindStringSubmatch(base)
+	if len(multiDisc) == 4 {
+		disc, _ := strconv.Atoi(multiDisc[1])
+		track, _ := strconv.Atoi(multiDisc[2])
+		return strings.TrimSpace(multiDisc[3]), disc, track
+	}
+	explicitTrack := regexp.MustCompile(`(?i)^\s*(?:track\s*)?(\d{1,3})\s*(?:[-_]\s*|\.\s+)(.+?)\s*$`).FindStringSubmatch(base)
+	if len(explicitTrack) == 3 {
+		track, _ := strconv.Atoi(explicitTrack[1])
+		return strings.TrimSpace(explicitTrack[2]), 0, track
+	}
+	zeroPaddedTrack := regexp.MustCompile(`^\s*(0\d{1,2})\s+(.+?)\s*$`).FindStringSubmatch(base)
+	if len(zeroPaddedTrack) == 3 {
+		track, _ := strconv.Atoi(zeroPaddedTrack[1])
+		return strings.TrimSpace(zeroPaddedTrack[2]), 0, track
+	}
+	leadingTrack := regexp.MustCompile(`^\s*(\d{1,3})(?:\s|[-_.])`).FindStringSubmatch(base)
+	track := 0
+	if len(leadingTrack) == 2 {
+		track, _ = strconv.Atoi(leadingTrack[1])
+	}
+	return base, 0, track
+}
+
+func albumImportTrackPathLess(left, right string) bool {
+	leftDisc, leftTrack := discAndTrackFromPath(left)
+	rightDisc, rightTrack := discAndTrackFromPath(right)
+	if leftDisc != rightDisc {
+		return leftDisc < rightDisc
+	}
+	if leftTrack > 0 && rightTrack > 0 && leftTrack != rightTrack {
+		return leftTrack < rightTrack
+	}
+	if leftTrack > 0 && rightTrack == 0 {
+		return true
+	}
+	if leftTrack == 0 && rightTrack > 0 {
+		return false
+	}
+	return strings.ToLower(filepath.ToSlash(left)) < strings.ToLower(filepath.ToSlash(right))
 }

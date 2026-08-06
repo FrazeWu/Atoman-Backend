@@ -651,6 +651,37 @@ func TestParseCUESupportsUTF8AndGBK(t *testing.T) {
 	}
 }
 
+func TestParseAudioProbeReadsTitleTrackAndDiscTags(t *testing.T) {
+	metadata := parseAudioProbe([]byte(`{"format":{"duration":"245.5","tags":{"TITLE":"Tagged title","TRACKNUMBER":"03/12","DISC":"2/2"}}}`))
+	if metadata.duration != 245.5 || metadata.title != "Tagged title" || metadata.trackNumber != 3 || metadata.discNumber != 2 {
+		t.Fatalf("unexpected audio metadata: %#v", metadata)
+	}
+}
+
+func TestAlbumImportTrackInfoFromFileNameIsConservative(t *testing.T) {
+	tests := []struct {
+		name      string
+		wantTitle string
+		wantDisc  int
+		wantTrack int
+	}{
+		{name: "01 - Intro.flac", wantTitle: "Intro", wantTrack: 1},
+		{name: "2-01 Main Theme.flac", wantTitle: "Main Theme", wantDisc: 2, wantTrack: 1},
+		{name: "03. Outro.flac", wantTitle: "Outro", wantTrack: 3},
+		{name: "01 Hidden Track.flac", wantTitle: "Hidden Track", wantTrack: 1},
+		{name: "99 Problems.flac", wantTitle: "99 Problems", wantTrack: 99},
+		{name: "1979.flac", wantTitle: "1979"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			title, disc, track := albumImportTrackInfoFromFileName(test.name)
+			if title != test.wantTitle || disc != test.wantDisc || track != test.wantTrack {
+				t.Fatalf("track info = %q/%d/%d, want %q/%d/%d", title, disc, track, test.wantTitle, test.wantDisc, test.wantTrack)
+			}
+		})
+	}
+}
+
 func TestMediaImportProcessorTranscodesUploadedAudioAndUpdatesFile(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}

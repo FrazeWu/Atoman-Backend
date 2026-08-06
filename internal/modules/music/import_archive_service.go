@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -166,16 +165,7 @@ func (s *Service) deriveAlbumImportPayloadFromZipFile(user authctx.CurrentUser, 
 		if file.FileInfo().IsDir() {
 			continue
 		}
-		// Filter out __MACOSX and hidden files/directories starting with .
-		segments := strings.Split(filepath.ToSlash(file.Name), "/")
-		ignored := false
-		for _, segment := range segments {
-			if (strings.HasPrefix(segment, ".") && segment != "." && segment != "..") || segment == "__MACOSX" {
-				ignored = true
-				break
-			}
-		}
-		if ignored {
+		if shouldIgnoreAlbumImportPath(file.Name) {
 			continue
 		}
 
@@ -312,12 +302,8 @@ func (s *Service) storeImportedCover(user authctx.CurrentUser, filename string, 
 }
 
 func deriveTrackFromArchiveEntry(name string) (string, int, bool) {
-	// Filter out system metadata directories like __MACOSX and hidden directories/files starting with . (excluding "." and "..")
-	segments := strings.Split(filepath.ToSlash(name), "/")
-	for _, segment := range segments {
-		if (strings.HasPrefix(segment, ".") && segment != "." && segment != "..") || segment == "__MACOSX" {
-			return "", 0, false
-		}
+	if shouldIgnoreAlbumImportPath(name) {
+		return "", 0, false
 	}
 	base := filepath.Base(name)
 	ext := strings.ToLower(filepath.Ext(base))
@@ -327,16 +313,7 @@ func deriveTrackFromArchiveEntry(name string) (string, int, bool) {
 		return "", 0, false
 	}
 
-	title := strings.TrimSuffix(base, filepath.Ext(base))
-	trackNumber := 0
-	var parts = strings.SplitN(title, " - ", 2)
-	if len(parts) == 2 {
-		if value, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
-			trackNumber = value
-			title = parts[1]
-		}
-	}
-	title = strings.TrimSpace(title)
+	title, _, trackNumber := albumImportTrackInfoFromFileName(base)
 	if title == "" {
 		return "", 0, false
 	}

@@ -191,6 +191,28 @@ func TestDetectAlbumImportFileRoleSupportsConfiguredWhitelist(t *testing.T) {
 	}
 }
 
+func TestNormalizeAlbumImportFilesIgnoresSystemMetadata(t *testing.T) {
+	files, inputMode, err := normalizeAlbumImportFiles([]AlbumImportFileInput{
+		albumImportFileInput("Album/01 - Intro.flac", 1024),
+		albumImportFileInput("Album/._01 - Intro.flac", 512),
+		albumImportFileInput("Album/__MACOSX/._02 - Hidden.mp3", 512),
+		albumImportFileInput("Album/.DS_Store", 512),
+		albumImportFileInput("Album/Thumbs.db", 512),
+		albumImportFileInput("Album/.hidden/03 - Hidden.flac", 512),
+	}, albumImportUploadLimitsFromEnv())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inputMode != AlbumImportInputModeFolder || len(files) != 1 || files[0].RelativePath != "Album/01 - Intro.flac" {
+		t.Fatalf("unexpected normalized files: mode=%q files=%#v", inputMode, files)
+	}
+
+	_, _, err = normalizeAlbumImportFiles([]AlbumImportFileInput{
+		albumImportFileInput("Album/._01 - Intro.flac", 512),
+	}, albumImportUploadLimitsFromEnv())
+	assertAlbumImportValidationError(t, err)
+}
+
 func TestRegisterAlbumImportFilesRejectsInvalidDescriptors(t *testing.T) {
 	tests := []struct {
 		name  string

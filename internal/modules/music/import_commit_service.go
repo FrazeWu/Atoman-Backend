@@ -182,6 +182,14 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				rawDerivedTracks = derivedTracks
 			}
 		}
+		var importFiles []model.AlbumImportFile
+		if err := tx.Where("import_id = ?", session.ID).Find(&importFiles).Error; err != nil {
+			return err
+		}
+		importFilesByID := make(map[string]model.AlbumImportFile, len(importFiles))
+		for _, file := range importFiles {
+			importFilesByID[file.ID.String()] = file
+		}
 		var existingSongs []model.Song
 		if isRepair {
 			if err := tx.Where("album_id = ?", album.ID).Order("track_number ASC, created_at ASC").Find(&existingSongs).Error; err != nil {
@@ -189,11 +197,14 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}
 		}
 		for index, track := range payload.Album.Tracks {
-			audioURL := matchDerivedTrackAudio(rawDerivedTracks, track, index, usedDerivedTrackIndexes)
+			derived := matchDerivedTrackAudio(rawDerivedTracks, track, index, usedDerivedTrackIndexes)
+			audioURL := derived.AudioURL
+			metadata := songAudioMetadataFromImportFile(importFilesByID[derived.FileID])
 			if index < len(existingSongs) {
 				song := existingSongs[index]
 				song.Title = strings.TrimSpace(track.Title)
 				song.TrackNumber = track.TrackNumber
+				applySongAudioMetadata(&song, metadata)
 				if err := tx.Save(&song).Error; err != nil {
 					return err
 				}
@@ -212,6 +223,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				AudioSource: coverSourceFromURL(audioURL),
 				UploadedBy:  &user.ID,
 			}
+			applySongAudioMetadata(&song, metadata)
 			if err := tx.Create(&song).Error; err != nil {
 				return err
 			}
@@ -356,8 +368,13 @@ func (s *Service) deleteAlbumImportObjects(keys []string) {
 	}
 }
 
-func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayload, index int, used map[int]bool) string {
-	tryMatch := func(predicate func(map[string]any) bool) string {
+type derivedTrackAudio struct {
+	AudioURL string
+	FileID   string
+}
+
+func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayload, index int, used map[int]bool) derivedTrackAudio {
+	tryMatch := func(predicate func(map[string]any) bool) derivedTrackAudio {
 		for i, rawTrack := range rawDerivedTracks {
 			if used[i] {
 				continue
@@ -367,32 +384,92 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 				continue
 			}
 			used[i] = true
-			return stringValue(trackMap["audio_url"])
+			return derivedTrackAudio{AudioURL: stringValue(trackMap["audio_url"]), FileID: stringValue(trackMap["file_id"])}
 		}
-		return ""
+		return derivedTrackAudio{}
 	}
 
 	title := strings.TrimSpace(track.Title)
 	if track.TrackNumber > 0 {
-		if audioURL := tryMatch(func(trackMap map[string]any) bool {
+		if audio := tryMatch(func(trackMap map[string]any) bool {
 			return strings.TrimSpace(stringValue(trackMap["title"])) == title &&
 				int(int64Value(trackMap["track_number"])) == track.TrackNumber
-		}); audioURL != "" {
-			return audioURL
+		}); audio.AudioURL != "" {
+			return audio
 		}
 	}
-	if audioURL := tryMatch(func(trackMap map[string]any) bool {
+	if audio := tryMatch(func(trackMap map[string]any) bool {
 		return strings.TrimSpace(stringValue(trackMap["title"])) == title
-	}); audioURL != "" {
-		return audioURL
+	}); audio.AudioURL != "" {
+		return audio
 	}
 	if index >= 0 && index < len(rawDerivedTracks) && !used[index] {
 		if trackMap, ok := rawDerivedTracks[index].(map[string]any); ok {
 			used[index] = true
-			return stringValue(trackMap["audio_url"])
+			return derivedTrackAudio{AudioURL: stringValue(trackMap["audio_url"]), FileID: stringValue(trackMap["file_id"])}
 		}
 	}
-	return ""
+	return derivedTrackAudio{}
+}
+
+type songAudioMetadata struct {
+	fileName     string
+	container    string
+	codec        string
+	bitrateKbps  int
+	sampleRateHz int
+	bitDepth     int
+	channels     int
+	sizeBytes    int64
+	lossless     bool
+	durationSec  int
+}
+
+func songAudioMetadataFromImportFile(file model.AlbumImportFile) songAudioMetadata {
+	if file.ID == uuid.Nil {
+		return songAudioMetadata{}
+	}
+	values := map[string]any{}
+	_ = json.Unmarshal([]byte(file.MetadataJSON), &values)
+	bitRate := int(int64Value(values["bit_rate"]))
+	container := strings.TrimSpace(stringValue(values["container"]))
+	if container == "" {
+		container = strings.TrimSpace(file.DetectedFormat)
+	}
+	codec := strings.TrimSpace(stringValue(values["codec"]))
+	return songAudioMetadata{
+		fileName: file.FileName, container: container, codec: codec, bitrateKbps: bitRate / 1000,
+		sampleRateHz: int(int64Value(values["sample_rate"])), bitDepth: int(int64Value(values["bit_depth"])),
+		channels: int(int64Value(values["channels"])), sizeBytes: file.Size,
+		lossless: isLosslessAudio(container, codec), durationSec: int(file.DurationSeconds + 0.5),
+	}
+}
+
+func applySongAudioMetadata(song *model.Song, metadata songAudioMetadata) {
+	if metadata.fileName == "" {
+		return
+	}
+	song.SourceFileName = metadata.fileName
+	song.SourceContainer = metadata.container
+	song.SourceCodec = metadata.codec
+	song.SourceBitrateKbps = metadata.bitrateKbps
+	song.SourceSampleRateHz = metadata.sampleRateHz
+	song.SourceBitDepth = metadata.bitDepth
+	song.SourceChannels = metadata.channels
+	song.SourceSizeBytes = metadata.sizeBytes
+	song.SourceLossless = metadata.lossless
+	song.PlaybackContainer = "mp3"
+	song.PlaybackCodec = "mp3"
+	song.PlaybackBitrateKbps = 320
+	song.PlaybackChannels = metadata.channels
+	if metadata.durationSec > 0 {
+		song.DurationSec = metadata.durationSec
+	}
+}
+
+func isLosslessAudio(container, codec string) bool {
+	value := strings.ToLower(container + " " + codec)
+	return strings.Contains(value, "flac") || strings.Contains(value, "alac") || strings.Contains(value, "wav") || strings.Contains(value, "aiff")
 }
 
 func resolveCommitAlbumImportArtists(tx *gorm.DB, input CommitAlbumImportSessionInput) ([]*model.Artist, error) {
