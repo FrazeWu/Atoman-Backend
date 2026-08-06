@@ -23,6 +23,12 @@ func RunMusicCatalogV2Migration(db *gorm.DB) error {
 		if err := tx.Model(&model.Playlist{}).Where("is_favorite = ?", true).Update("kind", "favorite").Error; err != nil {
 			return fmt.Errorf("mark favorite playlist kind: %w", err)
 		}
+		if err := tx.Model(&model.AlbumArtist{}).Where("position = ?", 0).Update("position", 1).Error; err != nil {
+			return fmt.Errorf("backfill album artist position: %w", err)
+		}
+		if err := tx.Model(&model.SongArtist{}).Where("position = ?", 0).Update("position", 1).Error; err != nil {
+			return fmt.Errorf("backfill song artist position: %w", err)
+		}
 		return tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_music_playlists_user_system_kind
 			ON music_playlists (user_id, kind)
 			WHERE kind IN ('favorite', 'later') AND deleted_at IS NULL`).Error

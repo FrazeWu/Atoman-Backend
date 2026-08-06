@@ -82,6 +82,7 @@ type AlbumArtist struct {
 	AlbumID   uuid.UUID `json:"album_id" gorm:"type:uuid;primaryKey"`
 	ArtistID  uuid.UUID `json:"artist_id" gorm:"type:uuid;primaryKey"`
 	Role      string    `json:"role" gorm:"default:'primary'"`
+	Position  int       `json:"position" gorm:"default:0"`
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at"`
 }
@@ -121,6 +122,7 @@ type SongArtist struct {
 	SongID    uuid.UUID `json:"song_id" gorm:"type:uuid;primaryKey"`
 	ArtistID  uuid.UUID `json:"artist_id" gorm:"type:uuid;primaryKey"`
 	Role      string    `json:"role" gorm:"default:'primary'"`
+	Position  int       `json:"position" gorm:"default:0"`
 	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
 	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at"`
 }
