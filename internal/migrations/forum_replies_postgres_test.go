@@ -27,14 +27,15 @@ func TestMigrateLegacyForumRepliesPostgres(t *testing.T) {
 	values := ids(10)
 	ownerID, authorID, likerID, topicID, rootID := values[0], values[1], values[2], values[3], values[4]
 	childID, deletedRootID, rescuedRootID, rescuedChildID, likeID := values[5], values[6], values[7], values[8], values[9]
-	deleted := gorm.DeletedAt{Time: testMigrationTime(), Valid: true}
+	created := testMigrationTime()
+	deleted := gorm.DeletedAt{Time: created.Add(10 * time.Minute), Valid: true}
 	require.NoError(t, db.Create(&legacyForumTopic{Base: model.Base{ID: topicID}, UserID: ownerID, SolvedReplyID: &rootID}).Error)
 	require.NoError(t, db.Create(&[]legacyForumReply{
-		{Base: model.Base{ID: rootID}, TopicID: topicID, UserID: authorID, Content: "root", FloorNumber: 1, IsSolved: true},
-		{Base: model.Base{ID: childID}, TopicID: topicID, UserID: authorID, ParentReplyID: &rootID, Content: "child"},
-		{Base: model.Base{ID: deletedRootID, DeletedAt: deleted}, TopicID: topicID, UserID: authorID, Content: "deleted", FloorNumber: 3},
-		{Base: model.Base{ID: rescuedRootID}, TopicID: topicID, UserID: authorID, ParentReplyID: &deletedRootID, Content: "rescued"},
-		{Base: model.Base{ID: rescuedChildID}, TopicID: topicID, UserID: authorID, ParentReplyID: &rescuedRootID, Content: "rescued child"},
+		{Base: base(rootID, created, created, gorm.DeletedAt{}), TopicID: topicID, UserID: authorID, Content: "root", FloorNumber: 1, IsSolved: true},
+		{Base: base(childID, created.Add(time.Minute), created.Add(time.Minute), gorm.DeletedAt{}), TopicID: topicID, UserID: authorID, ParentReplyID: &rootID, Content: "child"},
+		{Base: base(deletedRootID, created.Add(2*time.Minute), created.Add(2*time.Minute), deleted), TopicID: topicID, UserID: authorID, Content: "deleted", FloorNumber: 3},
+		{Base: base(rescuedRootID, created.Add(3*time.Minute), created.Add(3*time.Minute), gorm.DeletedAt{}), TopicID: topicID, UserID: authorID, ParentReplyID: &deletedRootID, Content: "rescued"},
+		{Base: base(rescuedChildID, created.Add(4*time.Minute), created.Add(4*time.Minute), gorm.DeletedAt{}), TopicID: topicID, UserID: authorID, ParentReplyID: &rescuedRootID, Content: "rescued child"},
 	}).Error)
 	require.NoError(t, db.Create(&legacyForumLike{Base: model.Base{ID: likeID}, UserID: likerID, TargetType: "reply", TargetID: rescuedChildID}).Error)
 
