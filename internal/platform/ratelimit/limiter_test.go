@@ -25,3 +25,20 @@ func TestLimiterBlocksUntilWindowExpires(t *testing.T) {
 		t.Fatal("request should be allowed after the window expires")
 	}
 }
+
+func TestLimiterRemovesExpiredWindows(t *testing.T) {
+	now := time.Date(2026, 7, 20, 10, 0, 0, 0, time.UTC)
+	limiter := New()
+	limiter.now = func() time.Time { return now }
+	limiter.Allow("expired", 1, time.Minute)
+
+	now = now.Add(2 * time.Minute)
+	limiter.Allow("active", 1, time.Minute)
+
+	if _, exists := limiter.windows["expired"]; exists {
+		t.Fatal("expired window should be removed during cleanup")
+	}
+	if _, exists := limiter.windows["active"]; !exists {
+		t.Fatal("active window should remain after cleanup")
+	}
+}

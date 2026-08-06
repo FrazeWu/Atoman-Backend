@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -305,31 +306,6 @@ func (h *Handler) getArtist(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, buildArtistDetailResponse(artist))
 }
 
-func (h *Handler) updateArtist(c *gin.Context) {
-	user, ok := currentMusicUser(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	artistID, err := parseMusicID(c.Param("artistId"), "artistId")
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	var req UpdateArtistRequest
-	if err := bindJSON(c, &req); err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	artist, err := h.service.UpdateArtist(user, artistID, req)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	artist.ImageURL = resolveMusicMediaURL(artist.ImageURL)
-	httpx.OK(c, http.StatusOK, artist)
-}
-
 func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
 	now := time.Now()
 	resp := ArtistDetailResponse{
@@ -499,6 +475,7 @@ func (h *Handler) getAlbum(c *gin.Context) {
 // @Success 200 {object} map[string]bool
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
+// @Failure 429 {object} handlers.ErrorResponse
 // @Failure 500 {object} handlers.ErrorResponse
 // @Router /api/v1/music/plays [post]
 func (h *Handler) recordSongPlay(c *gin.Context) {
@@ -510,6 +487,16 @@ func (h *Handler) recordSongPlay(c *gin.Context) {
 	var userID *uuid.UUID
 	if user, ok := authctx.Current(c); ok {
 		userID = &user.ID
+	}
+	identity := "ip:" + c.ClientIP()
+	if userID != nil {
+		identity = "user:" + userID.String()
+	}
+	if allowed, retryAfter := h.playLimiter.Allow(identity, 12, time.Minute); !allowed {
+		seconds := int((retryAfter + time.Second - 1) / time.Second)
+		c.Header("Retry-After", strconv.Itoa(seconds))
+		httpx.Error(c, apperr.New(http.StatusTooManyRequests, "music.play_rate_limited", "Too many play reports", map[string]any{"retry_after": seconds}))
+		return
 	}
 	if err := h.service.RecordSongPlay(userID, req.SongID); err != nil {
 		httpx.Error(c, err)

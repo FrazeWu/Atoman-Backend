@@ -11,9 +11,10 @@ type window struct {
 }
 
 type Limiter struct {
-	mu      sync.Mutex
-	windows map[string]window
-	now     func() time.Time
+	mu        sync.Mutex
+	windows   map[string]window
+	now       func() time.Time
+	cleanupAt time.Time
 }
 
 func New() *Limiter {
@@ -25,6 +26,14 @@ func (limiter *Limiter) Allow(key string, limit int, duration time.Duration) (bo
 	defer limiter.mu.Unlock()
 
 	now := limiter.now()
+	if limiter.cleanupAt.IsZero() || !now.Before(limiter.cleanupAt) {
+		for windowKey, current := range limiter.windows {
+			if !now.Before(current.resetAt) {
+				delete(limiter.windows, windowKey)
+			}
+		}
+		limiter.cleanupAt = now.Add(time.Minute)
+	}
 	current, exists := limiter.windows[key]
 	if !exists || !now.Before(current.resetAt) {
 		limiter.windows[key] = window{count: 1, resetAt: now.Add(duration)}

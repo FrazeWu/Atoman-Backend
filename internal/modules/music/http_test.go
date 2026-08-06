@@ -774,7 +774,7 @@ func TestRegisterRoutesCreatesArtistThroughMusicV1(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesUpdatesArtistThroughMusicV1(t *testing.T) {
+func TestRegisterRoutesDoesNotExposeDirectArtistUpdates(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Before Artist", Bio: "before", EntryStatus: "open"}
 	if err := db.Create(&artist).Error; err != nil {
@@ -788,25 +788,16 @@ func TestRegisterRoutesUpdatesArtistThroughMusicV1(t *testing.T) {
 
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Data model.Artist `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Data.Name != "After Artist" || resp.Data.Bio != "after" || resp.Data.ImageURL == "" || resp.Data.Nationality != "KR" || resp.Data.BirthYear != 1991 || resp.Data.DeathYear != 2026 {
-		t.Fatalf("unexpected artist response: %#v", resp.Data)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected direct artist update route to be unavailable, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var persisted model.Artist
 	if err := db.First(&persisted, "id = ?", artist.ID).Error; err != nil {
 		t.Fatalf("load persisted artist: %v", err)
 	}
-	if persisted.Name != "After Artist" || persisted.Bio != "after" {
-		t.Fatalf("unexpected persisted artist: %#v", persisted)
+	if persisted.Name != "Before Artist" || persisted.Bio != "before" {
+		t.Fatalf("direct update changed artist without an edit record: %#v", persisted)
 	}
 }
 
@@ -1312,6 +1303,45 @@ func TestRegisterRoutesRecordSongPlayWithoutUserDoesNotCreateHistory(t *testing.
 	if histories != 0 {
 		t.Fatalf("expected no anonymous history, got %d", histories)
 	}
+}
+
+func TestRegisterRoutesRateLimitsAnonymousPlayReports(t *testing.T) {
+	service, db, _ := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Rate Limited Play", AudioURL: "/audio/rate-limited.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	r := newMusicHTTPRouter(service, nil)
+
+	for attempt := 0; attempt < 12; attempt++ {
+		response := performMusicJSONRequest(t, r, http.MethodPost, "/api/v1/music/plays", `{"song_id":"`+song.ID.String()+`"}`)
+		if response.Code != http.StatusOK {
+			t.Fatalf("expected play report %d to return 200, got %d: %s", attempt+1, response.Code, response.Body.String())
+		}
+	}
+	limited := performMusicJSONRequest(t, r, http.MethodPost, "/api/v1/music/plays", `{"song_id":"`+song.ID.String()+`"}`)
+	assertMusicHTTPError(t, limited, http.StatusTooManyRequests, "music.play_rate_limited")
+	if limited.Header().Get("Retry-After") == "" {
+		t.Fatal("expected rate-limited response to include Retry-After")
+	}
+
+	var persisted model.Song
+	if err := db.First(&persisted, "id = ?", song.ID).Error; err != nil {
+		t.Fatalf("reload song: %v", err)
+	}
+	if persisted.PlayCount != 12 {
+		t.Fatalf("expected only allowed reports to count, got %d", persisted.PlayCount)
+	}
+}
+
+func TestRegisterRoutesRejectsPlayReportsForNonPublicSongs(t *testing.T) {
+	service, db, _ := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Draft Play", AudioURL: "/audio/draft.mp3", Status: "draft"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodPost, "/api/v1/music/plays", `{"song_id":"`+song.ID.String()+`"}`)
+	assertMusicHTTPError(t, response, http.StatusNotFound, "music.song_not_found")
 }
 
 func TestRegisterRoutesListsCurrentUserListeningHistory(t *testing.T) {

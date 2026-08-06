@@ -70,16 +70,6 @@ type CreateArtistRequest struct {
 	DeathYear   int    `json:"death_year"`
 }
 
-type UpdateArtistRequest struct {
-	Name        *string `json:"name"`
-	Bio         *string `json:"bio"`
-	ImageURL    *string `json:"image_url"`
-	Nationality *string `json:"nationality"`
-	BirthDate   *string `json:"birth_date"`
-	BirthYear   *int    `json:"birth_year"`
-	DeathYear   *int    `json:"death_year"`
-}
-
 type UpdatePlaylistRequest struct {
 	Name        *string `json:"name"`
 	Description *string `json:"description"`

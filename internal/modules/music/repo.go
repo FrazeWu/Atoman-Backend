@@ -251,10 +251,6 @@ func (r *Repo) GetArtist(artistID uuid.UUID) (model.Artist, error) {
 	return artist, err
 }
 
-func (r *Repo) UpdateArtist(artist *model.Artist, updates map[string]any) error {
-	return r.db.Model(artist).Updates(updates).Error
-}
-
 func (r *Repo) CreatePlaylist(playlist model.Playlist) (model.Playlist, error) {
 	return playlist, r.db.Create(&playlist).Error
 }

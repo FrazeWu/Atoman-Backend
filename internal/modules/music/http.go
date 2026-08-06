@@ -6,17 +6,19 @@ import (
 
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/ratelimit"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 
 type Handler struct {
-	service *Service
+	service     *Service
+	playLimiter *ratelimit.Limiter
 }
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
-	h := &Handler{service: service}
+	h := &Handler{service: service, playLimiter: ratelimit.New()}
 	group.POST("/imports/albums", h.createAlbumImportSession)
 	group.GET("/imports/albums", h.listAlbumImportSessions)
 	group.POST("/imports/albums/:sessionId/upload", h.uploadAlbumImportArchive)
@@ -40,7 +42,6 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/library", h.library)
 	group.POST("/artists", h.createArtist)
 	group.GET("/artists/:artistId", h.getArtist)
-	group.PATCH("/artists/:artistId", h.updateArtist)
 	group.GET("/albums", h.listAlbums)
 	group.GET("/albums/:albumId", h.getAlbum)
 	group.GET("/songs/:songId", h.getSongDetail)
