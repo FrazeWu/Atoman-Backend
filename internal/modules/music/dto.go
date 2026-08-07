@@ -209,12 +209,17 @@ type HomeResponse struct {
 	Personalized      bool                          `json:"personalized"`
 	ContinueListening *model.MusicListeningHistory  `json:"continue_listening,omitempty"`
 	RecentlyPlayed    []model.MusicListeningHistory `json:"recently_played"`
-	ForYou            []model.Album                 `json:"for_you"`
+	ForYou            []HomeAlbumRecommendation     `json:"for_you"`
 	ForYouReason      string                        `json:"for_you_reason,omitempty"`
 	Sections          []MusicHomeSection            `json:"sections"`
 	Discover          []DiscoverItemResponse        `json:"discover"`
 	DiscoverMore      bool                          `json:"discover_has_more"`
 	DiscoverMeta      PaginationMetaResponse        `json:"discover_meta"`
+}
+
+type HomeAlbumRecommendation struct {
+	model.Album
+	Reason string `json:"reason"`
 }
 
 type MusicHomeSection struct {

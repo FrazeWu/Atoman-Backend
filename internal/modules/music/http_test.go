@@ -3236,7 +3236,8 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 				} `json:"song"`
 			} `json:"recently_played"`
 			ForYou []struct {
-				ID string `json:"id"`
+				ID     string `json:"id"`
+				Reason string `json:"reason"`
 			} `json:"for_you"`
 		} `json:"data"`
 	}
@@ -3251,5 +3252,8 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 	}
 	if len(body.Data.ForYou) != 1 || body.Data.ForYou[0].ID != candidateAlbum.ID.String() {
 		t.Fatalf("expected only unheard related album, got %#v", body.Data.ForYou)
+	}
+	if body.Data.ForYou[0].Reason == "" {
+		t.Fatalf("expected an item-level recommendation reason, got %#v", body.Data.ForYou[0])
 	}
 }

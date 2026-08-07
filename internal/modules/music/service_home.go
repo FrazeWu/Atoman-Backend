@@ -25,7 +25,7 @@ func (s *Service) Home(user *authctx.CurrentUser, discoverPage, discoverPageSize
 	discoverPage, discoverPageSize = normalizeMusicRecommendationPage(discoverPage, discoverPageSize)
 	response := HomeResponse{
 		RecentlyPlayed: []model.MusicListeningHistory{},
-		ForYou:         []model.Album{},
+		ForYou:         []HomeAlbumRecommendation{},
 		Sections:       []MusicHomeSection{},
 		Discover:       []DiscoverItemResponse{},
 	}
@@ -271,7 +271,7 @@ func (s *Service) addHomeSongArtistAffinity(songIDs []uuid.UUID, affinity map[uu
 	return nil
 }
 
-func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums, seenSongs map[uuid.UUID]struct{}) ([]model.Album, error) {
+func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums, seenSongs map[uuid.UUID]struct{}) ([]HomeAlbumRecommendation, error) {
 	artistIDs := make([]uuid.UUID, 0, len(affinity))
 	for artistID := range affinity {
 		artistIDs = append(artistIDs, artistID)
@@ -322,10 +322,10 @@ func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums
 		return candidates[i].score > candidates[j].score
 	})
 
-	results := make([]model.Album, 0, musicHomeForYouLimit)
+	selectedAlbums := make([]model.Album, 0, musicHomeForYouLimit)
 	usedArtists := make(map[uuid.UUID]struct{})
 	for _, candidate := range candidates {
-		if len(results) == musicHomeForYouLimit {
+		if len(selectedAlbums) == musicHomeForYouLimit {
 			break
 		}
 		overlaps := false
@@ -338,17 +338,32 @@ func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums
 		if overlaps {
 			continue
 		}
-		results = append(results, candidate.album)
+		selectedAlbums = append(selectedAlbums, candidate.album)
 		for _, artist := range candidate.album.Artists {
 			usedArtists[artist.ID] = struct{}{}
 		}
 	}
 
-	if err := hydrateAlbumStats(s.db, results); err != nil {
+	if err := hydrateAlbumStats(s.db, selectedAlbums); err != nil {
 		return nil, err
 	}
-	for index := range results {
-		resolveAlbumMediaURLs(&results[index])
+	results := make([]HomeAlbumRecommendation, 0, len(selectedAlbums))
+	for index := range selectedAlbums {
+		resolveAlbumMediaURLs(&selectedAlbums[index])
+		reason := "基于你的音乐记录"
+		var strongestArtist *model.Artist
+		var strongestScore float64
+		for artistIndex := range selectedAlbums[index].Artists {
+			artist := &selectedAlbums[index].Artists[artistIndex]
+			if score := affinity[artist.ID]; score > strongestScore {
+				strongestArtist = artist
+				strongestScore = score
+			}
+		}
+		if strongestArtist != nil {
+			reason = "基于你与 " + strongestArtist.Name + " 相关的记录"
+		}
+		results = append(results, HomeAlbumRecommendation{Album: selectedAlbums[index], Reason: reason})
 	}
 	return results, nil
 }

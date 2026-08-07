@@ -25948,6 +25948,101 @@ const docTemplate = `{
                 }
             }
         },
+        "music.HomeAlbumRecommendation": {
+            "type": "object",
+            "properties": {
+                "album_type": {
+                    "type": "string"
+                },
+                "artist_credits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.AlbumArtist"
+                    }
+                },
+                "artists": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Artist"
+                    }
+                },
+                "bookmark_count": {
+                    "type": "integer"
+                },
+                "canonical_album_id": {
+                    "type": "string"
+                },
+                "cover_source": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "edition_type": {
+                    "type": "string"
+                },
+                "entry_status": {
+                    "type": "string"
+                },
+                "hot_score": {
+                    "type": "number"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "other_versions": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Album"
+                    }
+                },
+                "play_count": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                },
+                "redirect_to": {
+                    "type": "string"
+                },
+                "release_date": {
+                    "type": "string"
+                },
+                "release_year": {
+                    "type": "integer"
+                },
+                "songs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Song"
+                    }
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "uploaded_by": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "year": {
+                    "type": "integer"
+                }
+            }
+        },
         "music.HomeResponse": {
             "type": "object",
             "properties": {
@@ -25969,7 +26064,7 @@ const docTemplate = `{
                 "for_you": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.Album"
+                        "$ref": "#/definitions/music.HomeAlbumRecommendation"
                     }
                 },
                 "for_you_reason": {

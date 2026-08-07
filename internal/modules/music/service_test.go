@@ -643,6 +643,23 @@ func TestMergeArtistsMovesAlbumRelationsAndAliasesToTarget(t *testing.T) {
 	if err := db.Create(&album).Error; err != nil {
 		t.Fatalf("create album: %v", err)
 	}
+	group := model.Artist{Name: "Sunday Service", ArtistForm: "group", EntryStatus: "open"}
+	member := model.Artist{Name: "Group Member", EntryStatus: "open"}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatalf("create group artist: %v", err)
+	}
+	if err := db.Create(&member).Error; err != nil {
+		t.Fatalf("create member artist: %v", err)
+	}
+	for _, relation := range []model.ArtistMember{
+		{GroupArtistID: group.ID, MemberArtistID: source.ID},
+		{GroupArtistID: group.ID, MemberArtistID: target.ID},
+		{GroupArtistID: source.ID, MemberArtistID: member.ID},
+	} {
+		if err := db.Create(&relation).Error; err != nil {
+			t.Fatalf("create artist member relation: %v", err)
+		}
+	}
 	if err := db.Model(&album).Association("Artists").Append(&source); err != nil {
 		t.Fatalf("append source artist to album: %v", err)
 	}
@@ -684,6 +701,14 @@ func TestMergeArtistsMovesAlbumRelationsAndAliasesToTarget(t *testing.T) {
 	}
 	if !aliasSet["kanye"] || !aliasSet["Kanye West"] {
 		t.Fatalf("expected merged aliases on target artist, got %#v", aliases)
+	}
+
+	var memberRelations []model.ArtistMember
+	if err := db.Where("group_artist_id = ? OR member_artist_id = ?", target.ID, target.ID).Find(&memberRelations).Error; err != nil {
+		t.Fatalf("load merged member relations: %v", err)
+	}
+	if len(memberRelations) != 2 {
+		t.Fatalf("expected deduplicated member relations on target artist, got %#v", memberRelations)
 	}
 
 	var mergeRecord model.ArtistMerge

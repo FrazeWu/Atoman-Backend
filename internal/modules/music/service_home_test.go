@@ -105,4 +105,7 @@ func TestHomeUsesSearchClicksWithoutRecommendingTheOpenedAlbum(t *testing.T) {
 	if !home.Personalized || len(home.ForYou) != 1 || home.ForYou[0].ID != candidate.ID {
 		t.Fatalf("unexpected search-based recommendations: %#v", home.ForYou)
 	}
+	if home.ForYou[0].Reason != "基于你与 Search Artist 相关的记录" {
+		t.Fatalf("expected item-level recommendation reason, got %q", home.ForYou[0].Reason)
+	}
 }

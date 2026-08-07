@@ -99,6 +99,9 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 		if err := tx.Where("artist_id = ?", sourceArtistID).Delete(&model.ArtistBookmark{}).Error; err != nil {
 			return err
 		}
+		if err := mergeArtistMemberRelations(tx, sourceArtistID, targetArtistID); err != nil {
+			return err
+		}
 
 		var sourceAliases []model.ArtistAlias
 		if err := tx.Where("artist_id = ?", sourceArtistID).Find(&sourceAliases).Error; err != nil {
@@ -137,6 +140,51 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 		}
 		return audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "music.artist.merge", EntityType: "artist", EntityID: &targetArtistID, Reason: "合并重复艺术家", Metadata: map[string]any{"source_artist_id": sourceArtistID}})
 	})
+}
+
+func mergeArtistMemberRelations(tx *gorm.DB, sourceArtistID, targetArtistID uuid.UUID) error {
+	if !tx.Migrator().HasTable(&model.ArtistMember{}) {
+		return nil
+	}
+	var relations []model.ArtistMember
+	if err := tx.Where("group_artist_id = ? OR member_artist_id = ?", sourceArtistID, sourceArtistID).Find(&relations).Error; err != nil {
+		return err
+	}
+	for _, relation := range relations {
+		groupID := relation.GroupArtistID
+		memberID := relation.MemberArtistID
+		if groupID == sourceArtistID {
+			groupID = targetArtistID
+		}
+		if memberID == sourceArtistID {
+			memberID = targetArtistID
+		}
+		if groupID != memberID {
+			query := tx.Where("group_artist_id = ? AND member_artist_id = ?", groupID, memberID)
+			if relation.JoinDate == nil {
+				query = query.Where("join_date IS NULL")
+			} else {
+				query = query.Where("join_date = ?", *relation.JoinDate)
+			}
+			if relation.LeaveDate == nil {
+				query = query.Where("leave_date IS NULL")
+			} else {
+				query = query.Where("leave_date = ?", *relation.LeaveDate)
+			}
+			var existing model.ArtistMember
+			if err := query.First(&existing).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				if err := tx.Create(&model.ArtistMember{GroupArtistID: groupID, MemberArtistID: memberID, JoinDate: relation.JoinDate, LeaveDate: relation.LeaveDate}).Error; err != nil {
+					return err
+				}
+			} else if err != nil {
+				return err
+			}
+		}
+		if err := tx.Delete(&relation).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Service) SubmitEdit(user authctx.CurrentUser, req SubmitEditRequest) (model.MusicEdit, error) {

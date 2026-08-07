@@ -5006,6 +5006,69 @@ definitions:
       year:
         type: integer
     type: object
+  music.HomeAlbumRecommendation:
+    properties:
+      album_type:
+        type: string
+      artist_credits:
+        items:
+          $ref: '#/definitions/model.AlbumArtist'
+        type: array
+      artists:
+        items:
+          $ref: '#/definitions/model.Artist'
+        type: array
+      bookmark_count:
+        type: integer
+      canonical_album_id:
+        type: string
+      cover_source:
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      description:
+        type: string
+      edition_type:
+        type: string
+      entry_status:
+        type: string
+      hot_score:
+        type: number
+      id:
+        type: string
+      other_versions:
+        items:
+          $ref: '#/definitions/model.Album'
+        type: array
+      play_count:
+        type: integer
+      reason:
+        type: string
+      redirect_to:
+        type: string
+      release_date:
+        type: string
+      release_year:
+        type: integer
+      songs:
+        items:
+          $ref: '#/definitions/model.Song'
+        type: array
+      status:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      uploaded_by:
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+      year:
+        type: integer
+    type: object
   music.HomeResponse:
     properties:
       continue_listening:
@@ -5020,7 +5083,7 @@ definitions:
         $ref: '#/definitions/music.PaginationMetaResponse'
       for_you:
         items:
-          $ref: '#/definitions/model.Album'
+          $ref: '#/definitions/music.HomeAlbumRecommendation'
         type: array
       for_you_reason:
         type: string
