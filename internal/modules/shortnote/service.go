@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/reference"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -16,11 +17,18 @@ const maxContentRunes = 500
 const maxMediaURLs = 9
 
 type Service struct {
-	db *gorm.DB
+	db         *gorm.DB
+	references *reference.Service
 }
 
-func NewService(db *gorm.DB) *Service {
-	return &Service{db: db}
+func NewService(db *gorm.DB, references ...*reference.Service) *Service {
+	var refSvc *reference.Service
+	if len(references) > 0 && references[0] != nil {
+		refSvc = references[0]
+	} else {
+		refSvc = reference.NewService(db)
+	}
+	return &Service{db: db, references: refSvc}
 }
 
 func (s *Service) Create(user authctx.CurrentUser, input noteInput) (NoteDTO, error) {
@@ -36,7 +44,11 @@ func (s *Service) Create(user authctx.CurrentUser, input noteInput) (NoteDTO, er
 		if err := tx.Create(&note).Error; err != nil {
 			return err
 		}
-		return createMedia(tx, note.ID, mediaURLs)
+		if err := createMedia(tx, note.ID, mediaURLs); err != nil {
+			return err
+		}
+		_, err := s.syncShortNoteReferences(tx, note)
+		return err
 	}); err != nil {
 		return NoteDTO{}, err
 	}
@@ -91,7 +103,11 @@ func (s *Service) Update(user authctx.CurrentUser, id uuid.UUID, input noteInput
 		if err := tx.Where("short_note_id = ?", note.ID).Delete(&model.ShortNoteMedia{}).Error; err != nil {
 			return err
 		}
-		return createMedia(tx, note.ID, mediaURLs)
+		if err := createMedia(tx, note.ID, mediaURLs); err != nil {
+			return err
+		}
+		_, err := s.syncShortNoteReferences(tx, note)
+		return err
 	}); err != nil {
 		return NoteDTO{}, err
 	}
@@ -103,7 +119,12 @@ func (s *Service) Delete(user authctx.CurrentUser, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	return s.db.Delete(&note).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := s.references.RemoveSource(tx, "short_note", note.ID); err != nil {
+			return err
+		}
+		return tx.Delete(&note).Error
+	})
 }
 
 func (s *Service) ToggleLike(user authctx.CurrentUser, id uuid.UUID, liked bool) error {
@@ -183,4 +204,12 @@ func createMedia(tx *gorm.DB, noteID uuid.UUID, urls []string) error {
 		}
 	}
 	return nil
+}
+
+func (s *Service) syncShortNoteReferences(tx *gorm.DB, note model.ShortNote) ([]reference.ResolvedReference, error) {
+	return s.references.ReplacePublished(tx, reference.Source{
+		Type: "short_note", ID: note.ID, ActorID: note.UserID, Audience: reference.AudiencePublic,
+		MentionNotificationType: "content_mention", NotificationSourceType: "content_reference_short_note",
+		Meta: map[string]interface{}{"module": "blog", "path": "/posts/notes/" + note.ID.String()},
+	}, []reference.Field{{Name: "content", Content: note.Content}})
 }

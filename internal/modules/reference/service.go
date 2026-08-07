@@ -281,6 +281,7 @@ func notifyNewMentions(tx *gorm.DB, source Source, rows []model.ContentReference
 			RecipientID: row.TargetID, ActorID: &source.ActorID, Type: notificationType,
 			SourceType: notificationSourceType, SourceID: source.ID, Meta: meta,
 		}
+		notification.ID = uuid.New()
 		result := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "recipient_id"}, {Name: "source_type"}, {Name: "source_id"}},
 			TargetWhere: clause.Where{Exprs: []clause.Expression{
@@ -289,7 +290,13 @@ func notifyNewMentions(tx *gorm.DB, source Source, rows []model.ContentReference
 			DoNothing: true,
 		}).Create(&notification)
 		if result.Error != nil {
-			return fmt.Errorf("create mention notification: %w", result.Error)
+			var count int64
+			if err := tx.Model(&model.Notification{}).Where("recipient_id = ? AND source_type = ? AND source_id = ? AND aggregation_key = ''", row.TargetID, notificationSourceType, source.ID).Count(&count).Error; err == nil && count > 0 {
+				continue
+			}
+			if err := tx.Create(&notification).Error; err != nil {
+				return fmt.Errorf("create mention notification: %w", result.Error)
+			}
 		}
 	}
 	return nil

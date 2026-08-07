@@ -21,7 +21,7 @@ func newShortNoteHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.Curr
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.ShortNote{}, &model.ShortNoteMedia{}, &model.Like{}, &model.DiscussionTarget{})
+	testdb.Migrate(t, db, &model.User{}, &model.ShortNote{}, &model.ShortNoteMedia{}, &model.Like{}, &model.DiscussionTarget{}, &model.ContentReference{}, &model.Notification{})
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
@@ -186,5 +186,23 @@ func TestShortNoteLikeIsIdempotent(t *testing.T) {
 	}
 	if err := db.Model(&model.Like{}).Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, "short_note", note.ID).Count(&count).Error; err != nil || count != 0 {
 		t.Fatalf("expected no active likes, count=%d err=%v", count, err)
+	}
+}
+
+func TestShortNoteMentionsNotifiesTargetUser(t *testing.T) {
+	service, db, user := newShortNoteHTTPTestService(t)
+	adminUser := model.User{Username: "admin", Email: "admin@example.com", Password: "hash", Role: authctx.RoleAdmin, IsActive: true}
+	if err := db.Create(&adminUser).Error; err != nil {
+		t.Fatal(err)
+	}
+	r := newShortNoteHTTPRouter(service, &user)
+	body := `{"content":"Hello @admin check this out"}`
+	w := shortNoteRequest(t, r, http.MethodPost, "/api/v1/short-notes", body)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var count int64
+	if err := db.Model(&model.Notification{}).Where("recipient_id = ? AND type = ?", adminUser.UUID, "content_mention").Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("expected 1 mention notification for admin, got %d, err=%v", count, err)
 	}
 }
