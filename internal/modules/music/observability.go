@@ -37,7 +37,7 @@ func musicOperation(path string) string {
 		return "import"
 	case strings.HasSuffix(path, "/music/plays"):
 		return "play"
-	case strings.Contains(path, "/music/recommend/"):
+	case strings.Contains(path, "/music/recommend/") || strings.HasSuffix(path, "/music/home"):
 		return "recommend"
 	default:
 		return ""

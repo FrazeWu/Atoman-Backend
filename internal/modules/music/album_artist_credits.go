@@ -13,11 +13,10 @@ import (
 const albumArtistCustomRole = "custom"
 
 var fixedAlbumArtistRoles = map[string]struct{}{
-	"primary":  {},
-	"featured": {},
-	"producer": {},
-	"writer":   {},
-	"composer": {},
+	"primary": {}, "featured": {}, "vocals": {}, "backing_vocals": {},
+	"writer": {}, "composer": {}, "arranger": {}, "producer": {},
+	"vocal_producer": {}, "recording_engineer": {}, "mixing_engineer": {},
+	"mastering_engineer": {}, "remixer": {},
 }
 
 type AlbumArtistRoleInput struct {

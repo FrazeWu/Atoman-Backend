@@ -71,6 +71,7 @@ type Album struct {
 	CanonicalAlbumID *uuid.UUID    `json:"canonical_album_id,omitempty" gorm:"type:uuid;index"`
 	HotScore         float64       `json:"hot_score" gorm:"default:0;index"`
 	EntryStatus      string        `json:"entry_status" gorm:"default:'open'"`
+	RedirectTo       *uuid.UUID    `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
 	UploadedBy       *uuid.UUID    `json:"uploaded_by" gorm:"type:uuid"`
 	User             *User         `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
 	Artists          []Artist      `json:"artists,omitempty" gorm:"many2many:album_artists;"`
@@ -133,39 +134,41 @@ func (AlbumArtist) TableName() string {
 
 type Song struct {
 	Base
-	Title                string     `json:"title" gorm:"not null"`
-	ReleaseDate          time.Time  `json:"release_date" gorm:"type:date"`
-	TrackNumber          int        `json:"track_number"`
-	Lyrics               string     `json:"lyrics" gorm:"type:text"`
-	AudioURL             string     `json:"audio_url" gorm:"not null"`
-	SourceKey            string     `json:"source_key" gorm:"type:text"`
-	PlaybackKey          string     `json:"playback_key" gorm:"type:text"`
-	AudioSource          string     `json:"audio_source" gorm:"default:'local'"`
-	CoverURL             string     `json:"cover_url"`
-	CoverSource          string     `json:"cover_source" gorm:"default:'local'"`
-	BatchID              string     `json:"batch_id" gorm:"index"`
-	Status               string     `json:"status" gorm:"default:'open'"`
-	AlbumID              *uuid.UUID `json:"album_id" gorm:"type:uuid"`
-	Album                *Album     `json:"album,omitempty"`
-	Artists              []Artist   `json:"artists,omitempty" gorm:"many2many:song_artists;"`
-	UploadedBy           *uuid.UUID `json:"uploaded_by" gorm:"type:uuid"`
-	User                 *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
-	PlayCount            int64      `json:"play_count" gorm:"default:0"`
-	DurationSec          int        `json:"duration_sec" gorm:"default:0"`
-	SourceFileName       string     `json:"source_file_name"`
-	SourceContainer      string     `json:"source_container"`
-	SourceCodec          string     `json:"source_codec"`
-	SourceBitrateKbps    int        `json:"source_bitrate_kbps" gorm:"default:0"`
-	SourceSampleRateHz   int        `json:"source_sample_rate_hz" gorm:"default:0"`
-	SourceBitDepth       int        `json:"source_bit_depth" gorm:"default:0"`
-	SourceChannels       int        `json:"source_channels" gorm:"default:0"`
-	SourceSizeBytes      int64      `json:"source_size_bytes" gorm:"default:0"`
-	SourceLossless       bool       `json:"source_lossless" gorm:"default:false"`
-	PlaybackContainer    string     `json:"playback_container"`
-	PlaybackCodec        string     `json:"playback_codec"`
-	PlaybackBitrateKbps  int        `json:"playback_bitrate_kbps" gorm:"default:0"`
-	PlaybackSampleRateHz int        `json:"playback_sample_rate_hz" gorm:"default:0"`
-	PlaybackChannels     int        `json:"playback_channels" gorm:"default:0"`
+	Title                string       `json:"title" gorm:"not null"`
+	ReleaseDate          time.Time    `json:"release_date" gorm:"type:date"`
+	TrackNumber          int          `json:"track_number"`
+	DiscNumber           int          `json:"disc_number" gorm:"default:1"`
+	Lyrics               string       `json:"lyrics" gorm:"type:text"`
+	AudioURL             string       `json:"audio_url" gorm:"not null"`
+	SourceKey            string       `json:"source_key" gorm:"type:text"`
+	PlaybackKey          string       `json:"playback_key" gorm:"type:text"`
+	AudioSource          string       `json:"audio_source" gorm:"default:'local'"`
+	CoverURL             string       `json:"cover_url"`
+	CoverSource          string       `json:"cover_source" gorm:"default:'local'"`
+	BatchID              string       `json:"batch_id" gorm:"index"`
+	Status               string       `json:"status" gorm:"default:'open'"`
+	AlbumID              *uuid.UUID   `json:"album_id" gorm:"type:uuid"`
+	Album                *Album       `json:"album,omitempty"`
+	Artists              []Artist     `json:"artists,omitempty" gorm:"many2many:song_artists;"`
+	ArtistCredits        []SongArtist `json:"artist_credits,omitempty" gorm:"foreignKey:SongID"`
+	UploadedBy           *uuid.UUID   `json:"uploaded_by" gorm:"type:uuid"`
+	User                 *User        `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
+	PlayCount            int64        `json:"play_count" gorm:"default:0"`
+	DurationSec          int          `json:"duration_sec" gorm:"default:0"`
+	SourceFileName       string       `json:"source_file_name"`
+	SourceContainer      string       `json:"source_container"`
+	SourceCodec          string       `json:"source_codec"`
+	SourceBitrateKbps    int          `json:"source_bitrate_kbps" gorm:"default:0"`
+	SourceSampleRateHz   int          `json:"source_sample_rate_hz" gorm:"default:0"`
+	SourceBitDepth       int          `json:"source_bit_depth" gorm:"default:0"`
+	SourceChannels       int          `json:"source_channels" gorm:"default:0"`
+	SourceSizeBytes      int64        `json:"source_size_bytes" gorm:"default:0"`
+	SourceLossless       bool         `json:"source_lossless" gorm:"default:false"`
+	PlaybackContainer    string       `json:"playback_container"`
+	PlaybackCodec        string       `json:"playback_codec"`
+	PlaybackBitrateKbps  int          `json:"playback_bitrate_kbps" gorm:"default:0"`
+	PlaybackSampleRateHz int          `json:"playback_sample_rate_hz" gorm:"default:0"`
+	PlaybackChannels     int          `json:"playback_channels" gorm:"default:0"`
 }
 
 func (Song) TableName() string {
@@ -173,17 +176,37 @@ func (Song) TableName() string {
 }
 
 type SongArtist struct {
-	SongID    uuid.UUID `json:"song_id" gorm:"type:uuid;primaryKey"`
-	ArtistID  uuid.UUID `json:"artist_id" gorm:"type:uuid;primaryKey"`
-	Role      string    `json:"role" gorm:"default:'primary'"`
-	Position  int       `json:"position" gorm:"default:0"`
-	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at"`
+	SongID     uuid.UUID `json:"song_id" gorm:"type:uuid;primaryKey"`
+	ArtistID   uuid.UUID `json:"artist_id" gorm:"type:uuid;primaryKey"`
+	Artist     *Artist   `json:"artist,omitempty" gorm:"foreignKey:ArtistID;references:ID"`
+	Role       string    `json:"role" gorm:"primaryKey;default:'primary'"`
+	CustomRole string    `json:"custom_role" gorm:"primaryKey;default:''"`
+	Position   int       `json:"position" gorm:"default:1"`
+	CreatedAt  time.Time `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt  time.Time `json:"updated_at" gorm:"column:updated_at"`
 }
 
 func (SongArtist) TableName() string {
 	return "song_artists"
 }
+
+type SongAudioReplacement struct {
+	Base
+	SongID           uuid.UUID  `json:"song_id" gorm:"type:uuid;not null;index"`
+	Song             *Song      `json:"song,omitempty" gorm:"foreignKey:SongID"`
+	RequestedBy      uuid.UUID  `json:"requested_by" gorm:"type:uuid;not null;index"`
+	AudioURL         string     `json:"audio_url" gorm:"type:text;not null"`
+	SourceKey        string     `json:"source_key" gorm:"type:text"`
+	PreviousAudioURL string     `json:"previous_audio_url" gorm:"type:text"`
+	Status           string     `json:"status" gorm:"not null;default:'pending';index"`
+	ErrorMessage     string     `json:"error_message" gorm:"type:text"`
+	LockedBy         string     `json:"locked_by"`
+	StartedAt        *time.Time `json:"started_at"`
+	FinishedAt       *time.Time `json:"finished_at"`
+	RevisionID       *uuid.UUID `json:"revision_id,omitempty" gorm:"type:uuid"`
+}
+
+func (SongAudioReplacement) TableName() string { return "music_song_audio_replacements" }
 
 type AlbumCorrection struct {
 	Base
@@ -371,4 +394,16 @@ type MusicListeningHistory struct {
 
 func (MusicListeningHistory) TableName() string {
 	return "music_listening_histories"
+}
+
+type MusicSearchInteraction struct {
+	Base
+	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
+	Query      string    `json:"query" gorm:"type:varchar(200);not null"`
+	EntityType string    `json:"entity_type" gorm:"type:varchar(16);not null;index"`
+	EntityID   uuid.UUID `json:"entity_id" gorm:"type:uuid;not null;index"`
+}
+
+func (MusicSearchInteraction) TableName() string {
+	return "music_search_interactions"
 }

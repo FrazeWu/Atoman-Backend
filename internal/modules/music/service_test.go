@@ -3,7 +3,6 @@ package music
 import (
 	"encoding/json"
 	"errors"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +37,8 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.PlaylistBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
+		&model.MusicListeningHistory{},
+		&model.MusicSearchInteraction{},
 		&model.AlbumImportSession{},
 		&model.AlbumImportFile{},
 		&model.AlbumImportJob{},
@@ -51,6 +52,7 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.MusicLyricAnnotation{},
 		&model.MusicLyricAnnotationVote{},
 		&model.AuditLog{},
+		&model.Notification{},
 	)
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
@@ -495,99 +497,17 @@ func TestConcurrentApproveEditOnlyAppliesOnce(t *testing.T) {
 	}
 }
 
-func TestSubmitEditAutoAppliesUpdateArtistForMainWikiFlow(t *testing.T) {
-	svc, db, user := newMusicTestService(t)
-	artist := model.Artist{Name: "Before Artist", EntryStatus: "open"}
-	if err := db.Create(&artist).Error; err != nil {
-		t.Fatalf("create artist: %v", err)
-	}
-
-	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
-		Type:       "update_artist",
-		EntityType: "artist",
-		EntityID:   &artist.ID,
-		Changes:    map[string]any{"name": "New Artist"},
-		Reason:     "update artist",
-		Sources:    []Source{{Type: "url", URL: "https://example.com", Title: "source"}},
-	})
-	if err != nil {
-		t.Fatalf("submit edit: %v", err)
-	}
-	if edit.Status != "applied" || !edit.AutoApplied || edit.Type != "update_artist" || edit.SubmittedBy != user.ID {
-		t.Fatalf("unexpected edit: %#v", edit)
-	}
-
-	var persisted model.Artist
-	if err := db.Where("id = ?", artist.ID).First(&persisted).Error; err != nil {
-		t.Fatalf("reload artist: %v", err)
-	}
-	if persisted.Name != "New Artist" {
-		t.Fatalf("expected immediate artist update, got %#v", persisted)
-	}
-}
-
-func TestSubmitEditAutoAppliesUpdateArtistSupportsClearingFieldsAndMembers(t *testing.T) {
-	svc, db, user := newMusicTestService(t)
-
-	activeEndDate := mustParseDate(t, "2024-12-31")
-	member := model.Artist{Name: "Group Member", EntryStatus: "open"}
-	group := model.Artist{
-		Name:          "Editable Group",
-		LegalName:     "Old Legal",
-		Bio:           "old bio",
-		ImageURL:      "https://cdn.example.com/old.jpg",
-		ArtistForm:    "group",
-		ActiveEndDate: activeEndDate,
-		EntryStatus:   "open",
-	}
-	if err := db.Create(&member).Error; err != nil {
-		t.Fatalf("create member: %v", err)
-	}
-	if err := db.Create(&group).Error; err != nil {
-		t.Fatalf("create group: %v", err)
-	}
-	if err := db.Create(&model.ArtistMember{
-		GroupArtistID:  group.ID,
-		MemberArtistID: member.ID,
-		JoinDate:       mustDatePtr(t, "2020-01-01"),
-	}).Error; err != nil {
-		t.Fatalf("create member relation: %v", err)
-	}
-
-	_, err := svc.SubmitEdit(user, SubmitEditRequest{
-		Type:       "update_artist",
-		EntityType: "artist",
-		EntityID:   &group.ID,
-		Changes: map[string]any{
-			"legal_name":      "",
-			"bio":             "",
-			"image_url":       "",
-			"active_end_date": "",
-			"members":         []map[string]any{},
-		},
-		Reason: "clear artist fields",
-	})
-	if err != nil {
-		t.Fatalf("submit clear edit: %v", err)
-	}
-
-	var persisted model.Artist
-	if err := db.First(&persisted, "id = ?", group.ID).Error; err != nil {
-		t.Fatalf("reload group: %v", err)
-	}
-	if persisted.LegalName != "" || persisted.Bio != "" || persisted.ImageURL != "" {
-		t.Fatalf("expected clearable fields cleared, got %#v", persisted)
-	}
-	if !persisted.ActiveEndDate.IsZero() {
-		t.Fatalf("expected active_end_date cleared, got %#v", persisted.ActiveEndDate)
-	}
-
-	var members int64
-	if err := db.Model(&model.ArtistMember{}).Where("group_artist_id = ?", group.ID).Count(&members).Error; err != nil {
-		t.Fatalf("count members: %v", err)
-	}
-	if members != 0 {
-		t.Fatalf("expected members cleared, got %d", members)
+func TestSubmitEditRejectsLegacyRevisionAndAlbumMergePaths(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+	for _, editType := range []string{"update_artist", "update_album", "merge_album"} {
+		entityID := uuid.New()
+		_, err := svc.SubmitEdit(user, SubmitEditRequest{
+			Type: editType, EntityType: "album", EntityID: &entityID,
+			Changes: map[string]any{"name": "Changed"}, Reason: "legacy update",
+		})
+		if err == nil {
+			t.Fatalf("expected %s to require revisions", editType)
+		}
 	}
 }
 
@@ -733,7 +653,8 @@ func TestMergeArtistsMovesAlbumRelationsAndAliasesToTarget(t *testing.T) {
 		t.Fatalf("create source alias: %v", err)
 	}
 
-	if err := svc.MergeArtists(user, source.ID, target.ID); err != nil {
+	admin := authctx.CurrentUser{ID: user.ID, Username: user.Username, Role: authctx.RoleAdmin}
+	if err := svc.MergeArtists(admin, source.ID, target.ID); err != nil {
 		t.Fatalf("merge artists: %v", err)
 	}
 
@@ -771,73 +692,97 @@ func TestMergeArtistsMovesAlbumRelationsAndAliasesToTarget(t *testing.T) {
 	}
 }
 
-func TestApproveAlbumMergeMovesSongsAndClosesSource(t *testing.T) {
+func TestMergeArtistsRequiresAdmin(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
-	moderatorModel := model.User{Username: "album-merge-mod", Email: "album-merge-mod@example.com", Password: "hash", Role: authctx.RoleModerator, IsActive: true}
-	if err := db.Create(&moderatorModel).Error; err != nil {
-		t.Fatalf("create moderator: %v", err)
+	target := model.Artist{Name: "Target", EntryStatus: "open"}
+	source := model.Artist{Name: "Source", EntryStatus: "open"}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target artist: %v", err)
 	}
-	moderator := authctx.CurrentUser{ID: moderatorModel.UUID, Username: moderatorModel.Username, Role: authctx.RoleModerator}
-	artist := model.Artist{Name: "Album Merge Artist", EntryStatus: "open"}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source artist: %v", err)
+	}
+
+	err := svc.MergeArtists(user, source.ID, target.ID)
+	if app := apperr.FromError(err); app == nil || app.Code != "music.merge_forbidden" {
+		t.Fatalf("expected merge forbidden, got %v", err)
+	}
+}
+
+func TestMergeAlbumsMovesMatchedSongUserRelationsAndClosesSource(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
 	target := model.Album{Title: "Target Album", EntryStatus: "open", Status: "open"}
 	source := model.Album{Title: "Source Album", EntryStatus: "open", Status: "open"}
-	if err := db.Create(&artist).Error; err != nil {
-		t.Fatalf("create artist: %v", err)
-	}
 	if err := db.Create(&target).Error; err != nil {
 		t.Fatalf("create target album: %v", err)
 	}
 	if err := db.Create(&source).Error; err != nil {
 		t.Fatalf("create source album: %v", err)
 	}
-	if err := db.Model(&target).Association("Artists").Append(&artist); err != nil {
-		t.Fatalf("link target artist: %v", err)
+	targetSong := model.Song{Title: "Same Song", AlbumID: &target.ID, Status: "open"}
+	sourceSong := model.Song{Title: "Same Song", AlbumID: &source.ID, Status: "open"}
+	if err := db.Create(&targetSong).Error; err != nil {
+		t.Fatalf("create target song: %v", err)
 	}
-	if err := db.Model(&source).Association("Artists").Append(&artist); err != nil {
-		t.Fatalf("link source artist: %v", err)
+	if err := db.Create(&sourceSong).Error; err != nil {
+		t.Fatalf("create source song: %v", err)
 	}
-	song := model.Song{Title: "Migrated Song", AlbumID: &source.ID, Status: "open"}
-	if err := db.Create(&song).Error; err != nil {
-		t.Fatalf("create song: %v", err)
+	playlist := model.Playlist{UserID: user.ID, Name: "Merge Test", Kind: "user"}
+	fixtures := []any{
+		&playlist,
+		&model.AlbumBookmark{UserID: user.ID, AlbumID: source.ID},
+		&model.SongBookmark{UserID: user.ID, SongID: sourceSong.ID},
+		&model.MusicListeningHistory{UserID: user.ID, SongID: targetSong.ID, PlayCount: 2, LastPlayedAt: time.Now().Add(-time.Hour)},
+		&model.MusicListeningHistory{UserID: user.ID, SongID: sourceSong.ID, PlayCount: 3, LastPlayedAt: time.Now()},
+	}
+	for _, fixture := range fixtures {
+		if err := db.Create(fixture).Error; err != nil {
+			t.Fatalf("create merge fixture: %v", err)
+		}
+	}
+	if err := db.Create(&model.PlaylistSong{PlaylistID: playlist.ID, SongID: sourceSong.ID, Position: 1}).Error; err != nil {
+		t.Fatalf("create playlist song: %v", err)
 	}
 
-	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
-		Type:       "merge_album",
-		EntityType: "album",
-		EntityID:   &target.ID,
-		Changes:    map[string]any{"source_album_id": source.ID.String()},
-		Reason:     "merge duplicate albums",
-	})
-	if err != nil {
-		t.Fatalf("submit album merge: %v", err)
-	}
-	if edit.Status != "open" {
-		t.Fatalf("expected open merge edit, got %#v", edit)
-	}
-	if _, err := svc.ApproveEdit(moderator, edit.ID, "approved"); err != nil {
-		t.Fatalf("approve album merge: %v", err)
+	admin := authctx.CurrentUser{ID: user.ID, Username: user.Username, Role: authctx.RoleAdmin}
+	if err := svc.MergeAlbums(admin, target.ID, source.ID, []AlbumMergeSongMatchInput{{SourceSongID: sourceSong.ID, TargetSongID: targetSong.ID}}); err != nil {
+		t.Fatalf("merge albums: %v", err)
 	}
 
 	var refreshedSource model.Album
 	if err := db.First(&refreshedSource, "id = ?", source.ID).Error; err != nil {
 		t.Fatalf("load source album: %v", err)
 	}
-	if refreshedSource.EntryStatus != "closed" || refreshedSource.Status != "closed" {
+	if refreshedSource.EntryStatus != "closed" || refreshedSource.Status != "closed" || refreshedSource.RedirectTo == nil || *refreshedSource.RedirectTo != target.ID {
 		t.Fatalf("expected source album closed, got %#v", refreshedSource)
 	}
-	var refreshedSong model.Song
-	if err := db.First(&refreshedSong, "id = ?", song.ID).Error; err != nil {
-		t.Fatalf("load migrated song: %v", err)
+	if err := db.First(&sourceSong, "id = ?", sourceSong.ID).Error; err != nil {
+		t.Fatalf("load source song: %v", err)
 	}
-	if refreshedSong.AlbumID == nil || *refreshedSong.AlbumID != target.ID {
-		t.Fatalf("expected song moved to target album, got %#v", refreshedSong.AlbumID)
+	if sourceSong.Status != "closed" {
+		t.Fatalf("expected matched source song closed, got %#v", sourceSong)
 	}
-	var artistLinks []model.AlbumArtist
-	if err := db.Where("album_id = ?", target.ID).Find(&artistLinks).Error; err != nil {
-		t.Fatalf("load target artist links: %v", err)
+	for name, value := range map[string]any{
+		"album bookmark": &model.AlbumBookmark{},
+		"song bookmark":  &model.SongBookmark{},
+		"playlist song":  &model.PlaylistSong{},
+	} {
+		query := db.Where("user_id = ? AND album_id = ?", user.ID, target.ID)
+		if name == "song bookmark" {
+			query = db.Where("user_id = ? AND song_id = ?", user.ID, targetSong.ID)
+		} else if name == "playlist song" {
+			query = db.Where("playlist_id = ? AND song_id = ?", playlist.ID, targetSong.ID)
+		}
+		if err := query.First(value).Error; err != nil {
+			t.Fatalf("expected migrated %s: %v", name, err)
+		}
 	}
-	if len(artistLinks) != 1 || artistLinks[0].ArtistID != artist.ID {
-		t.Fatalf("expected one target artist link, got %#v", artistLinks)
+	var history model.MusicListeningHistory
+	if err := db.First(&history, "user_id = ? AND song_id = ?", user.ID, targetSong.ID).Error; err != nil {
+		t.Fatalf("load merged listening history: %v", err)
+	}
+	if history.PlayCount != 5 {
+		t.Fatalf("expected merged play count 5, got %d", history.PlayCount)
 	}
 }
 
@@ -884,260 +829,6 @@ func TestSubmitEditAutoAppliesCreateAlbumForMainWikiFlow(t *testing.T) {
 	}
 	if album.ReleaseYear != 2024 {
 		t.Fatalf("expected release year persisted, got %#v", album)
-	}
-}
-
-func TestSubmitEditAutoAppliesUpdateAlbumForMainWikiFlow(t *testing.T) {
-	svc, db, user := newMusicTestService(t)
-
-	artist := model.Artist{Name: "Album Artist", EntryStatus: "open"}
-	if err := db.Create(&artist).Error; err != nil {
-		t.Fatalf("create artist: %v", err)
-	}
-	album := model.Album{Title: "Original Album", EntryStatus: "open", Status: "open"}
-	if err := db.Create(&album).Error; err != nil {
-		t.Fatalf("create album: %v", err)
-	}
-	if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
-		t.Fatalf("append artist: %v", err)
-	}
-
-	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
-		Type:       "update_album",
-		EntityType: "album",
-		EntityID:   &album.ID,
-		Changes: map[string]any{
-			"title":        "New Album",
-			"artist_ids":   []any{artist.ID.String()},
-			"release_date": "2026-06-17",
-			"album_type":   "album",
-			"description":  "release notes",
-		},
-		Reason: "update album",
-	})
-	if err != nil {
-		t.Fatalf("submit edit: %v", err)
-	}
-
-	if edit.Status != "applied" || !edit.AutoApplied {
-		t.Fatalf("expected auto-applied update album edit, got %#v", edit)
-	}
-
-	var updatedAlbum model.Album
-	if err := db.Preload("Artists").Where("title = ?", "New Album").First(&updatedAlbum).Error; err != nil {
-		t.Fatalf("expected album updated immediately: %v", err)
-	}
-	if updatedAlbum.EntryStatus != "open" || updatedAlbum.AlbumType != "album" || updatedAlbum.ReleaseDate.Format("2006-01-02") != "2026-06-17" {
-		t.Fatalf("unexpected album fields: %#v", updatedAlbum)
-	}
-}
-
-func TestSubmitEditReplacesAlbumArtistCreditsWithMultipleAndCustomRoles(t *testing.T) {
-	svc, db, user := newMusicTestService(t)
-	primary := model.Artist{Name: "Primary Credit", EntryStatus: "open"}
-	guest := model.Artist{Name: "Guest Credit", EntryStatus: "open"}
-	album := model.Album{Title: "Credits Album", EntryStatus: "open", Status: "open"}
-	for _, value := range []any{&primary, &guest, &album} {
-		if err := db.Create(value).Error; err != nil {
-			t.Fatalf("create fixture: %v", err)
-		}
-	}
-
-	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
-		Type:       "update_album",
-		EntityType: "album",
-		EntityID:   &album.ID,
-		Changes: map[string]any{
-			"artist_credits": []map[string]any{
-				{
-					"artist_id": primary.ID.String(),
-					"position":  1,
-					"roles": []map[string]any{
-						{"role": "primary"},
-						{"role": "producer"},
-					},
-				},
-				{
-					"artist_id": guest.ID.String(),
-					"position":  2,
-					"roles": []map[string]any{
-						{"role": "featured"},
-						{"role": "custom", "label": "Mix Engineer"},
-					},
-				},
-			},
-		},
-		Reason: "update credits",
-	})
-	if err != nil {
-		t.Fatalf("submit edit: %v", err)
-	}
-	if edit.Status != "applied" {
-		t.Fatalf("expected applied edit, got %#v", edit)
-	}
-
-	var credits []model.AlbumArtist
-	if err := db.Where("album_id = ?", album.ID).Order("position ASC, role ASC").Find(&credits).Error; err != nil {
-		t.Fatalf("load credits: %v", err)
-	}
-	if len(credits) != 4 {
-		t.Fatalf("expected four credits, got %#v", credits)
-	}
-	hasCustomRole := false
-	for _, credit := range credits {
-		hasCustomRole = hasCustomRole || (credit.Role == "custom" && credit.CustomRole == "Mix Engineer")
-	}
-	if !hasCustomRole {
-		t.Fatalf("expected custom role to be preserved, got %#v", credits)
-	}
-}
-
-func TestSubmitEditRejectsAlbumCreditsWithoutPrimaryArtist(t *testing.T) {
-	svc, db, user := newMusicTestService(t)
-	artist := model.Artist{Name: "Featured Only", EntryStatus: "open"}
-	album := model.Album{Title: "Invalid Credits Album", EntryStatus: "open", Status: "open"}
-	if err := db.Create(&artist).Error; err != nil {
-		t.Fatalf("create artist: %v", err)
-	}
-	if err := db.Create(&album).Error; err != nil {
-		t.Fatalf("create album: %v", err)
-	}
-
-	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
-		Type:       "update_album",
-		EntityType: "album",
-		EntityID:   &album.ID,
-		Changes: map[string]any{
-			"artist_credits": []map[string]any{{
-				"artist_id": artist.ID.String(),
-				"roles":     []map[string]any{{"role": "featured"}},
-			}},
-		},
-		Reason: "invalid credits",
-	})
-	if err != nil {
-		t.Fatalf("submit edit: %v", err)
-	}
-	if edit.Status != "failed_prerequisite" || !strings.Contains(edit.FailureReason, "primary") {
-		t.Fatalf("expected missing primary failure, got %#v", edit)
-	}
-}
-
-func TestSubmitEditAutoAppliesUpdateAlbumTracksForMainWikiFlow(t *testing.T) {
-	svc, db, user := newMusicTestService(t)
-
-	artist := model.Artist{Name: "Track Artist", EntryStatus: "open"}
-	if err := db.Create(&artist).Error; err != nil {
-		t.Fatalf("create artist: %v", err)
-	}
-	album := model.Album{Title: "Track Album", EntryStatus: "open", Status: "open"}
-	if err := db.Create(&album).Error; err != nil {
-		t.Fatalf("create album: %v", err)
-	}
-	if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
-		t.Fatalf("append artist: %v", err)
-	}
-
-	existingSong := model.Song{
-		Title:       "Keep Me",
-		TrackNumber: 1,
-		Lyrics:      "old lyrics",
-		AudioURL:    "https://cdn.example.com/old.mp3",
-		AudioSource: "s3",
-		Status:      "open",
-		AlbumID:     &album.ID,
-	}
-	if err := db.Create(&existingSong).Error; err != nil {
-		t.Fatalf("create existing song: %v", err)
-	}
-
-	removedSong := model.Song{
-		Title:       "Remove Me",
-		TrackNumber: 2,
-		AudioURL:    "https://cdn.example.com/remove.mp3",
-		AudioSource: "s3",
-		Status:      "open",
-		AlbumID:     &album.ID,
-	}
-	if err := db.Create(&removedSong).Error; err != nil {
-		t.Fatalf("create removed song: %v", err)
-	}
-
-	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
-		Type:       "update_album",
-		EntityType: "album",
-		EntityID:   &album.ID,
-		Changes: map[string]any{
-			"title": "Track Album Revised",
-			"tracks": []map[string]any{
-				{
-					"id":           existingSong.ID.String(),
-					"title":        "Keep Me Better",
-					"track_number": 3,
-					"lyrics":       "new lyrics",
-					"audio_url":    "https://cdn.example.com/new.mp3",
-				},
-				{
-					"title":        "Brand New Song",
-					"track_number": 4,
-					"lyrics":       "brand new lyrics",
-					"audio_url":    "https://cdn.example.com/brand-new.mp3",
-				},
-				{
-					"id":      removedSong.ID.String(),
-					"removed": true,
-				},
-			},
-		},
-		Reason: "update album tracks",
-	})
-	if err != nil {
-		t.Fatalf("submit edit: %v", err)
-	}
-
-	if edit.Status != "applied" || !edit.AutoApplied {
-		t.Fatalf("expected auto-applied update album edit, got %#v", edit)
-	}
-
-	var updatedSong model.Song
-	if err := db.First(&updatedSong, "id = ?", existingSong.ID).Error; err != nil {
-		t.Fatalf("reload existing song: %v", err)
-	}
-	if updatedSong.Title != "Keep Me Better" || updatedSong.TrackNumber != 3 || updatedSong.AudioURL != "https://cdn.example.com/new.mp3" || updatedSong.Lyrics != "new lyrics" {
-		t.Fatalf("expected existing song updated, got %#v", updatedSong)
-	}
-	var updatedLyrics model.MusicSongLyric
-	if err := db.First(&updatedLyrics, "song_id = ?", existingSong.ID).Error; err != nil {
-		t.Fatalf("load updated wiki lyrics: %v", err)
-	}
-	if updatedLyrics.Content != "new lyrics" || updatedLyrics.UpdatedBy != user.ID || updatedLyrics.EditSummary != "通过专辑编辑更新歌词" {
-		t.Fatalf("unexpected updated wiki lyrics: %#v", updatedLyrics)
-	}
-
-	var createdSongs []model.Song
-	if err := db.Where("album_id = ? AND title = ?", album.ID, "Brand New Song").Find(&createdSongs).Error; err != nil {
-		t.Fatalf("load created songs: %v", err)
-	}
-	if len(createdSongs) != 1 {
-		t.Fatalf("expected one created song, got %d", len(createdSongs))
-	}
-	if createdSongs[0].TrackNumber != 4 || createdSongs[0].AudioURL != "https://cdn.example.com/brand-new.mp3" {
-		t.Fatalf("expected created song fields, got %#v", createdSongs[0])
-	}
-	var createdLyrics model.MusicSongLyric
-	if err := db.First(&createdLyrics, "song_id = ?", createdSongs[0].ID).Error; err != nil {
-		t.Fatalf("load created wiki lyrics: %v", err)
-	}
-	if createdLyrics.Content != "brand new lyrics" || createdLyrics.EditSummary != "通过专辑编辑创建歌词" {
-		t.Fatalf("unexpected created wiki lyrics: %#v", createdLyrics)
-	}
-
-	var closedSong model.Song
-	if err := db.First(&closedSong, "id = ?", removedSong.ID).Error; err != nil {
-		t.Fatalf("reload removed song: %v", err)
-	}
-	if closedSong.Status != "closed" {
-		t.Fatalf("expected removed song closed, got %#v", closedSong)
 	}
 }
 

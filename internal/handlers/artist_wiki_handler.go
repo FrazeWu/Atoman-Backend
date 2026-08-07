@@ -3,7 +3,6 @@ package handlers
 import (
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -11,7 +10,9 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/modules/music"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/httpx"
 	"atoman/internal/service"
 )
 
@@ -21,10 +22,9 @@ func SetupArtistWikiRoutes(router *gin.Engine, db *gorm.DB) {
 	artists := router.Group("/api/v1/artists")
 	{
 		artists.GET("/:id", GetArtistByIDHandler(db))
-		artists.PUT("/:id", middleware.AuthMiddleware(), UpdateArtistHandler(db, revisionService))
 		artists.GET("/:id/revisions", GetArtistRevisionsHandler(revisionService))
 		artists.GET("/:id/revisions/:version", GetArtistRevisionHandler(revisionService))
-		artists.POST("/:id/edit", middleware.AuthMiddleware(), CreateArtistRevisionHandler(db, revisionService))
+		artists.POST("/:id/revisions", middleware.AuthMiddleware(), CreateArtistRevisionHandler(db, revisionService))
 		artists.POST("/:id/revert/:version", middleware.AuthMiddleware(), RevertArtistHandler(revisionService))
 		artists.GET("/:id/aliases", GetArtistAliasesHandler(db))
 		artists.POST("/:id/aliases", middleware.AuthMiddleware(), AddArtistAliasHandler(db))
@@ -68,125 +68,6 @@ func GetArtistByIDHandler(db *gorm.DB) gin.HandlerFunc {
 				"data":        artist,
 				"redirect_to": artist.RedirectTo,
 			})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{"data": artist})
-	}
-}
-
-// UpdateArtistHandler godoc
-// @Summary 更新艺人信息
-// @Description 更新艺人 wiki 条目，并在存在 revision 基线时记录一条 revision。
-// @Tags music-artists
-// @Accept json
-// @Produce json
-// @Param id path string true "艺人 UUID"
-// @Param input body ArtistUpdateInput true "艺人更新输入"
-// @Success 200 {object} ArtistWikiResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
-// @Failure 409 {object} RevisionConflictResponse
-// @Failure 500 {object} ErrorResponse
-// @Security BearerAuth
-// @Security CookieAuth
-// @Router /api/v1/artists/{id} [put]
-func UpdateArtistHandler(db *gorm.DB, revisionService *service.RevisionService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		artistID, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid artist ID"})
-			return
-		}
-
-		var input struct {
-			Name        string `json:"name"`
-			Bio         string `json:"bio"`
-			Nationality string `json:"nationality"`
-			BirthYear   int    `json:"birth_year"`
-			DeathYear   int    `json:"death_year"`
-			Members     string `json:"members"`
-			ImageURL    string `json:"image_url"`
-			EditSummary string `json:"edit_summary"`
-		}
-		if err := c.ShouldBindJSON(&input); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		var artist model.Artist
-		if err := db.First(&artist, "id = ?", artistID).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Artist not found"})
-			return
-		}
-
-		updates := map[string]interface{}{}
-		if input.Name != "" {
-			updates["name"] = input.Name
-		}
-		if input.Bio != "" {
-			updates["bio"] = input.Bio
-		}
-		if input.Nationality != "" {
-			updates["nationality"] = input.Nationality
-		}
-		if input.BirthYear != 0 {
-			updates["birth_year"] = input.BirthYear
-		}
-		if input.DeathYear != 0 {
-			updates["death_year"] = input.DeathYear
-		}
-		if input.Members != "" {
-			updates["members"] = input.Members
-		}
-		if input.ImageURL != "" {
-			updates["image_url"] = input.ImageURL
-		}
-
-		if len(updates) == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No changes provided"})
-			return
-		}
-
-		if err := db.Model(&artist).Updates(updates).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update artist"})
-			return
-		}
-
-		userID := authctx.CurrentUserIDString(c)
-		editorUUID, _ := uuid.Parse(userID)
-		userRole := c.GetString("role")
-		autoApprove := userRole == "admin"
-
-		var latestRev model.Revision
-		var baseVersion int
-		if err := db.Where("content_id = ? AND content_type = ?", artistID, "artist").
-			Order("version_number DESC").First(&latestRev).Error; err == nil {
-			baseVersion = latestRev.VersionNumber
-		}
-
-		if baseVersion > 0 {
-			_, conflicts, err := revisionService.CreateRevision(
-				"artist",
-				artistID,
-				editorUUID,
-				updates,
-				input.EditSummary,
-				baseVersion,
-				autoApprove,
-			)
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			if len(conflicts) > 0 {
-				c.JSON(http.StatusConflict, gin.H{"error": "Edit conflicts detected", "conflicts": conflicts})
-				return
-			}
-		}
-
-		if err := db.Preload("Aliases").Preload("Albums").First(&artist, "id = ?", artistID).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reload artist"})
 			return
 		}
 
@@ -279,7 +160,7 @@ func GetArtistRevisionHandler(revisionService *service.RevisionService) gin.Hand
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth
-// @Router /api/v1/artists/{id}/edit [post]
+// @Router /api/v1/artists/{id}/revisions [post]
 func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionService) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
@@ -297,7 +178,7 @@ func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionS
 		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 		userRole := c.GetString("role")
-		autoApprove := userRole == "admin"
+		autoApprove := true
 
 		var protection model.ContentProtection
 		if err := db.Where("content_id = ? AND content_type = ?", artistID, "artist").
@@ -306,7 +187,7 @@ func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionS
 				c.JSON(http.StatusForbidden, gin.H{"error": "This artist is fully protected"})
 				return
 			}
-			if protection.ProtectionLevel == "semi" {
+			if protection.ProtectionLevel == "semi" && userRole != "admin" {
 				autoApprove = false
 			}
 		}
@@ -480,7 +361,7 @@ func DeleteArtistAliasHandler(db *gorm.DB) gin.HandlerFunc {
 
 // MergeArtistsHandler godoc
 // @Summary 合并艺人
-// @Description 将源艺人的关联关系、修订和讨论迁移到目标艺人，并设置 redirect_to。
+// @Description 将源艺人的音乐关联、收藏和别名迁移到目标艺人，并设置 redirect_to。
 // @Tags music-artists
 // @Accept json
 // @Produce json
@@ -508,50 +389,13 @@ func MergeArtistsHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		userID := authctx.CurrentUserIDString(c)
-		mergedByUUID, _ := uuid.Parse(userID)
-
-		if err := db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Exec("UPDATE album_artists SET artist_id = ? WHERE artist_id = ?", targetID, input.SourceID).Error; err != nil {
-				return err
-			}
-			if err := tx.Exec("UPDATE song_artists SET artist_id = ? WHERE artist_id = ?", targetID, input.SourceID).Error; err != nil {
-				return err
-			}
-			if err := tx.Exec(
-				"UPDATE revisions SET content_id = ? WHERE content_id = ? AND content_type = 'artist'",
-				targetID,
-				input.SourceID,
-			).Error; err != nil {
-				return err
-			}
-			if err := tx.Exec(
-				"UPDATE discussion_targets SET resource_id = ?, resource_key = ? WHERE resource_id = ? AND kind = 'music_artist'",
-				targetID,
-				targetID.String(),
-				input.SourceID,
-			).Error; err != nil {
-				return err
-			}
-
-			merge := model.ArtistMerge{
-				SourceArtistID: input.SourceID,
-				TargetArtistID: targetID,
-				MergedBy:       mergedByUUID,
-				MergedAt:       time.Now(),
-			}
-			if err := tx.Create(&merge).Error; err != nil {
-				return err
-			}
-
-			if err := tx.Model(&model.Artist{}).Where("id = ?", input.SourceID).
-				Update("redirect_to", targetID).Error; err != nil {
-				return err
-			}
-
-			return nil
-		}); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to merge artists"})
+		user, ok := authctx.Current(c)
+		if !ok {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Login required"})
+			return
+		}
+		if err := music.NewService(db).MergeArtists(user, input.SourceID, targetID); err != nil {
+			httpx.Error(c, err)
 			return
 		}
 

@@ -19,6 +19,9 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
 	}
+	if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		return apperr.Forbidden("music.merge_forbidden", "Admin role required")
+	}
 	if sourceArtistID == uuid.Nil || targetArtistID == uuid.Nil || sourceArtistID == targetArtistID {
 		return apperr.BadRequest("validation.invalid_request", "source_artist_id and target_artist_id must be different valid UUIDs")
 	}
@@ -67,18 +70,33 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 		}
 
 		if err := tx.Exec(`
-			INSERT INTO song_artists (song_id, artist_id)
-			SELECT sa.song_id, ?
+			INSERT INTO song_artists (song_id, artist_id, role, custom_role, position, created_at, updated_at)
+			SELECT sa.song_id, ?, sa.role, sa.custom_role, sa.position, sa.created_at, sa.updated_at
 			FROM song_artists sa
 			WHERE sa.artist_id = ?
 			  AND NOT EXISTS (
 				SELECT 1 FROM song_artists existing
 				WHERE existing.song_id = sa.song_id AND existing.artist_id = ?
+				  AND existing.role = sa.role AND existing.custom_role = sa.custom_role
 			  )
 		`, targetArtistID, sourceArtistID, targetArtistID).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("artist_id = ?", sourceArtistID).Delete(&model.SongArtist{}).Error; err != nil {
+			return err
+		}
+
+		var sourceBookmarks []model.ArtistBookmark
+		if err := tx.Where("artist_id = ?", sourceArtistID).Find(&sourceBookmarks).Error; err != nil {
+			return err
+		}
+		for _, row := range sourceBookmarks {
+			bookmark := model.ArtistBookmark{UserID: row.UserID, ArtistID: targetArtistID}
+			if err := tx.Where("user_id = ? AND artist_id = ?", row.UserID, targetArtistID).FirstOrCreate(&bookmark).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Where("artist_id = ?", sourceArtistID).Delete(&model.ArtistBookmark{}).Error; err != nil {
 			return err
 		}
 
@@ -104,7 +122,7 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 			}
 		}
 
-		if err := tx.Model(&model.Artist{}).Where("id = ?", sourceArtistID).Update("entry_status", "closed").Error; err != nil {
+		if err := tx.Model(&model.Artist{}).Where("id = ?", sourceArtistID).Updates(map[string]any{"entry_status": "closed", "redirect_to": targetArtistID}).Error; err != nil {
 			return err
 		}
 
@@ -114,7 +132,10 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 			MergedBy:       user.ID,
 			MergedAt:       time.Now(),
 		}
-		return tx.Create(&mergeRecord).Error
+		if err := tx.Create(&mergeRecord).Error; err != nil {
+			return err
+		}
+		return audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "music.artist.merge", EntityType: "artist", EntityID: &targetArtistID, Reason: "合并重复艺术家", Metadata: map[string]any{"source_artist_id": sourceArtistID}})
 	})
 }
 
@@ -124,6 +145,12 @@ func (s *Service) SubmitEdit(user authctx.CurrentUser, req SubmitEditRequest) (m
 	}
 	if req.Type == "" || req.EntityType == "" || req.Reason == "" {
 		return model.MusicEdit{}, apperr.BadRequest("validation.invalid_request", "type, entity_type and reason are required")
+	}
+	if req.Type == "update_artist" || req.Type == "update_album" {
+		return model.MusicEdit{}, apperr.BadRequest("music.revision_required", "artist and album updates must use revisions")
+	}
+	if req.Type == "merge_album" {
+		return model.MusicEdit{}, apperr.BadRequest("music.direct_merge_required", "album merges must use the direct merge endpoint")
 	}
 
 	payloadJSON, err := marshalObject(req.Payload, map[string]any{})
@@ -154,8 +181,6 @@ func (s *Service) SubmitEdit(user authctx.CurrentUser, req SubmitEditRequest) (m
 	autoApplyTypes := map[string]struct{}{
 		"create_artist": {},
 		"create_album":  {},
-		"update_artist": {},
-		"update_album":  {},
 	}
 
 	if _, shouldAutoApply := autoApplyTypes[req.Type]; !shouldAutoApply {
@@ -184,41 +209,6 @@ func (s *Service) SubmitEdit(user authctx.CurrentUser, req SubmitEditRequest) (m
 		return model.MusicEdit{}, err
 	}
 	return edit, nil
-}
-
-func (s *Service) SubmitAlbumMerge(user authctx.CurrentUser, targetAlbumID, sourceAlbumID uuid.UUID) (model.MusicEdit, error) {
-	if user.ID == uuid.Nil {
-		return model.MusicEdit{}, apperr.Unauthorized("Login required")
-	}
-	if targetAlbumID == uuid.Nil || sourceAlbumID == uuid.Nil || targetAlbumID == sourceAlbumID {
-		return model.MusicEdit{}, apperr.BadRequest("validation.invalid_request", "source_album_id and target album must be different valid UUIDs")
-	}
-
-	var target model.Album
-	if err := s.db.First(&target, "id = ?", targetAlbumID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return model.MusicEdit{}, apperr.NotFound("music.album_not_found", "Target album not found")
-		}
-		return model.MusicEdit{}, err
-	}
-	var source model.Album
-	if err := s.db.First(&source, "id = ?", sourceAlbumID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return model.MusicEdit{}, apperr.NotFound("music.album_not_found", "Source album not found")
-		}
-		return model.MusicEdit{}, err
-	}
-	if target.EntryStatus == "closed" || target.Status == "closed" || source.EntryStatus == "closed" || source.Status == "closed" {
-		return model.MusicEdit{}, apperr.Unprocessable("music.album_not_open", "Both albums must be available")
-	}
-
-	return s.SubmitEdit(user, SubmitEditRequest{
-		Type:       "merge_album",
-		EntityType: "album",
-		EntityID:   &targetAlbumID,
-		Changes:    map[string]any{"source_album_id": sourceAlbumID.String()},
-		Reason:     "合并重复专辑",
-	})
 }
 
 func (s *Service) Vote(user authctx.CurrentUser, editID uuid.UUID, req VoteRequest) error {

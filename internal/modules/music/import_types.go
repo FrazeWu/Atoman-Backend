@@ -194,6 +194,11 @@ type AlbumImportResponse struct {
 	Data AlbumImportDTO `json:"data"`
 }
 
+type AlbumImportListResponse struct {
+	Data []AlbumImportDTO       `json:"data"`
+	Meta PaginationMetaResponse `json:"meta"`
+}
+
 type AlbumImportFileResponse struct {
 	Data AlbumImportFileDTO `json:"data"`
 }

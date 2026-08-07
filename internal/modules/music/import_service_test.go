@@ -95,6 +95,28 @@ func TestBuildAlbumImportDTOFallsBackToArchiveName(t *testing.T) {
 	}
 }
 
+func TestDeleteAlbumImportRecordRemovesItsNotification(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session := model.AlbumImportSession{UserID: &user.ID, Status: AlbumImportStatusCanceled, PayloadJSON: `{}`}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	notification := model.Notification{RecipientID: user.ID, Type: musicImportNotificationType, SourceType: "music_album_import", SourceID: session.ID}
+	if err := db.Create(&notification).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DeleteAlbumImportRecord(user, session.ID); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&model.Notification{}).Where("source_type = ? AND source_id = ?", "music_album_import", session.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("expected import notification to be deleted, got %d", count)
+	}
+}
+
 func TestListAlbumImportSessionsForUserPreloadsTargetAlbum(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	album := model.Album{Title: "Late Registration", EntryStatus: "open", Status: "open"}

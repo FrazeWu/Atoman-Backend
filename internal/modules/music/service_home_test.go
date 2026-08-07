@@ -62,7 +62,7 @@ func TestHomeReturnsPublicSectionsForAnonymousListeners(t *testing.T) {
 		t.Fatalf("create song: %v", err)
 	}
 
-	home, err := service.Home(nil)
+	home, err := service.Home(nil, 1, 24)
 	if err != nil {
 		t.Fatalf("load anonymous home: %v", err)
 	}
@@ -73,5 +73,36 @@ func TestHomeReturnsPublicSectionsForAnonymousListeners(t *testing.T) {
 		if len(section.Albums) == 0 || section.Albums[0].ID != album.ID {
 			t.Fatalf("unexpected section %#v", section)
 		}
+	}
+}
+
+func TestHomeUsesSearchClicksWithoutRecommendingTheOpenedAlbum(t *testing.T) {
+	service, db, user := newMusicTestService(t)
+	artist := model.Artist{Name: "Search Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatal(err)
+	}
+	opened := model.Album{Title: "Opened", CoverURL: "/opened.jpg", Status: "open", EntryStatus: "open"}
+	candidate := model.Album{Title: "Candidate", CoverURL: "/candidate.jpg", Status: "open", EntryStatus: "open"}
+	for _, album := range []*model.Album{&opened, &candidate} {
+		if err := db.Create(album).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(album).Association("Artists").Append(&artist); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&model.Song{Title: album.Title + " song", AlbumID: &album.ID, AudioURL: "/audio.mp3", Status: "open"}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Create(&model.MusicSearchInteraction{UserID: user.ID, Query: "Opened", EntityType: "album", EntityID: opened.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	home, err := service.Home(&user, 1, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !home.Personalized || len(home.ForYou) != 1 || home.ForYou[0].ID != candidate.ID {
+		t.Fatalf("unexpected search-based recommendations: %#v", home.ForYou)
 	}
 }

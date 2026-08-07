@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -10,6 +11,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/httpx"
 )
 
 func SetupEntryStatusRoutes(router *gin.Engine, db *gorm.DB) {
@@ -45,20 +47,23 @@ type MusicQualityIssue struct {
 // @Description 管理员查看缺失封面、曲目、音频、关键元数据、重复候选和失败导入的音乐资料。
 // @Tags music-entry-status
 // @Produce json
-// @Param type query string false "问题类型" Enums(all,missing_cover,missing_tracks,missing_audio,missing_metadata,duplicate_candidate,import_failed)
+// @Param type query string false "问题类型" Enums(all,missing_cover,missing_tracks,missing_audio,missing_metadata,duplicate_candidate,processing_failed,import_failed)
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
 // @Success 200 {object} map[string]interface{}
 // @Security BearerAuth
 // @Router /api/v1/admin/music/quality [get]
 func ListMusicQualityIssuesHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		filter := c.DefaultQuery("type", "all")
+		page, pageSize := httpx.PageParams(c)
 		issues := make([]MusicQualityIssue, 0)
 		appendAlbums := func(issueType string, query *gorm.DB) error {
 			if filter != "all" && filter != issueType {
 				return nil
 			}
 			var albums []model.Album
-			if err := query.Limit(100).Find(&albums).Error; err != nil {
+			if err := query.Order("title ASC, id ASC").Find(&albums).Error; err != nil {
 				return err
 			}
 			for _, album := range albums {
@@ -71,7 +76,7 @@ func ListMusicQualityIssuesHandler(db *gorm.DB) gin.HandlerFunc {
 				return nil
 			}
 			var artists []model.Artist
-			if err := query.Limit(100).Find(&artists).Error; err != nil {
+			if err := query.Order("name ASC, id ASC").Find(&artists).Error; err != nil {
 				return err
 			}
 			for _, artist := range artists {
@@ -101,7 +106,7 @@ func ListMusicQualityIssuesHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 		if filter == "all" || filter == "missing_audio" {
 			var songs []model.Song
-			if err := db.Where("COALESCE(audio_url, '') = '' AND COALESCE(status, '') <> 'closed'").Limit(100).Find(&songs).Error; err != nil {
+			if err := db.Where("COALESCE(audio_url, '') = '' AND COALESCE(status, '') <> 'closed'").Order("title ASC, id ASC").Find(&songs).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 				return
 			}
@@ -111,7 +116,7 @@ func ListMusicQualityIssuesHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 		if filter == "all" || filter == "import_failed" {
 			var sessions []model.AlbumImportSession
-			if err := db.Where("status IN ?", []string{"failed", "needs_attention"}).Limit(100).Find(&sessions).Error; err != nil {
+			if err := db.Where("status IN ?", []string{"failed", "needs_attention"}).Order("updated_at DESC, id ASC").Find(&sessions).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 				return
 			}
@@ -119,7 +124,44 @@ func ListMusicQualityIssuesHandler(db *gorm.DB) gin.HandlerFunc {
 				issues = append(issues, MusicQualityIssue{Type: "import_failed", EntityType: "import", EntityID: session.ID.String(), Title: session.ErrorMessage})
 			}
 		}
-		c.JSON(http.StatusOK, gin.H{"data": issues, "total": len(issues)})
+		if filter == "all" || filter == "processing_failed" {
+			var replacements []model.SongAudioReplacement
+			if db.Migrator().HasTable(&model.SongAudioReplacement{}) {
+				if err := db.Preload("Song").Where("status = ?", "failed").Order("updated_at DESC, id ASC").Find(&replacements).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
+					return
+				}
+			}
+			for _, replacement := range replacements {
+				title := "音频替换失败"
+				if replacement.Song != nil && replacement.Song.Title != "" {
+					title = replacement.Song.Title
+				}
+				issues = append(issues, MusicQualityIssue{Type: "processing_failed", EntityType: "song", EntityID: replacement.SongID.String(), Title: title})
+			}
+		}
+		sort.SliceStable(issues, func(i, j int) bool {
+			if issues[i].Type != issues[j].Type {
+				return issues[i].Type < issues[j].Type
+			}
+			if issues[i].EntityType != issues[j].EntityType {
+				return issues[i].EntityType < issues[j].EntityType
+			}
+			if issues[i].Title != issues[j].Title {
+				return issues[i].Title < issues[j].Title
+			}
+			return issues[i].EntityID < issues[j].EntityID
+		})
+		total := len(issues)
+		start := (page - 1) * pageSize
+		if start > total {
+			start = total
+		}
+		end := start + pageSize
+		if end > total {
+			end = total
+		}
+		c.JSON(http.StatusOK, gin.H{"data": issues[start:end], "page": page, "page_size": pageSize, "total": total, "has_more": end < total})
 	}
 }
 

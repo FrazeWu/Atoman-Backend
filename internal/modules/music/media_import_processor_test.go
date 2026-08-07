@@ -3,6 +3,7 @@ package music
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -652,9 +653,49 @@ func TestParseCUESupportsUTF8AndGBK(t *testing.T) {
 }
 
 func TestParseAudioProbeReadsTitleTrackAndDiscTags(t *testing.T) {
-	metadata := parseAudioProbe([]byte(`{"format":{"duration":"245.5","tags":{"TITLE":"Tagged title","TRACKNUMBER":"03/12","DISC":"2/2"}}}`))
-	if metadata.duration != 245.5 || metadata.title != "Tagged title" || metadata.trackNumber != 3 || metadata.discNumber != 2 {
+	metadata := parseAudioProbe([]byte(`{"format":{"duration":"245.5","tags":{"TITLE":"Tagged title","ALBUM":"Late Registration","TRACKNUMBER":"03/12","DISC":"2/2"}}}`))
+	if metadata.duration != 245.5 || metadata.title != "Tagged title" || metadata.album != "Late Registration" || metadata.trackNumber != 3 || metadata.discNumber != 2 {
 		t.Fatalf("unexpected audio metadata: %#v", metadata)
+	}
+}
+
+func TestPersistDerivedTracksKeepsOnlyMajorityAlbum(t *testing.T) {
+	_, db, _ := newMusicTestService(t)
+	session := model.AlbumImportSession{Status: AlbumImportStatusAnalyzing, Stage: AlbumImportStageAnalyzing, PayloadJSON: `{}`}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	files := []model.AlbumImportFile{
+		{ImportID: session.ID, FileName: "01.mp3", RelativePath: "01.mp3", Role: AlbumImportFileRoleAudio, PlaybackKey: "one", Title: "One", TrackNumber: 1, ProcessingStatus: "completed", MetadataJSON: `{"album":"Late Registration"}`},
+		{ImportID: session.ID, FileName: "02.mp3", RelativePath: "02.mp3", Role: AlbumImportFileRoleAudio, PlaybackKey: "two", Title: "Two", TrackNumber: 2, ProcessingStatus: "completed", MetadataJSON: `{"album":" late   registration "}`},
+		{ImportID: session.ID, FileName: "03.mp3", RelativePath: "03.mp3", Role: AlbumImportFileRoleAudio, PlaybackKey: "three", Title: "Wrong", TrackNumber: 3, ProcessingStatus: "completed", MetadataJSON: `{"album":"DAMN."}`},
+		{ImportID: session.ID, FileName: "04.mp3", RelativePath: "04.mp3", Role: AlbumImportFileRoleAudio, PlaybackKey: "four", Title: "No Tag", TrackNumber: 4, ProcessingStatus: "completed", MetadataJSON: `{}`},
+	}
+	if err := db.Create(&files).Error; err != nil {
+		t.Fatal(err)
+	}
+	processor := NewMediaImportProcessor(db, &fakeMediaStore{}, &fakeMediaCommandRunner{}, "")
+	if err := processor.persistDerivedTracks(context.Background(), session.ID); err != nil {
+		t.Fatal(err)
+	}
+	var reloaded model.AlbumImportSession
+	if err := db.First(&reloaded, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(reloaded.PayloadJSON), &payload); err != nil {
+		t.Fatal(err)
+	}
+	tracks, _ := payload["derived_tracks"].([]any)
+	if len(tracks) != 3 || payload["derived_album_title"] != "Late Registration" {
+		t.Fatalf("unexpected derived payload: %#v", payload)
+	}
+	var ignored model.AlbumImportFile
+	if err := db.First(&ignored, "id = ?", files[2].ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if ignored.ProcessingStatus != "ignored" || ignored.ErrorMessage != "属于其他专辑：DAMN." {
+		t.Fatalf("unexpected ignored file: %#v", ignored)
 	}
 }
 

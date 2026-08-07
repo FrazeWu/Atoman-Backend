@@ -21,9 +21,13 @@ type BookmarkSort string
 const (
 	BookmarkSortLatest  BookmarkSort = "latest"
 	BookmarkSortPopular BookmarkSort = "popular"
+	BookmarkSortName    BookmarkSort = "name"
 )
 
 func normalizeBookmarkSort(sort string) BookmarkSort {
+	if strings.EqualFold(strings.TrimSpace(sort), string(BookmarkSortName)) {
+		return BookmarkSortName
+	}
 	if strings.EqualFold(strings.TrimSpace(sort), string(BookmarkSortPopular)) {
 		return BookmarkSortPopular
 	}
@@ -94,24 +98,35 @@ func (r *Repo) UpsertArtistBookmark(userID uuid.UUID, artistID uuid.UUID) (model
 }
 
 func (r *Repo) ListArtistBookmarks(userID uuid.UUID, page int, pageSize int, sort string) ([]model.ArtistBookmark, int64, error) {
+	return r.ListArtistBookmarksFiltered(userID, page, pageSize, sort, "")
+}
+
+func (r *Repo) ListArtistBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.ArtistBookmark, int64, error) {
 	var total int64
-	db := r.db.Model(&model.ArtistBookmark{}).Where("user_id = ?", userID)
+	db := r.db.Model(&model.ArtistBookmark{}).
+		Joins("JOIN \"Artists\" ON \"Artists\".id = music_artist_bookmarks.artist_id").
+		Where("music_artist_bookmarks.user_id = ?", userID)
+	if query = strings.TrimSpace(query); query != "" {
+		pattern := "%" + strings.ToLower(query) + "%"
+		db = db.Where("LOWER(\"Artists\".name) LIKE ? OR LOWER(COALESCE(\"Artists\".legal_name, '')) LIKE ?", pattern, pattern)
+	}
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var bookmarks []model.ArtistBookmark
-	if normalizeBookmarkSort(sort) == BookmarkSortPopular {
+	switch normalizeBookmarkSort(sort) {
+	case BookmarkSortPopular:
 		playCountSubquery := r.db.
 			Table("song_artists").
 			Select("song_artists.artist_id AS artist_id, COALESCE(SUM(\"Songs\".play_count), 0) AS play_count").
 			Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id").
 			Group("song_artists.artist_id")
-		db = db.
-			Joins("JOIN \"Artists\" ON \"Artists\".id = music_artist_bookmarks.artist_id").
-			Joins("LEFT JOIN (?) AS artist_popularity ON artist_popularity.artist_id = music_artist_bookmarks.artist_id", playCountSubquery).
+		db = db.Joins("LEFT JOIN (?) AS artist_popularity ON artist_popularity.artist_id = music_artist_bookmarks.artist_id", playCountSubquery).
 			Order("COALESCE(artist_popularity.play_count, 0) DESC").
 			Order("music_artist_bookmarks.created_at DESC")
-	} else {
+	case BookmarkSortName:
+		db = db.Order("LOWER(\"Artists\".name) ASC").Order("music_artist_bookmarks.created_at DESC")
+	default:
 		db = db.Order("music_artist_bookmarks.created_at DESC")
 	}
 	err := db.Preload("Artist").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
@@ -129,19 +144,29 @@ func (r *Repo) UpsertAlbumBookmark(userID uuid.UUID, albumID uuid.UUID) (model.A
 }
 
 func (r *Repo) ListAlbumBookmarks(userID uuid.UUID, page int, pageSize int, sort string) ([]model.AlbumBookmark, int64, error) {
+	return r.ListAlbumBookmarksFiltered(userID, page, pageSize, sort, "")
+}
+
+func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.AlbumBookmark, int64, error) {
 	var total int64
-	db := r.db.Model(&model.AlbumBookmark{}).Where("user_id = ?", userID)
+	db := r.db.Model(&model.AlbumBookmark{}).
+		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id").
+		Where("music_album_bookmarks.user_id = ?", userID)
+	if query = strings.TrimSpace(query); query != "" {
+		db = db.Where("LOWER(\"Albums\".title) LIKE ?", "%"+strings.ToLower(query)+"%")
+	}
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var bookmarks []model.AlbumBookmark
-	if normalizeBookmarkSort(sort) == BookmarkSortPopular {
-		db = db.
-			Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id").
-			Order("\"Albums\".hot_score DESC").
+	switch normalizeBookmarkSort(sort) {
+	case BookmarkSortPopular:
+		db = db.Order("\"Albums\".hot_score DESC").
 			Order("\"Albums\".play_count DESC").
 			Order("music_album_bookmarks.created_at DESC")
-	} else {
+	case BookmarkSortName:
+		db = db.Order("LOWER(\"Albums\".title) ASC").Order("music_album_bookmarks.created_at DESC")
+	default:
 		db = db.Order("music_album_bookmarks.created_at DESC")
 	}
 	err := db.Preload("Album.Artists").Preload("Album.Songs").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
@@ -159,18 +184,33 @@ func (r *Repo) UpsertSongBookmark(userID uuid.UUID, songID uuid.UUID) (model.Son
 }
 
 func (r *Repo) ListSongBookmarks(userID uuid.UUID, page int, pageSize int, sort string) ([]model.SongBookmark, int64, error) {
+	return r.ListSongBookmarksFiltered(userID, page, pageSize, sort, "")
+}
+
+func (r *Repo) ListSongBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.SongBookmark, int64, error) {
 	var total int64
-	db := r.db.Model(&model.SongBookmark{}).Where("user_id = ?", userID)
+	db := r.db.Model(&model.SongBookmark{}).
+		Joins("JOIN \"Songs\" ON \"Songs\".id = music_song_bookmarks.song_id").
+		Where("music_song_bookmarks.user_id = ?", userID)
+	if query = strings.TrimSpace(query); query != "" {
+		pattern := "%" + strings.ToLower(query) + "%"
+		db = db.Where(`LOWER("Songs".title) LIKE ? OR EXISTS (
+			SELECT 1 FROM song_artists
+			JOIN "Artists" ON "Artists".id = song_artists.artist_id
+			WHERE song_artists.song_id = "Songs".id AND LOWER("Artists".name) LIKE ?
+		)`, pattern, pattern)
+	}
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var bookmarks []model.SongBookmark
-	if normalizeBookmarkSort(sort) == BookmarkSortPopular {
-		db = db.
-			Joins("JOIN \"Songs\" ON \"Songs\".id = music_song_bookmarks.song_id").
-			Order("\"Songs\".play_count DESC").
+	switch normalizeBookmarkSort(sort) {
+	case BookmarkSortPopular:
+		db = db.Order("\"Songs\".play_count DESC").
 			Order("music_song_bookmarks.created_at DESC")
-	} else {
+	case BookmarkSortName:
+		db = db.Order("LOWER(\"Songs\".title) ASC").Order("music_song_bookmarks.created_at DESC")
+	default:
 		db = db.Order("music_song_bookmarks.created_at DESC")
 	}
 	err := db.Preload("Song.Artists").Preload("Song.Album").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
@@ -194,15 +234,23 @@ func (r *Repo) UpsertPlaylistBookmark(userID uuid.UUID, playlistID uuid.UUID) (m
 }
 
 func (r *Repo) ListPlaylistBookmarks(userID uuid.UUID, page int, pageSize int, sort string) ([]model.PlaylistBookmark, int64, error) {
+	return r.ListPlaylistBookmarksFiltered(userID, page, pageSize, sort, "")
+}
+
+func (r *Repo) ListPlaylistBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.PlaylistBookmark, int64, error) {
 	var total int64
 	db := r.db.Model(&model.PlaylistBookmark{}).
 		Joins("JOIN music_playlists ON music_playlists.id = music_playlist_bookmarks.playlist_id AND music_playlists.deleted_at IS NULL").
 		Where("music_playlist_bookmarks.user_id = ? AND (music_playlists.user_id = ? OR music_playlists.is_public = ?)", userID, userID, true)
+	if query = strings.TrimSpace(query); query != "" {
+		db = db.Where("LOWER(music_playlists.name) LIKE ?", "%"+strings.ToLower(query)+"%")
+	}
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var bookmarks []model.PlaylistBookmark
-	if normalizeBookmarkSort(sort) == BookmarkSortPopular {
+	switch normalizeBookmarkSort(sort) {
+	case BookmarkSortPopular:
 		songCountSubquery := r.db.Table("music_playlist_songs").
 			Select("playlist_id, COUNT(*) AS song_count").
 			Where("music_playlist_songs.deleted_at IS NULL").
@@ -211,7 +259,9 @@ func (r *Repo) ListPlaylistBookmarks(userID uuid.UUID, page int, pageSize int, s
 			Joins("LEFT JOIN (?) AS playlist_song_counts ON playlist_song_counts.playlist_id = music_playlist_bookmarks.playlist_id", songCountSubquery).
 			Order("COALESCE(playlist_song_counts.song_count, 0) DESC").
 			Order("music_playlist_bookmarks.created_at DESC")
-	} else {
+	case BookmarkSortName:
+		db = db.Order("LOWER(music_playlists.name) ASC").Order("music_playlist_bookmarks.created_at DESC")
+	default:
 		db = db.Order("music_playlist_bookmarks.created_at DESC")
 	}
 	if err := db.Preload("Playlist.User").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error; err != nil {
@@ -235,6 +285,30 @@ func (r *Repo) ListPlaylistBookmarks(userID uuid.UUID, page int, pageSize int, s
 		}
 	}
 	return bookmarks, total, nil
+}
+
+func (r *Repo) ListPlaylistSongsFiltered(playlistID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.PlaylistSong, int64, error) {
+	var total int64
+	db := r.db.Model(&model.PlaylistSong{}).
+		Joins("JOIN \"Songs\" ON \"Songs\".id = music_playlist_songs.song_id").
+		Where("music_playlist_songs.playlist_id = ?", playlistID)
+	if query = strings.TrimSpace(query); query != "" {
+		db = db.Where("LOWER(\"Songs\".title) LIKE ?", "%"+strings.ToLower(query)+"%")
+	}
+	if err := db.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	switch normalizeBookmarkSort(sort) {
+	case BookmarkSortPopular:
+		db = db.Order("\"Songs\".play_count DESC").Order("music_playlist_songs.created_at DESC")
+	case BookmarkSortName:
+		db = db.Order("LOWER(\"Songs\".title) ASC").Order("music_playlist_songs.created_at DESC")
+	default:
+		db = db.Order("music_playlist_songs.created_at DESC")
+	}
+	var songs []model.PlaylistSong
+	err := db.Preload("Song.Artists").Preload("Song.Album").Limit(pageSize).Offset((page - 1) * pageSize).Find(&songs).Error
+	return songs, total, err
 }
 
 func (r *Repo) DeletePlaylistBookmark(userID uuid.UUID, playlistID uuid.UUID) error {
@@ -451,4 +525,8 @@ func (r *Repo) ListListeningHistory(userID uuid.UUID, page, pageSize int) ([]mod
 		Limit(pageSize).Offset((page - 1) * pageSize).
 		Find(&rows).Error
 	return rows, total, err
+}
+
+func (r *Repo) ClearListeningHistory(userID uuid.UUID) error {
+	return r.db.Where("user_id = ?", userID).Delete(&model.MusicListeningHistory{}).Error
 }

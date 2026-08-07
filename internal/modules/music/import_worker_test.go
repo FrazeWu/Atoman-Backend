@@ -231,8 +231,11 @@ func TestImportWorkerCleanupRetriesTargets(t *testing.T) {
 		t.Fatalf("cleanup calls: delete=%v abort=%v", store.deleted, store.aborted)
 	}
 	var after model.AlbumImportSession
-	if err := db.First(&after, "id = ?", session.ID).Error; err == nil {
-		t.Fatal("expected cleaned session to be soft deleted")
+	if err := db.First(&after, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if after.ExpiresAt != nil {
+		t.Fatalf("cleaned session must remain as history without another expiration: %#v", after.ExpiresAt)
 	}
 
 	failed := model.AlbumImportSession{Status: AlbumImportStatusFailed, Stage: AlbumImportStageFailed, ExpiresAt: &expires, PayloadJSON: `{"cleanup_targets":[{"action":"delete","key":"retry.zip"}]}`}

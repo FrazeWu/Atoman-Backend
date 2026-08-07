@@ -33,3 +33,34 @@ func TestProtectionRoutesMountUnderAPIV1Only(t *testing.T) {
 		t.Fatalf("expected legacy album protection route to be unmounted, got %d: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestMusicEntityUpdatesOnlyExposeRevisionRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	r := gin.New()
+	SetupAlbumRoutes(r, db, nil)
+	SetupArtistWikiRoutes(r, db)
+	SetupRevisionRoutes(r, db)
+
+	routes := make(map[string]bool)
+	for _, route := range r.Routes() {
+		routes[route.Method+" "+route.Path] = true
+	}
+	for _, route := range []string{
+		"POST /api/v1/albums/:id/revisions",
+		"POST /api/v1/artists/:id/revisions",
+	} {
+		if !routes[route] {
+			t.Fatalf("expected revision route %q to be mounted", route)
+		}
+	}
+	for _, route := range []string{
+		"PUT /api/v1/albums/:id",
+		"PUT /api/v1/artists/:id",
+		"POST /api/v1/artists/:id/edit",
+	} {
+		if routes[route] {
+			t.Fatalf("expected legacy update route %q to be unmounted", route)
+		}
+	}
+}

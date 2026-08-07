@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
@@ -20,17 +21,37 @@ type homeAlbumCandidate struct {
 	score float64
 }
 
-func (s *Service) Home(user *authctx.CurrentUser) (HomeResponse, error) {
+func (s *Service) Home(user *authctx.CurrentUser, discoverPage, discoverPageSize int) (HomeResponse, error) {
+	discoverPage, discoverPageSize = normalizeMusicRecommendationPage(discoverPage, discoverPageSize)
 	response := HomeResponse{
 		RecentlyPlayed: []model.MusicListeningHistory{},
 		ForYou:         []model.Album{},
 		Sections:       []MusicHomeSection{},
+		Discover:       []DiscoverItemResponse{},
 	}
 	sections, err := s.homePublicSections()
 	if err != nil {
 		return response, err
 	}
 	response.Sections = sections
+	discover, total, err := s.Discover(recommendation.ModeHot, discoverPage, discoverPageSize)
+	if err != nil {
+		return response, err
+	}
+	for index := range discover {
+		discover[index].Section = discover[index].Type
+		switch discover[index].Type {
+		case "album":
+			discover[index].Reason = "近期热门专辑"
+		case "artist":
+			discover[index].Reason = "近期热门艺人"
+		case "playlist":
+			discover[index].Reason = "最新公开歌单"
+		}
+	}
+	response.Discover = discover
+	response.DiscoverMore = int64(discoverPage*discoverPageSize) < total
+	response.DiscoverMeta = PaginationMetaResponse{Page: discoverPage, PageSize: discoverPageSize, Total: total, HasMore: response.DiscoverMore}
 	if user == nil || user.ID == uuid.Nil {
 		return response, nil
 	}
@@ -39,7 +60,10 @@ func (s *Service) Home(user *authctx.CurrentUser) (HomeResponse, error) {
 	if err != nil {
 		return response, err
 	}
-	response.RecentlyPlayed = history
+	if len(history) > 0 {
+		response.ContinueListening = &history[0]
+		response.RecentlyPlayed = history[1:]
+	}
 	response.Personalized = len(history) > 0
 
 	affinity, seenAlbums, seenSongs, err := s.homeAffinity(user.ID, history)
@@ -53,7 +77,7 @@ func (s *Service) Home(user *authctx.CurrentUser) (HomeResponse, error) {
 	response.Personalized = true
 	response.ForYou, err = s.recommendHomeAlbums(affinity, seenAlbums, seenSongs)
 	if len(response.ForYou) > 0 {
-		response.ForYouReason = "基于最近播放和收藏"
+		response.ForYouReason = "基于播放、收藏、歌单和搜索记录"
 	}
 	return response, err
 }
@@ -148,6 +172,71 @@ func (s *Service) homeAffinity(userID uuid.UUID, history []model.MusicListeningH
 		songIDs = append(songIDs, bookmark.SongID)
 	}
 	if err := s.addHomeSongArtistAffinity(songIDs, affinity); err != nil {
+		return nil, nil, nil, err
+	}
+
+	var playlistSongIDs []uuid.UUID
+	if err := s.db.Table("music_playlist_songs").
+		Select("DISTINCT music_playlist_songs.song_id").
+		Joins("JOIN music_playlists ON music_playlists.id = music_playlist_songs.playlist_id").
+		Where("music_playlists.user_id = ? AND music_playlists.deleted_at IS NULL AND music_playlist_songs.deleted_at IS NULL", userID).
+		Pluck("music_playlist_songs.song_id", &playlistSongIDs).Error; err != nil {
+		return nil, nil, nil, err
+	}
+	if err := s.addHomeSongArtistAffinity(playlistSongIDs, affinity); err != nil {
+		return nil, nil, nil, err
+	}
+	for _, songID := range playlistSongIDs {
+		seenSongs[songID] = struct{}{}
+	}
+
+	var importedAlbumIDs []uuid.UUID
+	if err := s.db.Model(&model.AlbumImportSession{}).
+		Where("user_id = ? AND status = ? AND target_album_id IS NOT NULL", userID, AlbumImportStatusCommitted).
+		Pluck("target_album_id", &importedAlbumIDs).Error; err != nil {
+		return nil, nil, nil, err
+	}
+	if err := s.addHomeAlbumArtistAffinity(importedAlbumIDs, affinity); err != nil {
+		return nil, nil, nil, err
+	}
+	for _, albumID := range importedAlbumIDs {
+		seenAlbums[albumID] = struct{}{}
+	}
+
+	var interactions []model.MusicSearchInteraction
+	if s.db.Migrator().HasTable(&model.MusicSearchInteraction{}) {
+		if err := s.db.Where("user_id = ?", userID).Order("created_at DESC").Limit(100).Find(&interactions).Error; err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	searchAlbumIDs := make([]uuid.UUID, 0)
+	searchSongIDs := make([]uuid.UUID, 0)
+	searchPlaylistIDs := make([]uuid.UUID, 0)
+	for _, interaction := range interactions {
+		switch interaction.EntityType {
+		case "artist":
+			affinity[interaction.EntityID] += 3
+		case "album":
+			searchAlbumIDs = append(searchAlbumIDs, interaction.EntityID)
+			seenAlbums[interaction.EntityID] = struct{}{}
+		case "song":
+			searchSongIDs = append(searchSongIDs, interaction.EntityID)
+			seenSongs[interaction.EntityID] = struct{}{}
+		case "playlist":
+			searchPlaylistIDs = append(searchPlaylistIDs, interaction.EntityID)
+		}
+	}
+	if len(searchPlaylistIDs) > 0 {
+		var ids []uuid.UUID
+		if err := s.db.Model(&model.PlaylistSong{}).Where("playlist_id IN ?", searchPlaylistIDs).Pluck("song_id", &ids).Error; err != nil {
+			return nil, nil, nil, err
+		}
+		searchSongIDs = append(searchSongIDs, ids...)
+	}
+	if err := s.addHomeAlbumArtistAffinity(searchAlbumIDs, affinity); err != nil {
+		return nil, nil, nil, err
+	}
+	if err := s.addHomeSongArtistAffinity(searchSongIDs, affinity); err != nil {
 		return nil, nil, nil, err
 	}
 

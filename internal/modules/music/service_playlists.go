@@ -50,8 +50,8 @@ func (s *Service) DeletePlaylist(user authctx.CurrentUser, playlistID uuid.UUID)
 		}
 		return err
 	}
-	if playlist.IsFavorite {
-		return apperr.Conflict("music.favorite_playlist_protected", "Favorite playlist cannot be deleted")
+	if isSystemPlaylist(playlist) {
+		return apperr.Conflict("music.system_playlist_protected", "System playlist cannot be deleted")
 	}
 	return s.repo.DeletePlaylist(user.ID, playlistID)
 }
@@ -74,8 +74,8 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 		if name == "" {
 			return model.Playlist{}, apperr.BadRequest("validation.invalid_request", "name is required")
 		}
-		if playlist.IsFavorite && name != playlist.Name {
-			return model.Playlist{}, apperr.Conflict("music.favorite_playlist_protected", "Favorite playlist cannot be renamed")
+		if isSystemPlaylist(playlist) && name != playlist.Name {
+			return model.Playlist{}, apperr.Conflict("music.system_playlist_protected", "System playlist cannot be renamed")
 		}
 		updates["name"] = name
 	}
@@ -86,8 +86,8 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 		updates["cover_url"] = strings.TrimSpace(*req.CoverURL)
 	}
 	if req.IsPublic != nil {
-		if playlist.IsFavorite && *req.IsPublic {
-			return model.Playlist{}, apperr.Conflict("music.favorite_playlist_protected", "Favorite playlist cannot be public")
+		if isSystemPlaylist(playlist) && *req.IsPublic {
+			return model.Playlist{}, apperr.Conflict("music.system_playlist_protected", "System playlist cannot be public")
 		}
 		updates["is_public"] = *req.IsPublic
 	}
@@ -99,6 +99,10 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 		return model.Playlist{}, err
 	}
 	return s.repo.GetPlaylistForUser(user.ID, playlistID)
+}
+
+func isSystemPlaylist(playlist model.Playlist) bool {
+	return playlist.IsFavorite || playlist.Kind == "favorite" || playlist.Kind == "later"
 }
 
 func (s *Service) GetPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.Playlist, error) {

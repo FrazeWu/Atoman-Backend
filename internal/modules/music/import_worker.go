@@ -239,6 +239,9 @@ func importRetryDelay(attempt int) time.Duration {
 }
 
 func (w *ImportWorker) RunOnce(ctx context.Context, processor ImportProcessor) (bool, error) {
+	if processed, err := RunSongAudioReplacementOnce(ctx, w.db, w.workerID); processed || err != nil {
+		return processed, err
+	}
 	if err := w.CleanupExpired(ctx); err != nil {
 		return false, err
 	}
@@ -321,11 +324,7 @@ func (w *ImportWorker) CleanupExpired(ctx context.Context) error {
 				cleanupErr = err
 				return nil
 			}
-			result := tx.Where("id = ? AND committed_at IS NULL", locked.ID).Delete(&model.AlbumImportSession{})
-			if result.Error != nil {
-				return result.Error
-			}
-			return nil
+			return tx.Model(&locked).Update("expires_at", nil).Error
 		}); err != nil {
 			return fmt.Errorf("clean up import %s: %w", session.ID, err)
 		}

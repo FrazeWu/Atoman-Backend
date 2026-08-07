@@ -52,10 +52,7 @@ func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *test
 				"album",
 				contentID,
 				editorID,
-				map[string]interface{}{
-					"album": map[string]interface{}{"title": title},
-					"songs": []interface{}{},
-				},
+				map[string]interface{}{"title": title},
 				title,
 				1,
 				true,
@@ -82,6 +79,39 @@ func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *test
 	}
 
 	assertSingleCurrentAndUniqueVersions(t, db, contentID)
+}
+
+func TestCreateRevisionDetectsStaleAlbumFieldConflict(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{}, &model.EditConflict{})
+	album := model.Album{Title: "base"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	base := model.Revision{
+		ContentType: "album", ContentID: album.ID, VersionNumber: 1,
+		ContentSnapshot: []byte(`{"album":{"title":"base"},"songs":[]}`),
+		EditorID:        uuid.New(), EditSummary: "base", EditType: "creation", Status: "approved", IsCurrent: true,
+	}
+	if err := db.Create(&base).Error; err != nil {
+		t.Fatalf("create base revision: %v", err)
+	}
+
+	revisionService := NewRevisionService(db)
+	if _, _, err := revisionService.CreateRevision(
+		"album", album.ID, uuid.New(), map[string]interface{}{"title": "first"}, "first", 1, true,
+	); err != nil {
+		t.Fatalf("create first revision: %v", err)
+	}
+	revision, conflicts, err := revisionService.CreateRevision(
+		"album", album.ID, uuid.New(), map[string]interface{}{"title": "second"}, "second", 1, true,
+	)
+	if err != nil {
+		t.Fatalf("detect conflict: %v", err)
+	}
+	if revision != nil || len(conflicts) != 1 || conflicts[0].FieldName != "title" {
+		t.Fatalf("expected title conflict, revision=%#v conflicts=%#v", revision, conflicts)
+	}
 }
 
 func TestCreateRevisionAutoApproveAppliesArtistChanges(t *testing.T) {
@@ -543,20 +573,22 @@ func TestApproveAlbumRevisionRejectsFlatSnapshot(t *testing.T) {
 	}
 }
 
-func TestCreateAlbumSnapshotUsesEmptySongsArray(t *testing.T) {
+func TestCreateRevisionBaselineUsesEmptySongsArray(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{})
+	testdb.Migrate(t, db, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.Revision{}, &model.EditConflict{})
 
 	album := model.Album{Title: "No Tracks", AlbumType: "album", EntryStatus: "open", Status: "open"}
 	if err := db.Create(&album).Error; err != nil {
 		t.Fatalf("create album: %v", err)
 	}
-	if err := NewRevisionService(db).CreateAlbumSnapshot(album.ID, uuid.New(), "snapshot", db); err != nil {
-		t.Fatalf("create album snapshot: %v", err)
+	if _, _, err := NewRevisionService(db).CreateRevision(
+		"album", album.ID, uuid.New(), map[string]interface{}{"title": "Still No Tracks"}, "edit", 0, true,
+	); err != nil {
+		t.Fatalf("create album revision: %v", err)
 	}
 
 	var revision model.Revision
-	if err := db.Where("content_type = ? AND content_id = ?", "album", album.ID).First(&revision).Error; err != nil {
+	if err := db.Where("content_type = ? AND content_id = ? AND version_number = ?", "album", album.ID, 1).First(&revision).Error; err != nil {
 		t.Fatalf("load album snapshot: %v", err)
 	}
 	var snapshot map[string]json.RawMessage
@@ -565,5 +597,236 @@ func TestCreateAlbumSnapshotUsesEmptySongsArray(t *testing.T) {
 	}
 	if string(snapshot["songs"]) != "[]" {
 		t.Fatalf("expected empty songs array, got %s", snapshot["songs"])
+	}
+}
+
+func TestCreateRevisionBootstrapsAndAppliesAlbumEditorChanges(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.Artist{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{},
+		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
+		&model.Revision{}, &model.EditConflict{},
+	)
+
+	primary := model.Artist{Name: "Primary", EntryStatus: "open"}
+	featured := model.Artist{Name: "Featured", EntryStatus: "open"}
+	for _, value := range []any{&primary, &featured} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatalf("create artist: %v", err)
+		}
+	}
+	album := model.Album{Title: "Before", Description: "Old", AlbumType: "album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+
+	revisionService := NewRevisionService(db)
+	revision, conflicts, err := revisionService.CreateRevision(
+		"album", album.ID, uuid.New(),
+		map[string]interface{}{
+			"title":        "After",
+			"description":  "New",
+			"release_date": "2026-08-07",
+			"artist_credits": []map[string]interface{}{
+				{"artist_id": primary.ID.String(), "position": 1, "roles": []map[string]interface{}{{"role": "primary"}}},
+				{"artist_id": featured.ID.String(), "position": 2, "roles": []map[string]interface{}{{"role": "featured"}}},
+			},
+			"tracks": []map[string]interface{}{{"title": "Track", "track_number": 1, "audio_url": "https://example.com/track.mp3"}},
+		},
+		"编辑专辑", 0, true,
+	)
+	if err != nil {
+		t.Fatalf("create revision: %v", err)
+	}
+	if len(conflicts) != 0 || revision.VersionNumber != 2 || !revision.IsCurrent {
+		t.Fatalf("unexpected revision result: revision=%#v conflicts=%#v", revision, conflicts)
+	}
+
+	var revisions []model.Revision
+	if err := db.Where("content_type = ? AND content_id = ?", "album", album.ID).Order("version_number").Find(&revisions).Error; err != nil {
+		t.Fatalf("load revisions: %v", err)
+	}
+	if len(revisions) != 2 || revisions[0].EditType != "creation" || revisions[0].IsCurrent || !revisions[1].IsCurrent {
+		t.Fatalf("expected baseline and current revision, got %#v", revisions)
+	}
+
+	var updated model.Album
+	if err := db.Preload("ArtistCredits").Preload("Songs").First(&updated, "id = ?", album.ID).Error; err != nil {
+		t.Fatalf("reload album: %v", err)
+	}
+	if updated.Title != "After" || updated.Description != "New" || updated.ReleaseYear != 2026 || len(updated.ArtistCredits) != 2 || len(updated.Songs) != 1 || updated.Songs[0].AudioSource != "external" {
+		t.Fatalf("unexpected updated album: %#v", updated)
+	}
+	var linkedAlbums []model.Album
+	if err := db.Joins("JOIN album_artists ON album_artists.album_id = \"Albums\".id").
+		Where("album_artists.artist_id = ?", featured.ID).
+		Distinct("\"Albums\".*").
+		Find(&linkedAlbums).Error; err != nil {
+		t.Fatalf("list albums linked to featured artist: %v", err)
+	}
+	if len(linkedAlbums) != 1 || linkedAlbums[0].ID != album.ID {
+		t.Fatalf("expected revised album in featured artist list, got %#v", linkedAlbums)
+	}
+
+	if _, err := revisionService.RevertToRevision("album", album.ID, 1, uuid.New(), "恢复初始版本"); err != nil {
+		t.Fatalf("revert album: %v", err)
+	}
+	if err := db.Preload("ArtistCredits").First(&updated, "id = ?", album.ID).Error; err != nil {
+		t.Fatalf("reload reverted album: %v", err)
+	}
+	if updated.Title != "Before" || !updated.ReleaseDate.IsZero() || updated.Year != 0 || updated.ReleaseYear != 0 || len(updated.ArtistCredits) != 0 {
+		t.Fatalf("unexpected reverted album: %#v", updated)
+	}
+}
+
+func TestCreateRevisionRejectsProtectedArtistFields(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Artist{}, &model.Revision{}, &model.EditConflict{})
+	artist := model.Artist{Name: "Artist", EntryStatus: "protected"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+
+	if _, _, err := NewRevisionService(db).CreateRevision(
+		"artist", artist.ID, uuid.New(), map[string]interface{}{"entry_status": "open"}, "bypass", 0, true,
+	); err == nil {
+		t.Fatal("expected protected artist field to be rejected")
+	}
+
+	var revisionCount int64
+	if err := db.Model(&model.Revision{}).Where("content_id = ?", artist.ID).Count(&revisionCount).Error; err != nil {
+		t.Fatalf("count revisions: %v", err)
+	}
+	if revisionCount != 0 {
+		t.Fatalf("expected rejected revision transaction to roll back, got %d revisions", revisionCount)
+	}
+}
+
+func TestSongRevisionAppliesStructuredFieldsCreditsAndReverts(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.Artist{}, &model.Album{}, &model.Song{}, &model.SongArtist{},
+		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
+		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
+		&model.Revision{}, &model.EditConflict{},
+	)
+
+	primary := model.Artist{Name: "Primary", EntryStatus: "open"}
+	producer := model.Artist{Name: "Producer", EntryStatus: "open"}
+	if err := db.Create(&primary).Error; err != nil {
+		t.Fatalf("create primary artist: %v", err)
+	}
+	if err := db.Create(&producer).Error; err != nil {
+		t.Fatalf("create producer artist: %v", err)
+	}
+	song := model.Song{Title: "Before", TrackNumber: 1, DiscNumber: 1, Lyrics: "old", AudioURL: "/old.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if err := db.Create(&model.SongArtist{SongID: song.ID, ArtistID: primary.ID, Role: "primary", Position: 1}).Error; err != nil {
+		t.Fatalf("create initial credit: %v", err)
+	}
+
+	revisionService := NewRevisionService(db)
+	revision, conflicts, err := revisionService.CreateRevision("song", song.ID, uuid.New(), map[string]interface{}{
+		"title":        "After",
+		"track_number": 4,
+		"disc_number":  2,
+		"lyrics":       "new",
+		"cover_url":    "https://cdn.example.com/song.webp",
+		"artist_credits": []map[string]interface{}{
+			{"artist_id": primary.ID.String(), "position": 1, "roles": []map[string]interface{}{{"role": "primary"}, {"role": "vocals"}}},
+			{"artist_id": producer.ID.String(), "position": 2, "roles": []map[string]interface{}{{"role": "custom", "label": "执行制作"}}},
+		},
+	}, "编辑歌曲", 0, true)
+	if err != nil {
+		t.Fatalf("create song revision: %v", err)
+	}
+	if len(conflicts) != 0 || revision.VersionNumber != 2 || !revision.IsCurrent {
+		t.Fatalf("unexpected revision result: revision=%#v conflicts=%#v", revision, conflicts)
+	}
+
+	var updated model.Song
+	if err := db.Preload("ArtistCredits").First(&updated, "id = ?", song.ID).Error; err != nil {
+		t.Fatalf("reload updated song: %v", err)
+	}
+	if updated.Title != "After" || updated.TrackNumber != 4 || updated.DiscNumber != 2 || updated.Lyrics != "new" || updated.AudioURL != "/old.mp3" || len(updated.ArtistCredits) != 3 {
+		t.Fatalf("unexpected updated song: %#v", updated)
+	}
+
+	if _, err := revisionService.RevertToRevision("song", song.ID, 1, uuid.New(), "恢复初始版本"); err != nil {
+		t.Fatalf("revert song: %v", err)
+	}
+	if err := db.Preload("ArtistCredits").First(&updated, "id = ?", song.ID).Error; err != nil {
+		t.Fatalf("reload reverted song: %v", err)
+	}
+	if updated.Title != "Before" || updated.TrackNumber != 1 || updated.DiscNumber != 1 || updated.Lyrics != "old" || updated.AudioURL != "/old.mp3" || len(updated.ArtistCredits) != 1 || updated.ArtistCredits[0].Role != "primary" {
+		t.Fatalf("unexpected reverted song: %#v", updated)
+	}
+}
+
+func TestMergeSongRevisionChangesRejectsInvalidArtistRoles(t *testing.T) {
+	current, err := json.Marshal(songRevisionSnapshot{ID: uuid.NewString(), Title: "Song"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	artistID := uuid.NewString()
+	tests := []struct {
+		name  string
+		roles []map[string]interface{}
+	}{
+		{name: "unsupported", roles: []map[string]interface{}{{"role": "dj"}}},
+		{name: "empty custom", roles: []map[string]interface{}{{"role": "custom", "label": ""}}},
+		{name: "duplicate", roles: []map[string]interface{}{{"role": "producer"}, {"role": "producer"}}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := mergeSongRevisionChanges(current, map[string]interface{}{
+				"artist_credits": []map[string]interface{}{{"artist_id": artistID, "roles": test.roles}},
+			})
+			if err == nil {
+				t.Fatal("expected invalid artist roles to be rejected")
+			}
+		})
+	}
+}
+
+func TestCreateRevisionBootstrapsAndAppliesArtistChanges(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Artist{}, &model.Revision{}, &model.EditConflict{})
+	artist := model.Artist{Name: "Before", Bio: "Old", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+
+	revisionService := NewRevisionService(db)
+	revision, conflicts, err := revisionService.CreateRevision(
+		"artist", artist.ID, uuid.New(),
+		map[string]interface{}{"name": "After", "bio": "New", "birth_date": "1990-01-02"},
+		"编辑艺术家", 0, true,
+	)
+	if err != nil {
+		t.Fatalf("create revision: %v", err)
+	}
+	if len(conflicts) != 0 || revision.VersionNumber != 2 {
+		t.Fatalf("unexpected revision result: revision=%#v conflicts=%#v", revision, conflicts)
+	}
+	var updated model.Artist
+	if err := db.First(&updated, "id = ?", artist.ID).Error; err != nil {
+		t.Fatalf("reload artist: %v", err)
+	}
+	if updated.Name != "After" || updated.Bio != "New" || updated.BirthDate == nil {
+		t.Fatalf("unexpected updated artist: %#v", updated)
+	}
+
+	if _, err := revisionService.RevertToRevision("artist", artist.ID, 1, uuid.New(), "恢复初始版本"); err != nil {
+		t.Fatalf("revert artist: %v", err)
+	}
+	var reverted model.Artist
+	if err := db.First(&reverted, "id = ?", artist.ID).Error; err != nil {
+		t.Fatalf("reload reverted artist: %v", err)
+	}
+	if reverted.Name != "Before" || reverted.BirthDate != nil {
+		t.Fatalf("unexpected reverted artist: %#v", reverted)
 	}
 }

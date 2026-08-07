@@ -25,7 +25,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "将源艺人的关联关系、修订和讨论迁移到目标艺人，并设置 redirect_to。",
+                "description": "将源艺人的音乐关联、收藏和别名迁移到目标艺人，并设置 redirect_to。",
                 "consumes": [
                     "application/json"
                 ],
@@ -446,11 +446,24 @@ const docTemplate = `{
                             "missing_audio",
                             "missing_metadata",
                             "duplicate_candidate",
+                            "processing_failed",
                             "import_failed"
                         ],
                         "type": "string",
                         "description": "问题类型",
                         "name": "type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
                         "in": "query"
                     }
                 ],
@@ -2296,128 +2309,6 @@ const docTemplate = `{
                     }
                 }
             },
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "更新专辑信息并记录一条 wiki revision。",
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-albums"
-                ],
-                "summary": "更新专辑",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "专辑 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "专辑标题",
-                        "name": "title",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "艺人名称",
-                        "name": "artist",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "年份",
-                        "name": "year",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "发行日期 YYYY-MM-DD",
-                        "name": "release_date",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "已存在封面 URL",
-                        "name": "cover_url",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "专辑类型",
-                        "name": "album_type",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "编辑摘要",
-                        "name": "edit_summary",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "file",
-                        "description": "封面文件",
-                        "name": "cover",
-                        "in": "formData"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/model.Album"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            },
             "delete": {
                 "security": [
                     {
@@ -3108,77 +2999,6 @@ const docTemplate = `{
                         }
                     }
                 }
-            },
-            "put": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "更新艺人 wiki 条目，并在存在 revision 基线时记录一条 revision。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-artists"
-                ],
-                "summary": "更新艺人信息",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "艺人 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "艺人更新输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ArtistUpdateInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ArtistWikiResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.RevisionConflictResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
             }
         },
         "/api/v1/artists/{id}/aliases": {
@@ -3326,79 +3146,6 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/artists/{id}/edit": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "基于指定基线 revision 提交艺人修订。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-artists"
-                ],
-                "summary": "创建艺人修订",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "艺人 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "修订输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CreateRevisionInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.RevisionActionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "403": {
-                        "description": "Forbidden",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "409": {
-                        "description": "Conflict",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.RevisionConflictResponse"
                         }
                     },
                     "500": {
@@ -3733,6 +3480,77 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "基于指定基线 revision 提交艺人修订。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-artists"
+                ],
+                "summary": "创建艺人修订",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "艺人 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "修订输入",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CreateRevisionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RevisionActionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RevisionConflictResponse"
                         }
                     },
                     "500": {
@@ -11784,6 +11602,153 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/albums/{albumId}/merge": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "管理员确认曲目对应关系后直接合并，源专辑保留旧链接重定向。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "合并重复专辑",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "目标专辑 ID",
+                        "name": "albumId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "合并确认",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.AlbumMergeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/albums/{albumId}/merge/preview": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "按规范化曲名、碟号和曲序预匹配源专辑与目标专辑曲目。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "预览重复专辑合并",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "目标专辑 ID",
+                        "name": "albumId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "源专辑",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.AlbumMergeRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.AlbumMergePreviewResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/bookmarks/playlists": {
             "get": {
                 "security": [
@@ -11925,46 +11890,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/music/discover": {
-            "get": {
-                "description": "返回混合发现流，按专辑、艺人、公开歌单的简单规则混排。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-discovery"
-                ],
-                "summary": "获取音乐发现流",
-                "parameters": [
-                    {
-                        "enum": [
-                            "hot",
-                            "featured",
-                            "latest"
-                        ],
-                        "type": "string",
-                        "default": "hot",
-                        "description": "排序模式",
-                        "name": "mode",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/music.DiscoverListResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/music/history": {
             "get": {
                 "security": [
@@ -12003,6 +11928,37 @@ const docTemplate = `{
                         }
                     }
                 }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "清空播放历史",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/music/home": {
@@ -12015,6 +11971,20 @@ const docTemplate = `{
                     "music"
                 ],
                 "summary": "获取音乐首页内容",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "发现页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "发现每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -12042,14 +12012,25 @@ const docTemplate = `{
                     "music-imports"
                 ],
                 "summary": "获取当前用户的专辑导入记录",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/music.AlbumImportDTO"
-                            }
+                            "$ref": "#/definitions/music.AlbumImportListResponse"
                         }
                     },
                     "401": {
@@ -13004,6 +12985,64 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/imports/albums/{sessionId}/record": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "仅删除已完成或已取消的导入记录，不删除已发布的专辑与歌曲。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-imports"
+                ],
+                "summary": "删除专辑导入记录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入会话 ID",
+                        "name": "sessionId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/imports/albums/{sessionId}/repair": {
             "post": {
                 "produces": [
@@ -13055,8 +13094,20 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "song,album,artist,playlist",
+                        "description": "song,album,artist,playlist,later",
                         "name": "kind",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "关键词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "latest,popular,name",
+                        "name": "sort",
                         "in": "query"
                     }
                 ],
@@ -13465,9 +13516,66 @@ const docTemplate = `{
                         "description": "song,album,artist,playlist",
                         "name": "type",
                         "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
                     }
                 ],
-                "responses": {}
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.musicSearchResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/search/interactions": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "记录音乐搜索点击",
+                "parameters": [
+                    {
+                        "description": "搜索点击",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.recordSearchInteractionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
             }
         },
         "/api/v1/music/songs/{songId}": {
@@ -13489,6 +13597,73 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {}
+            }
+        },
+        "/api/v1/music/songs/{songId}/audio-replacements": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "新音频后台成功后原子切换；失败时保留原音频。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "排队替换歌曲音频",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 ID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "新音频",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.createSongAudioReplacementRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "$ref": "#/definitions/model.SongAudioReplacement"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
             }
         },
         "/api/v1/music/songs/{songId}/lyrics": {
@@ -21874,43 +22049,6 @@ const docTemplate = `{
                 }
             }
         },
-        "handlers.ArtistUpdateInput": {
-            "type": "object",
-            "properties": {
-                "bio": {
-                    "type": "string",
-                    "example": "Independent artist and writer"
-                },
-                "birth_year": {
-                    "type": "integer",
-                    "example": 1995
-                },
-                "death_year": {
-                    "type": "integer",
-                    "example": 0
-                },
-                "edit_summary": {
-                    "type": "string",
-                    "example": "补充艺人简介"
-                },
-                "image_url": {
-                    "type": "string",
-                    "example": "https://cdn.example.com/artist.jpg"
-                },
-                "members": {
-                    "type": "string",
-                    "example": "Member A, Member B"
-                },
-                "name": {
-                    "type": "string",
-                    "example": "Fafa"
-                },
-                "nationality": {
-                    "type": "string",
-                    "example": "CN"
-                }
-            }
-        },
         "handlers.ArtistWikiResponse": {
             "type": "object",
             "properties": {
@@ -22195,7 +22333,6 @@ const docTemplate = `{
         "handlers.CreateRevisionInput": {
             "type": "object",
             "required": [
-                "base_revision",
                 "changes",
                 "edit_summary"
             ],
@@ -23958,6 +24095,9 @@ const docTemplate = `{
                 "play_count": {
                     "type": "integer"
                 },
+                "redirect_to": {
+                    "type": "string"
+                },
                 "release_date": {
                     "type": "string"
                 },
@@ -25528,6 +25668,12 @@ const docTemplate = `{
                 "album_id": {
                     "type": "string"
                 },
+                "artist_credits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.SongArtist"
+                    }
+                },
                 "artists": {
                     "type": "array",
                     "items": {
@@ -25551,6 +25697,9 @@ const docTemplate = `{
                 },
                 "created_at": {
                     "type": "string"
+                },
+                "disc_number": {
+                    "type": "integer"
                 },
                 "duration_sec": {
                     "type": "integer"
@@ -25632,6 +25781,85 @@ const docTemplate = `{
                 },
                 "user": {
                     "$ref": "#/definitions/model.User"
+                }
+            }
+        },
+        "model.SongArtist": {
+            "type": "object",
+            "properties": {
+                "artist": {
+                    "$ref": "#/definitions/model.Artist"
+                },
+                "artist_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "custom_role": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "song_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.SongAudioReplacement": {
+            "type": "object",
+            "properties": {
+                "audio_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "locked_by": {
+                    "type": "string"
+                },
+                "previous_audio_url": {
+                    "type": "string"
+                },
+                "requested_by": {
+                    "type": "string"
+                },
+                "revision_id": {
+                    "type": "string"
+                },
+                "song": {
+                    "$ref": "#/definitions/model.Song"
+                },
+                "song_id": {
+                    "type": "string"
+                },
+                "source_key": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -26377,6 +26605,20 @@ const docTemplate = `{
                 }
             }
         },
+        "music.AlbumImportListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumImportDTO"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/music.PaginationMetaResponse"
+                }
+            }
+        },
         "music.AlbumImportMultipartPartDTO": {
             "type": "object",
             "properties": {
@@ -26454,6 +26696,65 @@ const docTemplate = `{
                 },
                 "track_number": {
                     "type": "integer"
+                }
+            }
+        },
+        "music.AlbumMergePreviewResponse": {
+            "type": "object",
+            "properties": {
+                "matches": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumMergeSongMatchResponse"
+                    }
+                },
+                "source_album": {
+                    "$ref": "#/definitions/model.Album"
+                },
+                "target_album": {
+                    "$ref": "#/definitions/model.Album"
+                }
+            }
+        },
+        "music.AlbumMergeRequest": {
+            "type": "object",
+            "properties": {
+                "confirmed": {
+                    "type": "boolean"
+                },
+                "song_matches": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumMergeSongMatchInput"
+                    }
+                },
+                "source_album_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.AlbumMergeSongMatchInput": {
+            "type": "object",
+            "properties": {
+                "source_song_id": {
+                    "type": "string"
+                },
+                "target_song_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.AlbumMergeSongMatchResponse": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
+                },
+                "source_song": {
+                    "$ref": "#/definitions/model.Song"
+                },
+                "target_song": {
+                    "$ref": "#/definitions/model.Song"
                 }
             }
         },
@@ -26732,7 +27033,13 @@ const docTemplate = `{
                 "play_count": {
                     "type": "integer"
                 },
+                "reason": {
+                    "type": "string"
+                },
                 "release_date": {
+                    "type": "string"
+                },
+                "section": {
                     "type": "string"
                 },
                 "song_count": {
@@ -26755,23 +27062,24 @@ const docTemplate = `{
                 }
             }
         },
-        "music.DiscoverListResponse": {
+        "music.HomeResponse": {
             "type": "object",
             "properties": {
-                "data": {
+                "continue_listening": {
+                    "$ref": "#/definitions/model.MusicListeningHistory"
+                },
+                "discover": {
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/music.DiscoverItemResponse"
                     }
                 },
-                "meta": {
+                "discover_has_more": {
+                    "type": "boolean"
+                },
+                "discover_meta": {
                     "$ref": "#/definitions/music.PaginationMetaResponse"
-                }
-            }
-        },
-        "music.HomeResponse": {
-            "type": "object",
-            "properties": {
+                },
                 "for_you": {
                     "type": "array",
                     "items": {
@@ -27308,6 +27616,94 @@ const docTemplate = `{
                 },
                 "start_offset": {
                     "type": "integer"
+                }
+            }
+        },
+        "music.createSongAudioReplacementRequest": {
+            "type": "object",
+            "required": [
+                "audio_url"
+            ],
+            "properties": {
+                "audio_url": {
+                    "type": "string"
+                },
+                "source_key": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.musicSearchMeta": {
+            "type": "object",
+            "properties": {
+                "has_more": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "boolean"
+                    }
+                },
+                "page": {
+                    "type": "integer"
+                },
+                "page_size": {
+                    "type": "integer"
+                },
+                "totals": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            }
+        },
+        "music.musicSearchResponse": {
+            "type": "object",
+            "properties": {
+                "albums": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Album"
+                    }
+                },
+                "artists": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Artist"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/music.musicSearchMeta"
+                },
+                "playlists": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Playlist"
+                    }
+                },
+                "songs": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Song"
+                    }
+                }
+            }
+        },
+        "music.recordSearchInteractionRequest": {
+            "type": "object",
+            "required": [
+                "entity_id",
+                "entity_type"
+            ],
+            "properties": {
+                "entity_id": {
+                    "type": "string"
+                },
+                "entity_type": {
+                    "type": "string"
+                },
+                "query": {
+                    "type": "string"
                 }
             }
         },

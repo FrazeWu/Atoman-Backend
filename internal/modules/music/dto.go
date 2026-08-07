@@ -25,7 +25,26 @@ type SubmitEditRequest struct {
 }
 
 type AlbumMergeRequest struct {
-	SourceAlbumID uuid.UUID `json:"source_album_id"`
+	SourceAlbumID uuid.UUID                  `json:"source_album_id"`
+	Confirmed     bool                       `json:"confirmed"`
+	SongMatches   []AlbumMergeSongMatchInput `json:"song_matches"`
+}
+
+type AlbumMergeSongMatchInput struct {
+	SourceSongID uuid.UUID `json:"source_song_id"`
+	TargetSongID uuid.UUID `json:"target_song_id"`
+}
+
+type AlbumMergeSongMatchResponse struct {
+	SourceSong model.Song `json:"source_song"`
+	TargetSong model.Song `json:"target_song"`
+	Reason     string     `json:"reason"`
+}
+
+type AlbumMergePreviewResponse struct {
+	SourceAlbum model.Album                   `json:"source_album"`
+	TargetAlbum model.Album                   `json:"target_album"`
+	Matches     []AlbumMergeSongMatchResponse `json:"matches"`
 }
 
 type VoteRequest struct {
@@ -102,6 +121,8 @@ type PlaylistSummaryResponse struct {
 
 type DiscoverItemResponse struct {
 	Type          string `json:"type"`
+	Section       string `json:"section,omitempty"`
+	Reason        string `json:"reason,omitempty"`
 	ID            string `json:"id"`
 	Title         string `json:"title"`
 	Summary       string `json:"summary,omitempty"`
@@ -172,11 +193,15 @@ type ListeningHistoryListResponse struct {
 }
 
 type HomeResponse struct {
-	Personalized   bool                          `json:"personalized"`
-	RecentlyPlayed []model.MusicListeningHistory `json:"recently_played"`
-	ForYou         []model.Album                 `json:"for_you"`
-	ForYouReason   string                        `json:"for_you_reason,omitempty"`
-	Sections       []MusicHomeSection            `json:"sections"`
+	Personalized      bool                          `json:"personalized"`
+	ContinueListening *model.MusicListeningHistory  `json:"continue_listening,omitempty"`
+	RecentlyPlayed    []model.MusicListeningHistory `json:"recently_played"`
+	ForYou            []model.Album                 `json:"for_you"`
+	ForYouReason      string                        `json:"for_you_reason,omitempty"`
+	Sections          []MusicHomeSection            `json:"sections"`
+	Discover          []DiscoverItemResponse        `json:"discover"`
+	DiscoverMore      bool                          `json:"discover_has_more"`
+	DiscoverMeta      PaginationMetaResponse        `json:"discover_meta"`
 }
 
 type MusicHomeSection struct {

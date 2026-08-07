@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -21,26 +23,51 @@ type RevisionService struct {
 }
 
 type albumRevisionSnapshot struct {
-	Album *albumRevisionAlbum `json:"album"`
-	Songs []albumRevisionSong `json:"songs"`
+	Album         *albumRevisionAlbum   `json:"album"`
+	ArtistCredits []albumRevisionCredit `json:"artist_credits"`
+	Songs         []albumRevisionSong   `json:"songs"`
 }
 
 type albumRevisionAlbum struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
+	Description string `json:"description"`
 	ReleaseDate string `json:"release_date"`
 	AlbumType   string `json:"album_type"`
 	EntryStatus string `json:"entry_status"`
 	CoverURL    string `json:"cover_url"`
+	CoverSource string `json:"cover_source"`
+}
+
+type albumRevisionCredit struct {
+	ArtistID   string `json:"artist_id"`
+	Role       string `json:"role"`
+	CustomRole string `json:"custom_role,omitempty"`
+	Position   int    `json:"position"`
 }
 
 type albumRevisionSong struct {
-	ID          string `json:"id,omitempty"`
-	Title       string `json:"title"`
-	TrackNumber int    `json:"track_number"`
-	Lyrics      string `json:"lyrics"`
-	AudioURL    string `json:"audio_url"`
-	Status      string `json:"status"`
+	ID            string                `json:"id,omitempty"`
+	Title         string                `json:"title"`
+	TrackNumber   int                   `json:"track_number"`
+	DiscNumber    int                   `json:"disc_number"`
+	Lyrics        string                `json:"lyrics"`
+	AudioURL      string                `json:"audio_url"`
+	CoverURL      string                `json:"cover_url"`
+	Status        string                `json:"status"`
+	ArtistCredits []albumRevisionCredit `json:"artist_credits"`
+}
+
+type songRevisionSnapshot struct {
+	ID            string                `json:"id"`
+	Title         string                `json:"title"`
+	TrackNumber   int                   `json:"track_number"`
+	DiscNumber    int                   `json:"disc_number"`
+	Lyrics        string                `json:"lyrics"`
+	AudioURL      string                `json:"audio_url"`
+	CoverURL      string                `json:"cover_url"`
+	Status        string                `json:"status"`
+	ArtistCredits []albumRevisionCredit `json:"artist_credits"`
 }
 
 func NewRevisionService(db *gorm.DB) *RevisionService {
@@ -66,15 +93,6 @@ func (s *RevisionService) CreateRevision(
 	var conflicts []model.EditConflict
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// Get base revision
-		var baseRevision model.Revision
-		if err := tx.Where("content_id = ? AND content_type = ? AND version_number = ?",
-			contentID, contentType, baseRevisionNumber).
-			First(&baseRevision).Error; err != nil {
-			return fmt.Errorf("base revision not found: %w", err)
-		}
-
-		// Get current revision
 		var currentRevision model.Revision
 		currentQuery := tx.Where("content_id = ? AND content_type = ? AND is_current = ?",
 			contentID, contentType, true).
@@ -82,8 +100,24 @@ func (s *RevisionService) CreateRevision(
 		if supportsRowLock(tx) {
 			currentQuery = currentQuery.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
-		if err := currentQuery.First(&currentRevision).Error; err != nil {
+		if err := currentQuery.First(&currentRevision).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			baseline, err := s.createBaselineRevision(tx, contentType, contentID, editorID)
+			if err != nil {
+				return err
+			}
+			currentRevision = *baseline
+		} else if err != nil {
 			return fmt.Errorf("current revision not found: %w", err)
+		}
+
+		if baseRevisionNumber <= 0 {
+			baseRevisionNumber = currentRevision.VersionNumber
+		}
+		var baseRevision model.Revision
+		if err := tx.Where("content_id = ? AND content_type = ? AND version_number = ?",
+			contentID, contentType, baseRevisionNumber).
+			First(&baseRevision).Error; err != nil {
+			return fmt.Errorf("base revision not found: %w", err)
 		}
 
 		// Detect conflicts if base != current
@@ -106,20 +140,9 @@ func (s *RevisionService) CreateRevision(
 			return nil
 		}
 
-		// Apply changes to current content
-		var currentContent map[string]interface{}
-		if err := json.Unmarshal(currentRevision.ContentSnapshot, &currentContent); err != nil {
-			return fmt.Errorf("failed to parse current content: %w", err)
-		}
-
-		for key, value := range changes {
-			currentContent[key] = value
-		}
-
-		// Serialize updated content
-		snapshot, err := json.Marshal(currentContent)
+		snapshot, err := mergeRevisionChanges(contentType, currentRevision.ContentSnapshot, changes)
 		if err != nil {
-			return fmt.Errorf("failed to serialize content: %w", err)
+			return err
 		}
 
 		// Determine status
@@ -174,6 +197,420 @@ func (s *RevisionService) CreateRevision(
 	return &newRevision, nil, nil
 }
 
+func (s *RevisionService) createBaselineRevision(tx *gorm.DB, contentType string, contentID, editorID uuid.UUID) (*model.Revision, error) {
+	snapshot, err := s.captureCurrentSnapshot(tx, contentType, contentID)
+	if err != nil {
+		return nil, err
+	}
+	baseline := model.Revision{
+		ContentType:     contentType,
+		ContentID:       contentID,
+		VersionNumber:   1,
+		ContentSnapshot: snapshot,
+		EditorID:        editorID,
+		EditSummary:     "初始版本",
+		EditType:        "creation",
+		Status:          "approved",
+		IsCurrent:       true,
+		CreatedAt:       time.Now(),
+	}
+	if err := tx.Create(&baseline).Error; err != nil {
+		return nil, fmt.Errorf("failed to create baseline revision: %w", err)
+	}
+	return &baseline, nil
+}
+
+func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string, contentID uuid.UUID) ([]byte, error) {
+	switch contentType {
+	case "album":
+		var album model.Album
+		if err := tx.Preload("ArtistCredits").Preload("Songs.ArtistCredits").First(&album, "id = ?", contentID).Error; err != nil {
+			return nil, fmt.Errorf("album not found: %w", err)
+		}
+		snapshot := albumRevisionSnapshot{
+			Album: &albumRevisionAlbum{
+				ID:          album.ID.String(),
+				Title:       album.Title,
+				Description: album.Description,
+				AlbumType:   album.AlbumType,
+				EntryStatus: album.EntryStatus,
+				CoverURL:    album.CoverURL,
+				CoverSource: album.CoverSource,
+			},
+			ArtistCredits: make([]albumRevisionCredit, 0, len(album.ArtistCredits)),
+			Songs:         make([]albumRevisionSong, 0, len(album.Songs)),
+		}
+		if !album.ReleaseDate.IsZero() {
+			snapshot.Album.ReleaseDate = album.ReleaseDate.Format("2006-01-02")
+		}
+		for _, credit := range album.ArtistCredits {
+			snapshot.ArtistCredits = append(snapshot.ArtistCredits, albumRevisionCredit{
+				ArtistID: credit.ArtistID.String(), CustomRole: credit.CustomRole,
+				Role: credit.Role, Position: credit.Position,
+			})
+		}
+		for _, song := range album.Songs {
+			if song.Status == "closed" {
+				continue
+			}
+			snapshot.Songs = append(snapshot.Songs, albumRevisionSong{
+				ID: song.ID.String(), Title: song.Title, TrackNumber: song.TrackNumber,
+				DiscNumber: song.DiscNumber, Lyrics: song.Lyrics, AudioURL: song.AudioURL,
+				CoverURL: song.CoverURL, Status: song.Status,
+				ArtistCredits: songCreditsSnapshot(song.ArtistCredits),
+			})
+		}
+		return json.Marshal(snapshot)
+	case "song":
+		var song model.Song
+		if err := tx.Preload("ArtistCredits").First(&song, "id = ?", contentID).Error; err != nil {
+			return nil, fmt.Errorf("song not found: %w", err)
+		}
+		return json.Marshal(songRevisionSnapshot{
+			ID: song.ID.String(), Title: song.Title, TrackNumber: song.TrackNumber,
+			DiscNumber: song.DiscNumber, Lyrics: song.Lyrics, AudioURL: song.AudioURL,
+			CoverURL: song.CoverURL, Status: song.Status,
+			ArtistCredits: songCreditsSnapshot(song.ArtistCredits),
+		})
+	case "artist":
+		var artist model.Artist
+		if err := tx.First(&artist, "id = ?", contentID).Error; err != nil {
+			return nil, fmt.Errorf("artist not found: %w", err)
+		}
+		snapshot := map[string]interface{}{
+			"name": artist.Name, "legal_name": artist.LegalName, "stage_names_json": artist.StageNamesJSON,
+			"bio": artist.Bio, "image_url": artist.ImageURL, "nationality": artist.Nationality,
+			"birth_place": artist.BirthPlace, "birth_year": artist.BirthYear, "death_year": artist.DeathYear,
+			"birth_date": "", "artist_form": artist.ArtistForm, "entry_status": artist.EntryStatus,
+		}
+		if artist.BirthDate != nil {
+			snapshot["birth_date"] = artist.BirthDate.Format("2006-01-02")
+		}
+		return json.Marshal(snapshot)
+	default:
+		return nil, fmt.Errorf("cannot create baseline for content type: %s", contentType)
+	}
+}
+
+func songCreditsSnapshot(credits []model.SongArtist) []albumRevisionCredit {
+	result := make([]albumRevisionCredit, 0, len(credits))
+	for _, credit := range credits {
+		result = append(result, albumRevisionCredit{
+			ArtistID: credit.ArtistID.String(), Role: credit.Role,
+			CustomRole: credit.CustomRole, Position: credit.Position,
+		})
+	}
+	return result
+}
+
+type albumRevisionRoleInput struct {
+	Role  string `json:"role"`
+	Label string `json:"label"`
+}
+
+type albumRevisionCreditInput struct {
+	ArtistID string                   `json:"artist_id"`
+	Roles    []albumRevisionRoleInput `json:"roles"`
+	Position int                      `json:"position"`
+}
+
+var revisionArtistRoles = map[string]struct{}{
+	"primary": {}, "featured": {}, "vocals": {}, "backing_vocals": {},
+	"writer": {}, "composer": {}, "arranger": {}, "producer": {},
+	"vocal_producer": {}, "recording_engineer": {}, "mixing_engineer": {},
+	"mastering_engineer": {}, "remixer": {}, "custom": {},
+}
+
+type albumRevisionTrackInput struct {
+	ID            string                     `json:"id"`
+	Title         string                     `json:"title"`
+	TrackNumber   int                        `json:"track_number"`
+	DiscNumber    int                        `json:"disc_number"`
+	Lyrics        string                     `json:"lyrics"`
+	AudioURL      string                     `json:"audio_url"`
+	CoverURL      string                     `json:"cover_url"`
+	ArtistCredits []albumRevisionCreditInput `json:"artist_credits"`
+	Removed       bool                       `json:"removed"`
+}
+
+type songRevisionChanges struct {
+	Title         *string                     `json:"title"`
+	TrackNumber   *int                        `json:"track_number"`
+	DiscNumber    *int                        `json:"disc_number"`
+	Lyrics        *string                     `json:"lyrics"`
+	AudioURL      *string                     `json:"audio_url"`
+	CoverURL      *string                     `json:"cover_url"`
+	ArtistCredits *[]albumRevisionCreditInput `json:"artist_credits"`
+}
+
+type albumRevisionChanges struct {
+	Title         *string                     `json:"title"`
+	Description   *string                     `json:"description"`
+	ReleaseDate   *string                     `json:"release_date"`
+	AlbumType     *string                     `json:"album_type"`
+	CoverURL      *string                     `json:"cover_url"`
+	ArtistIDs     *[]string                   `json:"artist_ids"`
+	ArtistCredits *[]albumRevisionCreditInput `json:"artist_credits"`
+	Tracks        *[]albumRevisionTrackInput  `json:"tracks"`
+}
+
+func mergeRevisionChanges(contentType string, current []byte, changes map[string]interface{}) ([]byte, error) {
+	if contentType == "artist" {
+		var snapshot map[string]interface{}
+		if err := json.Unmarshal(current, &snapshot); err != nil {
+			return nil, fmt.Errorf("failed to parse current content: %w", err)
+		}
+		allowed := map[string]struct{}{
+			"name": {}, "legal_name": {}, "stage_names_json": {}, "bio": {}, "image_url": {},
+			"nationality": {}, "birth_place": {}, "birth_date": {}, "birth_year": {},
+			"death_year": {}, "artist_form": {},
+		}
+		for key, value := range changes {
+			if _, ok := allowed[key]; !ok {
+				return nil, fmt.Errorf("unsupported artist revision field: %s", key)
+			}
+			snapshot[key] = value
+		}
+		return json.Marshal(snapshot)
+	}
+	if contentType == "song" {
+		return mergeSongRevisionChanges(current, changes)
+	}
+	if contentType != "album" {
+		return nil, fmt.Errorf("unsupported revision content type: %s", contentType)
+	}
+	allowed := map[string]struct{}{
+		"title": {}, "description": {}, "release_date": {}, "album_type": {},
+		"cover_url": {}, "cover_key": {}, "artist_ids": {}, "artist_credits": {}, "tracks": {},
+	}
+	for key := range changes {
+		if _, ok := allowed[key]; !ok {
+			return nil, fmt.Errorf("unsupported album revision field: %s", key)
+		}
+	}
+
+	var snapshot albumRevisionSnapshot
+	if err := json.Unmarshal(current, &snapshot); err != nil {
+		return nil, fmt.Errorf("failed to parse album snapshot: %w", err)
+	}
+	if snapshot.Album == nil || snapshot.Songs == nil {
+		return nil, errors.New("album snapshot must contain album and songs")
+	}
+	rawChanges, err := json.Marshal(changes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize album changes: %w", err)
+	}
+	var input albumRevisionChanges
+	if err := json.Unmarshal(rawChanges, &input); err != nil {
+		return nil, fmt.Errorf("failed to parse album changes: %w", err)
+	}
+	if input.Title != nil {
+		snapshot.Album.Title = *input.Title
+	}
+	if input.Description != nil {
+		snapshot.Album.Description = *input.Description
+	}
+	if input.ReleaseDate != nil {
+		snapshot.Album.ReleaseDate = *input.ReleaseDate
+	}
+	if input.AlbumType != nil {
+		snapshot.Album.AlbumType = *input.AlbumType
+	}
+	if input.CoverURL != nil {
+		snapshot.Album.CoverURL = *input.CoverURL
+		snapshot.Album.CoverSource = coverSourceForRevision(*input.CoverURL)
+	}
+	if input.ArtistCredits == nil && input.ArtistIDs != nil {
+		credits := make([]albumRevisionCredit, 0, len(*input.ArtistIDs))
+		for index, rawArtistID := range *input.ArtistIDs {
+			artistID := strings.TrimSpace(rawArtistID)
+			if _, err := uuid.Parse(artistID); err != nil {
+				return nil, errors.New("artist_ids must contain valid UUID values")
+			}
+			credits = append(credits, albumRevisionCredit{
+				ArtistID: artistID, Role: "primary", Position: index + 1,
+			})
+		}
+		snapshot.ArtistCredits = credits
+	}
+	if input.ArtistCredits != nil {
+		if err := validateRevisionCredits(*input.ArtistCredits, true); err != nil {
+			return nil, err
+		}
+		credits := make([]albumRevisionCredit, 0)
+		for index, credit := range *input.ArtistCredits {
+			if _, err := uuid.Parse(strings.TrimSpace(credit.ArtistID)); err != nil {
+				return nil, errors.New("artist_credits must contain valid artist_id values")
+			}
+			position := credit.Position
+			if position <= 0 {
+				position = index + 1
+			}
+			for _, role := range credit.Roles {
+				roleName := strings.ToLower(strings.TrimSpace(role.Role))
+				if roleName == "" {
+					return nil, errors.New("artist credit role is required")
+				}
+				credits = append(credits, albumRevisionCredit{
+					ArtistID: credit.ArtistID, Role: roleName,
+					CustomRole: strings.TrimSpace(role.Label), Position: position,
+				})
+			}
+		}
+		snapshot.ArtistCredits = credits
+	}
+	if input.Tracks != nil {
+		songs := make([]albumRevisionSong, 0, len(*input.Tracks))
+		for _, track := range *input.Tracks {
+			if track.Removed {
+				continue
+			}
+			if err := validateRevisionCredits(track.ArtistCredits, false); err != nil {
+				return nil, err
+			}
+			songs = append(songs, albumRevisionSong{
+				ID: track.ID, Title: track.Title, TrackNumber: track.TrackNumber,
+				DiscNumber: track.DiscNumber, Lyrics: track.Lyrics, AudioURL: track.AudioURL,
+				CoverURL: track.CoverURL, Status: "open",
+				ArtistCredits: revisionCreditsFromInput(track.ArtistCredits),
+			})
+		}
+		snapshot.Songs = songs
+	}
+	return json.Marshal(snapshot)
+}
+
+func mergeSongRevisionChanges(current []byte, changes map[string]interface{}) ([]byte, error) {
+	allowed := map[string]struct{}{
+		"title": {}, "track_number": {}, "disc_number": {}, "lyrics": {},
+		"audio_url": {}, "cover_url": {}, "artist_credits": {},
+	}
+	for key := range changes {
+		if _, ok := allowed[key]; !ok {
+			return nil, fmt.Errorf("unsupported song revision field: %s", key)
+		}
+	}
+	var snapshot songRevisionSnapshot
+	if err := json.Unmarshal(current, &snapshot); err != nil {
+		return nil, fmt.Errorf("failed to parse song snapshot: %w", err)
+	}
+	raw, err := json.Marshal(changes)
+	if err != nil {
+		return nil, err
+	}
+	var input songRevisionChanges
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	if input.Title != nil {
+		snapshot.Title = strings.TrimSpace(*input.Title)
+	}
+	if input.TrackNumber != nil {
+		snapshot.TrackNumber = *input.TrackNumber
+	}
+	if input.DiscNumber != nil {
+		snapshot.DiscNumber = *input.DiscNumber
+	}
+	if input.Lyrics != nil {
+		snapshot.Lyrics = *input.Lyrics
+	}
+	if input.AudioURL != nil {
+		snapshot.AudioURL = strings.TrimSpace(*input.AudioURL)
+	}
+	if input.CoverURL != nil {
+		snapshot.CoverURL = strings.TrimSpace(*input.CoverURL)
+	}
+	if input.ArtistCredits != nil {
+		if err := validateRevisionCredits(*input.ArtistCredits, false); err != nil {
+			return nil, err
+		}
+		snapshot.ArtistCredits = revisionCreditsFromInput(*input.ArtistCredits)
+	}
+	if snapshot.Title == "" {
+		return nil, errors.New("song title is required")
+	}
+	return json.Marshal(snapshot)
+}
+
+func revisionCreditsFromInput(input []albumRevisionCreditInput) []albumRevisionCredit {
+	credits := make([]albumRevisionCredit, 0)
+	for index, credit := range input {
+		position := credit.Position
+		if position <= 0 {
+			position = index + 1
+		}
+		for _, role := range credit.Roles {
+			credits = append(credits, albumRevisionCredit{
+				ArtistID: strings.TrimSpace(credit.ArtistID), Role: strings.ToLower(strings.TrimSpace(role.Role)),
+				CustomRole: strings.TrimSpace(role.Label), Position: position,
+			})
+		}
+	}
+	return credits
+}
+
+func validateRevisionCredits(input []albumRevisionCreditInput, requirePrimary bool) error {
+	if requirePrimary && len(input) == 0 {
+		return errors.New("artist_credits are required")
+	}
+	seen := make(map[string]struct{})
+	hasPrimary := false
+	for _, credit := range input {
+		artistID := strings.TrimSpace(credit.ArtistID)
+		if _, err := uuid.Parse(artistID); err != nil {
+			return errors.New("artist_credits must contain valid artist_id values")
+		}
+		if len(credit.Roles) == 0 {
+			return errors.New("each artist credit must contain at least one role")
+		}
+		for _, inputRole := range credit.Roles {
+			role := strings.ToLower(strings.TrimSpace(inputRole.Role))
+			if _, ok := revisionArtistRoles[role]; !ok {
+				return errors.New("artist credit role is not supported")
+			}
+			hasPrimary = hasPrimary || role == "primary"
+			label := strings.TrimSpace(inputRole.Label)
+			if role == "custom" && label == "" {
+				return errors.New("custom artist roles require a label")
+			}
+			key := artistID + "\x00" + role + "\x00" + strings.ToLower(label)
+			if _, exists := seen[key]; exists {
+				return errors.New("duplicate artist role")
+			}
+			seen[key] = struct{}{}
+		}
+	}
+	if requirePrimary && !hasPrimary {
+		return errors.New("at least one primary artist is required")
+	}
+	return nil
+}
+
+func coverSourceForRevision(url string) string {
+	trimmed := strings.TrimSpace(url)
+	if trimmed == "" {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "/uploads/") || strings.HasPrefix(trimmed, "uploads/") {
+		return "local"
+	}
+	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
+		publicUploadsBase := strings.TrimRight(strings.TrimSpace(os.Getenv("PUBLIC_UPLOADS_BASE_URL")), "/")
+		if publicUploadsBase != "" && (trimmed == publicUploadsBase || strings.HasPrefix(trimmed, publicUploadsBase+"/")) {
+			return "local"
+		}
+		s3Prefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
+		if s3Prefix != "" && (trimmed == s3Prefix || strings.HasPrefix(trimmed, s3Prefix+"/")) {
+			return "s3"
+		}
+		return "external"
+	}
+	if strings.HasPrefix(trimmed, "s3/") || strings.TrimSpace(os.Getenv("STORAGE_TYPE")) == "s3" {
+		return "s3"
+	}
+	return "local"
+}
+
 // DetectConflicts performs 3-way merge conflict detection
 func (s *RevisionService) DetectConflicts(
 	baseRevision *model.Revision,
@@ -188,34 +625,38 @@ func (s *RevisionService) DetectConflicts(
 
 	json.Unmarshal(baseRevision.ContentSnapshot, &baseData)
 	json.Unmarshal(currentRevision.ContentSnapshot, &currentData)
+	var userData map[string]interface{}
+	if baseRevision.ContentType == "album" {
+		if merged, err := mergeRevisionChanges("album", baseRevision.ContentSnapshot, userChanges); err == nil {
+			_ = json.Unmarshal(merged, &userData)
+		}
+	}
 
 	// Check each changed field
 	for field, userValue := range userChanges {
-		baseValue := baseData[field]
-		currentValue := currentData[field]
-
-		// Convert to strings for comparison
-		baseStr := fmt.Sprintf("%v", baseValue)
-		userStr := fmt.Sprintf("%v", userValue)
-		currentStr := fmt.Sprintf("%v", currentValue)
+		baseValue := revisionConflictValue(baseData, baseRevision.ContentType, field)
+		currentValue := revisionConflictValue(currentData, baseRevision.ContentType, field)
+		if baseRevision.ContentType == "album" {
+			userValue = revisionConflictValue(userData, baseRevision.ContentType, field)
+		}
 
 		// Case 1: Field unchanged by user → no conflict
-		if userStr == baseStr {
+		if reflect.DeepEqual(userValue, baseValue) {
 			continue
 		}
 
 		// Case 2: Field changed by user, but current version has same value → no conflict
-		if userStr == currentStr {
+		if reflect.DeepEqual(userValue, currentValue) {
 			continue
 		}
 
 		// Case 3: Field changed by user AND changed differently in current → CONFLICT
-		if baseStr != currentStr && userStr != currentStr {
+		if !reflect.DeepEqual(baseValue, currentValue) {
 			conflict := model.EditConflict{
 				FieldName: field,
-				BaseValue: baseStr,
-				Value1:    userStr,    // User's value
-				Value2:    currentStr, // Current value
+				BaseValue: fmt.Sprintf("%v", baseValue),
+				Value1:    fmt.Sprintf("%v", userValue),
+				Value2:    fmt.Sprintf("%v", currentValue),
 				Status:    "unresolved",
 				CreatedAt: time.Now(),
 			}
@@ -224,6 +665,23 @@ func (s *RevisionService) DetectConflicts(
 	}
 
 	return conflicts
+}
+
+func revisionConflictValue(data map[string]interface{}, contentType, field string) interface{} {
+	if contentType != "album" {
+		return data[field]
+	}
+	switch field {
+	case "artist_ids", "artist_credits":
+		return data["artist_credits"]
+	case "tracks":
+		return data["songs"]
+	case "cover_key":
+		return nil
+	default:
+		album, _ := data["album"].(map[string]interface{})
+		return album[field]
+	}
 }
 
 // ApproveRevision approves a pending revision
@@ -360,6 +818,65 @@ func (s *RevisionService) RevertToRevision(
 	})
 }
 
+func (s *RevisionService) ApplySongAudioReplacement(jobID uuid.UUID) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var job model.SongAudioReplacement
+		query := tx.Where("id = ? AND status = ?", jobID, "processing")
+		if supportsRowLock(tx) {
+			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := query.First(&job).Error; err != nil {
+			return err
+		}
+
+		var current model.Revision
+		currentQuery := tx.Where("content_id = ? AND content_type = ? AND is_current = ?", job.SongID, "song", true).Order("version_number DESC")
+		if supportsRowLock(tx) {
+			currentQuery = currentQuery.Clauses(clause.Locking{Strength: "UPDATE"})
+		}
+		if err := currentQuery.First(&current).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			baseline, baselineErr := s.createBaselineRevision(tx, "song", job.SongID, job.RequestedBy)
+			if baselineErr != nil {
+				return baselineErr
+			}
+			current = *baseline
+		} else if err != nil {
+			return err
+		}
+
+		var snapshot songRevisionSnapshot
+		if err := json.Unmarshal(current.ContentSnapshot, &snapshot); err != nil {
+			return err
+		}
+		if strings.TrimSpace(job.AudioURL) == "" {
+			return errors.New("replacement audio URL is required")
+		}
+		snapshot.AudioURL = strings.TrimSpace(job.AudioURL)
+		raw, err := json.Marshal(snapshot)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&model.Revision{}).Where("content_id = ? AND content_type = ? AND is_current = ?", job.SongID, "song", true).Update("is_current", false).Error; err != nil {
+			return err
+		}
+		revision := model.Revision{
+			ContentType: "song", ContentID: job.SongID, VersionNumber: current.VersionNumber + 1,
+			PreviousRevisionID: &current.ID, ContentSnapshot: raw, EditorID: job.RequestedBy,
+			EditSummary: "替换歌曲音频", EditType: "audio_replace", Status: "approved", IsCurrent: true, CreatedAt: time.Now(),
+		}
+		if err := tx.Create(&revision).Error; err != nil {
+			return err
+		}
+		if err := applySongRevisionSnapshot(tx, job.SongID, job.RequestedBy, raw); err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		return tx.Model(&model.SongAudioReplacement{}).Where("id = ?", job.ID).Updates(map[string]any{
+			"status": "completed", "revision_id": revision.ID, "finished_at": now, "error_message": "",
+		}).Error
+	})
+}
+
 // applyRevisionToContent applies revision changes to the actual Album/Song record
 func (s *RevisionService) applyRevisionToContent(tx *gorm.DB, revision *model.Revision) error {
 	var content map[string]interface{}
@@ -372,29 +889,102 @@ func (s *RevisionService) applyRevisionToContent(tx *gorm.DB, revision *model.Re
 		return s.applyAlbumRevisionSnapshot(tx, revision.ContentID, revision.EditorID, revision.ContentSnapshot)
 
 	case "song":
-		if err := applyFlatRevisionSnapshot(tx, &model.Song{}, revision.ContentID, revision.ContentType, content); err != nil {
-			return err
-		}
-		if lyrics, ok := content["lyrics"].(string); ok {
-			return musiclyrics.SyncLegacySongLyrics(tx, revision.EditorID, revision.ContentID, lyrics, "通过歌曲版本更新歌词")
-		}
-		return nil
+		return applySongRevisionSnapshot(tx, revision.ContentID, revision.EditorID, revision.ContentSnapshot)
 
 	case "artist":
-		return applyFlatRevisionSnapshot(tx, &model.Artist{}, revision.ContentID, revision.ContentType, content)
+		return applyArtistRevisionSnapshot(tx, revision.ContentID, content)
 
 	default:
 		return fmt.Errorf("unsupported content type: %s", revision.ContentType)
 	}
 }
 
-func applyFlatRevisionSnapshot(tx *gorm.DB, target any, contentID uuid.UUID, contentType string, content map[string]interface{}) error {
-	result := tx.Model(target).Where("id = ?", contentID).Updates(content)
+func applyArtistRevisionSnapshot(tx *gorm.DB, artistID uuid.UUID, content map[string]interface{}) error {
+	allowed := map[string]struct{}{
+		"name": {}, "legal_name": {}, "stage_names_json": {}, "bio": {}, "image_url": {},
+		"nationality": {}, "birth_place": {}, "birth_year": {}, "death_year": {},
+		"artist_form": {}, "entry_status": {},
+	}
+	updates := make(map[string]interface{})
+	for key, value := range content {
+		if _, ok := allowed[key]; ok {
+			updates[key] = value
+		}
+	}
+	if value, ok := content["birth_date"].(string); ok {
+		if strings.TrimSpace(value) == "" {
+			updates["birth_date"] = nil
+		} else {
+			parsed, err := time.Parse("2006-01-02", value)
+			if err != nil {
+				return fmt.Errorf("failed to parse artist birth date: %w", err)
+			}
+			updates["birth_date"] = parsed
+			updates["birth_year"] = parsed.Year()
+		}
+	}
+	result := tx.Model(&model.Artist{}).Where("id = ?", artistID).Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
-		return fmt.Errorf("%s not found", contentType)
+		return errors.New("artist not found")
+	}
+	return nil
+}
+
+func applySongRevisionSnapshot(tx *gorm.DB, songID, actorID uuid.UUID, raw []byte) error {
+	var snapshot songRevisionSnapshot
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		return err
+	}
+	if strings.TrimSpace(snapshot.Title) == "" {
+		return errors.New("song title is required")
+	}
+	updates := map[string]interface{}{
+		"title": strings.TrimSpace(snapshot.Title), "track_number": snapshot.TrackNumber,
+		"disc_number": snapshot.DiscNumber, "lyrics": snapshot.Lyrics,
+		"audio_url": strings.TrimSpace(snapshot.AudioURL), "cover_url": strings.TrimSpace(snapshot.CoverURL),
+	}
+	if strings.TrimSpace(snapshot.AudioURL) != "" {
+		updates["audio_source"] = coverSourceForRevision(snapshot.AudioURL)
+	}
+	if strings.TrimSpace(snapshot.CoverURL) != "" {
+		updates["cover_source"] = coverSourceForRevision(snapshot.CoverURL)
+	}
+	result := tx.Model(&model.Song{}).Where("id = ?", songID).Updates(updates)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return errors.New("song not found")
+	}
+	if snapshot.ArtistCredits != nil {
+		if err := replaceSongArtistCredits(tx, songID, snapshot.ArtistCredits); err != nil {
+			return err
+		}
+	}
+	return musiclyrics.SyncLegacySongLyrics(tx, actorID, songID, snapshot.Lyrics, "通过歌曲版本更新歌词")
+}
+
+func replaceSongArtistCredits(tx *gorm.DB, songID uuid.UUID, credits []albumRevisionCredit) error {
+	rows := make([]model.SongArtist, 0, len(credits))
+	for _, credit := range credits {
+		artistID, err := uuid.Parse(strings.TrimSpace(credit.ArtistID))
+		if err != nil {
+			return errors.New("song snapshot contains an invalid artist credit")
+		}
+		role := strings.ToLower(strings.TrimSpace(credit.Role))
+		if role == "" {
+			return errors.New("song snapshot contains an empty artist role")
+		}
+		rows = append(rows, model.SongArtist{SongID: songID, ArtistID: artistID, Role: role, CustomRole: strings.TrimSpace(credit.CustomRole), Position: credit.Position})
+	}
+	if err := tx.Where("song_id = ?", songID).Delete(&model.SongArtist{}).Error; err != nil {
+		return err
+	}
+	if len(rows) > 0 {
+		return tx.Create(&rows).Error
 	}
 	return nil
 }
@@ -422,7 +1012,9 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 	if strings.TrimSpace(snapshot.Album.EntryStatus) != "" {
 		album.EntryStatus = strings.TrimSpace(snapshot.Album.EntryStatus)
 	}
+	album.Description = snapshot.Album.Description
 	album.CoverURL = strings.TrimSpace(snapshot.Album.CoverURL)
+	album.CoverSource = strings.TrimSpace(snapshot.Album.CoverSource)
 	if snapshot.Album.ReleaseDate != "" {
 		releaseDate, err := time.Parse("2006-01-02", snapshot.Album.ReleaseDate)
 		if err != nil {
@@ -430,10 +1022,45 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 		}
 		album.ReleaseDate = releaseDate
 		album.Year = releaseDate.Year()
+		album.ReleaseYear = releaseDate.Year()
+	} else {
+		album.ReleaseDate = time.Time{}
+		album.Year = 0
+		album.ReleaseYear = 0
 	}
 
 	if err := tx.Save(&album).Error; err != nil {
 		return err
+	}
+	if snapshot.ArtistCredits != nil {
+		rows := make([]model.AlbumArtist, 0, len(snapshot.ArtistCredits))
+		hasPrimary := false
+		for _, credit := range snapshot.ArtistCredits {
+			artistID, err := uuid.Parse(strings.TrimSpace(credit.ArtistID))
+			if err != nil {
+				return errors.New("album snapshot contains an invalid artist credit")
+			}
+			role := strings.ToLower(strings.TrimSpace(credit.Role))
+			if role == "" {
+				return errors.New("album snapshot contains an empty artist role")
+			}
+			hasPrimary = hasPrimary || role == "primary"
+			rows = append(rows, model.AlbumArtist{
+				AlbumID: albumID, ArtistID: artistID, Role: role,
+				CustomRole: strings.TrimSpace(credit.CustomRole), Position: credit.Position,
+			})
+		}
+		if len(rows) > 0 && !hasPrimary {
+			return errors.New("album snapshot must contain a primary artist")
+		}
+		if err := tx.Where("album_id = ?", albumID).Delete(&model.AlbumArtist{}).Error; err != nil {
+			return err
+		}
+		if len(rows) > 0 {
+			if err := tx.Create(&rows).Error; err != nil {
+				return err
+			}
+		}
 	}
 
 	var existingSongs []model.Song
@@ -467,13 +1094,21 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 			if existingSong, ok := existingByID[songID]; ok {
 				existingSong.Title = title
 				existingSong.TrackNumber = songSnap.TrackNumber
+				existingSong.DiscNumber = songSnap.DiscNumber
 				existingSong.Lyrics = songSnap.Lyrics
 				existingSong.AudioURL = audioURL
+				existingSong.CoverURL = songSnap.CoverURL
+				existingSong.AudioSource = coverSourceForRevision(audioURL)
 				existingSong.Status = status
 				existingSong.AlbumID = &albumID
 				existingSong.ReleaseDate = album.ReleaseDate
 				if err := tx.Save(existingSong).Error; err != nil {
 					return err
+				}
+				if songSnap.ArtistCredits != nil {
+					if err := replaceSongArtistCredits(tx, existingSong.ID, songSnap.ArtistCredits); err != nil {
+						return err
+					}
 				}
 				if err := musiclyrics.SyncLegacySongLyrics(tx, actorID, existingSong.ID, songSnap.Lyrics, "通过专辑版本更新歌词"); err != nil {
 					return err
@@ -489,9 +1124,11 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 				Base:        model.Base{ID: parsedID},
 				Title:       title,
 				TrackNumber: songSnap.TrackNumber,
+				DiscNumber:  songSnap.DiscNumber,
 				Lyrics:      songSnap.Lyrics,
 				AudioURL:    audioURL,
-				AudioSource: "s3",
+				CoverURL:    songSnap.CoverURL,
+				AudioSource: coverSourceForRevision(audioURL),
 				Status:      status,
 				AlbumID:     &albumID,
 				ReleaseDate: album.ReleaseDate,
@@ -499,6 +1136,11 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 			}
 			if err := tx.Create(&newSong).Error; err != nil {
 				return err
+			}
+			if songSnap.ArtistCredits != nil {
+				if err := replaceSongArtistCredits(tx, newSong.ID, songSnap.ArtistCredits); err != nil {
+					return err
+				}
 			}
 			if err := musiclyrics.SyncLegacySongLyrics(tx, actorID, newSong.ID, songSnap.Lyrics, "通过专辑版本更新歌词"); err != nil {
 				return err
@@ -509,9 +1151,11 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 		newSong := model.Song{
 			Title:       title,
 			TrackNumber: songSnap.TrackNumber,
+			DiscNumber:  songSnap.DiscNumber,
 			Lyrics:      songSnap.Lyrics,
 			AudioURL:    audioURL,
-			AudioSource: "s3",
+			CoverURL:    songSnap.CoverURL,
+			AudioSource: coverSourceForRevision(audioURL),
 			Status:      status,
 			AlbumID:     &albumID,
 			ReleaseDate: album.ReleaseDate,
@@ -519,6 +1163,11 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 		}
 		if err := tx.Create(&newSong).Error; err != nil {
 			return err
+		}
+		if songSnap.ArtistCredits != nil {
+			if err := replaceSongArtistCredits(tx, newSong.ID, songSnap.ArtistCredits); err != nil {
+				return err
+			}
 		}
 		if err := musiclyrics.SyncLegacySongLyrics(tx, actorID, newSong.ID, songSnap.Lyrics, "通过专辑版本更新歌词"); err != nil {
 			return err
@@ -606,92 +1255,6 @@ func (s *RevisionService) GetRevisionDiff(
 	}
 
 	return diff, nil
-}
-
-// CreateAlbumSnapshot captures the current album state (with songs) as a new revision.
-// This is the lightweight "append-only history" helper used after direct wiki edits.
-func (s *RevisionService) CreateAlbumSnapshot(
-	albumID uuid.UUID,
-	editorID uuid.UUID,
-	editSummary string,
-	db *gorm.DB,
-) error {
-	return db.Transaction(func(tx *gorm.DB) error {
-		var album model.Album
-		if err := tx.Preload("Artists").Preload("Songs").First(&album, "id = ?", albumID).Error; err != nil {
-			return fmt.Errorf("album not found: %w", err)
-		}
-
-		snap := albumRevisionSnapshot{
-			Album: &albumRevisionAlbum{},
-			Songs: make([]albumRevisionSong, 0, len(album.Songs)),
-		}
-		snap.Album.ID = album.ID.String()
-		snap.Album.Title = album.Title
-		snap.Album.AlbumType = album.AlbumType
-		snap.Album.EntryStatus = album.EntryStatus
-		snap.Album.CoverURL = album.CoverURL
-		if !album.ReleaseDate.IsZero() {
-			snap.Album.ReleaseDate = album.ReleaseDate.Format("2006-01-02")
-		}
-
-		for _, song := range album.Songs {
-			snap.Songs = append(snap.Songs, albumRevisionSong{
-				ID:          song.ID.String(),
-				Title:       song.Title,
-				TrackNumber: song.TrackNumber,
-				Lyrics:      song.Lyrics,
-				AudioURL:    song.AudioURL,
-				Status:      song.Status,
-			})
-		}
-
-		snapshot, err := json.Marshal(snap)
-		if err != nil {
-			return fmt.Errorf("failed to serialize snapshot: %w", err)
-		}
-
-		// Get current version number
-		var latestRevision model.Revision
-		versionNumber := 1
-		currentQuery := tx.Where("content_id = ? AND content_type = ? AND is_current = ?", albumID, "album", true).
-			Order("version_number DESC")
-		if supportsRowLock(tx) {
-			currentQuery = currentQuery.Clauses(clause.Locking{Strength: "UPDATE"})
-		}
-		if err := currentQuery.First(&latestRevision).Error; err == nil {
-			versionNumber = latestRevision.VersionNumber + 1
-			// Mark old current as not-current
-			if err := tx.Model(&model.Revision{}).
-				Where("content_id = ? AND content_type = ? AND is_current = ?", albumID, "album", true).
-				Update("is_current", false).Error; err != nil {
-				return err
-			}
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-
-		prevID := &latestRevision.ID
-		if versionNumber == 1 {
-			prevID = nil
-		}
-
-		newRevision := model.Revision{
-			ContentType:        "album",
-			ContentID:          albumID,
-			VersionNumber:      versionNumber,
-			PreviousRevisionID: prevID,
-			ContentSnapshot:    snapshot,
-			EditorID:           editorID,
-			EditSummary:        editSummary,
-			EditType:           "edit",
-			Status:             "approved",
-			IsCurrent:          true,
-			CreatedAt:          time.Now(),
-		}
-
-		return tx.Create(&newRevision).Error
-	})
 }
 
 func supportsRowLock(db *gorm.DB) bool {

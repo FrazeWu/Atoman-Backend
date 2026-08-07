@@ -48,7 +48,7 @@ func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB) {
 }
 
 type CreateRevisionInput struct {
-	BaseRevision int                    `json:"base_revision" binding:"required"`
+	BaseRevision int                    `json:"base_revision"`
 	Changes      map[string]interface{} `json:"changes" binding:"required"`
 	EditSummary  string                 `json:"edit_summary" binding:"required"`
 }
@@ -212,7 +212,7 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 
 		// Check if user is admin for auto-approval
 		userRole := c.GetString("role")
-		autoApprove := (userRole == "admin")
+		autoApprove := true
 
 		// Check protection level
 		var protection model.ContentProtection
@@ -228,8 +228,8 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 			return
 		}
 
-		if protectionLevel == "semi" {
-			autoApprove = false // Force approval for semi-protected content
+		if protectionLevel == "semi" && userRole != "admin" {
+			autoApprove = false
 		}
 
 		// Create revision
@@ -464,7 +464,7 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 		userRole := c.GetString("role")
-		autoApprove := (userRole == "admin")
+		autoApprove := true
 
 		var protection model.ContentProtection
 		if err := db.Where("content_id = ? AND content_type = ?", songID, "song").
@@ -472,9 +472,6 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 			if protection.ProtectionLevel == "full" && userRole != "admin" {
 				c.JSON(http.StatusForbidden, gin.H{"error": "This song is fully protected"})
 				return
-			}
-			if protection.ProtectionLevel == "semi" {
-				autoApprove = false
 			}
 		}
 

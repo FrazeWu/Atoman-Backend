@@ -699,8 +699,45 @@ func (p *MediaImportProcessor) persistDerivedTracks(ctx context.Context, session
 
 	payload := map[string]any{}
 	_ = json.Unmarshal([]byte(session.PayloadJSON), &payload)
+	albumCounts := make(map[string]int)
+	albumNames := make(map[string]string)
+	albumOrder := make([]string, 0)
+	for _, file := range files {
+		album := albumImportFileAlbum(file)
+		key := strings.ToLower(strings.Join(strings.Fields(album), " "))
+		if key == "" {
+			continue
+		}
+		if _, exists := albumCounts[key]; !exists {
+			albumOrder = append(albumOrder, key)
+			albumNames[key] = album
+		}
+		albumCounts[key]++
+	}
+	primaryAlbumKey := ""
+	for _, key := range albumOrder {
+		if primaryAlbumKey == "" || albumCounts[key] > albumCounts[primaryAlbumKey] {
+			primaryAlbumKey = key
+		}
+	}
+	if primaryAlbumKey != "" {
+		payload["derived_album_title"] = albumNames[primaryAlbumKey]
+	}
+
 	tracks := make([]map[string]any, 0, len(files))
 	for _, file := range files {
+		album := albumImportFileAlbum(file)
+		albumKey := strings.ToLower(strings.Join(strings.Fields(album), " "))
+		if primaryAlbumKey != "" && albumKey != "" && albumKey != primaryAlbumKey {
+			reason := "属于其他专辑：" + album
+			if err := p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Updates(map[string]any{
+				"processing_status": "ignored",
+				"error_message":     reason,
+			}).Error; err != nil {
+				return err
+			}
+			continue
+		}
 		audioURL := ""
 		if p.urlPrefix != "" {
 			audioURL = p.urlPrefix + "/" + strings.TrimLeft(file.PlaybackKey, "/")
@@ -720,6 +757,17 @@ func (p *MediaImportProcessor) persistDerivedTracks(ctx context.Context, session
 		return err
 	}
 	return p.db.WithContext(ctx).Model(&session).Update("payload_json", string(encoded)).Error
+}
+
+func albumImportFileAlbum(file model.AlbumImportFile) string {
+	if strings.TrimSpace(file.MetadataJSON) == "" {
+		return ""
+	}
+	var metadata map[string]any
+	if json.Unmarshal([]byte(file.MetadataJSON), &metadata) != nil {
+		return ""
+	}
+	return strings.TrimSpace(stringValue(metadata["album"]))
 }
 
 func (p *MediaImportProcessor) processEmbeddedCover(ctx context.Context, sessionID uuid.UUID, source string) error {
@@ -757,7 +805,7 @@ func (p *MediaImportProcessor) processAudio(ctx context.Context, sessionID uuid.
 }
 
 func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile, sourcePath, overrideTitle string, overrideTrack int, knownDuration float64, rangeSeconds ...float64) error {
-	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", sourcePath)
+	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,album,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", sourcePath)
 	if err != nil {
 		return fmt.Errorf("ffprobe %s: %w", file.FileName, err)
 	}
@@ -862,6 +910,7 @@ func parseProbe(raw []byte) (float64, string) {
 type audioProbeMetadata struct {
 	duration    float64
 	title       string
+	album       string
 	discNumber  int
 	trackNumber int
 	container   string
@@ -912,6 +961,8 @@ func parseAudioProbe(raw []byte) audioProbeMetadata {
 		switch strings.ToLower(strings.TrimSpace(key)) {
 		case "title":
 			metadata.title = strings.TrimSpace(value)
+		case "album":
+			metadata.album = strings.TrimSpace(value)
 		case "track", "tracknumber", "track_number":
 			metadata.trackNumber = albumImportTagNumber(value)
 		case "disc", "discnumber", "disc_number":
@@ -923,6 +974,7 @@ func parseAudioProbe(raw []byte) audioProbeMetadata {
 
 func (m audioProbeMetadata) archiveMetadata() map[string]any {
 	return map[string]any{
+		"album":       m.album,
 		"container":   m.container,
 		"codec":       m.codec,
 		"bit_rate":    m.bitRate,

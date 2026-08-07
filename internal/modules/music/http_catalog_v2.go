@@ -19,6 +19,20 @@ type musicSearchResponse struct {
 	Albums    []model.Album    `json:"albums"`
 	Artists   []model.Artist   `json:"artists"`
 	Playlists []model.Playlist `json:"playlists"`
+	Meta      musicSearchMeta  `json:"meta"`
+}
+
+type musicSearchMeta struct {
+	Page     int              `json:"page"`
+	PageSize int              `json:"page_size"`
+	Totals   map[string]int64 `json:"totals"`
+	HasMore  map[string]bool  `json:"has_more"`
+}
+
+type recordSearchInteractionRequest struct {
+	Query      string    `json:"query"`
+	EntityType string    `json:"entity_type" binding:"required"`
+	EntityID   uuid.UUID `json:"entity_id" binding:"required"`
 }
 
 // search godoc
@@ -27,27 +41,45 @@ type musicSearchResponse struct {
 // @Produce json
 // @Param q query string true "关键词"
 // @Param type query string false "song,album,artist,playlist"
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Success 200 {object} musicSearchResponse
 // @Router /api/v1/music/search [get]
 func (h *Handler) search(c *gin.Context) {
+	page, pageSize := httpx.PageParams(c)
+	newResult := func() musicSearchResponse {
+		return musicSearchResponse{
+			Songs: []model.Song{}, Albums: []model.Album{}, Artists: []model.Artist{}, Playlists: []model.Playlist{},
+			Meta: musicSearchMeta{Page: page, PageSize: pageSize, Totals: map[string]int64{"song": 0, "album": 0, "artist": 0, "playlist": 0}, HasMore: map[string]bool{"song": false, "album": false, "artist": false, "playlist": false}},
+		}
+	}
 	query := strings.TrimSpace(c.Query("q"))
 	if query == "" {
-		httpx.OK(c, http.StatusOK, musicSearchResponse{Songs: []model.Song{}, Albums: []model.Album{}, Artists: []model.Artist{}, Playlists: []model.Playlist{}})
+		httpx.OK(c, http.StatusOK, newResult())
 		return
 	}
-	page, pageSize := httpx.PageParams(c)
 	offset := httpx.Offset(page, pageSize)
 	pattern := "%" + query + "%"
 	typeFilter := strings.TrimSpace(c.Query("type"))
 	include := func(kind string) bool { return typeFilter == "" || typeFilter == kind }
-	result := musicSearchResponse{Songs: []model.Song{}, Albums: []model.Album{}, Artists: []model.Artist{}, Playlists: []model.Playlist{}}
+	result := newResult()
 
 	if include("song") {
-		if err := h.service.db.Model(&model.Song{}).
-			Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
-			Joins("LEFT JOIN song_artists ON song_artists.song_id = \"Songs\".id").
-			Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = song_artists.artist_id").
-			Where("\"Songs\".status NOT IN ?", []string{"closed", "rejected", "draft"}).
-			Where("LOWER(\"Songs\".title) LIKE LOWER(?) OR LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?)", pattern, pattern, pattern).
+		var total int64
+		songQuery := func() *gorm.DB {
+			return h.service.db.Model(&model.Song{}).
+				Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
+				Joins("LEFT JOIN song_artists ON song_artists.song_id = \"Songs\".id").
+				Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = song_artists.artist_id").
+				Where("\"Songs\".status NOT IN ?", []string{"closed", "rejected", "draft"}).
+				Where("LOWER(\"Songs\".title) LIKE LOWER(?) OR LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?)", pattern, pattern, pattern)
+		}
+		if err := songQuery().Distinct("\"Songs\".id").Count(&total).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		result.Meta.Totals["song"] = total
+		if err := songQuery().
 			Distinct("\"Songs\".*").Preload("Album").Preload("Artists").Order("\"Songs\".play_count DESC, \"Songs\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Songs).Error; err != nil {
 			httpx.Error(c, err)
 			return
@@ -58,7 +90,16 @@ func (h *Handler) search(c *gin.Context) {
 		}
 	}
 	if include("album") {
-		if err := h.service.db.Model(&model.Album{}).Joins("LEFT JOIN album_artists ON album_artists.album_id = \"Albums\".id").Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = album_artists.artist_id").Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed").Where("LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?)", pattern, pattern).Distinct("\"Albums\".*").Preload("Artists").Preload("Songs").Order("\"Albums\".hot_score DESC, \"Albums\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
+		var total int64
+		albumQuery := func() *gorm.DB {
+			return h.service.db.Model(&model.Album{}).Joins("LEFT JOIN album_artists ON album_artists.album_id = \"Albums\".id").Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = album_artists.artist_id").Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed").Where("LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?)", pattern, pattern)
+		}
+		if err := albumQuery().Distinct("\"Albums\".id").Count(&total).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		result.Meta.Totals["album"] = total
+		if err := albumQuery().Distinct("\"Albums\".*").Preload("Artists").Preload("Songs").Order("\"Albums\".hot_score DESC, \"Albums\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -67,7 +108,16 @@ func (h *Handler) search(c *gin.Context) {
 		}
 	}
 	if include("artist") {
-		if err := h.service.db.Where("COALESCE(entry_status, '') <> ?", "closed").Where("LOWER(name) LIKE LOWER(?) OR LOWER(legal_name) LIKE LOWER(?)", pattern, pattern).Order("name ASC").Limit(pageSize).Offset(offset).Find(&result.Artists).Error; err != nil {
+		var total int64
+		artistQuery := func() *gorm.DB {
+			return h.service.db.Model(&model.Artist{}).Where("COALESCE(entry_status, '') <> ?", "closed").Where("LOWER(name) LIKE LOWER(?) OR LOWER(legal_name) LIKE LOWER(?)", pattern, pattern)
+		}
+		if err := artistQuery().Count(&total).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		result.Meta.Totals["artist"] = total
+		if err := artistQuery().Order("name ASC").Limit(pageSize).Offset(offset).Find(&result.Artists).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -76,11 +126,20 @@ func (h *Handler) search(c *gin.Context) {
 		}
 	}
 	if include("playlist") {
-		playlistDB := h.service.db.Where("LOWER(name) LIKE LOWER(?) AND is_public = ?", pattern, true)
-		if user, ok := currentMusicUser(c); ok {
-			playlistDB = playlistDB.Or("LOWER(name) LIKE LOWER(?) AND user_id = ?", pattern, user.ID)
+		var total int64
+		playlistQuery := func() *gorm.DB {
+			visible := h.service.db.Model(&model.Playlist{}).Where("LOWER(name) LIKE LOWER(?) AND is_public = ?", pattern, true)
+			if user, ok := currentMusicUser(c); ok {
+				visible = visible.Or("LOWER(name) LIKE LOWER(?) AND user_id = ?", pattern, user.ID)
+			}
+			return visible
 		}
-		if err := playlistDB.Order("updated_at DESC").Limit(pageSize).Offset(offset).Find(&result.Playlists).Error; err != nil {
+		if err := playlistQuery().Count(&total).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		result.Meta.Totals["playlist"] = total
+		if err := playlistQuery().Order("updated_at DESC").Limit(pageSize).Offset(offset).Find(&result.Playlists).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -88,13 +147,58 @@ func (h *Handler) search(c *gin.Context) {
 			result.Playlists[i].CoverURL = resolveMusicMediaURL(result.Playlists[i].CoverURL)
 		}
 	}
+	for kind, total := range result.Meta.Totals {
+		result.Meta.HasMore[kind] = int64(page*pageSize) < total
+	}
 	httpx.OK(c, http.StatusOK, result)
 }
 
+// recordSearchInteraction godoc
+// @Summary 记录音乐搜索点击
+// @Tags music
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param input body recordSearchInteractionRequest true "搜索点击"
+// @Success 204
+// @Router /api/v1/music/search/interactions [post]
+func (h *Handler) recordSearchInteraction(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var input recordSearchInteractionRequest
+	if err := bindJSON(c, &input); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	input.Query = strings.TrimSpace(input.Query)
+	switch input.EntityType {
+	case "song", "album", "artist", "playlist":
+	default:
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "invalid entity_type"))
+		return
+	}
+	if input.EntityID == uuid.Nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "entity_id is required"))
+		return
+	}
+	interaction := model.MusicSearchInteraction{UserID: user.ID, Query: input.Query, EntityType: input.EntityType, EntityID: input.EntityID}
+	if err := h.service.db.Create(&interaction).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 type songArtistRoleResponse struct {
-	ID   uuid.UUID `json:"id"`
-	Name string    `json:"name"`
-	Role string    `json:"role"`
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	Role       string    `json:"role"`
+	CustomRole string    `json:"custom_role,omitempty"`
+	Position   int       `json:"position"`
 }
 type songDetailResponse struct {
 	Song       model.Song               `json:"song"`
@@ -103,6 +207,67 @@ type songDetailResponse struct {
 	Next       *model.Song              `json:"next,omitempty"`
 	Bookmarked bool                     `json:"bookmarked"`
 	Playable   bool                     `json:"playable"`
+}
+
+type createSongAudioReplacementRequest struct {
+	AudioURL  string `json:"audio_url" binding:"required"`
+	SourceKey string `json:"source_key"`
+}
+
+// createSongAudioReplacement godoc
+// @Summary 排队替换歌曲音频
+// @Description 新音频后台成功后原子切换；失败时保留原音频。
+// @Tags music
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param songId path string true "歌曲 ID"
+// @Param input body createSongAudioReplacementRequest true "新音频"
+// @Success 202 {object} model.SongAudioReplacement
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/music/songs/{songId}/audio-replacements [post]
+func (h *Handler) createSongAudioReplacement(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	songID, err := parseMusicID(c.Param("songId"), "songId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var input createSongAudioReplacementRequest
+	if err := bindJSON(c, &input); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	input.AudioURL = strings.TrimSpace(input.AudioURL)
+	if input.AudioURL == "" {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "audio_url is required"))
+		return
+	}
+	var song model.Song
+	if err := h.service.db.First(&song, "id = ?", songID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(c, apperr.NotFound("music.song_not_found", "Song not found"))
+		} else {
+			httpx.Error(c, err)
+		}
+		return
+	}
+	job := model.SongAudioReplacement{
+		SongID: songID, RequestedBy: user.ID, AudioURL: input.AudioURL,
+		SourceKey: strings.TrimSpace(input.SourceKey), PreviousAudioURL: song.AudioURL, Status: "pending",
+	}
+	if err := h.service.db.Create(&job).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusAccepted, job)
 }
 
 // getSongDetail godoc
@@ -127,17 +292,20 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		return
 	}
 	var links []model.SongArtist
-	if err := h.service.db.Where("song_id = ?", song.ID).Find(&links).Error; err != nil {
+	if err := h.service.db.Preload("Artist").Where("song_id = ?", song.ID).Order("position ASC, created_at ASC").Find(&links).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	roles := make(map[uuid.UUID]string, len(links))
+	artists := make([]songArtistRoleResponse, 0, len(links))
 	for _, link := range links {
-		roles[link.ArtistID] = link.Role
-	}
-	artists := make([]songArtistRoleResponse, 0, len(song.Artists))
-	for _, artist := range song.Artists {
-		artists = append(artists, songArtistRoleResponse{ID: artist.ID, Name: artist.Name, Role: roles[artist.ID]})
+		name := ""
+		if link.Artist != nil {
+			name = link.Artist.Name
+		}
+		artists = append(artists, songArtistRoleResponse{
+			ID: link.ArtistID, Name: name, Role: link.Role,
+			CustomRole: link.CustomRole, Position: link.Position,
+		})
 	}
 	result := songDetailResponse{Song: song, Artists: artists, Playable: strings.TrimSpace(song.AudioURL) != ""}
 	if user, ok := currentMusicUser(c); ok {
@@ -209,7 +377,9 @@ func (h *Handler) addToLaterPlaylist(c *gin.Context) {
 // @Summary 获取个人音乐库
 // @Tags music
 // @Security BearerAuth
-// @Param kind query string false "song,album,artist,playlist"
+// @Param kind query string false "song,album,artist,playlist,later"
+// @Param q query string false "关键词"
+// @Param sort query string false "latest,popular,name"
 // @Router /api/v1/music/library [get]
 func (h *Handler) library(c *gin.Context) {
 	user, ok := currentMusicUser(c)
@@ -218,37 +388,46 @@ func (h *Handler) library(c *gin.Context) {
 		return
 	}
 	kind := c.DefaultQuery("kind", "song")
+	query := c.Query("q")
+	sort := c.DefaultQuery("sort", "latest")
 	page, pageSize := httpx.PageParams(c)
 	switch kind {
 	case "song":
-		rows, total, err := h.service.ListSongBookmarks(user, page, pageSize, c.DefaultQuery("sort", "latest"))
+		rows, total, err := h.service.ListSongBookmarksFiltered(user, page, pageSize, sort, query)
 		if err != nil {
 			httpx.Error(c, err)
 			return
 		}
 		httpx.List(c, rows, page, pageSize, total)
 	case "album":
-		rows, total, err := h.service.ListAlbumBookmarks(user, page, pageSize, c.DefaultQuery("sort", "latest"))
+		rows, total, err := h.service.ListAlbumBookmarksFiltered(user, page, pageSize, sort, query)
 		if err != nil {
 			httpx.Error(c, err)
 			return
 		}
 		httpx.List(c, rows, page, pageSize, total)
 	case "artist":
-		rows, total, err := h.service.ListArtistBookmarks(user, page, pageSize, c.DefaultQuery("sort", "latest"))
+		rows, total, err := h.service.ListArtistBookmarksFiltered(user, page, pageSize, sort, query)
 		if err != nil {
 			httpx.Error(c, err)
 			return
 		}
 		httpx.List(c, rows, page, pageSize, total)
 	case "playlist":
-		rows, total, err := h.service.ListPlaylistBookmarks(user, page, pageSize, c.DefaultQuery("sort", "latest"))
+		rows, total, err := h.service.ListPlaylistBookmarksFiltered(user, page, pageSize, sort, query)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		httpx.List(c, rows, page, pageSize, total)
+	case "later":
+		rows, total, err := h.service.ListLaterSongs(user, page, pageSize, sort, query)
 		if err != nil {
 			httpx.Error(c, err)
 			return
 		}
 		httpx.List(c, rows, page, pageSize, total)
 	default:
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "kind must be song, album, artist, or playlist"))
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "kind must be song, album, artist, playlist, or later"))
 	}
 }

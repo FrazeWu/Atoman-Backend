@@ -315,9 +315,15 @@ func (s *Service) GetAlbumImportSessionForUser(user authctx.CurrentUser, id uuid
 }
 
 func (s *Service) ListAlbumImportSessionsForUser(user authctx.CurrentUser) ([]model.AlbumImportSession, error) {
+	sessions, _, err := s.ListAlbumImportSessionsPageForUser(user, 1, 100)
+	return sessions, err
+}
+
+func (s *Service) ListAlbumImportSessionsPageForUser(user authctx.CurrentUser, page, pageSize int) ([]model.AlbumImportSession, int64, error) {
 	if user.ID == uuid.Nil {
-		return nil, apperr.Unauthorized("Login required")
+		return nil, 0, apperr.Unauthorized("Login required")
 	}
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
 	if err := s.db.Model(&model.AlbumImportSession{}).
 		Where("user_id = ? AND status IN ? AND updated_at < ?", user.ID,
 			[]string{AlbumImportStatusPendingUpload, AlbumImportStatusUploading}, time.Now().UTC().Add(-30*time.Minute)).
@@ -326,19 +332,54 @@ func (s *Service) ListAlbumImportSessionsForUser(user authctx.CurrentUser) ([]mo
 			"stage":         AlbumImportStageReady,
 			"error_message": "上传已暂停，请重新选择源文件恢复",
 		}).Error; err != nil {
-		return nil, err
+		return nil, 0, err
+	}
+	base := s.db.Model(&model.AlbumImportSession{}).Where("user_id = ?", user.ID)
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
 	}
 	var sessions []model.AlbumImportSession
 	if err := s.db.Preload("Files").Preload("Job").Preload("TargetAlbum").
-		Where("user_id = ? AND created_at >= ?", user.ID, time.Now().UTC().Add(-7*24*time.Hour)).
+		Where("user_id = ?", user.ID).
 		Order("created_at DESC").
+		Limit(pageSize).
+		Offset((page - 1) * pageSize).
 		Find(&sessions).Error; err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	for _, session := range sessions {
 		s.updateAlbumImportNotification(session)
 	}
-	return sessions, nil
+	return sessions, total, nil
+}
+
+func (s *Service) DeleteAlbumImportRecord(user authctx.CurrentUser, id uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var session model.AlbumImportSession
+		if err := tx.Where("id = ? AND user_id = ?", id, user.ID).First(&session).Error; err != nil {
+			if err == gorm.ErrRecordNotFound {
+				return apperr.NotFound("music.import_not_found", "Import session not found")
+			}
+			return err
+		}
+		if session.Status != AlbumImportStatusCommitted && session.Status != AlbumImportStatusCanceled {
+			return apperr.Unprocessable("music.import_invalid_status", "Cancel the import before deleting its record")
+		}
+		if err := tx.Where("import_id = ?", id).Delete(&model.AlbumImportJob{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("import_id = ?", id).Delete(&model.AlbumImportFile{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("recipient_id = ? AND source_type = ? AND source_id = ?", user.ID, "music_album_import", id).Delete(&model.Notification{}).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&session).Error
+	})
 }
 
 func loadAlbumImportSession(db *gorm.DB, id uuid.UUID, userID *uuid.UUID) (model.AlbumImportSession, error) {

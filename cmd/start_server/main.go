@@ -36,7 +36,6 @@ import (
 	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/modules/lifecycle"
-	"atoman/internal/modules/music"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/service"
@@ -575,7 +574,6 @@ ON CONFLICT (key) DO NOTHING`)
 	rssCronDone := service.StartRSSCron(ctx, db)
 	fullTextWorkerDone := service.StartFullTextWorker(ctx, db)
 	lifecycleWorkerDone := lifecycle.StartWorker(ctx, db)
-	musicImportWorkerDone := music.StartImportWorker(ctx, db, s3Client)
 
 	log.Println("Initializing Casbin Enforcer...")
 	if err := middleware.InitCasbin(db); err != nil {
@@ -618,7 +616,7 @@ ON CONFLICT (key) DO NOTHING`)
 	if err := serveUntilShutdown(ctx, server, shutdownTimeout); err != nil {
 		fatalLogger.Fatal("Failed to start server: ", err)
 	}
-	if err := waitForWorkers(shutdownTimeout, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone, musicImportWorkerDone); err != nil {
+	if err := waitForWorkers(shutdownTimeout, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone); err != nil {
 		log.Printf("WARN: timed out waiting for background workers to stop: %v", err)
 	}
 	log.Println("Server stopped")

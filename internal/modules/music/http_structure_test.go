@@ -83,7 +83,6 @@ func TestMusicHTTPSwaggerAnnotationsStayWithTheirHandlers(t *testing.T) {
 		"createPlaylistBookmark",
 		"deletePlaylistBookmark",
 		"listPublicPlaylists",
-		"discover",
 		"createPlaylist",
 		"getPlaylist",
 		"listPlaylistSongs",

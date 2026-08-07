@@ -446,7 +446,9 @@ func (h *Handler) getAlbum(c *gin.Context) {
 	var album model.Album
 	if err := h.service.db.Preload("Artists").Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
 		return db.Order("position ASC, role ASC, custom_role ASC")
-	}).Preload("ArtistCredits.Artist").Preload("Songs").First(&album, "id = ?", albumID).Error; err != nil {
+	}).Preload("ArtistCredits.Artist").Preload("Songs.ArtistCredits", func(db *gorm.DB) *gorm.DB {
+		return db.Order("position ASC, role ASC, custom_role ASC")
+	}).Preload("Songs.ArtistCredits.Artist").First(&album, "id = ?", albumID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("music.album_not_found", "Album not found"))
 			return
@@ -460,22 +462,7 @@ func (h *Handler) getAlbum(c *gin.Context) {
 		return
 	}
 	album = albumRows[0]
-	canonicalID := album.ID
-	if album.CanonicalAlbumID != nil {
-		canonicalID = *album.CanonicalAlbumID
-	}
-	if err := h.service.db.Where("id <> ? AND (id = ? OR canonical_album_id = ?)", album.ID, canonicalID, canonicalID).
-		Where("COALESCE(entry_status, '') <> ? AND COALESCE(status, '') <> ?", "closed", "closed").
-		Preload("Artists").Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
-		return db.Order("position ASC, role ASC, custom_role ASC")
-	}).Preload("ArtistCredits.Artist").Order("edition_type ASC, release_date DESC, title ASC").Find(&album.OtherVersions).Error; err != nil {
-		httpx.Error(c, err)
-		return
-	}
 	resolveAlbumMediaURLs(&album)
-	for index := range album.OtherVersions {
-		resolveAlbumMediaURLs(&album.OtherVersions[index])
-	}
 	httpx.OK(c, http.StatusOK, album)
 }
 
@@ -567,11 +554,35 @@ func (h *Handler) listListeningHistory(c *gin.Context) {
 	httpx.List(c, rows, page, pageSize, total)
 }
 
+// clearListeningHistory godoc
+// @Summary 清空播放历史
+// @Tags music
+// @Success 204
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/music/history [delete]
+func (h *Handler) clearListeningHistory(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	if err := h.service.ClearListeningHistory(user); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // home godoc
 // @Summary 获取音乐首页内容
 // @Description 登录用户返回最近播放和基于播放/收藏艺术家的未接触专辑；其他用户返回非个性化结果。
 // @Tags music
 // @Produce json
+// @Param page query int false "发现页码"
+// @Param page_size query int false "发现每页数量"
 // @Success 200 {object} HomeResponse
 // @Router /api/v1/music/home [get]
 func (h *Handler) home(c *gin.Context) {
@@ -579,7 +590,8 @@ func (h *Handler) home(c *gin.Context) {
 	if current, ok := authctx.Current(c); ok {
 		user = &current
 	}
-	response, err := h.service.Home(user)
+	page, pageSize := httpx.PageParams(c)
+	response, err := h.service.Home(user, page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -592,6 +604,13 @@ func (h *Handler) home(c *gin.Context) {
 		response.RecentlyPlayed[index].Song.CoverURL = resolveMusicMediaURL(response.RecentlyPlayed[index].Song.CoverURL)
 		if response.RecentlyPlayed[index].Song.Album != nil {
 			response.RecentlyPlayed[index].Song.Album.CoverURL = resolveMusicMediaURL(response.RecentlyPlayed[index].Song.Album.CoverURL)
+		}
+	}
+	if response.ContinueListening != nil && response.ContinueListening.Song != nil {
+		response.ContinueListening.Song.AudioURL = resolveMusicMediaURL(response.ContinueListening.Song.AudioURL)
+		response.ContinueListening.Song.CoverURL = resolveMusicMediaURL(response.ContinueListening.Song.CoverURL)
+		if response.ContinueListening.Song.Album != nil {
+			response.ContinueListening.Song.Album.CoverURL = resolveMusicMediaURL(response.ContinueListening.Song.Album.CoverURL)
 		}
 	}
 	httpx.OK(c, http.StatusOK, response)
@@ -623,37 +642,6 @@ func (h *Handler) getRecommendedArtists(c *gin.Context) {
 	}
 	page, pageSize := httpx.PageParams(c)
 	items, total, err := h.service.RecommendArtistsByMode(mode, page, pageSize)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	for i := range items {
-		items[i].ImageURL = resolveMusicMediaURL(items[i].ImageURL)
-	}
-	httpx.List(c, items, page, pageSize, total)
-}
-
-// discover godoc
-// @Summary 获取音乐发现流
-// @Description 返回混合发现流，按专辑、艺人、公开歌单的简单规则混排。
-// @Tags music-discovery
-// @Produce json
-// @Param mode query string false "排序模式" Enums(hot,featured,latest) default(hot)
-// @Success 200 {object} DiscoverListResponse
-// @Failure 500 {object} handlers.ErrorResponse
-// @Router /api/v1/music/discover [get]
-func (h *Handler) discover(c *gin.Context) {
-	mode := recommendation.ModeHot
-	if rawMode := strings.TrimSpace(c.Query("mode")); rawMode != "" {
-		parsedMode, err := parseMusicRecommendationMode(rawMode)
-		if err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		mode = parsedMode
-	}
-	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.Discover(mode, page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return

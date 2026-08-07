@@ -1783,33 +1783,6 @@ definitions:
     required:
     - source_id
     type: object
-  handlers.ArtistUpdateInput:
-    properties:
-      bio:
-        example: Independent artist and writer
-        type: string
-      birth_year:
-        example: 1995
-        type: integer
-      death_year:
-        example: 0
-        type: integer
-      edit_summary:
-        example: 补充艺人简介
-        type: string
-      image_url:
-        example: https://cdn.example.com/artist.jpg
-        type: string
-      members:
-        example: Member A, Member B
-        type: string
-      name:
-        example: Fafa
-        type: string
-      nationality:
-        example: CN
-        type: string
-    type: object
   handlers.ArtistWikiResponse:
     properties:
       data:
@@ -2016,7 +1989,6 @@ definitions:
       edit_summary:
         type: string
     required:
-    - base_revision
     - changes
     - edit_summary
     type: object
@@ -3210,6 +3182,8 @@ definitions:
         type: array
       play_count:
         type: integer
+      redirect_to:
+        type: string
       release_date:
         type: string
       release_year:
@@ -4258,6 +4232,10 @@ definitions:
         $ref: '#/definitions/model.Album'
       album_id:
         type: string
+      artist_credits:
+        items:
+          $ref: '#/definitions/model.SongArtist'
+        type: array
       artists:
         items:
           $ref: '#/definitions/model.Artist'
@@ -4274,6 +4252,8 @@ definitions:
         type: string
       created_at:
         type: string
+      disc_number:
+        type: integer
       duration_sec:
         type: integer
       id:
@@ -4328,6 +4308,58 @@ definitions:
         type: string
       user:
         $ref: '#/definitions/model.User'
+    type: object
+  model.SongArtist:
+    properties:
+      artist:
+        $ref: '#/definitions/model.Artist'
+      artist_id:
+        type: string
+      created_at:
+        type: string
+      custom_role:
+        type: string
+      position:
+        type: integer
+      role:
+        type: string
+      song_id:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  model.SongAudioReplacement:
+    properties:
+      audio_url:
+        type: string
+      created_at:
+        type: string
+      error_message:
+        type: string
+      finished_at:
+        type: string
+      id:
+        type: string
+      locked_by:
+        type: string
+      previous_audio_url:
+        type: string
+      requested_by:
+        type: string
+      revision_id:
+        type: string
+      song:
+        $ref: '#/definitions/model.Song'
+      song_id:
+        type: string
+      source_key:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
     type: object
   model.SongCorrection:
     properties:
@@ -4822,6 +4854,15 @@ definitions:
       data:
         $ref: '#/definitions/music.AlbumImportFileDTO'
     type: object
+  music.AlbumImportListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/music.AlbumImportDTO'
+        type: array
+      meta:
+        $ref: '#/definitions/music.PaginationMetaResponse'
+    type: object
   music.AlbumImportMultipartPartDTO:
     properties:
       etag:
@@ -4872,6 +4913,44 @@ definitions:
         type: string
       track_number:
         type: integer
+    type: object
+  music.AlbumMergePreviewResponse:
+    properties:
+      matches:
+        items:
+          $ref: '#/definitions/music.AlbumMergeSongMatchResponse'
+        type: array
+      source_album:
+        $ref: '#/definitions/model.Album'
+      target_album:
+        $ref: '#/definitions/model.Album'
+    type: object
+  music.AlbumMergeRequest:
+    properties:
+      confirmed:
+        type: boolean
+      song_matches:
+        items:
+          $ref: '#/definitions/music.AlbumMergeSongMatchInput'
+        type: array
+      source_album_id:
+        type: string
+    type: object
+  music.AlbumMergeSongMatchInput:
+    properties:
+      source_song_id:
+        type: string
+      target_song_id:
+        type: string
+    type: object
+  music.AlbumMergeSongMatchResponse:
+    properties:
+      reason:
+        type: string
+      source_song:
+        $ref: '#/definitions/model.Song'
+      target_song:
+        $ref: '#/definitions/model.Song'
     type: object
   music.AnnotationResolutionInput:
     properties:
@@ -5052,7 +5131,11 @@ definitions:
         type: string
       play_count:
         type: integer
+      reason:
+        type: string
       release_date:
+        type: string
+      section:
         type: string
       song_count:
         type: integer
@@ -5067,17 +5150,18 @@ definitions:
       year:
         type: integer
     type: object
-  music.DiscoverListResponse:
+  music.HomeResponse:
     properties:
-      data:
+      continue_listening:
+        $ref: '#/definitions/model.MusicListeningHistory'
+      discover:
         items:
           $ref: '#/definitions/music.DiscoverItemResponse'
         type: array
-      meta:
+      discover_has_more:
+        type: boolean
+      discover_meta:
         $ref: '#/definitions/music.PaginationMetaResponse'
-    type: object
-  music.HomeResponse:
-    properties:
       for_you:
         items:
           $ref: '#/definitions/model.Album'
@@ -5427,6 +5511,64 @@ definitions:
         type: string
       start_offset:
         type: integer
+    type: object
+  music.createSongAudioReplacementRequest:
+    properties:
+      audio_url:
+        type: string
+      source_key:
+        type: string
+    required:
+    - audio_url
+    type: object
+  music.musicSearchMeta:
+    properties:
+      has_more:
+        additionalProperties:
+          type: boolean
+        type: object
+      page:
+        type: integer
+      page_size:
+        type: integer
+      totals:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+    type: object
+  music.musicSearchResponse:
+    properties:
+      albums:
+        items:
+          $ref: '#/definitions/model.Album'
+        type: array
+      artists:
+        items:
+          $ref: '#/definitions/model.Artist'
+        type: array
+      meta:
+        $ref: '#/definitions/music.musicSearchMeta'
+      playlists:
+        items:
+          $ref: '#/definitions/model.Playlist'
+        type: array
+      songs:
+        items:
+          $ref: '#/definitions/model.Song'
+        type: array
+    type: object
+  music.recordSearchInteractionRequest:
+    properties:
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      query:
+        type: string
+    required:
+    - entity_id
+    - entity_type
     type: object
   notification.ActorDTO:
     properties:
@@ -6032,7 +6174,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 将源艺人的关联关系、修订和讨论迁移到目标艺人，并设置 redirect_to。
+      description: 将源艺人的音乐关联、收藏和别名迁移到目标艺人，并设置 redirect_to。
       parameters:
       - description: 目标艺人 UUID
         in: path
@@ -6297,10 +6439,19 @@ paths:
         - missing_audio
         - missing_metadata
         - duplicate_candidate
+        - processing_failed
         - import_failed
         in: query
         name: type
         type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
       produces:
       - application/json
       responses:
@@ -7486,85 +7637,6 @@ paths:
       summary: 获取专辑详情
       tags:
       - music-albums
-    put:
-      consumes:
-      - multipart/form-data
-      description: 更新专辑信息并记录一条 wiki revision。
-      parameters:
-      - description: 专辑 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 专辑标题
-        in: formData
-        name: title
-        type: string
-      - description: 艺人名称
-        in: formData
-        name: artist
-        type: string
-      - description: 年份
-        in: formData
-        name: year
-        type: integer
-      - description: 发行日期 YYYY-MM-DD
-        in: formData
-        name: release_date
-        type: string
-      - description: 已存在封面 URL
-        in: formData
-        name: cover_url
-        type: string
-      - description: 专辑类型
-        in: formData
-        name: album_type
-        type: string
-      - description: 编辑摘要
-        in: formData
-        name: edit_summary
-        type: string
-      - description: 封面文件
-        in: formData
-        name: cover
-        type: file
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/model.Album'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 更新专辑
-      tags:
-      - music-albums
   /api/v1/albums/{id}/entry-status:
     put:
       consumes:
@@ -7978,51 +8050,6 @@ paths:
       summary: 获取艺人详情
       tags:
       - music-artists
-    put:
-      consumes:
-      - application/json
-      description: 更新艺人 wiki 条目，并在存在 revision 基线时记录一条 revision。
-      parameters:
-      - description: 艺人 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 艺人更新输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ArtistUpdateInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.ArtistWikiResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.RevisionConflictResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 更新艺人信息
-      tags:
-      - music-artists
   /api/v1/artists/{id}/aliases:
     get:
       description: 返回指定艺人的所有别名。
@@ -8120,52 +8147,6 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 删除艺人别名
-      tags:
-      - music-artists
-  /api/v1/artists/{id}/edit:
-    post:
-      consumes:
-      - application/json
-      description: 基于指定基线 revision 提交艺人修订。
-      parameters:
-      - description: 艺人 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 修订输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.CreateRevisionInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.RevisionActionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "403":
-          description: Forbidden
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "409":
-          description: Conflict
-          schema:
-            $ref: '#/definitions/handlers.RevisionConflictResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 创建艺人修订
       tags:
       - music-artists
   /api/v1/artists/{id}/entry-status:
@@ -8378,6 +8359,51 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 获取艺人修订历史
+      tags:
+      - music-artists
+    post:
+      consumes:
+      - application/json
+      description: 基于指定基线 revision 提交艺人修订。
+      parameters:
+      - description: 艺人 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 修订输入
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateRevisionInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.RevisionActionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.RevisionConflictResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 创建艺人修订
       tags:
       - music-artists
   /api/v1/artists/{id}/revisions/{version}:
@@ -13440,6 +13466,99 @@ paths:
       summary: 重新评估用户论坛信任等级
       tags:
       - forum
+  /api/v1/music/albums/{albumId}/merge:
+    post:
+      consumes:
+      - application/json
+      description: 管理员确认曲目对应关系后直接合并，源专辑保留旧链接重定向。
+      parameters:
+      - description: 目标专辑 ID
+        in: path
+        name: albumId
+        required: true
+        type: string
+      - description: 合并确认
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.AlbumMergeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 合并重复专辑
+      tags:
+      - music
+  /api/v1/music/albums/{albumId}/merge/preview:
+    post:
+      consumes:
+      - application/json
+      description: 按规范化曲名、碟号和曲序预匹配源专辑与目标专辑曲目。
+      parameters:
+      - description: 目标专辑 ID
+        in: path
+        name: albumId
+        required: true
+        type: string
+      - description: 源专辑
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.AlbumMergeRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.AlbumMergePreviewResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 预览重复专辑合并
+      tags:
+      - music
   /api/v1/music/bookmarks/playlists:
     get:
       produces:
@@ -13525,34 +13644,25 @@ paths:
       summary: 取消收藏歌单
       tags:
       - music-bookmarks
-  /api/v1/music/discover:
-    get:
-      description: 返回混合发现流，按专辑、艺人、公开歌单的简单规则混排。
-      parameters:
-      - default: hot
-        description: 排序模式
-        enum:
-        - hot
-        - featured
-        - latest
-        in: query
-        name: mode
-        type: string
-      produces:
-      - application/json
+  /api/v1/music/history:
+    delete:
       responses:
-        "200":
-          description: OK
+        "204":
+          description: No Content
+        "401":
+          description: Unauthorized
           schema:
-            $ref: '#/definitions/music.DiscoverListResponse'
+            $ref: '#/definitions/handlers.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取音乐发现流
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 清空播放历史
       tags:
-      - music-discovery
-  /api/v1/music/history:
+      - music
     get:
       description: 返回当前用户最近播放的歌曲，每首歌曲保留最近时间和累计播放次数。
       produces:
@@ -13579,6 +13689,15 @@ paths:
   /api/v1/music/home:
     get:
       description: 登录用户返回最近播放和基于播放/收藏艺术家的未接触专辑；其他用户返回非个性化结果。
+      parameters:
+      - description: 发现页码
+        in: query
+        name: page
+        type: integer
+      - description: 发现每页数量
+        in: query
+        name: page_size
+        type: integer
       produces:
       - application/json
       responses:
@@ -13591,15 +13710,22 @@ paths:
       - music
   /api/v1/music/imports/albums:
     get:
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            items:
-              $ref: '#/definitions/music.AlbumImportDTO'
-            type: array
+            $ref: '#/definitions/music.AlbumImportListResponse'
         "401":
           description: Unauthorized
           schema:
@@ -14206,6 +14332,42 @@ paths:
       summary: 重试专辑导入文件
       tags:
       - music-imports
+  /api/v1/music/imports/albums/{sessionId}/record:
+    delete:
+      description: 仅删除已完成或已取消的导入记录，不删除已发布的专辑与歌曲。
+      parameters:
+      - description: 导入会话 ID
+        in: path
+        name: sessionId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 删除专辑导入记录
+      tags:
+      - music-imports
   /api/v1/music/imports/albums/{sessionId}/repair:
     post:
       produces:
@@ -14233,9 +14395,17 @@ paths:
   /api/v1/music/library:
     get:
       parameters:
-      - description: song,album,artist,playlist
+      - description: song,album,artist,playlist,later
         in: query
         name: kind
+        type: string
+      - description: 关键词
+        in: query
+        name: q
+        type: string
+      - description: latest,popular,name
+        in: query
+        name: sort
         type: string
       responses: {}
       security:
@@ -14497,10 +14667,44 @@ paths:
         in: query
         name: type
         type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
       produces:
       - application/json
-      responses: {}
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.musicSearchResponse'
       summary: 统一搜索音乐内容
+      tags:
+      - music
+  /api/v1/music/search/interactions:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 搜索点击
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.recordSearchInteractionRequest'
+      produces:
+      - application/json
+      responses:
+        "204":
+          description: No Content
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 记录音乐搜索点击
       tags:
       - music
   /api/v1/music/songs/{songId}:
@@ -14515,6 +14719,48 @@ paths:
       - application/json
       responses: {}
       summary: 获取歌曲详情
+      tags:
+      - music
+  /api/v1/music/songs/{songId}/audio-replacements:
+    post:
+      consumes:
+      - application/json
+      description: 新音频后台成功后原子切换；失败时保留原音频。
+      parameters:
+      - description: 歌曲 ID
+        in: path
+        name: songId
+        required: true
+        type: string
+      - description: 新音频
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.createSongAudioReplacementRequest'
+      produces:
+      - application/json
+      responses:
+        "202":
+          description: Accepted
+          schema:
+            $ref: '#/definitions/model.SongAudioReplacement'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 排队替换歌曲音频
       tags:
       - music
   /api/v1/music/songs/{songId}/lyrics:

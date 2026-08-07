@@ -271,12 +271,12 @@ func (s *UserBootstrapService) ensureFavoritePlaylist(userID uuid.UUID) error {
 		err = s.db.Where("user_id = ? AND name = ?", userID, "最爱").First(&playlist).Error
 	}
 	if err == nil {
-		return s.db.Model(&playlist).Updates(map[string]any{"is_favorite": true, "is_public": false}).Error
+		return s.db.Model(&playlist).Updates(map[string]any{"is_favorite": true, "is_public": false, "kind": "favorite", "name": "最爱"}).Error
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	return s.db.Create(&model.Playlist{UserID: userID, Name: "最爱", IsFavorite: true}).Error
+	return s.db.Create(&model.Playlist{UserID: userID, Name: "最爱", Kind: "favorite", IsFavorite: true}).Error
 }
 
 func buildUserBootstrapFeedSourceHash(sourceType string, sourceID uuid.UUID) string {

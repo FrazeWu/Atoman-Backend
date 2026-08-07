@@ -44,3 +44,10 @@ func (s *Service) ListListeningHistory(user authctx.CurrentUser, page, pageSize 
 	}
 	return s.repo.ListListeningHistory(user.ID, page, pageSize)
 }
+
+func (s *Service) ClearListeningHistory(user authctx.CurrentUser) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	return s.repo.ClearListeningHistory(user.ID)
+}

@@ -52,7 +52,9 @@ func (h *Handler) createAlbumImportSession(c *gin.Context) {
 // @Produce json
 // @Security BearerAuth
 // @Security CookieAuth
-// @Success 200 {array} AlbumImportDTO
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Success 200 {object} AlbumImportListResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 500 {object} handlers.ErrorResponse
 // @Router /api/v1/music/imports/albums [get]
@@ -63,7 +65,8 @@ func (h *Handler) listAlbumImportSessions(c *gin.Context) {
 		return
 	}
 
-	sessions, err := h.service.ListAlbumImportSessionsForUser(user)
+	page, pageSize := httpx.PageParams(c)
+	sessions, total, err := h.service.ListAlbumImportSessionsPageForUser(user, page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -72,7 +75,32 @@ func (h *Handler) listAlbumImportSessions(c *gin.Context) {
 	for _, session := range sessions {
 		data = append(data, buildAlbumImportDTO(session))
 	}
-	httpx.OK(c, http.StatusOK, data)
+	httpx.List(c, data, page, pageSize, total)
+}
+
+// deleteAlbumImportRecord godoc
+// @Summary 删除专辑导入记录
+// @Description 仅删除已完成或已取消的导入记录，不删除已发布的专辑与歌曲。
+// @Tags music-imports
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param sessionId path string true "导入会话 ID"
+// @Success 200 {object} map[string]bool
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 422 {object} handlers.ErrorResponse
+// @Router /api/v1/music/imports/albums/{sessionId}/record [delete]
+func (h *Handler) deleteAlbumImportRecord(c *gin.Context) {
+	user, sessionID, ok := albumImportSessionRouteUser(c)
+	if !ok {
+		return
+	}
+	if err := h.service.DeleteAlbumImportRecord(user, sessionID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
 }
 
 func (h *Handler) uploadAlbumImportArchive(c *gin.Context) {

@@ -9,11 +9,15 @@ import (
 )
 
 func (s *Service) ListArtistBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.ArtistBookmark, int64, error) {
+	return s.ListArtistBookmarksFiltered(user, page, pageSize, sort, "")
+}
+
+func (s *Service) ListArtistBookmarksFiltered(user authctx.CurrentUser, page int, pageSize int, sort string, query string) ([]model.ArtistBookmark, int64, error) {
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
-	return s.repo.ListArtistBookmarks(user.ID, page, pageSize, sort)
+	return s.repo.ListArtistBookmarksFiltered(user.ID, page, pageSize, sort, query)
 }
 
 func (s *Service) BookmarkArtist(user authctx.CurrentUser, artistID uuid.UUID) (model.ArtistBookmark, error) {
@@ -34,11 +38,15 @@ func (s *Service) DeleteArtistBookmark(user authctx.CurrentUser, artistID uuid.U
 }
 
 func (s *Service) ListAlbumBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.AlbumBookmark, int64, error) {
+	return s.ListAlbumBookmarksFiltered(user, page, pageSize, sort, "")
+}
+
+func (s *Service) ListAlbumBookmarksFiltered(user authctx.CurrentUser, page int, pageSize int, sort string, query string) ([]model.AlbumBookmark, int64, error) {
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
-	return s.repo.ListAlbumBookmarks(user.ID, page, pageSize, sort)
+	return s.repo.ListAlbumBookmarksFiltered(user.ID, page, pageSize, sort, query)
 }
 
 func (s *Service) BookmarkAlbum(user authctx.CurrentUser, albumID uuid.UUID) (model.AlbumBookmark, error) {
@@ -59,11 +67,15 @@ func (s *Service) DeleteAlbumBookmark(user authctx.CurrentUser, albumID uuid.UUI
 }
 
 func (s *Service) ListSongBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.SongBookmark, int64, error) {
+	return s.ListSongBookmarksFiltered(user, page, pageSize, sort, "")
+}
+
+func (s *Service) ListSongBookmarksFiltered(user authctx.CurrentUser, page int, pageSize int, sort string, query string) ([]model.SongBookmark, int64, error) {
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
-	return s.repo.ListSongBookmarks(user.ID, page, pageSize, sort)
+	return s.repo.ListSongBookmarksFiltered(user.ID, page, pageSize, sort, query)
 }
 
 func (s *Service) BookmarkSong(user authctx.CurrentUser, songID uuid.UUID) (model.SongBookmark, error) {
@@ -84,11 +96,27 @@ func (s *Service) DeleteSongBookmark(user authctx.CurrentUser, songID uuid.UUID)
 }
 
 func (s *Service) ListPlaylistBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.PlaylistBookmark, int64, error) {
+	return s.ListPlaylistBookmarksFiltered(user, page, pageSize, sort, "")
+}
+
+func (s *Service) ListPlaylistBookmarksFiltered(user authctx.CurrentUser, page int, pageSize int, sort string, query string) ([]model.PlaylistBookmark, int64, error) {
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
-	return s.repo.ListPlaylistBookmarks(user.ID, page, pageSize, sort)
+	return s.repo.ListPlaylistBookmarksFiltered(user.ID, page, pageSize, sort, query)
+}
+
+func (s *Service) ListLaterSongs(user authctx.CurrentUser, page int, pageSize int, sort string, query string) ([]model.PlaylistSong, int64, error) {
+	if user.ID == uuid.Nil {
+		return nil, 0, apperr.Unauthorized("Login required")
+	}
+	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
+	var playlist model.Playlist
+	if err := s.db.Where("user_id = ? AND kind = ?", user.ID, "later").First(&playlist).Error; err != nil {
+		return []model.PlaylistSong{}, 0, nil
+	}
+	return s.repo.ListPlaylistSongsFiltered(playlist.ID, page, pageSize, sort, query)
 }
 
 func (s *Service) BookmarkPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.PlaylistBookmark, error) {

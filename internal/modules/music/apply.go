@@ -2,7 +2,6 @@ package music
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -108,97 +107,6 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		}
 		edit.EntityID = &artist.ID
 		return nil
-	case "update_artist":
-		if edit.EntityID == nil {
-			return apperr.BadRequest("validation.invalid_request", "entity_id is required")
-		}
-		var rawChanges map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(edit.ChangesJSON), &rawChanges); err != nil {
-			return apperr.BadRequest("validation.invalid_request", "changes are not valid JSON")
-		}
-		var changes artistEditFields
-		if err := json.Unmarshal([]byte(edit.ChangesJSON), &changes); err != nil {
-			return apperr.BadRequest("validation.invalid_request", "changes are not valid JSON")
-		}
-		updates := map[string]any{}
-		if changes.Name != "" {
-			updates["name"] = changes.Name
-		}
-		if fieldPresent(rawChanges, "bio") {
-			updates["bio"] = changes.Bio
-		}
-		if fieldPresent(rawChanges, "legal_name") {
-			updates["legal_name"] = changes.LegalName
-		}
-		if len(changes.StageNames) > 0 {
-			updates["stage_names_json"] = mustMarshalStageNames(changes.StageNames)
-		}
-		if fieldPresent(rawChanges, "image_url") {
-			updates["image_url"] = changes.ImageURL
-		}
-		if changes.Nationality != "" {
-			updates["nationality"] = changes.Nationality
-		}
-		if changes.BirthPlace != "" {
-			updates["birth_place"] = changes.BirthPlace
-		}
-		if changes.BirthDate != "" {
-			birthDate, err := parseOptionalReleaseDate(changes.BirthDate)
-			if err != nil {
-				return err
-			}
-			if birthDate != nil {
-				updates["birth_date"] = *birthDate
-				updates["birth_year"] = birthDate.Year()
-			}
-		}
-		if changes.BirthYear != 0 {
-			updates["birth_year"] = changes.BirthYear
-		}
-		if changes.DeathYear != 0 {
-			updates["death_year"] = changes.DeathYear
-		}
-		if changes.ArtistForm != "" {
-			updates["artist_form"] = normalizeArtistForm(changes.ArtistForm)
-		}
-		if changes.ActiveStartDate != "" {
-			activeStartDate, err := parseOptionalDate(changes.ActiveStartDate, "active_start_date")
-			if err != nil {
-				return err
-			}
-			if activeStartDate != nil {
-				updates["active_start_date"] = *activeStartDate
-			}
-		}
-		if fieldPresent(rawChanges, "active_end_date") {
-			activeEndDate, err := parseOptionalDate(changes.ActiveEndDate, "active_end_date")
-			if err != nil {
-				return err
-			}
-			if activeEndDate != nil {
-				updates["active_end_date"] = *activeEndDate
-			} else {
-				updates["active_end_date"] = time.Time{}
-			}
-		}
-		if len(updates) == 0 {
-			if !fieldPresent(rawChanges, "members") {
-				return apperr.BadRequest("validation.invalid_request", "artist changes are required")
-			}
-		}
-		result := tx.Model(&model.Artist{}).Where("id = ?", *edit.EntityID).Updates(updates)
-		if result.Error != nil {
-			return result.Error
-		}
-		if result.RowsAffected == 0 {
-			return apperr.NotFound("music.artist_not_found", "Artist not found")
-		}
-		if fieldPresent(rawChanges, "members") {
-			if err := replaceArtistMembers(tx, *edit.EntityID, changes.Members); err != nil {
-				return err
-			}
-		}
-		return nil
 	case "delete_artist":
 		if edit.EntityID == nil {
 			return apperr.BadRequest("validation.invalid_request", "entity_id is required")
@@ -259,73 +167,6 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		}
 		edit.EntityID = &album.ID
 		return nil
-	case "update_album":
-		if edit.EntityID == nil {
-			return apperr.BadRequest("validation.invalid_request", "entity_id is required")
-		}
-		var rawChanges map[string]json.RawMessage
-		if err := json.Unmarshal([]byte(edit.ChangesJSON), &rawChanges); err != nil {
-			return apperr.BadRequest("validation.invalid_request", "changes are not valid JSON")
-		}
-		var changes albumEditFields
-		if err := json.Unmarshal([]byte(edit.ChangesJSON), &changes); err != nil {
-			return apperr.BadRequest("validation.invalid_request", "changes are not valid JSON")
-		}
-		var album model.Album
-		if err := tx.First(&album, "id = ?", *edit.EntityID).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				return apperr.NotFound("music.album_not_found", "Album not found")
-			}
-			return err
-		}
-		updates := map[string]any{}
-		if changes.Title != "" {
-			updates["title"] = changes.Title
-		}
-		if changes.ReleaseDate != "" {
-			releaseDate, err := parseOptionalReleaseDate(changes.ReleaseDate)
-			if err != nil {
-				return err
-			}
-			if releaseDate != nil {
-				updates["release_date"] = *releaseDate
-				updates["year"] = releaseDate.Year()
-				updates["release_year"] = releaseDate.Year()
-			}
-		}
-		if changes.ReleaseYear != 0 {
-			updates["release_year"] = changes.ReleaseYear
-			updates["year"] = changes.ReleaseYear
-		}
-		if changes.CoverURL != "" {
-			updates["cover_url"] = changes.CoverURL
-			updates["cover_source"] = coverSourceFromURL(changes.CoverURL)
-		}
-		if changes.AlbumType != "" {
-			updates["album_type"] = changes.AlbumType
-		}
-		if len(updates) > 0 {
-			if err := tx.Model(&album).Updates(updates).Error; err != nil {
-				return err
-			}
-		}
-		if fieldPresent(rawChanges, "artist_credits") || fieldPresent(rawChanges, "artist_ids") {
-			credits := changes.ArtistCredits
-			defaultMissingRoles := false
-			if !fieldPresent(rawChanges, "artist_credits") {
-				credits = legacyAlbumArtistCredits(changes.ArtistIDs)
-				defaultMissingRoles = true
-			}
-			if err := replaceAlbumArtistCredits(tx, album.ID, credits, defaultMissingRoles); err != nil {
-				return err
-			}
-		}
-		if len(changes.Tracks) > 0 {
-			if err := syncAlbumTracks(tx, &album, &edit.SubmittedBy, changes.Tracks); err != nil {
-				return err
-			}
-		}
-		return nil
 	case "delete_album":
 		if edit.EntityID == nil {
 			return apperr.BadRequest("validation.invalid_request", "entity_id is required")
@@ -336,70 +177,6 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		}
 		if result.RowsAffected == 0 {
 			return apperr.NotFound("music.album_not_found", "Album not found")
-		}
-		return nil
-	case "merge_album":
-		if edit.EntityID == nil {
-			return apperr.BadRequest("validation.invalid_request", "entity_id is required")
-		}
-		var changes struct {
-			SourceAlbumID string `json:"source_album_id"`
-		}
-		if err := json.Unmarshal([]byte(edit.ChangesJSON), &changes); err != nil {
-			return apperr.BadRequest("validation.invalid_request", "changes are not valid JSON")
-		}
-		sourceAlbumID, err := uuid.Parse(changes.SourceAlbumID)
-		if err != nil || sourceAlbumID == *edit.EntityID {
-			return apperr.BadRequest("validation.invalid_request", "source_album_id must be a different valid UUID")
-		}
-
-		var target, source model.Album
-		if err := tx.First(&target, "id = ?", *edit.EntityID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.NotFound("music.album_not_found", "Target album not found")
-			}
-			return err
-		}
-		if err := tx.First(&source, "id = ?", sourceAlbumID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.NotFound("music.album_not_found", "Source album not found")
-			}
-			return err
-		}
-		if target.EntryStatus == "closed" || target.Status == "closed" || source.EntryStatus == "closed" || source.Status == "closed" {
-			return apperr.Unprocessable("music.album_not_open", "Both albums must be available")
-		}
-
-		var sourceCredits []model.AlbumArtist
-		if err := tx.Where("album_id = ?", source.ID).Find(&sourceCredits).Error; err != nil {
-			return err
-		}
-		var targetCredits []model.AlbumArtist
-		if err := tx.Where("album_id = ?", target.ID).Find(&targetCredits).Error; err != nil {
-			return err
-		}
-		targetCreditKeys := make(map[string]struct{}, len(targetCredits))
-		for _, credit := range targetCredits {
-			targetCreditKeys[credit.ArtistID.String()+"\x00"+credit.Role+"\x00"+strings.ToLower(credit.CustomRole)] = struct{}{}
-		}
-		for _, credit := range sourceCredits {
-			key := credit.ArtistID.String() + "\x00" + credit.Role + "\x00" + strings.ToLower(credit.CustomRole)
-			if _, exists := targetCreditKeys[key]; !exists {
-				credit.AlbumID = target.ID
-				if err := tx.Create(&credit).Error; err != nil {
-					return err
-				}
-				targetCreditKeys[key] = struct{}{}
-			}
-		}
-		if err := tx.Where("album_id = ?", source.ID).Delete(&model.AlbumArtist{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&model.Song{}).Where("album_id = ?", source.ID).Update("album_id", target.ID).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&source).Updates(map[string]any{"entry_status": "closed", "status": "closed"}).Error; err != nil {
-			return err
 		}
 		return nil
 	default:

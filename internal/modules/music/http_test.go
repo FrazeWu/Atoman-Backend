@@ -42,6 +42,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.Playlist{},
 		&model.PlaylistSong{},
 		&model.MusicListeningHistory{},
+		&model.MusicSearchInteraction{},
 		&model.AlbumImportSession{},
 		&model.AlbumImportFile{},
 		&model.AlbumImportJob{},
@@ -234,8 +235,16 @@ func TestRegisterRoutesMusicSearchAndSongDetailHideNonPublicSongs(t *testing.T) 
 	router := newMusicHTTPRouter(service, &user)
 
 	search := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/search?q=Search+Song", "")
-	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), visible.ID.String()) || strings.Contains(search.Body.String(), draft.ID.String()) {
+	if search.Code != http.StatusOK || !strings.Contains(search.Body.String(), visible.ID.String()) || strings.Contains(search.Body.String(), draft.ID.String()) || !strings.Contains(search.Body.String(), `"totals":{"album":0,"artist":0,"playlist":0,"song":1}`) {
 		t.Fatalf("search exposed non-public song: %d %s", search.Code, search.Body.String())
+	}
+	interaction := performMusicJSONRequest(t, router, http.MethodPost, "/api/v1/music/search/interactions", `{"query":"Search Song","entity_type":"song","entity_id":"`+visible.ID.String()+`"}`)
+	if interaction.Code != http.StatusNoContent {
+		t.Fatalf("expected search interaction 204, got %d: %s", interaction.Code, interaction.Body.String())
+	}
+	var stored model.MusicSearchInteraction
+	if err := db.Where("user_id = ? AND entity_id = ?", user.ID, visible.ID).First(&stored).Error; err != nil || stored.Query != "Search Song" {
+		t.Fatalf("search interaction not stored: %#v, %v", stored, err)
 	}
 	detail := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/songs/"+draft.ID.String(), "")
 	assertMusicHTTPError(t, detail, http.StatusNotFound, "music.song_not_found")
@@ -683,8 +692,9 @@ func TestRegisterRoutesSubmitEditReturnsCreatedAppliedEditForMainWikiFlow(t *tes
 	}
 }
 
-func TestRegisterRoutesCreatesAlbumMergeEdit(t *testing.T) {
+func TestRegisterRoutesMergesAlbumsForAdmin(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
+	user.Role = authctx.RoleAdmin
 	target := model.Album{Title: "HTTP Target Album", EntryStatus: "open", Status: "open"}
 	source := model.Album{Title: "HTTP Source Album", EntryStatus: "open", Status: "open"}
 	if err := db.Create(&target).Error; err != nil {
@@ -694,26 +704,29 @@ func TestRegisterRoutesCreatesAlbumMergeEdit(t *testing.T) {
 		t.Fatalf("create source album: %v", err)
 	}
 	r := newMusicHTTPRouter(service, &user)
-	body := `{"source_album_id":"` + source.ID.String() + `"}`
+	body := `{"source_album_id":"` + source.ID.String() + `","confirmed":true,"song_matches":[]}`
 	w := performMusicJSONRequest(t, r, http.MethodPost, "/api/v1/music/albums/"+target.ID.String()+"/merge", body)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 	var resp struct {
-		Data model.MusicEdit `json:"data"`
+		Data struct {
+			Merged     bool      `json:"merged"`
+			RedirectTo uuid.UUID `json:"redirect_to"`
+		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Data.Type != "merge_album" || resp.Data.EntityType != "album" || resp.Data.EntityID == nil || *resp.Data.EntityID != target.ID || resp.Data.Status != "open" {
-		t.Fatalf("unexpected album merge edit: %#v", resp.Data)
+	if !resp.Data.Merged || resp.Data.RedirectTo != target.ID {
+		t.Fatalf("unexpected album merge response: %#v", resp.Data)
 	}
-	var changes map[string]string
-	if err := json.Unmarshal([]byte(resp.Data.ChangesJSON), &changes); err != nil {
-		t.Fatalf("decode changes: %v", err)
+	var mergedSource model.Album
+	if err := db.First(&mergedSource, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("load merged source album: %v", err)
 	}
-	if changes["source_album_id"] != source.ID.String() {
-		t.Fatalf("unexpected merge changes: %#v", changes)
+	if mergedSource.RedirectTo == nil || *mergedSource.RedirectTo != target.ID || mergedSource.Status != "closed" {
+		t.Fatalf("unexpected merged source album: %#v", mergedSource)
 	}
 }
 
@@ -2233,15 +2246,15 @@ func TestMusicRecommendationLatestModeReturnsNewestAlbumFirst(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesDiscoverAcceptsLatestMode(t *testing.T) {
+func TestRegisterRoutesDiscoverEndpointIsRemoved(t *testing.T) {
 	service, _, _ := newMusicHTTPTestService(t)
 	r := newMusicHTTPRouter(service, nil)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/discover?mode=latest&page_size=10", nil)
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -2992,7 +3005,7 @@ func createMusicPlaylistViaAPI(t *testing.T, router *gin.Engine, body string) st
 	return resp.Data
 }
 
-func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
+func TestRegisterRoutesMusicHomeReturnsMixedDiscoverItems(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 
 	artist := model.Artist{
@@ -3051,7 +3064,7 @@ func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
 
 	r := newMusicHTTPRouter(service, nil)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/discover?page_size=10", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/home", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusOK {
@@ -3059,39 +3072,41 @@ func TestRegisterRoutesDiscoverReturnsMixedItems(t *testing.T) {
 	}
 
 	var resp struct {
-		Data []struct {
-			Type          string `json:"type"`
-			ID            string `json:"id"`
-			Title         string `json:"title"`
-			Summary       string `json:"summary"`
-			ImageURL      string `json:"image_url"`
-			TargetPath    string `json:"target_path"`
-			PlayCount     int64  `json:"play_count"`
-			BookmarkCount int64  `json:"bookmark_count"`
-			SongCount     int64  `json:"song_count"`
-			OwnerUserID   string `json:"owner_user_id"`
+		Data struct {
+			Discover []struct {
+				Type          string `json:"type"`
+				ID            string `json:"id"`
+				Title         string `json:"title"`
+				Summary       string `json:"summary"`
+				ImageURL      string `json:"image_url"`
+				TargetPath    string `json:"target_path"`
+				PlayCount     int64  `json:"play_count"`
+				BookmarkCount int64  `json:"bookmark_count"`
+				SongCount     int64  `json:"song_count"`
+				OwnerUserID   string `json:"owner_user_id"`
+			} `json:"discover"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode discover response: %v", err)
 	}
-	if len(resp.Data) < 3 {
-		t.Fatalf("expected at least 3 discover items, got %#v", resp.Data)
+	if len(resp.Data.Discover) < 3 {
+		t.Fatalf("expected at least 3 discover items, got %#v", resp.Data.Discover)
 	}
 	wantTypes := []string{"album", "artist", "playlist"}
 	for i, want := range wantTypes {
-		if resp.Data[i].Type != want {
-			t.Fatalf("expected discover type order %v, got %#v", wantTypes, resp.Data[:3])
+		if resp.Data.Discover[i].Type != want {
+			t.Fatalf("expected discover type order %v, got %#v", wantTypes, resp.Data.Discover[:3])
 		}
 	}
-	if resp.Data[0].PlayCount != 3 || resp.Data[0].BookmarkCount != 1 {
-		t.Fatalf("expected album discover item stats to be present, got %#v", resp.Data[0])
+	if resp.Data.Discover[0].PlayCount != 3 || resp.Data.Discover[0].BookmarkCount != 1 {
+		t.Fatalf("expected album discover item stats to be present, got %#v", resp.Data.Discover[0])
 	}
-	if resp.Data[1].PlayCount != 3 || resp.Data[1].BookmarkCount != 1 {
-		t.Fatalf("expected artist discover item stats to be present, got %#v", resp.Data[1])
+	if resp.Data.Discover[1].PlayCount != 3 || resp.Data.Discover[1].BookmarkCount != 1 {
+		t.Fatalf("expected artist discover item stats to be present, got %#v", resp.Data.Discover[1])
 	}
-	if resp.Data[2].ID != playlistID.String() || resp.Data[2].SongCount != 1 || resp.Data[2].OwnerUserID != user.ID.String() {
-		t.Fatalf("unexpected playlist discover item: %#v", resp.Data[2])
+	if resp.Data.Discover[2].ID != playlistID.String() || resp.Data.Discover[2].SongCount != 1 || resp.Data.Discover[2].OwnerUserID != user.ID.String() {
+		t.Fatalf("unexpected playlist discover item: %#v", resp.Data.Discover[2])
 	}
 }
 
@@ -3139,7 +3154,7 @@ func TestRegisterRoutesPublicPlaylistsReturnsDiscoverablePlaylists(t *testing.T)
 	}
 }
 
-func TestRegisterRoutesDiscoverHidesPrivatePlaylistsFromAnonymousUsers(t *testing.T) {
+func TestRegisterRoutesMusicHomeHidesPrivatePlaylistsFromAnonymousUsers(t *testing.T) {
 	service, _, user := newMusicHTTPTestService(t)
 	userRouter := newMusicHTTPRouter(service, &user)
 
@@ -3149,24 +3164,26 @@ func TestRegisterRoutesDiscoverHidesPrivatePlaylistsFromAnonymousUsers(t *testin
 	r := newMusicHTTPRouter(service, nil)
 
 	discoverW := httptest.NewRecorder()
-	discoverReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/discover?page_size=20", nil)
+	discoverReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/home", nil)
 	r.ServeHTTP(discoverW, discoverReq)
 	if discoverW.Code != http.StatusOK {
 		t.Fatalf("expected discover 200, got %d: %s", discoverW.Code, discoverW.Body.String())
 	}
 
 	var discoverResp struct {
-		Data []struct {
-			Type  string `json:"type"`
-			Title string `json:"title"`
+		Data struct {
+			Discover []struct {
+				Type  string `json:"type"`
+				Title string `json:"title"`
+			} `json:"discover"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(discoverW.Body.Bytes(), &discoverResp); err != nil {
 		t.Fatalf("decode discover response: %v", err)
 	}
-	for _, item := range discoverResp.Data {
+	for _, item := range discoverResp.Data.Discover {
 		if item.Type == "playlist" && item.Title == "Hidden Private Playlist" {
-			t.Fatalf("private playlist should not appear in discover response: %#v", discoverResp.Data)
+			t.Fatalf("private playlist should not appear in music home: %#v", discoverResp.Data.Discover)
 		}
 	}
 
@@ -3308,7 +3325,12 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 	}
 	var body struct {
 		Data struct {
-			Personalized   bool `json:"personalized"`
+			Personalized      bool `json:"personalized"`
+			ContinueListening *struct {
+				Song struct {
+					ID string `json:"id"`
+				} `json:"song"`
+			} `json:"continue_listening"`
 			RecentlyPlayed []struct {
 				Song struct {
 					ID string `json:"id"`
@@ -3325,8 +3347,8 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 	if !body.Data.Personalized {
 		t.Fatal("expected home to be personalized after a recorded play")
 	}
-	if len(body.Data.RecentlyPlayed) != 1 || body.Data.RecentlyPlayed[0].Song.ID != playedSong.ID.String() {
-		t.Fatalf("unexpected recent plays: %#v", body.Data.RecentlyPlayed)
+	if body.Data.ContinueListening == nil || body.Data.ContinueListening.Song.ID != playedSong.ID.String() || len(body.Data.RecentlyPlayed) != 0 {
+		t.Fatalf("unexpected continue/recent plays: %#v %#v", body.Data.ContinueListening, body.Data.RecentlyPlayed)
 	}
 	if len(body.Data.ForYou) != 1 || body.Data.ForYou[0].ID != candidateAlbum.ID.String() {
 		t.Fatalf("expected only unheard related album, got %#v", body.Data.ForYou)

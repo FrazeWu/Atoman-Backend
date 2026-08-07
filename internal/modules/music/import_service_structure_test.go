@@ -16,6 +16,7 @@ func TestAlbumImportServiceOnlyOwnsCoreSessionAndSharedState(t *testing.T) {
 
 	expected := map[string]bool{
 		"buildAlbumImportDTO":                    true,
+		"albumImportSessionAlbumTitle":           true,
 		"stringValue":                            true,
 		"floatValue":                             true,
 		"CreateAlbumImportSession":               true,
@@ -27,6 +28,8 @@ func TestAlbumImportServiceOnlyOwnsCoreSessionAndSharedState(t *testing.T) {
 		"GetAlbumImportSession":                  true,
 		"GetAlbumImportSessionForUser":           true,
 		"ListAlbumImportSessionsForUser":         true,
+		"ListAlbumImportSessionsPageForUser":     true,
+		"DeleteAlbumImportRecord":                true,
 		"loadAlbumImportSession":                 true,
 		"normalizeAlbumImportStatus":             true,
 		"normalizeAlbumImportInputMode":          true,
