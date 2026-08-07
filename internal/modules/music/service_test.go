@@ -3,6 +3,7 @@ package music
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,7 +29,9 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.ArtistAlias{},
 		&model.ArtistMerge{},
 		&model.Album{},
+		&model.AlbumArtist{},
 		&model.Song{},
+		&model.SongArtist{},
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
 		&model.SongBookmark{},
@@ -926,6 +929,97 @@ func TestSubmitEditAutoAppliesUpdateAlbumForMainWikiFlow(t *testing.T) {
 	}
 	if updatedAlbum.EntryStatus != "open" || updatedAlbum.AlbumType != "album" || updatedAlbum.ReleaseDate.Format("2006-01-02") != "2026-06-17" {
 		t.Fatalf("unexpected album fields: %#v", updatedAlbum)
+	}
+}
+
+func TestSubmitEditReplacesAlbumArtistCreditsWithMultipleAndCustomRoles(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	primary := model.Artist{Name: "Primary Credit", EntryStatus: "open"}
+	guest := model.Artist{Name: "Guest Credit", EntryStatus: "open"}
+	album := model.Album{Title: "Credits Album", EntryStatus: "open", Status: "open"}
+	for _, value := range []any{&primary, &guest, &album} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatalf("create fixture: %v", err)
+		}
+	}
+
+	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
+		Type:       "update_album",
+		EntityType: "album",
+		EntityID:   &album.ID,
+		Changes: map[string]any{
+			"artist_credits": []map[string]any{
+				{
+					"artist_id": primary.ID.String(),
+					"position":  1,
+					"roles": []map[string]any{
+						{"role": "primary"},
+						{"role": "producer"},
+					},
+				},
+				{
+					"artist_id": guest.ID.String(),
+					"position":  2,
+					"roles": []map[string]any{
+						{"role": "featured"},
+						{"role": "custom", "label": "Mix Engineer"},
+					},
+				},
+			},
+		},
+		Reason: "update credits",
+	})
+	if err != nil {
+		t.Fatalf("submit edit: %v", err)
+	}
+	if edit.Status != "applied" {
+		t.Fatalf("expected applied edit, got %#v", edit)
+	}
+
+	var credits []model.AlbumArtist
+	if err := db.Where("album_id = ?", album.ID).Order("position ASC, role ASC").Find(&credits).Error; err != nil {
+		t.Fatalf("load credits: %v", err)
+	}
+	if len(credits) != 4 {
+		t.Fatalf("expected four credits, got %#v", credits)
+	}
+	hasCustomRole := false
+	for _, credit := range credits {
+		hasCustomRole = hasCustomRole || (credit.Role == "custom" && credit.CustomRole == "Mix Engineer")
+	}
+	if !hasCustomRole {
+		t.Fatalf("expected custom role to be preserved, got %#v", credits)
+	}
+}
+
+func TestSubmitEditRejectsAlbumCreditsWithoutPrimaryArtist(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	artist := model.Artist{Name: "Featured Only", EntryStatus: "open"}
+	album := model.Album{Title: "Invalid Credits Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+
+	edit, err := svc.SubmitEdit(user, SubmitEditRequest{
+		Type:       "update_album",
+		EntityType: "album",
+		EntityID:   &album.ID,
+		Changes: map[string]any{
+			"artist_credits": []map[string]any{{
+				"artist_id": artist.ID.String(),
+				"roles":     []map[string]any{{"role": "featured"}},
+			}},
+		},
+		Reason: "invalid credits",
+	})
+	if err != nil {
+		t.Fatalf("submit edit: %v", err)
+	}
+	if edit.Status != "failed_prerequisite" || !strings.Contains(edit.FailureReason, "primary") {
+		t.Fatalf("expected missing primary failure, got %#v", edit)
 	}
 }
 

@@ -20,6 +20,7 @@ type AlbumImportSession struct {
 	CommittedAt     *time.Time        `json:"committed_at"`
 	CommittedBy     *uuid.UUID        `json:"committed_by" gorm:"type:uuid"`
 	TargetAlbumID   *uuid.UUID        `json:"target_album_id,omitempty" gorm:"type:uuid;index"`
+	TargetAlbum     *Album            `json:"-" gorm:"foreignKey:TargetAlbumID;references:ID"`
 	Files           []AlbumImportFile `json:"files,omitempty" gorm:"foreignKey:ImportID"`
 	Job             *AlbumImportJob   `json:"job,omitempty" gorm:"foreignKey:ImportID"`
 }

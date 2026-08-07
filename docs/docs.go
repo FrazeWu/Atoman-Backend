@@ -429,7 +429,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "管理员查看缺失封面、曲目、音频和失败导入的音乐资料。",
+                "description": "管理员查看缺失封面、曲目、音频、关键元数据、重复候选和失败导入的音乐资料。",
                 "produces": [
                     "application/json"
                 ],
@@ -444,6 +444,8 @@ const docTemplate = `{
                             "missing_cover",
                             "missing_tracks",
                             "missing_audio",
+                            "missing_metadata",
+                            "duplicate_candidate",
                             "import_failed"
                         ],
                         "type": "string",
@@ -12023,7 +12025,152 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/imports/albums": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-imports"
+                ],
+                "summary": "获取当前用户的专辑导入记录",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/music.AlbumImportDTO"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-imports"
+                ],
+                "summary": "创建专辑导入会话",
+                "parameters": [
+                    {
+                        "description": "导入会话上下文",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.CreateAlbumImportSessionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/music.AlbumImportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/imports/albums/{sessionId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-imports"
+                ],
+                "summary": "获取专辑导入会话",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入会话 UUID",
+                        "name": "sessionId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.AlbumImportResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
             "delete": {
                 "security": [
                     {
@@ -12091,6 +12238,85 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/imports/albums/{sessionId}/commit": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "创建或更新同一导入会话对应的专辑，并保存创作者身份与曲目。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-imports"
+                ],
+                "summary": "提交专辑导入",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入会话 UUID",
+                        "name": "sessionId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "专辑与创作者资料",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.CommitAlbumImportSessionInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.AlbumImportResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -23681,6 +23907,12 @@ const docTemplate = `{
                 "album_type": {
                     "type": "string"
                 },
+                "artist_credits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.AlbumArtist"
+                    }
+                },
                 "artists": {
                     "type": "array",
                     "items": {
@@ -23755,6 +23987,35 @@ const docTemplate = `{
                 },
                 "year": {
                     "type": "integer"
+                }
+            }
+        },
+        "model.AlbumArtist": {
+            "type": "object",
+            "properties": {
+                "album_id": {
+                    "type": "string"
+                },
+                "artist": {
+                    "$ref": "#/definitions/model.Artist"
+                },
+                "artist_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "custom_role": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "role": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },
@@ -25303,14 +25564,56 @@ const docTemplate = `{
                 "play_count": {
                     "type": "integer"
                 },
+                "playback_bitrate_kbps": {
+                    "type": "integer"
+                },
+                "playback_channels": {
+                    "type": "integer"
+                },
+                "playback_codec": {
+                    "type": "string"
+                },
+                "playback_container": {
+                    "type": "string"
+                },
                 "playback_key": {
                     "type": "string"
+                },
+                "playback_sample_rate_hz": {
+                    "type": "integer"
                 },
                 "release_date": {
                     "type": "string"
                 },
+                "source_bit_depth": {
+                    "type": "integer"
+                },
+                "source_bitrate_kbps": {
+                    "type": "integer"
+                },
+                "source_channels": {
+                    "type": "integer"
+                },
+                "source_codec": {
+                    "type": "string"
+                },
+                "source_container": {
+                    "type": "string"
+                },
+                "source_file_name": {
+                    "type": "string"
+                },
                 "source_key": {
                     "type": "string"
+                },
+                "source_lossless": {
+                    "type": "boolean"
+                },
+                "source_sample_rate_hz": {
+                    "type": "integer"
+                },
+                "source_size_bytes": {
+                    "type": "integer"
                 },
                 "status": {
                     "type": "string"
@@ -25792,10 +26095,103 @@ const docTemplate = `{
                 }
             }
         },
+        "music.AlbumArtistRoleInput": {
+            "type": "object",
+            "properties": {
+                "label": {
+                    "type": "string"
+                },
+                "role": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.AlbumImportAlbumPayload": {
+            "type": "object",
+            "properties": {
+                "album_type": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "release_date": {
+                    "type": "string"
+                },
+                "release_year": {
+                    "type": "integer"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "tracks": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumImportTrackPayload"
+                    }
+                }
+            }
+        },
+        "music.AlbumImportArtistPayload": {
+            "type": "object",
+            "properties": {
+                "active_end_date": {
+                    "type": "string"
+                },
+                "active_start_date": {
+                    "type": "string"
+                },
+                "artist_form": {
+                    "type": "string"
+                },
+                "bio": {
+                    "type": "string"
+                },
+                "birth_date": {
+                    "type": "string"
+                },
+                "birth_place": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "legal_name": {
+                    "type": "string"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.ArtistMemberPayload"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nationality": {
+                    "type": "string"
+                },
+                "stage_names": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.ArtistStageNamePayload"
+                    }
+                }
+            }
+        },
         "music.AlbumImportDTO": {
             "type": "object",
             "properties": {
+                "albumTitle": {
+                    "type": "string"
+                },
                 "archiveName": {
+                    "type": "string"
+                },
+                "artistId": {
                     "type": "string"
                 },
                 "coverKey": {
@@ -26014,6 +26410,23 @@ const docTemplate = `{
                 }
             }
         },
+        "music.AlbumImportPayload": {
+            "type": "object",
+            "properties": {
+                "album": {
+                    "$ref": "#/definitions/music.AlbumImportAlbumPayload"
+                },
+                "artist": {
+                    "$ref": "#/definitions/music.AlbumImportArtistPayload"
+                },
+                "artists": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumImportArtistPayload"
+                    }
+                }
+            }
+        },
         "music.AlbumImportProgressDTO": {
             "type": "object",
             "properties": {
@@ -26030,6 +26443,17 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/music.AlbumImportDTO"
+                }
+            }
+        },
+        "music.AlbumImportTrackPayload": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string"
+                },
+                "track_number": {
+                    "type": "integer"
                 }
             }
         },
@@ -26059,6 +26483,119 @@ const docTemplate = `{
                 }
             }
         },
+        "music.ArtistMemberPayload": {
+            "type": "object",
+            "properties": {
+                "artist_id": {
+                    "type": "string"
+                },
+                "join_date": {
+                    "type": "string"
+                },
+                "leave_date": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.ArtistStageNamePayload": {
+            "type": "object",
+            "properties": {
+                "end_date_text": {
+                    "type": "string"
+                },
+                "is_primary": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "start_date_text": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.CommitAlbumImportArtistInput": {
+            "type": "object",
+            "properties": {
+                "active_end_date": {
+                    "type": "string"
+                },
+                "active_start_date": {
+                    "type": "string"
+                },
+                "artist_form": {
+                    "type": "string"
+                },
+                "artist_id": {
+                    "type": "string"
+                },
+                "bio": {
+                    "type": "string"
+                },
+                "birth_date": {
+                    "type": "string"
+                },
+                "birth_place": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "legal_name": {
+                    "type": "string"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.ArtistMemberPayload"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nationality": {
+                    "type": "string"
+                },
+                "roles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumArtistRoleInput"
+                    }
+                },
+                "stage_names": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.ArtistStageNamePayload"
+                    }
+                }
+            }
+        },
+        "music.CommitAlbumImportSessionInput": {
+            "type": "object",
+            "properties": {
+                "album": {
+                    "$ref": "#/definitions/music.AlbumImportAlbumPayload"
+                },
+                "album_source": {
+                    "type": "string"
+                },
+                "artist": {
+                    "$ref": "#/definitions/music.AlbumImportArtistPayload"
+                },
+                "artist_id": {
+                    "type": "string"
+                },
+                "artist_source": {
+                    "type": "string"
+                },
+                "artists": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.CommitAlbumImportArtistInput"
+                    }
+                }
+            }
+        },
         "music.CompleteAlbumImportMultipartPartInput": {
             "type": "object",
             "properties": {
@@ -26067,6 +26604,23 @@ const docTemplate = `{
                 },
                 "size": {
                     "type": "integer"
+                }
+            }
+        },
+        "music.CreateAlbumImportSessionInput": {
+            "type": "object",
+            "properties": {
+                "artistId": {
+                    "type": "string"
+                },
+                "inputMode": {
+                    "type": "string"
+                },
+                "payload": {
+                    "$ref": "#/definitions/music.AlbumImportPayload"
+                },
+                "status": {
+                    "type": "string"
                 }
             }
         },
@@ -26812,7 +27366,8 @@ const docTemplate = `{
                 "items": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "total": {
@@ -27193,7 +27748,8 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "title": {
@@ -27210,7 +27766,8 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 }
             }
@@ -27245,7 +27802,8 @@ const docTemplate = `{
                 "totals": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "trend": {
@@ -27371,7 +27929,8 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "module": {
@@ -27523,7 +28082,8 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "module": {

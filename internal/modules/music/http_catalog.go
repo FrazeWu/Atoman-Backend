@@ -58,6 +58,11 @@ func resolveMusicMediaURL(rawURL string) string {
 
 func resolveAlbumMediaURLs(album *model.Album) {
 	album.CoverURL = resolveMusicMediaURL(album.CoverURL)
+	for index := range album.ArtistCredits {
+		if album.ArtistCredits[index].Artist != nil {
+			album.ArtistCredits[index].Artist.ImageURL = resolveMusicMediaURL(album.ArtistCredits[index].Artist.ImageURL)
+		}
+	}
 	for i := range album.Songs {
 		album.Songs[i].AudioURL = resolveMusicMediaURL(album.Songs[i].AudioURL)
 		album.Songs[i].CoverURL = resolveMusicMediaURL(album.Songs[i].CoverURL)
@@ -267,7 +272,9 @@ func (h *Handler) getArtist(c *gin.Context) {
 	}
 
 	var artist model.Artist
-	query := h.service.db.Preload("Aliases").Preload("Albums.Artists").Preload("Albums.Songs")
+	query := h.service.db.Preload("Aliases").Preload("Albums.Artists").Preload("Albums.ArtistCredits", func(db *gorm.DB) *gorm.DB {
+		return db.Order("position ASC, role ASC, custom_role ASC")
+	}).Preload("Albums.ArtistCredits.Artist").Preload("Albums.Songs")
 	if h.service.db.Migrator().HasTable(&model.ArtistMember{}) {
 		query = query.Preload("MemberRelations.MemberArtist")
 	}
@@ -297,6 +304,7 @@ func (h *Handler) getArtist(c *gin.Context) {
 			artist.Albums[i].Artists[j].ImageURL = resolveMusicMediaURL(artist.Albums[i].Artists[j].ImageURL)
 		}
 	}
+	artist.Albums = uniqueAlbums(artist.Albums)
 	for i := range artist.MemberRelations {
 		if artist.MemberRelations[i].MemberArtist != nil {
 			artist.MemberRelations[i].MemberArtist.ImageURL = resolveMusicMediaURL(artist.MemberRelations[i].MemberArtist.ImageURL)
@@ -404,7 +412,9 @@ func (h *Handler) listAlbums(c *gin.Context) {
 	}
 
 	var albums []model.Album
-	findDB := db.Preload("Artists").Preload("Songs")
+	findDB := db.Preload("Artists").Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
+		return db.Order("position ASC, role ASC, custom_role ASC")
+	}).Preload("ArtistCredits.Artist").Preload("Songs")
 	if joinedArtists {
 		findDB = findDB.Distinct("\"Albums\".*")
 	}
@@ -434,7 +444,9 @@ func (h *Handler) getAlbum(c *gin.Context) {
 	}
 
 	var album model.Album
-	if err := h.service.db.Preload("Artists").Preload("Songs").First(&album, "id = ?", albumID).Error; err != nil {
+	if err := h.service.db.Preload("Artists").Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
+		return db.Order("position ASC, role ASC, custom_role ASC")
+	}).Preload("ArtistCredits.Artist").Preload("Songs").First(&album, "id = ?", albumID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("music.album_not_found", "Album not found"))
 			return
@@ -454,7 +466,9 @@ func (h *Handler) getAlbum(c *gin.Context) {
 	}
 	if err := h.service.db.Where("id <> ? AND (id = ? OR canonical_album_id = ?)", album.ID, canonicalID, canonicalID).
 		Where("COALESCE(entry_status, '') <> ? AND COALESCE(status, '') <> ?", "closed", "closed").
-		Preload("Artists").Order("edition_type ASC, release_date DESC, title ASC").Find(&album.OtherVersions).Error; err != nil {
+		Preload("Artists").Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
+		return db.Order("position ASC, role ASC, custom_role ASC")
+	}).Preload("ArtistCredits.Artist").Order("edition_type ASC, release_date DESC, title ASC").Find(&album.OtherVersions).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -463,6 +477,19 @@ func (h *Handler) getAlbum(c *gin.Context) {
 		resolveAlbumMediaURLs(&album.OtherVersions[index])
 	}
 	httpx.OK(c, http.StatusOK, album)
+}
+
+func uniqueAlbums(albums []model.Album) []model.Album {
+	unique := make([]model.Album, 0, len(albums))
+	seen := make(map[uuid.UUID]struct{}, len(albums))
+	for _, album := range albums {
+		if _, exists := seen[album.ID]; exists {
+			continue
+		}
+		seen[album.ID] = struct{}{}
+		unique = append(unique, album)
+	}
+	return unique
 }
 
 // recordSongPlay godoc

@@ -29,6 +29,8 @@ func TestAlbumImportServiceOnlyOwnsCoreSessionAndSharedState(t *testing.T) {
 		"ListAlbumImportSessionsForUser":         true,
 		"loadAlbumImportSession":                 true,
 		"normalizeAlbumImportStatus":             true,
+		"normalizeAlbumImportInputMode":          true,
+		"isAlbumImportInputModeAllowed":          true,
 		"isAlbumImportStatusAllowed":             true,
 		"isAlbumImportActiveStatus":              true,
 		"isAlbumImportMultipartStartStatus":      true,

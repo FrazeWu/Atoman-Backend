@@ -33,14 +33,15 @@ type artistEditFields struct {
 }
 
 type albumEditFields struct {
-	Title       string                  `json:"title"`
-	ArtistIDs   []string                `json:"artist_ids"`
-	ReleaseDate string                  `json:"release_date"`
-	ReleaseYear int                     `json:"release_year"`
-	CoverURL    string                  `json:"cover_url"`
-	CoverKey    string                  `json:"cover_key"`
-	AlbumType   string                  `json:"album_type"`
-	Tracks      []albumTrackEditPayload `json:"tracks"`
+	Title         string                   `json:"title"`
+	ArtistIDs     []string                 `json:"artist_ids"`
+	ArtistCredits []AlbumArtistCreditInput `json:"artist_credits"`
+	ReleaseDate   string                   `json:"release_date"`
+	ReleaseYear   int                      `json:"release_year"`
+	CoverURL      string                   `json:"cover_url"`
+	CoverKey      string                   `json:"cover_key"`
+	AlbumType     string                   `json:"album_type"`
+	Tracks        []albumTrackEditPayload  `json:"tracks"`
 }
 
 type albumTrackEditPayload struct {
@@ -218,12 +219,11 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		if payload.Title == "" {
 			return apperr.BadRequest("validation.invalid_request", "album title is required")
 		}
-		artistIDs, err := parseArtistIDs(payload.ArtistIDs)
-		if err != nil {
-			return err
-		}
-		if len(artistIDs) == 0 {
-			return apperr.BadRequest("validation.invalid_request", "artist_ids are required")
+		credits := payload.ArtistCredits
+		defaultMissingRoles := false
+		if len(credits) == 0 {
+			credits = legacyAlbumArtistCredits(payload.ArtistIDs)
+			defaultMissingRoles = true
 		}
 		releaseDate, err := parseOptionalReleaseDate(payload.ReleaseDate)
 		if err != nil {
@@ -254,7 +254,7 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		if err := tx.Create(&album).Error; err != nil {
 			return err
 		}
-		if err := linkAlbumArtists(tx, &album, artistIDs); err != nil {
+		if err := replaceAlbumArtistCredits(tx, album.ID, credits, defaultMissingRoles); err != nil {
 			return err
 		}
 		edit.EntityID = &album.ID
@@ -262,6 +262,10 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 	case "update_album":
 		if edit.EntityID == nil {
 			return apperr.BadRequest("validation.invalid_request", "entity_id is required")
+		}
+		var rawChanges map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(edit.ChangesJSON), &rawChanges); err != nil {
+			return apperr.BadRequest("validation.invalid_request", "changes are not valid JSON")
 		}
 		var changes albumEditFields
 		if err := json.Unmarshal([]byte(edit.ChangesJSON), &changes); err != nil {
@@ -305,15 +309,14 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 				return err
 			}
 		}
-		if len(changes.ArtistIDs) > 0 {
-			artistIDs, err := parseArtistIDs(changes.ArtistIDs)
-			if err != nil {
-				return err
+		if fieldPresent(rawChanges, "artist_credits") || fieldPresent(rawChanges, "artist_ids") {
+			credits := changes.ArtistCredits
+			defaultMissingRoles := false
+			if !fieldPresent(rawChanges, "artist_credits") {
+				credits = legacyAlbumArtistCredits(changes.ArtistIDs)
+				defaultMissingRoles = true
 			}
-			if err := tx.Model(&album).Association("Artists").Clear(); err != nil {
-				return err
-			}
-			if err := linkAlbumArtists(tx, &album, artistIDs); err != nil {
+			if err := replaceAlbumArtistCredits(tx, album.ID, credits, defaultMissingRoles); err != nil {
 				return err
 			}
 		}
@@ -367,26 +370,29 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 			return apperr.Unprocessable("music.album_not_open", "Both albums must be available")
 		}
 
-		var sourceArtists []model.Artist
-		if err := tx.Model(&source).Association("Artists").Find(&sourceArtists); err != nil {
+		var sourceCredits []model.AlbumArtist
+		if err := tx.Where("album_id = ?", source.ID).Find(&sourceCredits).Error; err != nil {
 			return err
 		}
-		var targetArtists []model.Artist
-		if err := tx.Model(&target).Association("Artists").Find(&targetArtists); err != nil {
+		var targetCredits []model.AlbumArtist
+		if err := tx.Where("album_id = ?", target.ID).Find(&targetCredits).Error; err != nil {
 			return err
 		}
-		targetArtistIDs := make(map[uuid.UUID]struct{}, len(targetArtists))
-		for _, artist := range targetArtists {
-			targetArtistIDs[artist.ID] = struct{}{}
+		targetCreditKeys := make(map[string]struct{}, len(targetCredits))
+		for _, credit := range targetCredits {
+			targetCreditKeys[credit.ArtistID.String()+"\x00"+credit.Role+"\x00"+strings.ToLower(credit.CustomRole)] = struct{}{}
 		}
-		for _, artist := range sourceArtists {
-			if _, exists := targetArtistIDs[artist.ID]; !exists {
-				if err := tx.Model(&target).Association("Artists").Append(&artist); err != nil {
+		for _, credit := range sourceCredits {
+			key := credit.ArtistID.String() + "\x00" + credit.Role + "\x00" + strings.ToLower(credit.CustomRole)
+			if _, exists := targetCreditKeys[key]; !exists {
+				credit.AlbumID = target.ID
+				if err := tx.Create(&credit).Error; err != nil {
 					return err
 				}
+				targetCreditKeys[key] = struct{}{}
 			}
 		}
-		if err := tx.Model(&source).Association("Artists").Clear(); err != nil {
+		if err := tx.Where("album_id = ?", source.ID).Delete(&model.AlbumArtist{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Model(&model.Song{}).Where("album_id = ?", source.ID).Update("album_id", target.ID).Error; err != nil {
@@ -475,18 +481,6 @@ func syncAlbumTracks(tx *gorm.DB, album *model.Album, submittedBy *uuid.UUID, tr
 	return nil
 }
 
-func parseArtistIDs(raw []string) ([]uuid.UUID, error) {
-	ids := make([]uuid.UUID, 0, len(raw))
-	for _, value := range raw {
-		id, err := uuid.Parse(value)
-		if err != nil {
-			return nil, apperr.BadRequest("validation.invalid_request", "artist_ids must contain valid UUIDs")
-		}
-		ids = append(ids, id)
-	}
-	return ids, nil
-}
-
 func parseOptionalReleaseDate(raw string) (*time.Time, error) {
 	if raw == "" {
 		return nil, nil
@@ -529,22 +523,6 @@ func coverSourceFromURL(url string) string {
 		return "s3"
 	}
 	return "local"
-}
-
-func linkAlbumArtists(tx *gorm.DB, album *model.Album, artistIDs []uuid.UUID) error {
-	for _, artistID := range artistIDs {
-		var artist model.Artist
-		if err := tx.First(&artist, "id = ?", artistID).Error; err != nil {
-			if err == gorm.ErrRecordNotFound {
-				return apperr.NotFound("music.artist_not_found", "Artist not found")
-			}
-			return err
-		}
-		if err := tx.Model(album).Association("Artists").Append(&artist); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func normalizeArtistForm(raw string) string {

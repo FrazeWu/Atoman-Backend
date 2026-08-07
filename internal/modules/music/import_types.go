@@ -50,8 +50,10 @@ type AlbumImportPayload struct {
 }
 
 type CreateAlbumImportSessionInput struct {
-	Status  string             `json:"status"`
-	Payload AlbumImportPayload `json:"payload"`
+	Status    string             `json:"status"`
+	ArtistID  string             `json:"artistId"`
+	InputMode string             `json:"inputMode"`
+	Payload   AlbumImportPayload `json:"payload"`
 }
 
 type CommitAlbumImportSessionInput struct {
@@ -65,6 +67,7 @@ type CommitAlbumImportSessionInput struct {
 
 type CommitAlbumImportArtistInput struct {
 	ArtistID        string                   `json:"artist_id"`
+	Roles           []AlbumArtistRoleInput   `json:"roles"`
 	Name            string                   `json:"name"`
 	LegalName       string                   `json:"legal_name"`
 	Bio             string                   `json:"bio"`
@@ -166,6 +169,8 @@ type AlbumImportErrorDTO struct {
 type AlbumImportDTO struct {
 	ImportID          string                 `json:"importId"`
 	TargetAlbumID     string                 `json:"targetAlbumId"`
+	ArtistID          string                 `json:"artistId"`
+	AlbumTitle        string                 `json:"albumTitle"`
 	Status            string                 `json:"status"`
 	InputMode         string                 `json:"inputMode"`
 	Stage             string                 `json:"stage"`

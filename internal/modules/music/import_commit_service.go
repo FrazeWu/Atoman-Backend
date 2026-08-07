@@ -75,12 +75,22 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if strings.TrimSpace(payload.Album.Title) == "" {
 			return apperr.BadRequest("validation.invalid_request", "album title is required")
 		}
-		artists, err := resolveCommitAlbumImportArtists(tx, input)
+		resolvedArtists, err := resolveCommitAlbumImportArtists(tx, input)
 		if err != nil {
 			return err
 		}
-		if len(artists) == 0 {
+		if len(resolvedArtists) == 0 {
 			return apperr.BadRequest("validation.invalid_request", "at least one artist is required")
+		}
+		artists := make([]*model.Artist, 0, len(resolvedArtists))
+		credits := make([]AlbumArtistCreditInput, 0, len(resolvedArtists))
+		for index, resolved := range resolvedArtists {
+			artists = append(artists, resolved.Artist)
+			credits = append(credits, AlbumArtistCreditInput{
+				ArtistID: resolved.Artist.ID.String(),
+				Roles:    resolved.Roles,
+				Position: index + 1,
+			})
 		}
 
 		var sessionPayload map[string]any
@@ -171,7 +181,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				}
 			}
 		}
-		if err := tx.Model(&album).Association("Artists").Replace(artists); err != nil {
+		if err := replaceAlbumArtistCredits(tx, album.ID, credits, true); err != nil {
 			return err
 		}
 
@@ -472,7 +482,12 @@ func isLosslessAudio(container, codec string) bool {
 	return strings.Contains(value, "flac") || strings.Contains(value, "alac") || strings.Contains(value, "wav") || strings.Contains(value, "aiff")
 }
 
-func resolveCommitAlbumImportArtists(tx *gorm.DB, input CommitAlbumImportSessionInput) ([]*model.Artist, error) {
+type resolvedCommitAlbumImportArtist struct {
+	Artist *model.Artist
+	Roles  []AlbumArtistRoleInput
+}
+
+func resolveCommitAlbumImportArtists(tx *gorm.DB, input CommitAlbumImportSessionInput) ([]resolvedCommitAlbumImportArtist, error) {
 	entries := make([]CommitAlbumImportArtistInput, 0, len(input.Artists))
 	if len(input.Artists) > 0 {
 		entries = append(entries, input.Artists...)
@@ -494,7 +509,7 @@ func resolveCommitAlbumImportArtists(tx *gorm.DB, input CommitAlbumImportSession
 		})
 	}
 
-	out := make([]*model.Artist, 0, len(entries))
+	out := make([]resolvedCommitAlbumImportArtist, 0, len(entries))
 	for _, entry := range entries {
 		artistID := strings.TrimSpace(entry.ArtistID)
 		if artistID != "" {
@@ -509,7 +524,7 @@ func resolveCommitAlbumImportArtists(tx *gorm.DB, input CommitAlbumImportSession
 				}
 				return nil, err
 			}
-			out = append(out, &artist)
+			out = append(out, resolvedCommitAlbumImportArtist{Artist: &artist, Roles: entry.Roles})
 			continue
 		}
 
@@ -526,7 +541,7 @@ func resolveCommitAlbumImportArtists(tx *gorm.DB, input CommitAlbumImportSession
 		if err := replaceArtistMembers(tx, artist.ID, entry.Members); err != nil {
 			return nil, err
 		}
-		out = append(out, artist)
+		out = append(out, resolvedCommitAlbumImportArtist{Artist: artist, Roles: entry.Roles})
 	}
 	return out, nil
 }

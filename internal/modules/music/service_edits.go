@@ -48,13 +48,16 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 		}
 
 		if err := tx.Exec(`
-			INSERT INTO album_artists (album_id, artist_id)
-			SELECT aa.album_id, ?
+			INSERT INTO album_artists (album_id, artist_id, role, custom_role, position, created_at, updated_at)
+			SELECT aa.album_id, ?, aa.role, aa.custom_role, aa.position, aa.created_at, aa.updated_at
 			FROM album_artists aa
 			WHERE aa.artist_id = ?
 			  AND NOT EXISTS (
 				SELECT 1 FROM album_artists existing
-				WHERE existing.album_id = aa.album_id AND existing.artist_id = ?
+				WHERE existing.album_id = aa.album_id
+				  AND existing.artist_id = ?
+				  AND existing.role = aa.role
+				  AND existing.custom_role = aa.custom_role
 			  )
 		`, targetArtistID, sourceArtistID, targetArtistID).Error; err != nil {
 			return err

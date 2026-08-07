@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type Artist struct {
@@ -36,6 +37,11 @@ func (Artist) TableName() string {
 	return "Artists"
 }
 
+func (artist *Artist) AfterFind(_ *gorm.DB) error {
+	artist.Albums = uniqueAlbumsByID(artist.Albums)
+	return nil
+}
+
 type ArtistMember struct {
 	Base
 	GroupArtistID  uuid.UUID  `json:"group_artist_id" gorm:"type:uuid;index;not null"`
@@ -52,39 +58,73 @@ func (ArtistMember) TableName() string {
 
 type Album struct {
 	Base
-	Title            string     `json:"title" gorm:"not null"`
-	Description      string     `json:"description" gorm:"type:text"`
-	Year             int        `json:"year"`
-	ReleaseYear      int        `json:"release_year"`
-	ReleaseDate      time.Time  `json:"release_date" gorm:"type:date"`
-	CoverURL         string     `json:"cover_url"`
-	CoverSource      string     `json:"cover_source" gorm:"default:'local'"`
-	Status           string     `json:"status" gorm:"default:'open'"`
-	AlbumType        string     `json:"album_type" gorm:"default:'album'"`
-	EditionType      string     `json:"edition_type" gorm:"default:'original'"`
-	CanonicalAlbumID *uuid.UUID `json:"canonical_album_id,omitempty" gorm:"type:uuid;index"`
-	HotScore         float64    `json:"hot_score" gorm:"default:0;index"`
-	EntryStatus      string     `json:"entry_status" gorm:"default:'open'"`
-	UploadedBy       *uuid.UUID `json:"uploaded_by" gorm:"type:uuid"`
-	User             *User      `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
-	Artists          []Artist   `json:"artists,omitempty" gorm:"many2many:album_artists;"`
-	Songs            []Song     `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
-	OtherVersions    []Album    `json:"other_versions,omitempty" gorm:"-"`
-	PlayCount        int64      `json:"play_count"`
-	BookmarkCount    int64      `json:"bookmark_count" gorm:"-"`
+	Title            string        `json:"title" gorm:"not null"`
+	Description      string        `json:"description" gorm:"type:text"`
+	Year             int           `json:"year"`
+	ReleaseYear      int           `json:"release_year"`
+	ReleaseDate      time.Time     `json:"release_date" gorm:"type:date"`
+	CoverURL         string        `json:"cover_url"`
+	CoverSource      string        `json:"cover_source" gorm:"default:'local'"`
+	Status           string        `json:"status" gorm:"default:'open'"`
+	AlbumType        string        `json:"album_type" gorm:"default:'album'"`
+	EditionType      string        `json:"edition_type" gorm:"default:'original'"`
+	CanonicalAlbumID *uuid.UUID    `json:"canonical_album_id,omitempty" gorm:"type:uuid;index"`
+	HotScore         float64       `json:"hot_score" gorm:"default:0;index"`
+	EntryStatus      string        `json:"entry_status" gorm:"default:'open'"`
+	UploadedBy       *uuid.UUID    `json:"uploaded_by" gorm:"type:uuid"`
+	User             *User         `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
+	Artists          []Artist      `json:"artists,omitempty" gorm:"many2many:album_artists;"`
+	ArtistCredits    []AlbumArtist `json:"artist_credits,omitempty" gorm:"foreignKey:AlbumID"`
+	Songs            []Song        `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
+	OtherVersions    []Album       `json:"other_versions,omitempty" gorm:"-"`
+	PlayCount        int64         `json:"play_count"`
+	BookmarkCount    int64         `json:"bookmark_count" gorm:"-"`
 }
 
 func (Album) TableName() string {
 	return "Albums"
 }
 
+func (album *Album) AfterFind(_ *gorm.DB) error {
+	album.Artists = uniqueArtistsByID(album.Artists)
+	return nil
+}
+
+func uniqueArtistsByID(artists []Artist) []Artist {
+	unique := make([]Artist, 0, len(artists))
+	seen := make(map[uuid.UUID]struct{}, len(artists))
+	for _, artist := range artists {
+		if _, exists := seen[artist.ID]; exists {
+			continue
+		}
+		seen[artist.ID] = struct{}{}
+		unique = append(unique, artist)
+	}
+	return unique
+}
+
+func uniqueAlbumsByID(albums []Album) []Album {
+	unique := make([]Album, 0, len(albums))
+	seen := make(map[uuid.UUID]struct{}, len(albums))
+	for _, album := range albums {
+		if _, exists := seen[album.ID]; exists {
+			continue
+		}
+		seen[album.ID] = struct{}{}
+		unique = append(unique, album)
+	}
+	return unique
+}
+
 type AlbumArtist struct {
-	AlbumID   uuid.UUID `json:"album_id" gorm:"type:uuid;primaryKey"`
-	ArtistID  uuid.UUID `json:"artist_id" gorm:"type:uuid;primaryKey"`
-	Role      string    `json:"role" gorm:"default:'primary'"`
-	Position  int       `json:"position" gorm:"default:0"`
-	CreatedAt time.Time `json:"created_at" gorm:"column:created_at"`
-	UpdatedAt time.Time `json:"updated_at" gorm:"column:updated_at"`
+	AlbumID    uuid.UUID `json:"album_id" gorm:"type:uuid;primaryKey"`
+	ArtistID   uuid.UUID `json:"artist_id" gorm:"type:uuid;primaryKey"`
+	Artist     *Artist   `json:"artist,omitempty" gorm:"foreignKey:ArtistID;references:ID"`
+	Role       string    `json:"role" gorm:"primaryKey;default:'primary'"`
+	CustomRole string    `json:"custom_role" gorm:"primaryKey;default:''"`
+	Position   int       `json:"position" gorm:"default:1"`
+	CreatedAt  time.Time `json:"created_at" gorm:"column:created_at"`
+	UpdatedAt  time.Time `json:"updated_at" gorm:"column:updated_at"`
 }
 
 func (AlbumArtist) TableName() string {

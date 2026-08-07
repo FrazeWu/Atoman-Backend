@@ -3176,6 +3176,10 @@ definitions:
     properties:
       album_type:
         type: string
+      artist_credits:
+        items:
+          $ref: '#/definitions/model.AlbumArtist'
+        type: array
       artists:
         items:
           $ref: '#/definitions/model.Artist'
@@ -3226,6 +3230,25 @@ definitions:
         $ref: '#/definitions/model.User'
       year:
         type: integer
+    type: object
+  model.AlbumArtist:
+    properties:
+      album_id:
+        type: string
+      artist:
+        $ref: '#/definitions/model.Artist'
+      artist_id:
+        type: string
+      created_at:
+        type: string
+      custom_role:
+        type: string
+      position:
+        type: integer
+      role:
+        type: string
+      updated_at:
+        type: string
     type: object
   model.AlbumCorrection:
     properties:
@@ -4259,12 +4282,40 @@ definitions:
         type: string
       play_count:
         type: integer
+      playback_bitrate_kbps:
+        type: integer
+      playback_channels:
+        type: integer
+      playback_codec:
+        type: string
+      playback_container:
+        type: string
       playback_key:
         type: string
+      playback_sample_rate_hz:
+        type: integer
       release_date:
+        type: string
+      source_bit_depth:
+        type: integer
+      source_bitrate_kbps:
+        type: integer
+      source_channels:
+        type: integer
+      source_codec:
+        type: string
+      source_container:
+        type: string
+      source_file_name:
         type: string
       source_key:
         type: string
+      source_lossless:
+        type: boolean
+      source_sample_rate_hz:
+        type: integer
+      source_size_bytes:
+        type: integer
       status:
         type: string
       title:
@@ -4586,9 +4637,70 @@ definitions:
       updated_at:
         type: string
     type: object
+  music.AlbumArtistRoleInput:
+    properties:
+      label:
+        type: string
+      role:
+        type: string
+    type: object
+  music.AlbumImportAlbumPayload:
+    properties:
+      album_type:
+        type: string
+      cover_url:
+        type: string
+      description:
+        type: string
+      release_date:
+        type: string
+      release_year:
+        type: integer
+      title:
+        type: string
+      tracks:
+        items:
+          $ref: '#/definitions/music.AlbumImportTrackPayload'
+        type: array
+    type: object
+  music.AlbumImportArtistPayload:
+    properties:
+      active_end_date:
+        type: string
+      active_start_date:
+        type: string
+      artist_form:
+        type: string
+      bio:
+        type: string
+      birth_date:
+        type: string
+      birth_place:
+        type: string
+      image_url:
+        type: string
+      legal_name:
+        type: string
+      members:
+        items:
+          $ref: '#/definitions/music.ArtistMemberPayload'
+        type: array
+      name:
+        type: string
+      nationality:
+        type: string
+      stage_names:
+        items:
+          $ref: '#/definitions/music.ArtistStageNamePayload'
+        type: array
+    type: object
   music.AlbumImportDTO:
     properties:
+      albumTitle:
+        type: string
       archiveName:
+        type: string
+      artistId:
         type: string
       coverKey:
         type: string
@@ -4731,6 +4843,17 @@ definitions:
       data:
         $ref: '#/definitions/music.AlbumImportMultipartPartUploadDTO'
     type: object
+  music.AlbumImportPayload:
+    properties:
+      album:
+        $ref: '#/definitions/music.AlbumImportAlbumPayload'
+      artist:
+        $ref: '#/definitions/music.AlbumImportArtistPayload'
+      artists:
+        items:
+          $ref: '#/definitions/music.AlbumImportArtistPayload'
+        type: array
+    type: object
   music.AlbumImportProgressDTO:
     properties:
       current:
@@ -4742,6 +4865,13 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/music.AlbumImportDTO'
+    type: object
+  music.AlbumImportTrackPayload:
+    properties:
+      title:
+        type: string
+      track_number:
+        type: integer
     type: object
   music.AnnotationResolutionInput:
     properties:
@@ -4760,12 +4890,97 @@ definitions:
       start_offset:
         type: integer
     type: object
+  music.ArtistMemberPayload:
+    properties:
+      artist_id:
+        type: string
+      join_date:
+        type: string
+      leave_date:
+        type: string
+    type: object
+  music.ArtistStageNamePayload:
+    properties:
+      end_date_text:
+        type: string
+      is_primary:
+        type: boolean
+      name:
+        type: string
+      start_date_text:
+        type: string
+    type: object
+  music.CommitAlbumImportArtistInput:
+    properties:
+      active_end_date:
+        type: string
+      active_start_date:
+        type: string
+      artist_form:
+        type: string
+      artist_id:
+        type: string
+      bio:
+        type: string
+      birth_date:
+        type: string
+      birth_place:
+        type: string
+      image_url:
+        type: string
+      legal_name:
+        type: string
+      members:
+        items:
+          $ref: '#/definitions/music.ArtistMemberPayload'
+        type: array
+      name:
+        type: string
+      nationality:
+        type: string
+      roles:
+        items:
+          $ref: '#/definitions/music.AlbumArtistRoleInput'
+        type: array
+      stage_names:
+        items:
+          $ref: '#/definitions/music.ArtistStageNamePayload'
+        type: array
+    type: object
+  music.CommitAlbumImportSessionInput:
+    properties:
+      album:
+        $ref: '#/definitions/music.AlbumImportAlbumPayload'
+      album_source:
+        type: string
+      artist:
+        $ref: '#/definitions/music.AlbumImportArtistPayload'
+      artist_id:
+        type: string
+      artist_source:
+        type: string
+      artists:
+        items:
+          $ref: '#/definitions/music.CommitAlbumImportArtistInput'
+        type: array
+    type: object
   music.CompleteAlbumImportMultipartPartInput:
     properties:
       etag:
         type: string
       size:
         type: integer
+    type: object
+  music.CreateAlbumImportSessionInput:
+    properties:
+      artistId:
+        type: string
+      inputMode:
+        type: string
+      payload:
+        $ref: '#/definitions/music.AlbumImportPayload'
+      status:
+        type: string
     type: object
   music.CreateLyricAnnotationRequest:
     properties:
@@ -5249,6 +5464,7 @@ definitions:
     properties:
       items:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       total:
@@ -5497,6 +5713,7 @@ definitions:
         type: string
       metrics:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       title:
@@ -5508,6 +5725,7 @@ definitions:
         type: string
       metrics:
         additionalProperties:
+          format: int64
           type: integer
         type: object
     type: object
@@ -5531,6 +5749,7 @@ definitions:
         type: array
       totals:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       trend:
@@ -5613,6 +5832,7 @@ definitions:
         type: array
       metrics:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       module:
@@ -5713,6 +5933,7 @@ definitions:
         type: string
       metrics:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       module:
@@ -6066,7 +6287,7 @@ paths:
       - music-entry-status
   /api/v1/admin/music/quality:
     get:
-      description: 管理员查看缺失封面、曲目、音频和失败导入的音乐资料。
+      description: 管理员查看缺失封面、曲目、音频、关键元数据、重复候选和失败导入的音乐资料。
       parameters:
       - description: 问题类型
         enum:
@@ -6074,6 +6295,8 @@ paths:
         - missing_cover
         - missing_tracks
         - missing_audio
+        - missing_metadata
+        - duplicate_candidate
         - import_failed
         in: query
         name: type
@@ -13366,6 +13589,66 @@ paths:
       summary: 获取音乐首页内容
       tags:
       - music
+  /api/v1/music/imports/albums:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/music.AlbumImportDTO'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取当前用户的专辑导入记录
+      tags:
+      - music-imports
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 导入会话上下文
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.CreateAlbumImportSessionInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/music.AlbumImportResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 创建专辑导入会话
+      tags:
+      - music-imports
   /api/v1/music/imports/albums/{sessionId}:
     delete:
       consumes:
@@ -13411,6 +13694,84 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 取消专辑导入会话
+      tags:
+      - music-imports
+    get:
+      parameters:
+      - description: 导入会话 UUID
+        in: path
+        name: sessionId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.AlbumImportResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取专辑导入会话
+      tags:
+      - music-imports
+  /api/v1/music/imports/albums/{sessionId}/commit:
+    post:
+      consumes:
+      - application/json
+      description: 创建或更新同一导入会话对应的专辑，并保存创作者身份与曲目。
+      parameters:
+      - description: 导入会话 UUID
+        in: path
+        name: sessionId
+        required: true
+        type: string
+      - description: 专辑与创作者资料
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.CommitAlbumImportSessionInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.AlbumImportResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 提交专辑导入
       tags:
       - music-imports
   /api/v1/music/imports/albums/{sessionId}/complete:

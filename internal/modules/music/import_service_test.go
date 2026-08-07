@@ -61,6 +61,47 @@ func TestBuildAlbumImportDTOSerializesV2ListsAsArrays(t *testing.T) {
 	}
 }
 
+func TestBuildAlbumImportDTOUsesTargetAlbumTitle(t *testing.T) {
+	dto := buildAlbumImportDTO(model.AlbumImportSession{
+		TargetAlbum: &model.Album{Title: "Late Registration"},
+		PayloadJSON: `{"derived_album_title":"Archive Guess"}`,
+	})
+
+	if dto.AlbumTitle != "Late Registration" {
+		t.Fatalf("expected target album title, got %q", dto.AlbumTitle)
+	}
+	if dto.DerivedAlbumTitle != "Archive Guess" {
+		t.Fatalf("expected recognized title to remain available, got %q", dto.DerivedAlbumTitle)
+	}
+}
+
+func TestListAlbumImportSessionsForUserPreloadsTargetAlbum(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	album := model.Album{Title: "Late Registration", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	session := model.AlbumImportSession{
+		UserID:        &user.ID,
+		PayloadJSON:   `{}`,
+		TargetAlbumID: &album.ID,
+	}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+
+	sessions, err := svc.ListAlbumImportSessionsForUser(user)
+	if err != nil {
+		t.Fatalf("list album import sessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].TargetAlbum == nil {
+		t.Fatalf("expected target album to be preloaded, got %#v", sessions)
+	}
+	if sessions[0].TargetAlbum.Title != "Late Registration" {
+		t.Fatalf("expected target album title, got %q", sessions[0].TargetAlbum.Title)
+	}
+}
+
 func TestCreateAlbumImportSessionStoresOwnerAndExpiration(t *testing.T) {
 	svc, _, user := newMusicTestService(t)
 
@@ -78,6 +119,35 @@ func TestCreateAlbumImportSessionStoresOwnerAndExpiration(t *testing.T) {
 	}
 	if session.ExpiresAt == nil || session.ExpiresAt.Before(time.Now().UTC().Add(6*24*time.Hour)) {
 		t.Fatalf("expected expiration about seven days ahead, got %#v", session.ExpiresAt)
+	}
+}
+
+func TestCreateAlbumImportSessionStoresInputContext(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		ArtistID:  "artist-existing",
+		InputMode: AlbumImportInputModeFolder,
+	})
+	if err != nil {
+		t.Fatalf("create album import session: %v", err)
+	}
+	if session.InputMode != AlbumImportInputModeFolder {
+		t.Fatalf("expected folder input mode, got %q", session.InputMode)
+	}
+
+	dto := buildAlbumImportDTO(session)
+	if dto.ArtistID != "artist-existing" {
+		t.Fatalf("expected artist id in DTO, got %q", dto.ArtistID)
+	}
+}
+
+func TestCreateAlbumImportSessionRejectsInvalidInputMode(t *testing.T) {
+	svc, _, user := newMusicTestService(t)
+
+	_, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{InputMode: "disc"})
+	if err == nil {
+		t.Fatal("expected invalid input mode error")
 	}
 }
 
@@ -1319,10 +1389,20 @@ func TestCommitAlbumImportSessionSupportsMultipleCreators(t *testing.T) {
 
 	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		Artists: []CommitAlbumImportArtistInput{
-			{ArtistID: existingArtist.ID.String()},
+			{
+				ArtistID: existingArtist.ID.String(),
+				Roles: []AlbumArtistRoleInput{
+					{Role: "primary"},
+					{Role: "producer"},
+				},
+			},
 			{
 				Name:       "New Creator",
 				ArtistForm: "person",
+				Roles: []AlbumArtistRoleInput{
+					{Role: "featured"},
+					{Role: "custom", Label: "Mix Engineer"},
+				},
 			},
 		},
 		Album: AlbumImportAlbumPayload{
@@ -1343,6 +1423,13 @@ func TestCommitAlbumImportSessionSupportsMultipleCreators(t *testing.T) {
 	}
 	if len(album.Artists) != 2 {
 		t.Fatalf("expected album linked to 2 creators, got %#v", album.Artists)
+	}
+	var credits []model.AlbumArtist
+	if err := db.Where("album_id = ?", album.ID).Order("position ASC, role ASC").Find(&credits).Error; err != nil {
+		t.Fatalf("load album credits: %v", err)
+	}
+	if len(credits) != 4 {
+		t.Fatalf("expected four album credits, got %#v", credits)
 	}
 
 	var songs []model.Song

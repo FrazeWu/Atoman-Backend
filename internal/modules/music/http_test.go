@@ -32,7 +32,9 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.ArtistAlias{},
 		&model.ArtistMerge{},
 		&model.Album{},
+		&model.AlbumArtist{},
 		&model.Song{},
+		&model.SongArtist{},
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
 		&model.SongBookmark{},
@@ -62,6 +64,61 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 	}
 
 	return NewService(db), db, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser}
+}
+
+func TestRegisterRoutesAlbumDetailReturnsArtistCredits(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Credited Artist", EntryStatus: "open"}
+	album := model.Album{Title: "Credited Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	for _, credit := range []model.AlbumArtist{
+		{AlbumID: album.ID, ArtistID: artist.ID, Role: "primary", Position: 1},
+		{AlbumID: album.ID, ArtistID: artist.ID, Role: "custom", CustomRole: "Mix Engineer", Position: 1},
+	} {
+		if err := db.Create(&credit).Error; err != nil {
+			t.Fatalf("create credit: %v", err)
+		}
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), nil)
+	newMusicHTTPRouter(service, &user).ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Artists []struct {
+				ID string `json:"id"`
+			} `json:"artists"`
+			Credits []struct {
+				ArtistID   string `json:"artist_id"`
+				Role       string `json:"role"`
+				CustomRole string `json:"custom_role"`
+				Artist     *struct {
+					Name string `json:"name"`
+				} `json:"artist"`
+			} `json:"artist_credits"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode album detail: %v", err)
+	}
+	if len(payload.Data.Artists) != 1 || len(payload.Data.Credits) != 2 {
+		t.Fatalf("unexpected artist response: %#v", payload.Data)
+	}
+	hasCustomRole := false
+	for _, credit := range payload.Data.Credits {
+		hasCustomRole = hasCustomRole || (credit.CustomRole == "Mix Engineer" && credit.Artist != nil)
+	}
+	if !hasCustomRole {
+		t.Fatalf("expected custom role and artist data, got %#v", payload.Data.Credits)
+	}
 }
 
 func TestRegisterRoutesPlaylistBookmarksMatchFrontendContract(t *testing.T) {

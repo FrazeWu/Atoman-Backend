@@ -12,6 +12,19 @@ import (
 	"github.com/google/uuid"
 )
 
+// createAlbumImportSession godoc
+// @Summary 创建专辑导入会话
+// @Tags music-imports
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param input body CreateAlbumImportSessionInput true "导入会话上下文"
+// @Success 201 {object} AlbumImportResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/music/imports/albums [post]
 func (h *Handler) createAlbumImportSession(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -33,6 +46,16 @@ func (h *Handler) createAlbumImportSession(c *gin.Context) {
 	httpx.OK(c, http.StatusCreated, buildAlbumImportDTO(session))
 }
 
+// listAlbumImportSessions godoc
+// @Summary 获取当前用户的专辑导入记录
+// @Tags music-imports
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Success 200 {array} AlbumImportDTO
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/music/imports/albums [get]
 func (h *Handler) listAlbumImportSessions(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -524,6 +547,17 @@ func albumImportMultipartRouteParams(c *gin.Context) (uuid.UUID, int, bool) {
 	return sessionID, partNumber, true
 }
 
+// getAlbumImportSession godoc
+// @Summary 获取专辑导入会话
+// @Tags music-imports
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param sessionId path string true "导入会话 UUID"
+// @Success 200 {object} AlbumImportResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/music/imports/albums/{sessionId} [get]
 func (h *Handler) getAlbumImportSession(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {
@@ -567,6 +601,23 @@ func (h *Handler) repairAlbumImportSession(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, buildAlbumImportDTO(session))
 }
 
+// commitAlbumImportSession godoc
+// @Summary 提交专辑导入
+// @Description 创建或更新同一导入会话对应的专辑，并保存创作者身份与曲目。
+// @Tags music-imports
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param sessionId path string true "导入会话 UUID"
+// @Param input body CommitAlbumImportSessionInput true "专辑与创作者资料"
+// @Success 200 {object} AlbumImportResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 422 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/music/imports/albums/{sessionId}/commit [post]
 func (h *Handler) commitAlbumImportSession(c *gin.Context) {
 	user, ok := authctx.Current(c)
 	if !ok {

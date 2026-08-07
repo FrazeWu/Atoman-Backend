@@ -38,6 +38,10 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	}
 
 	coverURL := resolveAlbumImportCoverURL(payload)
+	albumTitle := ""
+	if session.TargetAlbum != nil {
+		albumTitle = strings.TrimSpace(session.TargetAlbum.Title)
+	}
 	dto := AlbumImportDTO{
 		ImportID: session.ID.String(),
 		TargetAlbumID: func() string {
@@ -46,9 +50,11 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 			}
 			return session.TargetAlbumID.String()
 		}(),
-		Status:    session.Status,
-		InputMode: inputMode,
-		Stage:     stage,
+		ArtistID:   stringValue(payload["artist_id"]),
+		AlbumTitle: albumTitle,
+		Status:     session.Status,
+		InputMode:  inputMode,
+		Stage:      stage,
 		Progress: AlbumImportProgressDTO{
 			Current: session.ProgressCurrent,
 			Total:   session.ProgressTotal,
@@ -140,16 +146,29 @@ func (s *Service) CreateAlbumImportSession(user authctx.CurrentUser, input Creat
 		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "payload is not valid")
 	}
 
+	inputMode := normalizeAlbumImportInputMode(input.InputMode)
+	if !isAlbumImportInputModeAllowed(inputMode) {
+		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "invalid import input mode")
+	}
+
 	session := model.AlbumImportSession{
 		UserID:      &user.ID,
-		InputMode:   AlbumImportInputModeAuto,
+		InputMode:   inputMode,
 		PayloadJSON: string(payloadJSON),
 	}
 	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
 	if err != nil {
 		return model.AlbumImportSession{}, err
 	}
+	if artistID := strings.TrimSpace(input.ArtistID); artistID != "" {
+		payload["artist_id"] = artistID
+	}
 	applyAlbumImportSessionState(&session, status, payload)
+	payloadJSON, err = json.Marshal(payload)
+	if err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	session.PayloadJSON = string(payloadJSON)
 	expiresAt := time.Now().UTC().Add(7 * 24 * time.Hour)
 	session.ExpiresAt = &expiresAt
 	if err := s.db.Create(&session).Error; err != nil {
@@ -279,7 +298,7 @@ func (s *Service) ListAlbumImportSessionsForUser(user authctx.CurrentUser) ([]mo
 		return nil, apperr.Unauthorized("Login required")
 	}
 	var sessions []model.AlbumImportSession
-	if err := s.db.Preload("Files").Preload("Job").
+	if err := s.db.Preload("Files").Preload("Job").Preload("TargetAlbum").
 		Where("user_id = ? AND created_at >= ?", user.ID, time.Now().UTC().Add(-7*24*time.Hour)).
 		Order("created_at DESC").
 		Find(&sessions).Error; err != nil {
@@ -290,7 +309,7 @@ func (s *Service) ListAlbumImportSessionsForUser(user authctx.CurrentUser) ([]mo
 
 func loadAlbumImportSession(db *gorm.DB, id uuid.UUID, userID *uuid.UUID) (model.AlbumImportSession, error) {
 	var session model.AlbumImportSession
-	query := db.Preload("Files").Preload("Job")
+	query := db.Preload("Files").Preload("Job").Preload("TargetAlbum")
 	if userID != nil {
 		query = query.Where("user_id = ?", *userID)
 	}
@@ -308,6 +327,22 @@ func normalizeAlbumImportStatus(status string) string {
 		return AlbumImportStatusPendingUpload
 	}
 	return strings.TrimSpace(strings.ToLower(status))
+}
+
+func normalizeAlbumImportInputMode(inputMode string) string {
+	if strings.TrimSpace(inputMode) == "" {
+		return AlbumImportInputModeAuto
+	}
+	return strings.TrimSpace(strings.ToLower(inputMode))
+}
+
+func isAlbumImportInputModeAllowed(inputMode string) bool {
+	switch inputMode {
+	case AlbumImportInputModeAuto, AlbumImportInputModeArchive, AlbumImportInputModeFiles, AlbumImportInputModeFolder:
+		return true
+	default:
+		return false
+	}
 }
 
 func isAlbumImportStatusAllowed(status string) bool {
