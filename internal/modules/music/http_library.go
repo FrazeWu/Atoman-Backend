@@ -2,6 +2,7 @@ package music
 
 import (
 	"net/http"
+	"strings"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -131,6 +132,49 @@ func (h *Handler) listSongBookmarks(c *gin.Context) {
 		return
 	}
 	httpx.List(c, bookmarks, page, pageSize, total)
+}
+
+// songBookmarkStatus godoc
+// @Summary 批量查询歌曲收藏状态
+// @Tags music-bookmarks
+// @Produce json
+// @Param song_ids query string true "逗号分隔的歌曲 UUID"
+// @Security BearerAuth
+// @Security CookieAuth
+// @Success 200 {object} SongBookmarkStatusResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Router /api/v1/music/bookmarks/songs/status [get]
+func (h *Handler) songBookmarkStatus(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	rawIDs := strings.Split(c.Query("song_ids"), ",")
+	if len(rawIDs) == 0 || len(rawIDs) > 200 {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "song_ids must contain 1 to 200 song IDs"))
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(rawIDs))
+	seen := make(map[uuid.UUID]struct{}, len(rawIDs))
+	for _, rawID := range rawIDs {
+		id, err := uuid.Parse(strings.TrimSpace(rawID))
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "song_ids contains an invalid song ID"))
+			return
+		}
+		if _, exists := seen[id]; !exists {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	bookmarkedIDs, err := h.service.SongBookmarkIDs(user, ids)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"song_ids": bookmarkedIDs})
 }
 
 func (h *Handler) createSongBookmark(c *gin.Context) {
@@ -292,7 +336,7 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 			Description: playlist.Description,
 			CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
 			IsPublic:    playlist.IsPublic,
-			IsFavorite:  playlist.IsFavorite,
+			Kind:        playlist.Kind,
 			SongCount:   songCounts[playlist.ID],
 		})
 	}
@@ -324,7 +368,7 @@ func (h *Handler) listPublicPlaylists(c *gin.Context) {
 			Description: playlist.Description,
 			CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
 			IsPublic:    playlist.IsPublic,
-			IsFavorite:  playlist.IsFavorite,
+			Kind:        playlist.Kind,
 			SongCount:   songCounts[playlist.ID],
 		})
 	}
@@ -339,7 +383,7 @@ func buildPlaylistSummaryResponse(playlist model.Playlist, songCount int64) Play
 		Description: playlist.Description,
 		CoverURL:    resolveMusicMediaURL(playlist.CoverURL),
 		IsPublic:    playlist.IsPublic,
-		IsFavorite:  playlist.IsFavorite,
+		Kind:        playlist.Kind,
 		SongCount:   songCount,
 	}
 }

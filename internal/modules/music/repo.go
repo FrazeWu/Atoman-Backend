@@ -354,7 +354,7 @@ func (r *Repo) ListPlaylists(userID uuid.UUID, page int, pageSize int, sort stri
 
 func (r *Repo) ListPublicPlaylists(page int, pageSize int) ([]model.Playlist, int64, error) {
 	var total int64
-	db := r.db.Model(&model.Playlist{}).Where("is_public = ? AND is_favorite = ?", true, false)
+	db := r.db.Model(&model.Playlist{}).Where("is_public = ? AND kind = ?", true, "user")
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
@@ -368,7 +368,7 @@ func (r *Repo) ListRecentPublicPlaylists(limit int) ([]model.Playlist, int64, er
 		limit = 1
 	}
 	var total int64
-	base := r.db.Model(&model.Playlist{}).Where("is_public = ? AND is_favorite = ?", true, false)
+	base := r.db.Model(&model.Playlist{}).Where("is_public = ? AND kind = ?", true, "user")
 	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}

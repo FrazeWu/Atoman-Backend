@@ -34,48 +34,27 @@ func signedRouterTokenForTest(t *testing.T, db *gorm.DB, user model.User) string
 	return credentials.Token
 }
 
-func TestRegisterV1RoutesMountsMusicSubmitEdit(t *testing.T) {
+func TestRegisterV1RoutesDoesNotMountMusicEditReviewAPI(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db,
-		&model.User{},
-		&model.Artist{},
-		&model.Album{},
-		&model.Song{},
-		&model.MusicEdit{},
-		&model.MusicEditVote{},
-		&model.MusicEditDecision{},
-		&model.MusicEditChange{},
-		&model.AuditLog{},
-	)
-	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
-	if err := db.Create(&user).Error; err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-
 	r := gin.New()
-	r.Use(func(c *gin.Context) {
-		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser})
-		c.Next()
-	})
 	RegisterV1Routes(r, db, nil, nil, collab.NewUserHub(), collab.NewHub())
 
-	body := map[string]any{
-		"type":        "create_artist",
-		"entity_type": "artist",
-		"payload": map[string]any{
-			"name": "Router Artist",
-		},
-		"changes": map[string]any{},
-		"reason":  "new artist",
-	}
-	raw, _ := json.Marshal(body)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/edits", bytes.NewReader(raw))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	for _, path := range []string{
+		"/api/v1/music/edits",
+		"/api/v1/music/edits/" + uuid.NewString(),
+		"/api/v1/music/edits/" + uuid.NewString() + "/approve",
+		"/api/v1/corrections/song",
+		"/api/v1/corrections/album",
+		"/api/v1/corrections/artist",
+		"/api/v1/admin/reviews/songs/" + uuid.NewString() + "/approve",
+		"/api/v1/admin/reviews/song-corrections/" + uuid.NewString() + "/approve",
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, nil))
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("expected %s to be unmounted, got %d: %s", path, w.Code, w.Body.String())
+		}
 	}
 }
 

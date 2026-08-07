@@ -147,7 +147,7 @@ func GetArtistRevisionHandler(revisionService *service.RevisionService) gin.Hand
 
 // CreateArtistRevisionHandler godoc
 // @Summary 创建艺人修订
-// @Description 基于指定基线 revision 提交艺人修订。
+// @Description 基于指定基线 revision 创建并直接应用艺人修订。
 // @Tags music-artists
 // @Accept json
 // @Produce json
@@ -178,22 +178,18 @@ func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionS
 		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 		userRole := c.GetString("role")
-		autoApprove := true
 
 		var protection model.ContentProtection
 		if err := db.Where("content_id = ? AND content_type = ?", artistID, "artist").
 			First(&protection).Error; err == nil {
-			if protection.ProtectionLevel == "full" && userRole != "admin" {
+			if protection.ProtectionLevel == "full" && !authctx.RoleAtLeast(userRole, authctx.RoleAdmin) {
 				c.JSON(http.StatusForbidden, gin.H{"error": "This artist is fully protected"})
 				return
-			}
-			if protection.ProtectionLevel == "semi" && userRole != "admin" {
-				autoApprove = false
 			}
 		}
 
 		revision, conflicts, err := revisionService.CreateRevision(
-			"artist", artistID, editorUUID, input.Changes, input.EditSummary, input.BaseRevision, autoApprove,
+			"artist", artistID, editorUUID, input.Changes, input.EditSummary, input.BaseRevision, true,
 		)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -204,7 +200,7 @@ func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionS
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"data": revision, "message": statusMessage(autoApprove)})
+		c.JSON(http.StatusOK, gin.H{"data": revision, "message": "Changes saved"})
 	}
 }
 

@@ -58,7 +58,7 @@ func Run(db *gorm.DB) error {
 		{"music album import media migration", migrations.RunMusicAlbumImportMediaMigration},
 		{"music artist extended fields migration", migrations.RunMusicArtistExtendedFieldsMigration},
 		{"music bookmarks playlists migration", migrations.RunMusicBookmarksPlaylistsMigration},
-		{"music favorite playlist migration", migrations.RunMusicFavoritePlaylistMigration},
+		{"music standalone song bookmarks migration", migrations.RunMusicFavoritePlaylistMigration},
 		{"music play counts migration", migrations.RunMusicPlayCountsMigration},
 		{"music lyrics migration", migrations.RunMusicLyricsMigration},
 		{"music listening migration", migrations.RunMusicListeningMigration},

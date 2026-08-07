@@ -63,4 +63,12 @@ func TestMusicEntityUpdatesOnlyExposeRevisionRoutes(t *testing.T) {
 			t.Fatalf("expected legacy update route %q to be unmounted", route)
 		}
 	}
+	for _, route := range []string{
+		"POST /api/v1/admin/reviews/revisions/:id/approve",
+		"POST /api/v1/admin/reviews/revisions/:id/reject",
+	} {
+		if routes[route] {
+			t.Fatalf("expected revision review route %q to be removed", route)
+		}
+	}
 }

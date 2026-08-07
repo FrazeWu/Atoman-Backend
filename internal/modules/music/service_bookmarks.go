@@ -95,6 +95,21 @@ func (s *Service) DeleteSongBookmark(user authctx.CurrentUser, songID uuid.UUID)
 	return s.repo.DeleteSongBookmark(user.ID, songID)
 }
 
+func (s *Service) SongBookmarkIDs(user authctx.CurrentUser, songIDs []uuid.UUID) ([]uuid.UUID, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	if len(songIDs) == 0 {
+		return []uuid.UUID{}, nil
+	}
+	var ids []uuid.UUID
+	err := s.db.Model(&model.SongBookmark{}).
+		Where("user_id = ? AND song_id IN ?", user.ID, songIDs).
+		Order("song_id ASC").
+		Pluck("song_id", &ids).Error
+	return ids, err
+}
+
 func (s *Service) ListPlaylistBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.PlaylistBookmark, int64, error) {
 	return s.ListPlaylistBookmarksFiltered(user, page, pageSize, sort, "")
 }

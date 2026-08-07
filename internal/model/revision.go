@@ -83,7 +83,7 @@ type ContentProtection struct {
 
 	ProtectionLevel string `json:"protection_level" gorm:"default:'none'"` // 'none' / 'semi' / 'full'
 	// none: anyone can edit
-	// semi: edits require approval
+	// semi: authenticated users can edit; the protection marker remains visible
 	// full: only admin can edit
 
 	ProtectedBy   uuid.UUID  `json:"protected_by" gorm:"type:uuid;not null"` // Admin who set protection

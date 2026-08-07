@@ -59,6 +59,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/bookmarks/albums", h.createAlbumBookmark)
 	group.DELETE("/bookmarks/albums/:albumId", h.deleteAlbumBookmark)
 	group.GET("/bookmarks/songs", h.listSongBookmarks)
+	group.GET("/bookmarks/songs/status", h.songBookmarkStatus)
 	group.POST("/bookmarks/songs", h.createSongBookmark)
 	group.DELETE("/bookmarks/songs/:songId", h.deleteSongBookmark)
 	group.GET("/bookmarks/playlists", h.listPlaylistBookmarks)
@@ -90,13 +91,6 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.PATCH("/songs/:songId/lyrics/annotations/:annotationId", h.updateLyricAnnotation)
 	group.DELETE("/songs/:songId/lyrics/annotations/:annotationId", h.deleteLyricAnnotation)
 	group.POST("/songs/:songId/lyrics/annotations/:annotationId/votes", h.voteLyricAnnotation)
-	group.POST("/edits", h.submitEdit)
-	group.GET("/edits", h.listEdits)
-	group.GET("/edits/:editId", h.getEdit)
-	group.POST("/edits/:editId/votes", h.voteEdit)
-	group.POST("/edits/:editId/approve", h.approveEdit)
-	group.POST("/edits/:editId/reject", h.rejectEdit)
-	group.POST("/edits/:editId/cancel", h.cancelEdit)
 }
 
 func currentMusicUser(c *gin.Context) (authctx.CurrentUser, bool) {

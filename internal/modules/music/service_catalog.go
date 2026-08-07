@@ -9,6 +9,7 @@ import (
 	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest) (model.Artist, error) {
@@ -21,14 +22,17 @@ func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest
 	}
 
 	artist := model.Artist{
-		Name:        name,
-		Bio:         strings.TrimSpace(req.Bio),
-		ImageURL:    strings.TrimSpace(req.ImageURL),
-		Nationality: strings.TrimSpace(req.Nationality),
-		BirthYear:   req.BirthYear,
-		DeathYear:   req.DeathYear,
-		ArtistForm:  "person",
-		EntryStatus: "open",
+		Name:           name,
+		LegalName:      strings.TrimSpace(req.LegalName),
+		StageNamesJSON: mustMarshalStageNames(req.StageNames),
+		Bio:            strings.TrimSpace(req.Bio),
+		ImageURL:       strings.TrimSpace(req.ImageURL),
+		Nationality:    strings.TrimSpace(req.Nationality),
+		BirthPlace:     strings.TrimSpace(req.BirthPlace),
+		BirthYear:      req.BirthYear,
+		DeathYear:      req.DeathYear,
+		ArtistForm:     normalizeArtistForm(req.ArtistForm),
+		EntryStatus:    "open",
 	}
 	if strings.TrimSpace(req.BirthDate) != "" {
 		birthDate, err := parseMusicDate(req.BirthDate, "birth_date")
@@ -36,8 +40,30 @@ func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest
 			return model.Artist{}, err
 		}
 		artist.BirthDate = &birthDate
+		artist.BirthYear = birthDate.Year()
 	}
-	return s.repo.CreateArtist(artist)
+	if strings.TrimSpace(req.ActiveStartDate) != "" {
+		activeStartDate, err := parseMusicDate(req.ActiveStartDate, "active_start_date")
+		if err != nil {
+			return model.Artist{}, err
+		}
+		artist.ActiveStartDate = activeStartDate
+	}
+	if strings.TrimSpace(req.ActiveEndDate) != "" {
+		activeEndDate, err := parseMusicDate(req.ActiveEndDate, "active_end_date")
+		if err != nil {
+			return model.Artist{}, err
+		}
+		artist.ActiveEndDate = activeEndDate
+	}
+
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&artist).Error; err != nil {
+			return err
+		}
+		return replaceArtistMembers(tx, artist.ID, req.Members)
+	})
+	return artist, err
 }
 
 func parseMusicDate(raw string, field string) (time.Time, error) {

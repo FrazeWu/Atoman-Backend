@@ -20,9 +20,6 @@ func RunMusicCatalogV2Migration(db *gorm.DB) error {
 		if err := tx.Model(&model.Playlist{}).Where("COALESCE(kind, '') = ''").Update("kind", "user").Error; err != nil {
 			return fmt.Errorf("backfill playlist kind: %w", err)
 		}
-		if err := tx.Model(&model.Playlist{}).Where("is_favorite = ?", true).Update("kind", "favorite").Error; err != nil {
-			return fmt.Errorf("mark favorite playlist kind: %w", err)
-		}
 		if err := tx.Model(&model.AlbumArtist{}).Where("position = ?", 0).Update("position", 1).Error; err != nil {
 			return fmt.Errorf("backfill album artist position: %w", err)
 		}
@@ -31,6 +28,6 @@ func RunMusicCatalogV2Migration(db *gorm.DB) error {
 		}
 		return tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_music_playlists_user_system_kind
 			ON music_playlists (user_id, kind)
-			WHERE kind IN ('favorite', 'later') AND deleted_at IS NULL`).Error
+			WHERE kind = 'later' AND deleted_at IS NULL`).Error
 	})
 }

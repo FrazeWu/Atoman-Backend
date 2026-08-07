@@ -843,23 +843,12 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 		t.Fatalf("expected one default bookmark folder, got %d", len(folders))
 	}
 
-	var playlists []model.Playlist
-	if err := db.Where("user_id = ? AND name = ?", user.UUID, "最爱").Find(&playlists).Error; err != nil {
-		t.Fatalf("find favorite playlists: %v", err)
+	var playlists int64
+	if err := db.Model(&model.Playlist{}).Where("user_id = ?", user.UUID).Count(&playlists).Error; err != nil {
+		t.Fatalf("count default music playlists: %v", err)
 	}
-	if len(playlists) != 1 {
-		t.Fatalf("expected one default favorite playlist, got %d", len(playlists))
-	}
-	if !playlists[0].IsFavorite || playlists[0].IsPublic {
-		t.Fatalf("expected private system favorite playlist, got %#v", playlists[0])
-	}
-
-	var playlistSongs int64
-	if err := db.Model(&model.PlaylistSong{}).Where("playlist_id = ?", playlists[0].ID).Count(&playlistSongs).Error; err != nil {
-		t.Fatalf("count playlist songs: %v", err)
-	}
-	if playlistSongs != 0 {
-		t.Fatalf("expected empty favorite playlist, got %d songs", playlistSongs)
+	if playlists != 0 {
+		t.Fatalf("expected song bookmarks to stay separate from playlists, got %d playlists", playlists)
 	}
 }
 

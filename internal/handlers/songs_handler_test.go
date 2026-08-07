@@ -67,43 +67,6 @@ func TestLegacySongCreateAndUpdateKeepLyricsWikiInSync(t *testing.T) {
 	}
 }
 
-func TestApproveSongLyricsCorrectionKeepsLyricsWikiInSync(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	db := testdb.Open(t)
-	testdb.Migrate(t, db,
-		&model.User{}, &model.Song{}, &model.SongCorrection{},
-		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
-		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
-	)
-	admin := createDeleteSongTestUser(t, db, "correction-admin", authctx.RoleAdmin)
-	song := model.Song{Title: "Corrected", AudioURL: "/corrected.mp3", Lyrics: "old"}
-	if err := db.Create(&song).Error; err != nil {
-		t.Fatalf("create song: %v", err)
-	}
-	correction := model.SongCorrection{SongID: song.ID, Status: "pending", FieldName: "lyrics", CurrentValue: "old", CorrectedValue: "new"}
-	if err := db.Create(&correction).Error; err != nil {
-		t.Fatalf("create correction: %v", err)
-	}
-	r := gin.New()
-	r.Use(func(c *gin.Context) {
-		c.Set("user_id", admin.UUID)
-		c.Next()
-	})
-	r.POST("/api/v1/admin/song-corrections/:id/approve", ApproveSongCorrectionHandler(db))
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/admin/song-corrections/"+correction.ID.String()+"/approve", nil))
-	if w.Code != http.StatusOK {
-		t.Fatalf("approve correction: %d %s", w.Code, w.Body.String())
-	}
-	var lyric model.MusicSongLyric
-	if err := db.First(&lyric, "song_id = ?", song.ID).Error; err != nil {
-		t.Fatalf("load corrected wiki lyric: %v", err)
-	}
-	if lyric.Content != "new" || lyric.UpdatedBy != admin.UUID || lyric.EditSummary != "通过歌词纠错更新" {
-		t.Fatalf("unexpected corrected wiki lyric: %#v", lyric)
-	}
-}
-
 func newDeleteSongTestRouter(t *testing.T, current authctx.CurrentUser) (*gin.Engine, *gorm.DB) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

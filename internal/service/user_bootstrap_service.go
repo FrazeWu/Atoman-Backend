@@ -57,10 +57,6 @@ func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string)
 	if err := s.ensureDefaultBookmarkFolder(userID); err != nil {
 		return err
 	}
-	if err := s.ensureFavoritePlaylist(userID); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -262,21 +258,6 @@ func (s *UserBootstrapService) ensureDefaultBookmarkFolder(userID uuid.UUID) err
 		Name:   defaultBookmarkFolderName,
 	}
 	return s.db.Create(&folder).Error
-}
-
-func (s *UserBootstrapService) ensureFavoritePlaylist(userID uuid.UUID) error {
-	var playlist model.Playlist
-	err := s.db.Where("user_id = ? AND is_favorite = ?", userID, true).First(&playlist).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		err = s.db.Where("user_id = ? AND name = ?", userID, "最爱").First(&playlist).Error
-	}
-	if err == nil {
-		return s.db.Model(&playlist).Updates(map[string]any{"is_favorite": true, "is_public": false, "kind": "favorite", "name": "最爱"}).Error
-	}
-	if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return err
-	}
-	return s.db.Create(&model.Playlist{UserID: userID, Name: "最爱", Kind: "favorite", IsFavorite: true}).Error
 }
 
 func buildUserBootstrapFeedSourceHash(sourceType string, sourceID uuid.UUID) string {

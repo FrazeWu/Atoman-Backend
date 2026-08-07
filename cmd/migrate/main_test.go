@@ -183,9 +183,9 @@ func TestRunMigrationsBackfillsUserDefaultResources(t *testing.T) {
 	if db.Migrator().HasTable("user_default_channels") {
 		t.Fatal("expected legacy default channel selections to be removed")
 	}
-	var favorites int64
-	if err := db.Model(&model.Playlist{}).Where("user_id = ? AND is_favorite = ?", user.UUID, true).Count(&favorites).Error; err != nil || favorites != 1 {
-		t.Fatalf("expected one favorite playlist, got %d err=%v", favorites, err)
+	var playlists int64
+	if err := db.Model(&model.Playlist{}).Where("user_id = ?", user.UUID).Count(&playlists).Error; err != nil || playlists != 0 {
+		t.Fatalf("expected no implicit music playlists, got %d err=%v", playlists, err)
 	}
 	var folders int64
 	if err := db.Model(&model.BookmarkFolder{}).Where("user_id = ? AND name = ?", user.UUID, "默认收藏夹").Count(&folders).Error; err != nil || folders != 1 {

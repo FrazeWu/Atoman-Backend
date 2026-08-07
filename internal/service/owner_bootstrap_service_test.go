@@ -91,8 +91,8 @@ func TestEnsureOwnerCreatesDefaultResources(t *testing.T) {
 	if err := db.Where("user_id = ?", owner.UUID).Find(&playlists).Error; err != nil {
 		t.Fatalf("find playlists: %v", err)
 	}
-	if len(playlists) != 1 || !playlists[0].IsFavorite || playlists[0].IsPublic {
-		t.Fatalf("expected one private favorite playlist, got %#v", playlists)
+	if len(playlists) != 0 {
+		t.Fatalf("expected song bookmarks to stay separate from playlists, got %#v", playlists)
 	}
 }
 

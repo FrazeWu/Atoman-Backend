@@ -38,13 +38,6 @@ func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB) {
 		songs.POST("/revisions/:version/revert", middleware.AuthMiddleware(), RevertSongHandler(revisionService))
 	}
 
-	// Admin approval endpoints
-	admin := router.Group("/api/v1/admin/reviews/revisions")
-	admin.Use(middleware.AuthMiddleware(), middleware.AdminMiddleware(db))
-	{
-		admin.POST("/:id/approve", ApproveRevisionHandler(revisionService))
-		admin.POST("/:id/reject", RejectRevisionHandler(revisionService))
-	}
 }
 
 type CreateRevisionInput struct {
@@ -177,7 +170,7 @@ func GetAlbumRevisionDiffHandler(revisionService *service.RevisionService) gin.H
 
 // CreateAlbumRevisionHandler godoc
 // @Summary 提交专辑修订
-// @Description 为专辑创建一条新的修订；半保护内容会进入待审核，发生冲突时返回冲突详情。
+// @Description 为专辑创建并直接应用一条新的修订；发生冲突时返回冲突详情。
 // @Tags music-revisions
 // @Accept json
 // @Produce json
@@ -210,9 +203,7 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 
-		// Check if user is admin for auto-approval
 		userRole := c.GetString("role")
-		autoApprove := true
 
 		// Check protection level
 		var protection model.ContentProtection
@@ -223,13 +214,9 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 		}
 
 		// Apply protection rules
-		if protectionLevel == "full" && userRole != "admin" {
+		if protectionLevel == "full" && !authctx.RoleAtLeast(userRole, authctx.RoleAdmin) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "This album is fully protected. Only admins can edit."})
 			return
-		}
-
-		if protectionLevel == "semi" && userRole != "admin" {
-			autoApprove = false
 		}
 
 		// Create revision
@@ -240,7 +227,7 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 			input.Changes,
 			input.EditSummary,
 			input.BaseRevision,
-			autoApprove,
+			true,
 		)
 
 		if err != nil {
@@ -259,7 +246,7 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 
 		c.JSON(http.StatusOK, gin.H{
 			"data":    revision,
-			"message": statusMessage(autoApprove),
+			"message": "Changes saved",
 		})
 	}
 }
@@ -433,7 +420,7 @@ func GetSongRevisionDiffHandler(revisionService *service.RevisionService) gin.Ha
 
 // CreateSongRevisionHandler godoc
 // @Summary 提交歌曲修订
-// @Description 为歌曲创建一条新的修订；半保护内容会进入待审核，发生冲突时返回冲突详情。
+// @Description 为歌曲创建并直接应用一条新的修订；发生冲突时返回冲突详情。
 // @Tags music-revisions
 // @Accept json
 // @Produce json
@@ -464,12 +451,11 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
 		userRole := c.GetString("role")
-		autoApprove := true
 
 		var protection model.ContentProtection
 		if err := db.Where("content_id = ? AND content_type = ?", songID, "song").
 			First(&protection).Error; err == nil {
-			if protection.ProtectionLevel == "full" && userRole != "admin" {
+			if protection.ProtectionLevel == "full" && !authctx.RoleAtLeast(userRole, authctx.RoleAdmin) {
 				c.JSON(http.StatusForbidden, gin.H{"error": "This song is fully protected"})
 				return
 			}
@@ -482,7 +468,7 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 			input.Changes,
 			input.EditSummary,
 			input.BaseRevision,
-			autoApprove,
+			true,
 		)
 
 		if err != nil {
@@ -500,7 +486,7 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 
 		c.JSON(http.StatusOK, gin.H{
 			"data":    revision,
-			"message": statusMessage(autoApprove),
+			"message": "Changes saved",
 		})
 	}
 }
@@ -556,94 +542,4 @@ func RevertSongHandler(revisionService *service.RevisionService) gin.HandlerFunc
 			"message": "Song reverted successfully",
 		})
 	}
-}
-
-// ApproveRevisionHandler approves a pending revision
-// ApproveRevisionHandler godoc
-// @Summary 审核通过修订
-// @Description 管理员审核并通过一条待处理 revision。
-// @Tags music-revisions
-// @Accept json
-// @Produce json
-// @Param id path string true "修订 UUID"
-// @Param input body RevisionReviewInput false "审核备注"
-// @Success 200 {object} MessageResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Security BearerAuth
-// @Security CookieAuth
-// @Router /api/v1/admin/reviews/revisions/{id}/approve [post]
-func ApproveRevisionHandler(revisionService *service.RevisionService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		revisionID, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid revision ID"})
-			return
-		}
-
-		var input struct {
-			ReviewNotes string `json:"review_notes"`
-		}
-		c.ShouldBindJSON(&input)
-
-		reviewerID := authctx.CurrentUserIDString(c)
-		reviewerUUID, _ := uuid.Parse(reviewerID)
-
-		if err := revisionService.ApproveRevision(revisionID, reviewerUUID, input.ReviewNotes); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "Revision approved successfully"})
-	}
-}
-
-// RejectRevisionHandler rejects a pending revision
-// RejectRevisionHandler godoc
-// @Summary 驳回修订
-// @Description 管理员驳回一条待处理 revision，并记录审核备注。
-// @Tags music-revisions
-// @Accept json
-// @Produce json
-// @Param id path string true "修订 UUID"
-// @Param input body RevisionReviewInput true "审核备注"
-// @Success 200 {object} MessageResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
-// @Security BearerAuth
-// @Security CookieAuth
-// @Router /api/v1/admin/reviews/revisions/{id}/reject [post]
-func RejectRevisionHandler(revisionService *service.RevisionService) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		revisionID, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid revision ID"})
-			return
-		}
-
-		var input struct {
-			ReviewNotes string `json:"review_notes" binding:"required"`
-		}
-		if err := c.ShouldBindJSON(&input); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Review notes required"})
-			return
-		}
-
-		reviewerID := authctx.CurrentUserIDString(c)
-		reviewerUUID, _ := uuid.Parse(reviewerID)
-
-		if err := revisionService.RejectRevision(revisionID, reviewerUUID, input.ReviewNotes); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "Revision rejected"})
-	}
-}
-
-func statusMessage(autoApprove bool) string {
-	if autoApprove {
-		return "Changes saved and approved automatically"
-	}
-	return "Changes saved and pending approval"
 }

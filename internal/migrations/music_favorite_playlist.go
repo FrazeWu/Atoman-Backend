@@ -10,54 +10,50 @@ import (
 )
 
 func RunMusicFavoritePlaylistMigration(db *gorm.DB) error {
-	if !db.Migrator().HasTable(&model.Playlist{}) {
+	if !db.Migrator().HasTable(&model.Playlist{}) || !db.Migrator().HasTable(&model.SongBookmark{}) {
 		return nil
 	}
 
 	return db.Transaction(func(tx *gorm.DB) error {
-		var candidates []model.Playlist
-		if err := tx.Where("name = ? OR is_favorite = ?", "最爱", true).
-			Order("user_id ASC, is_favorite DESC, created_at ASC, id ASC").
-			Find(&candidates).Error; err != nil {
-			return fmt.Errorf("find favorite playlists: %w", err)
+		var favorites []model.Playlist
+		query := tx.Unscoped().Where("kind = ?", "favorite")
+		if tx.Migrator().HasColumn("music_playlists", "is_favorite") {
+			query = tx.Unscoped().Where("kind = ? OR is_favorite = ?", "favorite", true)
 		}
-		canonicalByUser := make(map[uuid.UUID]uuid.UUID, len(candidates))
-		if len(candidates) > 0 {
-			candidateIDs := make([]uuid.UUID, 0, len(candidates))
-			for _, playlist := range candidates {
-				candidateIDs = append(candidateIDs, playlist.ID)
-				if _, ok := canonicalByUser[playlist.UserID]; !ok {
-					canonicalByUser[playlist.UserID] = playlist.ID
+		if err := query.Find(&favorites).Error; err != nil {
+			return fmt.Errorf("find legacy favorite playlists: %w", err)
+		}
+		for _, playlist := range favorites {
+			var songIDs []uuid.UUID
+			if err := tx.Unscoped().Model(&model.PlaylistSong{}).Where("playlist_id = ?", playlist.ID).Pluck("song_id", &songIDs).Error; err != nil {
+				return fmt.Errorf("find legacy favorite songs: %w", err)
+			}
+			for _, songID := range songIDs {
+				bookmark := model.SongBookmark{UserID: playlist.UserID, SongID: songID}
+				if err := tx.Where("user_id = ? AND song_id = ?", playlist.UserID, songID).
+					FirstOrCreate(&bookmark).Error; err != nil {
+					return fmt.Errorf("migrate favorite song bookmark: %w", err)
 				}
 			}
-			if err := tx.Model(&model.Playlist{}).Where("id IN ?", candidateIDs).Update("is_favorite", false).Error; err != nil {
-				return fmt.Errorf("reset favorite playlists: %w", err)
+			if err := tx.Unscoped().Where("playlist_id = ?", playlist.ID).Delete(&model.PlaylistBookmark{}).Error; err != nil {
+				return fmt.Errorf("delete legacy favorite playlist bookmarks: %w", err)
 			}
-			for _, playlistID := range canonicalByUser {
-				if err := tx.Model(&model.Playlist{}).Where("id = ?", playlistID).
-					Updates(map[string]any{"is_favorite": true, "is_public": false}).Error; err != nil {
-					return fmt.Errorf("mark favorite playlist: %w", err)
-				}
+			if err := tx.Unscoped().Where("playlist_id = ?", playlist.ID).Delete(&model.PlaylistSong{}).Error; err != nil {
+				return fmt.Errorf("delete legacy favorite playlist songs: %w", err)
+			}
+			if err := tx.Unscoped().Delete(&model.Playlist{}, "id = ?", playlist.ID).Error; err != nil {
+				return fmt.Errorf("delete legacy favorite playlist: %w", err)
 			}
 		}
-		var userIDs []uuid.UUID
-		if err := tx.Model(&model.User{}).Pluck("uuid", &userIDs).Error; err != nil {
-			return fmt.Errorf("find users for favorite playlists: %w", err)
-		}
-		for _, userID := range userIDs {
-			if _, ok := canonicalByUser[userID]; ok {
-				continue
+		if tx.Migrator().HasIndex("music_playlists", "idx_music_playlists_user_favorite") {
+			if err := tx.Migrator().DropIndex("music_playlists", "idx_music_playlists_user_favorite"); err != nil {
+				return fmt.Errorf("drop legacy favorite playlist index: %w", err)
 			}
-			playlist := model.Playlist{UserID: userID, Name: "最爱", IsFavorite: true}
-			if err := tx.Create(&playlist).Error; err != nil {
-				return fmt.Errorf("create favorite playlist: %w", err)
-			}
-			canonicalByUser[userID] = playlist.ID
 		}
-		if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_music_playlists_user_favorite
-			ON music_playlists (user_id)
-			WHERE is_favorite = TRUE AND deleted_at IS NULL`).Error; err != nil {
-			return fmt.Errorf("create favorite playlist unique index: %w", err)
+		if tx.Migrator().HasColumn("music_playlists", "is_favorite") {
+			if err := tx.Exec("ALTER TABLE music_playlists DROP COLUMN is_favorite").Error; err != nil {
+				return fmt.Errorf("drop legacy favorite playlist column: %w", err)
+			}
 		}
 		return nil
 	})

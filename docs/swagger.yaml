@@ -1744,27 +1744,6 @@ definitions:
       data:
         $ref: '#/definitions/model.ArtistAlias'
     type: object
-  handlers.ArtistCorrectionInput:
-    properties:
-      artist_id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
-        format: uuid
-        type: string
-      description:
-        example: 补充艺人生平与成员信息
-        type: string
-      reason:
-        example: 现有资料过少
-        type: string
-    required:
-    - artist_id
-    - description
-    type: object
-  handlers.ArtistCorrectionResponse:
-    properties:
-      data:
-        $ref: '#/definitions/model.ArtistCorrection'
-    type: object
   handlers.ArtistInput:
     properties:
       bio:
@@ -1871,19 +1850,6 @@ definitions:
       id:
         example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
         format: uuid
-        type: string
-    type: object
-  handlers.CorrectionSubmissionResponse:
-    properties:
-      id:
-        example: 018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a
-        format: uuid
-        type: string
-      message:
-        example: Song correction submitted successfully
-        type: string
-      status:
-        example: pending
         type: string
     type: object
   handlers.CreateAdminUserInput:
@@ -2606,12 +2572,6 @@ definitions:
         example: 回滚到稳定版本
         type: string
     type: object
-  handlers.RevisionReviewInput:
-    properties:
-      review_notes:
-        example: 内容已核验，可合并
-        type: string
-    type: object
   handlers.SearchUserSummary:
     properties:
       avatar_url:
@@ -2671,23 +2631,6 @@ definitions:
         items:
           $ref: '#/definitions/model.PodcastEpisode'
         type: array
-    type: object
-  handlers.SongCorrectionInput:
-    properties:
-      corrected_value:
-        type: string
-      current_value:
-        type: string
-      field_name:
-        type: string
-      reason:
-        type: string
-      song_id:
-        type: string
-    required:
-    - corrected_value
-    - field_name
-    - song_id
     type: object
   handlers.SongPublicItem:
     properties:
@@ -3224,57 +3167,6 @@ definitions:
       updated_at:
         type: string
     type: object
-  model.AlbumCorrection:
-    properties:
-      album:
-        $ref: '#/definitions/model.Album'
-      album_id:
-        type: string
-      approved_at:
-        type: string
-      approved_by:
-        type: string
-      approved_by_user:
-        $ref: '#/definitions/model.User'
-      corrected_artist_ids:
-        type: string
-      corrected_cover_source:
-        type: string
-      corrected_cover_url:
-        type: string
-      corrected_release_date:
-        type: string
-      corrected_title:
-        type: string
-      created_at:
-        type: string
-      id:
-        type: string
-      original_artist_ids:
-        type: string
-      original_cover_url:
-        type: string
-      original_release_date:
-        type: string
-      original_title:
-        type: string
-      reason:
-        type: string
-      rejected_at:
-        type: string
-      rejected_by:
-        type: string
-      rejected_by_user:
-        $ref: '#/definitions/model.User'
-      status:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-    type: object
   model.Artist:
     properties:
       active_end_date:
@@ -3347,36 +3239,6 @@ definitions:
       is_main_name:
         type: boolean
       updated_at:
-        type: string
-    type: object
-  model.ArtistCorrection:
-    properties:
-      approved_at:
-        type: string
-      approved_by:
-        type: string
-      artist:
-        $ref: '#/definitions/model.Artist'
-      artist_id:
-        type: string
-      created_at:
-        type: string
-      description:
-        description: 修改说明
-        type: string
-      id:
-        type: string
-      reason:
-        description: 修改理由
-        type: string
-      status:
-        description: pending|approved|rejected
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
         type: string
     type: object
   model.BlogPostVersion:
@@ -4051,8 +3913,6 @@ definitions:
         type: string
       id:
         type: string
-      is_favorite:
-        type: boolean
       is_public:
         type: boolean
       kind:
@@ -4359,45 +4219,6 @@ definitions:
       status:
         type: string
       updated_at:
-        type: string
-    type: object
-  model.SongCorrection:
-    properties:
-      approved_at:
-        type: string
-      approved_by:
-        type: string
-      approved_by_user:
-        $ref: '#/definitions/model.User'
-      corrected_value:
-        type: string
-      created_at:
-        type: string
-      current_value:
-        type: string
-      field_name:
-        type: string
-      id:
-        type: string
-      reason:
-        type: string
-      rejected_at:
-        type: string
-      rejected_by:
-        type: string
-      rejected_by_user:
-        $ref: '#/definitions/model.User'
-      song:
-        $ref: '#/definitions/model.Song'
-      song_id:
-        type: string
-      status:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
         type: string
     type: object
   model.Subscription:
@@ -5061,6 +4882,41 @@ definitions:
       status:
         type: string
     type: object
+  music.CreateArtistRequest:
+    properties:
+      active_end_date:
+        type: string
+      active_start_date:
+        type: string
+      artist_form:
+        type: string
+      bio:
+        type: string
+      birth_date:
+        type: string
+      birth_place:
+        type: string
+      birth_year:
+        type: integer
+      death_year:
+        type: integer
+      image_url:
+        type: string
+      legal_name:
+        type: string
+      members:
+        items:
+          $ref: '#/definitions/music.ArtistMemberPayload'
+        type: array
+      name:
+        type: string
+      nationality:
+        type: string
+      stage_names:
+        items:
+          $ref: '#/definitions/music.ArtistStageNamePayload'
+        type: array
+    type: object
   music.CreateLyricAnnotationRequest:
     properties:
       body:
@@ -5449,10 +5305,10 @@ definitions:
         type: string
       id:
         type: string
-      is_favorite:
-        type: boolean
       is_public:
         type: boolean
+      kind:
+        type: string
       name:
         type: string
       song_count:
@@ -5498,6 +5354,16 @@ definitions:
         type: string
       translation:
         type: string
+    type: object
+  music.SongBookmarkStatusResponse:
+    properties:
+      data:
+        properties:
+          song_ids:
+            items:
+              type: string
+            type: array
+        type: object
     type: object
   music.UpdateLyricAnnotationRequest:
     properties:
@@ -6465,487 +6331,6 @@ paths:
       summary: 获取音乐资料问题
       tags:
       - music-entry-status
-  /api/v1/admin/reviews/album-corrections:
-    get:
-      description: 返回所有待审核专辑纠错及其关联专辑信息。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.AlbumCorrection'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取待审核专辑纠错列表
-      tags:
-      - admin
-  /api/v1/admin/reviews/album-corrections/{id}/approve:
-    post:
-      description: 将专辑纠错标记为 approved，并把改动应用到专辑实体。
-      parameters:
-      - description: 纠错 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 审核通过专辑纠错
-      tags:
-      - admin
-  /api/v1/admin/reviews/album-corrections/{id}/reject:
-    post:
-      description: 将专辑纠错标记为 rejected。
-      parameters:
-      - description: 纠错 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 驳回专辑纠错
-      tags:
-      - admin
-  /api/v1/admin/reviews/albums:
-    get:
-      description: 返回所有待审核专辑及其关联艺人、用户和歌曲信息。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.Album'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取待审核专辑列表
-      tags:
-      - admin
-  /api/v1/admin/reviews/albums/{id}/approve:
-    post:
-      description: 将待审核专辑及其附属歌曲标记为 approved，并在可用时迁移本地文件到 S3。
-      parameters:
-      - description: 专辑 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 审核通过专辑
-      tags:
-      - admin
-  /api/v1/admin/reviews/albums/{id}/reject:
-    post:
-      description: 删除待审核专辑及其关联存储对象。
-      parameters:
-      - description: 专辑 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 驳回专辑
-      tags:
-      - admin
-  /api/v1/admin/reviews/artist-corrections:
-    get:
-      description: 返回所有待审核艺人纠错及其关联艺人、提交用户信息。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.ArtistCorrection'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取待审核艺人纠错列表
-      tags:
-      - admin
-  /api/v1/admin/reviews/artist-corrections/{id}/approve:
-    post:
-      description: 将艺人纠错标记为 approved。
-      parameters:
-      - description: 纠错 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 审核通过艺人纠错
-      tags:
-      - admin
-  /api/v1/admin/reviews/artist-corrections/{id}/reject:
-    post:
-      description: 将艺人纠错标记为 rejected。
-      parameters:
-      - description: 纠错 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 驳回艺人纠错
-      tags:
-      - admin
-  /api/v1/admin/reviews/revisions/{id}/approve:
-    post:
-      consumes:
-      - application/json
-      description: 管理员审核并通过一条待处理 revision。
-      parameters:
-      - description: 修订 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 审核备注
-        in: body
-        name: input
-        schema:
-          $ref: '#/definitions/handlers.RevisionReviewInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 审核通过修订
-      tags:
-      - music-revisions
-  /api/v1/admin/reviews/revisions/{id}/reject:
-    post:
-      consumes:
-      - application/json
-      description: 管理员驳回一条待处理 revision，并记录审核备注。
-      parameters:
-      - description: 修订 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      - description: 审核备注
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.RevisionReviewInput'
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 驳回修订
-      tags:
-      - music-revisions
-  /api/v1/admin/reviews/song-corrections:
-    get:
-      description: 返回所有待审核歌曲纠错及其关联歌曲、提交用户信息。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.SongCorrection'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取待审核歌曲纠错列表
-      tags:
-      - admin
-  /api/v1/admin/reviews/song-corrections/{id}/approve:
-    post:
-      description: 将歌曲纠错标记为 approved，并把支持的字段改动应用到歌曲实体。
-      parameters:
-      - description: 纠错 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 审核通过歌曲纠错
-      tags:
-      - admin
-  /api/v1/admin/reviews/song-corrections/{id}/reject:
-    post:
-      description: 将歌曲纠错标记为 rejected。
-      parameters:
-      - description: 纠错 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 驳回歌曲纠错
-      tags:
-      - admin
-  /api/v1/admin/reviews/songs:
-    get:
-      description: 返回所有待审核歌曲及其关联用户、专辑和艺人信息。
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            items:
-              $ref: '#/definitions/model.Song'
-            type: array
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取待审核歌曲列表
-      tags:
-      - admin
-  /api/v1/admin/reviews/songs/{id}/approve:
-    post:
-      description: 将待审核歌曲标记为 approved，并在可用时把本地文件迁移到 S3。
-      parameters:
-      - description: 歌曲 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 审核通过歌曲
-      tags:
-      - admin
-  /api/v1/admin/reviews/songs/{id}/reject:
-    post:
-      description: 删除待审核歌曲及其关联本地或对象存储文件。
-      parameters:
-      - description: 歌曲 UUID
-        in: path
-        name: id
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/handlers.MessageResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 驳回歌曲
-      tags:
-      - admin
   /api/v1/admin/user-audit-logs:
     get:
       parameters:
@@ -7810,7 +7195,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 为专辑创建一条新的修订；半保护内容会进入待审核，发生冲突时返回冲突详情。
+      description: 为专辑创建并直接应用一条新的修订；发生冲突时返回冲突详情。
       parameters:
       - description: 专辑 UUID
         in: path
@@ -8364,7 +7749,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 基于指定基线 revision 提交艺人修订。
+      description: 基于指定基线 revision 创建并直接应用艺人修订。
       parameters:
       - description: 艺人 UUID
         in: path
@@ -9761,140 +9146,6 @@ paths:
       summary: 获取楼中楼回复
       tags:
       - comments
-  /api/v1/corrections/album:
-    post:
-      consumes:
-      - multipart/form-data
-      description: 通过 multipart form 为专辑提交标题、日期或封面纠错建议。
-      parameters:
-      - description: 专辑 UUID
-        in: formData
-        name: album_id
-        required: true
-        type: string
-      - description: 纠正后的标题
-        in: formData
-        name: corrected_title
-        type: string
-      - description: 纠正后的发行日期 YYYY-MM-DD
-        in: formData
-        name: corrected_release_date
-        type: string
-      - description: 纠错原因
-        in: formData
-        name: reason
-        type: string
-      - description: 新的封面文件
-        in: formData
-        name: cover
-        type: file
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.CorrectionSubmissionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 提交专辑纠错
-      tags:
-      - music-corrections
-  /api/v1/corrections/artist:
-    post:
-      consumes:
-      - application/json
-      description: 为艺人条目提交修改建议。
-      parameters:
-      - description: 艺人纠错输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.ArtistCorrectionInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.ArtistCorrectionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 提交艺人纠错
-      tags:
-      - music-corrections
-  /api/v1/corrections/song:
-    post:
-      consumes:
-      - application/json
-      description: 为歌曲某个字段提交纠错建议，管理员提交时会自动批准。
-      parameters:
-      - description: 歌曲纠错输入
-        in: body
-        name: input
-        required: true
-        schema:
-          $ref: '#/definitions/handlers.SongCorrectionInput'
-      produces:
-      - application/json
-      responses:
-        "201":
-          description: Created
-          schema:
-            $ref: '#/definitions/handlers.CorrectionSubmissionResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 提交歌曲纠错
-      tags:
-      - music-corrections
   /api/v1/debate/topics:
     get:
       parameters:
@@ -13559,6 +12810,39 @@ paths:
       summary: 预览重复专辑合并
       tags:
       - music
+  /api/v1/music/artists:
+    post:
+      consumes:
+      - application/json
+      description: 创建艺术家并直接保存完整资料，包括艺名、活动日期和组合成员。
+      parameters:
+      - description: 艺术家资料
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.CreateArtistRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.Artist'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 创建艺术家
+      tags:
+      - music
   /api/v1/music/bookmarks/playlists:
     get:
       produces:
@@ -13642,6 +12926,35 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 取消收藏歌单
+      tags:
+      - music-bookmarks
+  /api/v1/music/bookmarks/songs/status:
+    get:
+      parameters:
+      - description: 逗号分隔的歌曲 UUID
+        in: query
+        name: song_ids
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.SongBookmarkStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 批量查询歌曲收藏状态
       tags:
       - music-bookmarks
   /api/v1/music/history:
@@ -16009,7 +15322,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: 为歌曲创建一条新的修订；半保护内容会进入待审核，发生冲突时返回冲突详情。
+      description: 为歌曲创建并直接应用一条新的修订；发生冲突时返回冲突详情。
       parameters:
       - description: 歌曲 UUID
         in: path

@@ -80,13 +80,20 @@ type CreatePlaylistRequest struct {
 }
 
 type CreateArtistRequest struct {
-	Name        string `json:"name"`
-	Bio         string `json:"bio"`
-	ImageURL    string `json:"image_url"`
-	Nationality string `json:"nationality"`
-	BirthDate   string `json:"birth_date"`
-	BirthYear   int    `json:"birth_year"`
-	DeathYear   int    `json:"death_year"`
+	Name            string                   `json:"name"`
+	LegalName       string                   `json:"legal_name"`
+	StageNames      []ArtistStageNamePayload `json:"stage_names"`
+	Bio             string                   `json:"bio"`
+	ImageURL        string                   `json:"image_url"`
+	Nationality     string                   `json:"nationality"`
+	BirthPlace      string                   `json:"birth_place"`
+	BirthDate       string                   `json:"birth_date"`
+	BirthYear       int                      `json:"birth_year"`
+	DeathYear       int                      `json:"death_year"`
+	ArtistForm      string                   `json:"artist_form"`
+	ActiveStartDate string                   `json:"active_start_date"`
+	ActiveEndDate   string                   `json:"active_end_date"`
+	Members         []ArtistMemberPayload    `json:"members"`
 }
 
 type UpdatePlaylistRequest struct {
@@ -108,6 +115,12 @@ type RecordSongPlayRequest struct {
 	SongID uuid.UUID `json:"song_id"`
 }
 
+type SongBookmarkStatusResponse struct {
+	Data struct {
+		SongIDs []uuid.UUID `json:"song_ids"`
+	} `json:"data"`
+}
+
 type PlaylistSummaryResponse struct {
 	ID          uuid.UUID `json:"id"`
 	UserID      uuid.UUID `json:"user_id"`
@@ -115,7 +128,7 @@ type PlaylistSummaryResponse struct {
 	Description string    `json:"description,omitempty"`
 	CoverURL    string    `json:"cover_url,omitempty"`
 	IsPublic    bool      `json:"is_public"`
-	IsFavorite  bool      `json:"is_favorite"`
+	Kind        string    `json:"kind"`
 	SongCount   int64     `json:"song_count"`
 }
 

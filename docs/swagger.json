@@ -475,796 +475,6 @@
                 }
             }
         },
-        "/api/v1/admin/reviews/album-corrections": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "返回所有待审核专辑纠错及其关联专辑信息。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "获取待审核专辑纠错列表",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.AlbumCorrection"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/album-corrections/{id}/approve": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "将专辑纠错标记为 approved，并把改动应用到专辑实体。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "审核通过专辑纠错",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "纠错 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/album-corrections/{id}/reject": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "将专辑纠错标记为 rejected。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "驳回专辑纠错",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "纠错 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/albums": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "返回所有待审核专辑及其关联艺人、用户和歌曲信息。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "获取待审核专辑列表",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.Album"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/albums/{id}/approve": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "将待审核专辑及其附属歌曲标记为 approved，并在可用时迁移本地文件到 S3。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "审核通过专辑",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "专辑 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/albums/{id}/reject": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "删除待审核专辑及其关联存储对象。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "驳回专辑",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "专辑 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/artist-corrections": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "返回所有待审核艺人纠错及其关联艺人、提交用户信息。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "获取待审核艺人纠错列表",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.ArtistCorrection"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/artist-corrections/{id}/approve": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "将艺人纠错标记为 approved。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "审核通过艺人纠错",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "纠错 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/artist-corrections/{id}/reject": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "将艺人纠错标记为 rejected。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "驳回艺人纠错",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "纠错 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/revisions/{id}/approve": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "管理员审核并通过一条待处理 revision。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-revisions"
-                ],
-                "summary": "审核通过修订",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "修订 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "审核备注",
-                        "name": "input",
-                        "in": "body",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.RevisionReviewInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/revisions/{id}/reject": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "管理员驳回一条待处理 revision，并记录审核备注。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-revisions"
-                ],
-                "summary": "驳回修订",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "修订 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    },
-                    {
-                        "description": "审核备注",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.RevisionReviewInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/song-corrections": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "返回所有待审核歌曲纠错及其关联歌曲、提交用户信息。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "获取待审核歌曲纠错列表",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.SongCorrection"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/song-corrections/{id}/approve": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "将歌曲纠错标记为 approved，并把支持的字段改动应用到歌曲实体。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "审核通过歌曲纠错",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "纠错 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/song-corrections/{id}/reject": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "将歌曲纠错标记为 rejected。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "驳回歌曲纠错",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "纠错 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/songs": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "返回所有待审核歌曲及其关联用户、专辑和艺人信息。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "获取待审核歌曲列表",
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "array",
-                            "items": {
-                                "$ref": "#/definitions/model.Song"
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/songs/{id}/approve": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "将待审核歌曲标记为 approved，并在可用时把本地文件迁移到 S3。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "审核通过歌曲",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/admin/reviews/songs/{id}/reject": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "删除待审核歌曲及其关联本地或对象存储文件。",
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "驳回歌曲",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "歌曲 UUID",
-                        "name": "id",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.MessageResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/admin/user-audit-logs": {
             "get": {
                 "security": [
@@ -2629,7 +1839,7 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "为专辑创建一条新的修订；半保护内容会进入待审核，发生冲突时返回冲突详情。",
+                "description": "为专辑创建并直接应用一条新的修订；发生冲突时返回冲突详情。",
                 "consumes": [
                     "application/json"
                 ],
@@ -3496,7 +2706,7 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "基于指定基线 revision 提交艺人修订。",
+                "description": "基于指定基线 revision 创建并直接应用艺人修订。",
                 "consumes": [
                     "application/json"
                 ],
@@ -5688,220 +4898,6 @@
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/comment.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/corrections/album": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "通过 multipart form 为专辑提交标题、日期或封面纠错建议。",
-                "consumes": [
-                    "multipart/form-data"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-corrections"
-                ],
-                "summary": "提交专辑纠错",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "专辑 UUID",
-                        "name": "album_id",
-                        "in": "formData",
-                        "required": true
-                    },
-                    {
-                        "type": "string",
-                        "description": "纠正后的标题",
-                        "name": "corrected_title",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "纠正后的发行日期 YYYY-MM-DD",
-                        "name": "corrected_release_date",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "string",
-                        "description": "纠错原因",
-                        "name": "reason",
-                        "in": "formData"
-                    },
-                    {
-                        "type": "file",
-                        "description": "新的封面文件",
-                        "name": "cover",
-                        "in": "formData"
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CorrectionSubmissionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/corrections/artist": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "为艺人条目提交修改建议。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-corrections"
-                ],
-                "summary": "提交艺人纠错",
-                "parameters": [
-                    {
-                        "description": "艺人纠错输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ArtistCorrectionInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ArtistCorrectionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/corrections/song": {
-            "post": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "description": "为歌曲某个字段提交纠错建议，管理员提交时会自动批准。",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-corrections"
-                ],
-                "summary": "提交歌曲纠错",
-                "parameters": [
-                    {
-                        "description": "歌曲纠错输入",
-                        "name": "input",
-                        "in": "body",
-                        "required": true,
-                        "schema": {
-                            "$ref": "#/definitions/handlers.SongCorrectionInput"
-                        }
-                    }
-                ],
-                "responses": {
-                    "201": {
-                        "description": "Created",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.CorrectionSubmissionResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "503": {
-                        "description": "Service Unavailable",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
                         }
                     }
                 }
@@ -11746,6 +10742,60 @@
                 }
             }
         },
+        "/api/v1/music/artists": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "创建艺术家并直接保存完整资料，包括艺名、活动日期和组合成员。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "创建艺术家",
+                "parameters": [
+                    {
+                        "description": "艺术家资料",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.CreateArtistRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/model.Artist"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/bookmarks/playlists": {
             "get": {
                 "security": [
@@ -11870,6 +10920,54 @@
                             "additionalProperties": {
                                 "type": "boolean"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/bookmarks/songs/status": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-bookmarks"
+                ],
+                "summary": "批量查询歌曲收藏状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "逗号分隔的歌曲 UUID",
+                        "name": "song_ids",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.SongBookmarkStatusResponse"
                         }
                     },
                     "400": {
@@ -15620,7 +14718,7 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "为歌曲创建一条新的修订；半保护内容会进入待审核，发生冲突时返回冲突详情。",
+                "description": "为歌曲创建并直接应用一条新的修订；发生冲突时返回冲突详情。",
                 "consumes": [
                     "application/json"
                 ],
@@ -21989,36 +21087,6 @@
                 }
             }
         },
-        "handlers.ArtistCorrectionInput": {
-            "type": "object",
-            "required": [
-                "artist_id",
-                "description"
-            ],
-            "properties": {
-                "artist_id": {
-                    "type": "string",
-                    "format": "uuid",
-                    "example": "018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"
-                },
-                "description": {
-                    "type": "string",
-                    "example": "补充艺人生平与成员信息"
-                },
-                "reason": {
-                    "type": "string",
-                    "example": "现有资料过少"
-                }
-            }
-        },
-        "handlers.ArtistCorrectionResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "$ref": "#/definitions/model.ArtistCorrection"
-                }
-            }
-        },
         "handlers.ArtistInput": {
             "type": "object",
             "required": [
@@ -22169,24 +21237,6 @@
                     "type": "string",
                     "format": "uuid",
                     "example": "018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"
-                }
-            }
-        },
-        "handlers.CorrectionSubmissionResponse": {
-            "type": "object",
-            "properties": {
-                "id": {
-                    "type": "string",
-                    "format": "uuid",
-                    "example": "018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"
-                },
-                "message": {
-                    "type": "string",
-                    "example": "Song correction submitted successfully"
-                },
-                "status": {
-                    "type": "string",
-                    "example": "pending"
                 }
             }
         },
@@ -23250,15 +22300,6 @@
                 }
             }
         },
-        "handlers.RevisionReviewInput": {
-            "type": "object",
-            "properties": {
-                "review_notes": {
-                    "type": "string",
-                    "example": "内容已核验，可合并"
-                }
-            }
-        },
         "handlers.SearchUserSummary": {
             "type": "object",
             "properties": {
@@ -23344,31 +22385,6 @@
                     "items": {
                         "$ref": "#/definitions/model.PodcastEpisode"
                     }
-                }
-            }
-        },
-        "handlers.SongCorrectionInput": {
-            "type": "object",
-            "required": [
-                "corrected_value",
-                "field_name",
-                "song_id"
-            ],
-            "properties": {
-                "corrected_value": {
-                    "type": "string"
-                },
-                "current_value": {
-                    "type": "string"
-                },
-                "field_name": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "song_id": {
-                    "type": "string"
                 }
             }
         },
@@ -24156,83 +23172,6 @@
                 }
             }
         },
-        "model.AlbumCorrection": {
-            "type": "object",
-            "properties": {
-                "album": {
-                    "$ref": "#/definitions/model.Album"
-                },
-                "album_id": {
-                    "type": "string"
-                },
-                "approved_at": {
-                    "type": "string"
-                },
-                "approved_by": {
-                    "type": "string"
-                },
-                "approved_by_user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "corrected_artist_ids": {
-                    "type": "string"
-                },
-                "corrected_cover_source": {
-                    "type": "string"
-                },
-                "corrected_cover_url": {
-                    "type": "string"
-                },
-                "corrected_release_date": {
-                    "type": "string"
-                },
-                "corrected_title": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "original_artist_ids": {
-                    "type": "string"
-                },
-                "original_cover_url": {
-                    "type": "string"
-                },
-                "original_release_date": {
-                    "type": "string"
-                },
-                "original_title": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "rejected_at": {
-                    "type": "string"
-                },
-                "rejected_by": {
-                    "type": "string"
-                },
-                "rejected_by_user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
-                    "type": "string"
-                }
-            }
-        },
         "model.Artist": {
             "type": "object",
             "properties": {
@@ -24341,50 +23280,6 @@
                     "type": "boolean"
                 },
                 "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.ArtistCorrection": {
-            "type": "object",
-            "properties": {
-                "approved_at": {
-                    "type": "string"
-                },
-                "approved_by": {
-                    "type": "string"
-                },
-                "artist": {
-                    "$ref": "#/definitions/model.Artist"
-                },
-                "artist_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "description": {
-                    "description": "修改说明",
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "reason": {
-                    "description": "修改理由",
-                    "type": "string"
-                },
-                "status": {
-                    "description": "pending|approved|rejected",
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
                     "type": "string"
                 }
             }
@@ -25396,9 +24291,6 @@
                 "id": {
                     "type": "string"
                 },
-                "is_favorite": {
-                    "type": "boolean"
-                },
                 "is_public": {
                     "type": "boolean"
                 },
@@ -25856,65 +24748,6 @@
                     "type": "string"
                 },
                 "updated_at": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.SongCorrection": {
-            "type": "object",
-            "properties": {
-                "approved_at": {
-                    "type": "string"
-                },
-                "approved_by": {
-                    "type": "string"
-                },
-                "approved_by_user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "corrected_value": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "current_value": {
-                    "type": "string"
-                },
-                "field_name": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "rejected_at": {
-                    "type": "string"
-                },
-                "rejected_by": {
-                    "type": "string"
-                },
-                "rejected_by_user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "song": {
-                    "$ref": "#/definitions/model.Song"
-                },
-                "song_id": {
-                    "type": "string"
-                },
-                "status": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
                     "type": "string"
                 }
             }
@@ -26922,6 +25755,59 @@
                 }
             }
         },
+        "music.CreateArtistRequest": {
+            "type": "object",
+            "properties": {
+                "active_end_date": {
+                    "type": "string"
+                },
+                "active_start_date": {
+                    "type": "string"
+                },
+                "artist_form": {
+                    "type": "string"
+                },
+                "bio": {
+                    "type": "string"
+                },
+                "birth_date": {
+                    "type": "string"
+                },
+                "birth_place": {
+                    "type": "string"
+                },
+                "birth_year": {
+                    "type": "integer"
+                },
+                "death_year": {
+                    "type": "integer"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "legal_name": {
+                    "type": "string"
+                },
+                "members": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.ArtistMemberPayload"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "nationality": {
+                    "type": "string"
+                },
+                "stage_names": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.ArtistStageNamePayload"
+                    }
+                }
+            }
+        },
         "music.CreateLyricAnnotationRequest": {
             "type": "object",
             "properties": {
@@ -27518,11 +26404,11 @@
                 "id": {
                     "type": "string"
                 },
-                "is_favorite": {
-                    "type": "boolean"
-                },
                 "is_public": {
                     "type": "boolean"
+                },
+                "kind": {
+                    "type": "string"
                 },
                 "name": {
                     "type": "string"
@@ -27593,6 +26479,22 @@
                 },
                 "translation": {
                     "type": "string"
+                }
+            }
+        },
+        "music.SongBookmarkStatusResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "song_ids": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
                 }
             }
         },

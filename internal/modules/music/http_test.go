@@ -649,49 +649,6 @@ func assertMusicHTTPError(t *testing.T, w *httptest.ResponseRecorder, status int
 	}
 }
 
-func TestRegisterRoutesSubmitEditReturnsCreatedAppliedEditForMainWikiFlow(t *testing.T) {
-	service, db, user := newMusicHTTPTestService(t)
-	r := newMusicHTTPRouter(service, &user)
-
-	body := map[string]any{
-		"type":        "create_artist",
-		"entity_type": "artist",
-		"payload": map[string]any{
-			"name": "HTTP Artist",
-		},
-		"changes": map[string]any{},
-		"reason":  "new artist",
-	}
-	raw, _ := json.Marshal(body)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/edits", bytes.NewReader(raw))
-	req.Header.Set("Content-Type", "application/json")
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp struct {
-		Data model.MusicEdit `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Data.ID == uuid.Nil || resp.Data.Status != "applied" || !resp.Data.AutoApplied || resp.Data.SubmittedBy != user.ID {
-		t.Fatalf("unexpected response edit: %#v", resp.Data)
-	}
-
-	var persisted model.MusicEdit
-	if err := db.First(&persisted, "id = ?", resp.Data.ID).Error; err != nil {
-		t.Fatalf("load persisted edit: %v", err)
-	}
-	if persisted.Status != "applied" || persisted.Type != "create_artist" {
-		t.Fatalf("unexpected persisted edit: %#v", persisted)
-	}
-}
-
 func TestRegisterRoutesMergesAlbumsForAdmin(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	user.Role = authctx.RoleAdmin
@@ -815,9 +772,27 @@ func TestHydrateArtistDisplayImagesUsesAlbumCoverWithoutPersistingIt(t *testing.
 func TestRegisterRoutesCreatesArtistThroughMusicV1(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	r := newMusicHTTPRouter(service, &user)
+	member := model.Artist{Name: "Existing Member", ArtistForm: "person", EntryStatus: "open"}
+	if err := db.Create(&member).Error; err != nil {
+		t.Fatalf("create member artist: %v", err)
+	}
 
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/artists", bytes.NewBufferString(`{"name":"New Music Artist","bio":"artist bio","image_url":"/uploads/artist.jpg","nationality":"JP","birth_year":1990}`))
+	body := `{
+		"name":"New Music Group",
+		"legal_name":"New Music Group LLC",
+		"stage_names":[{"name":"NMG","is_primary":true,"start_date_text":"2020","end_date_text":""}],
+		"bio":"artist bio",
+		"image_url":"/uploads/artist.jpg",
+		"nationality":"JP",
+		"birth_place":"Tokyo",
+		"birth_date":"1990-05-21",
+		"artist_form":"group",
+		"active_start_date":"2020-01-01",
+		"active_end_date":"2026-08-07",
+		"members":[{"artist_id":"` + member.ID.String() + `","join_date":"2020-01-01","leave_date":""}]
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/artists", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 
 	r.ServeHTTP(w, req)
@@ -831,7 +806,7 @@ func TestRegisterRoutesCreatesArtistThroughMusicV1(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Data.ID == uuid.Nil || resp.Data.Name != "New Music Artist" || resp.Data.Bio != "artist bio" || resp.Data.Nationality != "JP" || resp.Data.BirthYear != 1990 || resp.Data.EntryStatus != "open" {
+	if resp.Data.ID == uuid.Nil || resp.Data.Name != "New Music Group" || resp.Data.LegalName != "New Music Group LLC" || resp.Data.Bio != "artist bio" || resp.Data.Nationality != "JP" || resp.Data.BirthPlace != "Tokyo" || resp.Data.BirthYear != 1990 || resp.Data.ArtistForm != "group" || resp.Data.EntryStatus != "open" {
 		t.Fatalf("unexpected artist response: %#v", resp.Data)
 	}
 
@@ -839,8 +814,12 @@ func TestRegisterRoutesCreatesArtistThroughMusicV1(t *testing.T) {
 	if err := db.First(&persisted, "id = ?", resp.Data.ID).Error; err != nil {
 		t.Fatalf("load persisted artist: %v", err)
 	}
-	if persisted.Name != "New Music Artist" {
+	if persisted.Name != "New Music Group" || persisted.StageNamesJSON == "" || persisted.ActiveStartDate.Format("2006-01-02") != "2020-01-01" || persisted.ActiveEndDate.Format("2006-01-02") != "2026-08-07" {
 		t.Fatalf("unexpected persisted artist: %#v", persisted)
+	}
+	var relation model.ArtistMember
+	if err := db.First(&relation, "group_artist_id = ? AND member_artist_id = ?", persisted.ID, member.ID).Error; err != nil {
+		t.Fatalf("load persisted member relation: %v", err)
 	}
 }
 
@@ -1106,64 +1085,6 @@ func mustDatePtr(t *testing.T, value string) *time.Time {
 		t.Fatalf("parse date %q: %v", value, err)
 	}
 	return &parsed
-}
-
-func TestRegisterRoutesListsMusicEditsForModerator(t *testing.T) {
-	service, db, _ := newMusicHTTPTestService(t)
-	moderator := authctx.CurrentUser{ID: uuid.New(), Username: "mod", Role: authctx.RoleModerator}
-	if err := db.Create(&model.User{
-		UUID:     moderator.ID,
-		Username: moderator.Username,
-		Email:    "mod@example.com",
-		Password: "hash",
-		Role:     moderator.Role,
-		IsActive: true,
-	}).Error; err != nil {
-		t.Fatalf("create moderator: %v", err)
-	}
-	edit := model.MusicEdit{
-		Type:        "create_artist",
-		EntityType:  "artist",
-		SubmittedBy: moderator.ID,
-		Status:      "open",
-		Reason:      "seed review queue",
-		PayloadJSON: "{}",
-		ChangesJSON: "{}",
-		SourcesJSON: "[]",
-		Votable:     true,
-	}
-	if err := db.Create(&edit).Error; err != nil {
-		t.Fatalf("create music edit: %v", err)
-	}
-	r := newMusicHTTPRouter(service, &moderator)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/edits?status=open&page_size=10", nil)
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp struct {
-		Data []model.MusicEdit `json:"data"`
-		Meta struct {
-			Page     int   `json:"page"`
-			PageSize int   `json:"page_size"`
-			Total    int64 `json:"total"`
-			HasMore  bool  `json:"has_more"`
-		} `json:"meta"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(resp.Data) != 1 || resp.Data[0].ID != edit.ID {
-		t.Fatalf("unexpected edits response: %#v", resp.Data)
-	}
-	if resp.Meta.Total != 1 || resp.Meta.Page != 1 || resp.Meta.PageSize != 10 || resp.Meta.HasMore {
-		t.Fatalf("unexpected meta: %#v", resp.Meta)
-	}
 }
 
 func TestRegisterRoutesListAlbumsSortsByHotScore(t *testing.T) {
@@ -2397,93 +2318,25 @@ func TestAlbumSortOrdersSupportsRandomMode(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesSubmitEditRequiresCurrentUser(t *testing.T) {
-	service, _, _ := newMusicHTTPTestService(t)
-	r := newMusicHTTPRouter(service, nil)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/edits", bytes.NewBufferString(`{"type":"create_artist","entity_type":"artist","reason":"new"}`))
-	req.Header.Set("Content-Type", "application/json")
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestRegisterRoutesSubmitEditRejectsInvalidJSON(t *testing.T) {
+func TestRegisterRoutesDoesNotExposeMusicEditReviewRoutes(t *testing.T) {
 	service, _, user := newMusicHTTPTestService(t)
 	r := newMusicHTTPRouter(service, &user)
+	editID := uuid.NewString()
 
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/edits", bytes.NewBufferString(`{"type":`))
-	req.Header.Set("Content-Type", "application/json")
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	paths := []string{
+		"/api/v1/music/edits",
+		"/api/v1/music/edits/" + editID,
+		"/api/v1/music/edits/" + editID + "/votes",
+		"/api/v1/music/edits/" + editID + "/approve",
+		"/api/v1/music/edits/" + editID + "/reject",
+		"/api/v1/music/edits/" + editID + "/cancel",
 	}
-	if !strings.Contains(w.Body.String(), "validation.invalid_request") {
-		t.Fatalf("expected validation.invalid_request, got %s", w.Body.String())
-	}
-}
-
-func TestRegisterRoutesGetEditRejectsInvalidUUID(t *testing.T) {
-	service, _, user := newMusicHTTPTestService(t)
-	r := newMusicHTTPRouter(service, &user)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/edits/not-a-uuid", nil)
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "validation.invalid_request") {
-		t.Fatalf("expected validation.invalid_request, got %s", w.Body.String())
-	}
-}
-
-func TestRegisterRoutesGetEditRequiresSubmitterOrModerator(t *testing.T) {
-	service, db, submitter := newMusicHTTPTestService(t)
-	edit, err := service.SubmitEdit(submitter, SubmitEditRequest{Type: "create_artist", EntityType: "artist", Payload: map[string]any{"name": "HTTP Artist"}, Reason: "new artist"})
-	if err != nil {
-		t.Fatalf("submit edit: %v", err)
-	}
-
-	otherUserModel := model.User{Username: "bob", Email: "bob@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
-	if err := db.Create(&otherUserModel).Error; err != nil {
-		t.Fatalf("create other user: %v", err)
-	}
-	otherUser := authctx.CurrentUser{ID: otherUserModel.UUID, Username: otherUserModel.Username, Role: authctx.RoleUser}
-	moderatorModel := model.User{Username: "mod", Email: "mod-http@example.com", Password: "hash", Role: authctx.RoleModerator, IsActive: true}
-	if err := db.Create(&moderatorModel).Error; err != nil {
-		t.Fatalf("create moderator: %v", err)
-	}
-	moderator := authctx.CurrentUser{ID: moderatorModel.UUID, Username: moderatorModel.Username, Role: authctx.RoleModerator}
-
-	rSubmitter := newMusicHTTPRouter(service, &submitter)
-	wSubmitter := httptest.NewRecorder()
-	rSubmitter.ServeHTTP(wSubmitter, httptest.NewRequest(http.MethodGet, "/api/v1/music/edits/"+edit.ID.String(), nil))
-	if wSubmitter.Code != http.StatusOK {
-		t.Fatalf("expected submitter 200, got %d: %s", wSubmitter.Code, wSubmitter.Body.String())
-	}
-
-	rOther := newMusicHTTPRouter(service, &otherUser)
-	wOther := httptest.NewRecorder()
-	rOther.ServeHTTP(wOther, httptest.NewRequest(http.MethodGet, "/api/v1/music/edits/"+edit.ID.String(), nil))
-	if wOther.Code != http.StatusForbidden {
-		t.Fatalf("expected other user 403, got %d: %s", wOther.Code, wOther.Body.String())
-	}
-
-	rModerator := newMusicHTTPRouter(service, &moderator)
-	wModerator := httptest.NewRecorder()
-	rModerator.ServeHTTP(wModerator, httptest.NewRequest(http.MethodGet, "/api/v1/music/edits/"+edit.ID.String(), nil))
-	if wModerator.Code != http.StatusOK {
-		t.Fatalf("expected moderator 200, got %d: %s", wModerator.Code, wModerator.Body.String())
+	for _, path := range paths {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, nil))
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("expected %s to be unmounted, got %d: %s", path, w.Code, w.Body.String())
+		}
 	}
 }
 
@@ -2615,6 +2468,52 @@ func TestRegisterRoutesSongBookmarksRequireCurrentUser(t *testing.T) {
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
 	}
+}
+
+func TestRegisterRoutesSongBookmarkStatusReturnsOnlyRequestedBookmarks(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	bookmarked := model.Song{Title: "Bookmarked", AudioURL: "/audio/bookmarked.mp3", Status: "open"}
+	plain := model.Song{Title: "Plain", AudioURL: "/audio/plain.mp3", Status: "open"}
+	if err := db.Create(&bookmarked).Error; err != nil {
+		t.Fatalf("create bookmarked song: %v", err)
+	}
+	if err := db.Create(&plain).Error; err != nil {
+		t.Fatalf("create plain song: %v", err)
+	}
+	if _, err := service.BookmarkSong(user, bookmarked.ID); err != nil {
+		t.Fatalf("bookmark song: %v", err)
+	}
+
+	router := newMusicHTTPRouter(service, &user)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/songs/status?song_ids="+bookmarked.ID.String()+","+plain.ID.String(), nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), bookmarked.ID.String()) || strings.Contains(recorder.Body.String(), plain.ID.String()) {
+		t.Fatalf("unexpected bookmark status: %s", recorder.Body.String())
+	}
+}
+
+func TestRegisterRoutesSongBookmarkStatusRequiresCurrentUser(t *testing.T) {
+	service, _, _ := newMusicHTTPTestService(t)
+	router := newMusicHTTPRouter(service, nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/songs/status?song_ids="+uuid.NewString(), nil))
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestRegisterRoutesSongBookmarkStatusRejectsInvalidSongID(t *testing.T) {
+	service, _, user := newMusicHTTPTestService(t)
+	router := newMusicHTTPRouter(service, &user)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/songs/status?song_ids=not-a-uuid", nil))
+
+	assertMusicHTTPError(t, recorder, http.StatusBadRequest, "validation.invalid_request")
 }
 
 func TestRegisterRoutesSongBookmarksListIncludesSongDetails(t *testing.T) {
@@ -2894,18 +2793,18 @@ func TestRegisterRoutesUpdatesOwnPlaylistThroughMusicV1(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesProtectsFavoritePlaylist(t *testing.T) {
+func TestRegisterRoutesProtectsLaterPlaylist(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	favorite := model.Playlist{UserID: user.ID, Name: "最爱", IsFavorite: true}
+	favorite := model.Playlist{UserID: user.ID, Name: "稍后播放", Kind: "later"}
 	if err := db.Create(&favorite).Error; err != nil {
-		t.Fatalf("create favorite playlist: %v", err)
+		t.Fatalf("create later playlist: %v", err)
 	}
 	router := newMusicHTTPRouter(service, &user)
 
 	listRecorder := httptest.NewRecorder()
 	router.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists", nil))
-	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), `"is_favorite":true`) {
-		t.Fatalf("expected favorite metadata in list response, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), `"kind":"later"`) {
+		t.Fatalf("expected later metadata in list response, got %d: %s", listRecorder.Code, listRecorder.Body.String())
 	}
 
 	patchRecorder := httptest.NewRecorder()
@@ -2913,13 +2812,13 @@ func TestRegisterRoutesProtectsFavoritePlaylist(t *testing.T) {
 	patchRequest.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(patchRecorder, patchRequest)
 	if patchRecorder.Code != http.StatusConflict {
-		t.Fatalf("expected favorite patch 409, got %d: %s", patchRecorder.Code, patchRecorder.Body.String())
+		t.Fatalf("expected later patch 409, got %d: %s", patchRecorder.Code, patchRecorder.Body.String())
 	}
 
 	deleteRecorder := httptest.NewRecorder()
 	router.ServeHTTP(deleteRecorder, httptest.NewRequest(http.MethodDelete, "/api/v1/music/playlists/"+favorite.ID.String(), nil))
 	if deleteRecorder.Code != http.StatusConflict {
-		t.Fatalf("expected favorite delete 409, got %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+		t.Fatalf("expected later delete 409, got %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
 	}
 }
 

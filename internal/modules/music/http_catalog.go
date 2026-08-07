@@ -244,6 +244,19 @@ func (h *Handler) listArtists(c *gin.Context) {
 	httpx.List(c, artists, page, pageSize, total)
 }
 
+// createArtist godoc
+// @Summary 创建艺术家
+// @Description 创建艺术家并直接保存完整资料，包括艺名、活动日期和组合成员。
+// @Tags music
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param input body CreateArtistRequest true "艺术家资料"
+// @Success 201 {object} model.Artist
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Router /api/v1/music/artists [post]
 func (h *Handler) createArtist(c *gin.Context) {
 	user, ok := currentMusicUser(c)
 	if !ok {

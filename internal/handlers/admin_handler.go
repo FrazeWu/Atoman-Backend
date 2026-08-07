@@ -48,27 +48,5 @@ func SetupAdminRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		admin.PATCH("/feed/onboarding/recommendations/:id", UpdateAdminOnboardingFeedRecommendation(db))
 		admin.DELETE("/feed/onboarding/recommendations/:id", DeleteAdminOnboardingFeedRecommendation(db))
 
-		reviews := admin.Group("/reviews")
-		{
-			reviews.GET("/songs", GetPendingSongsHandler(db))
-			reviews.POST("/songs/:id/approve", ApproveSongHandler(db, s3Client))
-			reviews.POST("/songs/:id/reject", RejectSongHandler(db, s3Client))
-
-			reviews.GET("/song-corrections", GetPendingSongCorrectionsHandler(db))
-			reviews.POST("/song-corrections/:id/approve", ApproveSongCorrectionHandler(db))
-			reviews.POST("/song-corrections/:id/reject", RejectSongCorrectionHandler(db))
-
-			reviews.GET("/albums", GetPendingAlbumsHandler(db))
-			reviews.POST("/albums/:id/approve", ApproveAlbumHandler(db, s3Client))
-			reviews.POST("/albums/:id/reject", RejectAlbumHandler(db, s3Client))
-
-			reviews.GET("/album-corrections", GetPendingAlbumCorrectionsHandler(db))
-			reviews.POST("/album-corrections/:id/approve", ApproveAlbumCorrectionHandler(db))
-			reviews.POST("/album-corrections/:id/reject", RejectAlbumCorrectionHandler(db, s3Client))
-
-			reviews.GET("/artist-corrections", GetPendingArtistCorrectionsHandler(db))
-			reviews.POST("/artist-corrections/:id/approve", ApproveArtistCorrectionHandler(db))
-			reviews.POST("/artist-corrections/:id/reject", RejectArtistCorrectionHandler(db))
-		}
 	}
 }

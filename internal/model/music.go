@@ -350,7 +350,6 @@ type Playlist struct {
 	Description   string    `json:"description" gorm:"type:text"`
 	CoverURL      string    `json:"cover_url"`
 	IsPublic      bool      `json:"is_public" gorm:"default:false;index"`
-	IsFavorite    bool      `json:"is_favorite" gorm:"default:false;index"`
 	Kind          string    `json:"kind" gorm:"default:'user';index"`
 	OwnerUsername string    `json:"owner_username,omitempty" gorm:"-"`
 	SongCount     int64     `json:"song_count" gorm:"-"`

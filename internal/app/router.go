@@ -74,7 +74,6 @@ func RegisterV1Routes(
 	handlers.SetupAlbumRoutes(r, db, s3Client)
 	handlers.SetupArtistRoutes(r, db)
 	handlers.SetupArtistWikiRoutes(r, db)
-	handlers.SetupCorrectionRoutes(r, db, s3Client)
 	handlers.SetupEntryStatusRoutes(r, db)
 	handlers.SetupTimelineRoutes(r, db)
 	handlers.SetupVideoRoutes(r, db, s3Client)

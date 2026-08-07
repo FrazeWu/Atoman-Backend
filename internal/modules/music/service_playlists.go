@@ -102,7 +102,7 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 }
 
 func isSystemPlaylist(playlist model.Playlist) bool {
-	return playlist.IsFavorite || playlist.Kind == "favorite" || playlist.Kind == "later"
+	return playlist.Kind == "later"
 }
 
 func (s *Service) GetPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.Playlist, error) {
