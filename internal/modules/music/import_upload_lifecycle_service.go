@@ -53,7 +53,11 @@ func (s *Service) CompleteAlbumImportSession(user authctx.CurrentUser, sessionID
 	if err != nil {
 		return model.AlbumImportSession{}, err
 	}
-	return loadAlbumImportSession(s.db, sessionID, &user.ID)
+	session, err := loadAlbumImportSession(s.db, sessionID, &user.ID)
+	if err == nil {
+		s.updateAlbumImportNotification(session)
+	}
+	return session, err
 }
 
 // RepairAlbumImportSession reopens one committed session so its original album
@@ -93,7 +97,11 @@ func (s *Service) RepairAlbumImportSession(user authctx.CurrentUser, sessionID u
 	}); err != nil {
 		return model.AlbumImportSession{}, err
 	}
-	return loadAlbumImportSession(s.db, sessionID, &user.ID)
+	session, err := loadAlbumImportSession(s.db, sessionID, &user.ID)
+	if err == nil {
+		s.updateAlbumImportNotification(session)
+	}
+	return session, err
 }
 
 func (s *Service) CancelAlbumImportSession(user authctx.CurrentUser, sessionID uuid.UUID) (model.AlbumImportSession, error) {
@@ -148,7 +156,11 @@ func (s *Service) CancelAlbumImportSession(user authctx.CurrentUser, sessionID u
 			}
 		}
 	}
-	return loadAlbumImportSession(s.db, sessionID, &user.ID)
+	session, err := loadAlbumImportSession(s.db, sessionID, &user.ID)
+	if err == nil {
+		s.updateAlbumImportNotification(session)
+	}
+	return session, err
 }
 
 func (s *Service) DeleteAlbumImportFile(user authctx.CurrentUser, sessionID, fileID uuid.UUID) error {

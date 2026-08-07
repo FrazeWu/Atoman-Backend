@@ -2,6 +2,7 @@ package music
 
 import (
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -38,10 +39,7 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	}
 
 	coverURL := resolveAlbumImportCoverURL(payload)
-	albumTitle := ""
-	if session.TargetAlbum != nil {
-		albumTitle = strings.TrimSpace(session.TargetAlbum.Title)
-	}
+	albumTitle := albumImportSessionAlbumTitle(session, payload)
 	dto := AlbumImportDTO{
 		ImportID: session.ID.String(),
 		TargetAlbumID: func() string {
@@ -105,6 +103,28 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	}
 
 	return dto
+}
+
+func albumImportSessionAlbumTitle(session model.AlbumImportSession, payload map[string]any) string {
+	if session.TargetAlbum != nil && strings.TrimSpace(session.TargetAlbum.Title) != "" {
+		return strings.TrimSpace(session.TargetAlbum.Title)
+	}
+	if request, ok := payload["commit_request"].(map[string]any); ok {
+		if album, ok := request["album"].(map[string]any); ok {
+			if title := strings.TrimSpace(stringValue(album["title"])); title != "" {
+				return title
+			}
+		}
+	}
+	if title := strings.TrimSpace(stringValue(payload["derived_album_title"])); title != "" {
+		return title
+	}
+	for _, file := range session.Files {
+		if file.Role == AlbumImportFileRoleArchive && strings.TrimSpace(file.FileName) != "" {
+			return strings.TrimSpace(strings.TrimSuffix(file.FileName, filepath.Ext(file.FileName)))
+		}
+	}
+	return ""
 }
 
 func stringValue(value any) string {
@@ -174,6 +194,7 @@ func (s *Service) CreateAlbumImportSession(user authctx.CurrentUser, input Creat
 	if err := s.db.Create(&session).Error; err != nil {
 		return model.AlbumImportSession{}, err
 	}
+	s.updateAlbumImportNotification(session)
 	return session, nil
 }
 
@@ -297,12 +318,25 @@ func (s *Service) ListAlbumImportSessionsForUser(user authctx.CurrentUser) ([]mo
 	if user.ID == uuid.Nil {
 		return nil, apperr.Unauthorized("Login required")
 	}
+	if err := s.db.Model(&model.AlbumImportSession{}).
+		Where("user_id = ? AND status IN ? AND updated_at < ?", user.ID,
+			[]string{AlbumImportStatusPendingUpload, AlbumImportStatusUploading}, time.Now().UTC().Add(-30*time.Minute)).
+		Updates(map[string]any{
+			"status":        AlbumImportStatusNeedsAttention,
+			"stage":         AlbumImportStageReady,
+			"error_message": "上传已暂停，请重新选择源文件恢复",
+		}).Error; err != nil {
+		return nil, err
+	}
 	var sessions []model.AlbumImportSession
 	if err := s.db.Preload("Files").Preload("Job").Preload("TargetAlbum").
 		Where("user_id = ? AND created_at >= ?", user.ID, time.Now().UTC().Add(-7*24*time.Hour)).
 		Order("created_at DESC").
 		Find(&sessions).Error; err != nil {
 		return nil, err
+	}
+	for _, session := range sessions {
+		s.updateAlbumImportNotification(session)
 	}
 	return sessions, nil
 }

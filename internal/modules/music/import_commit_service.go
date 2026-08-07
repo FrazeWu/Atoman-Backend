@@ -294,6 +294,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		return model.AlbumImportSession{}, err
 	}
 	s.deleteAlbumImportObjects(oldObjectKeys)
+	s.updateAlbumImportNotification(out)
 	return out, nil
 }
 

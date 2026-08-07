@@ -75,6 +75,26 @@ func TestBuildAlbumImportDTOUsesTargetAlbumTitle(t *testing.T) {
 	}
 }
 
+func TestBuildAlbumImportDTOUsesDeferredCommitTitle(t *testing.T) {
+	dto := buildAlbumImportDTO(model.AlbumImportSession{
+		PayloadJSON: `{"commit_request":{"album":{"title":"再想想"}},"derived_album_title":"Archive Guess"}`,
+	})
+
+	if dto.AlbumTitle != "再想想" {
+		t.Fatalf("expected deferred commit title, got %q", dto.AlbumTitle)
+	}
+}
+
+func TestBuildAlbumImportDTOFallsBackToArchiveName(t *testing.T) {
+	dto := buildAlbumImportDTO(model.AlbumImportSession{
+		Files: []model.AlbumImportFile{{Role: AlbumImportFileRoleArchive, FileName: "再想想.zip"}},
+	})
+
+	if dto.AlbumTitle != "再想想" {
+		t.Fatalf("expected archive title fallback, got %q", dto.AlbumTitle)
+	}
+}
+
 func TestListAlbumImportSessionsForUserPreloadsTargetAlbum(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	album := model.Album{Title: "Late Registration", EntryStatus: "open", Status: "open"}
