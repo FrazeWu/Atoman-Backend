@@ -2539,6 +2539,21 @@ definitions:
         example: Edit conflicts detected
         type: string
     type: object
+  handlers.RevisionContributorListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/service.RevisionContributorDTO'
+        type: array
+      meta:
+        $ref: '#/definitions/handlers.RevisionContributorMeta'
+    type: object
+  handlers.RevisionContributorMeta:
+    properties:
+      total:
+        example: 4
+        type: integer
+    type: object
   handlers.RevisionDiffResponse:
     properties:
       data:
@@ -2549,7 +2564,7 @@ definitions:
     properties:
       data:
         items:
-          $ref: '#/definitions/model.Revision'
+          $ref: '#/definitions/service.RevisionDTO'
         type: array
       limit:
         example: 50
@@ -2564,7 +2579,7 @@ definitions:
   handlers.RevisionResponse:
     properties:
       data:
-        $ref: '#/definitions/model.Revision'
+        $ref: '#/definitions/service.RevisionDTO'
     type: object
   handlers.RevisionRevertInput:
     properties:
@@ -3137,6 +3152,10 @@ definitions:
         items:
           $ref: '#/definitions/model.Song'
         type: array
+      sources:
+        items:
+          $ref: '#/definitions/model.MusicSource'
+        type: array
       status:
         type: string
       title:
@@ -3203,8 +3222,14 @@ definitions:
         type: integer
       created_at:
         type: string
+      created_by:
+        type: string
       death_year:
         type: integer
+      disambiguation:
+        type: string
+      display_name:
+        type: string
       entry_status:
         type: string
       id:
@@ -3226,6 +3251,10 @@ definitions:
       songs:
         items:
           $ref: '#/definitions/model.Song'
+        type: array
+      sources:
+        items:
+          $ref: '#/definitions/model.MusicSource'
         type: array
       stage_names_json:
         type: string
@@ -3878,6 +3907,15 @@ definitions:
       updated_at:
         type: string
       user_id:
+        type: string
+    type: object
+  model.MusicSource:
+    properties:
+      title:
+        type: string
+      type:
+        type: string
+      url:
         type: string
     type: object
   model.NotificationMeta:
@@ -4540,6 +4578,8 @@ definitions:
         type: string
       birth_place:
         type: string
+      disambiguation:
+        type: string
       image_url:
         type: string
       legal_name:
@@ -4806,9 +4846,9 @@ definitions:
         type: string
       join_date:
         type: string
-      name:
-        type: string
       leave_date:
+        type: string
+      name:
         type: string
     type: object
   music.ArtistStageNamePayload:
@@ -4838,6 +4878,8 @@ definitions:
         type: string
       birth_place:
         type: string
+      disambiguation:
+        type: string
       image_url:
         type: string
       legal_name:
@@ -4865,12 +4907,20 @@ definitions:
         $ref: '#/definitions/music.AlbumImportAlbumPayload'
       album_source:
         type: string
+      album_sources:
+        items:
+          $ref: '#/definitions/music.Source'
+        type: array
       artist:
         $ref: '#/definitions/music.AlbumImportArtistPayload'
       artist_id:
         type: string
       artist_source:
         type: string
+      artist_sources:
+        items:
+          $ref: '#/definitions/music.Source'
+        type: array
       artists:
         items:
           $ref: '#/definitions/music.CommitAlbumImportArtistInput'
@@ -4912,6 +4962,10 @@ definitions:
         type: integer
       death_year:
         type: integer
+      disambiguation:
+        type: string
+      draft_context:
+        type: string
       image_url:
         type: string
       legal_name:
@@ -4924,6 +4978,10 @@ definitions:
         type: string
       nationality:
         type: string
+      sources:
+        items:
+          $ref: '#/definitions/music.Source'
+        type: array
       stage_names:
         items:
           $ref: '#/definitions/music.ArtistStageNamePayload'
@@ -5069,6 +5127,10 @@ definitions:
       songs:
         items:
           $ref: '#/definitions/model.Song'
+        type: array
+      sources:
+        items:
+          $ref: '#/definitions/model.MusicSource'
         type: array
       status:
         type: string
@@ -5237,6 +5299,8 @@ definitions:
         type: string
       translation:
         type: string
+      translation_language:
+        type: string
       updated_at:
         type: string
       updated_by:
@@ -5278,7 +5342,11 @@ definitions:
         type: string
       id:
         type: string
+      language:
+        type: string
       song_id:
+        type: string
+      target:
         type: string
       translation:
         type: string
@@ -5417,17 +5485,38 @@ definitions:
       edit_summary:
         type: string
     type: object
+  music.SaveLyricsLineInput:
+    properties:
+      line_key:
+        type: string
+      text:
+        type: string
+      time_ms:
+        type: integer
+      translation:
+        type: string
+    type: object
   music.SaveLyricsRequest:
     properties:
       annotation_resolutions:
         items:
           $ref: '#/definitions/music.AnnotationResolutionInput'
         type: array
+      base_version:
+        type: integer
       content:
         type: string
       edit_summary:
         type: string
       format:
+        type: string
+      language:
+        type: string
+      lines:
+        items:
+          $ref: '#/definitions/music.SaveLyricsLineInput'
+        type: array
+      target:
         type: string
       translation:
         type: string
@@ -5441,6 +5530,15 @@ definitions:
               type: string
             type: array
         type: object
+    type: object
+  music.Source:
+    properties:
+      title:
+        type: string
+      type:
+        type: string
+      url:
+        type: string
     type: object
   music.UpdateLyricAnnotationRequest:
     properties:
@@ -5641,6 +5739,69 @@ definitions:
   reference.resolveRequest:
     properties:
       content:
+        type: string
+    type: object
+  service.RevisionContributorDTO:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      last_contributed_at:
+        type: string
+      revision_count:
+        type: integer
+      user_id:
+        type: string
+      username:
+        type: string
+    type: object
+  service.RevisionDTO:
+    properties:
+      content_id:
+        type: string
+      content_snapshot:
+        type: object
+      content_type:
+        type: string
+      created_at:
+        type: string
+      edit_summary:
+        type: string
+      edit_type:
+        type: string
+      editor:
+        $ref: '#/definitions/service.RevisionUserDTO'
+      editor_id:
+        type: string
+      id:
+        type: string
+      is_current:
+        type: boolean
+      previous_revision_id:
+        type: string
+      review_notes:
+        type: string
+      reviewed_at:
+        type: string
+      reviewer:
+        $ref: '#/definitions/service.RevisionUserDTO'
+      reviewer_id:
+        type: string
+      status:
+        type: string
+      version_number:
+        type: integer
+    type: object
+  service.RevisionUserDTO:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      username:
+        type: string
+      uuid:
         type: string
     type: object
   service.SiteAccessFeedSettings:
@@ -7099,6 +7260,33 @@ paths:
       summary: 获取专辑详情
       tags:
       - music-albums
+  /api/v1/albums/{id}/contributors:
+    get:
+      description: 返回最近参与创建或修改专辑的用户，最多 10 人。
+      parameters:
+      - description: 专辑 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.RevisionContributorListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取专辑贡献者
+      tags:
+      - music-revisions
   /api/v1/albums/{id}/entry-status:
     put:
       consumes:
@@ -7609,6 +7797,33 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 删除艺人别名
+      tags:
+      - music-artists
+  /api/v1/artists/{id}/contributors:
+    get:
+      description: 返回最近参与创建或修改艺术家资料的用户，最多 10 人。
+      parameters:
+      - description: 艺术家 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.RevisionContributorListResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取艺术家贡献者
       tags:
       - music-artists
   /api/v1/artists/{id}/entry-status:
@@ -14187,7 +14402,7 @@ paths:
     put:
       consumes:
       - application/json
-      description: 保存 LRC 或纯文本歌词、逐行翻译，并处理失效注释锚点。
+      description: 登录用户可基于当前版本独立更新原文、翻译或时间轴；每次成功更新都会生成历史版本。
       parameters:
       - description: 歌曲 UUID
         in: path

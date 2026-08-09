@@ -1567,6 +1567,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/albums/{id}/contributors": {
+            "get": {
+                "description": "返回最近参与创建或修改专辑的用户，最多 10 人。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-revisions"
+                ],
+                "summary": "获取专辑贡献者",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "专辑 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RevisionContributorListResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/albums/{id}/entry-status": {
             "put": {
                 "security": [
@@ -2350,6 +2391,47 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/handlers.MessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/artists/{id}/contributors": {
+            "get": {
+                "description": "返回最近参与创建或修改艺术家资料的用户，最多 10 人。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-artists"
+                ],
+                "summary": "获取艺术家贡献者",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "艺术家 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.RevisionContributorListResponse"
                         }
                     },
                     "400": {
@@ -12819,7 +12901,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "保存 LRC 或纯文本歌词、逐行翻译，并处理失效注释锚点。",
+                "description": "登录用户可基于当前版本独立更新原文、翻译或时间轴；每次成功更新都会生成历史版本。",
                 "consumes": [
                     "application/json"
                 ],
@@ -22254,6 +22336,29 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.RevisionContributorListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/service.RevisionContributorDTO"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/handlers.RevisionContributorMeta"
+                }
+            }
+        },
+        "handlers.RevisionContributorMeta": {
+            "type": "object",
+            "properties": {
+                "total": {
+                    "type": "integer",
+                    "example": 4
+                }
+            }
+        },
         "handlers.RevisionDiffResponse": {
             "type": "object",
             "properties": {
@@ -22269,7 +22374,7 @@ const docTemplate = `{
                 "data": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.Revision"
+                        "$ref": "#/definitions/service.RevisionDTO"
                     }
                 },
                 "limit": {
@@ -22290,7 +22395,7 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "data": {
-                    "$ref": "#/definitions/model.Revision"
+                    "$ref": "#/definitions/service.RevisionDTO"
                 }
             }
         },
@@ -23129,6 +23234,12 @@ const docTemplate = `{
                         "$ref": "#/definitions/model.Song"
                     }
                 },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.MusicSource"
+                    }
+                },
                 "status": {
                     "type": "string"
                 },
@@ -23229,8 +23340,17 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "created_by": {
+                    "type": "string"
+                },
                 "death_year": {
                     "type": "integer"
+                },
+                "disambiguation": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
                 },
                 "entry_status": {
                     "type": "string"
@@ -23263,6 +23383,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/model.Song"
+                    }
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.MusicSource"
                     }
                 },
                 "stage_names_json": {
@@ -24241,6 +24367,20 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.MusicSource": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "url": {
                     "type": "string"
                 }
             }
@@ -25232,6 +25372,9 @@ const docTemplate = `{
                 "birth_place": {
                     "type": "string"
                 },
+                "disambiguation": {
+                    "type": "string"
+                },
                 "image_url": {
                     "type": "string"
                 },
@@ -25641,10 +25784,10 @@ const docTemplate = `{
                 "join_date": {
                     "type": "string"
                 },
-                "name": {
+                "leave_date": {
                     "type": "string"
                 },
-                "leave_date": {
+                "name": {
                     "type": "string"
                 }
             }
@@ -25690,6 +25833,9 @@ const docTemplate = `{
                 "birth_place": {
                     "type": "string"
                 },
+                "disambiguation": {
+                    "type": "string"
+                },
                 "image_url": {
                     "type": "string"
                 },
@@ -25731,6 +25877,12 @@ const docTemplate = `{
                 "album_source": {
                     "type": "string"
                 },
+                "album_sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.Source"
+                    }
+                },
                 "artist": {
                     "$ref": "#/definitions/music.AlbumImportArtistPayload"
                 },
@@ -25739,6 +25891,12 @@ const docTemplate = `{
                 },
                 "artist_source": {
                     "type": "string"
+                },
+                "artist_sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.Source"
+                    }
                 },
                 "artists": {
                     "type": "array",
@@ -25803,6 +25961,12 @@ const docTemplate = `{
                 "death_year": {
                     "type": "integer"
                 },
+                "disambiguation": {
+                    "type": "string"
+                },
+                "draft_context": {
+                    "type": "string"
+                },
                 "image_url": {
                     "type": "string"
                 },
@@ -25820,6 +25984,12 @@ const docTemplate = `{
                 },
                 "nationality": {
                     "type": "string"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.Source"
+                    }
                 },
                 "stage_names": {
                     "type": "array",
@@ -26042,6 +26212,12 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/model.Song"
+                    }
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.MusicSource"
                     }
                 },
                 "status": {
@@ -26299,6 +26475,9 @@ const docTemplate = `{
                 "translation": {
                     "type": "string"
                 },
+                "translation_language": {
+                    "type": "string"
+                },
                 "updated_at": {
                     "type": "string"
                 },
@@ -26362,7 +26541,13 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "language": {
+                    "type": "string"
+                },
                 "song_id": {
+                    "type": "string"
+                },
+                "target": {
                     "type": "string"
                 },
                 "translation": {
@@ -26578,6 +26763,23 @@ const docTemplate = `{
                 }
             }
         },
+        "music.SaveLyricsLineInput": {
+            "type": "object",
+            "properties": {
+                "line_key": {
+                    "type": "string"
+                },
+                "text": {
+                    "type": "string"
+                },
+                "time_ms": {
+                    "type": "integer"
+                },
+                "translation": {
+                    "type": "string"
+                }
+            }
+        },
         "music.SaveLyricsRequest": {
             "type": "object",
             "properties": {
@@ -26587,6 +26789,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/music.AnnotationResolutionInput"
                     }
                 },
+                "base_version": {
+                    "type": "integer"
+                },
                 "content": {
                     "type": "string"
                 },
@@ -26594,6 +26799,18 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "format": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "lines": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.SaveLyricsLineInput"
+                    }
+                },
+                "target": {
                     "type": "string"
                 },
                 "translation": {
@@ -26614,6 +26831,20 @@ const docTemplate = `{
                             }
                         }
                     }
+                }
+            }
+        },
+        "music.Source": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string"
+                },
+                "type": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
                 }
             }
         },
@@ -26919,6 +27150,102 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "content": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.RevisionContributorDTO": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "last_contributed_at": {
+                    "type": "string"
+                },
+                "revision_count": {
+                    "type": "integer"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                }
+            }
+        },
+        "service.RevisionDTO": {
+            "type": "object",
+            "properties": {
+                "content_id": {
+                    "type": "string"
+                },
+                "content_snapshot": {
+                    "type": "object"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "edit_summary": {
+                    "type": "string"
+                },
+                "edit_type": {
+                    "type": "string"
+                },
+                "editor": {
+                    "$ref": "#/definitions/service.RevisionUserDTO"
+                },
+                "editor_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_current": {
+                    "type": "boolean"
+                },
+                "previous_revision_id": {
+                    "type": "string"
+                },
+                "review_notes": {
+                    "type": "string"
+                },
+                "reviewed_at": {
+                    "type": "string"
+                },
+                "reviewer": {
+                    "$ref": "#/definitions/service.RevisionUserDTO"
+                },
+                "reviewer_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "version_number": {
+                    "type": "integer"
+                }
+            }
+        },
+        "service.RevisionUserDTO": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                },
+                "uuid": {
                     "type": "string"
                 }
             }

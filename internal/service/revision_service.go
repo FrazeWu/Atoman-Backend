@@ -36,7 +36,7 @@ type RevisionDTO struct {
 	ContentID          uuid.UUID        `json:"content_id"`
 	VersionNumber      int              `json:"version_number"`
 	PreviousRevisionID *uuid.UUID       `json:"previous_revision_id,omitempty"`
-	ContentSnapshot    json.RawMessage  `json:"content_snapshot"`
+	ContentSnapshot    json.RawMessage  `json:"content_snapshot" swaggertype:"object"`
 	EditorID           uuid.UUID        `json:"editor_id"`
 	Editor             *RevisionUserDTO `json:"editor,omitempty"`
 	EditSummary        string           `json:"edit_summary"`
@@ -56,7 +56,7 @@ type RevisionContributorDTO struct {
 	DisplayName       string    `json:"display_name" gorm:"column:display_name"`
 	AvatarURL         string    `json:"avatar_url" gorm:"column:avatar_url"`
 	RevisionCount     int64     `json:"revision_count" gorm:"column:revision_count"`
-	LastContributedAt time.Time `json:"last_contributed_at" gorm:"column:last_contributed_at"`
+	LastContributedAt string    `json:"last_contributed_at" gorm:"column:last_contributed_at"`
 }
 
 type albumRevisionSnapshot struct {
@@ -1312,16 +1312,18 @@ func (s *RevisionService) GetContributors(
 		limit = 10
 	}
 
-	baseQuery := s.db.Table("revisions").
-		Where("content_type = ? AND content_id = ? AND status = ?", contentType, contentID, "approved")
+	baseQuery := func() *gorm.DB {
+		return s.db.Table("revisions").
+			Where("content_type = ? AND content_id = ? AND status = ?", contentType, contentID, "approved")
+	}
 
 	var total int64
-	if err := baseQuery.Distinct("editor_id").Count(&total).Error; err != nil {
+	if err := baseQuery().Distinct("editor_id").Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	var contributors []RevisionContributorDTO
-	err := baseQuery.
+	err := baseQuery().
 		Select(`users.uuid AS user_id, users.username, users.display_name, users.avatar_url,
 			COUNT(revisions.id) AS revision_count, MAX(revisions.created_at) AS last_contributed_at`).
 		Joins(`JOIN "Users" AS users ON users.uuid = revisions.editor_id`).
