@@ -14,12 +14,14 @@ type ArtistStageNamePayload struct {
 
 type ArtistMemberPayload struct {
 	ArtistID  string `json:"artist_id"`
+	Name      string `json:"name"`
 	JoinDate  string `json:"join_date"`
 	LeaveDate string `json:"leave_date"`
 }
 
 type AlbumImportArtistPayload struct {
 	Name            string                   `json:"name"`
+	Disambiguation  string                   `json:"disambiguation"`
 	LegalName       string                   `json:"legal_name"`
 	Bio             string                   `json:"bio"`
 	ImageURL        string                   `json:"image_url"`
@@ -57,18 +59,21 @@ type CreateAlbumImportSessionInput struct {
 }
 
 type CommitAlbumImportSessionInput struct {
-	ArtistID     string                         `json:"artist_id"`
-	Artist       AlbumImportArtistPayload       `json:"artist"`
-	Artists      []CommitAlbumImportArtistInput `json:"artists"`
-	ArtistSource string                         `json:"artist_source"`
-	Album        AlbumImportAlbumPayload        `json:"album"`
-	AlbumSource  string                         `json:"album_source"`
+	ArtistID      string                         `json:"artist_id"`
+	Artist        AlbumImportArtistPayload       `json:"artist"`
+	Artists       []CommitAlbumImportArtistInput `json:"artists"`
+	ArtistSource  string                         `json:"artist_source"`
+	ArtistSources []Source                       `json:"artist_sources"`
+	Album         AlbumImportAlbumPayload        `json:"album"`
+	AlbumSource   string                         `json:"album_source"`
+	AlbumSources  []Source                       `json:"album_sources"`
 }
 
 type CommitAlbumImportArtistInput struct {
 	ArtistID        string                   `json:"artist_id"`
 	Roles           []AlbumArtistRoleInput   `json:"roles"`
 	Name            string                   `json:"name"`
+	Disambiguation  string                   `json:"disambiguation"`
 	LegalName       string                   `json:"legal_name"`
 	Bio             string                   `json:"bio"`
 	ImageURL        string                   `json:"image_url"`

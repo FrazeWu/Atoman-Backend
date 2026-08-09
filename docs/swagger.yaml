@@ -3129,6 +3129,8 @@ definitions:
         type: string
       release_date:
         type: string
+      release_date_precision:
+        type: string
       release_year:
         type: integer
       songs:
@@ -3171,7 +3173,11 @@ definitions:
     properties:
       active_end_date:
         type: string
+      active_end_date_precision:
+        type: string
       active_start_date:
+        type: string
+      active_start_date_precision:
         type: string
       albums:
         items:
@@ -3186,6 +3192,8 @@ definitions:
       bio:
         type: string
       birth_date:
+        type: string
+      birth_date_precision:
         type: string
       birth_place:
         type: string
@@ -4136,6 +4144,8 @@ definitions:
         type: integer
       release_date:
         type: string
+      release_date_precision:
+        type: string
       source_bit_depth:
         type: integer
       source_bitrate_kbps:
@@ -4796,6 +4806,8 @@ definitions:
         type: string
       join_date:
         type: string
+      name:
+        type: string
       leave_date:
         type: string
     type: object
@@ -5049,6 +5061,8 @@ definitions:
       redirect_to:
         type: string
       release_date:
+        type: string
+      release_date_precision:
         type: string
       release_year:
         type: integer

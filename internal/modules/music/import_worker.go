@@ -53,6 +53,38 @@ func (w *ImportWorker) WithCompletionFinalizer(finalizer func(context.Context, u
 	return w
 }
 
+// FinalizeSubmittedReady retries deferred commits that were left ready after
+// processing completed or a previous finalization attempt failed.
+func (w *ImportWorker) FinalizeSubmittedReady(ctx context.Context) (int, error) {
+	if w.db == nil {
+		return 0, errors.New("music import worker database is required")
+	}
+	if w.completionFinalizer == nil {
+		return 0, nil
+	}
+
+	var sessions []model.AlbumImportSession
+	if err := w.db.WithContext(ctx).
+		Select("id").
+		Where("status = ? AND payload_json LIKE ?", AlbumImportStatusReady, `%"commit_request"%`).
+		Order("updated_at ASC").
+		Limit(50).
+		Find(&sessions).Error; err != nil {
+		return 0, err
+	}
+
+	finalized := 0
+	var finalizationErr error
+	for _, session := range sessions {
+		if err := w.completionFinalizer(ctx, session.ID); err != nil {
+			finalizationErr = errors.Join(finalizationErr, fmt.Errorf("finalize album import %s: %w", session.ID, err))
+			continue
+		}
+		finalized++
+	}
+	return finalized, finalizationErr
+}
+
 func (w *ImportWorker) Claim(ctx context.Context) (model.AlbumImportJob, bool, error) {
 	if w.db == nil {
 		return model.AlbumImportJob{}, false, errors.New("music import worker database is required")
@@ -298,6 +330,9 @@ func (w *ImportWorker) CleanupExpired(ctx context.Context) error {
 	if w.db == nil {
 		return errors.New("music import worker database is required")
 	}
+	if err := cleanupExpiredArtistDrafts(w.db.WithContext(ctx), w.now()); err != nil {
+		return err
+	}
 	if w.store == nil {
 		return nil
 	}
@@ -333,6 +368,17 @@ func (w *ImportWorker) CleanupExpired(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func cleanupExpiredArtistDrafts(db *gorm.DB, now time.Time) error {
+	cutoff := now.Add(-7 * 24 * time.Hour)
+	return db.Where("entry_status = ? AND created_at <= ?", artistEntryDraft, cutoff).
+		Where(`NOT EXISTS (SELECT 1 FROM album_artists WHERE album_artists.artist_id = "Artists".id)`).
+		Where(`NOT EXISTS (SELECT 1 FROM song_artists WHERE song_artists.artist_id = "Artists".id)`).
+		Where(`NOT EXISTS (SELECT 1 FROM artist_members WHERE artist_members.deleted_at IS NULL AND (artist_members.group_artist_id = "Artists".id OR artist_members.member_artist_id = "Artists".id))`).
+		Where(`NOT EXISTS (SELECT 1 FROM music_artist_bookmarks WHERE music_artist_bookmarks.deleted_at IS NULL AND music_artist_bookmarks.artist_id = "Artists".id)`).
+		Where(`NOT EXISTS (SELECT 1 FROM music_search_interactions WHERE music_search_interactions.deleted_at IS NULL AND music_search_interactions.entity_type = 'artist' AND music_search_interactions.entity_id = "Artists".id)`).
+		Delete(&model.Artist{}).Error
 }
 
 func (w *ImportWorker) cleanupSession(ctx context.Context, db *gorm.DB, session *model.AlbumImportSession) error {

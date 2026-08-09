@@ -17,6 +17,7 @@ import (
 	"atoman/internal/model"
 	musicmodule "atoman/internal/modules/music"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/service"
 	"atoman/internal/storage"
 )
 
@@ -508,6 +509,19 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			if err := musicmodule.SyncLegacySongLyrics(tx, *userID, song.ID, input.Lyrics, "通过歌曲上传创建歌词"); err != nil {
 				tx.Rollback()
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save song lyrics"})
+				return
+			}
+		}
+		if userID == nil {
+			tx.Rollback()
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+			return
+		}
+		revisions := service.NewRevisionService(tx)
+		for contentType, contentID := range map[string]uuid.UUID{"artist": artist.ID, "album": album.ID, "song": song.ID} {
+			if _, err := revisions.EnsureInitialRevision(contentType, contentID, *userID); err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create revision"})
 				return
 			}
 		}

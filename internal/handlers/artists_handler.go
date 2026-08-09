@@ -5,10 +5,12 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/service"
 )
 
 type ArtistInput struct {
@@ -85,12 +87,25 @@ func CreateArtistHandler(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		userID, _ := c.Get("user_id")
+		editorID, _ := userID.(uuid.UUID)
+		if editorID == uuid.Nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+			return
+		}
 		artist := model.Artist{
-			Name: input.Name,
-			Bio:  input.Bio,
+			Name:      input.Name,
+			Bio:       input.Bio,
+			CreatedBy: &editorID,
 		}
 
-		if err := db.Create(&artist).Error; err != nil {
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Create(&artist).Error; err != nil {
+				return err
+			}
+			_, err := service.NewRevisionService(tx).EnsureInitialRevision("artist", artist.ID, editorID)
+			return err
+		}); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create artist"})
 			return
 		}

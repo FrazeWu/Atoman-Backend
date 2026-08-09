@@ -56,6 +56,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.MusicLyricAnnotationVote{},
 		&model.Notification{},
 		&model.AuditLog{},
+		&model.Revision{},
 	)
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
@@ -775,6 +776,10 @@ func TestRegisterRoutesCreatesArtistThroughMusicV1(t *testing.T) {
 	if err := db.Create(&member).Error; err != nil {
 		t.Fatalf("create member artist: %v", err)
 	}
+	secondMember := model.Artist{Name: "Second Existing Member", ArtistForm: "person", EntryStatus: "open"}
+	if err := db.Create(&secondMember).Error; err != nil {
+		t.Fatalf("create second member artist: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	body := `{
@@ -789,7 +794,8 @@ func TestRegisterRoutesCreatesArtistThroughMusicV1(t *testing.T) {
 		"artist_form":"group",
 		"active_start_date":"2020-01-01",
 		"active_end_date":"2026-08-07",
-		"members":[{"artist_id":"` + member.ID.String() + `","join_date":"2020-01-01","leave_date":""}]
+		"members":[{"artist_id":"` + member.ID.String() + `","join_date":"2020-01-01","leave_date":""},{"artist_id":"` + secondMember.ID.String() + `","join_date":"2020-01-01","leave_date":""}],
+		"sources":[{"title":"artist source"}]
 	}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/artists", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -805,7 +811,7 @@ func TestRegisterRoutesCreatesArtistThroughMusicV1(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Data.ID == uuid.Nil || resp.Data.Name != "New Music Group" || resp.Data.LegalName != "New Music Group LLC" || resp.Data.Bio != "artist bio" || resp.Data.Nationality != "JP" || resp.Data.BirthPlace != "Tokyo" || resp.Data.BirthYear != 1990 || resp.Data.ArtistForm != "group" || resp.Data.EntryStatus != "open" {
+	if resp.Data.ID == uuid.Nil || resp.Data.Name != "New Music Group" || resp.Data.LegalName != "New Music Group LLC" || resp.Data.Bio != "artist bio" || resp.Data.Nationality != "JP" || resp.Data.BirthPlace != "Tokyo" || resp.Data.BirthYear != 1990 || resp.Data.ArtistForm != "group" || resp.Data.EntryStatus != artistEntryDraft {
 		t.Fatalf("unexpected artist response: %#v", resp.Data)
 	}
 
@@ -819,6 +825,13 @@ func TestRegisterRoutesCreatesArtistThroughMusicV1(t *testing.T) {
 	var relation model.ArtistMember
 	if err := db.First(&relation, "group_artist_id = ? AND member_artist_id = ?", persisted.ID, member.ID).Error; err != nil {
 		t.Fatalf("load persisted member relation: %v", err)
+	}
+	var revision model.Revision
+	if err := db.Where("content_type = ? AND content_id = ?", "artist", persisted.ID).First(&revision).Error; err != nil {
+		t.Fatalf("load initial revision: %v", err)
+	}
+	if revision.VersionNumber != 1 || revision.EditType != "creation" || revision.Status != "approved" || !revision.IsCurrent {
+		t.Fatalf("unexpected initial revision: %#v", revision)
 	}
 }
 
@@ -1484,7 +1497,6 @@ func TestRegisterRoutesCreateAlbumImportSessionSupportsArchiveUpload(t *testing.
 	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResp); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
-
 	body, contentType := newAlbumImportUploadRequestBody(t, "Untrue.zip", map[string]string{
 		"01 - Untitled.mp3":  "",
 		"02 - Archangel.mp3": "",
@@ -1875,7 +1887,7 @@ func startAlbumImportMultipartThroughHTTP(t *testing.T, r *gin.Engine) AlbumImpo
 }
 
 func TestRegisterRoutesCommitAlbumImportSessionUsesRequestPayload(t *testing.T) {
-	service, _, user := newMusicHTTPTestService(t)
+	service, db, user := newMusicHTTPTestService(t)
 	r := newMusicHTTPRouter(service, &user)
 
 	createBody, _ := json.Marshal(CreateAlbumImportSessionInput{
@@ -1896,11 +1908,15 @@ func TestRegisterRoutesCommitAlbumImportSessionUsesRequestPayload(t *testing.T) 
 	if err := json.Unmarshal(createRecorder.Body.Bytes(), &createResp); err != nil {
 		t.Fatalf("decode create response: %v", err)
 	}
+	seedReadyImportMedia(t, db, uuid.MustParse(createResp.Data.ImportID), "https://cdn.test/http-cover.jpg", "Track One")
 
 	commitBody, _ := json.Marshal(CommitAlbumImportSessionInput{
 		Artist: AlbumImportArtistPayload{
-			Name:      "HTTP Artist",
-			LegalName: "HTTP Legal Artist",
+			Name:        "HTTP Artist",
+			LegalName:   "HTTP Legal Artist",
+			ImageURL:    "/artist.jpg",
+			Nationality: "CN",
+			BirthDate:   "1990-01-01",
 			StageNames: []ArtistStageNamePayload{
 				{Name: "HTTP Artist", IsPrimary: true},
 			},
@@ -1908,11 +1924,15 @@ func TestRegisterRoutesCommitAlbumImportSessionUsesRequestPayload(t *testing.T) 
 		},
 		Album: AlbumImportAlbumPayload{
 			Title:       "HTTP Album",
+			CoverURL:    "https://cdn.test/http-cover.jpg",
+			ReleaseDate: "2026-01-01",
 			ReleaseYear: 2026,
 			Tracks: []AlbumImportTrackPayload{
 				{Title: "Track One", TrackNumber: 1},
 			},
 		},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
 	})
 
 	commitRecorder := httptest.NewRecorder()

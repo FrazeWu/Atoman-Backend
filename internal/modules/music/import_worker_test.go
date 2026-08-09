@@ -2,6 +2,7 @@ package music
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -119,6 +120,56 @@ func TestImportWorkerFinalizesSubmittedImportAfterProcessing(t *testing.T) {
 	}
 	if called != job.ImportID {
 		t.Fatalf("finalizer import id = %s, want %s", called, job.ImportID)
+	}
+}
+
+func TestImportWorkerRetriesSubmittedReadyImportFinalization(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})
+	if err != nil {
+		t.Fatalf("create import session: %v", err)
+	}
+	payload, err := json.Marshal(map[string]any{"commit_request": CommitAlbumImportSessionInput{
+		Artist: completeAlbumImportArtistPayload("Retry Artist"),
+		Album: AlbumImportAlbumPayload{
+			Title: "Retry Album", CoverURL: "https://cdn.test/retry.jpg", ReleaseDate: "2020-01-01",
+			Tracks: []AlbumImportTrackPayload{{Title: "Retry Track", TrackNumber: 1}},
+		},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
+	}, "derived_tracks": []map[string]any{{"title": "Retry Track", "track_number": 1, "audio_url": "https://cdn.test/retry.mp3"}}})
+	if err != nil {
+		t.Fatalf("encode commit request: %v", err)
+	}
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Update("payload_json", string(payload)).Error; err != nil {
+		t.Fatalf("save commit request: %v", err)
+	}
+
+	previousHook := albumImportCreateAlbumHook
+	albumImportCreateAlbumHook = func(_ *gorm.DB, _ *model.Album) error {
+		return errors.New("temporary database failure")
+	}
+	t.Cleanup(func() { albumImportCreateAlbumHook = previousHook })
+
+	worker := NewImportWorker(db, nil, "worker").WithCompletionFinalizer(func(_ context.Context, importID uuid.UUID) error {
+		return svc.FinalizeSubmittedAlbumImport(importID)
+	})
+	finalized, err := worker.FinalizeSubmittedReady(context.Background())
+	if err == nil || finalized != 0 {
+		t.Fatalf("first finalization should fail: finalized=%d err=%v", finalized, err)
+	}
+
+	albumImportCreateAlbumHook = previousHook
+	finalized, err = worker.FinalizeSubmittedReady(context.Background())
+	if err != nil || finalized != 1 {
+		t.Fatalf("retry finalization: finalized=%d err=%v", finalized, err)
+	}
+	var stored model.AlbumImportSession
+	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("load finalized session: %v", err)
+	}
+	if stored.Status != AlbumImportStatusCommitted || stored.TargetAlbumID == nil {
+		t.Fatalf("ready import was not committed on retry: %#v", stored)
 	}
 }
 

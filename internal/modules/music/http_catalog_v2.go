@@ -110,7 +110,7 @@ func (h *Handler) search(c *gin.Context) {
 	if include("artist") {
 		var total int64
 		artistQuery := func() *gorm.DB {
-			return h.service.db.Model(&model.Artist{}).Where("COALESCE(entry_status, '') <> ?", "closed").Where("LOWER(name) LIKE LOWER(?) OR LOWER(legal_name) LIKE LOWER(?)", pattern, pattern)
+			return h.service.db.Model(&model.Artist{}).Where("COALESCE(entry_status, '') NOT IN ?", []string{"closed", artistEntryDraft}).Where("LOWER(name) LIKE LOWER(?) OR LOWER("+artistDisambiguationSearchExpression+") LIKE LOWER(?) OR LOWER(legal_name) LIKE LOWER(?)", pattern, pattern, pattern)
 		}
 		if err := artistQuery().Count(&total).Error; err != nil {
 			httpx.Error(c, err)

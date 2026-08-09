@@ -64,6 +64,7 @@ func validateWorkerToolchain(runner music.MediaCommandRunner) error {
 }
 
 type workerRunner interface {
+	FinalizeSubmittedReady(context.Context) (int, error)
 	RunOnce(context.Context, music.ImportProcessor) (bool, error)
 }
 
@@ -72,6 +73,14 @@ func runWorker(ctx context.Context, worker workerRunner, processor music.ImportP
 		pollInterval = 5 * time.Second
 	}
 	for {
+		finalized, err := worker.FinalizeSubmittedReady(ctx)
+		if err != nil {
+			log.Printf("music import worker could not finalize ready imports: %v", err)
+		}
+		if finalized > 0 {
+			log.Printf("music import worker finalized %d ready import(s)", finalized)
+		}
+
 		processed, err := worker.RunOnce(ctx, processor)
 		if err != nil {
 			log.Printf("music import worker: %v", err)

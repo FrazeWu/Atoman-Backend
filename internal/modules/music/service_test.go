@@ -3,6 +3,7 @@ package music
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -52,6 +53,7 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.MusicLyricAnnotationVote{},
 		&model.AuditLog{},
 		&model.Notification{},
+		&model.Revision{},
 	)
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true}
@@ -60,6 +62,41 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 	}
 
 	return NewService(db), db, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser}
+}
+
+func seedReadyImportMedia(t *testing.T, db *gorm.DB, sessionID uuid.UUID, coverURL string, trackTitles ...string) {
+	t.Helper()
+	payload := map[string]any{}
+	var session model.AlbumImportSession
+	if err := db.First(&session, "id = ?", sessionID).Error; err != nil {
+		t.Fatalf("load import session: %v", err)
+	}
+	if session.PayloadJSON != "" {
+		_ = json.Unmarshal([]byte(session.PayloadJSON), &payload)
+	}
+	payload["derived_cover"] = coverURL
+	tracks := make([]map[string]any, 0, len(trackTitles))
+	for index, title := range trackTitles {
+		tracks = append(tracks, map[string]any{
+			"title": title, "track_number": index + 1,
+			"audio_url": fmt.Sprintf("https://cdn.test/%s/%d.mp3", sessionID, index+1),
+		})
+	}
+	payload["derived_tracks"] = tracks
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("encode import payload: %v", err)
+	}
+	if err := db.Model(&session).Update("payload_json", string(encoded)).Error; err != nil {
+		t.Fatalf("save import payload: %v", err)
+	}
+}
+
+func completeAlbumImportArtistPayload(name string) AlbumImportArtistPayload {
+	return AlbumImportArtistPayload{
+		Name: name, LegalName: name, ImageURL: "/artist.jpg",
+		Nationality: "CN", BirthDate: "1990-01-01", ArtistForm: "person",
+	}
 }
 
 func TestPlaylistBookmarksRequireExistingPlaylistAndStayUserScoped(t *testing.T) {

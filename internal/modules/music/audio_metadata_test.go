@@ -80,8 +80,10 @@ func TestCommitAlbumImportSessionCopiesAudioMetadataToSong(t *testing.T) {
 	}
 
 	_, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{Name: "Archive Artist"},
-		Album:  AlbumImportAlbumPayload{Title: "Archive Album", Tracks: []AlbumImportTrackPayload{{Title: "Master", TrackNumber: 1}}},
+		Artist:       completeAlbumImportArtistPayload("Archive Artist"),
+		Album:        AlbumImportAlbumPayload{Title: "Archive Album", CoverURL: "https://cdn.test/cover.jpg", ReleaseDate: "2020-01-01", Tracks: []AlbumImportTrackPayload{{Title: "Master", TrackNumber: 1}}},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
 	})
 	if err != nil {
 		t.Fatalf("commit import: %v", err)

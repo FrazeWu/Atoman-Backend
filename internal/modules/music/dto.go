@@ -8,11 +8,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type Source struct {
-	Type  string `json:"type"`
-	URL   string `json:"url"`
-	Title string `json:"title"`
-}
+type Source = model.MusicSource
 
 type SubmitEditRequest struct {
 	Type       string         `json:"type"`
@@ -81,6 +77,7 @@ type CreatePlaylistRequest struct {
 
 type CreateArtistRequest struct {
 	Name            string                   `json:"name"`
+	Disambiguation  string                   `json:"disambiguation"`
 	LegalName       string                   `json:"legal_name"`
 	StageNames      []ArtistStageNamePayload `json:"stage_names"`
 	Bio             string                   `json:"bio"`
@@ -94,6 +91,8 @@ type CreateArtistRequest struct {
 	ActiveStartDate string                   `json:"active_start_date"`
 	ActiveEndDate   string                   `json:"active_end_date"`
 	Members         []ArtistMemberPayload    `json:"members"`
+	Sources         []Source                 `json:"sources"`
+	DraftContext    string                   `json:"draft_context"`
 }
 
 type UpdatePlaylistRequest struct {
@@ -238,11 +237,14 @@ type PlaylistSongDetail struct {
 }
 
 type ArtistMemberGroupItemResponse struct {
-	ArtistID  uuid.UUID `json:"artist_id"`
-	Name      string    `json:"name"`
-	ImageURL  string    `json:"image_url,omitempty"`
-	JoinDate  string    `json:"join_date,omitempty"`
-	LeaveDate string    `json:"leave_date,omitempty"`
+	ArtistID           uuid.UUID `json:"artist_id"`
+	Name               string    `json:"name"`
+	ImageURL           string    `json:"image_url,omitempty"`
+	JoinDate           string    `json:"join_date,omitempty"`
+	JoinDatePrecision  string    `json:"join_date_precision,omitempty"`
+	LeaveDate          string    `json:"leave_date,omitempty"`
+	LeaveDatePrecision string    `json:"leave_date_precision,omitempty"`
+	IsPublished        bool      `json:"is_published"`
 }
 
 type ArtistMemberGroupsResponse struct {
@@ -251,26 +253,32 @@ type ArtistMemberGroupsResponse struct {
 }
 
 type ArtistDetailResponse struct {
-	ID              uuid.UUID                  `json:"id"`
-	Name            string                     `json:"name"`
-	LegalName       string                     `json:"legal_name"`
-	StageNamesJSON  string                     `json:"stage_names_json"`
-	Bio             string                     `json:"bio"`
-	ImageURL        string                     `json:"image_url"`
-	Nationality     string                     `json:"nationality"`
-	BirthPlace      string                     `json:"birth_place"`
-	BirthDate       any                        `json:"birth_date,omitempty"`
-	BirthYear       int                        `json:"birth_year"`
-	DeathYear       int                        `json:"death_year"`
-	ArtistForm      string                     `json:"artist_form"`
-	ActiveStartDate string                     `json:"active_start_date,omitempty"`
-	ActiveEndDate   string                     `json:"active_end_date,omitempty"`
-	Members         string                     `json:"members"`
-	EntryStatus     string                     `json:"entry_status"`
-	RedirectTo      *uuid.UUID                 `json:"redirect_to,omitempty"`
-	Albums          any                        `json:"albums,omitempty"`
-	Aliases         any                        `json:"aliases,omitempty"`
-	PlayCount       int64                      `json:"play_count"`
-	BookmarkCount   int64                      `json:"bookmark_count"`
-	MemberGroups    ArtistMemberGroupsResponse `json:"member_groups"`
+	ID                       uuid.UUID                  `json:"id"`
+	Name                     string                     `json:"name"`
+	Disambiguation           string                     `json:"disambiguation,omitempty"`
+	DisplayName              string                     `json:"display_name"`
+	LegalName                string                     `json:"legal_name"`
+	StageNamesJSON           string                     `json:"stage_names_json"`
+	Bio                      string                     `json:"bio"`
+	ImageURL                 string                     `json:"image_url"`
+	Nationality              string                     `json:"nationality"`
+	BirthPlace               string                     `json:"birth_place"`
+	BirthDate                any                        `json:"birth_date,omitempty"`
+	BirthDatePrecision       string                     `json:"birth_date_precision,omitempty"`
+	BirthYear                int                        `json:"birth_year"`
+	DeathYear                int                        `json:"death_year"`
+	ArtistForm               string                     `json:"artist_form"`
+	ActiveStartDate          string                     `json:"active_start_date,omitempty"`
+	ActiveStartDatePrecision string                     `json:"active_start_date_precision,omitempty"`
+	ActiveEndDate            string                     `json:"active_end_date,omitempty"`
+	ActiveEndDatePrecision   string                     `json:"active_end_date_precision,omitempty"`
+	Members                  string                     `json:"members"`
+	EntryStatus              string                     `json:"entry_status"`
+	RedirectTo               *uuid.UUID                 `json:"redirect_to,omitempty"`
+	Albums                   any                        `json:"albums,omitempty"`
+	Aliases                  any                        `json:"aliases,omitempty"`
+	PlayCount                int64                      `json:"play_count"`
+	BookmarkCount            int64                      `json:"bookmark_count"`
+	MemberGroups             ArtistMemberGroupsResponse `json:"member_groups"`
+	Sources                  []Source                   `json:"sources,omitempty"`
 }

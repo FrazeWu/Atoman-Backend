@@ -969,6 +969,7 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	seedReadyImportMedia(t, db, session.ID, "https://cdn.example.com/lp1.jpg", "Preface", "Lights On")
 
 	committed, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		Artist: AlbumImportArtistPayload{
@@ -1064,8 +1065,8 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 		t.Fatalf("expected submitted album cover, got %q", album.CoverURL)
 	}
 	for _, song := range songs {
-		if song.AudioURL != "" {
-			t.Fatalf("expected empty song audio placeholder fallback, got %q", song.AudioURL)
+		if song.AudioURL == "" {
+			t.Fatalf("expected processed song audio, got %q", song.AudioURL)
 		}
 	}
 	var committedPayload map[string]any
@@ -1122,9 +1123,15 @@ func TestFinalizeSubmittedAlbumImportCommitsReadySession(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 	payload, err := json.Marshal(map[string]any{"commit_request": CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{Name: "Finalized Artist"},
-		Album:  AlbumImportAlbumPayload{Title: "Finalized Album"},
-	}})
+		Artist: completeAlbumImportArtistPayload("Finalized Artist"),
+		Album: AlbumImportAlbumPayload{
+			Title: "Finalized Album", CoverURL: "https://cdn.test/finalized.jpg", ReleaseDate: "2020-01-01",
+			Tracks: []AlbumImportTrackPayload{{Title: "Finalized Track", TrackNumber: 1}},
+		},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
+	}, "derived_tracks": []map[string]any{{"title": "Finalized Track", "track_number": 1, "audio_url": "https://cdn.test/finalized.mp3"}},
+	})
 	if err != nil {
 		t.Fatalf("encode payload: %v", err)
 	}
@@ -1175,10 +1182,12 @@ func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T)
 	}
 
 	if _, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{Name: "Burial"},
+		Artist: completeAlbumImportArtistPayload("Burial"),
 		Album: AlbumImportAlbumPayload{
-			Title: "Untrue",
+			Title: "Untrue", ReleaseDate: "2007-11-05",
 		},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
 	}); err != nil {
 		t.Fatalf("commit session: %v", err)
 	}
@@ -1246,9 +1255,12 @@ func TestCommitAlbumImportSessionIsIdempotentAfterCommit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	seedReadyImportMedia(t, db, session.ID, "https://cdn.test/discovery.jpg", "One More Time")
 	input := CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{Name: "Daft Punk"},
-		Album:  AlbumImportAlbumPayload{Title: "Discovery", Tracks: []AlbumImportTrackPayload{{Title: "One More Time", TrackNumber: 1}}},
+		Artist:       completeAlbumImportArtistPayload("Daft Punk"),
+		Album:        AlbumImportAlbumPayload{Title: "Discovery", CoverURL: "https://cdn.test/discovery.jpg", ReleaseDate: "2001-03-12", Tracks: []AlbumImportTrackPayload{{Title: "One More Time", TrackNumber: 1}}},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
 	}
 	first, err := svc.CommitAlbumImportSession(user, session.ID, input)
 	if err != nil {
@@ -1276,12 +1288,15 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	seedReadyImportMedia(t, db, session.ID, "https://cdn.test/discovery.jpg", "One More Time", "Aerodynamic")
 	initial := CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{Name: "Daft Punk"},
-		Album: AlbumImportAlbumPayload{Title: "Discovery", Tracks: []AlbumImportTrackPayload{
+		Artist: completeAlbumImportArtistPayload("Daft Punk"),
+		Album: AlbumImportAlbumPayload{Title: "Discovery", CoverURL: "https://cdn.test/discovery.jpg", ReleaseDate: "2001-03-12", Tracks: []AlbumImportTrackPayload{
 			{Title: "One More Time", TrackNumber: 1},
 			{Title: "Aerodynamic", TrackNumber: 2},
 		}},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
 	}
 	committed, err := svc.CommitAlbumImportSession(user, session.ID, initial)
 	if err != nil {
@@ -1304,9 +1319,10 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 	}
 	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		Artists: []CommitAlbumImportArtistInput{{ArtistID: artist.ID.String()}},
-		Album: AlbumImportAlbumPayload{Title: "Discovery (Remastered)", Description: "Updated metadata", Tracks: []AlbumImportTrackPayload{
+		Album: AlbumImportAlbumPayload{Title: "Discovery (Remastered)", Description: "Updated metadata", CoverURL: "https://cdn.test/discovery-remastered.jpg", ReleaseDate: "2001-03-12", Tracks: []AlbumImportTrackPayload{
 			{Title: "One More Time (Remastered)", TrackNumber: 1},
 		}},
+		AlbumSource: "album source",
 	})
 	if err != nil {
 		t.Fatalf("submit repair: %v", err)
@@ -1363,16 +1379,20 @@ func TestCommitAlbumImportSessionUsesExistingArtistWhenArtistIDProvided(t *testi
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	seedReadyImportMedia(t, db, session.ID, "https://cdn.test/graduation.jpg", "Good Morning")
 
 	committed, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		ArtistID: existingArtist.ID.String(),
 		Album: AlbumImportAlbumPayload{
 			Title:       "Graduation",
+			CoverURL:    "https://cdn.test/graduation.jpg",
+			ReleaseDate: "2007-09-11",
 			ReleaseYear: 2007,
 			Tracks: []AlbumImportTrackPayload{
 				{Title: "Good Morning", TrackNumber: 1},
 			},
 		},
+		AlbumSource: "album source",
 	})
 	if err != nil {
 		t.Fatalf("commit session with existing artist: %v", err)
@@ -1428,6 +1448,7 @@ func TestCommitAlbumImportSessionSupportsMultipleCreators(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	seedReadyImportMedia(t, db, session.ID, "https://cdn.test/joint.jpg", "Together")
 
 	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		Artists: []CommitAlbumImportArtistInput{
@@ -1449,11 +1470,14 @@ func TestCommitAlbumImportSessionSupportsMultipleCreators(t *testing.T) {
 		},
 		Album: AlbumImportAlbumPayload{
 			Title:       "Joint Album",
+			CoverURL:    "https://cdn.test/joint.jpg",
 			ReleaseDate: "2022-09-09",
 			Tracks: []AlbumImportTrackPayload{
 				{Title: "Together", TrackNumber: 1},
 			},
 		},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
 	})
 	if err != nil {
 		t.Fatalf("commit multi-creator session: %v", err)
@@ -1515,7 +1539,7 @@ func TestCommitAlbumImportSessionUsesResolvedSourceKindsAndTrackNumberAwareAudio
 	}
 
 	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{Name: "Source Artist"},
+		Artist: completeAlbumImportArtistPayload("Source Artist"),
 		Album: AlbumImportAlbumPayload{
 			Title:       "Source Album",
 			ReleaseDate: "2024-01-02",
@@ -1524,6 +1548,8 @@ func TestCommitAlbumImportSessionUsesResolvedSourceKindsAndTrackNumberAwareAudio
 				{Title: "Intro", TrackNumber: 2},
 			},
 		},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
 	})
 	if err != nil {
 		t.Fatalf("commit session: %v", err)

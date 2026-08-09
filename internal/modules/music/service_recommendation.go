@@ -117,7 +117,7 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 		Select("\"Artists\".*, COALESCE(MAX(a.hot_score), 0) as max_hot_score, COUNT(a.id) as album_count").
 		Joins("LEFT JOIN album_artists aa ON aa.artist_id = \"Artists\".id").
 		Joins("LEFT JOIN \"Albums\" a ON a.id = aa.album_id AND COALESCE(a.entry_status, '') <> 'closed' AND COALESCE(a.status, '') <> 'closed'").
-		Where("COALESCE(\"Artists\".entry_status, '') <> ?", "closed").
+		Where("COALESCE(\"Artists\".entry_status, '') NOT IN ?", []string{"closed", artistEntryDraft}).
 		Group("\"Artists\".id").
 		Find(&dbArtists).Error; err != nil {
 		return nil, 0, err

@@ -23,7 +23,10 @@ func (s *Service) CompleteAlbumImportSession(user authctx.CurrentUser, sessionID
 		if err != nil {
 			return err
 		}
-		if session.Status == AlbumImportStatusCanceled || session.Status == AlbumImportStatusCommitted {
+		if session.Status == AlbumImportStatusCommitted {
+			return nil
+		}
+		if session.Status == AlbumImportStatusCanceled {
 			return apperr.Unprocessable("music.import_invalid_status", "Import session cannot be queued")
 		}
 		if session.Status == AlbumImportStatusQueued {

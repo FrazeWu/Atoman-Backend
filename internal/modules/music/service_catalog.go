@@ -2,11 +2,11 @@ package music
 
 import (
 	"strings"
-	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	revisionservice "atoman/internal/service"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -20,9 +20,21 @@ func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest
 	if name == "" {
 		return model.Artist{}, apperr.BadRequest("validation.invalid_request", "name is required")
 	}
+	memberDraft := strings.TrimSpace(req.DraftContext) == "member"
+
+	sources, sourcesJSON := []model.MusicSource(nil), "[]"
+	if !memberDraft {
+		var err error
+		sources, sourcesJSON, err = normalizeMusicSources(req.Sources, "")
+		if err != nil {
+			return model.Artist{}, err
+		}
+	}
 
 	artist := model.Artist{
 		Name:           name,
+		Disambiguation: strings.TrimSpace(req.Disambiguation),
+		DisplayName:    artistDisplayName(name, req.Disambiguation),
 		LegalName:      strings.TrimSpace(req.LegalName),
 		StageNamesJSON: mustMarshalStageNames(req.StageNames),
 		Bio:            strings.TrimSpace(req.Bio),
@@ -32,44 +44,57 @@ func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest
 		BirthYear:      req.BirthYear,
 		DeathYear:      req.DeathYear,
 		ArtistForm:     normalizeArtistForm(req.ArtistForm),
-		EntryStatus:    "open",
+		EntryStatus:    artistEntryDraft,
+		CreatedBy:      &user.ID,
+		SourcesJSON:    sourcesJSON,
+		Sources:        sources,
 	}
 	if strings.TrimSpace(req.BirthDate) != "" {
-		birthDate, err := parseMusicDate(req.BirthDate, "birth_date")
+		birthDate, precision, err := parsePartialDate(req.BirthDate, "birth_date")
 		if err != nil {
 			return model.Artist{}, err
 		}
-		artist.BirthDate = &birthDate
+		artist.BirthDate = birthDate
+		artist.BirthDatePrecision = precision
 		artist.BirthYear = birthDate.Year()
 	}
 	if strings.TrimSpace(req.ActiveStartDate) != "" {
-		activeStartDate, err := parseMusicDate(req.ActiveStartDate, "active_start_date")
+		activeStartDate, precision, err := parsePartialDate(req.ActiveStartDate, "active_start_date")
 		if err != nil {
 			return model.Artist{}, err
 		}
-		artist.ActiveStartDate = activeStartDate
+		artist.ActiveStartDate = *activeStartDate
+		artist.ActiveStartDatePrecision = precision
 	}
 	if strings.TrimSpace(req.ActiveEndDate) != "" {
-		activeEndDate, err := parseMusicDate(req.ActiveEndDate, "active_end_date")
+		activeEndDate, precision, err := parsePartialDate(req.ActiveEndDate, "active_end_date")
 		if err != nil {
 			return model.Artist{}, err
 		}
-		artist.ActiveEndDate = activeEndDate
+		artist.ActiveEndDate = *activeEndDate
+		artist.ActiveEndDatePrecision = precision
+	}
+	if !memberDraft {
+		if err := validateArtistPublicationFields(artist, req.Members); err != nil {
+			return model.Artist{}, err
+		}
 	}
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := ensureArtistDisplayNameAvailable(tx, artist.Name, artist.Disambiguation, nil); err != nil {
+			return err
+		}
+		if err := validateArtistMemberReferences(tx, user, req.Members); err != nil {
+			return err
+		}
 		if err := tx.Create(&artist).Error; err != nil {
 			return err
 		}
-		return replaceArtistMembers(tx, artist.ID, req.Members)
+		if err := replaceArtistMembers(tx, artist.ID, req.Members); err != nil {
+			return err
+		}
+		_, err := revisionservice.NewRevisionService(tx).EnsureInitialRevision("artist", artist.ID, user.ID)
+		return err
 	})
 	return artist, err
-}
-
-func parseMusicDate(raw string, field string) (time.Time, error) {
-	parsed, err := time.Parse("2006-01-02", strings.TrimSpace(raw))
-	if err != nil {
-		return time.Time{}, apperr.BadRequest("validation.invalid_request", field+" must use YYYY-MM-DD")
-	}
-	return parsed, nil
 }

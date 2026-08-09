@@ -14,6 +14,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/service"
 	"atoman/internal/storage"
 )
 
@@ -239,6 +240,7 @@ func CreateAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			return
 		}
 
+		createdArtists := make([]model.Artist, 0, len(artistNames))
 		for _, name := range artistNames {
 			var artist model.Artist
 			if err := tx.FirstOrCreate(&artist, model.Artist{Name: name}).Error; err != nil {
@@ -251,6 +253,25 @@ func CreateAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to link album to artist"})
 				return
 			}
+			createdArtists = append(createdArtists, artist)
+		}
+		if userID == nil {
+			tx.Rollback()
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication required"})
+			return
+		}
+		revisions := service.NewRevisionService(tx)
+		for _, artist := range createdArtists {
+			if _, err := revisions.EnsureInitialRevision("artist", artist.ID, *userID); err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create artist revision"})
+				return
+			}
+		}
+		if _, err := revisions.EnsureInitialRevision("album", album.ID, *userID); err != nil {
+			tx.Rollback()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create album revision"})
+			return
 		}
 
 		if err := tx.Commit().Error; err != nil {

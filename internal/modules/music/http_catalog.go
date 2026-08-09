@@ -210,11 +210,16 @@ func (h *Handler) listArtists(c *gin.Context) {
 	query := strings.TrimSpace(c.Query("q"))
 
 	db := h.service.db.Model(&model.Artist{}).Distinct("\"Artists\".*").Where("COALESCE(\"Artists\".entry_status, '') <> ?", "closed")
+	if user, ok := currentMusicUser(c); ok {
+		db = db.Where("COALESCE(\"Artists\".entry_status, '') <> ? OR \"Artists\".created_by = ?", artistEntryDraft, user.ID)
+	} else {
+		db = db.Where("COALESCE(\"Artists\".entry_status, '') <> ?", artistEntryDraft)
+	}
 	if query != "" {
 		like := "%" + strings.ToLower(query) + "%"
 		db = db.
 			Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
-			Where("LOWER(\"Artists\".name) LIKE ? OR LOWER(COALESCE(\"Artists\".legal_name, '')) LIKE ? OR LOWER(COALESCE(artist_aliases.alias, '')) LIKE ?", like, like, like)
+			Where("LOWER(\"Artists\".name) LIKE ? OR LOWER("+artistDisambiguationSearchExpression+") LIKE ? OR LOWER(COALESCE(\"Artists\".legal_name, '')) LIKE ? OR LOWER(COALESCE(artist_aliases.alias, '')) LIKE ?", like, like, like, like)
 	}
 
 	var total int64
@@ -299,6 +304,13 @@ func (h *Handler) getArtist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	if artist.EntryStatus == artistEntryDraft {
+		user, ok := currentMusicUser(c)
+		if !ok || artist.CreatedBy == nil || *artist.CreatedBy != user.ID {
+			httpx.Error(c, apperr.NotFound("music.artist_not_found", "Artist not found"))
+			return
+		}
+	}
 	artistRows := []model.Artist{artist}
 	if err := hydrateArtistStats(h.service.db, artistRows); err != nil {
 		httpx.Error(c, err)
@@ -330,25 +342,31 @@ func (h *Handler) getArtist(c *gin.Context) {
 func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
 	now := time.Now()
 	resp := ArtistDetailResponse{
-		ID:             artist.ID,
-		Name:           artist.Name,
-		LegalName:      artist.LegalName,
-		StageNamesJSON: artist.StageNamesJSON,
-		Bio:            artist.Bio,
-		ImageURL:       artist.ImageURL,
-		Nationality:    artist.Nationality,
-		BirthPlace:     artist.BirthPlace,
-		BirthDate:      artist.BirthDate,
-		BirthYear:      artist.BirthYear,
-		DeathYear:      artist.DeathYear,
-		ArtistForm:     artist.ArtistForm,
-		Members:        artist.Members,
-		EntryStatus:    artist.EntryStatus,
-		RedirectTo:     artist.RedirectTo,
-		Albums:         artist.Albums,
-		Aliases:        artist.Aliases,
-		PlayCount:      artist.PlayCount,
-		BookmarkCount:  artist.BookmarkCount,
+		ID:                       artist.ID,
+		Name:                     artist.Name,
+		Disambiguation:           artist.Disambiguation,
+		DisplayName:              artist.DisplayName,
+		LegalName:                artist.LegalName,
+		StageNamesJSON:           artist.StageNamesJSON,
+		Bio:                      artist.Bio,
+		ImageURL:                 artist.ImageURL,
+		Nationality:              artist.Nationality,
+		BirthPlace:               artist.BirthPlace,
+		BirthDate:                artist.BirthDate,
+		BirthDatePrecision:       artist.BirthDatePrecision,
+		BirthYear:                artist.BirthYear,
+		DeathYear:                artist.DeathYear,
+		ArtistForm:               artist.ArtistForm,
+		Members:                  artist.Members,
+		EntryStatus:              artist.EntryStatus,
+		RedirectTo:               artist.RedirectTo,
+		Albums:                   artist.Albums,
+		Aliases:                  artist.Aliases,
+		PlayCount:                artist.PlayCount,
+		BookmarkCount:            artist.BookmarkCount,
+		Sources:                  artist.Sources,
+		ActiveStartDatePrecision: artist.ActiveStartDatePrecision,
+		ActiveEndDatePrecision:   artist.ActiveEndDatePrecision,
 		MemberGroups: ArtistMemberGroupsResponse{
 			Current: []ArtistMemberGroupItemResponse{},
 			Former:  []ArtistMemberGroupItemResponse{},
@@ -365,9 +383,12 @@ func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
 			continue
 		}
 		item := ArtistMemberGroupItemResponse{
-			ArtistID: relation.MemberArtist.ID,
-			Name:     relation.MemberArtist.Name,
-			ImageURL: relation.MemberArtist.ImageURL,
+			ArtistID:           relation.MemberArtist.ID,
+			Name:               relation.MemberArtist.Name,
+			ImageURL:           relation.MemberArtist.ImageURL,
+			JoinDatePrecision:  relation.JoinDatePrecision,
+			LeaveDatePrecision: relation.LeaveDatePrecision,
+			IsPublished:        relation.MemberArtist.EntryStatus != artistEntryDraft,
 		}
 		if relation.JoinDate != nil {
 			item.JoinDate = relation.JoinDate.Format("2006-01-02")

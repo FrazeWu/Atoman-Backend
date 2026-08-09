@@ -17,6 +17,10 @@ type Handler struct {
 	playLimiter *ratelimit.Limiter
 }
 
+// Use JSON extraction so search remains available while older databases catch up
+// with the artist disambiguation column migration.
+const artistDisambiguationSearchExpression = `COALESCE(to_jsonb("Artists")->>'disambiguation', '')`
+
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service, playLimiter: ratelimit.New()}
 	group.Use(musicOperationLog())

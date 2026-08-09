@@ -15,6 +15,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/musiclyrics"
+	"atoman/internal/platform/partialdate"
 )
 
 // RevisionService handles revision-related operations
@@ -77,6 +78,20 @@ func NewRevisionService(db *gorm.DB) *RevisionService {
 // GetDB returns the database instance
 func (s *RevisionService) GetDB() *gorm.DB {
 	return s.db
+}
+
+// EnsureInitialRevision creates the approved v1 snapshot once for newly created content.
+func (s *RevisionService) EnsureInitialRevision(contentType string, contentID, editorID uuid.UUID) (*model.Revision, error) {
+	var revision model.Revision
+	result := s.db.Where("content_id = ? AND content_type = ?", contentID, contentType).
+		Order("version_number ASC").Limit(1).Find(&revision)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	if result.RowsAffected > 0 {
+		return &revision, nil
+	}
+	return s.createBaselineRevision(s.db, contentType, contentID, editorID)
 }
 
 // CreateRevision creates a new revision with conflict detection
@@ -202,6 +217,10 @@ func (s *RevisionService) createBaselineRevision(tx *gorm.DB, contentType string
 	if err != nil {
 		return nil, err
 	}
+	createdAt, err := revisionContentCreatedAt(tx, contentType, contentID)
+	if err != nil {
+		return nil, err
+	}
 	baseline := model.Revision{
 		ContentType:     contentType,
 		ContentID:       contentID,
@@ -212,12 +231,31 @@ func (s *RevisionService) createBaselineRevision(tx *gorm.DB, contentType string
 		EditType:        "creation",
 		Status:          "approved",
 		IsCurrent:       true,
-		CreatedAt:       time.Now(),
+		CreatedAt:       createdAt,
 	}
 	if err := tx.Create(&baseline).Error; err != nil {
 		return nil, fmt.Errorf("failed to create baseline revision: %w", err)
 	}
 	return &baseline, nil
+}
+
+func revisionContentCreatedAt(tx *gorm.DB, contentType string, contentID uuid.UUID) (time.Time, error) {
+	var createdAt time.Time
+	var query *gorm.DB
+	switch contentType {
+	case "artist":
+		query = tx.Model(&model.Artist{})
+	case "album":
+		query = tx.Model(&model.Album{})
+	case "song":
+		query = tx.Model(&model.Song{})
+	default:
+		return time.Time{}, fmt.Errorf("cannot find creation time for content type: %s", contentType)
+	}
+	if err := query.Select("created_at").Where("id = ?", contentID).Scan(&createdAt).Error; err != nil {
+		return time.Time{}, err
+	}
+	return createdAt, nil
 }
 
 func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string, contentID uuid.UUID) ([]byte, error) {
@@ -240,9 +278,7 @@ func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string
 			ArtistCredits: make([]albumRevisionCredit, 0, len(album.ArtistCredits)),
 			Songs:         make([]albumRevisionSong, 0, len(album.Songs)),
 		}
-		if !album.ReleaseDate.IsZero() {
-			snapshot.Album.ReleaseDate = album.ReleaseDate.Format("2006-01-02")
-		}
+		snapshot.Album.ReleaseDate = partialdate.Format(album.ReleaseDate, album.ReleaseDatePrecision)
 		for _, credit := range album.ArtistCredits {
 			snapshot.ArtistCredits = append(snapshot.ArtistCredits, albumRevisionCredit{
 				ArtistID: credit.ArtistID.String(), CustomRole: credit.CustomRole,
@@ -284,7 +320,7 @@ func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string
 			"birth_date": "", "artist_form": artist.ArtistForm, "entry_status": artist.EntryStatus,
 		}
 		if artist.BirthDate != nil {
-			snapshot["birth_date"] = artist.BirthDate.Format("2006-01-02")
+			snapshot["birth_date"] = partialdate.Format(*artist.BirthDate, artist.BirthDatePrecision)
 		}
 		return json.Marshal(snapshot)
 	default:
@@ -914,12 +950,14 @@ func applyArtistRevisionSnapshot(tx *gorm.DB, artistID uuid.UUID, content map[st
 	if value, ok := content["birth_date"].(string); ok {
 		if strings.TrimSpace(value) == "" {
 			updates["birth_date"] = nil
+			updates["birth_date_precision"] = ""
 		} else {
-			parsed, err := time.Parse("2006-01-02", value)
+			parsed, precision, err := partialdate.Parse(value)
 			if err != nil {
 				return fmt.Errorf("failed to parse artist birth date: %w", err)
 			}
 			updates["birth_date"] = parsed
+			updates["birth_date_precision"] = precision
 			updates["birth_year"] = parsed.Year()
 		}
 	}
@@ -1016,20 +1054,27 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 	album.CoverURL = strings.TrimSpace(snapshot.Album.CoverURL)
 	album.CoverSource = strings.TrimSpace(snapshot.Album.CoverSource)
 	if snapshot.Album.ReleaseDate != "" {
-		releaseDate, err := time.Parse("2006-01-02", snapshot.Album.ReleaseDate)
+		releaseDate, precision, err := partialdate.Parse(snapshot.Album.ReleaseDate)
 		if err != nil {
 			return fmt.Errorf("failed to parse album release date: %w", err)
 		}
-		album.ReleaseDate = releaseDate
+		album.ReleaseDate = *releaseDate
+		album.ReleaseDatePrecision = precision
 		album.Year = releaseDate.Year()
 		album.ReleaseYear = releaseDate.Year()
 	} else {
 		album.ReleaseDate = time.Time{}
+		album.ReleaseDatePrecision = ""
 		album.Year = 0
 		album.ReleaseYear = 0
 	}
 
 	if err := tx.Save(&album).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&model.Song{}).Where("album_id = ?", album.ID).Updates(map[string]any{
+		"release_date": album.ReleaseDate, "release_date_precision": album.ReleaseDatePrecision,
+	}).Error; err != nil {
 		return err
 	}
 	if snapshot.ArtistCredits != nil {

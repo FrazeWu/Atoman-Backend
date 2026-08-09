@@ -7,6 +7,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/service"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -66,6 +67,9 @@ func Run(db *gorm.DB) error {
 		{"music song credits migration", migrations.RunMusicSongCreditsMigration},
 		{"music catalog v2 migration", migrations.RunMusicCatalogV2Migration},
 		{"music catalog indexes migration", migrations.RunMusicCatalogIndexesMigration},
+		{"music partial dates migration", migrations.RunMusicPartialDatesMigration},
+		{"music artist drafts migration", migrations.RunMusicArtistDraftsMigration},
+		{"music revision baselines migration", runMusicRevisionBaselinesMigration},
 		{"unified studio migration", migrations.RunUnifiedStudioMigration},
 		{"user default resources migration", backfillUserDefaultResources},
 	}
@@ -75,6 +79,77 @@ func Run(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+func runMusicRevisionBaselinesMigration(db *gorm.DB) error {
+	for _, table := range []any{&model.User{}, &model.Artist{}, &model.Album{}, &model.Song{}, &model.Revision{}} {
+		if !db.Migrator().HasTable(table) {
+			return nil
+		}
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var users []model.User
+		if err := tx.Where("is_active = ?", true).
+			Order("CASE WHEN role = 'admin' THEN 0 WHEN role = 'moderator' THEN 1 ELSE 2 END").
+			Order("created_at ASC, uuid ASC").Find(&users).Error; err != nil {
+			return fmt.Errorf("find revision editors: %w", err)
+		}
+		validEditors := make(map[uuid.UUID]bool, len(users))
+		for _, user := range users {
+			validEditors[user.UUID] = true
+		}
+
+		var artists []model.Artist
+		var albums []model.Album
+		var songs []model.Song
+		if err := tx.Order("created_at ASC, id ASC").Find(&artists).Error; err != nil {
+			return fmt.Errorf("find artists for revision baselines: %w", err)
+		}
+		if err := tx.Order("created_at ASC, id ASC").Find(&albums).Error; err != nil {
+			return fmt.Errorf("find albums for revision baselines: %w", err)
+		}
+		if err := tx.Order("created_at ASC, id ASC").Find(&songs).Error; err != nil {
+			return fmt.Errorf("find songs for revision baselines: %w", err)
+		}
+		if len(artists)+len(albums)+len(songs) == 0 {
+			return nil
+		}
+		if len(users) == 0 {
+			return fmt.Errorf("cannot create music revision baselines without a user")
+		}
+
+		fallbackEditorID := users[0].UUID
+		revisions := service.NewRevisionService(tx)
+		for _, artist := range artists {
+			editorID := fallbackEditorID
+			if artist.CreatedBy != nil && validEditors[*artist.CreatedBy] {
+				editorID = *artist.CreatedBy
+			}
+			if _, err := revisions.EnsureInitialRevision("artist", artist.ID, editorID); err != nil {
+				return fmt.Errorf("create artist %s revision baseline: %w", artist.ID, err)
+			}
+		}
+		for _, album := range albums {
+			editorID := fallbackEditorID
+			if album.UploadedBy != nil && validEditors[*album.UploadedBy] {
+				editorID = *album.UploadedBy
+			}
+			if _, err := revisions.EnsureInitialRevision("album", album.ID, editorID); err != nil {
+				return fmt.Errorf("create album %s revision baseline: %w", album.ID, err)
+			}
+		}
+		for _, song := range songs {
+			editorID := fallbackEditorID
+			if song.UploadedBy != nil && validEditors[*song.UploadedBy] {
+				editorID = *song.UploadedBy
+			}
+			if _, err := revisions.EnsureInitialRevision("song", song.ID, editorID); err != nil {
+				return fmt.Errorf("create song %s revision baseline: %w", song.ID, err)
+			}
+		}
+		return nil
+	})
 }
 
 func backfillUserDefaultResources(db *gorm.DB) error {

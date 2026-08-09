@@ -23,6 +23,7 @@ func TestLegacySongCreateAndUpdateKeepLyricsWikiInSync(t *testing.T) {
 		&model.User{}, &model.Artist{}, &model.Album{}, &model.Song{},
 		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
 		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
+		&model.Revision{},
 	)
 	user := createDeleteSongTestUser(t, db, "legacy-editor", authctx.RoleUser)
 	r := gin.New()
@@ -45,6 +46,13 @@ func TestLegacySongCreateAndUpdateKeepLyricsWikiInSync(t *testing.T) {
 	var song model.Song
 	if err := json.Unmarshal(createW.Body.Bytes(), &song); err != nil {
 		t.Fatalf("decode created song: %v", err)
+	}
+	var revision model.Revision
+	if err := db.Where("content_type = ? AND content_id = ?", "song", song.ID).First(&revision).Error; err != nil {
+		t.Fatalf("load initial song revision: %v", err)
+	}
+	if revision.VersionNumber != 1 || revision.EditType != "creation" || !revision.IsCurrent {
+		t.Fatalf("unexpected initial song revision: %#v", revision)
 	}
 
 	update := url.Values{"title": {"Legacy API Song"}, "artist": {"Artist"}, "album": {"Unknown Album"}, "audio_url": {"/song.mp3"}, "lyrics": {"updated"}}

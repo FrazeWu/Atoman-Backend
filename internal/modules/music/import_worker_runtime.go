@@ -62,6 +62,14 @@ func StartImportWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-chan
 		defer close(done)
 		log.Printf("music import worker started as %s", workerID)
 		run := func() {
+			finalized, finalizeErr := worker.FinalizeSubmittedReady(ctx)
+			if finalizeErr != nil {
+				log.Printf("WARN: music import worker could not finalize ready imports: %v", finalizeErr)
+			}
+			if finalized > 0 {
+				log.Printf("music import worker finalized %d ready import(s)", finalized)
+			}
+
 			processed, err := worker.RunOnce(ctx, processor)
 			if err != nil {
 				log.Printf("WARN: music import worker failed: %v", err)

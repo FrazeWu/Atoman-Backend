@@ -23114,6 +23114,9 @@
                 "release_date": {
                     "type": "string"
                 },
+                "release_date_precision": {
+                    "type": "string"
+                },
                 "release_year": {
                     "type": "integer"
                 },
@@ -23178,7 +23181,13 @@
                 "active_end_date": {
                     "type": "string"
                 },
+                "active_end_date_precision": {
+                    "type": "string"
+                },
                 "active_start_date": {
+                    "type": "string"
+                },
+                "active_start_date_precision": {
                     "type": "string"
                 },
                 "albums": {
@@ -23200,6 +23209,9 @@
                     "type": "string"
                 },
                 "birth_date": {
+                    "type": "string"
+                },
+                "birth_date_precision": {
                     "type": "string"
                 },
                 "birth_place": {
@@ -24623,6 +24635,9 @@
                 "release_date": {
                     "type": "string"
                 },
+                "release_date_precision": {
+                    "type": "string"
+                },
                 "source_bit_depth": {
                     "type": "integer"
                 },
@@ -25623,6 +25638,9 @@
                 "join_date": {
                     "type": "string"
                 },
+                "name": {
+                    "type": "string"
+                },
                 "leave_date": {
                     "type": "string"
                 }
@@ -26009,6 +26027,9 @@
                     "type": "string"
                 },
                 "release_date": {
+                    "type": "string"
+                },
+                "release_date_precision": {
                     "type": "string"
                 },
                 "release_year": {

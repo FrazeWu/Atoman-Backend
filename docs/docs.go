@@ -23117,6 +23117,9 @@ const docTemplate = `{
                 "release_date": {
                     "type": "string"
                 },
+                "release_date_precision": {
+                    "type": "string"
+                },
                 "release_year": {
                     "type": "integer"
                 },
@@ -23181,7 +23184,13 @@ const docTemplate = `{
                 "active_end_date": {
                     "type": "string"
                 },
+                "active_end_date_precision": {
+                    "type": "string"
+                },
                 "active_start_date": {
+                    "type": "string"
+                },
+                "active_start_date_precision": {
                     "type": "string"
                 },
                 "albums": {
@@ -23203,6 +23212,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "birth_date": {
+                    "type": "string"
+                },
+                "birth_date_precision": {
                     "type": "string"
                 },
                 "birth_place": {
@@ -24626,6 +24638,9 @@ const docTemplate = `{
                 "release_date": {
                     "type": "string"
                 },
+                "release_date_precision": {
+                    "type": "string"
+                },
                 "source_bit_depth": {
                     "type": "integer"
                 },
@@ -25626,6 +25641,9 @@ const docTemplate = `{
                 "join_date": {
                     "type": "string"
                 },
+                "name": {
+                    "type": "string"
+                },
                 "leave_date": {
                     "type": "string"
                 }
@@ -26012,6 +26030,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "release_date": {
+                    "type": "string"
+                },
+                "release_date_precision": {
                     "type": "string"
                 },
                 "release_year": {

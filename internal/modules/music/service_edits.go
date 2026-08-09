@@ -173,7 +173,7 @@ func mergeArtistMemberRelations(tx *gorm.DB, sourceArtistID, targetArtistID uuid
 			}
 			var existing model.ArtistMember
 			if err := query.First(&existing).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-				if err := tx.Create(&model.ArtistMember{GroupArtistID: groupID, MemberArtistID: memberID, JoinDate: relation.JoinDate, LeaveDate: relation.LeaveDate}).Error; err != nil {
+				if err := tx.Create(&model.ArtistMember{GroupArtistID: groupID, MemberArtistID: memberID, JoinDate: relation.JoinDate, JoinDatePrecision: relation.JoinDatePrecision, LeaveDate: relation.LeaveDate, LeaveDatePrecision: relation.LeaveDatePrecision}).Error; err != nil {
 					return err
 				}
 			} else if err != nil {

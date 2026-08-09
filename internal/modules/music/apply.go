@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
+	revisionservice "atoman/internal/service"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -62,7 +62,7 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		if payload.Name == "" {
 			return apperr.BadRequest("validation.invalid_request", "artist name is required")
 		}
-		birthDate, err := parseOptionalReleaseDate(payload.BirthDate)
+		birthDate, birthDatePrecision, err := parseOptionalDate(payload.BirthDate, "birth_date")
 		if err != nil {
 			return err
 		}
@@ -70,39 +70,45 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		if birthDate != nil {
 			birthYear = birthDate.Year()
 		}
-		activeStartDate, err := parseOptionalDate(payload.ActiveStartDate, "active_start_date")
+		activeStartDate, activeStartDatePrecision, err := parseOptionalDate(payload.ActiveStartDate, "active_start_date")
 		if err != nil {
 			return err
 		}
-		activeEndDate, err := parseOptionalDate(payload.ActiveEndDate, "active_end_date")
+		activeEndDate, activeEndDatePrecision, err := parseOptionalDate(payload.ActiveEndDate, "active_end_date")
 		if err != nil {
 			return err
 		}
 
 		artist := model.Artist{
-			Name:           payload.Name,
-			LegalName:      payload.LegalName,
-			StageNamesJSON: mustMarshalStageNames(payload.StageNames),
-			Bio:            payload.Bio,
-			ImageURL:       payload.ImageURL,
-			Nationality:    payload.Nationality,
-			BirthPlace:     payload.BirthPlace,
-			BirthDate:      birthDate,
-			BirthYear:      birthYear,
-			DeathYear:      payload.DeathYear,
-			ArtistForm:     normalizeArtistForm(payload.ArtistForm),
-			EntryStatus:    "open",
+			Name:               payload.Name,
+			LegalName:          payload.LegalName,
+			StageNamesJSON:     mustMarshalStageNames(payload.StageNames),
+			Bio:                payload.Bio,
+			ImageURL:           payload.ImageURL,
+			Nationality:        payload.Nationality,
+			BirthPlace:         payload.BirthPlace,
+			BirthDate:          birthDate,
+			BirthDatePrecision: birthDatePrecision,
+			BirthYear:          birthYear,
+			DeathYear:          payload.DeathYear,
+			ArtistForm:         normalizeArtistForm(payload.ArtistForm),
+			EntryStatus:        "open",
 		}
 		if activeStartDate != nil {
 			artist.ActiveStartDate = *activeStartDate
+			artist.ActiveStartDatePrecision = activeStartDatePrecision
 		}
 		if activeEndDate != nil {
 			artist.ActiveEndDate = *activeEndDate
+			artist.ActiveEndDatePrecision = activeEndDatePrecision
 		}
 		if err := tx.Create(&artist).Error; err != nil {
 			return err
 		}
 		if err := replaceArtistMembers(tx, artist.ID, payload.Members); err != nil {
+			return err
+		}
+		if _, err := revisionservice.NewRevisionService(tx).EnsureInitialRevision("artist", artist.ID, edit.SubmittedBy); err != nil {
 			return err
 		}
 		edit.EntityID = &artist.ID
@@ -133,7 +139,7 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 			credits = legacyAlbumArtistCredits(payload.ArtistIDs)
 			defaultMissingRoles = true
 		}
-		releaseDate, err := parseOptionalReleaseDate(payload.ReleaseDate)
+		releaseDate, releaseDatePrecision, err := parseOptionalReleaseDate(payload.ReleaseDate)
 		if err != nil {
 			return err
 		}
@@ -156,6 +162,7 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		}
 		if releaseDate != nil {
 			album.ReleaseDate = *releaseDate
+			album.ReleaseDatePrecision = releaseDatePrecision
 			album.Year = releaseDate.Year()
 			album.ReleaseYear = releaseDate.Year()
 		}
@@ -163,6 +170,9 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 			return err
 		}
 		if err := replaceAlbumArtistCredits(tx, album.ID, credits, defaultMissingRoles); err != nil {
+			return err
+		}
+		if _, err := revisionservice.NewRevisionService(tx).EnsureInitialRevision("album", album.ID, edit.SubmittedBy); err != nil {
 			return err
 		}
 		edit.EntityID = &album.ID
@@ -247,6 +257,7 @@ func syncAlbumTracks(tx *gorm.DB, album *model.Album, submittedBy *uuid.UUID, tr
 			UploadedBy:  submittedBy,
 		}
 		song.ReleaseDate = album.ReleaseDate
+		song.ReleaseDatePrecision = album.ReleaseDatePrecision
 		if err := tx.Create(&song).Error; err != nil {
 			return err
 		}
@@ -256,24 +267,6 @@ func syncAlbumTracks(tx *gorm.DB, album *model.Album, submittedBy *uuid.UUID, tr
 	}
 
 	return nil
-}
-
-func parseOptionalReleaseDate(raw string) (*time.Time, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	return parseOptionalDate(raw, "release_date")
-}
-
-func parseOptionalDate(raw string, fieldName string) (*time.Time, error) {
-	if raw == "" {
-		return nil, nil
-	}
-	parsed, err := time.Parse("2006-01-02", raw)
-	if err != nil {
-		return nil, apperr.BadRequest("validation.invalid_request", fmt.Sprintf("%s must be YYYY-MM-DD", fieldName))
-	}
-	return &parsed, nil
 }
 
 func coverSourceFromURL(url string) string {
@@ -321,9 +314,12 @@ func replaceArtistMembers(tx *gorm.DB, groupArtistID uuid.UUID, members []Artist
 		return err
 	}
 	for _, member := range members {
-		memberArtistID, err := uuid.Parse(member.ArtistID)
+		memberArtistID, err := resolveArtistMemberID(tx, member)
 		if err != nil {
-			return apperr.BadRequest("validation.invalid_request", "members.artist_id must be a valid UUID")
+			return err
+		}
+		if memberArtistID == uuid.Nil {
+			continue
 		}
 		if memberArtistID == groupArtistID {
 			return apperr.BadRequest("validation.invalid_request", "group artist cannot reference itself as a member")
@@ -335,23 +331,36 @@ func replaceArtistMembers(tx *gorm.DB, groupArtistID uuid.UUID, members []Artist
 			}
 			return err
 		}
-		joinDate, err := parseOptionalDate(member.JoinDate, "join_date")
+		joinDate, joinDatePrecision, err := parseOptionalDate(member.JoinDate, "join_date")
 		if err != nil {
 			return err
 		}
-		leaveDate, err := parseOptionalDate(member.LeaveDate, "leave_date")
+		leaveDate, leaveDatePrecision, err := parseOptionalDate(member.LeaveDate, "leave_date")
 		if err != nil {
 			return err
 		}
 		artistMember := model.ArtistMember{
-			GroupArtistID:  groupArtistID,
-			MemberArtistID: memberArtistID,
-			JoinDate:       joinDate,
-			LeaveDate:      leaveDate,
+			GroupArtistID:      groupArtistID,
+			MemberArtistID:     memberArtistID,
+			JoinDate:           joinDate,
+			JoinDatePrecision:  joinDatePrecision,
+			LeaveDate:          leaveDate,
+			LeaveDatePrecision: leaveDatePrecision,
 		}
 		if err := tx.Create(&artistMember).Error; err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func resolveArtistMemberID(_ *gorm.DB, member ArtistMemberPayload) (uuid.UUID, error) {
+	if artistID := strings.TrimSpace(member.ArtistID); artistID != "" {
+		parsed, err := uuid.Parse(artistID)
+		if err != nil {
+			return uuid.Nil, apperr.BadRequest("validation.invalid_request", "members.artist_id must be a valid UUID")
+		}
+		return parsed, nil
+	}
+	return uuid.Nil, apperr.BadRequest("validation.invalid_request", "members.artist_id is required")
 }

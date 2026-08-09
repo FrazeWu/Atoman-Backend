@@ -19,7 +19,15 @@ func (r fakeMediaRunner) LookPath(name string) (string, error) {
 
 func (fakeMediaRunner) Run(context.Context, string, ...string) ([]byte, error) { return nil, nil }
 
-type fakeWorkerRunner struct{ calls int }
+type fakeWorkerRunner struct {
+	calls         int
+	finalizeCalls int
+}
+
+func (w *fakeWorkerRunner) FinalizeSubmittedReady(context.Context) (int, error) {
+	w.finalizeCalls++
+	return 0, nil
+}
 
 func (w *fakeWorkerRunner) RunOnce(context.Context, music.ImportProcessor) (bool, error) {
 	w.calls++
@@ -42,6 +50,9 @@ func TestRunWorkerWithoutProcessorWaitsInsteadOfReturningError(t *testing.T) {
 	}
 	if worker.calls != 1 {
 		t.Fatalf("RunOnce calls = %d", worker.calls)
+	}
+	if worker.finalizeCalls != 1 {
+		t.Fatalf("FinalizeSubmittedReady calls = %d", worker.finalizeCalls)
 	}
 }
 

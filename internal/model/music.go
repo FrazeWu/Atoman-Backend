@@ -1,36 +1,52 @@
 package model
 
 import (
+	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
+type MusicSource struct {
+	Type  string `json:"type"`
+	URL   string `json:"url,omitempty"`
+	Title string `json:"title,omitempty"`
+}
+
 type Artist struct {
 	Base
-	Name            string         `json:"name" gorm:"unique;not null"`
-	LegalName       string         `json:"legal_name"`
-	StageNamesJSON  string         `json:"stage_names_json" gorm:"type:text"`
-	Bio             string         `json:"bio" gorm:"type:text"`
-	ImageURL        string         `json:"image_url"`
-	Nationality     string         `json:"nationality"`
-	BirthPlace      string         `json:"birth_place"`
-	BirthDate       *time.Time     `json:"birth_date,omitempty" gorm:"type:date"`
-	BirthYear       int            `json:"birth_year"`
-	DeathYear       int            `json:"death_year"`
-	ArtistForm      string         `json:"artist_form" gorm:"default:'person'"`
-	ActiveStartDate time.Time      `json:"active_start_date,omitempty" gorm:"type:date"`
-	ActiveEndDate   time.Time      `json:"active_end_date,omitempty" gorm:"type:date"`
-	Members         string         `json:"members" gorm:"type:text"`
-	EntryStatus     string         `json:"entry_status" gorm:"default:'open'"`
-	RedirectTo      *uuid.UUID     `json:"redirect_to,omitempty" gorm:"type:uuid"`
-	Albums          []Album        `json:"albums,omitempty" gorm:"many2many:album_artists;"`
-	Songs           []Song         `json:"songs,omitempty" gorm:"many2many:song_artists;"`
-	Aliases         []ArtistAlias  `json:"aliases,omitempty" gorm:"foreignKey:ArtistID"`
-	MemberRelations []ArtistMember `json:"-" gorm:"foreignKey:GroupArtistID"`
-	PlayCount       int64          `json:"play_count" gorm:"-"`
-	BookmarkCount   int64          `json:"bookmark_count" gorm:"-"`
+	Name                     string         `json:"name" gorm:"not null"`
+	Disambiguation           string         `json:"disambiguation,omitempty"`
+	DisplayName              string         `json:"display_name" gorm:"-"`
+	LegalName                string         `json:"legal_name"`
+	StageNamesJSON           string         `json:"stage_names_json" gorm:"type:text"`
+	Bio                      string         `json:"bio" gorm:"type:text"`
+	ImageURL                 string         `json:"image_url"`
+	Nationality              string         `json:"nationality"`
+	BirthPlace               string         `json:"birth_place"`
+	BirthDate                *time.Time     `json:"birth_date,omitempty" gorm:"type:date"`
+	BirthDatePrecision       string         `json:"birth_date_precision,omitempty"`
+	BirthYear                int            `json:"birth_year"`
+	DeathYear                int            `json:"death_year"`
+	ArtistForm               string         `json:"artist_form" gorm:"default:'person'"`
+	ActiveStartDate          time.Time      `json:"active_start_date,omitempty" gorm:"type:date"`
+	ActiveStartDatePrecision string         `json:"active_start_date_precision,omitempty"`
+	ActiveEndDate            time.Time      `json:"active_end_date,omitempty" gorm:"type:date"`
+	ActiveEndDatePrecision   string         `json:"active_end_date_precision,omitempty"`
+	Members                  string         `json:"members" gorm:"type:text"`
+	EntryStatus              string         `json:"entry_status" gorm:"default:'open'"`
+	CreatedBy                *uuid.UUID     `json:"created_by,omitempty" gorm:"type:uuid;index"`
+	SourcesJSON              string         `json:"-" gorm:"type:jsonb;default:'[]'"`
+	Sources                  []MusicSource  `json:"sources,omitempty" gorm:"-"`
+	RedirectTo               *uuid.UUID     `json:"redirect_to,omitempty" gorm:"type:uuid"`
+	Albums                   []Album        `json:"albums,omitempty" gorm:"many2many:album_artists;"`
+	Songs                    []Song         `json:"songs,omitempty" gorm:"many2many:song_artists;"`
+	Aliases                  []ArtistAlias  `json:"aliases,omitempty" gorm:"foreignKey:ArtistID"`
+	MemberRelations          []ArtistMember `json:"-" gorm:"foreignKey:GroupArtistID"`
+	PlayCount                int64          `json:"play_count" gorm:"-"`
+	BookmarkCount            int64          `json:"bookmark_count" gorm:"-"`
 }
 
 func (Artist) TableName() string {
@@ -39,17 +55,26 @@ func (Artist) TableName() string {
 
 func (artist *Artist) AfterFind(_ *gorm.DB) error {
 	artist.Albums = uniqueAlbumsByID(artist.Albums)
+	artist.DisplayName = strings.TrimSpace(artist.Name)
+	if disambiguation := strings.TrimSpace(artist.Disambiguation); disambiguation != "" {
+		artist.DisplayName += "（" + disambiguation + "）"
+	}
+	if strings.TrimSpace(artist.SourcesJSON) != "" {
+		_ = json.Unmarshal([]byte(artist.SourcesJSON), &artist.Sources)
+	}
 	return nil
 }
 
 type ArtistMember struct {
 	Base
-	GroupArtistID  uuid.UUID  `json:"group_artist_id" gorm:"type:uuid;index;not null"`
-	GroupArtist    *Artist    `json:"group_artist,omitempty" gorm:"foreignKey:GroupArtistID"`
-	MemberArtistID uuid.UUID  `json:"member_artist_id" gorm:"type:uuid;index;not null"`
-	MemberArtist   *Artist    `json:"member_artist,omitempty" gorm:"foreignKey:MemberArtistID"`
-	JoinDate       *time.Time `json:"join_date,omitempty" gorm:"type:date"`
-	LeaveDate      *time.Time `json:"leave_date,omitempty" gorm:"type:date"`
+	GroupArtistID      uuid.UUID  `json:"group_artist_id" gorm:"type:uuid;index;not null"`
+	GroupArtist        *Artist    `json:"group_artist,omitempty" gorm:"foreignKey:GroupArtistID"`
+	MemberArtistID     uuid.UUID  `json:"member_artist_id" gorm:"type:uuid;index;not null"`
+	MemberArtist       *Artist    `json:"member_artist,omitempty" gorm:"foreignKey:MemberArtistID"`
+	JoinDate           *time.Time `json:"join_date,omitempty" gorm:"type:date"`
+	JoinDatePrecision  string     `json:"join_date_precision,omitempty"`
+	LeaveDate          *time.Time `json:"leave_date,omitempty" gorm:"type:date"`
+	LeaveDatePrecision string     `json:"leave_date_precision,omitempty"`
 }
 
 func (ArtistMember) TableName() string {
@@ -58,28 +83,31 @@ func (ArtistMember) TableName() string {
 
 type Album struct {
 	Base
-	Title            string        `json:"title" gorm:"not null"`
-	Description      string        `json:"description" gorm:"type:text"`
-	Year             int           `json:"year"`
-	ReleaseYear      int           `json:"release_year"`
-	ReleaseDate      time.Time     `json:"release_date" gorm:"type:date"`
-	CoverURL         string        `json:"cover_url"`
-	CoverSource      string        `json:"cover_source" gorm:"default:'local'"`
-	Status           string        `json:"status" gorm:"default:'open'"`
-	AlbumType        string        `json:"album_type" gorm:"default:'album'"`
-	EditionType      string        `json:"edition_type" gorm:"default:'original'"`
-	CanonicalAlbumID *uuid.UUID    `json:"canonical_album_id,omitempty" gorm:"type:uuid;index"`
-	HotScore         float64       `json:"hot_score" gorm:"default:0;index"`
-	EntryStatus      string        `json:"entry_status" gorm:"default:'open'"`
-	RedirectTo       *uuid.UUID    `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
-	UploadedBy       *uuid.UUID    `json:"uploaded_by" gorm:"type:uuid"`
-	User             *User         `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
-	Artists          []Artist      `json:"artists,omitempty" gorm:"many2many:album_artists;"`
-	ArtistCredits    []AlbumArtist `json:"artist_credits,omitempty" gorm:"foreignKey:AlbumID"`
-	Songs            []Song        `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
-	OtherVersions    []Album       `json:"other_versions,omitempty" gorm:"-"`
-	PlayCount        int64         `json:"play_count"`
-	BookmarkCount    int64         `json:"bookmark_count" gorm:"-"`
+	Title                string        `json:"title" gorm:"not null"`
+	Description          string        `json:"description" gorm:"type:text"`
+	Year                 int           `json:"year"`
+	ReleaseYear          int           `json:"release_year"`
+	ReleaseDate          time.Time     `json:"release_date" gorm:"type:date"`
+	ReleaseDatePrecision string        `json:"release_date_precision,omitempty"`
+	CoverURL             string        `json:"cover_url"`
+	CoverSource          string        `json:"cover_source" gorm:"default:'local'"`
+	Status               string        `json:"status" gorm:"default:'open'"`
+	AlbumType            string        `json:"album_type" gorm:"default:'album'"`
+	EditionType          string        `json:"edition_type" gorm:"default:'original'"`
+	CanonicalAlbumID     *uuid.UUID    `json:"canonical_album_id,omitempty" gorm:"type:uuid;index"`
+	HotScore             float64       `json:"hot_score" gorm:"default:0;index"`
+	EntryStatus          string        `json:"entry_status" gorm:"default:'open'"`
+	SourcesJSON          string        `json:"-" gorm:"type:jsonb;default:'[]'"`
+	Sources              []MusicSource `json:"sources,omitempty" gorm:"-"`
+	RedirectTo           *uuid.UUID    `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
+	UploadedBy           *uuid.UUID    `json:"uploaded_by" gorm:"type:uuid"`
+	User                 *User         `json:"user,omitempty" gorm:"foreignKey:UploadedBy;references:UUID"`
+	Artists              []Artist      `json:"artists,omitempty" gorm:"many2many:album_artists;"`
+	ArtistCredits        []AlbumArtist `json:"artist_credits,omitempty" gorm:"foreignKey:AlbumID"`
+	Songs                []Song        `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
+	OtherVersions        []Album       `json:"other_versions,omitempty" gorm:"-"`
+	PlayCount            int64         `json:"play_count"`
+	BookmarkCount        int64         `json:"bookmark_count" gorm:"-"`
 }
 
 func (Album) TableName() string {
@@ -88,6 +116,9 @@ func (Album) TableName() string {
 
 func (album *Album) AfterFind(_ *gorm.DB) error {
 	album.Artists = uniqueArtistsByID(album.Artists)
+	if strings.TrimSpace(album.SourcesJSON) != "" {
+		_ = json.Unmarshal([]byte(album.SourcesJSON), &album.Sources)
+	}
 	return nil
 }
 
@@ -136,6 +167,7 @@ type Song struct {
 	Base
 	Title                string       `json:"title" gorm:"not null"`
 	ReleaseDate          time.Time    `json:"release_date" gorm:"type:date"`
+	ReleaseDatePrecision string       `json:"release_date_precision,omitempty"`
 	TrackNumber          int          `json:"track_number"`
 	DiscNumber           int          `json:"disc_number" gorm:"default:1"`
 	Lyrics               string       `json:"lyrics" gorm:"type:text"`
