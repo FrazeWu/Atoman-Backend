@@ -35,6 +35,9 @@ func (s *Service) ListPlaylists(user authctx.CurrentUser, page int, pageSize int
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
+	if _, err := s.repo.EnsureFavoritePlaylist(user.ID); err != nil {
+		return nil, 0, err
+	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
 	return s.repo.ListPlaylists(user.ID, page, pageSize, sort)
 }
@@ -102,7 +105,7 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 }
 
 func isSystemPlaylist(playlist model.Playlist) bool {
-	return playlist.Kind == "later"
+	return playlist.Kind == "favorite" || playlist.Kind == "later"
 }
 
 func (s *Service) GetPlaylist(user authctx.CurrentUser, playlistID uuid.UUID) (model.Playlist, error) {

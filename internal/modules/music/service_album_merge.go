@@ -185,20 +185,6 @@ func mergeSongRelations(tx *gorm.DB, sourceID, targetID uuid.UUID) error {
 			return err
 		}
 	}
-	var bookmarks []model.SongBookmark
-	if err := tx.Where("song_id = ?", sourceID).Find(&bookmarks).Error; err != nil {
-		return err
-	}
-	for _, row := range bookmarks {
-		bookmark := model.SongBookmark{UserID: row.UserID, SongID: targetID}
-		if err := tx.Where("user_id = ? AND song_id = ?", row.UserID, targetID).FirstOrCreate(&bookmark).Error; err != nil {
-			return err
-		}
-	}
-	if err := tx.Where("song_id = ?", sourceID).Delete(&model.SongBookmark{}).Error; err != nil {
-		return err
-	}
-
 	var playlistRows []model.PlaylistSong
 	if err := tx.Where("song_id = ?", sourceID).Find(&playlistRows).Error; err != nil {
 		return err

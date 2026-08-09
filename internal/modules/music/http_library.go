@@ -462,7 +462,12 @@ func (h *Handler) getPlaylist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, buildPlaylistSummaryResponse(playlist, 0))
+	songCounts, err := h.service.repo.CountPlaylistSongs([]uuid.UUID{playlist.ID})
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, buildPlaylistSummaryResponse(playlist, songCounts[playlist.ID]))
 }
 
 func (h *Handler) updatePlaylist(c *gin.Context) {
@@ -486,7 +491,12 @@ func (h *Handler) updatePlaylist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, buildPlaylistSummaryResponse(playlist, 0))
+	songCounts, err := h.service.repo.CountPlaylistSongs([]uuid.UUID{playlist.ID})
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, buildPlaylistSummaryResponse(playlist, songCounts[playlist.ID]))
 }
 
 // listPlaylistSongs godoc

@@ -142,14 +142,10 @@ func (s *Service) homeAffinity(userID uuid.UUID, history []model.MusicListeningH
 
 	var artistBookmarks []model.ArtistBookmark
 	var albumBookmarks []model.AlbumBookmark
-	var songBookmarks []model.SongBookmark
 	if err := s.db.Where("user_id = ?", userID).Find(&artistBookmarks).Error; err != nil {
 		return nil, nil, nil, err
 	}
 	if err := s.db.Where("user_id = ?", userID).Find(&albumBookmarks).Error; err != nil {
-		return nil, nil, nil, err
-	}
-	if err := s.db.Where("user_id = ?", userID).Find(&songBookmarks).Error; err != nil {
 		return nil, nil, nil, err
 	}
 
@@ -163,15 +159,6 @@ func (s *Service) homeAffinity(userID uuid.UUID, history []model.MusicListeningH
 		albumIDs = append(albumIDs, bookmark.AlbumID)
 	}
 	if err := s.addHomeAlbumArtistAffinity(albumIDs, affinity); err != nil {
-		return nil, nil, nil, err
-	}
-
-	songIDs := make([]uuid.UUID, 0, len(songBookmarks))
-	for _, bookmark := range songBookmarks {
-		seenSongs[bookmark.SongID] = struct{}{}
-		songIDs = append(songIDs, bookmark.SongID)
-	}
-	if err := s.addHomeSongArtistAffinity(songIDs, affinity); err != nil {
 		return nil, nil, nil, err
 	}
 

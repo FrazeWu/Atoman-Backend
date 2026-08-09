@@ -57,7 +57,18 @@ func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string)
 	if err := s.ensureDefaultBookmarkFolder(userID); err != nil {
 		return err
 	}
+	if err := s.ensureFavoritePlaylist(userID); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s *UserBootstrapService) ensureFavoritePlaylist(userID uuid.UUID) error {
+	if !s.db.Migrator().HasTable(&model.Playlist{}) {
+		return nil
+	}
+	playlist := model.Playlist{UserID: userID, Name: "最爱", Kind: "favorite", IsPublic: false}
+	return s.db.Where("user_id = ? AND kind = ?", userID, "favorite").FirstOrCreate(&playlist).Error
 }
 
 func (s *UserBootstrapService) ensureStudioChannel(userID uuid.UUID, username string) (*model.Channel, error) {

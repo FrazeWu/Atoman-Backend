@@ -309,9 +309,8 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 	}
 	result := songDetailResponse{Song: song, Artists: artists, Playable: strings.TrimSpace(song.AudioURL) != ""}
 	if user, ok := currentMusicUser(c); ok {
-		var count int64
-		if err := h.service.db.Model(&model.SongBookmark{}).Where("user_id = ? AND song_id = ?", user.ID, song.ID).Count(&count).Error; err == nil {
-			result.Bookmarked = count > 0
+		if ids, err := h.service.SongBookmarkIDs(user, []uuid.UUID{song.ID}); err == nil {
+			result.Bookmarked = len(ids) > 0
 		}
 	}
 	if song.AlbumID != nil {

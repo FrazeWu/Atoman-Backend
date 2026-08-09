@@ -33,7 +33,6 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.SongArtist{},
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
-		&model.SongBookmark{},
 		&model.PlaylistBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
@@ -753,10 +752,11 @@ func TestMergeAlbumsMovesMatchedSongUserRelationsAndClosesSource(t *testing.T) {
 		t.Fatalf("create source song: %v", err)
 	}
 	playlist := model.Playlist{UserID: user.ID, Name: "Merge Test", Kind: "user"}
+	favorite := model.Playlist{UserID: user.ID, Name: "最爱", Kind: "favorite"}
 	fixtures := []any{
 		&playlist,
+		&favorite,
 		&model.AlbumBookmark{UserID: user.ID, AlbumID: source.ID},
-		&model.SongBookmark{UserID: user.ID, SongID: sourceSong.ID},
 		&model.MusicListeningHistory{UserID: user.ID, SongID: targetSong.ID, PlayCount: 2, LastPlayedAt: time.Now().Add(-time.Hour)},
 		&model.MusicListeningHistory{UserID: user.ID, SongID: sourceSong.ID, PlayCount: 3, LastPlayedAt: time.Now()},
 	}
@@ -767,6 +767,9 @@ func TestMergeAlbumsMovesMatchedSongUserRelationsAndClosesSource(t *testing.T) {
 	}
 	if err := db.Create(&model.PlaylistSong{PlaylistID: playlist.ID, SongID: sourceSong.ID, Position: 1}).Error; err != nil {
 		t.Fatalf("create playlist song: %v", err)
+	}
+	if err := db.Create(&model.PlaylistSong{PlaylistID: favorite.ID, SongID: sourceSong.ID, Position: 1}).Error; err != nil {
+		t.Fatalf("create favorite song: %v", err)
 	}
 
 	admin := authctx.CurrentUser{ID: user.ID, Username: user.Username, Role: authctx.RoleAdmin}
@@ -789,18 +792,19 @@ func TestMergeAlbumsMovesMatchedSongUserRelationsAndClosesSource(t *testing.T) {
 	}
 	for name, value := range map[string]any{
 		"album bookmark": &model.AlbumBookmark{},
-		"song bookmark":  &model.SongBookmark{},
 		"playlist song":  &model.PlaylistSong{},
 	} {
 		query := db.Where("user_id = ? AND album_id = ?", user.ID, target.ID)
-		if name == "song bookmark" {
-			query = db.Where("user_id = ? AND song_id = ?", user.ID, targetSong.ID)
-		} else if name == "playlist song" {
+		if name == "playlist song" {
 			query = db.Where("playlist_id = ? AND song_id = ?", playlist.ID, targetSong.ID)
 		}
 		if err := query.First(value).Error; err != nil {
 			t.Fatalf("expected migrated %s: %v", name, err)
 		}
+	}
+	var favoriteSong model.PlaylistSong
+	if err := db.First(&favoriteSong, "playlist_id = ? AND song_id = ?", favorite.ID, targetSong.ID).Error; err != nil {
+		t.Fatalf("expected migrated favorite song: %v", err)
 	}
 	var history model.MusicListeningHistory
 	if err := db.First(&history, "user_id = ? AND song_id = ?", user.ID, targetSong.ID).Error; err != nil {

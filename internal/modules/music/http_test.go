@@ -37,7 +37,6 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.SongArtist{},
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
-		&model.SongBookmark{},
 		&model.PlaylistBookmark{},
 		&model.Playlist{},
 		&model.PlaylistSong{},
@@ -2717,6 +2716,24 @@ func TestRegisterRoutesPlaylistsArePrivateAndSongsAreDeduplicated(t *testing.T) 
 		t.Fatalf("unexpected playlist song payload: %#v", songsResp.Data[0])
 	}
 
+	detailRecorder := httptest.NewRecorder()
+	detailRequest := httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/"+createResp.Data.ID, nil)
+	userRouter.ServeHTTP(detailRecorder, detailRequest)
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("expected playlist detail 200, got %d: %s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+	var detailResponse struct {
+		Data struct {
+			SongCount int64 `json:"song_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(detailRecorder.Body.Bytes(), &detailResponse); err != nil {
+		t.Fatalf("decode playlist detail: %v", err)
+	}
+	if detailResponse.Data.SongCount != 1 {
+		t.Fatalf("expected playlist detail song_count 1, got %d", detailResponse.Data.SongCount)
+	}
+
 	otherRouter := newMusicHTTPRouter(service, &otherUser)
 	otherList := httptest.NewRecorder()
 	otherListReq := httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists", nil)
@@ -2726,7 +2743,10 @@ func TestRegisterRoutesPlaylistsArePrivateAndSongsAreDeduplicated(t *testing.T) 
 	}
 
 	var otherListResp struct {
-		Data []any `json:"data"`
+		Data []struct {
+			Name string `json:"name"`
+			Kind string `json:"kind"`
+		} `json:"data"`
 		Meta struct {
 			Total int64 `json:"total"`
 		} `json:"meta"`
@@ -2734,8 +2754,8 @@ func TestRegisterRoutesPlaylistsArePrivateAndSongsAreDeduplicated(t *testing.T) 
 	if err := json.Unmarshal(otherList.Body.Bytes(), &otherListResp); err != nil {
 		t.Fatalf("decode other user playlist list: %v", err)
 	}
-	if len(otherListResp.Data) != 0 || otherListResp.Meta.Total != 0 {
-		t.Fatalf("expected private playlists to be hidden, got %#v %#v", otherListResp.Data, otherListResp.Meta)
+	if len(otherListResp.Data) != 1 || otherListResp.Meta.Total != 1 || otherListResp.Data[0].Name != "最爱" || otherListResp.Data[0].Kind != "favorite" {
+		t.Fatalf("expected only the other user's favorite playlist, got %#v %#v", otherListResp.Data, otherListResp.Meta)
 	}
 }
 
@@ -2793,32 +2813,39 @@ func TestRegisterRoutesUpdatesOwnPlaylistThroughMusicV1(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesProtectsLaterPlaylist(t *testing.T) {
+func TestRegisterRoutesProtectsSystemPlaylists(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	favorite := model.Playlist{UserID: user.ID, Name: "稍后播放", Kind: "later"}
-	if err := db.Create(&favorite).Error; err != nil {
-		t.Fatalf("create later playlist: %v", err)
+	playlists := []model.Playlist{
+		{UserID: user.ID, Name: "最爱", Kind: "favorite"},
+		{UserID: user.ID, Name: "稍后播放", Kind: "later"},
+	}
+	for index := range playlists {
+		if err := db.Create(&playlists[index]).Error; err != nil {
+			t.Fatalf("create %s playlist: %v", playlists[index].Kind, err)
+		}
 	}
 	router := newMusicHTTPRouter(service, &user)
 
 	listRecorder := httptest.NewRecorder()
 	router.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists", nil))
-	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), `"kind":"later"`) {
-		t.Fatalf("expected later metadata in list response, got %d: %s", listRecorder.Code, listRecorder.Body.String())
+	if listRecorder.Code != http.StatusOK || !strings.Contains(listRecorder.Body.String(), `"kind":"favorite"`) || !strings.Contains(listRecorder.Body.String(), `"kind":"later"`) {
+		t.Fatalf("expected system playlist metadata in list response, got %d: %s", listRecorder.Code, listRecorder.Body.String())
 	}
 
-	patchRecorder := httptest.NewRecorder()
-	patchRequest := httptest.NewRequest(http.MethodPatch, "/api/v1/music/playlists/"+favorite.ID.String(), bytes.NewBufferString(`{"name":"Renamed","is_public":true}`))
-	patchRequest.Header.Set("Content-Type", "application/json")
-	router.ServeHTTP(patchRecorder, patchRequest)
-	if patchRecorder.Code != http.StatusConflict {
-		t.Fatalf("expected later patch 409, got %d: %s", patchRecorder.Code, patchRecorder.Body.String())
-	}
+	for _, playlist := range playlists {
+		patchRecorder := httptest.NewRecorder()
+		patchRequest := httptest.NewRequest(http.MethodPatch, "/api/v1/music/playlists/"+playlist.ID.String(), bytes.NewBufferString(`{"name":"Renamed","is_public":true}`))
+		patchRequest.Header.Set("Content-Type", "application/json")
+		router.ServeHTTP(patchRecorder, patchRequest)
+		if patchRecorder.Code != http.StatusConflict {
+			t.Fatalf("expected %s patch 409, got %d: %s", playlist.Kind, patchRecorder.Code, patchRecorder.Body.String())
+		}
 
-	deleteRecorder := httptest.NewRecorder()
-	router.ServeHTTP(deleteRecorder, httptest.NewRequest(http.MethodDelete, "/api/v1/music/playlists/"+favorite.ID.String(), nil))
-	if deleteRecorder.Code != http.StatusConflict {
-		t.Fatalf("expected later delete 409, got %d: %s", deleteRecorder.Code, deleteRecorder.Body.String())
+		deleteRecorder := httptest.NewRecorder()
+		router.ServeHTTP(deleteRecorder, httptest.NewRequest(http.MethodDelete, "/api/v1/music/playlists/"+playlist.ID.String(), nil))
+		if deleteRecorder.Code != http.StatusConflict {
+			t.Fatalf("expected %s delete 409, got %d: %s", playlist.Kind, deleteRecorder.Code, deleteRecorder.Body.String())
+		}
 	}
 }
 

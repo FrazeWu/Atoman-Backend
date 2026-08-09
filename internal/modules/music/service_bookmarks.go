@@ -85,7 +85,12 @@ func (s *Service) BookmarkSong(user authctx.CurrentUser, songID uuid.UUID) (mode
 	if songID == uuid.Nil {
 		return model.SongBookmark{}, apperr.BadRequest("validation.invalid_request", "song_id is required")
 	}
-	return s.repo.UpsertSongBookmark(user.ID, songID)
+	playlist, err := s.repo.EnsureFavoritePlaylist(user.ID)
+	if err != nil {
+		return model.SongBookmark{}, err
+	}
+	entry, err := s.AddPlaylistSong(user, playlist.ID, songID)
+	return songBookmarkFromPlaylistSong(user.ID, entry), err
 }
 
 func (s *Service) DeleteSongBookmark(user authctx.CurrentUser, songID uuid.UUID) error {
@@ -103,10 +108,12 @@ func (s *Service) SongBookmarkIDs(user authctx.CurrentUser, songIDs []uuid.UUID)
 		return []uuid.UUID{}, nil
 	}
 	var ids []uuid.UUID
-	err := s.db.Model(&model.SongBookmark{}).
-		Where("user_id = ? AND song_id IN ?", user.ID, songIDs).
-		Order("song_id ASC").
-		Pluck("song_id", &ids).Error
+	err := s.db.Model(&model.PlaylistSong{}).
+		Select("music_playlist_songs.song_id").
+		Joins("JOIN music_playlists ON music_playlists.id = music_playlist_songs.playlist_id").
+		Where("music_playlists.user_id = ? AND music_playlists.kind = ? AND music_playlist_songs.song_id IN ?", user.ID, "favorite", songIDs).
+		Order("music_playlist_songs.song_id ASC").
+		Pluck("music_playlist_songs.song_id", &ids).Error
 	return ids, err
 }
 
