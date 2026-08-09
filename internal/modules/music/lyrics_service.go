@@ -21,6 +21,7 @@ import (
 type SaveLyricsInput struct {
 	Target                string                      `json:"target"`
 	Language              string                      `json:"language"`
+	TranslationIncluded   bool                        `json:"translation_included"`
 	BaseVersion           *int                        `json:"base_version"`
 	Lines                 []SaveLyricsLineInput       `json:"lines"`
 	Content               string                      `json:"content"`
@@ -204,7 +205,7 @@ func (s *Service) RevertSongLyrics(user authctx.CurrentUser, songID uuid.UUID, v
 		}
 		input := SaveLyricsInput{
 			Content: target.Content, Translation: target.Translation, Format: target.Format,
-			EditSummary: strings.TrimSpace(editSummary), Target: "restore",
+			EditSummary: strings.TrimSpace(editSummary), Target: "restore", Language: target.Language,
 		}
 		lines, err := ParseLyricLines(input.Content, input.Translation, input.Format)
 		if err != nil {
@@ -268,14 +269,14 @@ func prepareLyricsSave(tx *gorm.DB, songID uuid.UUID, input *SaveLyricsInput) ([
 	if target == "all" || target == "restore" {
 		return ParseLyricLines(input.Content, input.Translation, input.Format)
 	}
-	if target != "original" && target != "translation" && target != "timing" {
-		return nil, lyricValidationError("target must be original, translation, or timing")
+	if target != "original" && target != "translation" && target != "timing" && target != "import" {
+		return nil, lyricValidationError("target must be original, translation, timing, or import")
 	}
 
 	var lyric model.MusicSongLyric
 	err := tx.First(&lyric, "song_id = ?", songID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		if input.BaseVersion == nil || *input.BaseVersion != 0 || target != "original" {
+		if input.BaseVersion == nil || *input.BaseVersion != 0 || (target != "original" && target != "import") {
 			return nil, lyricsVersionConflict(input.BaseVersion, 0)
 		}
 		lyric = model.MusicSongLyric{SongID: songID, Version: 0, Format: "plain"}
@@ -303,7 +304,13 @@ func prepareLyricsSave(tx *gorm.DB, songID uuid.UUID, input *SaveLyricsInput) ([
 		if len(input.Lines) == 0 {
 			return nil, lyricValidationError("original lyrics require at least one line")
 		}
+		input.Format = lyric.Format
+		if input.Format == "" {
+			input.Format = "plain"
+		}
+		input.Language = lyric.TranslationLanguage
 		occurrences := map[string]int{}
+		seenKeys := map[string]bool{}
 		lines = make([]ParsedLyricLine, 0, len(input.Lines))
 		for index, submitted := range input.Lines {
 			text := strings.TrimSpace(submitted.Text)
@@ -315,18 +322,21 @@ func prepareLyricsSave(tx *gorm.DB, songID uuid.UUID, input *SaveLyricsInput) ([
 			occurrences[fingerprint]++
 			lineKey := submitted.LineKey
 			old, exists := currentByKey[lineKey]
+			if exists && seenKeys[lineKey] {
+				return nil, lyricValidationError("lyric line keys must be unique")
+			}
 			if !exists {
 				lineKey = fmt.Sprintf("plain:%s:%d", fingerprint, occurrence)
 			}
+			seenKeys[lineKey] = true
 			line := ParsedLyricLine{LineKey: lineKey, LineIndex: index, Text: text}
 			if exists {
 				line.TimeMS, line.Translation = old.TimeMS, old.Translation
+			} else if input.Format == "lrc" {
+				defaultTime := 0
+				line.TimeMS = &defaultTime
 			}
 			lines = append(lines, line)
-		}
-		input.Format = lyric.Format
-		if input.Format == "" {
-			input.Format = "plain"
 		}
 	case "translation":
 		if len(current) == 0 {
@@ -362,17 +372,112 @@ func prepareLyricsSave(tx *gorm.DB, songID uuid.UUID, input *SaveLyricsInput) ([
 			if _, exists := currentByKey[submitted.LineKey]; !exists {
 				return nil, lyricsVersionConflict(input.BaseVersion, lyric.Version)
 			}
+			if _, exists := timings[submitted.LineKey]; exists {
+				return nil, lyricValidationError("timing line keys must be unique")
+			}
 			timings[submitted.LineKey] = submitted.TimeMS
 		}
 		lines = modelLinesToParsed(current)
 		for index := range lines {
-			lines[index].TimeMS = timings[lines[index].LineKey]
+			timeMS, exists := timings[lines[index].LineKey]
+			if !exists {
+				return nil, lyricValidationError("timing must include every current lyric line")
+			}
+			lines[index].TimeMS = timeMS
 		}
 		input.Format = "lrc"
 		input.Language = lyric.TranslationLanguage
+	case "import":
+		if len(input.Lines) == 0 {
+			return nil, lyricValidationError("import requires at least one lyric line")
+		}
+		currentByText := make(map[string][]model.MusicSongLyricLine, len(current))
+		for _, line := range current {
+			fingerprint := musiclyrics.TextFingerprint(line.Text)
+			currentByText[fingerprint] = append(currentByText[fingerprint], line)
+		}
+		claimedKeys := make(map[string]bool, len(input.Lines))
+		currentTextOccurrences := make(map[string]int, len(currentByText))
+		generatedOccurrences := make(map[string]int, len(input.Lines))
+		lines = make([]ParsedLyricLine, 0, len(input.Lines))
+		for index, submitted := range input.Lines {
+			text := strings.TrimSpace(submitted.Text)
+			if text == "" {
+				return nil, lyricValidationError("imported lyric lines cannot be empty")
+			}
+			if submitted.TimeMS == nil || *submitted.TimeMS < 0 {
+				return nil, lyricValidationError("each imported lyric line requires a valid time")
+			}
+
+			fingerprint := musiclyrics.TextFingerprint(text)
+			matched, matchedExisting := currentByKey[submitted.LineKey]
+			if matchedExisting && claimedKeys[matched.LineKey] {
+				return nil, lyricValidationError("lyric line keys must be unique")
+			}
+			if !matchedExisting {
+				candidates := currentByText[fingerprint]
+				occurrence := currentTextOccurrences[fingerprint]
+				for occurrence < len(candidates) && claimedKeys[candidates[occurrence].LineKey] {
+					occurrence++
+				}
+				if occurrence < len(candidates) {
+					matched, matchedExisting = candidates[occurrence], true
+					occurrence++
+				}
+				currentTextOccurrences[fingerprint] = occurrence
+			}
+
+			lineKey := matched.LineKey
+			if !matchedExisting {
+				baseKey := fmt.Sprintf("lrc:%d:%s", *submitted.TimeMS, fingerprint)
+				occurrence := generatedOccurrences[baseKey]
+				for {
+					lineKey = fmt.Sprintf("%s:%d", baseKey, occurrence)
+					occurrence++
+					if !claimedKeys[lineKey] {
+						if _, exists := currentByKey[lineKey]; !exists {
+							break
+						}
+					}
+				}
+				generatedOccurrences[baseKey] = occurrence
+			}
+			claimedKeys[lineKey] = true
+			translation := ""
+			if input.TranslationIncluded {
+				translation = strings.TrimSpace(submitted.Translation)
+			} else if matchedExisting {
+				translation = matched.Translation
+			}
+			lines = append(lines, ParsedLyricLine{
+				LineKey: lineKey, LineIndex: index, TimeMS: submitted.TimeMS,
+				Text: text, Translation: translation,
+			})
+		}
+		input.Format = "lrc"
+		if input.TranslationIncluded {
+			input.Language = strings.TrimSpace(input.Language)
+			if input.Language == "" {
+				input.Language = lyric.TranslationLanguage
+			}
+		} else {
+			input.Language = lyric.TranslationLanguage
+		}
+	}
+	if (target == "import" || target == "timing") && hasDescendingLyricTime(lines) {
+		return nil, lyricValidationError("lyric times must be in ascending order")
 	}
 	input.Content, input.Translation = serializeParsedLyrics(lines, input.Format)
 	return lines, nil
+}
+
+func hasDescendingLyricTime(lines []ParsedLyricLine) bool {
+	for index := 1; index < len(lines); index++ {
+		if lines[index-1].TimeMS != nil && lines[index].TimeMS != nil && *lines[index].TimeMS < *lines[index-1].TimeMS {
+			return true
+		}
+	}
+	return false
 }
 
 func modelLinesToParsed(lines []model.MusicSongLyricLine) []ParsedLyricLine {
@@ -386,11 +491,32 @@ func modelLinesToParsed(lines []model.MusicSongLyricLine) []ParsedLyricLine {
 func serializeParsedLyrics(lines []ParsedLyricLine, format string) (string, string) {
 	content := make([]string, 0, len(lines))
 	translation := make([]string, 0, len(lines))
+	lastTranslatedOccurrence := make(map[int]int)
+	translationOccurrences := make(map[int]int)
+	if format == "lrc" {
+		for _, line := range lines {
+			if line.TimeMS == nil {
+				continue
+			}
+			timeMS := *line.TimeMS
+			occurrence := translationOccurrences[timeMS]
+			translationOccurrences[timeMS] = occurrence + 1
+			if line.Translation != "" {
+				lastTranslatedOccurrence[timeMS] = occurrence
+			}
+		}
+		clear(translationOccurrences)
+	}
 	for _, line := range lines {
 		if format == "lrc" && line.TimeMS != nil {
 			stamp := formatLRCTime(*line.TimeMS)
 			content = append(content, stamp+line.Text)
-			translation = append(translation, stamp+line.Translation)
+			timeMS := *line.TimeMS
+			occurrence := translationOccurrences[timeMS]
+			translationOccurrences[timeMS] = occurrence + 1
+			if lastOccurrence, exists := lastTranslatedOccurrence[timeMS]; exists && occurrence <= lastOccurrence {
+				translation = append(translation, stamp+line.Translation)
+			}
 		} else {
 			content = append(content, line.Text)
 			translation = append(translation, line.Translation)

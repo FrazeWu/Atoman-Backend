@@ -21,6 +21,8 @@ func TestAlbumImportCommitIsIdempotentInPostgres(t *testing.T) {
 		&model.AlbumImportSession{},
 		&model.AlbumImportFile{},
 		&model.AlbumImportJob{},
+		&model.Notification{},
+		&model.Revision{},
 	); err != nil {
 		t.Fatalf("migrate music import schema: %v", err)
 	}
@@ -34,11 +36,22 @@ func TestAlbumImportCommitIsIdempotentInPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create import session: %v", err)
 	}
+	seedReadyImportMedia(t, db, session.ID, "https://example.test/album.jpg", "PostgreSQL Track")
 	input := CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{Name: "PostgreSQL Artist"},
+		ArtistSource: "https://example.test/artist",
+		AlbumSource:  "https://example.test/album",
+		Artist: AlbumImportArtistPayload{
+			Name:        "PostgreSQL Artist",
+			LegalName:   "PostgreSQL Artist",
+			ImageURL:    "https://example.test/artist.jpg",
+			Nationality: "US",
+			BirthDate:   "1977-06-08",
+		},
 		Album: AlbumImportAlbumPayload{
-			Title:  "PostgreSQL Album",
-			Tracks: []AlbumImportTrackPayload{{Title: "PostgreSQL Track", TrackNumber: 1}},
+			Title:       "PostgreSQL Album",
+			CoverURL:    "https://example.test/album.jpg",
+			ReleaseDate: "2026-08-09",
+			Tracks:      []AlbumImportTrackPayload{{Title: "PostgreSQL Track", TrackNumber: 1}},
 		},
 	}
 	first, err := service.CommitAlbumImportSession(user, session.ID, input)

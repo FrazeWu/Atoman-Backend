@@ -21,7 +21,7 @@ import (
 func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) {
 	t.Helper()
 
-	db := testdb.Open(t)
+	db := testdb.OpenPostgres(t, "music_service")
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Artist{},
@@ -194,8 +194,8 @@ func TestPlaylistBookmarksRespectPlaylistVisibility(t *testing.T) {
 	if _, err := svc.BookmarkPlaylist(user, orphanedPlaylist.ID); err != nil {
 		t.Fatalf("bookmark orphan target: %v", err)
 	}
-	if err := db.Unscoped().Delete(&orphanedPlaylist).Error; err != nil {
-		t.Fatalf("hard delete orphan target: %v", err)
+	if err := db.Delete(&orphanedPlaylist).Error; err != nil {
+		t.Fatalf("delete orphan target: %v", err)
 	}
 
 	bookmarks, total, err := svc.ListPlaylistBookmarks(user, 1, 20, "latest")

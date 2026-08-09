@@ -12901,7 +12901,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "登录用户可基于当前版本独立更新原文、翻译或时间轴；每次成功更新都会生成历史版本。",
+                "description": "登录用户可基于当前版本更新原文、翻译、时间轴或原子导入 LRC；每次成功更新都会生成历史版本。",
                 "consumes": [
                     "application/json"
                 ],
@@ -26815,6 +26815,9 @@ const docTemplate = `{
                 },
                 "translation": {
                     "type": "string"
+                },
+                "translation_included": {
+                    "type": "boolean"
                 }
             }
         },

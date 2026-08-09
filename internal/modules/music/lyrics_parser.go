@@ -12,6 +12,7 @@ import (
 )
 
 var lrcLinePattern = regexp.MustCompile(`^\[(\d+):(\d{2})(?:\.(\d{1,3}))?\](.*)$`)
+var lrcMetadataPattern = regexp.MustCompile(`^\[[A-Za-z][A-Za-z0-9_-]*:.*\]$`)
 
 func ParseLyricLines(content, translation, format string) ([]ParsedLyricLine, error) {
 	switch format {
@@ -37,11 +38,11 @@ func parsePlainLyricLines(content, translation string) []ParsedLyricLine {
 }
 
 func parseLRCLyricLines(content, translation string) ([]ParsedLyricLine, error) {
-	contentLines, err := parseTimedLRCLines(content)
+	contentLines, err := parseTimedLRCLines(content, false)
 	if err != nil {
 		return nil, err
 	}
-	translationLines, err := parseTimedLRCLines(translation)
+	translationLines, err := parseTimedLRCLines(translation, true)
 	if err != nil {
 		return nil, err
 	}
@@ -65,12 +66,12 @@ func parseLRCLyricLines(content, translation string) ([]ParsedLyricLine, error) 
 	return contentLines, nil
 }
 
-func parseTimedLRCLines(content string) ([]ParsedLyricLine, error) {
+func parseTimedLRCLines(content string, keepEmpty bool) ([]ParsedLyricLine, error) {
 	lines := make([]ParsedLyricLine, 0)
 	keyOccurrences := make(map[string]int)
 	for _, rawLine := range splitLyricLines(content) {
-		line := strings.TrimSpace(rawLine)
-		if line == "" {
+		line := strings.TrimSpace(strings.TrimPrefix(rawLine, "\uFEFF"))
+		if line == "" || lrcMetadataPattern.MatchString(line) {
 			continue
 		}
 
@@ -97,6 +98,9 @@ func parseTimedLRCLines(content string) ([]ParsedLyricLine, error) {
 		}
 		timeMS := minutes*60000 + remainingMS
 		text := strings.TrimSpace(matches[4])
+		if text == "" && !keepEmpty {
+			continue
+		}
 		baseKey := fmt.Sprintf("lrc:%d:%s", timeMS, lyricTextFingerprint(text))
 		occurrence := keyOccurrences[baseKey]
 		keyOccurrences[baseKey] = occurrence + 1

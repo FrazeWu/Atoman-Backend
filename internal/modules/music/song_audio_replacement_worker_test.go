@@ -6,23 +6,25 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
-
-	"github.com/google/uuid"
 )
 
 func TestRunSongAudioReplacementOnceCreatesRevisionBeforeSwitchingAudio(t *testing.T) {
-	db := testdb.Open(t)
+	db := testdb.OpenPostgres(t, "music_audio_replacement")
 	testdb.Migrate(t, db,
-		&model.Song{}, &model.SongAudioReplacement{}, &model.Revision{}, &model.EditConflict{},
+		&model.User{}, &model.Song{}, &model.SongAudioReplacement{}, &model.Revision{}, &model.EditConflict{},
 		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
 		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
 	)
+	requester := model.User{Username: "audio-replacement", Email: "audio-replacement@example.test", Password: "hash", IsActive: true}
+	if err := db.Create(&requester).Error; err != nil {
+		t.Fatalf("create requester: %v", err)
+	}
 	song := model.Song{Title: "Track", AudioURL: "/old.mp3", Status: "open", TrackNumber: 1, DiscNumber: 1}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
 	job := model.SongAudioReplacement{
-		SongID: song.ID, RequestedBy: uuid.New(), AudioURL: "/new.mp3",
+		SongID: song.ID, RequestedBy: requester.UUID, AudioURL: "/new.mp3",
 		PreviousAudioURL: song.AudioURL, Status: "pending",
 	}
 	if err := db.Create(&job).Error; err != nil {

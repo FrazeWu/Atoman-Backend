@@ -3,6 +3,7 @@ package music
 import (
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -18,7 +19,7 @@ import (
 
 func newLyricsTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, model.Song) {
 	t.Helper()
-	db := testdb.Open(t)
+	db := testdb.OpenPostgres(t, "music_lyrics_service")
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Album{},
@@ -421,15 +422,119 @@ func TestSaveSongLyricsUpdatesTranslationAndTimingIndependently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if timed.Format != "lrc" || timed.Lines[0].Text != "alpha" || timed.Lines[0].Translation != "新一" || *timed.Lines[1].TimeMS != secondTime {
+	if timed.Format != "lrc" || timed.TranslationLanguage != "zh-CN" || timed.Lines[0].Text != "alpha" || timed.Lines[0].Translation != "新一" || *timed.Lines[1].TimeMS != secondTime {
 		t.Fatalf("timing update changed unrelated content: %#v", timed)
+	}
+	originalBase := timed.Version
+	updatedOriginal, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "original", BaseVersion: &originalBase, EditSummary: "增加一行",
+		Lines: []SaveLyricsLineInput{
+			{LineKey: timed.Lines[0].LineKey, Text: "alpha"},
+			{LineKey: timed.Lines[1].LineKey, Text: "beta"},
+			{Text: "gamma"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedOriginal.TranslationLanguage != "zh-CN" || updatedOriginal.Lines[2].TimeMS == nil || !strings.Contains(updatedOriginal.Content, "[00:00.00]gamma") {
+		t.Fatalf("original update produced an invalid timed snapshot: %#v", updatedOriginal)
 	}
 	versions, err := svc.ListSongLyricVersions(song.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if versions[0].Target != "timing" || versions[1].Target != "translation" || versions[1].Language != "zh-CN" {
+	if versions[0].Target != "original" || versions[1].Target != "timing" || versions[2].Target != "translation" || versions[2].Language != "zh-CN" {
 		t.Fatalf("revision targets were not recorded: %#v", versions)
+	}
+}
+
+func TestSaveSongLyricsImportsLRCAtomicallyAndPreservesTranslation(t *testing.T) {
+	svc, db, user, song := newLyricsTestService(t)
+	zero := 0
+	firstTime, secondTime := 1000, 2000
+	created, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "import", BaseVersion: &zero, TranslationIncluded: true,
+		Language: "zh-CN", EditSummary: "导入双语歌词",
+		Lines: []SaveLyricsLineInput{
+			{Text: "alpha", Translation: "甲", TimeMS: &firstTime},
+			{Text: "beta", Translation: "乙", TimeMS: &secondTime},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Version != 1 || created.Format != "lrc" || created.TranslationLanguage != "zh-CN" || created.Translation != "[00:01.00]甲\n[00:02.00]乙" {
+		t.Fatalf("unexpected imported lyrics: %#v", created)
+	}
+
+	updatedFirstTime, updatedSecondTime := 3000, 4000
+	baseVersion := created.Version
+	updated, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "import", BaseVersion: &baseVersion, EditSummary: "更新时间轴",
+		Lines: []SaveLyricsLineInput{
+			{Text: "beta", TimeMS: &updatedFirstTime},
+			{Text: "alpha", TimeMS: &updatedSecondTime},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Version != 2 || updated.Lines[0].Translation != "乙" || updated.Lines[1].Translation != "甲" || updated.TranslationLanguage != "zh-CN" {
+		t.Fatalf("original-only import did not preserve translations: %#v", updated)
+	}
+	if updated.Lines[0].LineKey != created.Lines[1].LineKey || updated.Lines[1].LineKey != created.Lines[0].LineKey {
+		t.Fatalf("matching imported lines lost stable keys: created=%#v updated=%#v", created.Lines, updated.Lines)
+	}
+
+	_, err = svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "import", BaseVersion: &baseVersion,
+		Lines: []SaveLyricsLineInput{{Text: "stale", TimeMS: &firstTime}},
+	})
+	assertAppErrorCode(t, err, "music.lyrics_version_conflict")
+
+	var versions []model.MusicSongLyricVersion
+	if err := db.Where("song_id = ?", song.ID).Order("version").Find(&versions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(versions) != 2 || versions[0].Target != "import" || versions[1].Target != "import" {
+		t.Fatalf("expected one import revision per save: %#v", versions)
+	}
+}
+
+func TestSaveSongLyricsImportRequiresTextAndTime(t *testing.T) {
+	svc, _, user, song := newLyricsTestService(t)
+	zero := 0
+	timeMS := 1000
+	_, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "import", BaseVersion: &zero,
+		Lines: []SaveLyricsLineInput{{Text: "", TimeMS: &timeMS}},
+	})
+	assertAppErrorCode(t, err, "validation.invalid_request")
+	_, err = svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "import", BaseVersion: &zero,
+		Lines: []SaveLyricsLineInput{{Text: "alpha"}},
+	})
+	assertAppErrorCode(t, err, "validation.invalid_request")
+	lateTime, earlyTime := 2000, 1000
+	_, err = svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "import", BaseVersion: &zero,
+		Lines: []SaveLyricsLineInput{
+			{Text: "late", TimeMS: &lateTime},
+			{Text: "early", TimeMS: &earlyTime},
+		},
+	})
+	assertAppErrorCode(t, err, "validation.invalid_request")
+}
+
+func TestSerializeParsedLyricsOmitsEmptyLRCTranslationTrack(t *testing.T) {
+	firstTime, secondTime := 1000, 2000
+	content, translation := serializeParsedLyrics([]ParsedLyricLine{
+		{TimeMS: &firstTime, Text: "alpha"},
+		{TimeMS: &secondTime, Text: "beta"},
+	}, "lrc")
+	if content != "[00:01.00]alpha\n[00:02.00]beta" || translation != "" {
+		t.Fatalf("unexpected serialized LRC: content=%q translation=%q", content, translation)
 	}
 }
 

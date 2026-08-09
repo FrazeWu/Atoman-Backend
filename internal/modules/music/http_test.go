@@ -24,7 +24,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 	t.Helper()
 
 	gin.SetMode(gin.TestMode)
-	db := testdb.Open(t)
+	db := testdb.OpenPostgres(t, "music_http")
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Artist{},
@@ -359,6 +359,48 @@ func TestRegisterRoutesMusicLyricsLifecycleMatchesFrontendContract(t *testing.T)
 	deleted := performMusicJSONRequest(t, userRouter, http.MethodDelete, itemPath, "")
 	if deleted.Code != http.StatusOK || !strings.Contains(deleted.Body.String(), `"deleted":true`) {
 		t.Fatalf("expected annotation DELETE 200, got %d: %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+func TestRegisterRoutesMusicLyricsImportsStructuredLRCAndCreatesRevision(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Imported Lyrics", AudioURL: "/imported-lyrics.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	router := newMusicHTTPRouter(service, &user)
+	basePath := "/api/v1/music/songs/" + song.ID.String() + "/lyrics"
+	body := `{"target":"import","base_version":0,"translation_included":true,"language":"zh-CN","lines":[{"text":"Closed on Sunday","translation":"周日歇业","time_ms":29890},{"text":"Chick-Fil-A","translation":"福乐鸡","time_ms":150520}],"edit_summary":"导入双语歌词"}`
+
+	response := performMusicJSONRequest(t, router, http.MethodPut, basePath, body)
+	if response.Code != http.StatusOK {
+		t.Fatalf("import lyrics: %d %s", response.Code, response.Body.String())
+	}
+	var saved struct {
+		Data MusicLyricsDTO `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	if saved.Data.Version != 1 || saved.Data.Format != "lrc" || saved.Data.TranslationLanguage != "zh-CN" || len(saved.Data.Lines) != 2 {
+		t.Fatalf("unexpected imported lyrics: %#v", saved.Data)
+	}
+	if saved.Data.Lines[0].TimeMS == nil || *saved.Data.Lines[0].TimeMS != 29890 || saved.Data.Lines[0].Translation != "周日歇业" {
+		t.Fatalf("unexpected imported first line: %#v", saved.Data.Lines[0])
+	}
+
+	versions := performMusicJSONRequest(t, router, http.MethodGet, basePath+"/versions", "")
+	if versions.Code != http.StatusOK {
+		t.Fatalf("list versions: %d %s", versions.Code, versions.Body.String())
+	}
+	var listed struct {
+		Data []MusicSongLyricsVersionDTO `json:"data"`
+	}
+	if err := json.Unmarshal(versions.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Data) != 1 || listed.Data[0].Target != "import" || listed.Data[0].Version != 1 {
+		t.Fatalf("expected one import revision: %#v", listed.Data)
 	}
 }
 

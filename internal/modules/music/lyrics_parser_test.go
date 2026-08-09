@@ -212,6 +212,20 @@ func TestParseLyricLinesLRCAcceptsOneTwoAndThreeFractionDigits(t *testing.T) {
 	}
 }
 
+func TestParseLyricLinesLRCAcceptsMetadataAndSkipsEmptyOriginalMarkers(t *testing.T) {
+	content := "\uFEFF[id: ngirwxkr]\r\n[ar: Kanye West]\r\n[length: 02:32]\r\n[00:29.89]Closed on Sunday\r\n[01:28.20]\r\n[02:30.52]Chick-Fil-A\r\n[02:31.73]"
+	lines, err := ParseLyricLines(content, "", "lrc")
+	if err != nil {
+		t.Fatalf("parse LRC metadata and markers: %v", err)
+	}
+	if len(lines) != 2 || lines[0].Text != "Closed on Sunday" || lines[1].Text != "Chick-Fil-A" {
+		t.Fatalf("unexpected parsed lines: %#v", lines)
+	}
+	if lines[0].TimeMS == nil || *lines[0].TimeMS != 29890 || lines[1].TimeMS == nil || *lines[1].TimeMS != 150520 {
+		t.Fatalf("unexpected parsed times: %#v", lines)
+	}
+}
+
 func TestParseLyricLinesLRCRepeatedTimeAndTextGetsDistinctStableKeys(t *testing.T) {
 	content := "[00:01.00]A\n[00:01.00]A"
 	first, err := ParseLyricLines(content, "", "lrc")

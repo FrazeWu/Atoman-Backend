@@ -2,49 +2,21 @@ package music
 
 import (
 	"fmt"
-	"net/url"
-	"os"
-	"strings"
 	"sync"
 	"testing"
 
 	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/testdb"
 
 	"github.com/google/uuid"
-	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
 
 func openLyricsPostgresTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := os.Getenv("MUSIC_POSTGRES_TEST_DSN")
-	if dsn == "" {
-		t.Skip("MUSIC_POSTGRES_TEST_DSN is not set")
-	}
-	parsed, err := url.Parse(dsn)
-	if err != nil || parsed.Scheme == "" {
-		t.Fatalf("MUSIC_POSTGRES_TEST_DSN must be a PostgreSQL URL: %v", err)
-	}
-	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open PostgreSQL: %v", err)
-	}
-	schema := "music_lyrics_" + strings.ReplaceAll(uuid.NewString(), "-", "_")
-	if err := admin.Exec(fmt.Sprintf(`CREATE SCHEMA "%s"`, schema)).Error; err != nil {
-		t.Fatalf("create test schema: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = admin.Exec(fmt.Sprintf(`DROP SCHEMA IF EXISTS "%s" CASCADE`, schema)).Error
-	})
-	query := parsed.Query()
-	query.Set("search_path", schema)
-	parsed.RawQuery = query.Encode()
-	db, err := gorm.Open(postgres.Open(parsed.String()), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open isolated PostgreSQL schema: %v", err)
-	}
+	db := testdb.OpenPostgres(t, "music_lyrics")
 	if err := db.AutoMigrate(
 		&model.User{}, &model.Album{}, &model.Song{}, &model.MusicSongLyric{}, &model.MusicSongLyricLine{},
 		&model.MusicSongLyricVersion{}, &model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},

@@ -15,6 +15,7 @@ import (
 type SaveLyricsRequest struct {
 	Target                string                      `json:"target"`
 	Language              string                      `json:"language"`
+	TranslationIncluded   bool                        `json:"translation_included"`
 	BaseVersion           *int                        `json:"base_version"`
 	Lines                 []SaveLyricsLineInput       `json:"lines"`
 	Content               string                      `json:"content"`
@@ -140,7 +141,7 @@ func (h *Handler) getSongLyrics(c *gin.Context) {
 
 // saveSongLyrics godoc
 // @Summary 保存歌曲歌词
-// @Description 登录用户可基于当前版本独立更新原文、翻译或时间轴；每次成功更新都会生成历史版本。
+// @Description 登录用户可基于当前版本更新原文、翻译、时间轴或原子导入 LRC；每次成功更新都会生成历史版本。
 // @Tags music-lyrics
 // @Accept json
 // @Produce json
