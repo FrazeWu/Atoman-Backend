@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,71 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+func TestRevisionContributorsAreDistinctRecentAndSafe(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Revision{})
+
+	first := model.User{
+		UUID: uuid.New(), Username: "first", DisplayName: "First", AvatarURL: "https://example.com/first.jpg",
+		Email: "first@example.com", Password: "secret",
+	}
+	second := model.User{
+		UUID: uuid.New(), Username: "second", DisplayName: "Second", AvatarURL: "https://example.com/second.jpg",
+		Email: "second@example.com", Password: "secret",
+	}
+	third := model.User{
+		UUID: uuid.New(), Username: "pending", Email: "pending@example.com", Password: "secret",
+	}
+	for _, user := range []*model.User{&first, &second, &third} {
+		if err := db.Create(user).Error; err != nil {
+			t.Fatalf("create user: %v", err)
+		}
+	}
+
+	contentID := uuid.New()
+	baseTime := time.Date(2026, 8, 9, 10, 0, 0, 0, time.UTC)
+	revisions := []model.Revision{
+		{ContentType: "album", ContentID: contentID, VersionNumber: 1, ContentSnapshot: []byte(`{"title":"one"}`), EditorID: first.UUID, EditType: "creation", EditSummary: "created", Status: "approved", CreatedAt: baseTime},
+		{ContentType: "album", ContentID: contentID, VersionNumber: 2, ContentSnapshot: []byte(`{"title":"two"}`), EditorID: first.UUID, EditType: "edit", EditSummary: "edited", Status: "approved", CreatedAt: baseTime.Add(time.Hour)},
+		{ContentType: "album", ContentID: contentID, VersionNumber: 3, ContentSnapshot: []byte(`{"title":"three"}`), EditorID: second.UUID, EditType: "edit", EditSummary: "latest", Status: "approved", CreatedAt: baseTime.Add(2 * time.Hour)},
+		{ContentType: "album", ContentID: contentID, VersionNumber: 4, ContentSnapshot: []byte(`{"title":"pending"}`), EditorID: third.UUID, EditType: "edit", EditSummary: "pending", Status: "pending", CreatedAt: baseTime.Add(3 * time.Hour)},
+	}
+	if err := db.Create(&revisions).Error; err != nil {
+		t.Fatalf("create revisions: %v", err)
+	}
+
+	service := NewRevisionService(db)
+	contributors, total, err := service.GetContributors("album", contentID, 10)
+	if err != nil {
+		t.Fatalf("get contributors: %v", err)
+	}
+	if total != 2 || len(contributors) != 2 {
+		t.Fatalf("expected 2 approved contributors, total=%d len=%d", total, len(contributors))
+	}
+	if contributors[0].UserID != second.UUID || contributors[1].UserID != first.UUID {
+		t.Fatalf("contributors are not ordered by latest contribution: %#v", contributors)
+	}
+	if contributors[1].RevisionCount != 2 {
+		t.Fatalf("expected first user to have 2 revisions, got %d", contributors[1].RevisionCount)
+	}
+
+	history, _, err := service.GetRevisions("album", contentID, 10, 0)
+	if err != nil {
+		t.Fatalf("get revisions: %v", err)
+	}
+	raw, err := json.Marshal(history[0])
+	if err != nil {
+		t.Fatalf("marshal revision DTO: %v", err)
+	}
+	serialized := string(raw)
+	if strings.Contains(serialized, "second@example.com") || strings.Contains(serialized, `"email"`) {
+		t.Fatalf("revision response exposed private user fields: %s", serialized)
+	}
+	if !strings.Contains(serialized, `"content_snapshot":{"title":"pending"}`) {
+		t.Fatalf("revision snapshot was not returned as JSON: %s", serialized)
+	}
+}
 
 func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *testing.T) {
 	db := testdb.Open(t)

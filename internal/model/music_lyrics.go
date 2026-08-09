@@ -4,15 +4,16 @@ import "github.com/google/uuid"
 
 type MusicSongLyric struct {
 	Base
-	SongID        uuid.UUID `json:"song_id" gorm:"type:uuid;not null;uniqueIndex:idx_music_song_lyrics_song"`
-	Song          *Song     `json:"song,omitempty" gorm:"foreignKey:SongID"`
-	Content       string    `json:"content" gorm:"type:text;not null;default:''"`
-	Translation   string    `json:"translation" gorm:"type:text;not null;default:''"`
-	Format        string    `json:"format" gorm:"not null;default:'plain';check:chk_music_song_lyrics_format,format IN ('plain','lrc')"`
-	Version       int       `json:"version" gorm:"not null;default:1"`
-	UpdatedBy     uuid.UUID `json:"updated_by" gorm:"type:uuid;not null;index"`
-	UpdatedByUser *User     `json:"updated_by_user,omitempty" gorm:"foreignKey:UpdatedBy;references:UUID"`
-	EditSummary   string    `json:"edit_summary" gorm:"type:text;not null;default:''"`
+	SongID              uuid.UUID `json:"song_id" gorm:"type:uuid;not null;uniqueIndex:idx_music_song_lyrics_song"`
+	Song                *Song     `json:"song,omitempty" gorm:"foreignKey:SongID"`
+	Content             string    `json:"content" gorm:"type:text;not null;default:''"`
+	Translation         string    `json:"translation" gorm:"type:text;not null;default:''"`
+	TranslationLanguage string    `json:"translation_language" gorm:"not null;default:''"`
+	Format              string    `json:"format" gorm:"not null;default:'plain';check:chk_music_song_lyrics_format,format IN ('plain','lrc')"`
+	Version             int       `json:"version" gorm:"not null;default:1"`
+	UpdatedBy           uuid.UUID `json:"updated_by" gorm:"type:uuid;not null;index"`
+	UpdatedByUser       *User     `json:"updated_by_user,omitempty" gorm:"foreignKey:UpdatedBy;references:UUID"`
+	EditSummary         string    `json:"edit_summary" gorm:"type:text;not null;default:''"`
 }
 
 func (MusicSongLyric) TableName() string { return "music_song_lyrics" }
@@ -37,6 +38,8 @@ type MusicSongLyricVersion struct {
 	Version       int       `json:"version" gorm:"not null;uniqueIndex:idx_music_song_lyric_versions_song_version,priority:2"`
 	Content       string    `json:"content" gorm:"type:text;not null;default:''"`
 	Translation   string    `json:"translation" gorm:"type:text;not null;default:''"`
+	Target        string    `json:"target" gorm:"not null;default:'all'"`
+	Language      string    `json:"language" gorm:"not null;default:''"`
 	Format        string    `json:"format" gorm:"not null;default:'plain';check:chk_music_song_lyric_versions_format,format IN ('plain','lrc')"`
 	EditSummary   string    `json:"edit_summary" gorm:"type:text;not null;default:''"`
 	CreatedBy     uuid.UUID `json:"created_by" gorm:"type:uuid;not null;index"`

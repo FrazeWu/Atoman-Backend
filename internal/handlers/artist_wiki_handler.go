@@ -22,6 +22,7 @@ func SetupArtistWikiRoutes(router *gin.Engine, db *gorm.DB) {
 	artists := router.Group("/api/v1/artists")
 	{
 		artists.GET("/:id", GetArtistByIDHandler(db))
+		artists.GET("/:id/contributors", GetArtistContributorsHandler(revisionService))
 		artists.GET("/:id/revisions", GetArtistRevisionsHandler(revisionService))
 		artists.GET("/:id/revisions/:version", GetArtistRevisionHandler(revisionService))
 		artists.POST("/:id/revisions", middleware.AuthMiddleware(), CreateArtistRevisionHandler(db, revisionService))
@@ -36,6 +37,20 @@ func SetupArtistWikiRoutes(router *gin.Engine, db *gorm.DB) {
 	{
 		admin.POST("/:id/merge", MergeArtistsHandler(db))
 	}
+}
+
+// GetArtistContributorsHandler godoc
+// @Summary 获取艺术家贡献者
+// @Description 返回最近参与创建或修改艺术家资料的用户，最多 10 人。
+// @Tags music-artists
+// @Produce json
+// @Param id path string true "艺术家 UUID"
+// @Success 200 {object} RevisionContributorListResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/artists/{id}/contributors [get]
+func GetArtistContributorsHandler(revisionService *service.RevisionService) gin.HandlerFunc {
+	return getRevisionContributorsHandler(revisionService, "artist")
 }
 
 // GetArtistByIDHandler godoc
@@ -132,11 +147,8 @@ func GetArtistRevisionHandler(revisionService *service.RevisionService) gin.Hand
 			return
 		}
 
-		var revision model.Revision
-		if err := revisionService.GetDB().
-			Where("content_id = ? AND content_type = ? AND version_number = ?", artistID, "artist", version).
-			Preload("Editor").
-			First(&revision).Error; err != nil {
+		revision, err := revisionService.GetRevision("artist", artistID, version)
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Revision not found"})
 			return
 		}

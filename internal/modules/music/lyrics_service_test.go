@@ -379,6 +379,60 @@ func TestSaveSongLyricsCreatesAndVersionsCurrentLyrics(t *testing.T) {
 	}
 }
 
+func TestSaveSongLyricsUpdatesTranslationAndTimingIndependently(t *testing.T) {
+	svc, _, user, song := newLyricsTestService(t)
+	first, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Content: "alpha\nbeta", Translation: "旧一\n旧二", Format: "plain", EditSummary: "创建歌词",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseVersion := first.Version
+	translated, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "translation", Language: "zh-CN", BaseVersion: &baseVersion, EditSummary: "更新翻译",
+		Lines: []SaveLyricsLineInput{
+			{LineKey: first.Lines[0].LineKey, Translation: "新一"},
+			{LineKey: first.Lines[1].LineKey, Translation: "新二"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if translated.Content != first.Content || translated.Translation != "新一\n新二" || translated.TranslationLanguage != "zh-CN" {
+		t.Fatalf("translation update changed unrelated content: %#v", translated)
+	}
+
+	staleVersion := first.Version
+	_, err = svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "translation", BaseVersion: &staleVersion,
+		Lines: []SaveLyricsLineInput{{LineKey: first.Lines[0].LineKey, Translation: "过期修改"}},
+	})
+	assertAppErrorCode(t, err, "music.lyrics_version_conflict")
+
+	firstTime, secondTime := 1000, 2500
+	timingBase := translated.Version
+	timed, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "timing", BaseVersion: &timingBase, EditSummary: "添加时间轴",
+		Lines: []SaveLyricsLineInput{
+			{LineKey: translated.Lines[0].LineKey, TimeMS: &firstTime},
+			{LineKey: translated.Lines[1].LineKey, TimeMS: &secondTime},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if timed.Format != "lrc" || timed.Lines[0].Text != "alpha" || timed.Lines[0].Translation != "新一" || *timed.Lines[1].TimeMS != secondTime {
+		t.Fatalf("timing update changed unrelated content: %#v", timed)
+	}
+	versions, err := svc.ListSongLyricVersions(song.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if versions[0].Target != "timing" || versions[1].Target != "translation" || versions[1].Language != "zh-CN" {
+		t.Fatalf("revision targets were not recorded: %#v", versions)
+	}
+}
+
 func TestSaveSongLyricsValidatesUserSongAndFormat(t *testing.T) {
 	svc, _, user, song := newLyricsTestService(t)
 	_, err := svc.SaveSongLyrics(authctx.CurrentUser{}, song.ID, SaveLyricsInput{Format: "plain"})

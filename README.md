@@ -1,241 +1,63 @@
 # Atoman Backend
 
-Go backend service for API, authentication, data models, migrations, storage, and host Nginx integration.
+## 简介
 
-## Stack
+Atoman 的 Go 后端服务，负责 API、鉴权、内容数据、后台任务、对象存储和管理能力。
+
+## 功能
+
+- 用户与权限：JWT、OAuth、Turnstile、用户资料、访问控制和后台管理。
+- 内容服务：Blog、短话、论坛、辩题、播客、视频和人物时间线。
+- Feed / RSS：订阅分组、抓取、全文提取、搜索、阅读状态、收藏和规则。
+- 音乐档案库：艺人、专辑、歌曲、歌单、导入、歌词注释和版本治理。
+- Studio：频道、内容、数据、互动和发布管理接口。
+- 通用能力：点赞评论、通知私信、用户屏蔽、内容保护和 Swagger 文档。
+
+## 技术栈
 
 - Go
 - Gin
 - GORM
-- JWT
 - PostgreSQL
-- S3-compatible storage / Cloudflare R2
+- JWT
+- S3 兼容对象存储
 - Nginx
 - systemd
 
-## Common Commands
+## 开发
+
+本地 PostgreSQL 和 MinIO 由根目录的 `docker-compose.dev.yml` 提供。
+
+```bash
+docker compose -f ../docker-compose.dev.yml up -d
+cp .env.example .env.dev
+go run ./cmd/start_server --mode dev
+```
+
+常用命令：
 
 ```bash
 go build ./...
+go test ./...
 go run cmd/migrate/main.go
-go run ./cmd/start_server --mode dev
 go run cmd/create_admin/main.go
 ```
 
-## Environment Files
+开发环境读取 `.env.dev`，生产环境读取 `.env.prod`。
 
-Backend keeps three environment files:
+## 部署
 
-- `.env.example`: local template without real secrets
-- `.env.dev`: local development values
-- `.env.prod`: production values
+生产环境采用主机进程部署：
 
-Use the startup command with an explicit mode:
-
-```bash
-go run ./cmd/start_server --mode dev
-go run ./cmd/start_server --mode prod
-```
-
-Mode mapping:
-
-- `dev` -> `.env.dev`
-- `prod` -> `.env.prod`
-- default mode is `dev`
-
-Local development uses:
-
-- `BASE_URL=http://localhost:8080`
-- local PostgreSQL via `DATABASE_URL`
-- local MinIO via `S3_ENDPOINT=http://localhost:9100`
-- empty `TURNSTILE_SECRET_KEY`
-
-## Project Layout
-
-| Path | Purpose |
-| --- | --- |
-| `cmd/` | Executable entrypoints |
-| `internal/handlers/` | HTTP handlers |
-| `internal/model/` | Data models |
-| `internal/migrations/` | Database migrations |
-| `internal/middleware/` | Middleware |
-| `internal/service/` | Business services |
-| `internal/storage/` | Storage integration |
-| `nginx/` | Host Nginx config and certificate source files |
-| `docs/` | Backend docs |
-
-## Build And Run
-
-Build the server binary:
+- Go 应用构建为主机二进制，由 systemd 管理。
+- Nginx 负责反向代理、TLS 和站点入口。
+- PostgreSQL 使用 Neon。
+- 对象存储使用 Cloudflare R2。
+- Cloudflare 位于公网入口前层并提供 CDN。
 
 ```bash
 go build -o start_server ./cmd/start_server
+./start_server --mode prod
 ```
 
-Production runtime can start with `--mode prod`, or read environment variables from `.env.prod` through `systemd`.
-
-## Production Deployment Script
-
-The production deployment script manages the backend and its host dependencies. It does not deploy the frontend, which remains on Cloudflare Pages.
-
-Before the first deployment, install Git, Go 1.24+, Docker with the Compose plugin, systemd, Nginx, and curl. Also provide:
-
-```bash
-.env.prod
-nginx/ssl/atoman.org.pem
-nginx/ssl/atoman.org.key
-```
-
-Check the host without changing it:
-
-```bash
-scripts/deploy-production.sh check
-```
-
-Run the first deployment:
-
-```bash
-scripts/deploy-production.sh install
-```
-
-Deploy later updates:
-
-```bash
-scripts/deploy-production.sh update
-```
-
-The script:
-
-- fast-forwards the local `main` branch to `origin/main`
-- starts PostgreSQL with the `postgres` and `db-init` services in `docker-compose.dev.yml`
-- builds the Go backend and starts it with systemd
-- synchronizes the checked-in Nginx configuration and, during `install`, the TLS certificate
-- uses Cloudflare R2 through `.env.prod`; it does not start MinIO in production
-- runs the backend's automatic migrations on startup
-- verifies both the local and public API endpoints
-- restores the previous backend binary when startup or health checks fail
-
-The deployment requires a clean `main` worktree. Run `install` once on a new host, then use `update` for subsequent deployments.
-
-## Manual systemd Deployment
-
-The deployment script is the recommended method. The following commands are retained as a manual reference and must be adjusted to match the actual repository path and service user.
-
-Install the service:
-
-```bash
-sudo tee /etc/systemd/system/atoman-backend.service >/dev/null <<'EOF'
-[Unit]
-Description=Atoman Backend
-After=network.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=fa
-Group=fa
-WorkingDirectory=/home/fa/Atoman-Backend
-EnvironmentFile=/home/fa/Atoman-Backend/.env.prod
-Environment=ENV=production
-Environment=GIN_MODE=release
-Environment=PORT=8080
-ExecStart=/home/fa/Atoman-Backend/start_server --mode prod
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now atoman-backend
-```
-
-Check status:
-
-```bash
-sudo systemctl status atoman-backend
-journalctl -u atoman-backend -f -q
-```
-
-## Nginx And SSL
-
-This repo keeps the source certificate files in:
-
-```bash
-nginx/ssl/atoman.org.pem
-nginx/ssl/atoman.org.key
-```
-
-Deploy them onto the host at:
-
-```bash
-/etc/nginx/ssl/api.atoman.org.pem
-/etc/nginx/ssl/api.atoman.org.key
-```
-
-Install the certificate, Cloudflare real IP config, and site config:
-
-```bash
-sudo mkdir -p /etc/nginx/ssl
-sudo cp /home/fa/Atoman-Backend/nginx/ssl/atoman.org.pem /etc/nginx/ssl/api.atoman.org.pem
-sudo cp /home/fa/Atoman-Backend/nginx/ssl/atoman.org.key /etc/nginx/ssl/api.atoman.org.key
-sudo chmod 600 /etc/nginx/ssl/api.atoman.org.key
-
-sudo cp /home/fa/Atoman-Backend/nginx/conf.d/00-real-ip.conf /etc/nginx/conf.d/00-real-ip.conf
-sudo cp /home/fa/Atoman-Backend/nginx/api.atoman.org.conf /etc/nginx/conf.d/api.atoman.org.conf
-
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-The checked-in host site config is:
-
-```bash
-nginx/api.atoman.org.conf
-```
-
-It serves:
-
-- `https://api.atoman.org/api/...`
-- `https://api.atoman.org/swagger/index.html`
-- WebSocket routes
-
-The root path `/` intentionally returns `404`.
-
-## Verification
-
-Local dependencies:
-
-```bash
-docker compose -f docker-compose.dev.yml up -d
-```
-
-Local backend:
-
-```bash
-curl -i http://127.0.0.1:8080/api/v1/site/access
-curl -i http://127.0.0.1:8080/swagger/index.html
-```
-
-Public endpoint:
-
-```bash
-curl -i https://api.atoman.org/api/v1/site/access
-curl -i https://api.atoman.org/swagger/index.html
-```
-
-TLS check:
-
-```bash
-openssl s_client -connect api.atoman.org:443 -servername api.atoman.org </dev/null
-```
-
-## Notes
-
-- API changes must be reflected in the API docs.
-- Run `go build ./...` before considering backend changes complete.
-- Production does not use Docker Compose for the application process.
-- `docker-compose.dev.yml` is only for local PostgreSQL and MinIO dependencies.
+开发计划见 [ROADMAP.md](./ROADMAP.md)。

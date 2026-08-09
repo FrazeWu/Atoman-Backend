@@ -21,6 +21,7 @@ func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB) {
 	// Album revisions
 	albums := router.Group("/api/v1/albums/:id")
 	{
+		albums.GET("/contributors", GetAlbumContributorsHandler(revisionService))
 		albums.GET("/revisions", GetAlbumRevisionsHandler(revisionService))
 		albums.GET("/revisions/:version", GetAlbumRevisionHandler(revisionService))
 		albums.GET("/revisions/diff", GetAlbumRevisionDiffHandler(revisionService))
@@ -38,6 +39,38 @@ func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB) {
 		songs.POST("/revisions/:version/revert", middleware.AuthMiddleware(), RevertSongHandler(revisionService))
 	}
 
+}
+
+// GetAlbumContributorsHandler godoc
+// @Summary 获取专辑贡献者
+// @Description 返回最近参与创建或修改专辑的用户，最多 10 人。
+// @Tags music-revisions
+// @Produce json
+// @Param id path string true "专辑 UUID"
+// @Success 200 {object} RevisionContributorListResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/albums/{id}/contributors [get]
+func GetAlbumContributorsHandler(revisionService *service.RevisionService) gin.HandlerFunc {
+	return getRevisionContributorsHandler(revisionService, "album")
+}
+
+func getRevisionContributorsHandler(revisionService *service.RevisionService, contentType string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		contentID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid content ID"})
+			return
+		}
+
+		contributors, total, err := revisionService.GetContributors(contentType, contentID, 10)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch contributors"})
+			return
+		}
+
+		c.JSON(http.StatusOK, gin.H{"data": contributors, "meta": gin.H{"total": total}})
+	}
 }
 
 type CreateRevisionInput struct {
@@ -111,12 +144,8 @@ func GetAlbumRevisionHandler(revisionService *service.RevisionService) gin.Handl
 			return
 		}
 
-		var revision model.Revision
-		if err := revisionService.GetDB().
-			Where("content_id = ? AND content_type = ? AND version_number = ?", albumID, "album", version).
-			Preload("Editor").
-			Preload("Reviewer").
-			First(&revision).Error; err != nil {
+		revision, err := revisionService.GetRevision("album", albumID, version)
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Revision not found"})
 			return
 		}
@@ -371,12 +400,8 @@ func GetSongRevisionHandler(revisionService *service.RevisionService) gin.Handle
 			return
 		}
 
-		var revision model.Revision
-		if err := revisionService.GetDB().
-			Where("content_id = ? AND content_type = ? AND version_number = ?", songID, "song", version).
-			Preload("Editor").
-			Preload("Reviewer").
-			First(&revision).Error; err != nil {
+		revision, err := revisionService.GetRevision("song", songID, version)
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Revision not found"})
 			return
 		}

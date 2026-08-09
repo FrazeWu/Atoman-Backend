@@ -551,14 +551,23 @@ type ArtistMergeInput struct {
 }
 
 type RevisionResponse struct {
-	Data model.Revision `json:"data"`
+	Data service.RevisionDTO `json:"data"`
 }
 
 type RevisionListResponse struct {
-	Data   []model.Revision `json:"data"`
-	Total  int64            `json:"total" example:"12"`
-	Limit  int              `json:"limit" example:"50"`
-	Offset int              `json:"offset" example:"0"`
+	Data   []service.RevisionDTO `json:"data"`
+	Total  int64                 `json:"total" example:"12"`
+	Limit  int                   `json:"limit" example:"50"`
+	Offset int                   `json:"offset" example:"0"`
+}
+
+type RevisionContributorMeta struct {
+	Total int64 `json:"total" example:"4"`
+}
+
+type RevisionContributorListResponse struct {
+	Data []service.RevisionContributorDTO `json:"data"`
+	Meta RevisionContributorMeta          `json:"meta"`
 }
 
 type RevisionActionResponse struct {

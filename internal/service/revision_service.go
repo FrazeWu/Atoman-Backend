@@ -23,6 +23,42 @@ type RevisionService struct {
 	db *gorm.DB
 }
 
+type RevisionUserDTO struct {
+	UUID        uuid.UUID `json:"uuid"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name"`
+	AvatarURL   string    `json:"avatar_url"`
+}
+
+type RevisionDTO struct {
+	ID                 uuid.UUID        `json:"id"`
+	ContentType        string           `json:"content_type"`
+	ContentID          uuid.UUID        `json:"content_id"`
+	VersionNumber      int              `json:"version_number"`
+	PreviousRevisionID *uuid.UUID       `json:"previous_revision_id,omitempty"`
+	ContentSnapshot    json.RawMessage  `json:"content_snapshot"`
+	EditorID           uuid.UUID        `json:"editor_id"`
+	Editor             *RevisionUserDTO `json:"editor,omitempty"`
+	EditSummary        string           `json:"edit_summary"`
+	EditType           string           `json:"edit_type"`
+	Status             string           `json:"status"`
+	ReviewerID         *uuid.UUID       `json:"reviewer_id,omitempty"`
+	Reviewer           *RevisionUserDTO `json:"reviewer,omitempty"`
+	ReviewedAt         *time.Time       `json:"reviewed_at,omitempty"`
+	ReviewNotes        string           `json:"review_notes,omitempty"`
+	IsCurrent          bool             `json:"is_current"`
+	CreatedAt          time.Time        `json:"created_at"`
+}
+
+type RevisionContributorDTO struct {
+	UserID            uuid.UUID `json:"user_id" gorm:"column:user_id"`
+	Username          string    `json:"username"`
+	DisplayName       string    `json:"display_name" gorm:"column:display_name"`
+	AvatarURL         string    `json:"avatar_url" gorm:"column:avatar_url"`
+	RevisionCount     int64     `json:"revision_count" gorm:"column:revision_count"`
+	LastContributedAt time.Time `json:"last_contributed_at" gorm:"column:last_contributed_at"`
+}
+
 type albumRevisionSnapshot struct {
 	Album         *albumRevisionAlbum   `json:"album"`
 	ArtistCredits []albumRevisionCredit `json:"artist_credits"`
@@ -1240,7 +1276,7 @@ func (s *RevisionService) GetRevisions(
 	contentID uuid.UUID,
 	limit int,
 	offset int,
-) ([]model.Revision, int64, error) {
+) ([]RevisionDTO, int64, error) {
 	var revisions []model.Revision
 	var total int64
 
@@ -1260,7 +1296,79 @@ func (s *RevisionService) GetRevisions(
 		return nil, 0, err
 	}
 
-	return revisions, total, nil
+	result := make([]RevisionDTO, 0, len(revisions))
+	for i := range revisions {
+		result = append(result, revisionDTO(revisions[i]))
+	}
+	return result, total, nil
+}
+
+func (s *RevisionService) GetContributors(
+	contentType string,
+	contentID uuid.UUID,
+	limit int,
+) ([]RevisionContributorDTO, int64, error) {
+	if limit <= 0 || limit > 10 {
+		limit = 10
+	}
+
+	baseQuery := s.db.Table("revisions").
+		Where("content_type = ? AND content_id = ? AND status = ?", contentType, contentID, "approved")
+
+	var total int64
+	if err := baseQuery.Distinct("editor_id").Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var contributors []RevisionContributorDTO
+	err := baseQuery.
+		Select(`users.uuid AS user_id, users.username, users.display_name, users.avatar_url,
+			COUNT(revisions.id) AS revision_count, MAX(revisions.created_at) AS last_contributed_at`).
+		Joins(`JOIN "Users" AS users ON users.uuid = revisions.editor_id`).
+		Group("users.uuid, users.username, users.display_name, users.avatar_url").
+		Order("MAX(revisions.created_at) DESC, users.uuid ASC").
+		Limit(limit).
+		Scan(&contributors).Error
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return contributors, total, nil
+}
+
+func revisionUserDTO(user *model.User) *RevisionUserDTO {
+	if user == nil {
+		return nil
+	}
+	return &RevisionUserDTO{
+		UUID: user.UUID, Username: user.Username, DisplayName: user.DisplayName, AvatarURL: user.AvatarURL,
+	}
+}
+
+func revisionDTO(revision model.Revision) RevisionDTO {
+	return RevisionDTO{
+		ID: revision.ID, ContentType: revision.ContentType, ContentID: revision.ContentID,
+		VersionNumber: revision.VersionNumber, PreviousRevisionID: revision.PreviousRevisionID,
+		ContentSnapshot: json.RawMessage(revision.ContentSnapshot), EditorID: revision.EditorID,
+		Editor: revisionUserDTO(revision.Editor), EditSummary: revision.EditSummary,
+		EditType: revision.EditType, Status: revision.Status, ReviewerID: revision.ReviewerID,
+		Reviewer: revisionUserDTO(revision.Reviewer), ReviewedAt: revision.ReviewedAt,
+		ReviewNotes: revision.ReviewNotes, IsCurrent: revision.IsCurrent, CreatedAt: revision.CreatedAt,
+	}
+}
+
+func (s *RevisionService) GetRevision(
+	contentType string,
+	contentID uuid.UUID,
+	version int,
+) (RevisionDTO, error) {
+	var revision model.Revision
+	err := s.db.Where("content_id = ? AND content_type = ? AND version_number = ?", contentID, contentType, version).
+		Preload("Editor").Preload("Reviewer").First(&revision).Error
+	if err != nil {
+		return RevisionDTO{}, err
+	}
+	return revisionDTO(revision), nil
 }
 
 // GetRevisionDiff compares two revisions and returns the differences

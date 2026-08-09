@@ -2,6 +2,7 @@ package music
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,11 +19,22 @@ import (
 )
 
 type SaveLyricsInput struct {
+	Target                string                      `json:"target"`
+	Language              string                      `json:"language"`
+	BaseVersion           *int                        `json:"base_version"`
+	Lines                 []SaveLyricsLineInput       `json:"lines"`
 	Content               string                      `json:"content"`
 	Translation           string                      `json:"translation"`
 	Format                string                      `json:"format"`
 	EditSummary           string                      `json:"edit_summary"`
 	AnnotationResolutions []AnnotationResolutionInput `json:"annotation_resolutions"`
+}
+
+type SaveLyricsLineInput struct {
+	LineKey     string `json:"line_key"`
+	Text        string `json:"text"`
+	Translation string `json:"translation"`
+	TimeMS      *int   `json:"time_ms"`
 }
 
 type AnnotationResolutionInput struct {
@@ -69,6 +81,8 @@ type MusicSongLyricsVersionDTO struct {
 	Translation string    `json:"translation"`
 	Format      string    `json:"format"`
 	EditSummary string    `json:"edit_summary"`
+	Target      string    `json:"target"`
+	Language    string    `json:"language"`
 	CreatedBy   uuid.UUID `json:"created_by"`
 	CreatedAt   time.Time `json:"created_at"`
 }
@@ -99,26 +113,23 @@ type MusicLyricAnnotationDTO struct {
 }
 
 type MusicLyricsDTO struct {
-	ID          uuid.UUID                 `json:"id"`
-	SongID      uuid.UUID                 `json:"song_id"`
-	Content     string                    `json:"content"`
-	Translation string                    `json:"translation"`
-	Format      string                    `json:"format"`
-	Version     int                       `json:"version"`
-	UpdatedBy   uuid.UUID                 `json:"updated_by"`
-	EditSummary string                    `json:"edit_summary"`
-	UpdatedAt   time.Time                 `json:"updated_at"`
-	Lines       []MusicLyricLineDTO       `json:"lines"`
-	Annotations []MusicLyricAnnotationDTO `json:"annotations"`
+	ID                  uuid.UUID                 `json:"id"`
+	SongID              uuid.UUID                 `json:"song_id"`
+	Content             string                    `json:"content"`
+	Translation         string                    `json:"translation"`
+	TranslationLanguage string                    `json:"translation_language"`
+	Format              string                    `json:"format"`
+	Version             int                       `json:"version"`
+	UpdatedBy           uuid.UUID                 `json:"updated_by"`
+	EditSummary         string                    `json:"edit_summary"`
+	UpdatedAt           time.Time                 `json:"updated_at"`
+	Lines               []MusicLyricLineDTO       `json:"lines"`
+	Annotations         []MusicLyricAnnotationDTO `json:"annotations"`
 }
 
 func (s *Service) SaveSongLyrics(user authctx.CurrentUser, songID uuid.UUID, input SaveLyricsInput) (MusicLyricsDTO, error) {
 	if user.ID == uuid.Nil {
 		return MusicLyricsDTO{}, apperr.Unauthorized("Login required")
-	}
-	lines, err := ParseLyricLines(input.Content, input.Translation, input.Format)
-	if err != nil {
-		return MusicLyricsDTO{}, err
 	}
 	if strings.TrimSpace(input.EditSummary) == "" {
 		input.EditSummary = "更新歌词"
@@ -127,8 +138,12 @@ func (s *Service) SaveSongLyrics(user authctx.CurrentUser, songID uuid.UUID, inp
 	unlock := s.serializeLyricsSaveForSQLite()
 	defer unlock()
 
-	err = s.db.Transaction(func(tx *gorm.DB) error {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := lockLyricsSong(tx, songID); err != nil {
+			return err
+		}
+		lines, err := prepareLyricsSave(tx, songID, &input)
+		if err != nil {
 			return err
 		}
 		return persistSongLyrics(tx, user.ID, songID, input, lines, false)
@@ -156,7 +171,8 @@ func (s *Service) ListSongLyricVersions(songID uuid.UUID) ([]MusicSongLyricsVers
 		dtos = append(dtos, MusicSongLyricsVersionDTO{
 			ID: version.ID, SongID: version.SongID, Version: version.Version,
 			Content: version.Content, Translation: version.Translation, Format: version.Format,
-			EditSummary: version.EditSummary, CreatedBy: version.CreatedBy, CreatedAt: version.CreatedAt,
+			EditSummary: version.EditSummary, Target: version.Target, Language: version.Language,
+			CreatedBy: version.CreatedBy, CreatedAt: version.CreatedAt,
 		})
 	}
 	return dtos, nil
@@ -188,7 +204,7 @@ func (s *Service) RevertSongLyrics(user authctx.CurrentUser, songID uuid.UUID, v
 		}
 		input := SaveLyricsInput{
 			Content: target.Content, Translation: target.Translation, Format: target.Format,
-			EditSummary: strings.TrimSpace(editSummary),
+			EditSummary: strings.TrimSpace(editSummary), Target: "restore",
 		}
 		lines, err := ParseLyricLines(input.Content, input.Translation, input.Format)
 		if err != nil {
@@ -216,6 +232,7 @@ func persistSongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, input SaveLyricsI
 	}
 	lyric.Content = input.Content
 	lyric.Translation = input.Translation
+	lyric.TranslationLanguage = input.Language
 	lyric.Format = input.Format
 	lyric.UpdatedBy = actorID
 	lyric.EditSummary = input.EditSummary
@@ -237,12 +254,170 @@ func persistSongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, input SaveLyricsI
 	created := model.MusicSongLyricVersion{
 		SongID: songID, Version: lyric.Version, Content: input.Content,
 		Translation: input.Translation, Format: input.Format,
-		EditSummary: input.EditSummary, CreatedBy: actorID,
+		EditSummary: input.EditSummary, Target: normalizedLyricsTarget(input.Target),
+		Language: lyric.TranslationLanguage, CreatedBy: actorID,
 	}
 	if err := tx.Create(&created).Error; err != nil {
 		return err
 	}
 	return tx.Model(&model.Song{}).Where("id = ?", songID).Update("lyrics", input.Content).Error
+}
+
+func prepareLyricsSave(tx *gorm.DB, songID uuid.UUID, input *SaveLyricsInput) ([]ParsedLyricLine, error) {
+	target := normalizedLyricsTarget(input.Target)
+	if target == "all" || target == "restore" {
+		return ParseLyricLines(input.Content, input.Translation, input.Format)
+	}
+	if target != "original" && target != "translation" && target != "timing" {
+		return nil, lyricValidationError("target must be original, translation, or timing")
+	}
+
+	var lyric model.MusicSongLyric
+	err := tx.First(&lyric, "song_id = ?", songID).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if input.BaseVersion == nil || *input.BaseVersion != 0 || target != "original" {
+			return nil, lyricsVersionConflict(input.BaseVersion, 0)
+		}
+		lyric = model.MusicSongLyric{SongID: songID, Version: 0, Format: "plain"}
+	} else if err != nil {
+		return nil, err
+	}
+	if input.BaseVersion == nil || *input.BaseVersion != lyric.Version {
+		return nil, lyricsVersionConflict(input.BaseVersion, lyric.Version)
+	}
+
+	var current []model.MusicSongLyricLine
+	if lyric.ID != uuid.Nil {
+		if err := tx.Where("lyric_id = ?", lyric.ID).Order("line_index ASC").Find(&current).Error; err != nil {
+			return nil, err
+		}
+	}
+	currentByKey := make(map[string]model.MusicSongLyricLine, len(current))
+	for _, line := range current {
+		currentByKey[line.LineKey] = line
+	}
+
+	var lines []ParsedLyricLine
+	switch target {
+	case "original":
+		if len(input.Lines) == 0 {
+			return nil, lyricValidationError("original lyrics require at least one line")
+		}
+		occurrences := map[string]int{}
+		lines = make([]ParsedLyricLine, 0, len(input.Lines))
+		for index, submitted := range input.Lines {
+			text := strings.TrimSpace(submitted.Text)
+			if text == "" {
+				return nil, lyricValidationError("original lyric lines cannot be empty")
+			}
+			fingerprint := musiclyrics.TextFingerprint(text)
+			occurrence := occurrences[fingerprint]
+			occurrences[fingerprint]++
+			lineKey := submitted.LineKey
+			old, exists := currentByKey[lineKey]
+			if !exists {
+				lineKey = fmt.Sprintf("plain:%s:%d", fingerprint, occurrence)
+			}
+			line := ParsedLyricLine{LineKey: lineKey, LineIndex: index, Text: text}
+			if exists {
+				line.TimeMS, line.Translation = old.TimeMS, old.Translation
+			}
+			lines = append(lines, line)
+		}
+		input.Format = lyric.Format
+		if input.Format == "" {
+			input.Format = "plain"
+		}
+	case "translation":
+		if len(current) == 0 {
+			return nil, lyricValidationError("original lyrics are required before adding a translation")
+		}
+		translations := make(map[string]string, len(input.Lines))
+		for _, submitted := range input.Lines {
+			if _, exists := currentByKey[submitted.LineKey]; !exists {
+				return nil, lyricsVersionConflict(input.BaseVersion, lyric.Version)
+			}
+			translations[submitted.LineKey] = strings.TrimSpace(submitted.Translation)
+		}
+		lines = modelLinesToParsed(current)
+		for index := range lines {
+			if translation, exists := translations[lines[index].LineKey]; exists {
+				lines[index].Translation = translation
+			}
+		}
+		input.Format = lyric.Format
+		input.Language = strings.TrimSpace(input.Language)
+		if input.Language == "" {
+			input.Language = lyric.TranslationLanguage
+		}
+	case "timing":
+		if len(current) == 0 || len(input.Lines) != len(current) {
+			return nil, lyricValidationError("timing must include every current lyric line")
+		}
+		timings := make(map[string]*int, len(input.Lines))
+		for _, submitted := range input.Lines {
+			if submitted.TimeMS == nil || *submitted.TimeMS < 0 {
+				return nil, lyricValidationError("each lyric line requires a valid time")
+			}
+			if _, exists := currentByKey[submitted.LineKey]; !exists {
+				return nil, lyricsVersionConflict(input.BaseVersion, lyric.Version)
+			}
+			timings[submitted.LineKey] = submitted.TimeMS
+		}
+		lines = modelLinesToParsed(current)
+		for index := range lines {
+			lines[index].TimeMS = timings[lines[index].LineKey]
+		}
+		input.Format = "lrc"
+		input.Language = lyric.TranslationLanguage
+	}
+	input.Content, input.Translation = serializeParsedLyrics(lines, input.Format)
+	return lines, nil
+}
+
+func modelLinesToParsed(lines []model.MusicSongLyricLine) []ParsedLyricLine {
+	parsed := make([]ParsedLyricLine, 0, len(lines))
+	for _, line := range lines {
+		parsed = append(parsed, ParsedLyricLine{LineKey: line.LineKey, LineIndex: line.LineIndex, TimeMS: line.TimeMS, Text: line.Text, Translation: line.Translation})
+	}
+	return parsed
+}
+
+func serializeParsedLyrics(lines []ParsedLyricLine, format string) (string, string) {
+	content := make([]string, 0, len(lines))
+	translation := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if format == "lrc" && line.TimeMS != nil {
+			stamp := formatLRCTime(*line.TimeMS)
+			content = append(content, stamp+line.Text)
+			translation = append(translation, stamp+line.Translation)
+		} else {
+			content = append(content, line.Text)
+			translation = append(translation, line.Translation)
+		}
+	}
+	return strings.Join(content, "\n"), strings.Join(translation, "\n")
+}
+
+func formatLRCTime(timeMS int) string {
+	centiseconds := timeMS / 10
+	return fmt.Sprintf("[%02d:%02d.%02d]", centiseconds/6000, (centiseconds/100)%60, centiseconds%100)
+}
+
+func normalizedLyricsTarget(target string) string {
+	if strings.TrimSpace(target) == "" {
+		return "all"
+	}
+	return strings.TrimSpace(target)
+}
+
+func lyricsVersionConflict(baseVersion *int, currentVersion int) error {
+	err := apperr.Conflict("music.lyrics_version_conflict", "Lyrics changed while you were editing")
+	if baseVersion != nil {
+		err.Details["base_version"] = *baseVersion
+	}
+	err.Details["current_version"] = currentVersion
+	return err
 }
 
 // SyncLegacySongLyrics routes legacy song writes through the Wiki version and line model.
@@ -403,6 +578,7 @@ func (s *Service) GetSongLyrics(user authctx.CurrentUser, songID uuid.UUID) (Mus
 		return MusicLyricsDTO{}, err
 	}
 	dto.ID, dto.Content, dto.Translation, dto.Format = lyric.ID, lyric.Content, lyric.Translation, lyric.Format
+	dto.TranslationLanguage = lyric.TranslationLanguage
 	dto.Version, dto.UpdatedBy, dto.EditSummary, dto.UpdatedAt = lyric.Version, lyric.UpdatedBy, lyric.EditSummary, lyric.UpdatedAt
 	var lines []model.MusicSongLyricLine
 	if err := s.db.Where("lyric_id = ?", lyric.ID).Order("line_index ASC").Find(&lines).Error; err != nil {
