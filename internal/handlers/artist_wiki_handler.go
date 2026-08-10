@@ -2,7 +2,9 @@ package handlers
 
 import (
 	"net/http"
+	"path"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -14,9 +16,12 @@ import (
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/service"
+	"atoman/internal/storage"
+
+	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-func SetupArtistWikiRoutes(router *gin.Engine, db *gorm.DB) {
+func SetupArtistWikiRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	revisionService := service.NewRevisionService(db)
 
 	artists := router.Group("/api/v1/artists")
@@ -25,7 +30,7 @@ func SetupArtistWikiRoutes(router *gin.Engine, db *gorm.DB) {
 		artists.GET("/:id/contributors", GetArtistContributorsHandler(revisionService))
 		artists.GET("/:id/revisions", GetArtistRevisionsHandler(revisionService))
 		artists.GET("/:id/revisions/:version", GetArtistRevisionHandler(revisionService))
-		artists.POST("/:id/revisions", middleware.AuthMiddleware(), CreateArtistRevisionHandler(db, revisionService))
+		artists.POST("/:id/revisions", middleware.AuthMiddleware(), CreateArtistRevisionHandler(db, revisionService, s3Client))
 		artists.POST("/:id/revert/:version", middleware.AuthMiddleware(), RevertArtistHandler(revisionService))
 		artists.GET("/:id/aliases", GetArtistAliasesHandler(db))
 		artists.POST("/:id/aliases", middleware.AuthMiddleware(), AddArtistAliasHandler(db))
@@ -173,7 +178,7 @@ func GetArtistRevisionHandler(revisionService *service.RevisionService) gin.Hand
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/artists/{id}/revisions [post]
-func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionService) gin.HandlerFunc {
+func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionService, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		artistID, err := uuid.Parse(c.Param("id"))
 		if err != nil {
@@ -199,18 +204,33 @@ func CreateArtistRevisionHandler(db *gorm.DB, revisionService *service.RevisionS
 				return
 			}
 		}
+		var promoted storage.PromotedMusicAsset
+		if imageURL, ok := input.Changes["image_url"].(string); ok && strings.TrimSpace(imageURL) != "" {
+			promoted, err = storage.PromoteMusicUploadAsset(
+				s3Client, imageURL,
+				storage.BuildMusicArtistImageVersionKey(artistID.String(), uuid.NewString(), path.Ext(imageURL)),
+			)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+				return
+			}
+			input.Changes["image_url"] = promoted.URL
+		}
 
 		revision, conflicts, err := revisionService.CreateRevision(
 			"artist", artistID, editorUUID, input.Changes, input.EditSummary, input.BaseRevision, true,
 		)
 		if err != nil {
+			storage.DeleteMusicObjects(s3Client, []string{promoted.DestinationKey})
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 		if len(conflicts) > 0 {
+			storage.DeleteMusicObjects(s3Client, []string{promoted.DestinationKey})
 			c.JSON(http.StatusConflict, gin.H{"error": "Edit conflicts detected", "conflicts": conflicts})
 			return
 		}
+		storage.DeleteMusicObjects(s3Client, []string{promoted.SourceKey})
 
 		c.JSON(http.StatusOK, gin.H{"data": revision, "message": "Changes saved"})
 	}

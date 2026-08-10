@@ -1440,6 +1440,16 @@ func TestParseExploreSourceTimestampInvalid(t *testing.T) {
 	}
 }
 
+func TestRecommendationThemeKeywordsPreservesContentTypeMatches(t *testing.T) {
+	keywords, ok := recommendationThemeKeywords("video", "cinema")
+	if !ok {
+		t.Fatal("expected cinema theme to be valid for video")
+	}
+	if len(keywords) != 0 {
+		t.Fatalf("expected content type match to skip text prefilter, got %v", keywords)
+	}
+}
+
 func TestListExploreSourcesExcludesHiddenSources(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 

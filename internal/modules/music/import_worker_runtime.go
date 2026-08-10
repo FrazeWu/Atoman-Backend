@@ -47,7 +47,7 @@ func StartImportWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-chan
 		func(_ context.Context, importID uuid.UUID) error {
 			return importService.FinalizeSubmittedAlbumImport(importID)
 		},
-	)
+	).WithMediaService(importService)
 
 	interval := defaultMusicImportWorkerPollInterval
 	if raw := strings.TrimSpace(os.Getenv("MUSIC_IMPORT_WORKER_POLL_INTERVAL")); raw != "" {

@@ -1,12 +1,14 @@
 package music
 
 import (
+	"path"
 	"strings"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	revisionservice "atoman/internal/service"
+	"atoman/internal/storage"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -80,6 +82,7 @@ func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest
 		}
 	}
 
+	oldObjectKey, newObjectKey := "", ""
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := ensureArtistDisplayNameAvailable(tx, artist.Name, artist.Disambiguation, nil); err != nil {
 			return err
@@ -90,11 +93,30 @@ func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest
 		if err := tx.Create(&artist).Error; err != nil {
 			return err
 		}
+		asset, err := storage.PromoteMusicUploadAsset(
+			s.s3, artist.ImageURL,
+			storage.BuildMusicArtistImageVersionKey(artist.ID.String(), uuid.NewString(), path.Ext(artist.ImageURL)),
+		)
+		if err != nil {
+			return err
+		}
+		if asset.DestinationKey != "" {
+			artist.ImageURL = asset.URL
+			oldObjectKey, newObjectKey = asset.SourceKey, asset.DestinationKey
+			if err := tx.Model(&artist).Update("image_url", artist.ImageURL).Error; err != nil {
+				return err
+			}
+		}
 		if err := replaceArtistMembers(tx, artist.ID, req.Members); err != nil {
 			return err
 		}
-		_, err := revisionservice.NewRevisionService(tx).EnsureInitialRevision("artist", artist.ID, user.ID)
+		_, err = revisionservice.NewRevisionService(tx).EnsureInitialRevision("artist", artist.ID, user.ID)
 		return err
 	})
+	if err != nil {
+		storage.DeleteMusicObjects(s.s3, []string{newObjectKey})
+		return model.Artist{}, err
+	}
+	storage.DeleteMusicObjects(s.s3, []string{oldObjectKey})
 	return artist, err
 }

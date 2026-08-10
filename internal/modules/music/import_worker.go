@@ -42,6 +42,7 @@ type ImportWorker struct {
 	leaseTimeout         time.Duration
 	beforeCleanupSession func(uuid.UUID)
 	completionFinalizer  func(context.Context, uuid.UUID) error
+	mediaService         *Service
 }
 
 func NewImportWorker(db *gorm.DB, store MusicImportObjectStore, workerID string) *ImportWorker {
@@ -50,6 +51,11 @@ func NewImportWorker(db *gorm.DB, store MusicImportObjectStore, workerID string)
 
 func (w *ImportWorker) WithCompletionFinalizer(finalizer func(context.Context, uuid.UUID) error) *ImportWorker {
 	w.completionFinalizer = finalizer
+	return w
+}
+
+func (w *ImportWorker) WithMediaService(service *Service) *ImportWorker {
+	w.mediaService = service
 	return w
 }
 
@@ -271,10 +277,13 @@ func importRetryDelay(attempt int) time.Duration {
 }
 
 func (w *ImportWorker) RunOnce(ctx context.Context, processor ImportProcessor) (bool, error) {
-	if processed, err := RunSongAudioReplacementOnce(ctx, w.db, w.workerID); processed || err != nil {
+	if processed, err := runSongAudioReplacementOnce(ctx, w.db, w.workerID, w.mediaService); processed || err != nil {
 		return processed, err
 	}
 	if err := w.CleanupExpired(ctx); err != nil {
+		return false, err
+	}
+	if _, err := w.CleanupCommitted(ctx); err != nil {
 		return false, err
 	}
 	if processor == nil {
@@ -294,6 +303,39 @@ func (w *ImportWorker) RunOnce(ctx context.Context, processor ImportProcessor) (
 		if err := w.completionFinalizer(ctx, job.ImportID); err != nil {
 			return true, err
 		}
+	}
+	return true, nil
+}
+
+func (w *ImportWorker) CleanupCommitted(ctx context.Context) (bool, error) {
+	if w.db == nil || w.store == nil {
+		return false, nil
+	}
+	var session model.AlbumImportSession
+	err := w.db.WithContext(ctx).
+		Where("status = ?", AlbumImportStatusCommitted).
+		Where(`payload_json LIKE ? OR EXISTS (
+			SELECT 1 FROM music_album_import_files
+			WHERE music_album_import_files.import_id = music_album_import_sessions.id
+			AND (source_key <> '' OR playback_key <> '' OR cleanup_json NOT IN ('', '[]'))
+		)`, `%"cleanup_targets"%`).
+		Order("updated_at ASC").
+		Preload("Files").
+		First(&session).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var locked model.AlbumImportSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Preload("Files").First(&locked, "id = ? AND status = ?", session.ID, AlbumImportStatusCommitted).Error; err != nil {
+			return err
+		}
+		return w.cleanupSession(ctx, tx, &locked)
+	}); err != nil {
+		return true, fmt.Errorf("clean up committed import %s: %w", session.ID, err)
 	}
 	return true, nil
 }
@@ -402,6 +444,17 @@ func (w *ImportWorker) cleanupSession(ctx context.Context, db *gorm.DB, session 
 		}
 		session.PayloadJSON = string(encoded)
 	}
+	if _, ok := payload["cleanup_targets"]; ok {
+		delete(payload, "cleanup_targets")
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		if err := db.WithContext(ctx).Model(session).Update("payload_json", string(encoded)).Error; err != nil {
+			return err
+		}
+		session.PayloadJSON = string(encoded)
+	}
 	for i := range session.Files {
 		file := &session.Files[i]
 		var targets []importCleanupTarget
@@ -447,6 +500,15 @@ func (w *ImportWorker) cleanupSession(ctx context.Context, db *gorm.DB, session 
 				return err
 			}
 			file.SourceKey, file.UploadID = "", ""
+		}
+		if file.PlaybackKey != "" {
+			if err := cleanupTarget(w.store, importCleanupTarget{Action: "delete", Key: file.PlaybackKey}); err != nil {
+				return err
+			}
+			if err := db.WithContext(ctx).Model(file).Update("playback_key", "").Error; err != nil {
+				return err
+			}
+			file.PlaybackKey = ""
 		}
 	}
 	return nil

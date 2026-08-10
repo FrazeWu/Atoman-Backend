@@ -747,7 +747,7 @@ func TestCreateRevisionBootstrapsAndAppliesAlbumEditorChanges(t *testing.T) {
 
 func TestCreateRevisionRejectsProtectedArtistFields(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Artist{}, &model.Revision{}, &model.EditConflict{})
+	testdb.Migrate(t, db, &model.Artist{}, &model.ArtistMember{}, &model.Revision{}, &model.EditConflict{})
 	artist := model.Artist{Name: "Artist", EntryStatus: "protected"}
 	if err := db.Create(&artist).Error; err != nil {
 		t.Fatalf("create artist: %v", err)
@@ -859,16 +859,25 @@ func TestMergeSongRevisionChangesRejectsInvalidArtistRoles(t *testing.T) {
 
 func TestCreateRevisionBootstrapsAndAppliesArtistChanges(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Artist{}, &model.Revision{}, &model.EditConflict{})
+	testdb.Migrate(t, db, &model.Artist{}, &model.ArtistMember{}, &model.Revision{}, &model.EditConflict{})
 	artist := model.Artist{Name: "Before", Bio: "Old", EntryStatus: "open"}
 	if err := db.Create(&artist).Error; err != nil {
 		t.Fatalf("create artist: %v", err)
+	}
+	member := model.Artist{Name: "Member", EntryStatus: "open"}
+	if err := db.Create(&member).Error; err != nil {
+		t.Fatalf("create member: %v", err)
 	}
 
 	revisionService := NewRevisionService(db)
 	revision, conflicts, err := revisionService.CreateRevision(
 		"artist", artist.ID, uuid.New(),
-		map[string]interface{}{"name": "After", "bio": "New", "birth_date": "1990-01-02"},
+		map[string]interface{}{
+			"name": "After", "disambiguation": "Group", "bio": "New", "birth_date": "1990-01-02",
+			"artist_form": "group", "active_start_date": "2020", "stage_names_json": `[{"name":"After","is_primary":true}]`,
+			"members": []map[string]interface{}{{"artist_id": member.ID.String(), "join_date": "2020/01/--", "leave_date": ""}},
+			"sources": []map[string]interface{}{{"type": "url", "url": "https://example.com/artist"}},
+		},
 		"编辑艺术家", 0, true,
 	)
 	if err != nil {
@@ -881,12 +890,19 @@ func TestCreateRevisionBootstrapsAndAppliesArtistChanges(t *testing.T) {
 	if err := db.First(&updated, "id = ?", artist.ID).Error; err != nil {
 		t.Fatalf("reload artist: %v", err)
 	}
-	if updated.Name != "After" || updated.Bio != "New" || updated.BirthDate == nil {
+	if updated.Name != "After" || updated.Disambiguation != "Group" || updated.Bio != "New" || updated.BirthDate == nil || updated.ArtistForm != "group" || updated.ActiveStartDatePrecision != "year" {
 		t.Fatalf("unexpected updated artist: %#v", updated)
+	}
+	var relations []model.ArtistMember
+	if err := db.Where("group_artist_id = ?", artist.ID).Find(&relations).Error; err != nil || len(relations) != 1 || relations[0].MemberArtistID != member.ID || relations[0].JoinDatePrecision != "month" {
+		t.Fatalf("unexpected artist members: relations=%#v err=%v", relations, err)
 	}
 
 	if _, err := revisionService.RevertToRevision("artist", artist.ID, 1, uuid.New(), "恢复初始版本"); err != nil {
 		t.Fatalf("revert artist: %v", err)
+	}
+	if err := db.Where("group_artist_id = ?", artist.ID).Find(&relations).Error; err != nil || len(relations) != 0 {
+		t.Fatalf("expected members to revert: relations=%#v err=%v", relations, err)
 	}
 	var reverted model.Artist
 	if err := db.First(&reverted, "id = ?", artist.ID).Error; err != nil {

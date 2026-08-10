@@ -88,6 +88,21 @@ func (s *Service) RepairAlbumImportSession(user authctx.CurrentUser, sessionID u
 		if err != nil {
 			return err
 		}
+		var songs []model.Song
+		if err := tx.Where("album_id = ?", album.ID).Order("track_number ASC, created_at ASC").Find(&songs).Error; err != nil {
+			return err
+		}
+		currentTracks := make([]map[string]any, 0, len(songs))
+		for _, song := range songs {
+			currentTracks = append(currentTracks, map[string]any{
+				"title": song.Title, "track_number": song.TrackNumber,
+				"audio_url": song.AudioURL,
+			})
+		}
+		payload["cover_url"] = album.CoverURL
+		delete(payload, "cover_key")
+		delete(payload, "derived_cover")
+		payload["derived_tracks"] = currentTracks
 		applyAlbumImportSessionState(&session, AlbumImportStatusReady, payload)
 		session.CommittedAt = nil
 		session.CommittedBy = nil

@@ -326,6 +326,37 @@ func TestImportWorkerCleanupRemovesCanceledFileSourceWithoutRecordedTarget(t *te
 	}
 }
 
+func TestImportWorkerCleanupCommittedDeletesSourcesAndPlaybackAfterSuccess(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	now := time.Now().UTC()
+	session := model.AlbumImportSession{Status: AlbumImportStatusCommitted, CommittedAt: &now, PayloadJSON: `{}`}
+	if err := db.Create(&session).Error; err != nil {
+		t.Fatal(err)
+	}
+	file := model.AlbumImportFile{
+		ImportID: session.ID, FileName: "album.flac", SourceKey: "source/album.flac", PlaybackKey: "playback/album.mp3",
+		UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: "completed", CleanupJSON: "[]",
+	}
+	if err := db.Create(&file).Error; err != nil {
+		t.Fatal(err)
+	}
+	store := &importWorkerStore{}
+	cleaned, err := NewImportWorker(db, store, "worker").CleanupCommitted(context.Background())
+	if err != nil || !cleaned {
+		t.Fatalf("cleanup committed: cleaned=%v err=%v", cleaned, err)
+	}
+	if !containsString(store.deleted, file.SourceKey) || !containsString(store.deleted, file.PlaybackKey) {
+		t.Fatalf("temporary objects were not deleted: %v", store.deleted)
+	}
+	var after model.AlbumImportFile
+	if err := db.First(&after, "id = ?", file.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if after.SourceKey != "" || after.PlaybackKey != "" {
+		t.Fatalf("temporary keys were retained: %#v", after)
+	}
+}
+
 func TestImportWorkerCleanupSkipsSessionCommittedAfterScan(t *testing.T) {
 	db := newImportWorkerTestDB(t)
 	expires := time.Now().UTC().Add(-time.Minute)

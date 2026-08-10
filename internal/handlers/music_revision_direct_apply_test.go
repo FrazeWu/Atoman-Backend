@@ -21,6 +21,7 @@ func TestSemiProtectedMusicRevisionsApplyDirectly(t *testing.T) {
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Artist{},
+		&model.ArtistMember{},
 		&model.Album{},
 		&model.Song{},
 		&model.AlbumArtist{},
@@ -68,9 +69,9 @@ func TestSemiProtectedMusicRevisionsApplyDirectly(t *testing.T) {
 		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: authctx.RoleUser})
 		c.Next()
 	})
-	router.POST("/api/v1/artists/:id/revisions", CreateArtistRevisionHandler(db, revisionService))
-	router.POST("/api/v1/albums/:id/revisions", CreateAlbumRevisionHandler(db, revisionService))
-	router.POST("/api/v1/songs/:id/revisions", CreateSongRevisionHandler(db, revisionService))
+	router.POST("/api/v1/artists/:id/revisions", CreateArtistRevisionHandler(db, revisionService, nil))
+	router.POST("/api/v1/albums/:id/revisions", CreateAlbumRevisionHandler(db, revisionService, nil))
+	router.POST("/api/v1/songs/:id/revisions", CreateSongRevisionHandler(db, revisionService, nil))
 
 	tests := []struct {
 		name        string

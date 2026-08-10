@@ -2,11 +2,13 @@ package music
 
 import (
 	"errors"
+	"path"
 	"strings"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/storage"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -22,13 +24,28 @@ func (s *Service) CreatePlaylist(user authctx.CurrentUser, req CreatePlaylistReq
 	}
 
 	playlist := model.Playlist{
+		Base:        model.Base{ID: uuid.New()},
 		UserID:      user.ID,
 		Name:        name,
 		Description: strings.TrimSpace(req.Description),
 		CoverURL:    strings.TrimSpace(req.CoverURL),
 		IsPublic:    req.IsPublic,
 	}
-	return s.repo.CreatePlaylist(playlist)
+	asset, err := storage.PromoteMusicUploadAsset(
+		s.s3, playlist.CoverURL,
+		storage.BuildMusicPlaylistCoverVersionKey(playlist.ID.String(), uuid.NewString(), path.Ext(playlist.CoverURL)),
+	)
+	if err != nil {
+		return model.Playlist{}, err
+	}
+	playlist.CoverURL = asset.URL
+	created, err := s.repo.CreatePlaylist(playlist)
+	if err != nil {
+		storage.DeleteMusicObjects(s.s3, []string{asset.DestinationKey})
+		return model.Playlist{}, err
+	}
+	storage.DeleteMusicObjects(s.s3, []string{asset.SourceKey})
+	return created, nil
 }
 
 func (s *Service) ListPlaylists(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.Playlist, int64, error) {
@@ -72,6 +89,7 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 	}
 
 	updates := map[string]any{}
+	oldObjectKey, newObjectKey := "", ""
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
 		if name == "" {
@@ -86,7 +104,15 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 		updates["description"] = strings.TrimSpace(*req.Description)
 	}
 	if req.CoverURL != nil {
-		updates["cover_url"] = strings.TrimSpace(*req.CoverURL)
+		asset, err := storage.PromoteMusicUploadAsset(
+			s.s3, strings.TrimSpace(*req.CoverURL),
+			storage.BuildMusicPlaylistCoverVersionKey(playlist.ID.String(), uuid.NewString(), path.Ext(*req.CoverURL)),
+		)
+		if err != nil {
+			return model.Playlist{}, err
+		}
+		updates["cover_url"] = asset.URL
+		oldObjectKey, newObjectKey = asset.SourceKey, asset.DestinationKey
 	}
 	if req.IsPublic != nil {
 		if isSystemPlaylist(playlist) && *req.IsPublic {
@@ -99,8 +125,10 @@ func (s *Service) UpdatePlaylist(user authctx.CurrentUser, playlistID uuid.UUID,
 	}
 
 	if err := s.repo.UpdatePlaylist(&playlist, updates); err != nil {
+		storage.DeleteMusicObjects(s.s3, []string{newObjectKey})
 		return model.Playlist{}, err
 	}
+	storage.DeleteMusicObjects(s.s3, []string{oldObjectKey})
 	return s.repo.GetPlaylistForUser(user.ID, playlistID)
 }
 

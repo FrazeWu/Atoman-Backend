@@ -52,6 +52,7 @@ func Run(db *gorm.DB) error {
 		{"subscription unique index migration", migrations.RunSubscriptionUniqueIndex},
 		{"subscription group unique index migration", migrations.RunSubscriptionGroupUniqueIndex},
 		{"feed item unique index migration", migrations.RunFeedItemUniqueIndex},
+		{"feed recommendation indexes migration", migrations.RunFeedRecommendationIndexes},
 		{"forum draft unique index migration", migrations.RunForumDraftUniqueIndex},
 		{"forum search indexes migration", migrations.RunForumSearchIndexes},
 		{"revision unique indexes migration", migrations.RunRevisionUniqueIndexes},

@@ -3,6 +3,7 @@ package music
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1180,6 +1181,14 @@ func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T)
 	if err := db.Create(&session).Error; err != nil {
 		t.Fatalf("create session: %v", err)
 	}
+	sourceKey := "music/album-imports/source/users/" + user.ID.String() + "/sessions/" + sessionID.String() + "/album.zip"
+	importFile := model.AlbumImportFile{
+		ImportID: sessionID, FileName: "album.zip", SourceKey: sourceKey, PlaybackKey: audioKey,
+		UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: "completed",
+	}
+	if err := db.Create(&importFile).Error; err != nil {
+		t.Fatalf("create import file: %v", err)
+	}
 
 	if _, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		Artist: completeAlbumImportArtistPayload("Burial"),
@@ -1200,22 +1209,33 @@ func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T)
 	if err := db.Where("album_id = ?", album.ID).First(&song).Error; err != nil {
 		t.Fatalf("load song: %v", err)
 	}
-	wantCoverKey := "music/albums/" + album.ID.String() + "/cover.jpg"
-	wantAudioKey := "music/albums/" + album.ID.String() + "/tracks/" + song.ID.String() + ".mp3"
-	if album.CoverURL != "https://cdn.atoman.test/"+wantCoverKey {
+	coverPrefix := "music/albums/" + album.ID.String() + "/covers/"
+	audioPrefix := "music/albums/" + album.ID.String() + "/tracks/" + song.ID.String() + "/"
+	if !strings.HasPrefix(album.CoverURL, "https://cdn.atoman.test/"+coverPrefix) || !strings.HasSuffix(album.CoverURL, ".jpg") {
 		t.Fatalf("unexpected album cover URL: %s", album.CoverURL)
 	}
-	if song.AudioURL != "https://cdn.atoman.test/"+wantAudioKey {
+	if !strings.HasPrefix(song.AudioURL, "https://cdn.atoman.test/"+audioPrefix) || !strings.HasSuffix(song.AudioURL, ".mp3") {
 		t.Fatalf("unexpected song audio URL: %s", song.AudioURL)
 	}
 	if len(copiedSources) != 2 || len(copiedDestinations) != 2 {
 		t.Fatalf("expected 2 copied objects, got sources=%#v destinations=%#v", copiedSources, copiedDestinations)
 	}
-	if !containsString(copiedDestinations, wantCoverKey) || !containsString(copiedDestinations, wantAudioKey) {
+	if !strings.HasPrefix(copiedDestinations[0], coverPrefix) || !strings.HasPrefix(copiedDestinations[1], audioPrefix) {
 		t.Fatalf("unexpected copy destinations: %#v", copiedDestinations)
 	}
-	if !containsString(deletedKeys, coverKey) || !containsString(deletedKeys, audioKey) {
+	didCleanup, err := NewImportWorker(db, NewMusicImportObjectStore(svc.s3), "test-worker").CleanupCommitted(context.Background())
+	if err != nil || !didCleanup {
+		t.Fatalf("cleanup committed import: cleaned=%v err=%v", didCleanup, err)
+	}
+	if !containsString(deletedKeys, coverKey) || !containsString(deletedKeys, audioKey) || !containsString(deletedKeys, sourceKey) {
 		t.Fatalf("expected upload objects deleted, got %#v", deletedKeys)
+	}
+	var cleaned model.AlbumImportFile
+	if err := db.First(&cleaned, "id = ?", importFile.ID).Error; err != nil {
+		t.Fatalf("load cleaned import file: %v", err)
+	}
+	if cleaned.SourceKey != "" || cleaned.PlaybackKey != "" {
+		t.Fatalf("temporary keys were retained: %#v", cleaned)
 	}
 }
 
@@ -1284,6 +1304,13 @@ func TestCommitAlbumImportSessionIsIdempotentAfterCommit(t *testing.T) {
 
 func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
+	var copiedSources []string
+	var copiedDestinations []string
+	var deletedKeys []string
+	svc.s3 = fakeMusicPromotionS3Client(t, &copiedSources, &copiedDestinations, &deletedKeys)
+	t.Setenv("STORAGE_TYPE", "s3")
+	t.Setenv("S3_BUCKET", "atoman-test")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.atoman.test")
 	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})
 	if err != nil {
 		t.Fatalf("create session: %v", err)
@@ -1313,13 +1340,37 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 	if ready.Status != AlbumImportStatusReady || ready.TargetAlbumID == nil || *ready.TargetAlbumID != *committed.TargetAlbumID {
 		t.Fatalf("unexpected repair state: %#v", ready)
 	}
+	var beforeAlbum model.Album
+	if err := db.First(&beforeAlbum, "id = ?", *committed.TargetAlbumID).Error; err != nil {
+		t.Fatalf("load album before repair: %v", err)
+	}
+	var beforeSongs []model.Song
+	if err := db.Where("album_id = ?", beforeAlbum.ID).Order("track_number ASC").Find(&beforeSongs).Error; err != nil {
+		t.Fatalf("load songs before repair: %v", err)
+	}
+	newAudioKey := "music/album-imports/playback/sessions/" + session.ID.String() + "/repair/track.mp3"
+	payload, err := readAlbumImportPayloadMap(ready.PayloadJSON)
+	if err != nil {
+		t.Fatalf("read repair payload: %v", err)
+	}
+	payload["derived_tracks"] = []map[string]any{{
+		"title": "One More Time (Remastered)", "track_number": 1,
+		"audio_url": "https://cdn.atoman.test/" + newAudioKey,
+	}}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal repair payload: %v", err)
+	}
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Update("payload_json", string(payloadJSON)).Error; err != nil {
+		t.Fatalf("update repair payload: %v", err)
+	}
 	var artist model.Artist
 	if err := db.Joins("JOIN album_artists ON album_artists.artist_id = Artists.id").Where("album_artists.album_id = ?", *committed.TargetAlbumID).First(&artist).Error; err != nil {
 		t.Fatalf("load artist: %v", err)
 	}
 	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		Artists: []CommitAlbumImportArtistInput{{ArtistID: artist.ID.String()}},
-		Album: AlbumImportAlbumPayload{Title: "Discovery (Remastered)", Description: "Updated metadata", CoverURL: "https://cdn.test/discovery-remastered.jpg", ReleaseDate: "2001-03-12", Tracks: []AlbumImportTrackPayload{
+		Album: AlbumImportAlbumPayload{Title: "Discovery (Remastered)", Description: "Updated metadata", CoverURL: "https://cdn.atoman.test/music/covers/uploads/users/test/repair.jpg", ReleaseDate: "2001-03-12", Tracks: []AlbumImportTrackPayload{
 			{Title: "One More Time (Remastered)", TrackNumber: 1},
 		}},
 		AlbumSource: "album source",
@@ -1335,6 +1386,9 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 	if album.Title != "Discovery (Remastered)" || album.Description != "Updated metadata" {
 		t.Fatalf("expected original album updated, got %#v", album)
 	}
+	if !strings.Contains(album.CoverURL, "/music/albums/"+album.ID.String()+"/covers/") {
+		t.Fatalf("repair cover was not promoted: %s", album.CoverURL)
+	}
 	var songs []model.Song
 	if err := db.Where("album_id = ?", album.ID).Order("track_number ASC").Find(&songs).Error; err != nil {
 		t.Fatalf("load songs: %v", err)
@@ -1342,12 +1396,25 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 	if len(songs) != 1 || songs[0].Title != "One More Time (Remastered)" {
 		t.Fatalf("expected repaired tracks, got %#v", songs)
 	}
+	if !strings.Contains(songs[0].AudioURL, "/music/albums/"+album.ID.String()+"/tracks/"+songs[0].ID.String()+"/") {
+		t.Fatalf("repair audio was not promoted: %s", songs[0].AudioURL)
+	}
 	var count int64
 	if err := db.Model(&model.Album{}).Count(&count).Error; err != nil {
 		t.Fatalf("count albums: %v", err)
 	}
 	if count != 1 {
 		t.Fatalf("repair created duplicate albums: %d", count)
+	}
+	var revisions []model.Revision
+	if err := db.Where("content_type = ? AND content_id = ?", "album", album.ID).Order("version_number ASC").Find(&revisions).Error; err != nil {
+		t.Fatalf("load album revisions: %v", err)
+	}
+	if len(revisions) != 2 || !strings.Contains(string(revisions[0].ContentSnapshot), beforeAlbum.CoverURL) || !strings.Contains(string(revisions[0].ContentSnapshot), beforeSongs[0].AudioURL) {
+		t.Fatalf("repair did not preserve the original media revision: %#v", revisions)
+	}
+	if !strings.Contains(string(revisions[1].ContentSnapshot), album.CoverURL) || !strings.Contains(string(revisions[1].ContentSnapshot), songs[0].AudioURL) {
+		t.Fatalf("repair revision does not reference promoted media: %#v", revisions[1])
 	}
 }
 

@@ -20,7 +20,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 }
 
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db}
+	return &Service{db: db, hotCache: make(map[int]hotCacheEntry)}
 }
 
 func (h *Handler) HotContent(c *gin.Context) {
@@ -30,6 +30,7 @@ func (h *Handler) HotContent(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	c.Header("Cache-Control", "public, max-age=30, s-maxage=60, stale-while-revalidate=300")
 	httpx.OK(c, http.StatusOK, response)
 }
 

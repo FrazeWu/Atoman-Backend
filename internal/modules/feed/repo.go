@@ -412,6 +412,129 @@ func (r *Repo) ListRecommendationPosts() ([]model.Post, error) {
 	return posts, err
 }
 
+type RecommendationArticlePostRow struct {
+	ID        uuid.UUID
+	UserID    uuid.UUID
+	ChannelID *uuid.UUID
+	ViewCount int
+	CreatedAt time.Time
+	Title     string
+	Summary   string
+}
+
+type RecommendationArticleFeedItemRow struct {
+	ID             uuid.UUID
+	FeedSourceID   uuid.UUID
+	Title          string
+	Summary        string
+	HasSummary     bool
+	HasImage       bool
+	HasFullText    bool
+	EnclosureType  string
+	PublishedAt    time.Time
+	SourceCategory string
+}
+
+func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, limit int) ([]RecommendationArticlePostRow, error) {
+	columns := []string{"id", "user_id", "channel_id", "view_count", "created_at", "'' AS title", "'' AS summary"}
+	if includeText {
+		columns[5] = "title"
+		columns[6] = "summary"
+	}
+
+	var posts []RecommendationArticlePostRow
+	db := r.db.Model(&model.Post{}).
+		Select(columns).
+		Where("status = ?", "published").
+		Where("created_at >= ?", publishedAfter).
+		Order("created_at DESC, id DESC").
+		Limit(limit)
+	db = applyRecommendationTextFilter(db, "title", "summary", keywords)
+	err := db.Scan(&posts).Error
+	return posts, err
+}
+
+func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category string, publishedAfter time.Time, keywords []string, limit int) ([]RecommendationArticleFeedItemRow, error) {
+	columns := []string{
+		"feed_items.id",
+		"feed_items.feed_source_id",
+		"'' AS title",
+		"'' AS summary",
+		"feed_items.enclosure_type",
+		"feed_items.published_at",
+		"COALESCE(feed_items.summary, '') <> '' AS has_summary",
+		"COALESCE(feed_items.image_url, '') <> '' AS has_image",
+		"COALESCE(feed_items.full_text_html, '') <> '' AS has_full_text",
+		"feed_sources.category AS source_category",
+	}
+	if includeText {
+		columns[2] = "feed_items.title"
+		columns[3] = "feed_items.summary"
+	}
+
+	var items []RecommendationArticleFeedItemRow
+	db := r.db.Table("feed_items").
+		Select(columns).
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_sources.hidden = ?", false).
+		Where("feed_items.deleted_at IS NULL").
+		Where("feed_items.published_at >= ?", publishedAfter).
+		Where(recommendationFeedItemCategorySQL()+" = ?", category).
+		Order("feed_items.published_at DESC, feed_items.id DESC")
+	db = applyRecommendationTextFilter(db, "feed_items.title", "feed_items.summary", keywords)
+	db = db.Limit(limit)
+	err := db.Scan(&items).Error
+	return items, err
+}
+
+func applyRecommendationTextFilter(db *gorm.DB, titleColumn string, summaryColumn string, keywords []string) *gorm.DB {
+	if len(keywords) == 0 {
+		return db
+	}
+	clauses := make([]string, 0, len(keywords))
+	args := make([]any, 0, len(keywords)*2)
+	for _, keyword := range keywords {
+		pattern := "%" + strings.ToLower(strings.TrimSpace(keyword)) + "%"
+		clauses = append(clauses, "(LOWER(COALESCE("+titleColumn+", '')) LIKE ? OR LOWER(COALESCE("+summaryColumn+", '')) LIKE ?)")
+		args = append(args, pattern, pattern)
+	}
+	return db.Where(strings.Join(clauses, " OR "), args...)
+}
+
+func recommendationFeedItemCategorySQL() string {
+	return `CASE
+		WHEN LOWER(COALESCE(feed_items.enclosure_type, '')) LIKE 'video/%' THEN 'video'
+		WHEN LOWER(COALESCE(feed_items.enclosure_type, '')) LIKE 'audio/%' THEN 'podcast'
+		WHEN LOWER(COALESCE(feed_sources.category, '')) IN ('blog', 'news', 'social', 'video', 'forum', 'podcast')
+			THEN LOWER(feed_sources.category)
+		ELSE 'blog'
+	END`
+}
+
+func (r *Repo) ListRecommendationPostsByIDs(ids []uuid.UUID) ([]model.Post, error) {
+	if len(ids) == 0 {
+		return []model.Post{}, nil
+	}
+	var posts []model.Post
+	err := r.db.Model(&model.Post{}).
+		Select("id", "title", "summary", "cover_url").
+		Where("id IN ?", ids).
+		Find(&posts).Error
+	return posts, err
+}
+
+func (r *Repo) ListRecommendationFeedItemsByIDs(ids []uuid.UUID) ([]model.FeedItem, error) {
+	if len(ids) == 0 {
+		return []model.FeedItem{}, nil
+	}
+	var items []model.FeedItem
+	err := r.db.Model(&model.FeedItem{}).
+		Select("id", "title", "summary", "image_url").
+		Where("id IN ?", ids).
+		Find(&items).Error
+	return items, err
+}
+
 type RecommendationChannelRow struct {
 	ChannelID             uuid.UUID
 	Slug                  string
@@ -609,12 +732,29 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 		return nil
 	}
 
-	var items []model.FeedItem
-	if err := r.db.
-		Where("feed_source_id IN ?", sourceIDs).
-		Order("published_at DESC").
-		Order("created_at DESC").
-		Find(&items).Error; err != nil {
+	type recentItemRow struct {
+		ID            uuid.UUID
+		FeedSourceID  uuid.UUID
+		Title         string
+		Link          string
+		PublishedAt   time.Time
+		EnclosureType string
+	}
+	var items []recentItemRow
+	if err := r.db.Raw(`
+		SELECT id, feed_source_id, title, link, published_at, enclosure_type
+		FROM (
+			SELECT id, feed_source_id, title, link, published_at, enclosure_type,
+				ROW_NUMBER() OVER (
+					PARTITION BY feed_source_id
+					ORDER BY published_at DESC, created_at DESC
+				) AS row_number
+			FROM feed_items
+			WHERE feed_source_id IN ? AND deleted_at IS NULL
+		) ranked_items
+		WHERE row_number <= 3
+		ORDER BY feed_source_id, published_at DESC
+	`, sourceIDs).Scan(&items).Error; err != nil {
 		return err
 	}
 
@@ -623,10 +763,9 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 		rowIndexBySourceID[row.ID] = i
 	}
 
-	countBySourceID := make(map[uuid.UUID]int, len(rows))
 	for _, item := range items {
 		rowIndex, ok := rowIndexBySourceID[item.FeedSourceID]
-		if !ok || countBySourceID[item.FeedSourceID] >= 3 {
+		if !ok {
 			continue
 		}
 		rows[rowIndex].RecentItems = append(rows[rowIndex].RecentItems, ExploreSourceRecentItem{
@@ -636,7 +775,6 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 			PublishedAt:   item.PublishedAt,
 			EnclosureType: item.EnclosureType,
 		})
-		countBySourceID[item.FeedSourceID]++
 	}
 
 	for i := range rows {

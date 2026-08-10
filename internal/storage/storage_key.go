@@ -34,6 +34,30 @@ func BuildMusicAlbumTrackKey(albumID, songID, ext string) string {
 	return "music/albums/" + strings.Trim(albumID, "/") + "/tracks/" + strings.Trim(songID, "/") + normalizeExtension(ext)
 }
 
+func BuildMusicAlbumCoverVersionKey(albumID, assetID, ext string) string {
+	return "music/albums/" + strings.Trim(albumID, "/") + "/covers/" + strings.Trim(assetID, "/") + normalizeExtension(ext)
+}
+
+func BuildMusicAlbumTrackVersionKey(albumID, songID, assetID, ext string) string {
+	return "music/albums/" + strings.Trim(albumID, "/") + "/tracks/" + strings.Trim(songID, "/") + "/" + strings.Trim(assetID, "/") + normalizeExtension(ext)
+}
+
+func BuildMusicArtistImageVersionKey(artistID, assetID, ext string) string {
+	return "music/artists/" + strings.Trim(artistID, "/") + "/images/" + strings.Trim(assetID, "/") + normalizeExtension(ext)
+}
+
+func BuildMusicPlaylistCoverVersionKey(playlistID, assetID, ext string) string {
+	return "music/playlists/" + strings.Trim(playlistID, "/") + "/covers/" + strings.Trim(assetID, "/") + normalizeExtension(ext)
+}
+
+func BuildMusicSongCoverVersionKey(songID, assetID, ext string) string {
+	return "music/songs/" + strings.Trim(songID, "/") + "/covers/" + strings.Trim(assetID, "/") + normalizeExtension(ext)
+}
+
+func BuildMusicSongAudioVersionKey(songID, assetID, ext string) string {
+	return "music/songs/" + strings.Trim(songID, "/") + "/audio/" + strings.Trim(assetID, "/") + normalizeExtension(ext)
+}
+
 func normalizeExtension(ext string) string {
 	ext = strings.TrimSpace(ext)
 	if ext == "" || strings.HasPrefix(ext, ".") {

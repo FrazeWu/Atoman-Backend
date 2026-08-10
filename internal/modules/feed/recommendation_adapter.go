@@ -16,6 +16,11 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	recommendationArticleCandidateLimit         = 5000
+	recommendationInternalArticleCandidateLimit = 2500
+)
+
 func parseRecommendationMode(raw string) (recommendation.Mode, error) {
 	switch recommendation.Mode(strings.TrimSpace(strings.ToLower(raw))) {
 	case recommendation.ModeHot:
@@ -30,18 +35,31 @@ func parseRecommendationMode(raw string) (recommendation.Mode, error) {
 }
 
 func (s *Service) RecommendArticles(mode recommendation.Mode, category string, theme string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	posts, err := s.repo.ListRecommendationPosts()
-	if err != nil {
-		return nil, 0, err
+	normalizedCategory := normalizeSourceCategory(category)
+	keywords, validTheme := recommendationThemeKeywords(normalizedCategory, theme)
+	if !validTheme {
+		return []RecommendationItemDTO{}, 0, nil
 	}
-	feedItems, err := s.repo.ListExploreFeedItemsAll("recent")
+	includeText := len(keywords) > 0
+	publishedAfter := time.Now().Add(-recommendationArticleCandidateWindow(mode))
+
+	posts := []RecommendationArticlePostRow{}
+	if normalizedCategory == "blog" {
+		var err error
+		posts, err = s.repo.ListRecommendationArticlePosts(includeText, publishedAfter, keywords, recommendationInternalArticleCandidateLimit)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+	feedItemLimit := recommendationArticleCandidateLimit - len(posts)
+	feedItems, err := s.repo.ListRecommendationArticleFeedItems(includeText, normalizedCategory, publishedAfter, keywords, feedItemLimit)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	candidates := make([]recommendation.Candidate, 0, len(posts)+len(feedItems))
-	postByID := make(map[string]model.Post, len(posts))
-	feedItemByID := make(map[string]model.FeedItem, len(feedItems))
+	postByID := make(map[string]RecommendationArticlePostRow, len(posts))
+	feedItemByID := make(map[string]RecommendationArticleFeedItemRow, len(feedItems))
 	for _, post := range posts {
 		candidate := recommendation.Candidate{
 			Module:          "feed",
@@ -87,7 +105,6 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 				Title:       post.Title,
 				Summary:     post.Summary,
 				ContentType: "blog",
-				ImageURL:    post.CoverURL,
 				TargetPath:  "/posts/post/" + post.ID.String(),
 				ScoreLabel:  recommendationScoreLabel(mode, item.FinalScore),
 			})
@@ -102,14 +119,20 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 			Title:       feedItem.Title,
 			Summary:     feedItem.Summary,
 			ContentType: inferFeedItemRecommendationType(feedItem),
-			ImageURL:    feedItem.ImageURL,
 			TargetPath:  "/feed/item/" + feedItem.ID.String(),
 			ScoreLabel:  recommendationScoreLabel(mode, item.FinalScore),
 		})
 	}
 
 	items = filterRecommendationItems(items, category, theme)
-	return paginateRecommendationItems(items, page, pageSize)
+	items, total, err := paginateRecommendationItems(items, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.hydrateRecommendationArticles(items); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }
 
 func (s *Service) RecommendChannels(mode recommendation.Mode, category string, theme string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
@@ -177,52 +200,21 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 			if strings.TrimSpace(row.Slug) == "" {
 				targetPath = "/channels/" + row.ChannelID.String()
 			}
-			recentPosts, err := s.repo.ListRecentPublishedPostsByChannelID(row.ChannelID, 3)
-			if err != nil {
-				return nil, 0, err
-			}
-			recentItems := make([]RecommendationPreviewDTO, 0, len(recentPosts))
-			publishedTimes := make([]time.Time, 0, len(recentPosts))
-			for _, post := range recentPosts {
-				recentItems = append(recentItems, RecommendationPreviewDTO{
-					ID:    post.ID.String(),
-					Title: post.Title,
-				})
-				if !post.CreatedAt.IsZero() {
-					publishedTimes = append(publishedTimes, post.CreatedAt)
-				}
-			}
-			feedSourceID, err := s.findInternalChannelFeedSourceID(row.ChannelID)
-			if err != nil {
-				return nil, 0, err
-			}
-			bookmarkCount, err := s.repo.CountSubscriptionsByFeedSourceID(feedSourceID)
-			if err != nil {
-				return nil, 0, err
-			}
-			readCount, err := s.repo.CountReadEvents("internal_channel", row.ChannelID.String())
-			if err != nil {
-				return nil, 0, err
-			}
 			var lastPublishedAt *time.Time
 			if row.LatestPublishedAtUnix.Valid {
 				value := time.Unix(row.LatestPublishedAtUnix.Int64, 0).UTC()
 				lastPublishedAt = &value
 			}
 			items = append(items, RecommendationItemDTO{
-				ID:                   row.ChannelID.String(),
-				Title:                row.Name,
-				Summary:              row.Description,
-				Description:          strings.TrimSpace(row.Description),
-				ContentType:          "blog",
-				ImageURL:             row.CoverURL,
-				TargetPath:           targetPath,
-				ScoreLabel:           recommendationScoreLabel(mode, item.FinalScore),
-				BookmarkCount:        bookmarkCount,
-				ReadCount:            readCount,
-				UpdateFrequencyLabel: describeUpdateFrequency(publishedTimes),
-				LastPublishedAt:      lastPublishedAt,
-				RecentItems:          recentItems,
+				ID:              row.ChannelID.String(),
+				Title:           row.Name,
+				Summary:         row.Description,
+				Description:     strings.TrimSpace(row.Description),
+				ContentType:     "blog",
+				ImageURL:        row.CoverURL,
+				TargetPath:      targetPath,
+				ScoreLabel:      recommendationScoreLabel(mode, item.FinalScore),
+				LastPublishedAt: lastPublishedAt,
 			})
 			continue
 		}
@@ -230,44 +222,128 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 		if !ok {
 			continue
 		}
-		bookmarkCount, err := s.repo.CountSubscriptionsByFeedSourceID(source.ID)
-		if err != nil {
-			return nil, 0, err
-		}
-		readCount, err := s.repo.CountReadEvents("external_rss", source.ID.String())
-		if err != nil {
-			return nil, 0, err
-		}
-		recentItems := make([]RecommendationPreviewDTO, 0, len(source.RecentItems))
-		publishedTimes := make([]time.Time, 0, len(source.RecentItems))
-		for _, recent := range source.RecentItems {
-			recentItems = append(recentItems, RecommendationPreviewDTO{
-				ID:    recent.ID.String(),
-				Title: recent.Title,
-			})
-			if !recent.PublishedAt.IsZero() {
-				publishedTimes = append(publishedTimes, recent.PublishedAt)
-			}
-		}
 		items = append(items, RecommendationItemDTO{
-			ID:                   source.ID.String(),
-			Title:                source.Title,
-			Summary:              recommendationSourceSummary(source),
-			Description:          recommendationSourceDescription(source),
-			ContentType:          normalizeSourceCategory(source.Category),
-			ImageURL:             "",
-			TargetPath:           "/feed?source_id=" + source.ID.String(),
-			ScoreLabel:           recommendationScoreLabel(mode, item.FinalScore),
-			BookmarkCount:        bookmarkCount,
-			ReadCount:            readCount,
-			UpdateFrequencyLabel: describeUpdateFrequency(publishedTimes),
-			LastPublishedAt:      source.LastPublishedAt,
-			RecentItems:          recentItems,
+			ID:              source.ID.String(),
+			Title:           source.Title,
+			Summary:         recommendationSourceSummary(source),
+			Description:     recommendationSourceDescription(source),
+			ContentType:     normalizeSourceCategory(source.Category),
+			ImageURL:        "",
+			TargetPath:      "/feed?source_id=" + source.ID.String(),
+			ScoreLabel:      recommendationScoreLabel(mode, item.FinalScore),
+			BookmarkCount:   source.SubscriptionCount,
+			LastPublishedAt: source.LastPublishedAt,
 		})
 	}
 
 	items = filterRecommendationItems(items, category, theme)
-	return paginateRecommendationItems(items, page, pageSize)
+	items, total, err := paginateRecommendationItems(items, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.enrichRecommendationChannels(items, rowByID, sourceByID); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) error {
+	postIDs := make([]uuid.UUID, 0, len(items))
+	feedItemIDs := make([]uuid.UUID, 0, len(items))
+	for _, item := range items {
+		id, err := uuid.Parse(item.ID)
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(item.TargetPath, "/posts/post/") {
+			postIDs = append(postIDs, id)
+		} else {
+			feedItemIDs = append(feedItemIDs, id)
+		}
+	}
+
+	posts, err := s.repo.ListRecommendationPostsByIDs(postIDs)
+	if err != nil {
+		return err
+	}
+	feedItems, err := s.repo.ListRecommendationFeedItemsByIDs(feedItemIDs)
+	if err != nil {
+		return err
+	}
+	postByID := make(map[string]model.Post, len(posts))
+	for _, post := range posts {
+		postByID[post.ID.String()] = post
+	}
+	feedItemByID := make(map[string]model.FeedItem, len(feedItems))
+	for _, feedItem := range feedItems {
+		feedItemByID[feedItem.ID.String()] = feedItem
+	}
+
+	for i := range items {
+		if post, ok := postByID[items[i].ID]; ok {
+			items[i].Title = post.Title
+			items[i].Summary = post.Summary
+			items[i].ImageURL = post.CoverURL
+			continue
+		}
+		if feedItem, ok := feedItemByID[items[i].ID]; ok {
+			items[i].Title = feedItem.Title
+			items[i].Summary = feedItem.Summary
+			items[i].ImageURL = feedItem.ImageURL
+		}
+	}
+	return nil
+}
+
+func (s *Service) enrichRecommendationChannels(items []RecommendationItemDTO, rowByID map[string]RecommendationChannelRow, sourceByID map[string]ExploreSourceRow) error {
+	for i := range items {
+		if row, ok := rowByID[items[i].ID]; ok {
+			recentPosts, err := s.repo.ListRecentPublishedPostsByChannelID(row.ChannelID, 3)
+			if err != nil {
+				return err
+			}
+			publishedTimes := make([]time.Time, 0, len(recentPosts))
+			for _, post := range recentPosts {
+				items[i].RecentItems = append(items[i].RecentItems, RecommendationPreviewDTO{ID: post.ID.String(), Title: post.Title})
+				if !post.CreatedAt.IsZero() {
+					publishedTimes = append(publishedTimes, post.CreatedAt)
+				}
+			}
+			feedSourceID, err := s.findInternalChannelFeedSourceID(row.ChannelID)
+			if err != nil {
+				return err
+			}
+			items[i].BookmarkCount, err = s.repo.CountSubscriptionsByFeedSourceID(feedSourceID)
+			if err != nil {
+				return err
+			}
+			items[i].ReadCount, err = s.repo.CountReadEvents("internal_channel", row.ChannelID.String())
+			if err != nil {
+				return err
+			}
+			items[i].UpdateFrequencyLabel = describeUpdateFrequency(publishedTimes)
+			continue
+		}
+
+		source, ok := sourceByID[items[i].ID]
+		if !ok {
+			continue
+		}
+		publishedTimes := make([]time.Time, 0, len(source.RecentItems))
+		for _, recent := range source.RecentItems {
+			items[i].RecentItems = append(items[i].RecentItems, RecommendationPreviewDTO{ID: recent.ID.String(), Title: recent.Title})
+			if !recent.PublishedAt.IsZero() {
+				publishedTimes = append(publishedTimes, recent.PublishedAt)
+			}
+		}
+		readCount, err := s.repo.CountReadEvents("external_rss", source.ID.String())
+		if err != nil {
+			return err
+		}
+		items[i].ReadCount = readCount
+		items[i].UpdateFrequencyLabel = describeUpdateFrequency(publishedTimes)
+	}
+	return nil
 }
 
 func paginateRecommendationItems(items []RecommendationItemDTO, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
@@ -285,77 +361,71 @@ func paginateRecommendationItems(items []RecommendationItemDTO, page int, pageSi
 	return items[start:end], total, nil
 }
 
-func recommendationSourceKeyForPost(post model.Post) string {
+func recommendationSourceKeyForPost(post RecommendationArticlePostRow) string {
 	if post.ChannelID != nil {
 		return post.ChannelID.String()
 	}
 	return post.UserID.String()
 }
 
-func recommendationSourceKeyForFeedItem(item model.FeedItem) string {
-	if item.FeedSourceID.String() != "" {
+func recommendationSourceKeyForFeedItem(item RecommendationArticleFeedItemRow) string {
+	if item.FeedSourceID != uuid.Nil {
 		return item.FeedSourceID.String()
 	}
 	return item.ID.String()
 }
 
-func normalizeArticleQuality(post model.Post) float64 {
+func normalizeArticleQuality(post RecommendationArticlePostRow) float64 {
 	return clamp01(float64(post.ViewCount) / 100)
 }
 
-func normalizeFeedItemQuality(item model.FeedItem) float64 {
+func normalizeFeedItemQuality(item RecommendationArticleFeedItemRow) float64 {
 	score := 0.35
-	if strings.TrimSpace(item.Summary) != "" {
+	if item.HasSummary {
 		score += 0.2
 	}
-	if strings.TrimSpace(item.ImageURL) != "" {
+	if item.HasImage {
 		score += 0.15
 	}
-	if strings.TrimSpace(item.FullTextHTML) != "" {
+	if item.HasFullText {
 		score += 0.2
 	}
 	return clamp01(score)
 }
 
-func normalizeFeedItemTrend(item model.FeedItem) float64 {
+func normalizeFeedItemTrend(item RecommendationArticleFeedItemRow) float64 {
 	if !item.PublishedAt.IsZero() {
 		return normalizePostRecency(item.PublishedAt, 7*24*time.Hour)
 	}
 	return 0.4
 }
 
-func normalizeArticleAuthority(post model.Post) float64 {
+func normalizeArticleAuthority(post RecommendationArticlePostRow) float64 {
 	if post.ChannelID != nil {
 		return 0.6
 	}
 	return 0.4
 }
 
-func normalizeFeedItemAuthority(item model.FeedItem) float64 {
-	if item.FeedSource != nil {
-		switch strings.TrimSpace(strings.ToLower(item.FeedSource.Category)) {
-		case "news":
-			return 0.65
-		case "podcast", "video":
-			return 0.55
-		default:
-			return 0.5
-		}
+func normalizeFeedItemAuthority(item RecommendationArticleFeedItemRow) float64 {
+	switch strings.TrimSpace(strings.ToLower(item.SourceCategory)) {
+	case "news":
+		return 0.65
+	case "podcast", "video":
+		return 0.55
+	default:
+		return 0.5
 	}
-	return 0.45
 }
 
-func inferFeedItemRecommendationType(item model.FeedItem) string {
+func inferFeedItemRecommendationType(item RecommendationArticleFeedItemRow) string {
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(item.EnclosureType)), "video/") {
 		return "video"
 	}
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(item.EnclosureType)), "audio/") {
 		return "podcast"
 	}
-	if item.FeedSource != nil {
-		return normalizeSourceCategory(item.FeedSource.Category)
-	}
-	return "blog"
+	return normalizeSourceCategory(item.SourceCategory)
 }
 
 func normalizeSourceCategory(category string) string {
@@ -548,6 +618,34 @@ func filterRecommendationItems(items []RecommendationItemDTO, category string, t
 		}
 	}
 	return themeFiltered
+}
+
+func recommendationThemeKeywords(category string, theme string) ([]string, bool) {
+	normalized := strings.TrimSpace(strings.ToLower(theme))
+	if normalized == "" || normalized == "all" {
+		return nil, true
+	}
+	definition, ok := findRecommendationTheme(category, normalized)
+	if !ok {
+		return nil, false
+	}
+	for _, keyword := range definition.Keywords {
+		if strings.Contains(strings.ToLower(category), strings.ToLower(keyword)) {
+			return nil, true
+		}
+	}
+	return definition.Keywords, true
+}
+
+func recommendationArticleCandidateWindow(mode recommendation.Mode) time.Duration {
+	switch mode {
+	case recommendation.ModeFeatured:
+		return 180 * 24 * time.Hour
+	case recommendation.ModeDiscover:
+		return 90 * 24 * time.Hour
+	default:
+		return 30 * 24 * time.Hour
+	}
 }
 
 func recommendationItemMatchesTheme(item RecommendationItemDTO, definition recommendationThemeDefinition) bool {

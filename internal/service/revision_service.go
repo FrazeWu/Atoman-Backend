@@ -130,6 +130,38 @@ func (s *RevisionService) EnsureInitialRevision(contentType string, contentID, e
 	return s.createBaselineRevision(s.db, contentType, contentID, editorID)
 }
 
+// CreateCurrentSnapshotRevision records content that was updated inside an
+// existing transaction without applying the snapshot a second time.
+func (s *RevisionService) CreateCurrentSnapshotRevision(contentType string, contentID, editorID uuid.UUID, editSummary string) (*model.Revision, error) {
+	var current model.Revision
+	query := s.db.Where("content_id = ? AND content_type = ? AND is_current = ?", contentID, contentType, true).
+		Order("version_number DESC")
+	if supportsRowLock(s.db) {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	if err := query.First(&current).Error; err != nil {
+		return nil, fmt.Errorf("current revision not found: %w", err)
+	}
+	snapshot, err := s.captureCurrentSnapshot(s.db, contentType, contentID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.db.Model(&model.Revision{}).
+		Where("content_id = ? AND content_type = ? AND is_current = ?", contentID, contentType, true).
+		Update("is_current", false).Error; err != nil {
+		return nil, err
+	}
+	revision := model.Revision{
+		ContentType: contentType, ContentID: contentID, VersionNumber: current.VersionNumber + 1,
+		PreviousRevisionID: &current.ID, ContentSnapshot: snapshot, EditorID: editorID,
+		EditSummary: editSummary, EditType: "edit", Status: "approved", IsCurrent: true, CreatedAt: time.Now(),
+	}
+	if err := s.db.Create(&revision).Error; err != nil {
+		return nil, fmt.Errorf("failed to create revision: %w", err)
+	}
+	return &revision, nil
+}
+
 // CreateRevision creates a new revision with conflict detection
 func (s *RevisionService) CreateRevision(
 	contentType string,
@@ -346,17 +378,35 @@ func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string
 		})
 	case "artist":
 		var artist model.Artist
-		if err := tx.First(&artist, "id = ?", contentID).Error; err != nil {
+		if err := tx.Preload("MemberRelations").First(&artist, "id = ?", contentID).Error; err != nil {
 			return nil, fmt.Errorf("artist not found: %w", err)
 		}
+		members := make([]map[string]interface{}, 0, len(artist.MemberRelations))
+		for _, member := range artist.MemberRelations {
+			item := map[string]interface{}{"artist_id": member.MemberArtistID.String(), "join_date": "", "leave_date": ""}
+			if member.JoinDate != nil {
+				item["join_date"] = partialdate.Format(*member.JoinDate, member.JoinDatePrecision)
+			}
+			if member.LeaveDate != nil {
+				item["leave_date"] = partialdate.Format(*member.LeaveDate, member.LeaveDatePrecision)
+			}
+			members = append(members, item)
+		}
 		snapshot := map[string]interface{}{
-			"name": artist.Name, "legal_name": artist.LegalName, "stage_names_json": artist.StageNamesJSON,
+			"name": artist.Name, "disambiguation": artist.Disambiguation, "legal_name": artist.LegalName, "stage_names_json": artist.StageNamesJSON,
 			"bio": artist.Bio, "image_url": artist.ImageURL, "nationality": artist.Nationality,
 			"birth_place": artist.BirthPlace, "birth_year": artist.BirthYear, "death_year": artist.DeathYear,
 			"birth_date": "", "artist_form": artist.ArtistForm, "entry_status": artist.EntryStatus,
+			"active_start_date": "", "active_end_date": "", "members": members, "sources": artist.Sources,
 		}
 		if artist.BirthDate != nil {
 			snapshot["birth_date"] = partialdate.Format(*artist.BirthDate, artist.BirthDatePrecision)
+		}
+		if !artist.ActiveStartDate.IsZero() {
+			snapshot["active_start_date"] = partialdate.Format(artist.ActiveStartDate, artist.ActiveStartDatePrecision)
+		}
+		if !artist.ActiveEndDate.IsZero() {
+			snapshot["active_end_date"] = partialdate.Format(artist.ActiveEndDate, artist.ActiveEndDatePrecision)
 		}
 		return json.Marshal(snapshot)
 	default:
@@ -433,9 +483,10 @@ func mergeRevisionChanges(contentType string, current []byte, changes map[string
 			return nil, fmt.Errorf("failed to parse current content: %w", err)
 		}
 		allowed := map[string]struct{}{
-			"name": {}, "legal_name": {}, "stage_names_json": {}, "bio": {}, "image_url": {},
+			"name": {}, "disambiguation": {}, "legal_name": {}, "stage_names_json": {}, "bio": {}, "image_url": {},
 			"nationality": {}, "birth_place": {}, "birth_date": {}, "birth_year": {},
-			"death_year": {}, "artist_form": {},
+			"death_year": {}, "artist_form": {}, "active_start_date": {}, "active_end_date": {},
+			"members": {}, "sources": {},
 		}
 		for key, value := range changes {
 			if _, ok := allowed[key]; !ok {
@@ -971,9 +1022,15 @@ func (s *RevisionService) applyRevisionToContent(tx *gorm.DB, revision *model.Re
 	}
 }
 
+type artistRevisionMember struct {
+	ArtistID  string `json:"artist_id"`
+	JoinDate  string `json:"join_date"`
+	LeaveDate string `json:"leave_date"`
+}
+
 func applyArtistRevisionSnapshot(tx *gorm.DB, artistID uuid.UUID, content map[string]interface{}) error {
 	allowed := map[string]struct{}{
-		"name": {}, "legal_name": {}, "stage_names_json": {}, "bio": {}, "image_url": {},
+		"name": {}, "disambiguation": {}, "legal_name": {}, "stage_names_json": {}, "bio": {}, "image_url": {},
 		"nationality": {}, "birth_place": {}, "birth_year": {}, "death_year": {},
 		"artist_form": {}, "entry_status": {},
 	}
@@ -997,12 +1054,75 @@ func applyArtistRevisionSnapshot(tx *gorm.DB, artistID uuid.UUID, content map[st
 			updates["birth_year"] = parsed.Year()
 		}
 	}
+	for _, field := range []string{"active_start_date", "active_end_date"} {
+		value, ok := content[field].(string)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(value) == "" {
+			updates[field] = nil
+			updates[field+"_precision"] = ""
+			continue
+		}
+		parsed, precision, err := partialdate.Parse(value)
+		if err != nil {
+			return fmt.Errorf("failed to parse artist %s: %w", field, err)
+		}
+		updates[field] = parsed
+		updates[field+"_precision"] = precision
+	}
+	if sources, ok := content["sources"]; ok {
+		raw, err := json.Marshal(sources)
+		if err != nil {
+			return fmt.Errorf("failed to encode artist sources: %w", err)
+		}
+		updates["sources_json"] = string(raw)
+	}
 	result := tx.Model(&model.Artist{}).Where("id = ?", artistID).Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
 	if result.RowsAffected == 0 {
 		return errors.New("artist not found")
+	}
+	if members, ok := content["members"]; ok {
+		raw, err := json.Marshal(members)
+		if err != nil {
+			return fmt.Errorf("failed to encode artist members: %w", err)
+		}
+		var payload []artistRevisionMember
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return fmt.Errorf("failed to parse artist members: %w", err)
+		}
+		if err := tx.Where("group_artist_id = ?", artistID).Delete(&model.ArtistMember{}).Error; err != nil {
+			return err
+		}
+		for _, member := range payload {
+			memberID, err := uuid.Parse(strings.TrimSpace(member.ArtistID))
+			if err != nil {
+				return fmt.Errorf("invalid artist member id: %w", err)
+			}
+			relation := model.ArtistMember{GroupArtistID: artistID, MemberArtistID: memberID}
+			if strings.TrimSpace(member.JoinDate) != "" {
+				parsed, precision, err := partialdate.Parse(member.JoinDate)
+				if err != nil {
+					return fmt.Errorf("failed to parse member join date: %w", err)
+				}
+				relation.JoinDate = parsed
+				relation.JoinDatePrecision = precision
+			}
+			if strings.TrimSpace(member.LeaveDate) != "" {
+				parsed, precision, err := partialdate.Parse(member.LeaveDate)
+				if err != nil {
+					return fmt.Errorf("failed to parse member leave date: %w", err)
+				}
+				relation.LeaveDate = parsed
+				relation.LeaveDatePrecision = precision
+			}
+			if err := tx.Create(&relation).Error; err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

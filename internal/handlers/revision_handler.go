@@ -1,8 +1,11 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
+	"path"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -12,10 +15,13 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/service"
+	"atoman/internal/storage"
+
+	"github.com/aws/aws-sdk-go/service/s3"
 )
 
 // SetupRevisionRoutes registers revision-related routes
-func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB) {
+func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	revisionService := service.NewRevisionService(db)
 
 	// Album revisions
@@ -25,7 +31,7 @@ func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB) {
 		albums.GET("/revisions", GetAlbumRevisionsHandler(revisionService))
 		albums.GET("/revisions/:version", GetAlbumRevisionHandler(revisionService))
 		albums.GET("/revisions/diff", GetAlbumRevisionDiffHandler(revisionService))
-		albums.POST("/revisions", middleware.AuthMiddleware(), CreateAlbumRevisionHandler(db, revisionService))
+		albums.POST("/revisions", middleware.AuthMiddleware(), CreateAlbumRevisionHandler(db, revisionService, s3Client))
 		albums.POST("/revisions/:version/revert", middleware.AuthMiddleware(), RevertAlbumHandler(revisionService))
 	}
 
@@ -35,7 +41,7 @@ func SetupRevisionRoutes(router *gin.Engine, db *gorm.DB) {
 		songs.GET("/revisions", GetSongRevisionsHandler(revisionService))
 		songs.GET("/revisions/:version", GetSongRevisionHandler(revisionService))
 		songs.GET("/revisions/diff", GetSongRevisionDiffHandler(revisionService))
-		songs.POST("/revisions", middleware.AuthMiddleware(), CreateSongRevisionHandler(db, revisionService))
+		songs.POST("/revisions", middleware.AuthMiddleware(), CreateSongRevisionHandler(db, revisionService, s3Client))
 		songs.POST("/revisions/:version/revert", middleware.AuthMiddleware(), RevertSongHandler(revisionService))
 	}
 
@@ -214,7 +220,7 @@ func GetAlbumRevisionDiffHandler(revisionService *service.RevisionService) gin.H
 // @Security CookieAuth
 // @Router /api/v1/albums/{id}/revisions [post]
 // CreateAlbumRevisionHandler creates a new album revision
-func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionService) gin.HandlerFunc {
+func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionService, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		albumID, err := uuid.Parse(c.Param("id"))
 		if err != nil {
@@ -247,6 +253,12 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 			c.JSON(http.StatusForbidden, gin.H{"error": "This album is fully protected. Only admins can edit."})
 			return
 		}
+		oldObjectKeys, newObjectKeys, err := promoteAlbumRevisionAssets(s3Client, albumID, input.Changes)
+		if err != nil {
+			storage.DeleteMusicObjects(s3Client, newObjectKeys)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 
 		// Create revision
 		revision, conflicts, err := revisionService.CreateRevision(
@@ -260,18 +272,21 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 		)
 
 		if err != nil {
+			storage.DeleteMusicObjects(s3Client, newObjectKeys)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
 		// If conflicts exist, return them
 		if len(conflicts) > 0 {
+			storage.DeleteMusicObjects(s3Client, newObjectKeys)
 			c.JSON(http.StatusConflict, gin.H{
 				"error":     "Edit conflicts detected",
 				"conflicts": conflicts,
 			})
 			return
 		}
+		storage.DeleteMusicObjects(s3Client, oldObjectKeys)
 
 		c.JSON(http.StatusOK, gin.H{
 			"data":    revision,
@@ -459,7 +474,7 @@ func GetSongRevisionDiffHandler(revisionService *service.RevisionService) gin.Ha
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/songs/{id}/revisions [post]
-func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionService) gin.HandlerFunc {
+func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionService, s3Client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		songID, err := uuid.Parse(c.Param("id"))
 		if err != nil {
@@ -485,6 +500,12 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 				return
 			}
 		}
+		oldObjectKeys, newObjectKeys, err := promoteSongRevisionAssets(db, s3Client, songID, input.Changes)
+		if err != nil {
+			storage.DeleteMusicObjects(s3Client, newObjectKeys)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 
 		revision, conflicts, err := revisionService.CreateRevision(
 			"song",
@@ -497,23 +518,116 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 		)
 
 		if err != nil {
+			storage.DeleteMusicObjects(s3Client, newObjectKeys)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
 		if len(conflicts) > 0 {
+			storage.DeleteMusicObjects(s3Client, newObjectKeys)
 			c.JSON(http.StatusConflict, gin.H{
 				"error":     "Edit conflicts detected",
 				"conflicts": conflicts,
 			})
 			return
 		}
+		storage.DeleteMusicObjects(s3Client, oldObjectKeys)
 
 		c.JSON(http.StatusOK, gin.H{
 			"data":    revision,
 			"message": "Changes saved",
 		})
 	}
+}
+
+func promoteAlbumRevisionAssets(s3Client *s3.S3, albumID uuid.UUID, changes map[string]interface{}) ([]string, []string, error) {
+	oldKeys := []string{}
+	newKeys := []string{}
+	promote := func(rawURL, destinationKey string) (string, error) {
+		asset, err := storage.PromoteMusicUploadAsset(s3Client, rawURL, destinationKey)
+		if err != nil {
+			return "", err
+		}
+		oldKeys = append(oldKeys, asset.SourceKey)
+		newKeys = append(newKeys, asset.DestinationKey)
+		return asset.URL, nil
+	}
+
+	if coverURL, ok := changes["cover_url"].(string); ok && strings.TrimSpace(coverURL) != "" {
+		promotedURL, err := promote(coverURL, storage.BuildMusicAlbumCoverVersionKey(albumID.String(), uuid.NewString(), path.Ext(coverURL)))
+		if err != nil {
+			return oldKeys, newKeys, err
+		}
+		changes["cover_url"] = promotedURL
+	}
+	rawTracks, ok := changes["tracks"]
+	if !ok {
+		return oldKeys, newKeys, nil
+	}
+	encoded, err := json.Marshal(rawTracks)
+	if err != nil {
+		return oldKeys, newKeys, err
+	}
+	var tracks []map[string]interface{}
+	if err := json.Unmarshal(encoded, &tracks); err != nil {
+		return oldKeys, newKeys, err
+	}
+	for _, track := range tracks {
+		if removed, _ := track["removed"].(bool); removed {
+			continue
+		}
+		songID, _ := track["id"].(string)
+		if strings.TrimSpace(songID) == "" {
+			songID = uuid.NewString()
+			track["id"] = songID
+		}
+		for _, media := range []struct {
+			field string
+			key   func(string) string
+		}{
+			{field: "audio_url", key: func(rawURL string) string {
+				return storage.BuildMusicAlbumTrackVersionKey(albumID.String(), songID, uuid.NewString(), path.Ext(rawURL))
+			}},
+			{field: "cover_url", key: func(rawURL string) string {
+				return storage.BuildMusicAlbumCoverVersionKey(albumID.String(), uuid.NewString(), path.Ext(rawURL))
+			}},
+		} {
+			rawURL, _ := track[media.field].(string)
+			if strings.TrimSpace(rawURL) == "" {
+				continue
+			}
+			promotedURL, err := promote(rawURL, media.key(rawURL))
+			if err != nil {
+				return oldKeys, newKeys, err
+			}
+			track[media.field] = promotedURL
+		}
+	}
+	changes["tracks"] = tracks
+	return oldKeys, newKeys, nil
+}
+
+func promoteSongRevisionAssets(db *gorm.DB, s3Client *s3.S3, songID uuid.UUID, changes map[string]interface{}) ([]string, []string, error) {
+	coverURL, ok := changes["cover_url"].(string)
+	if !ok || strings.TrimSpace(coverURL) == "" {
+		return nil, nil, nil
+	}
+	var song model.Song
+	if err := db.Select("id", "album_id").First(&song, "id = ?", songID).Error; err != nil {
+		return nil, nil, err
+	}
+	destinationKey := storage.BuildMusicSongCoverVersionKey(song.ID.String(), uuid.NewString(), path.Ext(coverURL))
+	if song.AlbumID != nil {
+		destinationKey = storage.BuildMusicAlbumCoverVersionKey(song.AlbumID.String(), uuid.NewString(), path.Ext(coverURL))
+	}
+	asset, err := storage.PromoteMusicUploadAsset(
+		s3Client, coverURL, destinationKey,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	changes["cover_url"] = asset.URL
+	return []string{asset.SourceKey}, []string{asset.DestinationKey}, nil
 }
 
 // RevertSongHandler godoc

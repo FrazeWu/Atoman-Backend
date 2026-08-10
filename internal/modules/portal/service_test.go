@@ -1,6 +1,7 @@
 package portal
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -8,7 +9,35 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
+
+func TestHotContentCachesRepeatedRequests(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Post{})
+
+	var queries atomic.Int64
+	if err := db.Callback().Query().Before("gorm:query").Register("portal:count_queries", func(*gorm.DB) {
+		queries.Add(1)
+	}); err != nil {
+		t.Fatalf("register query callback: %v", err)
+	}
+
+	service := NewService(db)
+	if _, err := service.HotContent(4); err != nil {
+		t.Fatalf("first HotContent call returned error: %v", err)
+	}
+	firstQueryCount := queries.Load()
+	if firstQueryCount == 0 {
+		t.Fatal("expected first HotContent call to query the database")
+	}
+	if _, err := service.HotContent(4); err != nil {
+		t.Fatalf("second HotContent call returned error: %v", err)
+	}
+	if queries.Load() != firstQueryCount {
+		t.Fatalf("expected cached response without new queries, got %d additional queries", queries.Load()-firstQueryCount)
+	}
+}
 
 func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 	db := testdb.Open(t)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"atoman/internal/model"
@@ -12,12 +13,27 @@ import (
 )
 
 type Service struct {
-	db *gorm.DB
+	db       *gorm.DB
+	cacheMu  sync.Mutex
+	hotCache map[int]hotCacheEntry
+}
+
+const hotCacheTTL = time.Minute
+
+type hotCacheEntry struct {
+	response  HotResponse
+	expiresAt time.Time
 }
 
 func (s *Service) HotContent(limit int) (HotResponse, error) {
 	if limit < 1 {
 		limit = 6
+	}
+
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if cached, ok := s.hotCache[limit]; ok && time.Now().Before(cached.expiresAt) {
+		return cached.response, nil
 	}
 
 	sections := make([]HotSection, 0, 8)
@@ -34,8 +50,23 @@ func (s *Service) HotContent(limit int) (HotResponse, error) {
 		s.hotTimelineEvents,
 	}
 
-	for _, load := range loaders {
-		items, err := load(limit)
+	type loadResult struct {
+		items []HotItem
+		err   error
+	}
+	results := make([]loadResult, len(loaders))
+	var wg sync.WaitGroup
+	for index, load := range loaders {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[index].items, results[index].err = load(limit)
+		}()
+	}
+	wg.Wait()
+
+	for _, result := range results {
+		items, err := result.items, result.err
 		if err != nil {
 			if isMissingTableError(err) {
 				continue
@@ -58,7 +89,9 @@ func (s *Service) HotContent(limit int) (HotResponse, error) {
 		all = all[:4]
 	}
 
-	return HotResponse{Featured: all, Sections: sections}, nil
+	response := HotResponse{Featured: all, Sections: sections}
+	s.hotCache[limit] = hotCacheEntry{response: response, expiresAt: time.Now().Add(hotCacheTTL)}
+	return response, nil
 }
 
 type blogHotRow struct {

@@ -39,8 +39,8 @@ func TestMusicEntityUpdatesOnlyExposeRevisionRoutes(t *testing.T) {
 	db := testdb.Open(t)
 	r := gin.New()
 	SetupAlbumRoutes(r, db, nil)
-	SetupArtistWikiRoutes(r, db)
-	SetupRevisionRoutes(r, db)
+	SetupArtistWikiRoutes(r, db, nil)
+	SetupRevisionRoutes(r, db, nil)
 
 	routes := make(map[string]bool)
 	for _, route := range r.Routes() {

@@ -96,6 +96,21 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				Roles:    resolved.Roles,
 				Position: index + 1,
 			})
+			asset, err := storage.PromoteMusicUploadAsset(
+				s.s3, resolved.Artist.ImageURL,
+				storage.BuildMusicArtistImageVersionKey(resolved.Artist.ID.String(), uuid.NewString(), path.Ext(resolved.Artist.ImageURL)),
+			)
+			if err != nil {
+				return err
+			}
+			if asset.DestinationKey != "" {
+				resolved.Artist.ImageURL = asset.URL
+				oldObjectKeys = append(oldObjectKeys, asset.SourceKey)
+				newObjectKeys = append(newObjectKeys, asset.DestinationKey)
+				if err := tx.Model(resolved.Artist).Update("image_url", asset.URL).Error; err != nil {
+					return err
+				}
+			}
 		}
 
 		var sessionPayload map[string]any
@@ -146,12 +161,16 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}
 		}
 		isRepair := session.TargetAlbumID != nil
+		revisions := revisionservice.NewRevisionService(tx)
 		if isRepair {
 			var existing model.Album
 			if err := tx.First(&existing, "id = ?", *session.TargetAlbumID).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return apperr.NotFound("music.album_not_found", "Target album not found")
 				}
+				return err
+			}
+			if _, err := revisions.EnsureInitialRevision("album", existing.ID, user.ID); err != nil {
 				return err
 			}
 			existing.Title = album.Title
@@ -174,25 +193,25 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				return err
 			}
 			session.TargetAlbumID = &album.ID
-			promotedCoverURL, oldCoverKey, newCoverKey, err := s.promoteAlbumImportAsset(
-				album.CoverURL,
-				storage.BuildMusicAlbumCoverKey(album.ID.String(), path.Ext(album.CoverURL)),
-				id,
-			)
-			if err != nil {
+		}
+		promotedCoverURL, oldCoverKey, newCoverKey, err := s.promoteAlbumImportAsset(
+			album.CoverURL,
+			storage.BuildMusicAlbumCoverVersionKey(album.ID.String(), uuid.NewString(), path.Ext(album.CoverURL)),
+			id,
+		)
+		if err != nil {
+			return err
+		}
+		if newCoverKey != "" {
+			album.CoverURL = promotedCoverURL
+			album.CoverSource = "s3"
+			oldObjectKeys = append(oldObjectKeys, oldCoverKey)
+			newObjectKeys = append(newObjectKeys, newCoverKey)
+			if err := tx.Model(&album).Updates(map[string]any{
+				"cover_url":    album.CoverURL,
+				"cover_source": album.CoverSource,
+			}).Error; err != nil {
 				return err
-			}
-			if newCoverKey != "" {
-				album.CoverURL = promotedCoverURL
-				album.CoverSource = "s3"
-				oldObjectKeys = append(oldObjectKeys, oldCoverKey)
-				newObjectKeys = append(newObjectKeys, newCoverKey)
-				if err := tx.Model(&album).Updates(map[string]any{
-					"cover_url":    album.CoverURL,
-					"cover_source": album.CoverSource,
-				}).Error; err != nil {
-					return err
-				}
 			}
 		}
 		if err := replaceAlbumArtistCredits(tx, album.ID, credits, true); err != nil {
@@ -254,6 +273,22 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				song.TrackNumber = track.TrackNumber
 				song.ReleaseDate = album.ReleaseDate
 				song.ReleaseDatePrecision = album.ReleaseDatePrecision
+				if strings.TrimSpace(audioURL) != "" && audioURL != song.AudioURL {
+					promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteAlbumImportAsset(
+						audioURL,
+						storage.BuildMusicAlbumTrackVersionKey(album.ID.String(), song.ID.String(), uuid.NewString(), path.Ext(audioURL)),
+						id,
+					)
+					if err != nil {
+						return err
+					}
+					if newAudioKey != "" {
+						song.AudioURL = promotedAudioURL
+						song.AudioSource = "s3"
+						oldObjectKeys = append(oldObjectKeys, oldAudioKey)
+						newObjectKeys = append(newObjectKeys, newAudioKey)
+					}
+				}
 				applySongAudioMetadata(&song, metadata)
 				if err := tx.Save(&song).Error; err != nil {
 					return err
@@ -284,7 +319,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}
 			promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteAlbumImportAsset(
 				song.AudioURL,
-				storage.BuildMusicAlbumTrackKey(album.ID.String(), song.ID.String(), path.Ext(song.AudioURL)),
+				storage.BuildMusicAlbumTrackVersionKey(album.ID.String(), song.ID.String(), uuid.NewString(), path.Ext(song.AudioURL)),
 				id,
 			)
 			if err != nil {
@@ -314,7 +349,6 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			}
 		}
 
-		revisions := revisionservice.NewRevisionService(tx)
 		for _, resolved := range resolvedArtists {
 			if _, err := revisions.EnsureInitialRevision("artist", resolved.Artist.ID, user.ID); err != nil {
 				return err
@@ -329,6 +363,11 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 		for _, song := range albumSongs {
 			if _, err := revisions.EnsureInitialRevision("song", song.ID, user.ID); err != nil {
+				return err
+			}
+		}
+		if isRepair {
+			if _, err := revisions.CreateCurrentSnapshotRevision("album", album.ID, user.ID, "修复专辑资料"); err != nil {
 				return err
 			}
 		}
