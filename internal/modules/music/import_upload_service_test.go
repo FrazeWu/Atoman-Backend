@@ -360,6 +360,62 @@ func TestAlbumImportFileMultipartSupportsResumeAndCompletion(t *testing.T) {
 	}
 }
 
+func TestCompleteLastAlbumImportFileQueuesEarlySubmission(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err := svc.RegisterAlbumImportFiles(user, session.ID, RegisterAlbumImportFilesInput{Files: []AlbumImportFileInput{
+		albumImportFileInput("01.flac", 1024),
+		albumImportFileInput("02.flac", 1024),
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artist: AlbumImportArtistPayload{Name: "Early Artist"},
+		Album:  AlbumImportAlbumPayload{Title: "Early Album"},
+	}); err != nil {
+		t.Fatalf("submit import before upload completion: %v", err)
+	}
+
+	for index, file := range registered.Files {
+		if _, err := svc.CompleteAlbumImportFilePart(user, session.ID, file.ID, 1, CompleteAlbumImportMultipartPartInput{ETag: fmt.Sprintf("etag-%d", index), Size: file.Size}); err != nil {
+			t.Fatalf("complete file part %d: %v", index, err)
+		}
+		if _, err := svc.CompleteAlbumImportFile(user, session.ID, file.ID); err != nil {
+			t.Fatalf("complete file %d: %v", index, err)
+		}
+		var persisted model.AlbumImportSession
+		if err := db.First(&persisted, "id = ?", session.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if index == 0 && persisted.Status != AlbumImportStatusUploading {
+			t.Fatalf("import queued before all uploads completed: %s", persisted.Status)
+		}
+	}
+
+	var persisted model.AlbumImportSession
+	if err := db.First(&persisted, "id = ?", session.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != AlbumImportStatusQueued || persisted.Stage != AlbumImportStageQueued {
+		t.Fatalf("early submission was not queued after final upload: %#v", persisted)
+	}
+	if _, err := svc.CompleteAlbumImportSession(user, session.ID); err != nil {
+		t.Fatalf("queued completion should be idempotent: %v", err)
+	}
+	var jobs int64
+	if err := db.Model(&model.AlbumImportJob{}).Where("import_id = ?", session.ID).Count(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if jobs != 1 {
+		t.Fatalf("expected one import job, got %d", jobs)
+	}
+}
+
 func TestCompleteAlbumImportSessionRequiresUploadedArchiveOrAudio(t *testing.T) {
 	tests := []struct {
 		name      string

@@ -163,6 +163,9 @@ func (s *Service) CompleteAlbumImportFile(user authctx.CurrentUser, sessionID, f
 		if err := refreshAlbumImportUploadProgress(tx, &session); err != nil {
 			return err
 		}
+		if err := queueSubmittedAlbumImportWhenUploadsComplete(tx, &session); err != nil {
+			return err
+		}
 		upload = file
 		return nil
 	})

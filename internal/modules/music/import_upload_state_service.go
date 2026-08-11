@@ -164,6 +164,30 @@ func refreshAlbumImportFileSet(tx *gorm.DB, session *model.AlbumImportSession) e
 	return refreshAlbumImportUploadProgress(tx, session)
 }
 
+func queueSubmittedAlbumImportWhenUploadsComplete(tx *gorm.DB, session *model.AlbumImportSession) error {
+	if session.Status != AlbumImportStatusUploading {
+		return nil
+	}
+	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
+	if err != nil {
+		return err
+	}
+	if _, submitted := payload["commit_request"]; !submitted {
+		return nil
+	}
+	var total, incomplete int64
+	if err := tx.Model(&model.AlbumImportFile{}).Where("import_id = ?", session.ID).Count(&total).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&model.AlbumImportFile{}).Where("import_id = ? AND upload_status <> ?", session.ID, AlbumImportFileUploadStatusUploaded).Count(&incomplete).Error; err != nil {
+		return err
+	}
+	if total == 0 || incomplete > 0 {
+		return nil
+	}
+	return queueAlbumImportSession(tx, session, true)
+}
+
 func queueAlbumImportSession(tx *gorm.DB, session *model.AlbumImportSession, resetJob bool) error {
 	payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
 	if err != nil {
