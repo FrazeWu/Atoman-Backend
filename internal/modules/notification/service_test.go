@@ -12,7 +12,7 @@ import (
 
 func TestServiceListNotificationsPrefersTypeOverCategory(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Notification{})
+	testdb.Migrate(t, db, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{})
 	userID := uuid.New()
 	if err := db.Create(&[]model.Notification{
 		{RecipientID: userID, Type: "comment_like", SourceType: "test", SourceID: uuid.New()},

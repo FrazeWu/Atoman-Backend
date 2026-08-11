@@ -23,6 +23,94 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/notifications/unread-counts", h.getUnreadCounts)
 	group.PUT("/notifications/:id/read", h.markRead)
 	group.PUT("/notifications/read-all", h.markAllRead)
+	group.GET("/notifications/preferences", h.listPreferences)
+	group.PUT("/notifications/preferences", h.savePreferences)
+	group.POST("/notifications/mutes", h.createMute)
+}
+
+// listPreferences godoc
+// @Summary 获取通知偏好
+// @Tags notifications
+// @Produce json
+// @Success 200 {array} model.NotificationPreference
+// @Failure 401 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/notifications/preferences [get]
+func (h *Handler) listPreferences(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	items, err := h.service.ListPreferences(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, items)
+}
+
+// savePreferences godoc
+// @Summary 保存通知偏好
+// @Tags notifications
+// @Accept json
+// @Produce json
+// @Param payload body SavePreferencesInput true "通知偏好"
+// @Success 200 {array} model.NotificationPreference
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/notifications/preferences [put]
+func (h *Handler) savePreferences(c *gin.Context) {
+	var input SavePreferencesInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Notification preferences are invalid"))
+		return
+	}
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	items, err := h.service.SavePreferences(user, input)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, items)
+}
+
+// createMute godoc
+// @Summary 静音通知来源
+// @Tags notifications
+// @Accept json
+// @Produce json
+// @Param payload body CreateMuteInput true "通知来源"
+// @Success 201 {object} model.NotificationMute
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/notifications/mutes [post]
+func (h *Handler) createMute(c *gin.Context) {
+	var input CreateMuteInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Notification source is invalid"))
+		return
+	}
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	mute, err := h.service.CreateMute(user, input)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, mute)
 }
 
 // getUnreadCounts godoc

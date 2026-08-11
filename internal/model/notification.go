@@ -63,3 +63,23 @@ type Notification struct {
 func (Notification) TableName() string {
 	return "notifications"
 }
+
+type NotificationPreference struct {
+	Base
+	UserID    uuid.UUID `json:"-" gorm:"type:uuid;not null;uniqueIndex:idx_notification_preference_scope,priority:1"`
+	Category  string    `json:"category" gorm:"type:varchar(24);not null"`
+	EventType string    `json:"event_type" gorm:"type:varchar(64);not null;uniqueIndex:idx_notification_preference_scope,priority:2"`
+	Enabled   bool      `json:"enabled" gorm:"not null"`
+}
+
+func (NotificationPreference) TableName() string { return "notification_preferences" }
+
+type NotificationMute struct {
+	Base
+	UserID     uuid.UUID `json:"-" gorm:"type:uuid;not null;uniqueIndex:idx_notification_mute_scope,priority:1"`
+	SourceType string    `json:"source_type" gorm:"type:varchar(64);not null;uniqueIndex:idx_notification_mute_scope,priority:2"`
+	SourceID   uuid.UUID `json:"source_id" gorm:"type:uuid;not null;uniqueIndex:idx_notification_mute_scope,priority:3"`
+	Reason     string    `json:"reason" gorm:"type:varchar(255);not null;default:''"`
+}
+
+func (NotificationMute) TableName() string { return "notification_mutes" }

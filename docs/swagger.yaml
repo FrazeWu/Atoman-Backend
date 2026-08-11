@@ -3921,6 +3921,36 @@ definitions:
   model.NotificationMeta:
     additionalProperties: true
     type: object
+  model.NotificationMute:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      reason:
+        type: string
+      source_id:
+        type: string
+      source_type:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  model.NotificationPreference:
+    properties:
+      category:
+        type: string
+      created_at:
+        type: string
+      enabled:
+        type: boolean
+      event_type:
+        type: string
+      id:
+        type: string
+      updated_at:
+        type: string
+    type: object
   model.PersonLocation:
     properties:
       created_at:
@@ -5645,6 +5675,18 @@ definitions:
       username:
         type: string
     type: object
+  notification.CreateMuteInput:
+    properties:
+      reason:
+        type: string
+      source_id:
+        type: string
+      source_type:
+        type: string
+    required:
+    - source_id
+    - source_type
+    type: object
   notification.NotificationDTO:
     properties:
       actor:
@@ -5665,6 +5707,28 @@ definitions:
         type: string
       type:
         type: string
+    type: object
+  notification.PreferenceInput:
+    properties:
+      category:
+        type: string
+      enabled:
+        type: boolean
+      event_type:
+        type: string
+    required:
+    - category
+    - event_type
+    type: object
+  notification.SavePreferencesInput:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/notification.PreferenceInput'
+        minItems: 1
+        type: array
+    required:
+    - items
     type: object
   notification.UnreadCountsDTO:
     properties:
@@ -14809,6 +14873,92 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 获取通知列表
+      tags:
+      - notifications
+  /api/v1/notifications/mutes:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 通知来源
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/notification.CreateMuteInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/model.NotificationMute'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 静音通知来源
+      tags:
+      - notifications
+  /api/v1/notifications/preferences:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.NotificationPreference'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取通知偏好
+      tags:
+      - notifications
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 通知偏好
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/notification.SavePreferencesInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.NotificationPreference'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 保存通知偏好
       tags:
       - notifications
   /api/v1/notifications/read-all:

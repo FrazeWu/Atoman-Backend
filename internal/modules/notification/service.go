@@ -131,6 +131,57 @@ func (s *Service) MarkAllRead(user authctx.CurrentUser, query ListQuery) error {
 	return s.repo.MarkAllRead(user.ID, normalizeListQuery(query), time.Now())
 }
 
+func (s *Service) SavePreferences(user authctx.CurrentUser, input SavePreferencesInput) ([]model.NotificationPreference, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	items := make([]model.NotificationPreference, 0, len(input.Items))
+	for _, item := range input.Items {
+		category := strings.TrimSpace(item.Category)
+		eventType := strings.TrimSpace(item.EventType)
+		if !validNotificationCategory(category) || eventType == "" {
+			return nil, apperr.BadRequest("notification.invalid_preference", "Notification preference is invalid")
+		}
+		items = append(items, model.NotificationPreference{Category: category, EventType: eventType, Enabled: item.Enabled})
+	}
+	if err := s.repo.SavePreferences(user.ID, items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *Service) ListPreferences(user authctx.CurrentUser) ([]model.NotificationPreference, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	return s.repo.ListPreferences(user.ID)
+}
+
+func (s *Service) CreateMute(user authctx.CurrentUser, input CreateMuteInput) (model.NotificationMute, error) {
+	if user.ID == uuid.Nil {
+		return model.NotificationMute{}, apperr.Unauthorized("Login required")
+	}
+	input.SourceType = strings.TrimSpace(input.SourceType)
+	input.Reason = strings.TrimSpace(input.Reason)
+	if input.SourceType == "" || input.SourceID == uuid.Nil {
+		return model.NotificationMute{}, apperr.BadRequest("notification.invalid_mute", "Notification source is invalid")
+	}
+	mute := model.NotificationMute{UserID: user.ID, SourceType: input.SourceType, SourceID: input.SourceID, Reason: input.Reason}
+	if err := s.repo.CreateMute(&mute); err != nil {
+		return model.NotificationMute{}, err
+	}
+	return mute, nil
+}
+
+func validNotificationCategory(category string) bool {
+	for _, candidate := range notificationCategories {
+		if category == candidate {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeListQuery gives an exact notification type precedence over a category.
 func normalizeListQuery(query ListQuery) ListQuery {
 	query.Type = strings.TrimSpace(query.Type)

@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"atoman/internal/model"
+
+	"github.com/google/uuid"
 )
 
 type ListQuery struct {
@@ -11,6 +13,22 @@ type ListQuery struct {
 	PageSize int    `json:"page_size" form:"page_size"`
 	Type     string `json:"type" form:"type"`
 	Category string `json:"category" form:"category"`
+}
+
+type PreferenceInput struct {
+	Category  string `json:"category" binding:"required"`
+	EventType string `json:"event_type" binding:"required"`
+	Enabled   bool   `json:"enabled"`
+}
+
+type SavePreferencesInput struct {
+	Items []PreferenceInput `json:"items" binding:"required,min=1,dive"`
+}
+
+type CreateMuteInput struct {
+	SourceType string    `json:"source_type" binding:"required"`
+	SourceID   uuid.UUID `json:"source_id" binding:"required"`
+	Reason     string    `json:"reason"`
 }
 
 type NotificationDTO struct {

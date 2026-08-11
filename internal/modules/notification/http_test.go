@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,12 +13,77 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
+
+func TestNotificationPreferencesAndMutesHideMatchingNotifications(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{})
+	user := model.User{Username: "notify-mute-user", Email: "notify-mute@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	firstSource := uuid.New()
+	secondSource := uuid.New()
+	if err := db.Create(&[]model.Notification{
+		{RecipientID: user.UUID, Type: "comment_like", SourceType: "comment_like", SourceID: firstSource},
+		{RecipientID: user.UUID, Type: "comment_reply", SourceType: "comment_event", SourceID: secondSource},
+	}).Error; err != nil {
+		t.Fatalf("create notifications: %v", err)
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: user.Role})
+		c.Next()
+	})
+	RegisterRoutes(r.Group("/api/v1"), NewService(db))
+
+	preference := httptest.NewRecorder()
+	r.ServeHTTP(preference, httptest.NewRequest(http.MethodPut, "/api/v1/notifications/preferences", strings.NewReader(`{"items":[{"category":"like","event_type":"comment_like","enabled":false}]}`)))
+	if preference.Code != http.StatusOK {
+		t.Fatalf("expected preference 200, got %d: %s", preference.Code, preference.Body.String())
+	}
+	preferences := httptest.NewRecorder()
+	r.ServeHTTP(preferences, httptest.NewRequest(http.MethodGet, "/api/v1/notifications/preferences", nil))
+	var savedPreferences struct {
+		Data []model.NotificationPreference `json:"data"`
+	}
+	if preferences.Code != http.StatusOK || json.Unmarshal(preferences.Body.Bytes(), &savedPreferences) != nil || len(savedPreferences.Data) != 1 || savedPreferences.Data[0].Enabled {
+		t.Fatalf("expected disabled preference, got %d: %s", preferences.Code, preferences.Body.String())
+	}
+
+	mute := httptest.NewRecorder()
+	muteBody := `{"source_type":"comment_event","source_id":"` + secondSource.String() + `","reason":"thread"}`
+	r.ServeHTTP(mute, httptest.NewRequest(http.MethodPost, "/api/v1/notifications/mutes", strings.NewReader(muteBody)))
+	if mute.Code != http.StatusCreated {
+		t.Fatalf("expected mute 201, got %d: %s", mute.Code, mute.Body.String())
+	}
+
+	list := httptest.NewRecorder()
+	r.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/v1/notifications", nil))
+	if list.Code != http.StatusOK {
+		t.Fatalf("expected list 200, got %d: %s", list.Code, list.Body.String())
+	}
+	var response struct {
+		Data []NotificationDTO `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(response.Data) != 0 || response.Meta.Total != 0 {
+		t.Fatalf("expected muted notifications to be hidden, got %#v", response)
+	}
+}
 
 func TestUnreadCountsRequiresAuthentication(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Notification{}, &model.DMConversation{}, &model.DMMessage{})
+	testdb.Migrate(t, db, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{}, &model.DMConversation{}, &model.DMMessage{})
 
 	r := gin.New()
 	RegisterRoutes(r.Group("/api/v1"), NewService(db))
@@ -32,7 +98,7 @@ func TestUnreadCountsRequiresAuthentication(t *testing.T) {
 func TestUnreadCountsReturnsNotificationCategoriesAndDMTotal(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Notification{}, &model.DMConversation{}, &model.DMMessage{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{}, &model.DMConversation{}, &model.DMMessage{})
 	user := model.User{Username: "notify-count-user", Email: "notify-count@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	other := model.User{Username: "notify-count-other", Email: "notify-count-other@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&[]model.User{user, other}).Error; err != nil {
@@ -107,7 +173,7 @@ func TestUnreadCountsReturnsNotificationCategoriesAndDMTotal(t *testing.T) {
 func TestUnreadCountsIncludesMessagesToOwnedChannels(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Notification{}, &model.DMConversation{}, &model.DMMessage{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{}, &model.DMConversation{}, &model.DMMessage{})
 	owner := model.User{Username: "notify-channel-owner", Email: "owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	sender := model.User{Username: "notify-channel-sender", Email: "sender@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&owner).Error; err != nil {
@@ -153,7 +219,7 @@ func TestUnreadCountsIncludesMessagesToOwnedChannels(t *testing.T) {
 func TestMarkAllReadReturnsRemainingUnreadTotal(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Notification{})
+	testdb.Migrate(t, db, &model.User{}, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{})
 	user := model.User{Username: "notify-user", Email: "notify@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
@@ -194,7 +260,7 @@ func TestMarkAllReadReturnsRemainingUnreadTotal(t *testing.T) {
 func TestNotificationCategoryEndpointsFilterAndMarkCategory(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Notification{})
+	testdb.Migrate(t, db, &model.User{}, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{})
 	user := model.User{Username: "notify-category-user", Email: "notify-category@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
