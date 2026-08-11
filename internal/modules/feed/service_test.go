@@ -1124,6 +1124,74 @@ func TestGetSubscribedFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
 	}
 }
 
+func TestGetSubscribedFeedPaginatesEqualTimestampsDeterministically(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+
+	source := model.FeedSource{
+		Base:       model.Base{ID: uuid.MustParse("018f0f58-31d2-7e35-bf72-777777777777")},
+		SourceType: "external_rss",
+		RssURL:     "https://stable-pagination.example.com/feed.xml",
+		Hash:       "stable-pagination-source",
+		Title:      "Stable Pagination",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	subscription := model.Subscription{UserID: user.ID, FeedSourceID: source.ID, Title: source.Title}
+	if err := db.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+
+	publishedAt := time.Now().UTC().Truncate(time.Second)
+	first := model.FeedItem{
+		Base:         model.Base{ID: uuid.MustParse("018f0f58-31d2-7e35-bf72-888888888888")},
+		FeedSourceID: source.ID,
+		GUID:         "stable-page-1",
+		Title:        "Stable page 1",
+		Link:         "https://stable-pagination.example.com/items/1",
+		PublishedAt:  publishedAt,
+		FetchedAt:    publishedAt,
+	}
+	second := model.FeedItem{
+		Base:         model.Base{ID: uuid.MustParse("018f0f58-31d2-7e35-bf72-999999999999")},
+		FeedSourceID: source.ID,
+		GUID:         "stable-page-2",
+		Title:        "Stable page 2",
+		Link:         "https://stable-pagination.example.com/items/2",
+		PublishedAt:  publishedAt,
+		FetchedAt:    publishedAt,
+	}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("create first item: %v", err)
+	}
+	if err := db.Create(&second).Error; err != nil {
+		t.Fatalf("create second item: %v", err)
+	}
+
+	pageOne, totalOne, err := service.GetSubscribedFeed(user, FeedQuery{
+		Page: 1, PageSize: 1, SourceID: subscription.ID,
+	})
+	if err != nil {
+		t.Fatalf("get first page: %v", err)
+	}
+	pageTwo, totalTwo, err := service.GetSubscribedFeed(user, FeedQuery{
+		Page: 2, PageSize: 1, SourceID: subscription.ID,
+	})
+	if err != nil {
+		t.Fatalf("get second page: %v", err)
+	}
+
+	if totalOne != 2 || totalTwo != 2 || len(pageOne) != 1 || len(pageTwo) != 1 {
+		t.Fatalf("unexpected pagination totals: totalOne=%d totalTwo=%d pageOne=%#v pageTwo=%#v", totalOne, totalTwo, pageOne, pageTwo)
+	}
+	if pageOne[0].FeedItem == nil || pageTwo[0].FeedItem == nil {
+		t.Fatalf("expected feed items, got pageOne=%#v pageTwo=%#v", pageOne, pageTwo)
+	}
+	if pageOne[0].FeedItem.ID != second.ID || pageTwo[0].FeedItem.ID != first.ID {
+		t.Fatalf("expected stable descending id order, got pageOne=%s pageTwo=%s", pageOne[0].FeedItem.ID, pageTwo[0].FeedItem.ID)
+	}
+}
+
 func TestGetPublicFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
 	service, db, _ := newFeedTestService(t)
 

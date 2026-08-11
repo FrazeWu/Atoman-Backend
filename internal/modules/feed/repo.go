@@ -276,7 +276,7 @@ func (r *Repo) ListFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID) ([]model.Feed
 	err := r.db.Preload("FeedSource").
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
 		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false).
-		Order("feed_items.published_at DESC").
+		Order("feed_items.published_at DESC, feed_items.id DESC").
 		Find(&items).Error
 	return items, err
 }
@@ -289,7 +289,7 @@ func (r *Repo) ListFeedItemsBySourceIDsPaged(feedSourceIDs []uuid.UUID, limit in
 	err := r.db.Preload("FeedSource").
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
 		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false).
-		Order("feed_items.published_at DESC").
+		Order("feed_items.published_at DESC, feed_items.id DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&items).Error
@@ -302,7 +302,7 @@ func (r *Repo) ListFeedItemsBySourceID(feedSourceID uuid.UUID, limit int, offset
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
 		Where("feed_items.feed_source_id = ?", feedSourceID).
 		Where("feed_sources.hidden = ?", false).
-		Order("feed_items.published_at DESC").
+		Order("feed_items.published_at DESC, feed_items.id DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&items).Error
