@@ -14213,6 +14213,25 @@ paths:
       tags:
       - music-playlists
   /api/v1/music/playlists/later/{songId}:
+    delete:
+      parameters:
+      - description: 歌曲 ID
+        in: path
+        name: songId
+        required: true
+        type: string
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 移出稍后播放
+      tags:
+      - music
     post:
       parameters:
       - description: 歌曲 ID

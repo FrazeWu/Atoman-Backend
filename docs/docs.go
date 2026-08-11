@@ -12415,6 +12415,37 @@ const docTemplate = `{
                     }
                 ],
                 "responses": {}
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "移出稍后播放",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 ID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/v1/music/playlists/public": {

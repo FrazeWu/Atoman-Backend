@@ -388,6 +388,40 @@ func (h *Handler) addToLaterPlaylist(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"playlist_id": playlist.ID, "added": true})
 }
 
+// deleteFromLaterPlaylist godoc
+// @Summary 移出稍后播放
+// @Tags music
+// @Security BearerAuth
+// @Param songId path string true "歌曲 ID"
+// @Success 200 {object} map[string]bool
+// @Router /api/v1/music/playlists/later/{songId} [delete]
+func (h *Handler) deleteFromLaterPlaylist(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	songID, err := parseMusicID(c.Param("songId"), "songId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var playlist model.Playlist
+	if err := h.service.db.Where("user_id = ? AND kind = ?", user.ID, "later").First(&playlist).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
+			return
+		}
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.DeletePlaylistSong(user, playlist.ID, songID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
+}
+
 // library godoc
 // @Summary 获取个人音乐库
 // @Tags music

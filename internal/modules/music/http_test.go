@@ -264,6 +264,36 @@ func TestRegisterRoutesMusicLaterPlaylistRejectsMissingSong(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesDeleteMusicLaterSongIsIdempotent(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Later Song", AudioURL: "/later.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	router := newMusicHTTPRouter(service, &user)
+	path := "/api/v1/music/playlists/later/" + song.ID.String()
+
+	add := performMusicJSONRequest(t, router, http.MethodPost, path, "")
+	if add.Code != http.StatusOK {
+		t.Fatalf("expected add 200, got %d: %s", add.Code, add.Body.String())
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		remove := performMusicJSONRequest(t, router, http.MethodDelete, path, "")
+		if remove.Code != http.StatusOK || !strings.Contains(remove.Body.String(), `"deleted":true`) {
+			t.Fatalf("expected delete attempt %d to succeed, got %d: %s", attempt, remove.Code, remove.Body.String())
+		}
+	}
+
+	var remaining int64
+	if err := db.Model(&model.PlaylistSong{}).Where("song_id = ?", song.ID).Count(&remaining).Error; err != nil {
+		t.Fatalf("count later playlist songs: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("expected later song to be removed, got %d rows", remaining)
+	}
+}
+
 func TestRegisterRoutesMusicLyricsLifecycleMatchesFrontendContract(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	song := model.Song{Title: "HTTP Lyrics", AudioURL: "/lyrics.mp3", Status: "open"}
