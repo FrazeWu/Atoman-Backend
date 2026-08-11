@@ -18,6 +18,20 @@ import (
 	"atoman/internal/service"
 )
 
+type videoCreateParams struct {
+	ChannelID     *uuid.UUID  `json:"channel_id"`
+	Title         string      `json:"title" binding:"required"`
+	Description   string      `json:"description"`
+	StorageType   string      `json:"storage_type"`
+	VideoURL      string      `json:"video_url" binding:"required"`
+	ThumbnailURL  string      `json:"thumbnail_url"`
+	DurationSec   int         `json:"duration_sec"`
+	Visibility    string      `json:"visibility"`
+	Status        string      `json:"status"`
+	Tags          []string    `json:"tags"`
+	CollectionIDs []uuid.UUID `json:"collection_ids"`
+}
+
 // ReprocessVideo godoc
 // @Summary 重新处理视频预览
 // @Tags videos
@@ -66,105 +80,14 @@ func ReprocessVideo(db *gorm.DB) gin.HandlerFunc {
 func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
-		var input struct {
-			ChannelID     *uuid.UUID  `json:"channel_id"`
-			Title         string      `json:"title" binding:"required"`
-			Description   string      `json:"description"`
-			StorageType   string      `json:"storage_type"`
-			VideoURL      string      `json:"video_url" binding:"required"`
-			ThumbnailURL  string      `json:"thumbnail_url"`
-			DurationSec   int         `json:"duration_sec"`
-			Visibility    string      `json:"visibility"`
-			Status        string      `json:"status"`
-			Tags          []string    `json:"tags"`
-			CollectionIDs []uuid.UUID `json:"collection_ids"`
-		}
+		var input videoCreateParams
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
 
-		storageType := input.StorageType
-		if storageType == "" {
-			storageType = "external"
-		}
-		visibility := input.Visibility
-		if visibility == "" {
-			visibility = "public"
-		}
-		status := input.Status
-		if status == "" {
-			status = "draft"
-		}
-
-		if input.ChannelID != nil {
-			var channel model.Channel
-			if err := db.First(&channel, "id = ?", *input.ChannelID).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
-					return
-				}
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
-			}
-			if !ownsChannel(channel.UserID, userID) {
-				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-				return
-			}
-		}
-		var channelID uuid.UUID
-		if input.ChannelID != nil {
-			channelID = *input.ChannelID
-		}
-		if err := studioapi.NewService(db).ValidateContentScope(userID, channelID, studioapi.ModuleVideo, input.CollectionIDs, status == "published"); err != nil {
-			httpx.Error(c, err)
-			return
-		}
-
-		video := model.Video{
-			UserID:       userID,
-			ChannelID:    input.ChannelID,
-			Title:        strings.TrimSpace(input.Title),
-			Description:  input.Description,
-			StorageType:  storageType,
-			VideoURL:     input.VideoURL,
-			ThumbnailURL: input.ThumbnailURL,
-			DurationSec:  input.DurationSec,
-			Visibility:   visibility,
-			Status:       status,
-		}
-
-		statusCode := http.StatusInternalServerError
-		if err := db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Create(&video).Error; err != nil {
-				return err
-			}
-
-			if err := service.EnsureVideoPreviewJob(tx, &video); err != nil {
-				return fmt.Errorf("processing job failed: %w", err)
-			}
-
-			if len(input.Tags) > 0 {
-				if err := attachVideoTags(tx, &video, input.Tags); err != nil {
-					return fmt.Errorf("tags failed: %w", err)
-				}
-			}
-
-			if len(input.CollectionIDs) > 0 {
-				if err := assignVideoCollections(tx, &video, input.CollectionIDs); err != nil {
-					statusCode = http.StatusBadRequest
-					return err
-				}
-			}
-			if status == "published" {
-				lifecycleService := lifecycle.NewService(tx)
-				if err := lifecycleService.ValidatePublishable("video", video.ID); err != nil {
-					return err
-				}
-				return lifecycleService.EnqueuePublication("video", video.ID)
-			}
-			return nil
-		}); err != nil {
+		video, statusCode, err := createVideoRecord(db, userID, input)
+		if err != nil {
 			if apperr.FromError(err) != nil {
 				httpx.Error(c, err)
 				return
@@ -172,10 +95,85 @@ func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(statusCode, gin.H{"error": err.Error()})
 			return
 		}
-
-		db.Preload("Channel").Preload("Tags").Preload("Collections").First(&video, "id = ?", video.ID)
 		c.JSON(http.StatusCreated, video)
 	}
+}
+
+func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (model.Video, int, error) {
+	storageType := input.StorageType
+	if storageType == "" {
+		storageType = "external"
+	}
+	visibility := input.Visibility
+	if visibility == "" {
+		visibility = "public"
+	}
+	status := input.Status
+	if status == "" {
+		status = "draft"
+	}
+
+	if input.ChannelID != nil {
+		var channel model.Channel
+		if err := db.First(&channel, "id = ?", *input.ChannelID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return model.Video{}, http.StatusNotFound, apperr.NotFound("video.channel_not_found", "Channel not found")
+			}
+			return model.Video{}, http.StatusInternalServerError, err
+		}
+		if !ownsChannel(channel.UserID, userID) {
+			return model.Video{}, http.StatusForbidden, apperr.Forbidden("video.channel_forbidden", "Forbidden")
+		}
+	}
+	var channelID uuid.UUID
+	if input.ChannelID != nil {
+		channelID = *input.ChannelID
+	}
+	if err := studioapi.NewService(db).ValidateContentScope(userID, channelID, studioapi.ModuleVideo, input.CollectionIDs, status == "published"); err != nil {
+		return model.Video{}, http.StatusBadRequest, err
+	}
+
+	video := model.Video{
+		UserID: userID, ChannelID: input.ChannelID, Title: strings.TrimSpace(input.Title),
+		Description: input.Description, StorageType: storageType, VideoURL: input.VideoURL,
+		ThumbnailURL: input.ThumbnailURL, DurationSec: input.DurationSec,
+		Visibility: visibility, Status: status,
+	}
+	statusCode := http.StatusInternalServerError
+	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&video).Error; err != nil {
+			return err
+		}
+		if err := service.EnsureVideoPreviewJob(tx, &video); err != nil {
+			return fmt.Errorf("processing job failed: %w", err)
+		}
+		if len(input.Tags) > 0 {
+			if err := attachVideoTags(tx, &video, input.Tags); err != nil {
+				return fmt.Errorf("tags failed: %w", err)
+			}
+		}
+		if len(input.CollectionIDs) > 0 {
+			if err := assignVideoCollections(tx, &video, input.CollectionIDs); err != nil {
+				statusCode = http.StatusBadRequest
+				return err
+			}
+		}
+		if status == "published" {
+			lifecycleService := lifecycle.NewService(tx)
+			if err := lifecycleService.ValidatePublishable("video", video.ID); err != nil {
+				return err
+			}
+			return lifecycleService.EnqueuePublication("video", video.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		return model.Video{}, statusCode, err
+	}
+	if err := db.Preload("Channel").Preload("Tags").Preload("Collections").First(&video, "id = ?", video.ID).Error; err != nil {
+		return model.Video{}, http.StatusInternalServerError, err
+	}
+	return video, http.StatusCreated, nil
 }
 
 // UpdateVideo updates a video's fields.

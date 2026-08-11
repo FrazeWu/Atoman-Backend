@@ -29,6 +29,9 @@ func SetupVideoRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		// File upload endpoints
 		v.POST("/upload-video", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), UploadVideoFile(s3Client))
 		v.POST("/upload-cover", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), UploadVideoCover(s3Client))
+		imports := v.Group("")
+		imports.Use(middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"))
+		registerVideoImportRoutes(imports, db, s3Client)
 	}
 	// Per-channel Video RSS feed
 	router.GET("/api/v1/channels/slug/:slug/rss/video", GetVideoRSS(db))

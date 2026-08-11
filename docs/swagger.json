@@ -18287,6 +18287,448 @@
                 }
             }
         },
+        "/api/v1/videos/imports": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "获取视频导入任务",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/handlers.VideoImportDTO"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "创建视频导入任务",
+                "parameters": [
+                    {
+                        "description": "视频文件信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CreateVideoImportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VideoImportDTO"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/imports/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "获取视频导入任务详情",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入任务 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VideoImportDTO"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "保存视频导入资料",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入任务 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "视频资料",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VideoImportPayload"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VideoImportDTO"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "取消视频导入任务",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入任务 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VideoImportDTO"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/imports/{id}/complete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "完成视频文件上传",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入任务 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VideoImportDTO"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/imports/{id}/parts/{partNumber}": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "获取视频分片上传地址",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入任务 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "分片序号",
+                        "name": "partNumber",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VideoImportPartUploadDTO"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/imports/{id}/parts/{partNumber}/complete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "确认视频分片上传完成",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入任务 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "分片序号",
+                        "name": "partNumber",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "分片结果",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.CompleteVideoImportPartInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VideoImportDTO"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/imports/{id}/record": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "删除视频导入记录",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入任务 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/imports/{id}/retry": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "重试视频导入发布",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入任务 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VideoImportDTO"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/videos/imports/{id}/submit": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "提交视频导入任务",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入任务 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "发布资料",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SubmitVideoImportInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.VideoImportDTO"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/videos/upload-cover": {
             "post": {
                 "security": [
@@ -21482,6 +21924,21 @@
                 }
             }
         },
+        "handlers.CompleteVideoImportPartInput": {
+            "type": "object",
+            "required": [
+                "etag",
+                "size"
+            ],
+            "properties": {
+                "etag": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.ConflictWithIDResponse": {
             "type": "object",
             "properties": {
@@ -21649,6 +22106,28 @@
                 },
                 "edit_summary": {
                     "type": "string"
+                }
+            }
+        },
+        "handlers.CreateVideoImportInput": {
+            "type": "object",
+            "required": [
+                "content_type",
+                "file_name",
+                "file_size"
+            ],
+            "properties": {
+                "channel_id": {
+                    "type": "string"
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "file_size": {
+                    "type": "integer"
                 }
             }
         },
@@ -22718,6 +23197,24 @@
                 }
             }
         },
+        "handlers.SubmitVideoImportInput": {
+            "type": "object",
+            "required": [
+                "payload",
+                "publish_mode"
+            ],
+            "properties": {
+                "payload": {
+                    "$ref": "#/definitions/handlers.VideoImportPayload"
+                },
+                "publish_mode": {
+                    "type": "string"
+                },
+                "scheduled_at": {
+                    "type": "string"
+                }
+            }
+        },
         "handlers.TimelineEventListResponse": {
             "type": "object",
             "properties": {
@@ -23181,6 +23678,111 @@
                 "visibility": {
                     "type": "string",
                     "example": "public"
+                }
+            }
+        },
+        "handlers.VideoImportDTO": {
+            "type": "object",
+            "properties": {
+                "completed_parts": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "file_size": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "part_size": {
+                    "type": "integer"
+                },
+                "payload": {
+                    "$ref": "#/definitions/handlers.VideoImportPayload"
+                },
+                "progress_current": {
+                    "type": "integer"
+                },
+                "progress_total": {
+                    "type": "integer"
+                },
+                "publish_mode": {
+                    "type": "string"
+                },
+                "publish_requested_at": {
+                    "type": "string"
+                },
+                "scheduled_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "target_video_id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "upload_completed_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.VideoImportPartUploadDTO": {
+            "type": "object",
+            "properties": {
+                "part_number": {
+                    "type": "integer"
+                },
+                "upload_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "handlers.VideoImportPayload": {
+            "type": "object",
+            "properties": {
+                "channel_id": {
+                    "type": "string"
+                },
+                "collection_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "description": {
+                    "type": "string"
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "thumbnail_url": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "visibility": {
+                    "type": "string"
                 }
             }
         },

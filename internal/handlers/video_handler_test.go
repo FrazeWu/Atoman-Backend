@@ -34,6 +34,7 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.VideoBookmark{},
 		&model.ChannelBookmark{},
 		&model.VideoProcessingJob{},
+		&model.VideoImportSession{},
 		&model.VideoTag{},
 		&model.VideoCollection{},
 		&model.VideoTagRelation{},

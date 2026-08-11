@@ -370,7 +370,7 @@ func (s *Service) PublishDue(now time.Time, limit int) error {
 	return nil
 }
 
-func (s *Service) validatePublishable(module string, contentID uuid.UUID, requireReady bool) error {
+func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool) error {
 	switch module {
 	case "blog":
 		var post model.Post
@@ -399,9 +399,6 @@ func (s *Service) validatePublishable(module string, contentID uuid.UUID, requir
 		}
 		if strings.TrimSpace(video.Title) == "" || strings.TrimSpace(video.VideoURL) == "" || collections == 0 {
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Video title, source, and collection are required")
-		}
-		if requireReady && video.StorageType == "local" && video.ProcessingStatus != "ready" {
-			return apperr.Conflict("lifecycle.processing_pending", "Video processing is not ready")
 		}
 	default:
 		return apperr.BadRequest("lifecycle.invalid_module", "module must be blog, podcast, or video")
