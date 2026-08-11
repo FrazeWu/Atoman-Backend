@@ -25493,6 +25493,9 @@ const docTemplate = `{
                 "origin": {
                     "type": "string"
                 },
+                "songId": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
                 }
@@ -25679,9 +25682,38 @@ const docTemplate = `{
                 }
             }
         },
+        "music.AlbumImportTrackLyricsPayload": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "edit_summary": {
+                    "type": "string"
+                },
+                "format": {
+                    "type": "string"
+                },
+                "language": {
+                    "type": "string"
+                },
+                "translation": {
+                    "type": "string"
+                }
+            }
+        },
         "music.AlbumImportTrackPayload": {
             "type": "object",
             "properties": {
+                "disc_number": {
+                    "type": "integer"
+                },
+                "lyrics": {
+                    "$ref": "#/definitions/music.AlbumImportTrackLyricsPayload"
+                },
+                "song_id": {
+                    "type": "string"
+                },
                 "title": {
                     "type": "string"
                 },

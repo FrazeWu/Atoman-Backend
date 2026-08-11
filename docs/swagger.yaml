@@ -4658,6 +4658,8 @@ definitions:
         type: string
       origin:
         type: string
+      songId:
+        type: string
       title:
         type: string
     type: object
@@ -4778,8 +4780,27 @@ definitions:
       data:
         $ref: '#/definitions/music.AlbumImportDTO'
     type: object
+  music.AlbumImportTrackLyricsPayload:
+    properties:
+      content:
+        type: string
+      edit_summary:
+        type: string
+      format:
+        type: string
+      language:
+        type: string
+      translation:
+        type: string
+    type: object
   music.AlbumImportTrackPayload:
     properties:
+      disc_number:
+        type: integer
+      lyrics:
+        $ref: '#/definitions/music.AlbumImportTrackLyricsPayload'
+      song_id:
+        type: string
       title:
         type: string
       track_number:

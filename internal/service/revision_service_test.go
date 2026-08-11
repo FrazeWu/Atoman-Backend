@@ -745,6 +745,62 @@ func TestCreateRevisionBootstrapsAndAppliesAlbumEditorChanges(t *testing.T) {
 	}
 }
 
+func TestRevertAlbumRevisionRestoresSoftDeletedSong(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.Album{}, &model.Song{},
+		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
+		&model.Revision{}, &model.EditConflict{},
+	)
+
+	album := model.Album{Title: "Album", AlbumType: "album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	song := model.Song{Title: "Original Track", AudioURL: "/original.mp3", Status: "open", AlbumID: &album.ID}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	targetSnapshot, err := json.Marshal(albumRevisionSnapshot{
+		Album: &albumRevisionAlbum{Title: album.Title, AlbumType: album.AlbumType, EntryStatus: album.EntryStatus},
+		Songs: []albumRevisionSong{{ID: song.ID.String(), Title: song.Title, AudioURL: song.AudioURL, Status: song.Status}},
+	})
+	if err != nil {
+		t.Fatalf("marshal target snapshot: %v", err)
+	}
+	currentSnapshot, err := json.Marshal(albumRevisionSnapshot{
+		Album: &albumRevisionAlbum{Title: album.Title, AlbumType: album.AlbumType, EntryStatus: album.EntryStatus},
+		Songs: []albumRevisionSong{},
+	})
+	if err != nil {
+		t.Fatalf("marshal current snapshot: %v", err)
+	}
+	editorID := uuid.New()
+	revisions := []model.Revision{
+		{ContentType: "album", ContentID: album.ID, VersionNumber: 1, ContentSnapshot: targetSnapshot, EditorID: editorID, EditType: "creation", Status: "approved"},
+		{ContentType: "album", ContentID: album.ID, VersionNumber: 2, ContentSnapshot: currentSnapshot, EditorID: editorID, EditType: "edit", Status: "approved", IsCurrent: true},
+	}
+	if err := db.Create(&revisions).Error; err != nil {
+		t.Fatalf("create revisions: %v", err)
+	}
+	if err := db.Delete(&song).Error; err != nil {
+		t.Fatalf("soft delete song: %v", err)
+	}
+
+	if _, err := NewRevisionService(db).RevertToRevision("album", album.ID, 1, editorID, "restore track"); err != nil {
+		t.Fatalf("revert album revision: %v", err)
+	}
+
+	var restored model.Song
+	if err := db.Unscoped().First(&restored, "id = ?", song.ID).Error; err != nil {
+		t.Fatalf("load restored song: %v", err)
+	}
+	if restored.DeletedAt.Valid || restored.ID != song.ID || restored.Title != song.Title {
+		t.Fatalf("expected original song row to be restored, got %#v", restored)
+	}
+}
+
 func TestCreateRevisionRejectsProtectedArtistFields(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.Artist{}, &model.ArtistMember{}, &model.Revision{}, &model.EditConflict{})

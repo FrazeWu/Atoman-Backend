@@ -255,22 +255,44 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			importFilesByID[file.ID.String()] = file
 		}
 		var existingSongs []model.Song
+		existingSongsByID := map[uuid.UUID]*model.Song{}
 		if isRepair {
-			if err := tx.Where("album_id = ?", album.ID).Order("track_number ASC, created_at ASC").Find(&existingSongs).Error; err != nil {
+			if err := tx.Where("album_id = ?", album.ID).Order("disc_number ASC, track_number ASC, created_at ASC").Find(&existingSongs).Error; err != nil {
 				return err
 			}
+			for index := range existingSongs {
+				existingSongsByID[existingSongs[index].ID] = &existingSongs[index]
+			}
 		}
+		seenSongIDs := map[uuid.UUID]bool{}
 		for index, track := range payload.Album.Tracks {
 			derived := matchDerivedTrackAudio(rawDerivedTracks, track, index, usedDerivedTrackIndexes)
 			audioURL := derived.AudioURL
 			metadata := songAudioMetadataFromImportFile(importFilesByID[derived.FileID])
-			if index < len(existingSongs) {
-				song := existingSongs[index]
+			var existingSong *model.Song
+			if strings.TrimSpace(track.SongID) != "" {
+				songID, err := uuid.Parse(strings.TrimSpace(track.SongID))
+				if err != nil {
+					return apperr.BadRequest("validation.invalid_request", "invalid song id")
+				}
+				existingSong = existingSongsByID[songID]
+				if existingSong == nil {
+					return apperr.BadRequest("validation.invalid_request", "song does not belong to target album")
+				}
+				if seenSongIDs[songID] {
+					return apperr.BadRequest("validation.invalid_request", "duplicate song id")
+				}
+				seenSongIDs[songID] = true
+			}
+			if existingSong != nil {
+				song := *existingSong
 				if strings.TrimSpace(song.AudioURL) == "" {
 					return apperr.BadRequest("validation.invalid_request", "every track must have processed audio")
 				}
 				song.Title = strings.TrimSpace(track.Title)
 				song.TrackNumber = track.TrackNumber
+				song.DiscNumber = normalizedDiscNumber(track.DiscNumber)
+				song.Status = "open"
 				song.ReleaseDate = album.ReleaseDate
 				song.ReleaseDatePrecision = album.ReleaseDatePrecision
 				if strings.TrimSpace(audioURL) != "" && audioURL != song.AudioURL {
@@ -296,6 +318,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				if err := tx.Model(&song).Association("Artists").Replace(artists); err != nil {
 					return err
 				}
+				if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics); err != nil {
+					return err
+				}
 				continue
 			}
 			if strings.TrimSpace(audioURL) == "" {
@@ -305,6 +330,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			song := model.Song{
 				Title:                strings.TrimSpace(track.Title),
 				TrackNumber:          track.TrackNumber,
+				DiscNumber:           normalizedDiscNumber(track.DiscNumber),
 				ReleaseDate:          album.ReleaseDate,
 				ReleaseDatePrecision: album.ReleaseDatePrecision,
 				AlbumID:              &album.ID,
@@ -340,10 +366,16 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			if err := tx.Model(&song).Association("Artists").Append(artists); err != nil {
 				return err
 			}
+			if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics); err != nil {
+				return err
+			}
 		}
-		if len(payload.Album.Tracks) < len(existingSongs) {
-			for _, song := range existingSongs[len(payload.Album.Tracks):] {
-				if err := tx.Delete(&song).Error; err != nil {
+		if isRepair {
+			for _, song := range existingSongs {
+				if seenSongIDs[song.ID] {
+					continue
+				}
+				if err := tx.Model(&song).Update("status", "closed").Error; err != nil {
 					return err
 				}
 			}
@@ -399,6 +431,34 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 	s.deleteAlbumImportObjects(oldObjectKeys)
 	s.updateAlbumImportNotification(out)
 	return out, nil
+}
+
+func persistAlbumImportTrackLyrics(tx *gorm.DB, actorID, songID uuid.UUID, payload *AlbumImportTrackLyricsPayload) error {
+	if payload == nil {
+		return nil
+	}
+	var current model.MusicSongLyric
+	currentVersion := 0
+	err := tx.First(&current, "song_id = ?", songID).Error
+	if err == nil {
+		currentVersion = current.Version
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	input := SaveLyricsInput{
+		Target: "all", BaseVersion: &currentVersion,
+		Content: payload.Content, Translation: payload.Translation,
+		Format: payload.Format, Language: payload.Language,
+		EditSummary: strings.TrimSpace(payload.EditSummary),
+	}
+	if input.EditSummary == "" {
+		input.EditSummary = "添加歌词"
+	}
+	lines, err := prepareLyricsSave(tx, songID, &input)
+	if err != nil {
+		return err
+	}
+	return persistSongLyrics(tx, actorID, songID, input, lines, false)
 }
 
 // FinalizeSubmittedAlbumImport creates a submitted album after media processing reaches ready.
@@ -503,10 +563,20 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 		return derivedTrackAudio{}
 	}
 
+	songID := strings.TrimSpace(track.SongID)
+	if songID != "" {
+		if audio := tryMatch(func(trackMap map[string]any) bool {
+			return stringValue(trackMap["song_id"]) == songID
+		}); audio.AudioURL != "" {
+			return audio
+		}
+	}
+
 	title := strings.TrimSpace(track.Title)
 	if track.TrackNumber > 0 {
 		if audio := tryMatch(func(trackMap map[string]any) bool {
 			return strings.TrimSpace(stringValue(trackMap["title"])) == title &&
+				normalizedDiscNumber(int(int64Value(trackMap["disc_number"]))) == normalizedDiscNumber(track.DiscNumber) &&
 				int(int64Value(trackMap["track_number"])) == track.TrackNumber
 		}); audio.AudioURL != "" {
 			return audio
@@ -685,9 +755,19 @@ func albumImportTracksFromDerived(payload map[string]any) []AlbumImportTrackPayl
 		if trackNumber <= 0 {
 			trackNumber = index + 1
 		}
-		tracks = append(tracks, AlbumImportTrackPayload{Title: title, TrackNumber: trackNumber})
+		tracks = append(tracks, AlbumImportTrackPayload{
+			SongID: stringValue(trackMap["song_id"]), Title: title,
+			DiscNumber: normalizedDiscNumber(int(int64Value(trackMap["disc_number"]))), TrackNumber: trackNumber,
+		})
 	}
 	return tracks
+}
+
+func normalizedDiscNumber(value int) int {
+	if value > 0 {
+		return value
+	}
+	return 1
 }
 
 func buildArtistFromImportInput(input CommitAlbumImportArtistInput) (*model.Artist, error) {

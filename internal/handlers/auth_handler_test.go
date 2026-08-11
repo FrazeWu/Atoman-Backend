@@ -847,8 +847,8 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	if err := db.Model(&model.Playlist{}).Where("user_id = ?", user.UUID).Count(&playlists).Error; err != nil {
 		t.Fatalf("count default music playlists: %v", err)
 	}
-	if playlists != 0 {
-		t.Fatalf("expected song bookmarks to stay separate from playlists, got %d playlists", playlists)
+	if playlists != 1 {
+		t.Fatalf("expected one default favorite playlist, got %d playlists", playlists)
 	}
 }
 

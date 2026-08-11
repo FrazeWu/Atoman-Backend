@@ -266,11 +266,33 @@ func persistSongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, input SaveLyricsI
 
 func prepareLyricsSave(tx *gorm.DB, songID uuid.UUID, input *SaveLyricsInput) ([]ParsedLyricLine, error) {
 	target := normalizedLyricsTarget(input.Target)
-	if target == "all" || target == "restore" {
+	if target == "restore" {
+		return ParseLyricLines(input.Content, input.Translation, input.Format)
+	}
+	if target == "all" {
+		if strings.TrimSpace(input.Target) == "" {
+			return ParseLyricLines(input.Content, input.Translation, input.Format)
+		}
+		var lyric model.MusicSongLyric
+		err := tx.First(&lyric, "song_id = ?", songID).Error
+		currentVersion := 0
+		if err == nil {
+			currentVersion = lyric.Version
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		if input.BaseVersion == nil || *input.BaseVersion != currentVersion {
+			return nil, lyricsVersionConflict(input.BaseVersion, currentVersion)
+		}
+		input.Format = strings.TrimSpace(input.Format)
+		if input.Format == "" {
+			input.Format = "plain"
+		}
+		input.Language = strings.TrimSpace(input.Language)
 		return ParseLyricLines(input.Content, input.Translation, input.Format)
 	}
 	if target != "original" && target != "translation" && target != "timing" && target != "import" {
-		return nil, lyricValidationError("target must be original, translation, timing, or import")
+		return nil, lyricValidationError("target must be all, original, translation, timing, or import")
 	}
 
 	var lyric model.MusicSongLyric

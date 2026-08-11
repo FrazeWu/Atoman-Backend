@@ -1,8 +1,19 @@
 package music
 
 type AlbumImportTrackPayload struct {
-	Title       string `json:"title"`
-	TrackNumber int    `json:"track_number"`
+	SongID      string                         `json:"song_id"`
+	Title       string                         `json:"title"`
+	DiscNumber  int                            `json:"disc_number"`
+	TrackNumber int                            `json:"track_number"`
+	Lyrics      *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
+}
+
+type AlbumImportTrackLyricsPayload struct {
+	Content     string `json:"content"`
+	Translation string `json:"translation"`
+	Format      string `json:"format"`
+	Language    string `json:"language"`
+	EditSummary string `json:"edit_summary"`
 }
 
 type ArtistStageNamePayload struct {
@@ -134,6 +145,7 @@ type CompleteAlbumImportMultipartPartInput struct {
 }
 
 type AlbumImportDTOTrack struct {
+	SongID   string `json:"songId"`
 	Title    string `json:"title"`
 	AudioKey string `json:"audioKey"`
 	AudioURL string `json:"audioUrl"`

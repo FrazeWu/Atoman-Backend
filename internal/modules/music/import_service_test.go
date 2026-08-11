@@ -1354,7 +1354,7 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 		t.Fatalf("read repair payload: %v", err)
 	}
 	payload["derived_tracks"] = []map[string]any{{
-		"title": "One More Time (Remastered)", "track_number": 1,
+		"song_id": beforeSongs[1].ID.String(), "title": "Aerodynamic (Remastered)", "track_number": 1,
 		"audio_url": "https://cdn.atoman.test/" + newAudioKey,
 	}}
 	payloadJSON, err := json.Marshal(payload)
@@ -1371,7 +1371,7 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		Artists: []CommitAlbumImportArtistInput{{ArtistID: artist.ID.String()}},
 		Album: AlbumImportAlbumPayload{Title: "Discovery (Remastered)", Description: "Updated metadata", CoverURL: "https://cdn.atoman.test/music/covers/uploads/users/test/repair.jpg", ReleaseDate: "2001-03-12", Tracks: []AlbumImportTrackPayload{
-			{Title: "One More Time (Remastered)", TrackNumber: 1},
+			{SongID: beforeSongs[1].ID.String(), Title: "Aerodynamic (Remastered)", TrackNumber: 1},
 		}},
 		AlbumSource: "album source",
 	})
@@ -1390,11 +1390,15 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 		t.Fatalf("repair cover was not promoted: %s", album.CoverURL)
 	}
 	var songs []model.Song
-	if err := db.Where("album_id = ?", album.ID).Order("track_number ASC").Find(&songs).Error; err != nil {
+	if err := db.Where("album_id = ? AND status <> ?", album.ID, "closed").Order("track_number ASC").Find(&songs).Error; err != nil {
 		t.Fatalf("load songs: %v", err)
 	}
-	if len(songs) != 1 || songs[0].Title != "One More Time (Remastered)" {
+	if len(songs) != 1 || songs[0].ID != beforeSongs[1].ID || songs[0].Title != "Aerodynamic (Remastered)" {
 		t.Fatalf("expected repaired tracks, got %#v", songs)
+	}
+	var removedSong model.Song
+	if err := db.First(&removedSong, "id = ?", beforeSongs[0].ID).Error; err != nil || removedSong.Status != "closed" {
+		t.Fatalf("expected removed track identity to be preserved as closed: %#v, err=%v", removedSong, err)
 	}
 	if !strings.Contains(songs[0].AudioURL, "/music/albums/"+album.ID.String()+"/tracks/"+songs[0].ID.String()+"/") {
 		t.Fatalf("repair audio was not promoted: %s", songs[0].AudioURL)

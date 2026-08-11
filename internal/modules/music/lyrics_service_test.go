@@ -380,6 +380,54 @@ func TestSaveSongLyricsCreatesAndVersionsCurrentLyrics(t *testing.T) {
 	}
 }
 
+func TestSaveSongLyricsAllUsesOptimisticVersion(t *testing.T) {
+	svc, _, user, song := newLyricsTestService(t)
+	baseVersion := 0
+	first, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "all", BaseVersion: &baseVersion,
+		Content: "alpha", Translation: "甲", Format: "plain", EditSummary: "创建歌词",
+	})
+	if err != nil {
+		t.Fatalf("save complete lyrics: %v", err)
+	}
+	if first.Version != 1 || first.Content != "alpha" || first.Translation != "甲" {
+		t.Fatalf("unexpected complete lyrics: %#v", first)
+	}
+
+	_, err = svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{
+		Target: "all", BaseVersion: &baseVersion,
+		Content: "stale", Format: "plain", EditSummary: "过期修改",
+	})
+	assertAppErrorCode(t, err, "music.lyrics_version_conflict")
+}
+
+func TestPersistAlbumImportTrackLyricsCreatesInitialHistory(t *testing.T) {
+	svc, db, user, song := newLyricsTestService(t)
+	err := db.Transaction(func(tx *gorm.DB) error {
+		return persistAlbumImportTrackLyrics(tx, user.ID, song.ID, &AlbumImportTrackLyricsPayload{
+			Content: "[00:01.00]Alpha", Translation: "[00:01.00]甲",
+			Format: "lrc", Language: "zh-CN", EditSummary: "添加歌词",
+		})
+	})
+	if err != nil {
+		t.Fatalf("persist imported lyrics: %v", err)
+	}
+	lyrics, err := svc.GetSongLyrics(user, song.ID)
+	if err != nil {
+		t.Fatalf("load imported lyrics: %v", err)
+	}
+	if lyrics.Version != 1 || len(lyrics.Lines) != 1 || lyrics.Lines[0].Translation != "甲" {
+		t.Fatalf("unexpected imported lyrics: %#v", lyrics)
+	}
+	var versions int64
+	if err := db.Model(&model.MusicSongLyricVersion{}).Where("song_id = ?", song.ID).Count(&versions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if versions != 1 {
+		t.Fatalf("expected one initial version, got %d", versions)
+	}
+}
+
 func TestSaveSongLyricsUpdatesTranslationAndTimingIndependently(t *testing.T) {
 	svc, _, user, song := newLyricsTestService(t)
 	first, err := svc.SaveSongLyrics(user, song.ID, SaveLyricsInput{

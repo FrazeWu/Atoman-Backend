@@ -1265,7 +1265,7 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 	}
 
 	var existingSongs []model.Song
-	if err := tx.Where("album_id = ?", albumID).Find(&existingSongs).Error; err != nil {
+	if err := tx.Unscoped().Where("album_id = ?", albumID).Find(&existingSongs).Error; err != nil {
 		return err
 	}
 
@@ -1293,6 +1293,7 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 
 		if songID != "" {
 			if existingSong, ok := existingByID[songID]; ok {
+				existingSong.DeletedAt = gorm.DeletedAt{}
 				existingSong.Title = title
 				existingSong.TrackNumber = songSnap.TrackNumber
 				existingSong.DiscNumber = songSnap.DiscNumber
@@ -1303,7 +1304,7 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 				existingSong.Status = status
 				existingSong.AlbumID = &albumID
 				existingSong.ReleaseDate = album.ReleaseDate
-				if err := tx.Save(existingSong).Error; err != nil {
+				if err := tx.Unscoped().Save(existingSong).Error; err != nil {
 					return err
 				}
 				if songSnap.ArtistCredits != nil {

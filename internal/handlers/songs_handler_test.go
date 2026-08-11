@@ -20,7 +20,7 @@ func TestLegacySongCreateAndUpdateKeepLyricsWikiInSync(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.Artist{}, &model.Album{}, &model.Song{},
+		&model.User{}, &model.Artist{}, &model.ArtistMember{}, &model.Album{}, &model.Song{},
 		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
 		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
 		&model.Revision{},

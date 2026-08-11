@@ -89,13 +89,13 @@ func (s *Service) RepairAlbumImportSession(user authctx.CurrentUser, sessionID u
 			return err
 		}
 		var songs []model.Song
-		if err := tx.Where("album_id = ?", album.ID).Order("track_number ASC, created_at ASC").Find(&songs).Error; err != nil {
+		if err := tx.Where("album_id = ? AND status <> ?", album.ID, "closed").Order("disc_number ASC, track_number ASC, created_at ASC").Find(&songs).Error; err != nil {
 			return err
 		}
 		currentTracks := make([]map[string]any, 0, len(songs))
 		for _, song := range songs {
 			currentTracks = append(currentTracks, map[string]any{
-				"title": song.Title, "track_number": song.TrackNumber,
+				"song_id": song.ID.String(), "title": song.Title, "disc_number": song.DiscNumber, "track_number": song.TrackNumber,
 				"audio_url": song.AudioURL,
 			})
 		}

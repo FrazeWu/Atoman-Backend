@@ -314,9 +314,7 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		}
 	}
 	if song.AlbumID != nil {
-		var previous, next model.Song
-		h.service.db.Where("album_id = ? AND track_number < ? AND status NOT IN ?", *song.AlbumID, song.TrackNumber, []string{"closed", "rejected", "draft"}).Order("track_number DESC").First(&previous)
-		h.service.db.Where("album_id = ? AND track_number > ? AND status NOT IN ?", *song.AlbumID, song.TrackNumber, []string{"closed", "rejected", "draft"}).Order("track_number ASC").First(&next)
+		previous, next := loadAdjacentAlbumSongs(h.service.db, song)
 		if previous.ID != uuid.Nil {
 			previous.AudioURL = resolveMusicMediaURL(previous.AudioURL)
 			result.Previous = &previous
@@ -332,6 +330,24 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		resolveAlbumMediaURLs(result.Song.Album)
 	}
 	httpx.OK(c, http.StatusOK, result)
+}
+
+func loadAdjacentAlbumSongs(db *gorm.DB, song model.Song) (model.Song, model.Song) {
+	if song.AlbumID == nil {
+		return model.Song{}, model.Song{}
+	}
+	var previous, next model.Song
+	discNumber := normalizedDiscNumber(song.DiscNumber)
+	visibleStatuses := []string{"closed", "rejected", "draft"}
+	db.Where(
+		"album_id = ? AND (COALESCE(NULLIF(disc_number, 0), 1) < ? OR (COALESCE(NULLIF(disc_number, 0), 1) = ? AND track_number < ?)) AND status NOT IN ?",
+		*song.AlbumID, discNumber, discNumber, song.TrackNumber, visibleStatuses,
+	).Order("COALESCE(NULLIF(disc_number, 0), 1) DESC, track_number DESC, created_at DESC").First(&previous)
+	db.Where(
+		"album_id = ? AND (COALESCE(NULLIF(disc_number, 0), 1) > ? OR (COALESCE(NULLIF(disc_number, 0), 1) = ? AND track_number > ?)) AND status NOT IN ?",
+		*song.AlbumID, discNumber, discNumber, song.TrackNumber, visibleStatuses,
+	).Order("COALESCE(NULLIF(disc_number, 0), 1) ASC, track_number ASC, created_at ASC").First(&next)
+	return previous, next
 }
 
 // addToLaterPlaylist godoc
