@@ -64,6 +64,37 @@ func TestCasbinMiddlewareAllowsAnonymousV1AuthLogin(t *testing.T) {
 	}
 }
 
+func TestCasbinMiddlewareOnlyAllowsAnonymousMusicPlayPost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	policyFile := t.TempDir() + "/policy.csv"
+	if err := os.WriteFile(policyFile, nil, 0o600); err != nil {
+		t.Fatalf("create policy file: %v", err)
+	}
+	var err error
+	Enforcer, err = casbin.NewEnforcer(testCasbinModel(t), fileadapter.NewAdapter(policyFile))
+	if err != nil {
+		t.Fatalf("create enforcer: %v", err)
+	}
+	initDefaultPolicies()
+
+	r := gin.New()
+	r.Use(CasbinMiddleware())
+	r.POST("/api/v1/music/plays", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	r.POST("/api/v1/music/playlists", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/music/plays", nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected anonymous music play to pass Casbin, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/music/playlists", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected another anonymous music POST to remain unauthorized, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestCasbinMiddlewareTreatsDeniedV1AuthPostsAsForbidden(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	var err error

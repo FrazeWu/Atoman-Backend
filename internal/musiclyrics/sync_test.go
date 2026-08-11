@@ -116,3 +116,71 @@ func TestSyncLegacySongLyricsVersionsContentAndMarksInvalidAnchors(t *testing.T)
 		t.Fatalf("unexpected legacy mirror: %#v", mirrored)
 	}
 }
+
+func TestSyncLegacySongLyricsPreservesStructuredLyricsWhenContentIsUnchanged(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Song{}, &model.MusicSongLyric{},
+		&model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
+		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
+		&model.Notification{},
+	)
+	actor := model.User{Username: "structured-sync", Email: "structured-sync@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&actor).Error; err != nil {
+		t.Fatal(err)
+	}
+	content := "[00:01.00]Hello"
+	song := model.Song{Title: "Structured Sync", AudioURL: "/structured.mp3", Lyrics: content}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	lyric := model.MusicSongLyric{
+		SongID: song.ID, Content: content, Translation: "[00:01.00]你好",
+		TranslationLanguage: "zh-CN", Format: "lrc", Version: 3,
+		UpdatedBy: actor.UUID, EditSummary: "双语歌词",
+	}
+	if err := db.Create(&lyric).Error; err != nil {
+		t.Fatal(err)
+	}
+	timeMS := 1000
+	line := model.MusicSongLyricLine{
+		LyricID: lyric.ID, LineKey: "lrc:1000:hello:0", LineIndex: 0,
+		TimeMS: &timeMS, Text: "Hello", Translation: "你好",
+	}
+	if err := db.Create(&line).Error; err != nil {
+		t.Fatal(err)
+	}
+	version := model.MusicSongLyricVersion{
+		SongID: song.ID, Version: 3, Content: content, Translation: "[00:01.00]你好",
+		Target: "all", Language: "zh-CN", Format: "lrc", EditSummary: "双语歌词", CreatedBy: actor.UUID,
+	}
+	if err := db.Create(&version).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return SyncLegacySongLyrics(tx, actor.UUID, song.ID, content, "只修改歌曲资料")
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var current model.MusicSongLyric
+	if err := db.First(&current, "song_id = ?", song.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if current.Version != 3 || current.Format != "lrc" || current.Translation != "[00:01.00]你好" || current.TranslationLanguage != "zh-CN" {
+		t.Fatalf("structured lyrics changed: %#v", current)
+	}
+	var currentLine model.MusicSongLyricLine
+	if err := db.First(&currentLine, "lyric_id = ?", lyric.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if currentLine.TimeMS == nil || *currentLine.TimeMS != 1000 || currentLine.Translation != "你好" {
+		t.Fatalf("structured line changed: %#v", currentLine)
+	}
+	var versionCount int64
+	db.Model(&model.MusicSongLyricVersion{}).Where("song_id = ?", song.ID).Count(&versionCount)
+	if versionCount != 1 {
+		t.Fatalf("version count = %d, want 1", versionCount)
+	}
+}

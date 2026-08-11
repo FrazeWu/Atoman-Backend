@@ -74,6 +74,9 @@ func initDefaultPolicies() {
 	if ok, _ := Enforcer.AddPolicy("anonymous", "/api/*", "GET"); ok {
 		policyAdded = true
 	}
+	if ok, _ := Enforcer.AddPolicy("anonymous", "/api/v1/music/plays", "POST"); ok {
+		policyAdded = true
+	}
 	if ok, _ := Enforcer.AddPolicy("anonymous", "/uploads/*", "(GET|HEAD)"); ok {
 		policyAdded = true
 	}

@@ -16,7 +16,7 @@ import (
 func SyncLegacySongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, content, editSummary string) error {
 	var lyric model.MusicSongLyric
 	findErr := tx.First(&lyric, "song_id = ?", songID).Error
-	if findErr == nil && lyric.Content == content && lyric.Translation == "" && lyric.Format == "plain" {
+	if findErr == nil && lyric.Content == content {
 		return tx.Model(&model.Song{}).Where("id = ?", songID).Update("lyrics", content).Error
 	}
 	if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
