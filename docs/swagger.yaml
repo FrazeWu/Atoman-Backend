@@ -11782,6 +11782,77 @@ paths:
       summary: 检查单个订阅健康状态
       tags:
       - feed
+  /api/v1/feed/subscriptions/{id}/mark-read:
+    post:
+      description: 将当前用户在该订阅源中的条目全部标记为已读。
+      parameters:
+      - description: 订阅 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 标记订阅源全部已读
+      tags:
+      - feed
+  /api/v1/feed/subscriptions/{id}/mark-unread:
+    post:
+      parameters:
+      - description: 订阅 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 标记订阅源全部未读
+      tags:
+      - feed
   /api/v1/feed/subscriptions/{id}/sync:
     post:
       description: 立即抓取当前用户指定的外部 RSS 订阅源并返回新增条目数。

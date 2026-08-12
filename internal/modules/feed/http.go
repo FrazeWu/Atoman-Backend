@@ -58,6 +58,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/subscriptions", CreateSubscription(service.db))
 		protected.DELETE("/subscriptions/:id", DeleteSubscription(service.db))
 		protected.PUT("/subscriptions/:id", UpdateSubscription(service.db))
+		protected.POST("/subscriptions/:id/mark-read", h.markSubscriptionRead)
+		protected.POST("/subscriptions/:id/mark-unread", h.markSubscriptionUnread)
 		protected.POST("/subscriptions/sync-all", h.syncAllSubscriptions)
 		protected.POST("/subscriptions/:id/sync", h.syncSubscription)
 		protected.GET("/stats", GetFeedStats(service.db))
@@ -367,6 +369,67 @@ func (h *Handler) markAllUnread(c *gin.Context) {
 		return
 	}
 	if err := h.service.MarkAllUnread(user); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
+}
+
+// markSubscriptionRead godoc
+// @Summary 标记订阅源全部已读
+// @Description 将当前用户在该订阅源中的条目全部标记为已读。
+// @Tags feed
+// @Produce json
+// @Param id path string true "订阅 UUID"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/subscriptions/{id}/mark-read [post]
+func (h *Handler) markSubscriptionRead(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	subscriptionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "subscription id must be a valid uuid"))
+		return
+	}
+	if err := h.service.MarkSubscriptionRead(user, subscriptionID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
+}
+
+// markSubscriptionUnread godoc
+// @Summary 标记订阅源全部未读
+// @Tags feed
+// @Produce json
+// @Param id path string true "订阅 UUID"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/subscriptions/{id}/mark-unread [post]
+func (h *Handler) markSubscriptionUnread(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	subscriptionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "subscription id must be a valid uuid"))
+		return
+	}
+	if err := h.service.MarkSubscriptionUnread(user, subscriptionID); err != nil {
 		httpx.Error(c, err)
 		return
 	}

@@ -1690,3 +1690,81 @@ func TestMarkUnreadHandlerDeletesReadRecord(t *testing.T) {
 		t.Fatalf("expected mark-unread to delete read record, got %d", count)
 	}
 }
+
+func TestSubscriptionReadHandlersScopeItemsToOwnedSubscription(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+
+	var subscription model.Subscription
+	if err := db.Where("user_id = ?", user.ID).First(&subscription).Error; err != nil {
+		t.Fatalf("find subscription: %v", err)
+	}
+	items := []model.FeedItem{
+		{FeedSourceID: subscription.FeedSourceID, GUID: "subscription-read-1", Title: "First", PublishedAt: time.Now().UTC(), FetchedAt: time.Now().UTC()},
+		{FeedSourceID: subscription.FeedSourceID, GUID: "subscription-read-2", Title: "Second", PublishedAt: time.Now().UTC(), FetchedAt: time.Now().UTC()},
+	}
+	if err := db.Create(&items).Error; err != nil {
+		t.Fatalf("create feed items: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	request := func(method, path string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, nil)
+		req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		return rr
+	}
+
+	readPath := fmt.Sprintf("/api/v1/feed/subscriptions/%s/mark-read", subscription.ID)
+	if rr := request(http.MethodPost, readPath); rr.Code != http.StatusOK {
+		t.Fatalf("mark subscription read status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var readCount int64
+	if err := db.Model(&model.FeedItemRead{}).Where("user_id = ? AND feed_item_id IN ?", user.ID, []uuid.UUID{items[0].ID, items[1].ID}).Count(&readCount).Error; err != nil {
+		t.Fatalf("count subscription reads: %v", err)
+	}
+	if readCount != 2 {
+		t.Fatalf("expected both subscription items marked read, got %d", readCount)
+	}
+
+	unreadPath := fmt.Sprintf("/api/v1/feed/subscriptions/%s/mark-unread", subscription.ID)
+	if rr := request(http.MethodPost, unreadPath); rr.Code != http.StatusOK {
+		t.Fatalf("mark subscription unread status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if err := db.Model(&model.FeedItemRead{}).Where("user_id = ? AND feed_item_id IN ?", user.ID, []uuid.UUID{items[0].ID, items[1].ID}).Count(&readCount).Error; err != nil {
+		t.Fatalf("count subscription reads after unread: %v", err)
+	}
+	if readCount != 0 {
+		t.Fatalf("expected subscription items marked unread, got %d", readCount)
+	}
+}
+
+func TestSubscriptionReadHandlersRejectForeignSubscription(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+	other := model.User{Username: "feed-foreign", Email: "feed-foreign@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	var subscription model.Subscription
+	if err := db.Where("user_id = ?", user.ID).First(&subscription).Error; err != nil {
+		t.Fatalf("find subscription: %v", err)
+	}
+	subscription.ID = uuid.New()
+	subscription.UserID = other.UUID
+	if err := db.Create(&subscription).Error; err != nil {
+		t.Fatalf("create foreign subscription: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/feed/subscriptions/%s/mark-read", subscription.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected foreign subscription to return 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}

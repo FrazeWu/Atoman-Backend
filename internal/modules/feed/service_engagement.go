@@ -26,6 +26,47 @@ func (s *Service) MarkUnread(user authctx.CurrentUser, ids []uuid.UUID) error {
 	return s.repo.DeleteReads(user.ID, dedupeUUIDs(ids))
 }
 
+func (s *Service) MarkSubscriptionRead(user authctx.CurrentUser, subscriptionID uuid.UUID) error {
+	ids, err := s.subscriptionFeedItemIDs(user, subscriptionID)
+	if err != nil {
+		return err
+	}
+	return s.repo.MarkRead(user.ID, ids)
+}
+
+func (s *Service) MarkSubscriptionUnread(user authctx.CurrentUser, subscriptionID uuid.UUID) error {
+	ids, err := s.subscriptionFeedItemIDs(user, subscriptionID)
+	if err != nil {
+		return err
+	}
+	return s.repo.DeleteReads(user.ID, ids)
+}
+
+func (s *Service) subscriptionFeedItemIDs(user authctx.CurrentUser, subscriptionID uuid.UUID) ([]uuid.UUID, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	if subscriptionID == uuid.Nil {
+		return nil, apperr.BadRequest("validation.invalid_request", "subscription id is required")
+	}
+
+	var subscription model.Subscription
+	if err := s.db.Where("id = ? AND user_id = ?", subscriptionID, user.ID).First(&subscription).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperr.NotFound("feed.subscription_not_found", "Subscription not found")
+		}
+		return nil, err
+	}
+
+	var ids []uuid.UUID
+	if err := s.db.Model(&model.FeedItem{}).
+		Where("feed_source_id = ?", subscription.FeedSourceID).
+		Pluck("id", &ids).Error; err != nil {
+		return nil, err
+	}
+	return ids, nil
+}
+
 func (s *Service) MarkAllRead(user authctx.CurrentUser) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")
