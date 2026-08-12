@@ -594,12 +594,14 @@ func TestGetSubscribedVideosReturnsVideoChannelAndCollectionUpdates(t *testing.T
 	collection := seedVideoCollection(t, db, channel.ID, "Subscribed Collection")
 	channelVideo := seedVideoWithState(t, db, channelOwner.UUID, "published", "public")
 	collectionVideo := seedVideoWithState(t, db, channelOwner.UUID, "published", "public")
+	hiddenCollectionVideo := seedVideoWithState(t, db, channelOwner.UUID, "draft", "public")
 	unsubscribedVideo := seedVideoWithState(t, db, channelOwner.UUID, "published", "public")
-	for _, video := range []*model.Video{&channelVideo, &collectionVideo} {
+	for _, video := range []*model.Video{&channelVideo, &collectionVideo, &hiddenCollectionVideo} {
 		require.NoError(t, db.Model(video).Update("channel_id", channel.ID).Error)
 	}
 	require.NoError(t, db.Model(&unsubscribedVideo).Update("channel_id", otherChannel.ID).Error)
 	require.NoError(t, db.Create(&model.VideoCollection{VideoID: collectionVideo.ID, CollectionID: collection.ID}).Error)
+	require.NoError(t, db.Create(&model.VideoCollection{VideoID: hiddenCollectionVideo.ID, CollectionID: collection.ID}).Error)
 
 	channelSource := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Hash: "video-sub-channel"}
 	collectionSource := model.FeedSource{SourceType: "internal_collection", SourceID: &collection.ID, Hash: "video-sub-collection"}
@@ -621,6 +623,7 @@ func TestGetSubscribedVideosReturnsVideoChannelAndCollectionUpdates(t *testing.T
 	}
 	require.ElementsMatch(t, []uuid.UUID{channelVideo.ID, collectionVideo.ID}, ids)
 	require.NotContains(t, ids, unsubscribedVideo.ID)
+	require.NotContains(t, ids, hiddenCollectionVideo.ID)
 }
 
 func TestGetVideoCollectionBookmarksReturnsOnlyVideoCollections(t *testing.T) {
