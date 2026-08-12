@@ -72,7 +72,8 @@ func clearAuthTokenCookie(c *gin.Context) {
 	http.SetCookie(c.Writer, &cookie)
 }
 
-func userAuthResponse(user model.User, csrfToken string) gin.H {
+func userAuthResponse(db *gorm.DB, user model.User, csrfToken string) gin.H {
+	user.AvatarURL = service.ResolveUserAvatarURL(db, user)
 	return gin.H{
 		"csrf_token": csrfToken,
 		"user": gin.H{
@@ -90,11 +91,11 @@ func userAuthResponse(user model.User, csrfToken string) gin.H {
 	}
 }
 
-func apiAuthResponse(user model.User, credentials authsession.Credentials) gin.H {
+func apiAuthResponse(db *gorm.DB, user model.User, credentials authsession.Credentials) gin.H {
 	return gin.H{
 		"token":      credentials.Token,
 		"expires_at": credentials.ExpiresAt,
-		"user":       userAuthResponse(user, "")["user"],
+		"user":       userAuthResponse(db, user, "")["user"],
 	}
 }
 
@@ -314,7 +315,7 @@ func RegisterHandler(db *gorm.DB, emailService *service.EmailService) gin.Handle
 
 		revokeReplacedWebSession(c, db, credentials.Token)
 		setAuthSessionCookie(c, credentials)
-		c.JSON(http.StatusCreated, userAuthResponse(user, credentials.CSRFToken))
+		c.JSON(http.StatusCreated, userAuthResponse(db, user, credentials.CSRFToken))
 	}
 }
 
@@ -367,7 +368,7 @@ func SessionHandler(db *gorm.DB) gin.HandlerFunc {
 			clearSessionAndAuthError(c, authInvalidToken, "登录状态已失效，请重新登录")
 			return
 		}
-		c.JSON(http.StatusOK, userAuthResponse(resolved.User, csrfToken))
+		c.JSON(http.StatusOK, userAuthResponse(db, resolved.User, csrfToken))
 	}
 }
 
@@ -443,7 +444,7 @@ func LoginHandler(db *gorm.DB) gin.HandlerFunc {
 		revokeReplacedWebSession(c, db, credentials.Token)
 		setAuthSessionCookie(c, credentials)
 
-		c.JSON(http.StatusOK, userAuthResponse(user, credentials.CSRFToken))
+		c.JSON(http.StatusOK, userAuthResponse(db, user, credentials.CSRFToken))
 	}
 }
 
@@ -532,7 +533,7 @@ func TokenLoginHandler(db *gorm.DB) gin.HandlerFunc {
 			authError(c, http.StatusInternalServerError, authTokenGenerationFailed, "登录服务暂时不可用，请稍后重试")
 			return
 		}
-		c.JSON(http.StatusOK, apiAuthResponse(user, credentials))
+		c.JSON(http.StatusOK, apiAuthResponse(db, user, credentials))
 	}
 }
 

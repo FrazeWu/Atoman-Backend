@@ -514,7 +514,8 @@ func (h *OAuthHandler) writeCompletion(c *gin.Context, result service.OAuthCompl
 	}
 	setAuthSessionCookie(c, credentials)
 	clearOAuthFlowCookie(c)
-	payload := userAuthResponse(result.User, credentials.CSRFToken)
+	result.User.AvatarURL = h.service.ResolveUserAvatarURL(result.User)
+	payload := userAuthResponse(nil, result.User, credentials.CSRFToken)
 	payload["return_to"] = result.ReturnTo
 	c.Header("Cache-Control", "no-store")
 	c.JSON(http.StatusOK, payload)

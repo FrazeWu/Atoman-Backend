@@ -415,6 +415,42 @@ func TestUpdateUserProfileCanClearOptionalFields(t *testing.T) {
 	}
 }
 
+func TestGetUserByUsernameUsesLinkedIdentityAvatarWhenUserAvatarIsEmpty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.ExternalIdentity{}, &model.Follow{}, &model.Post{})
+	user := model.User{Username: "identity-avatar-user", Email: "identity-avatar@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := db.Create(&model.ExternalIdentity{
+		UserID: user.UUID, Provider: model.OAuthProviderMicrosoft, Issuer: "issuer", Subject: "subject",
+		AvatarURL: "https://cdn.example.com/avatar.png",
+	}).Error; err != nil {
+		t.Fatalf("create identity: %v", err)
+	}
+
+	r := gin.New()
+	r.GET("/users/by-username/:username", GetUserByUsername(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/by-username/identity-avatar-user", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data struct {
+			AvatarURL string `json:"avatar_url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Data.AvatarURL != "https://cdn.example.com/avatar.png" {
+		t.Fatalf("expected identity avatar, got %q", response.Data.AvatarURL)
+	}
+}
+
 func TestUpdateUserProfileOnlyChangesProvidedFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)

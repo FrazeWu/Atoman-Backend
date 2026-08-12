@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	"atoman/internal/service"
 )
 
 type UserProfileInput struct {
@@ -99,6 +100,7 @@ func GetCurrentUser(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 			return
 		}
+		user.AvatarURL = service.ResolveUserAvatarURL(db, user)
 
 		c.JSON(http.StatusOK, gin.H{"data": user, "message": "ok"})
 	}
@@ -123,6 +125,7 @@ func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 			return
 		}
+		avatarURL := service.ResolveUserAvatarURL(db, user)
 
 		var followersCount, followingCount, postsCount int64
 		db.Model(&model.Follow{}).Where("following_id = ?", user.UUID).Count(&followersCount)
@@ -135,7 +138,7 @@ func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 				"uuid":            user.UUID,
 				"username":        user.Username,
 				"display_name":    user.DisplayName,
-				"avatar_url":      user.AvatarURL,
+				"avatar_url":      avatarURL,
 				"bio":             user.Bio,
 				"website":         user.Website,
 				"role":            user.Role,
@@ -168,6 +171,7 @@ func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 			return
 		}
+		avatarURL := service.ResolveUserAvatarURL(db, user)
 
 		// Get counts
 		var followersCount int64
@@ -189,7 +193,7 @@ func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 					"uuid":         user.UUID,
 					"username":     user.Username,
 					"display_name": user.DisplayName,
-					"avatar_url":   user.AvatarURL,
+					"avatar_url":   avatarURL,
 					"bio":          user.Bio,
 					"website":      user.Website,
 					"location":     user.Location,
