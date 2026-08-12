@@ -1,13 +1,15 @@
 package service
 
 import (
+	"strings"
+
 	"atoman/internal/model"
 
 	"gorm.io/gorm"
 )
 
 func EnsureVideoPreviewJob(db *gorm.DB, video *model.Video) error {
-	if video.StorageType != "local" {
+	if !needsVideoPreviewJob(*video) {
 		return db.Model(video).Updates(map[string]interface{}{
 			"processing_status": "none",
 			"processing_error":  "",
@@ -30,4 +32,10 @@ func EnsureVideoPreviewJob(db *gorm.DB, video *model.Video) error {
 		}
 		return tx.Create(&job).Error
 	})
+}
+
+func needsVideoPreviewJob(video model.Video) bool {
+	return video.StorageType == "local" &&
+		!strings.HasPrefix(video.VideoURL, "http://") &&
+		!strings.HasPrefix(video.VideoURL, "https://")
 }

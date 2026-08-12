@@ -95,7 +95,7 @@ func TestVideoImportCompletesUploadAndPublishesOnce(t *testing.T) {
 	submitted := performVideoImportRequest(t, router, http.MethodPost, "/api/v1/videos/imports/"+task.ID.String()+"/submit", SubmitVideoImportInput{
 		Payload: VideoImportPayload{
 			ChannelID: &channel.ID, Title: "Imported video", Description: "Ready after upload",
-			Visibility: "public", CollectionIDs: []uuid.UUID{collection.ID}, Tags: []string{"imported"},
+			DurationSec: 214, Visibility: "public", CollectionIDs: []uuid.UUID{collection.ID}, Tags: []string{"imported"},
 		},
 		PublishMode: "published",
 	})
@@ -114,6 +114,7 @@ func TestVideoImportCompletesUploadAndPublishesOnce(t *testing.T) {
 	var video model.Video
 	require.NoError(t, db.Preload("Collections").Preload("Tags").First(&video, "id = ?", *task.TargetVideoID).Error)
 	require.Equal(t, "Imported video", video.Title)
+	require.Equal(t, 214, video.DurationSec)
 	require.Equal(t, "published", video.Status)
 	require.Contains(t, video.VideoURL, "/video/imports/")
 	require.Len(t, video.Collections, 1)
