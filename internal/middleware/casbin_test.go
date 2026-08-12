@@ -64,7 +64,7 @@ func TestCasbinMiddlewareAllowsAnonymousV1AuthLogin(t *testing.T) {
 	}
 }
 
-func TestCasbinMiddlewareOnlyAllowsAnonymousMusicPlayPost(t *testing.T) {
+func TestCasbinMiddlewareOnlyAllowsAnonymousPlaybackCounterPosts(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	policyFile := t.TempDir() + "/policy.csv"
 	if err := os.WriteFile(policyFile, nil, 0o600); err != nil {
@@ -81,6 +81,8 @@ func TestCasbinMiddlewareOnlyAllowsAnonymousMusicPlayPost(t *testing.T) {
 	r.Use(CasbinMiddleware())
 	r.POST("/api/v1/music/plays", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 	r.POST("/api/v1/music/playlists", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	r.POST("/api/v1/videos/:id/view", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	r.POST("/api/v1/videos/:id/reprocess", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/music/plays", nil))
@@ -89,9 +91,21 @@ func TestCasbinMiddlewareOnlyAllowsAnonymousMusicPlayPost(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/videos/video-1/view", nil))
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected anonymous video view to pass Casbin, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/music/playlists", nil))
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("expected another anonymous music POST to remain unauthorized, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/videos/video-1/reprocess", nil))
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected another anonymous video POST to remain unauthorized, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
