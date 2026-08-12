@@ -2543,133 +2543,58 @@ func TestRegisterRoutesAlbumBookmarksDeleteIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesSongBookmarksRequireCurrentUser(t *testing.T) {
-	service, db, _ := newMusicHTTPTestService(t)
-	song := model.Song{Title: "Bookmarked Song", AudioURL: "/audio/song.mp3", Status: "open"}
-	if err := db.Create(&song).Error; err != nil {
-		t.Fatalf("create song: %v", err)
-	}
-	r := newMusicHTTPRouter(service, nil)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/music/bookmarks/songs", bytes.NewBufferString(`{"song_id":"`+song.ID.String()+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestRegisterRoutesSongBookmarkStatusReturnsOnlyRequestedBookmarks(t *testing.T) {
+func TestRegisterRoutesPlaylistSongStatusReturnsOnlyRequestedMembers(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
-	bookmarked := model.Song{Title: "Bookmarked", AudioURL: "/audio/bookmarked.mp3", Status: "open"}
+	playlist := model.Playlist{UserID: user.ID, Name: "最爱", Kind: "favorite"}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	member := model.Song{Title: "Member", AudioURL: "/audio/member.mp3", Status: "open"}
 	plain := model.Song{Title: "Plain", AudioURL: "/audio/plain.mp3", Status: "open"}
-	if err := db.Create(&bookmarked).Error; err != nil {
-		t.Fatalf("create bookmarked song: %v", err)
+	if err := db.Create(&member).Error; err != nil {
+		t.Fatalf("create member song: %v", err)
 	}
 	if err := db.Create(&plain).Error; err != nil {
 		t.Fatalf("create plain song: %v", err)
 	}
-	if _, err := service.BookmarkSong(user, bookmarked.ID); err != nil {
-		t.Fatalf("bookmark song: %v", err)
+	if _, err := service.AddPlaylistSong(user, playlist.ID, member.ID); err != nil {
+		t.Fatalf("add playlist song: %v", err)
 	}
 
 	router := newMusicHTTPRouter(service, &user)
 	recorder := httptest.NewRecorder()
-	request := httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/songs/status?song_ids="+bookmarked.ID.String()+","+plain.ID.String(), nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/"+playlist.ID.String()+"/songs/status?song_ids="+member.ID.String()+","+plain.ID.String(), nil)
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", recorder.Code, recorder.Body.String())
 	}
-	if !strings.Contains(recorder.Body.String(), bookmarked.ID.String()) || strings.Contains(recorder.Body.String(), plain.ID.String()) {
-		t.Fatalf("unexpected bookmark status: %s", recorder.Body.String())
+	if !strings.Contains(recorder.Body.String(), member.ID.String()) || strings.Contains(recorder.Body.String(), plain.ID.String()) {
+		t.Fatalf("unexpected playlist status: %s", recorder.Body.String())
 	}
 }
 
-func TestRegisterRoutesSongBookmarkStatusRequiresCurrentUser(t *testing.T) {
+func TestRegisterRoutesPlaylistSongStatusRequiresCurrentUser(t *testing.T) {
 	service, _, _ := newMusicHTTPTestService(t)
 	router := newMusicHTTPRouter(service, nil)
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/songs/status?song_ids="+uuid.NewString(), nil))
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/"+uuid.NewString()+"/songs/status?song_ids="+uuid.NewString(), nil))
 
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401, got %d: %s", recorder.Code, recorder.Body.String())
 	}
 }
 
-func TestRegisterRoutesSongBookmarkStatusRejectsInvalidSongID(t *testing.T) {
-	service, _, user := newMusicHTTPTestService(t)
+func TestRegisterRoutesPlaylistSongStatusRejectsInvalidSongID(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	playlist := model.Playlist{UserID: user.ID, Name: "Playlist", Kind: "user"}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
 	router := newMusicHTTPRouter(service, &user)
 	recorder := httptest.NewRecorder()
-	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/songs/status?song_ids=not-a-uuid", nil))
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists/"+playlist.ID.String()+"/songs/status?song_ids=not-a-uuid", nil))
 
 	assertMusicHTTPError(t, recorder, http.StatusBadRequest, "validation.invalid_request")
-}
-
-func TestRegisterRoutesSongBookmarksListIncludesSongDetails(t *testing.T) {
-	service, db, user := newMusicHTTPTestService(t)
-	artist := model.Artist{Name: "Song Bookmark Artist", EntryStatus: "open"}
-	if err := db.Create(&artist).Error; err != nil {
-		t.Fatalf("create artist: %v", err)
-	}
-	album := model.Album{Title: "Song Bookmark Album", EntryStatus: "open", Status: "open"}
-	if err := db.Create(&album).Error; err != nil {
-		t.Fatalf("create album: %v", err)
-	}
-	if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
-		t.Fatalf("append album artist: %v", err)
-	}
-	song := model.Song{Title: "cellophane", AudioURL: "/audio/song.mp3", Status: "open", AlbumID: &album.ID}
-	if err := db.Create(&song).Error; err != nil {
-		t.Fatalf("create song: %v", err)
-	}
-	if err := db.Model(&song).Association("Artists").Append(&artist); err != nil {
-		t.Fatalf("append song artist: %v", err)
-	}
-	if _, err := service.BookmarkSong(user, song.ID); err != nil {
-		t.Fatalf("bookmark song: %v", err)
-	}
-
-	r := newMusicHTTPRouter(service, &user)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/music/bookmarks/songs", nil)
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp struct {
-		Data []struct {
-			ID   string `json:"id"`
-			Song struct {
-				ID    string `json:"id"`
-				Title string `json:"title"`
-				Album struct {
-					Title string `json:"title"`
-				} `json:"album"`
-				Artists []struct {
-					Name string `json:"name"`
-				} `json:"artists"`
-			} `json:"song"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if len(resp.Data) != 1 {
-		t.Fatalf("expected 1 song bookmark, got %#v", resp.Data)
-	}
-	if resp.Data[0].Song.Title != "cellophane" {
-		t.Fatalf("expected song title in bookmark payload, got %#v", resp.Data[0].Song)
-	}
-	if resp.Data[0].Song.Album.Title != "Song Bookmark Album" {
-		t.Fatalf("expected album title in bookmark payload, got %#v", resp.Data[0].Song.Album)
-	}
-	if len(resp.Data[0].Song.Artists) != 1 || resp.Data[0].Song.Artists[0].Name != "Song Bookmark Artist" {
-		t.Fatalf("expected song artists in bookmark payload, got %#v", resp.Data[0].Song.Artists)
-	}
 }
 
 func TestRegisterRoutesArtistBookmarksSupportPopularSort(t *testing.T) {

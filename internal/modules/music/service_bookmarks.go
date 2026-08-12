@@ -66,57 +66,6 @@ func (s *Service) DeleteAlbumBookmark(user authctx.CurrentUser, albumID uuid.UUI
 	return s.repo.DeleteAlbumBookmark(user.ID, albumID)
 }
 
-func (s *Service) ListSongBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.SongBookmark, int64, error) {
-	return s.ListSongBookmarksFiltered(user, page, pageSize, sort, "")
-}
-
-func (s *Service) ListSongBookmarksFiltered(user authctx.CurrentUser, page int, pageSize int, sort string, query string) ([]model.SongBookmark, int64, error) {
-	if user.ID == uuid.Nil {
-		return nil, 0, apperr.Unauthorized("Login required")
-	}
-	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
-	return s.repo.ListSongBookmarksFiltered(user.ID, page, pageSize, sort, query)
-}
-
-func (s *Service) BookmarkSong(user authctx.CurrentUser, songID uuid.UUID) (model.SongBookmark, error) {
-	if user.ID == uuid.Nil {
-		return model.SongBookmark{}, apperr.Unauthorized("Login required")
-	}
-	if songID == uuid.Nil {
-		return model.SongBookmark{}, apperr.BadRequest("validation.invalid_request", "song_id is required")
-	}
-	playlist, err := s.repo.EnsureFavoritePlaylist(user.ID)
-	if err != nil {
-		return model.SongBookmark{}, err
-	}
-	entry, err := s.AddPlaylistSong(user, playlist.ID, songID)
-	return songBookmarkFromPlaylistSong(user.ID, entry), err
-}
-
-func (s *Service) DeleteSongBookmark(user authctx.CurrentUser, songID uuid.UUID) error {
-	if user.ID == uuid.Nil {
-		return apperr.Unauthorized("Login required")
-	}
-	return s.repo.DeleteSongBookmark(user.ID, songID)
-}
-
-func (s *Service) SongBookmarkIDs(user authctx.CurrentUser, songIDs []uuid.UUID) ([]uuid.UUID, error) {
-	if user.ID == uuid.Nil {
-		return nil, apperr.Unauthorized("Login required")
-	}
-	if len(songIDs) == 0 {
-		return []uuid.UUID{}, nil
-	}
-	var ids []uuid.UUID
-	err := s.db.Model(&model.PlaylistSong{}).
-		Select("music_playlist_songs.song_id").
-		Joins("JOIN music_playlists ON music_playlists.id = music_playlist_songs.playlist_id").
-		Where("music_playlists.user_id = ? AND music_playlists.kind = ? AND music_playlist_songs.song_id IN ?", user.ID, "favorite", songIDs).
-		Order("music_playlist_songs.song_id ASC").
-		Pluck("music_playlist_songs.song_id", &ids).Error
-	return ids, err
-}
-
 func (s *Service) ListPlaylistBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.PlaylistBookmark, int64, error) {
 	return s.ListPlaylistBookmarksFiltered(user, page, pageSize, sort, "")
 }

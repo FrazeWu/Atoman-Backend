@@ -201,12 +201,11 @@ type songArtistRoleResponse struct {
 	Position   int       `json:"position"`
 }
 type songDetailResponse struct {
-	Song       model.Song               `json:"song"`
-	Artists    []songArtistRoleResponse `json:"artists"`
-	Previous   *model.Song              `json:"previous,omitempty"`
-	Next       *model.Song              `json:"next,omitempty"`
-	Bookmarked bool                     `json:"bookmarked"`
-	Playable   bool                     `json:"playable"`
+	Song     model.Song               `json:"song"`
+	Artists  []songArtistRoleResponse `json:"artists"`
+	Previous *model.Song              `json:"previous,omitempty"`
+	Next     *model.Song              `json:"next,omitempty"`
+	Playable bool                     `json:"playable"`
 }
 
 type createSongAudioReplacementRequest struct {
@@ -308,11 +307,6 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		})
 	}
 	result := songDetailResponse{Song: song, Artists: artists, Playable: strings.TrimSpace(song.AudioURL) != ""}
-	if user, ok := currentMusicUser(c); ok {
-		if ids, err := h.service.SongBookmarkIDs(user, []uuid.UUID{song.ID}); err == nil {
-			result.Bookmarked = len(ids) > 0
-		}
-	}
 	if song.AlbumID != nil {
 		previous, next := loadAdjacentAlbumSongs(h.service.db, song)
 		if previous.ID != uuid.Nil {
@@ -426,7 +420,7 @@ func (h *Handler) deleteFromLaterPlaylist(c *gin.Context) {
 // @Summary 获取个人音乐库
 // @Tags music
 // @Security BearerAuth
-// @Param kind query string false "song,album,artist,playlist,later"
+// @Param kind query string false "album,artist,playlist,later"
 // @Param q query string false "关键词"
 // @Param sort query string false "latest,popular,name"
 // @Router /api/v1/music/library [get]
@@ -436,18 +430,11 @@ func (h *Handler) library(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	kind := c.DefaultQuery("kind", "song")
+	kind := c.DefaultQuery("kind", "album")
 	query := c.Query("q")
 	sort := c.DefaultQuery("sort", "latest")
 	page, pageSize := httpx.PageParams(c)
 	switch kind {
-	case "song":
-		rows, total, err := h.service.ListSongBookmarksFiltered(user, page, pageSize, sort, query)
-		if err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		httpx.List(c, rows, page, pageSize, total)
 	case "album":
 		rows, total, err := h.service.ListAlbumBookmarksFiltered(user, page, pageSize, sort, query)
 		if err != nil {
@@ -477,6 +464,6 @@ func (h *Handler) library(c *gin.Context) {
 		}
 		httpx.List(c, rows, page, pageSize, total)
 	default:
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "kind must be song, album, artist, playlist, or later"))
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "kind must be album, artist, playlist, or later"))
 	}
 }

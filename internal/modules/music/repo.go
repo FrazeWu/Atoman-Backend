@@ -177,60 +177,6 @@ func (r *Repo) DeleteAlbumBookmark(userID uuid.UUID, albumID uuid.UUID) error {
 	return r.db.Where("user_id = ? AND album_id = ?", userID, albumID).Delete(&model.AlbumBookmark{}).Error
 }
 
-func (r *Repo) ListSongBookmarks(userID uuid.UUID, page int, pageSize int, sort string) ([]model.SongBookmark, int64, error) {
-	return r.ListSongBookmarksFiltered(userID, page, pageSize, sort, "")
-}
-
-func (r *Repo) ListSongBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.SongBookmark, int64, error) {
-	var total int64
-	db := r.db.Model(&model.PlaylistSong{}).
-		Joins("JOIN music_playlists ON music_playlists.id = music_playlist_songs.playlist_id").
-		Joins("JOIN \"Songs\" ON \"Songs\".id = music_playlist_songs.song_id").
-		Where("music_playlists.user_id = ? AND music_playlists.kind = ?", userID, "favorite")
-	if query = strings.TrimSpace(query); query != "" {
-		pattern := "%" + strings.ToLower(query) + "%"
-		db = db.Where(`LOWER("Songs".title) LIKE ? OR EXISTS (
-			SELECT 1 FROM song_artists
-			JOIN "Artists" ON "Artists".id = song_artists.artist_id
-			WHERE song_artists.song_id = "Songs".id AND LOWER("Artists".name) LIKE ?
-		)`, pattern, pattern)
-	}
-	if err := db.Count(&total).Error; err != nil {
-		return nil, 0, err
-	}
-	var entries []model.PlaylistSong
-	switch normalizeBookmarkSort(sort) {
-	case BookmarkSortPopular:
-		db = db.Order("\"Songs\".play_count DESC").
-			Order("music_playlist_songs.created_at DESC")
-	case BookmarkSortName:
-		db = db.Order("LOWER(\"Songs\".title) ASC").Order("music_playlist_songs.created_at DESC")
-	default:
-		db = db.Order("music_playlist_songs.created_at DESC")
-	}
-	err := db.Preload("Song.Artists").Preload("Song.Album").Limit(pageSize).Offset((page - 1) * pageSize).Find(&entries).Error
-	bookmarks := make([]model.SongBookmark, 0, len(entries))
-	for _, entry := range entries {
-		bookmarks = append(bookmarks, songBookmarkFromPlaylistSong(userID, entry))
-	}
-	return bookmarks, total, err
-}
-
-func (r *Repo) DeleteSongBookmark(userID uuid.UUID, songID uuid.UUID) error {
-	var playlist model.Playlist
-	if err := r.db.Where("user_id = ? AND kind = ?", userID, "favorite").First(&playlist).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		return err
-	}
-	return r.DeletePlaylistSong(playlist.ID, songID)
-}
-
-func songBookmarkFromPlaylistSong(userID uuid.UUID, entry model.PlaylistSong) model.SongBookmark {
-	return model.SongBookmark{Base: entry.Base, UserID: userID, SongID: entry.SongID, Song: entry.Song}
-}
-
 func (r *Repo) UpsertPlaylistBookmark(userID uuid.UUID, playlistID uuid.UUID) (model.PlaylistBookmark, error) {
 	bookmark := model.PlaylistBookmark{UserID: userID, PlaylistID: playlistID}
 	if err := r.db.Clauses(clause.OnConflict{DoNothing: true}).Create(&bookmark).Error; err != nil {

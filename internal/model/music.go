@@ -363,17 +363,6 @@ func (AlbumBookmark) TableName() string {
 	return "music_album_bookmarks"
 }
 
-type SongBookmark struct {
-	Base
-	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_song_bookmarks_user_song,priority:1,where:deleted_at IS NULL"`
-	SongID uuid.UUID `json:"song_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_song_bookmarks_user_song,priority:2,where:deleted_at IS NULL"`
-	Song   *Song     `json:"song,omitempty" gorm:"foreignKey:SongID"`
-}
-
-func (SongBookmark) TableName() string {
-	return "music_song_bookmarks"
-}
-
 type Playlist struct {
 	Base
 	UserID        uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`

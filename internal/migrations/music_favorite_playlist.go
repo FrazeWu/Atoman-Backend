@@ -10,6 +10,16 @@ import (
 	"gorm.io/gorm"
 )
 
+type legacySongBookmark struct {
+	model.Base
+	UserID uuid.UUID
+	SongID uuid.UUID
+}
+
+func (legacySongBookmark) TableName() string {
+	return "music_song_bookmarks"
+}
+
 func RunMusicFavoritePlaylistMigration(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&model.User{}) || !db.Migrator().HasTable(&model.Playlist{}) || !db.Migrator().HasTable(&model.PlaylistSong{}) {
 		return nil
@@ -30,8 +40,8 @@ func RunMusicFavoritePlaylistMigration(db *gorm.DB) error {
 			if err != nil {
 				return err
 			}
-			if tx.Migrator().HasTable(&model.SongBookmark{}) {
-				var bookmarks []model.SongBookmark
+			if tx.Migrator().HasTable(&legacySongBookmark{}) {
+				var bookmarks []legacySongBookmark
 				if err := tx.Where("user_id = ?", user.UUID).Order("created_at ASC, id ASC").Find(&bookmarks).Error; err != nil {
 					return fmt.Errorf("find song bookmarks: %w", err)
 				}
@@ -40,8 +50,8 @@ func RunMusicFavoritePlaylistMigration(db *gorm.DB) error {
 				}
 			}
 		}
-		if tx.Migrator().HasTable(&model.SongBookmark{}) {
-			if err := tx.Migrator().DropTable(&model.SongBookmark{}); err != nil {
+		if tx.Migrator().HasTable(&legacySongBookmark{}) {
+			if err := tx.Migrator().DropTable(&legacySongBookmark{}); err != nil {
 				return fmt.Errorf("drop standalone song bookmarks table: %w", err)
 			}
 		}
@@ -90,9 +100,9 @@ func ensureFavoritePlaylist(tx *gorm.DB, userID uuid.UUID) (model.Playlist, erro
 		if err := tx.Where("playlist_id = ?", duplicate.ID).Order("position ASC, created_at ASC").Find(&songs).Error; err != nil {
 			return model.Playlist{}, fmt.Errorf("find duplicate favorite songs: %w", err)
 		}
-		bookmarks := make([]model.SongBookmark, 0, len(songs))
+		bookmarks := make([]legacySongBookmark, 0, len(songs))
 		for _, song := range songs {
-			bookmarks = append(bookmarks, model.SongBookmark{Base: song.Base, UserID: userID, SongID: song.SongID})
+			bookmarks = append(bookmarks, legacySongBookmark{Base: song.Base, UserID: userID, SongID: song.SongID})
 		}
 		if err := appendFavoriteSongs(tx, favorite.ID, bookmarks); err != nil {
 			return model.Playlist{}, err
@@ -107,7 +117,7 @@ func ensureFavoritePlaylist(tx *gorm.DB, userID uuid.UUID) (model.Playlist, erro
 	return favorite, nil
 }
 
-func appendFavoriteSongs(tx *gorm.DB, playlistID uuid.UUID, bookmarks []model.SongBookmark) error {
+func appendFavoriteSongs(tx *gorm.DB, playlistID uuid.UUID, bookmarks []legacySongBookmark) error {
 	var maxPosition int
 	if err := tx.Model(&model.PlaylistSong{}).Where("playlist_id = ?", playlistID).
 		Select("COALESCE(MAX(position), 0)").Scan(&maxPosition).Error; err != nil {

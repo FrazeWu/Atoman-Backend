@@ -11022,54 +11022,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/music/bookmarks/songs/status": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-bookmarks"
-                ],
-                "summary": "批量查询歌曲收藏状态",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "逗号分隔的歌曲 UUID",
-                        "name": "song_ids",
-                        "in": "query",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "$ref": "#/definitions/music.SongBookmarkStatusResponse"
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/music/history": {
             "get": {
                 "security": [
@@ -12274,7 +12226,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "song,album,artist,playlist,later",
+                        "description": "album,artist,playlist,later",
                         "name": "kind",
                         "in": "query"
                     },
@@ -12637,6 +12589,67 @@ const docTemplate = `{
                     },
                     "500": {
                         "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/playlists/{id}/songs/status": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-playlists"
+                ],
+                "summary": "批量查询歌曲是否在歌单中",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌单 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "逗号分隔的歌曲 UUID",
+                        "name": "song_ids",
+                        "in": "query",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.PlaylistSongStatusResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -27534,6 +27547,22 @@ const docTemplate = `{
                 }
             }
         },
+        "music.PlaylistSongStatusResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "song_ids": {
+                            "type": "array",
+                            "items": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "music.PlaylistSongsListResponse": {
             "type": "object",
             "properties": {
@@ -27684,22 +27713,6 @@ const docTemplate = `{
                 },
                 "translation_included": {
                     "type": "boolean"
-                }
-            }
-        },
-        "music.SongBookmarkStatusResponse": {
-            "type": "object",
-            "properties": {
-                "data": {
-                    "type": "object",
-                    "properties": {
-                        "song_ids": {
-                            "type": "array",
-                            "items": {
-                                "type": "string"
-                            }
-                        }
-                    }
                 }
             }
         },

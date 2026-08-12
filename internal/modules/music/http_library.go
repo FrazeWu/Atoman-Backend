@@ -118,102 +118,6 @@ func (h *Handler) deleteAlbumBookmark(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
 }
 
-func (h *Handler) listSongBookmarks(c *gin.Context) {
-	user, ok := currentMusicUser(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	page, pageSize := httpx.PageParams(c)
-	sort := c.DefaultQuery("sort", "latest")
-	bookmarks, total, err := h.service.ListSongBookmarks(user, page, pageSize, sort)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.List(c, bookmarks, page, pageSize, total)
-}
-
-// songBookmarkStatus godoc
-// @Summary 批量查询歌曲收藏状态
-// @Tags music-bookmarks
-// @Produce json
-// @Param song_ids query string true "逗号分隔的歌曲 UUID"
-// @Security BearerAuth
-// @Security CookieAuth
-// @Success 200 {object} SongBookmarkStatusResponse
-// @Failure 400 {object} handlers.ErrorResponse
-// @Failure 401 {object} handlers.ErrorResponse
-// @Router /api/v1/music/bookmarks/songs/status [get]
-func (h *Handler) songBookmarkStatus(c *gin.Context) {
-	user, ok := currentMusicUser(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	rawIDs := strings.Split(c.Query("song_ids"), ",")
-	if len(rawIDs) == 0 || len(rawIDs) > 200 {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "song_ids must contain 1 to 200 song IDs"))
-		return
-	}
-	ids := make([]uuid.UUID, 0, len(rawIDs))
-	seen := make(map[uuid.UUID]struct{}, len(rawIDs))
-	for _, rawID := range rawIDs {
-		id, err := uuid.Parse(strings.TrimSpace(rawID))
-		if err != nil {
-			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "song_ids contains an invalid song ID"))
-			return
-		}
-		if _, exists := seen[id]; !exists {
-			seen[id] = struct{}{}
-			ids = append(ids, id)
-		}
-	}
-	bookmarkedIDs, err := h.service.SongBookmarkIDs(user, ids)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"song_ids": bookmarkedIDs})
-}
-
-func (h *Handler) createSongBookmark(c *gin.Context) {
-	user, ok := currentMusicUser(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	var req CreateSongBookmarkRequest
-	if err := bindJSON(c, &req); err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	bookmark, err := h.service.BookmarkSong(user, req.SongID)
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusCreated, bookmark)
-}
-
-func (h *Handler) deleteSongBookmark(c *gin.Context) {
-	user, ok := currentMusicUser(c)
-	if !ok {
-		httpx.Error(c, apperr.Unauthorized("Login required"))
-		return
-	}
-	songID, err := parseMusicID(c.Param("songId"), "songId")
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	if err := h.service.DeleteSongBookmark(user, songID); err != nil {
-		httpx.Error(c, err)
-		return
-	}
-	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
-}
-
 // listPlaylistBookmarks godoc
 // @Summary 获取当前用户收藏的歌单
 // @Tags music-bookmarks
@@ -524,6 +428,63 @@ func (h *Handler) listPlaylistSongs(c *gin.Context) {
 		return
 	}
 	httpx.List(c, songs, page, pageSize, total)
+}
+
+// playlistSongStatus godoc
+// @Summary 批量查询歌曲是否在歌单中
+// @Tags music-playlists
+// @Produce json
+// @Param id path string true "歌单 ID"
+// @Param song_ids query string true "逗号分隔的歌曲 UUID"
+// @Security BearerAuth
+// @Security CookieAuth
+// @Success 200 {object} PlaylistSongStatusResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/music/playlists/{id}/songs/status [get]
+func (h *Handler) playlistSongStatus(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	playlistID, err := parseMusicID(c.Param("id"), "id")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	songIDs, err := parsePlaylistSongIDs(c.Query("song_ids"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	matchedIDs, err := h.service.PlaylistSongIDs(user, playlistID, songIDs)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"song_ids": matchedIDs})
+}
+
+func parsePlaylistSongIDs(raw string) ([]uuid.UUID, error) {
+	parts := strings.Split(raw, ",")
+	if strings.TrimSpace(raw) == "" || len(parts) > 200 {
+		return nil, apperr.BadRequest("validation.invalid_request", "song_ids must contain 1 to 200 IDs")
+	}
+	ids := make([]uuid.UUID, 0, len(parts))
+	seen := make(map[uuid.UUID]struct{}, len(parts))
+	for _, part := range parts {
+		id, err := uuid.Parse(strings.TrimSpace(part))
+		if err != nil {
+			return nil, apperr.BadRequest("validation.invalid_request", "song_ids contains an invalid ID")
+		}
+		if _, exists := seen[id]; !exists {
+			seen[id] = struct{}{}
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
 }
 
 func (h *Handler) addPlaylistSong(c *gin.Context) {

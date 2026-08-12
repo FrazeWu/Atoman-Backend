@@ -9,7 +9,7 @@ import (
 
 func TestRunMusicFavoritePlaylistMigrationMovesBookmarksIntoFavoritePlaylist(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Song{}, &model.SongBookmark{}, &model.Playlist{}, &model.PlaylistSong{}, &model.PlaylistBookmark{})
+	testdb.Migrate(t, db, &model.User{}, &model.Song{}, &legacySongBookmark{}, &model.Playlist{}, &model.PlaylistSong{}, &model.PlaylistBookmark{})
 
 	user := model.User{Username: "favorite-migration", Email: "favorite-migration@example.com", Password: "hash", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -19,7 +19,7 @@ func TestRunMusicFavoritePlaylistMigrationMovesBookmarksIntoFavoritePlaylist(t *
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
-	bookmark := model.SongBookmark{UserID: user.UUID, SongID: song.ID}
+	bookmark := legacySongBookmark{UserID: user.UUID, SongID: song.ID}
 	if err := db.Create(&bookmark).Error; err != nil {
 		t.Fatalf("create song bookmark: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestRunMusicFavoritePlaylistMigrationMovesBookmarksIntoFavoritePlaylist(t *
 		t.Fatalf("rerun standalone bookmark migration: %v", err)
 	}
 
-	if db.Migrator().HasTable(&model.SongBookmark{}) {
+	if db.Migrator().HasTable(&legacySongBookmark{}) {
 		t.Fatal("expected standalone song bookmarks table to be removed")
 	}
 	var favorite model.Playlist

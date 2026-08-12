@@ -5593,6 +5593,16 @@ definitions:
       song_id:
         type: string
     type: object
+  music.PlaylistSongStatusResponse:
+    properties:
+      data:
+        properties:
+          song_ids:
+            items:
+              type: string
+            type: array
+        type: object
+    type: object
   music.PlaylistSongsListResponse:
     properties:
       data:
@@ -5691,16 +5701,6 @@ definitions:
         type: string
       translation_included:
         type: boolean
-    type: object
-  music.SongBookmarkStatusResponse:
-    properties:
-      data:
-        properties:
-          song_ids:
-            items:
-              type: string
-            type: array
-        type: object
     type: object
   music.Source:
     properties:
@@ -13425,35 +13425,6 @@ paths:
       summary: 取消收藏歌单
       tags:
       - music-bookmarks
-  /api/v1/music/bookmarks/songs/status:
-    get:
-      parameters:
-      - description: 逗号分隔的歌曲 UUID
-        in: query
-        name: song_ids
-        required: true
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/music.SongBookmarkStatusResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 批量查询歌曲收藏状态
-      tags:
-      - music-bookmarks
   /api/v1/music/history:
     delete:
       responses:
@@ -14205,7 +14176,7 @@ paths:
   /api/v1/music/library:
     get:
       parameters:
-      - description: song,album,artist,playlist,later
+      - description: album,artist,playlist,later
         in: query
         name: kind
         type: string
@@ -14392,6 +14363,44 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 调整歌单歌曲顺序
+      tags:
+      - music-playlists
+  /api/v1/music/playlists/{id}/songs/status:
+    get:
+      parameters:
+      - description: 歌单 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 逗号分隔的歌曲 UUID
+        in: query
+        name: song_ids
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.PlaylistSongStatusResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 批量查询歌曲是否在歌单中
       tags:
       - music-playlists
   /api/v1/music/playlists/later/{songId}:

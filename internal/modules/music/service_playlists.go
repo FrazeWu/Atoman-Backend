@@ -192,6 +192,24 @@ func (s *Service) ListPlaylistSongs(user authctx.CurrentUser, playlistID uuid.UU
 	return s.repo.ListPlaylistSongs(playlistID, page, pageSize)
 }
 
+func (s *Service) PlaylistSongIDs(user authctx.CurrentUser, playlistID uuid.UUID, songIDs []uuid.UUID) ([]uuid.UUID, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	if _, err := s.repo.GetPlaylistForUser(user.ID, playlistID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperr.NotFound("music.playlist_not_found", "Playlist not found")
+		}
+		return nil, err
+	}
+	var ids []uuid.UUID
+	err := s.db.Model(&model.PlaylistSong{}).
+		Where("playlist_id = ? AND song_id IN ?", playlistID, songIDs).
+		Order("song_id ASC").
+		Pluck("song_id", &ids).Error
+	return ids, err
+}
+
 func (s *Service) DeletePlaylistSong(user authctx.CurrentUser, playlistID uuid.UUID, songID uuid.UUID) error {
 	if user.ID == uuid.Nil {
 		return apperr.Unauthorized("Login required")

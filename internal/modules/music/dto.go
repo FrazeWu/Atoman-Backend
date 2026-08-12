@@ -60,10 +60,6 @@ type CreateAlbumBookmarkRequest struct {
 	AlbumID uuid.UUID `json:"album_id"`
 }
 
-type CreateSongBookmarkRequest struct {
-	SongID uuid.UUID `json:"song_id"`
-}
-
 type CreatePlaylistBookmarkRequest struct {
 	PlaylistID uuid.UUID `json:"playlist_id"`
 }
@@ -114,7 +110,7 @@ type RecordSongPlayRequest struct {
 	SongID uuid.UUID `json:"song_id"`
 }
 
-type SongBookmarkStatusResponse struct {
+type PlaylistSongStatusResponse struct {
 	Data struct {
 		SongIDs []uuid.UUID `json:"song_ids"`
 	} `json:"data"`
