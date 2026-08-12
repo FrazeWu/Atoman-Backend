@@ -597,16 +597,17 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 }
 
 type songAudioMetadata struct {
-	fileName     string
-	container    string
-	codec        string
-	bitrateKbps  int
-	sampleRateHz int
-	bitDepth     int
-	channels     int
-	sizeBytes    int64
-	lossless     bool
-	durationSec  int
+	fileName      string
+	container     string
+	codec         string
+	bitrateKbps   int
+	sampleRateHz  int
+	bitDepth      int
+	channels      int
+	sizeBytes     int64
+	lossless      bool
+	durationSec   int
+	waveformPeaks json.RawMessage
 }
 
 func songAudioMetadataFromImportFile(file model.AlbumImportFile) songAudioMetadata {
@@ -621,11 +622,12 @@ func songAudioMetadataFromImportFile(file model.AlbumImportFile) songAudioMetada
 		container = strings.TrimSpace(file.DetectedFormat)
 	}
 	codec := strings.TrimSpace(stringValue(values["codec"]))
+	waveformPeaks, _ := json.Marshal(values["waveform_peaks"])
 	return songAudioMetadata{
 		fileName: file.FileName, container: container, codec: codec, bitrateKbps: bitRate / 1000,
 		sampleRateHz: int(int64Value(values["sample_rate"])), bitDepth: int(int64Value(values["bit_depth"])),
 		channels: int(int64Value(values["channels"])), sizeBytes: file.Size,
-		lossless: isLosslessAudio(container, codec), durationSec: int(file.DurationSeconds + 0.5),
+		lossless: isLosslessAudio(container, codec), durationSec: int(file.DurationSeconds + 0.5), waveformPeaks: waveformPeaks,
 	}
 }
 
@@ -646,6 +648,9 @@ func applySongAudioMetadata(song *model.Song, metadata songAudioMetadata) {
 	song.PlaybackCodec = "mp3"
 	song.PlaybackBitrateKbps = 320
 	song.PlaybackChannels = metadata.channels
+	if len(metadata.waveformPeaks) > 0 && string(metadata.waveformPeaks) != "null" {
+		song.WaveformPeaks = metadata.waveformPeaks
+	}
 	if metadata.durationSec > 0 {
 		song.DurationSec = metadata.durationSec
 	}
@@ -755,10 +760,18 @@ func albumImportTracksFromDerived(payload map[string]any) []AlbumImportTrackPayl
 		if trackNumber <= 0 {
 			trackNumber = index + 1
 		}
-		tracks = append(tracks, AlbumImportTrackPayload{
+		track := AlbumImportTrackPayload{
 			SongID: stringValue(trackMap["song_id"]), Title: title,
 			DiscNumber: normalizedDiscNumber(int(int64Value(trackMap["disc_number"]))), TrackNumber: trackNumber,
-		})
+		}
+		if lyricsMap, ok := trackMap["lyrics"].(map[string]any); ok {
+			track.Lyrics = &AlbumImportTrackLyricsPayload{
+				Content: stringValue(lyricsMap["content"]), Translation: stringValue(lyricsMap["translation"]),
+				Format: stringValue(lyricsMap["format"]), Language: stringValue(lyricsMap["language"]),
+				EditSummary: stringValue(lyricsMap["edit_summary"]),
+			}
+		}
+		tracks = append(tracks, track)
 	}
 	return tracks
 }

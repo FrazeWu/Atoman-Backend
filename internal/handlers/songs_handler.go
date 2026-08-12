@@ -150,17 +150,18 @@ func GetSongsHandler(db *gorm.DB) gin.HandlerFunc {
 			}
 
 			response[i] = map[string]interface{}{
-				"id":           song.ID,
-				"title":        song.Title,
-				"artist":       artistName,
-				"album":        albumTitle,
-				"album_id":     song.AlbumID,
-				"year":         albumYear,
-				"release_date": releaseDate,
-				"lyrics":       song.Lyrics,
-				"audio_url":    resolveMediaURL(song.AudioURL),
-				"cover_url":    resolveMediaURL(coverURL),
-				"status":       song.Status,
+				"id":             song.ID,
+				"title":          song.Title,
+				"artist":         artistName,
+				"album":          albumTitle,
+				"album_id":       song.AlbumID,
+				"year":           albumYear,
+				"release_date":   releaseDate,
+				"lyrics":         song.Lyrics,
+				"audio_url":      resolveMediaURL(song.AudioURL),
+				"waveform_peaks": song.WaveformPeaks,
+				"cover_url":      resolveMediaURL(coverURL),
+				"status":         song.Status,
 			}
 		}
 
@@ -214,17 +215,18 @@ func GetSongHandler(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		response := map[string]interface{}{
-			"id":           song.ID,
-			"title":        song.Title,
-			"artist":       artistName,
-			"album":        albumTitle,
-			"album_id":     song.AlbumID,
-			"year":         albumYear,
-			"release_date": releaseDate,
-			"lyrics":       song.Lyrics,
-			"audio_url":    resolveMediaURL(song.AudioURL),
-			"cover_url":    resolveMediaURL(coverURL),
-			"status":       song.Status,
+			"id":             song.ID,
+			"title":          song.Title,
+			"artist":         artistName,
+			"album":          albumTitle,
+			"album_id":       song.AlbumID,
+			"year":           albumYear,
+			"release_date":   releaseDate,
+			"lyrics":         song.Lyrics,
+			"audio_url":      resolveMediaURL(song.AudioURL),
+			"waveform_peaks": song.WaveformPeaks,
+			"cover_url":      resolveMediaURL(coverURL),
+			"status":         song.Status,
 		}
 
 		c.JSON(http.StatusOK, response)

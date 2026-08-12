@@ -820,13 +820,20 @@ func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID 
 	}
 	defer os.RemoveAll(dir)
 	outputPath := filepath.Join(dir, "playback.mp3")
-	args := []string{"-y"}
+	args := []string{"-y", "-v", "error"}
 	if len(rangeSeconds) == 2 {
 		args = append(args, "-ss", strconv.FormatFloat(rangeSeconds[0], 'f', -1, 64), "-to", strconv.FormatFloat(rangeSeconds[1], 'f', -1, 64))
 	}
-	args = append(args, "-i", sourcePath, "-vn", "-c:a", "libmp3lame", "-b:a", "320k", outputPath)
-	if _, err := p.runner.Run(ctx, "ffmpeg", args...); err != nil {
+	args = append(args, "-i", sourcePath,
+		"-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-b:a", "320k", outputPath,
+		"-map", "0:a:0", "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1")
+	waveformPCM, err := p.runner.Run(ctx, "ffmpeg", args...)
+	if err != nil {
 		return fmt.Errorf("ffmpeg %s: %w", file.FileName, err)
+	}
+	waveformPeaks := waveformPeaksFromPCM(waveformPCM, WaveformPeakCount)
+	if len(waveformPeaks) != WaveformPeakCount {
+		return fmt.Errorf("generate waveform %s: empty audio output", file.FileName)
 	}
 	output, err := os.Open(outputPath)
 	if err != nil {
@@ -854,7 +861,9 @@ func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID 
 	if overrideTrack > 0 {
 		track = overrideTrack
 	}
-	metadataJSON, _ := json.Marshal(metadata.archiveMetadata())
+	metadataValues := metadata.archiveMetadata()
+	metadataValues["waveform_peaks"] = waveformPeaks
+	metadataJSON, _ := json.Marshal(metadataValues)
 	return p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Updates(map[string]any{
 		"playback_key": playbackKey, "title": title, "disc_number": disc, "track_number": track,
 		"duration_seconds": duration, "metadata_json": string(metadataJSON), "processing_status": "completed", "error_message": "",

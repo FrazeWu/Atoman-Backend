@@ -2706,6 +2706,10 @@ definitions:
       title:
         example: Track One
         type: string
+      waveform_peaks:
+        items:
+          type: integer
+        type: array
       year:
         example: 2026
         type: integer
@@ -4352,6 +4356,10 @@ definitions:
         type: string
       user:
         $ref: '#/definitions/model.User'
+      waveform_peaks:
+        items:
+          type: integer
+        type: array
     type: object
   model.SongArtist:
     properties:
@@ -5579,6 +5587,10 @@ definitions:
         type: string
       track_number:
         type: integer
+      waveform_peaks:
+        items:
+          type: integer
+        type: array
     type: object
   music.PlaylistSongResponse:
     properties:

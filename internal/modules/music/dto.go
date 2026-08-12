@@ -1,6 +1,7 @@
 package music
 
 import (
+	"encoding/json"
 	"time"
 
 	"atoman/internal/model"
@@ -224,12 +225,13 @@ type MusicHomeSection struct {
 }
 
 type PlaylistSongDetail struct {
-	ID          uuid.UUID `json:"id"`
-	Title       string    `json:"title"`
-	TrackNumber int       `json:"track_number"`
-	AudioURL    string    `json:"audio_url"`
-	CoverURL    string    `json:"cover_url"`
-	EntryStatus string    `json:"entry_status"`
+	ID            uuid.UUID       `json:"id"`
+	Title         string          `json:"title"`
+	TrackNumber   int             `json:"track_number"`
+	AudioURL      string          `json:"audio_url"`
+	WaveformPeaks json.RawMessage `json:"waveform_peaks" swaggertype:"array,integer"`
+	CoverURL      string          `json:"cover_url"`
+	EntryStatus   string          `json:"entry_status"`
 }
 
 type ArtistMemberGroupItemResponse struct {

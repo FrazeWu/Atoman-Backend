@@ -23269,6 +23269,12 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Track One"
                 },
+                "waveform_peaks": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
                 "year": {
                     "type": "integer",
                     "example": 2026
@@ -25725,6 +25731,12 @@ const docTemplate = `{
                 },
                 "user": {
                     "$ref": "#/definitions/model.User"
+                },
+                "waveform_peaks": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 }
             }
         },
@@ -27586,6 +27598,12 @@ const docTemplate = `{
                 },
                 "track_number": {
                     "type": "integer"
+                },
+                "waveform_peaks": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 }
             }
         },

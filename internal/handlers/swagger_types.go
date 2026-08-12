@@ -504,17 +504,18 @@ type ConflictWithIDResponse struct {
 }
 
 type SongPublicItem struct {
-	ID          string `json:"id" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
-	Title       string `json:"title" example:"Track One"`
-	Artist      string `json:"artist" example:"Fafa"`
-	Album       string `json:"album" example:"Paper Notes"`
-	AlbumID     string `json:"album_id,omitempty" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8b"`
-	Year        int    `json:"year" example:"2026"`
-	ReleaseDate string `json:"release_date" example:"2026-05-25"`
-	Lyrics      string `json:"lyrics" example:"Hello world"`
-	AudioURL    string `json:"audio_url" example:"https://cdn.example.com/song.mp3"`
-	CoverURL    string `json:"cover_url" example:"https://cdn.example.com/cover.jpg"`
-	Status      string `json:"status" example:"open"`
+	ID            string `json:"id" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
+	Title         string `json:"title" example:"Track One"`
+	Artist        string `json:"artist" example:"Fafa"`
+	Album         string `json:"album" example:"Paper Notes"`
+	AlbumID       string `json:"album_id,omitempty" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8b"`
+	Year          int    `json:"year" example:"2026"`
+	ReleaseDate   string `json:"release_date" example:"2026-05-25"`
+	Lyrics        string `json:"lyrics" example:"Hello world"`
+	AudioURL      string `json:"audio_url" example:"https://cdn.example.com/song.mp3"`
+	WaveformPeaks []int  `json:"waveform_peaks"`
+	CoverURL      string `json:"cover_url" example:"https://cdn.example.com/cover.jpg"`
+	Status        string `json:"status" example:"open"`
 }
 
 type ArtistUpdateInput struct {
