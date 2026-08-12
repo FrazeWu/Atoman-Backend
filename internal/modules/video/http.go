@@ -13,6 +13,8 @@ func RegisterRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	v := router.Group("/api/v1/videos")
 	v.GET("", middleware.OptionalAuthMiddleware(), handlers.GetVideos(db))
 	v.GET("/recommend/items", handlers.GetRecommendedVideoItems(db))
+	v.GET("/subscriptions", middleware.AuthMiddleware(), handlers.GetSubscribedVideos(db))
+	v.GET("/collection-bookmarks", middleware.AuthMiddleware(), handlers.GetVideoCollectionBookmarks(db))
 	v.POST("/:id/reprocess", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), handlers.ReprocessVideo(db))
 	v.GET("/:id", handlers.GetVideo(db))
 	v.GET("/:id/recommended", handlers.GetRecommendedVideos(db))

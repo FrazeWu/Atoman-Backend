@@ -585,6 +585,73 @@ func TestVideoChannelBookmarksExcludePodcastShowBookmarks(t *testing.T) {
 	require.NotContains(t, w.Body.String(), podcastBookmark.ID.String())
 }
 
+func TestGetSubscribedVideosReturnsVideoChannelAndCollectionUpdates(t *testing.T) {
+	db := newVideoTestDB(t)
+	viewer := seedVideoUser(t, db)
+	channelOwner := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, channelOwner.UUID, "Subscribed Videos")
+	otherChannel := seedVideoChannel(t, db, channelOwner.UUID, "Other Videos")
+	collection := seedVideoCollection(t, db, channel.ID, "Subscribed Collection")
+	channelVideo := seedVideoWithState(t, db, channelOwner.UUID, "published", "public")
+	collectionVideo := seedVideoWithState(t, db, channelOwner.UUID, "published", "public")
+	unsubscribedVideo := seedVideoWithState(t, db, channelOwner.UUID, "published", "public")
+	for _, video := range []*model.Video{&channelVideo, &collectionVideo} {
+		require.NoError(t, db.Model(video).Update("channel_id", channel.ID).Error)
+	}
+	require.NoError(t, db.Model(&unsubscribedVideo).Update("channel_id", otherChannel.ID).Error)
+	require.NoError(t, db.Create(&model.VideoCollection{VideoID: collectionVideo.ID, CollectionID: collection.ID}).Error)
+
+	channelSource := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Hash: "video-sub-channel"}
+	collectionSource := model.FeedSource{SourceType: "internal_collection", SourceID: &collection.ID, Hash: "video-sub-collection"}
+	require.NoError(t, db.Create(&channelSource).Error)
+	require.NoError(t, db.Create(&collectionSource).Error)
+	require.NoError(t, db.Create(&model.Subscription{UserID: viewer.UUID, FeedSourceID: channelSource.ID}).Error)
+	require.NoError(t, db.Create(&model.Subscription{UserID: viewer.UUID, FeedSourceID: collectionSource.ID}).Error)
+
+	r := gin.New()
+	r.GET("/api/v1/videos/subscriptions", withVideoAuth(viewer.UUID, GetSubscribedVideos(db)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/videos/subscriptions", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var videos []model.Video
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &videos))
+	ids := make([]uuid.UUID, 0, len(videos))
+	for _, video := range videos {
+		ids = append(ids, video.ID)
+	}
+	require.ElementsMatch(t, []uuid.UUID{channelVideo.ID, collectionVideo.ID}, ids)
+	require.NotContains(t, ids, unsubscribedVideo.ID)
+}
+
+func TestGetVideoCollectionBookmarksReturnsOnlyVideoCollections(t *testing.T) {
+	db := newVideoTestDB(t)
+	viewer := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, viewer.UUID, "Bookmark Collections")
+	videoCollection := seedVideoCollection(t, db, channel.ID, "Video Collection")
+	blogCollection := model.Collection{ChannelID: channel.ID, ContentType: "blog", Name: "Blog Collection"}
+	require.NoError(t, db.Create(&blogCollection).Error)
+	videoSource := model.FeedSource{SourceType: "internal_collection", SourceID: &videoCollection.ID, Hash: "video-bookmark-collection"}
+	blogSource := model.FeedSource{SourceType: "internal_collection", SourceID: &blogCollection.ID, Hash: "blog-bookmark-collection"}
+	require.NoError(t, db.Create(&videoSource).Error)
+	require.NoError(t, db.Create(&blogSource).Error)
+	require.NoError(t, db.Create(&model.Subscription{UserID: viewer.UUID, FeedSourceID: videoSource.ID}).Error)
+	require.NoError(t, db.Create(&model.Subscription{UserID: viewer.UUID, FeedSourceID: blogSource.ID}).Error)
+
+	r := gin.New()
+	r.GET("/api/v1/videos/collection-bookmarks", withVideoAuth(viewer.UUID, GetVideoCollectionBookmarks(db)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/videos/collection-bookmarks", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var response struct {
+		Data []struct {
+			Collection model.Collection `json:"collection"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	require.Len(t, response.Data, 1)
+	require.Equal(t, videoCollection.ID, response.Data[0].Collection.ID)
+}
+
 func TestSetupVideoRoutesMountsRecommendationItemsEndpoint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newVideoTestDB(t)
