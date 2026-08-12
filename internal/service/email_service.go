@@ -253,42 +253,68 @@ func (s *EmailService) buildVerificationEmail(code, purpose string) string {
 	}
 	return fmt.Sprintf(`
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-  <meta charset="UTF-8">
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1f2937; }
-    .container { max-width: 600px; margin: 0 auto; padding: 2rem; }
-    .header { background: #000; color: #fff; padding: 2rem; text-align: center; }
-    .header h1 { margin: 0; font-size: 1.5rem; font-weight: 900; }
-    .content { background: #fff; padding: 2rem; border: 2px solid #000; margin-top: -2px; }
-    .code-box { background: #f9fafb; border: 2px solid #000; padding: 1.5rem; text-align: center; margin: 1.5rem 0; }
-    .code { font-size: 2rem; font-weight: 900; letter-spacing: 0.5em; font-family: monospace; }
-    .footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e5e7eb; font-size: 0.875rem; color: #6b7280; }
-  </style>
+	  <meta charset="UTF-8">
+	  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+	  <style>
+	    body { margin: 0; padding: 0; background: #f8fafc; color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; }
+	    .email-shell { width: 100%%; padding: 40px 16px; }
+	    .email-card { width: 100%%; max-width: 560px; margin: 0 auto; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 4px; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08); }
+	    .brand-bar { padding: 24px 32px; border-bottom: 1px solid #e2e8f0; }
+	    .brand-mark { display: inline-block; width: 28px; height: 28px; margin-right: 10px; border-radius: 4px; background: #2563eb; color: #ffffff; font-size: 16px; font-weight: 700; line-height: 28px; text-align: center; vertical-align: middle; }
+	    .brand-name { color: #0f172a; font-size: 18px; font-weight: 600; line-height: 28px; vertical-align: middle; }
+	    .content { padding: 36px 32px 32px; }
+	    .eyebrow { margin: 0 0 8px; color: #2563eb; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: uppercase; }
+	    .title { margin: 0; color: #0f172a; font-size: 24px; font-weight: 600; line-height: 1.3; }
+	    .description { margin: 16px 0 0; color: #334155; font-size: 16px; }
+	    .code-box { margin: 28px 0 20px; padding: 22px 16px; border: 1px solid #bfdbfe; border-radius: 4px; background: #eff6ff; text-align: center; }
+	    .code-label { margin: 0 0 8px; color: #64748b; font-size: 12px; }
+	    .code { color: #1d4ed8; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace; font-size: 32px; font-weight: 600; letter-spacing: 6px; line-height: 1.2; }
+	    .notice { margin: 0; color: #64748b; font-size: 14px; }
+	    .footer { margin-top: 32px; padding-top: 20px; border-top: 1px solid #e2e8f0; color: #94a3b8; font-size: 12px; }
+	    .footer p { margin: 4px 0; }
+	    @media only screen and (max-width: 600px) {
+	      .email-shell { padding: 20px 12px; }
+	      .brand-bar, .content { padding-left: 24px; padding-right: 24px; }
+	      .code { font-size: 28px; letter-spacing: 4px; }
+	    }
+	  </style>
 </head>
 <body>
-  <div class="container">
-    <div class="header">
-      <h1>Atoman</h1>
-    </div>
-    <div class="content">
-	      <h2>%s</h2>
-	      <p>%s</p>
-      
-      <div class="code-box">
-        <div class="code">%s</div>
-      </div>
-      
-      <p>验证码有效期为 <strong>10 分钟</strong>。请勿将此验证码分享给他人。</p>
-	      <p>%s</p>
-      
-      <div class="footer">
-        <p>此邮件由 Atoman系统自动发送，请勿回复。</p>
-        <p>&copy; 2026 Atoman. All rights reserved.</p>
-      </div>
-    </div>
-  </div>
+	  <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%%">
+	    <tr>
+	      <td class="email-shell">
+	        <table role="presentation" cellpadding="0" cellspacing="0" border="0" class="email-card">
+	          <tr>
+	            <td class="brand-bar">
+	              <span class="brand-mark">A</span><span class="brand-name">Atoman</span>
+	            </td>
+	          </tr>
+	          <tr>
+	            <td class="content">
+	              <p class="eyebrow">Atoman 账户</p>
+	              <h1 class="title">%s</h1>
+	              <p class="description">%s</p>
+
+	              <div class="code-box">
+	                <p class="code-label">验证码</p>
+	                <div class="code">%s</div>
+	              </div>
+
+	              <p class="notice">验证码有效期为 <strong>10 分钟</strong>。请勿将此验证码分享给他人。</p>
+	              <p class="notice" style="margin-top: 8px;">%s</p>
+
+	              <div class="footer">
+	                <p>此邮件由 Atoman 自动发送，请勿直接回复。</p>
+	                <p>&copy; 2026 Atoman. All rights reserved.</p>
+	              </div>
+	            </td>
+	          </tr>
+	        </table>
+	      </td>
+	    </tr>
+	  </table>
 </body>
 </html>
 	`, title, description, code, ignoreMessage)
