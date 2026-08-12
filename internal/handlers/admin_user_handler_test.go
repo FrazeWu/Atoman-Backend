@@ -163,12 +163,8 @@ func TestAdminCanCreateOnlyRegularUsers(t *testing.T) {
 	if err := env.db.Model(&model.Playlist{}).Where("user_id = ?", user.UUID).Count(&playlists).Error; err != nil {
 		t.Fatalf("count music playlists: %v", err)
 	}
-	if playlists != 1 {
-		t.Fatalf("expected one implicit favorite playlist, got %d", playlists)
-	}
-	var favorite model.Playlist
-	if err := env.db.Where("user_id = ?", user.UUID).First(&favorite).Error; err != nil || favorite.Kind != "favorite" {
-		t.Fatalf("expected favorite system playlist, got %#v, err=%v", favorite, err)
+	if playlists != 0 {
+		t.Fatalf("expected music playlists to be created on demand, got %d", playlists)
 	}
 
 	forbidden := env.request(t, http.MethodPost, "/api/v1/admin/users", `{"username":"new-admin","email":"new-admin@example.com","password":"secret123","role":"admin"}`)

@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"net/http"
-	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -10,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/httpx"
 )
 
 // ====== Person Handlers ======
@@ -27,15 +27,8 @@ import (
 // @Router /api/v1/timeline/persons [get]
 func GetTimelinePersons(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
-		if page < 1 {
-			page = 1
-		}
-		if limit < 1 || limit > 100 {
-			limit = 20
-		}
-		offset := (page - 1) * limit
+		page, limit := httpx.PageParamsWith(c, "limit", 20, 100)
+		offset := httpx.Offset(page, limit)
 
 		search := c.Query("search")
 		query := db.Model(&model.TimelinePerson{}).Preload("User").Where("is_public = ?", true)

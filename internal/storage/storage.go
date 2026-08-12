@@ -163,10 +163,7 @@ func DeleteS3Object(s3Client *s3.S3, key string) error {
 		return nil
 	}
 
-	_, err := s3Client.DeleteObject(&s3.DeleteObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-	})
+	err := DeleteObject(s3Client, bucket, key)
 	if err != nil {
 		log.Printf("Failed to delete S3 object %s from bucket %s: %v", key, bucket, err)
 		return err

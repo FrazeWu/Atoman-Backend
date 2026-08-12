@@ -8,21 +8,17 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/url"
 	"os"
 	"os/signal"
 	"regexp"
 	"strings"
 	"syscall"
-	"time"
 
 	docs "atoman/docs"
 
 	"github.com/google/uuid"
 
-	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	_ "github.com/lib/pq" // PostgreSQL array type support
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
@@ -39,7 +35,6 @@ import (
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/service"
-	"atoman/internal/storage"
 )
 
 //go:generate go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g cmd/start_server/main.go -d ../.. -o ../../docs
@@ -379,110 +374,6 @@ func handlersSlugify(value string) string {
 	return mapped
 }
 
-func resolveEnvFile(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", "dev":
-		return ".env.dev"
-	case "prod":
-		return ".env.prod"
-	default:
-		return ".env.dev"
-	}
-}
-
-func loadEnvironment(mode string) string {
-	envFile := resolveEnvFile(mode)
-	if err := godotenv.Load(envFile); err == nil {
-		return "Loaded " + envFile
-	}
-	if err := godotenv.Load(".env"); err == nil {
-		return "Loaded .env"
-	}
-	return "No .env file found, using system environment variables"
-}
-
-func initializeStorageClient() *s3.S3 {
-	if os.Getenv("STORAGE_TYPE") == "local" {
-		log.Println("Storage mode: local (S3 disabled)")
-		return nil
-	}
-
-	s3Client, err := storage.InitS3Client()
-	if err != nil {
-		log.Printf("WARN: S3 storage unavailable; storage-backed endpoints will return 503: %v", err)
-		return nil
-	}
-	if err := storage.ValidateS3Connection(s3Client); err != nil {
-		log.Printf("WARN: S3 storage unavailable; storage-backed endpoints will return 503: %v", err)
-		return nil
-	}
-
-	log.Println("S3 storage initialized")
-	return s3Client
-}
-
-func configuredAllowedOrigins() []string {
-	allowedOrigins := []string{
-		"http://localhost:5173",
-		"http://localhost:3000",
-		"http://127.0.0.1:5173",
-		"http://127.0.0.1:3000",
-	}
-	for _, origin := range strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",") {
-		origin = strings.TrimSpace(origin)
-		if origin != "" {
-			allowedOrigins = append(allowedOrigins, origin)
-		}
-	}
-	return allowedOrigins
-}
-
-func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		origin := c.Request.Header.Get("Origin")
-		isAllowed := originAllowed(origin, allowedOrigins)
-
-		if isAllowed {
-			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
-			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		}
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Request-ID")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE, PATCH")
-
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
-			return
-		}
-
-		c.Next()
-	}
-}
-
-func originAllowed(origin string, allowedOrigins []string) bool {
-	for _, allowed := range allowedOrigins {
-		if origin == allowed {
-			return true
-		}
-		if strings.HasPrefix(allowed, "*.") {
-			suffix := strings.TrimPrefix(allowed, "*.")
-			if strings.HasPrefix(origin, "https://") && strings.HasSuffix(strings.TrimPrefix(origin, "https://"), suffix) {
-				return true
-			}
-			if strings.HasPrefix(origin, "http://") && strings.HasSuffix(strings.TrimPrefix(origin, "http://"), suffix) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func validateAuthEnvironment() error {
-	if os.Getenv("ENV") == "production" && strings.TrimSpace(os.Getenv("AUTH_CODE_SECRET")) == "" {
-		return fmt.Errorf("AUTH_CODE_SECRET environment variable is required")
-	}
-	return nil
-}
-
 func main() {
 	mode := flag.String("mode", "dev", "startup mode: dev or prod")
 	flag.Parse()
@@ -538,24 +429,7 @@ func main() {
 		}
 		log.Println("Database migrations completed")
 
-		// Seed default site settings (idempotent)
-		db.Exec(`INSERT INTO site_settings (key, value, description, updated_at)
-VALUES ('forum.solved_auto_threshold', '10', '回复点赞数达到该值时自动标记为解决方案', NOW())
-ON CONFLICT (key) DO NOTHING`)
-		db.Exec(`INSERT INTO site_settings (key, value, description, updated_at)
-VALUES ('site.module_access', '{"modules":{"feed":{"visible":true,"features":{"subscription.manage":true}},"music":{"visible":true,"features":{"music.submit":true,"music.review":true}},"blog":{"visible":true,"features":{"post.create":true,"channel.manage":true}},"forum":{"visible":true,"features":{"topic.create":true,"category.request":true}},"debate":{"visible":true,"features":{"debate.create":true,"debate.edit":true}},"timeline":{"visible":true,"features":{"timeline.edit":true}},"podcast":{"visible":true,"features":{"podcast.publish":true}},"video":{"visible":true,"features":{"video.publish":true}}}}', '模块可见性与功能开放配置', NOW())
-ON CONFLICT (key) DO NOTHING`)
-
-		log.Println("Running blog channel field backfill...")
-		backfillBlogChannelFields(db)
-		log.Println("Running external RSS full text enablement backfill...")
-		backfillExternalRSSFullTextEnabled(db)
-		log.Println("Running internal RSS feed source backfill...")
-		backfillInternalRSSFeedSources(db)
-
-		ensureSoftDeleteColumns(db)
-
-		if err := bootstrapOwnerFromEnv(db); err != nil {
+		if err := runStartupMaintenance(db); err != nil {
 			log.Fatal("Failed to bootstrap owner user: ", err)
 		}
 
@@ -620,66 +494,4 @@ ON CONFLICT (key) DO NOTHING`)
 		log.Printf("WARN: timed out waiting for background workers to stop: %v", err)
 	}
 	log.Println("Server stopped")
-}
-
-func waitForWorkers(timeout time.Duration, workers ...<-chan struct{}) error {
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	for _, done := range workers {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	return nil
-}
-
-func databaseLogTarget(dbType string, rawURL string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	if strings.Contains(rawURL, "=") && !strings.Contains(rawURL, "://") {
-		return databaseLogTargetFromDSN(dbType, rawURL)
-	}
-
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return strings.TrimSpace(dbType) + " database"
-	}
-
-	parts := []string{strings.TrimSpace(dbType) + " database"}
-	if host := parsed.Host; host != "" {
-		parts = append(parts, "host="+host)
-	}
-	if dbName := strings.TrimPrefix(parsed.EscapedPath(), "/"); dbName != "" {
-		if decoded, err := url.PathUnescape(dbName); err == nil {
-			dbName = decoded
-		}
-		parts = append(parts, "dbname="+dbName)
-	}
-	return strings.Join(parts, " ")
-}
-
-func databaseLogTargetFromDSN(dbType string, dsn string) string {
-	values := map[string]string{}
-	for _, field := range strings.Fields(dsn) {
-		key, value, ok := strings.Cut(field, "=")
-		if !ok {
-			continue
-		}
-		values[key] = strings.Trim(value, "'\"")
-	}
-
-	parts := []string{strings.TrimSpace(dbType) + " database"}
-	host := values["host"]
-	if port := values["port"]; host != "" && port != "" {
-		host += ":" + port
-	}
-	if host != "" {
-		parts = append(parts, "host="+host)
-	}
-	if dbName := values["dbname"]; dbName != "" {
-		parts = append(parts, "dbname="+dbName)
-	}
-	return strings.Join(parts, " ")
 }

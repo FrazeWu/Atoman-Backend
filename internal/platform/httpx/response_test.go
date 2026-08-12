@@ -101,3 +101,61 @@ func TestPageParamsAndOffset(t *testing.T) {
 		t.Fatalf("unexpected pagination data: %#v", body.Data)
 	}
 }
+
+func TestPageParamsClampsPageSize(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", func(c *gin.Context) {
+		page, pageSize := PageParams(c)
+		OK(c, http.StatusOK, gin.H{"page": page, "page_size": pageSize})
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/?page_size=101", nil))
+	var body struct {
+		Data struct {
+			PageSize int `json:"page_size"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Data.PageSize != 100 {
+		t.Fatalf("expected page size 100, got %d", body.Data.PageSize)
+	}
+}
+
+func TestPageParamsWithUsesNamedSizeAndConfiguredBounds(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", func(c *gin.Context) {
+		page, limit := PageParamsWith(c, "limit", 50, 200)
+		OK(c, http.StatusOK, gin.H{"page": page, "limit": limit})
+	})
+	for _, test := range []struct {
+		name      string
+		query     string
+		wantLimit int
+	}{
+		{name: "configured value", query: "?page=2&limit=150", wantLimit: 150},
+		{name: "over limit", query: "?limit=201", wantLimit: 50},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/"+test.query, nil))
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d", w.Code)
+			}
+			var body struct {
+				Data struct {
+					Limit int `json:"limit"`
+				} `json:"data"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body.Data.Limit != test.wantLimit {
+				t.Fatalf("expected limit %d, got %d", test.wantLimit, body.Data.Limit)
+			}
+		})
+	}
+}

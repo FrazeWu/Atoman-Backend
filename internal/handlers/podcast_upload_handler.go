@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -114,13 +113,7 @@ func UploadPodcastAudio(s3Client *s3.S3) gin.HandlerFunc {
 		if !requireS3(c, s3Client) {
 			return
 		}
-		if _, err := s3Client.PutObject(&s3.PutObjectInput{
-			Bucket:      aws.String(os.Getenv("S3_BUCKET")),
-			Key:         aws.String(s3Key),
-			Body:        file,
-			ContentType: aws.String(ct),
-			ACL:         aws.String("public-read"),
-		}); err != nil {
+		if err := storage.PutPublicObject(s3Client, os.Getenv("S3_BUCKET"), s3Key, ct, file); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "上传至存储失败"})
 			return
 		}
@@ -203,13 +196,7 @@ func UploadPodcastCover(s3Client *s3.S3) gin.HandlerFunc {
 		if !requireS3(c, s3Client) {
 			return
 		}
-		if _, err := s3Client.PutObject(&s3.PutObjectInput{
-			Bucket:      aws.String(os.Getenv("S3_BUCKET")),
-			Key:         aws.String(s3Key),
-			Body:        file,
-			ContentType: aws.String(ct),
-			ACL:         aws.String("public-read"),
-		}); err != nil {
+		if err := storage.PutPublicObject(s3Client, os.Getenv("S3_BUCKET"), s3Key, ct, file); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "上传至存储失败"})
 			return
 		}

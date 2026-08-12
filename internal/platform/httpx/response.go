@@ -48,6 +48,15 @@ func PageParams(c *gin.Context) (int, int) {
 	return page, pageSize
 }
 
+func PageParamsWith(c *gin.Context, sizeKey string, defaultSize, maxSize int) (int, int) {
+	page := parsePositiveInt(c.Query("page"), 1)
+	pageSize := parsePositiveInt(c.Query(sizeKey), defaultSize)
+	if pageSize > maxSize {
+		pageSize = defaultSize
+	}
+	return page, pageSize
+}
+
 func Offset(page int, pageSize int) int {
 	if page < 1 {
 		page = 1

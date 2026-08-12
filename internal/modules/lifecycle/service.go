@@ -400,6 +400,9 @@ func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool
 		if strings.TrimSpace(video.Title) == "" || strings.TrimSpace(video.VideoURL) == "" || collections == 0 {
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Video title, source, and collection are required")
 		}
+		if video.StorageType == "local" && strings.HasPrefix(video.VideoURL, "/uploads/") && video.ProcessingStatus != "ready" {
+			return apperr.Conflict("lifecycle.content_processing", "Video processing must finish before publishing")
+		}
 	default:
 		return apperr.BadRequest("lifecycle.invalid_module", "module must be blog, podcast, or video")
 	}

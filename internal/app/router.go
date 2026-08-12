@@ -16,10 +16,13 @@ import (
 	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/music"
 	"atoman/internal/modules/notification"
+	"atoman/internal/modules/podcast"
 	"atoman/internal/modules/portal"
 	"atoman/internal/modules/reference"
 	"atoman/internal/modules/shortnote"
 	"atoman/internal/modules/studio"
+	"atoman/internal/modules/timeline"
+	"atoman/internal/modules/video"
 	"atoman/internal/service"
 
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -64,6 +67,9 @@ func RegisterV1Routes(
 	portal.RegisterRoutes(group.Group("/portal"), portal.NewService(db))
 	studio.RegisterRoutes(group.Group("/studio"), studio.NewService(db))
 	lifecycle.RegisterRoutes(group.Group("/content"), lifecycle.NewService(db))
+	timeline.RegisterRoutes(r, db)
+	video.RegisterRoutes(r, db, s3Client)
+	podcast.RegisterRoutes(r, db, s3Client)
 
 	handlers.SetupAuthRoutes(r, db, emailService)
 	handlers.SetupSiteRoutes(r, db)
@@ -76,11 +82,8 @@ func RegisterV1Routes(
 	handlers.SetupArtistRoutes(r, db)
 	handlers.SetupArtistWikiRoutes(r, db, s3Client)
 	handlers.SetupEntryStatusRoutes(r, db)
-	handlers.SetupTimelineRoutes(r, db)
-	handlers.SetupVideoRoutes(r, db, s3Client)
 	handlers.SetupRevisionRoutes(r, db, s3Client)
 	handlers.SetupProtectionRoutes(r, db)
-	handlers.SetupPodcastRoutes(r, db, s3Client)
 	handlers.SetupAdminRoutes(r, db, s3Client)
 
 	r.GET("/ws/user", func(c *gin.Context) {

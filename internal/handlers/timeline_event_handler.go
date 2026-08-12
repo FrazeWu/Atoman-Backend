@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/httpx"
 )
 
 // ====== Event Handlers ======
@@ -30,15 +31,8 @@ import (
 // @Router /api/v1/timeline/events [get]
 func GetTimelineEvents(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-		limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-		if page < 1 {
-			page = 1
-		}
-		if limit < 1 || limit > 200 {
-			limit = 50
-		}
-		offset := (page - 1) * limit
+		page, limit := httpx.PageParamsWith(c, "limit", 50, 200)
+		offset := httpx.Offset(page, limit)
 
 		category := c.Query("category")
 		yearStart := c.Query("year_start")

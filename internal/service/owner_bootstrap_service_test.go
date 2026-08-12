@@ -87,12 +87,12 @@ func TestEnsureOwnerCreatesDefaultResources(t *testing.T) {
 		t.Fatalf("find default bookmark folder: %v", err)
 	}
 
-	var playlists []model.Playlist
-	if err := db.Where("user_id = ?", owner.UUID).Find(&playlists).Error; err != nil {
-		t.Fatalf("find playlists: %v", err)
+	var playlists int64
+	if err := db.Model(&model.Playlist{}).Where("user_id = ?", owner.UUID).Count(&playlists).Error; err != nil {
+		t.Fatalf("count playlists: %v", err)
 	}
-	if len(playlists) != 1 || playlists[0].Name != "最爱" || playlists[0].Kind != "favorite" || playlists[0].IsPublic {
-		t.Fatalf("expected one private favorite playlist, got %#v", playlists)
+	if playlists != 0 {
+		t.Fatalf("expected music playlists to be created on demand, got %d", playlists)
 	}
 }
 

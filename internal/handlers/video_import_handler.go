@@ -109,7 +109,7 @@ type VideoImportPartUploadDTO struct {
 	UploadURL  string `json:"upload_url"`
 }
 
-func registerVideoImportRoutes(group *gin.RouterGroup, db *gorm.DB, s3Client *s3.S3) {
+func RegisterVideoImportRoutes(group *gin.RouterGroup, db *gorm.DB, s3Client *s3.S3) {
 	imports := group.Group("/imports")
 	imports.POST("", CreateVideoImport(db, s3Client))
 	imports.GET("", ListVideoImports(db))
@@ -122,6 +122,12 @@ func registerVideoImportRoutes(group *gin.RouterGroup, db *gorm.DB, s3Client *s3
 	imports.POST("/:id/retry", RetryVideoImport(db))
 	imports.DELETE("/:id", CancelVideoImport(db, s3Client))
 	imports.DELETE("/:id/record", DeleteVideoImportRecord(db))
+}
+
+// registerVideoImportRoutes keeps package-local callers stable while route ownership
+// moves to internal/modules/video.
+func registerVideoImportRoutes(group *gin.RouterGroup, db *gorm.DB, s3Client *s3.S3) {
+	RegisterVideoImportRoutes(group, db, s3Client)
 }
 
 // CreateVideoImport godoc

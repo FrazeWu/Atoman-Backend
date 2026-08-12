@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -58,4 +59,66 @@ func serveUntilShutdown(ctx context.Context, server managedServer, timeout time.
 		}
 		return err
 	}
+}
+
+func waitForWorkers(timeout time.Duration, workers ...<-chan struct{}) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	for _, done := range workers {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func databaseLogTarget(dbType string, rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if strings.Contains(rawURL, "=") && !strings.Contains(rawURL, "://") {
+		return databaseLogTargetFromDSN(dbType, rawURL)
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return strings.TrimSpace(dbType) + " database"
+	}
+
+	parts := []string{strings.TrimSpace(dbType) + " database"}
+	if host := parsed.Host; host != "" {
+		parts = append(parts, "host="+host)
+	}
+	if dbName := strings.TrimPrefix(parsed.EscapedPath(), "/"); dbName != "" {
+		if decoded, err := url.PathUnescape(dbName); err == nil {
+			dbName = decoded
+		}
+		parts = append(parts, "dbname="+dbName)
+	}
+	return strings.Join(parts, " ")
+}
+
+func databaseLogTargetFromDSN(dbType string, dsn string) string {
+	values := map[string]string{}
+	for _, field := range strings.Fields(dsn) {
+		key, value, ok := strings.Cut(field, "=")
+		if !ok {
+			continue
+		}
+		values[key] = strings.Trim(value, "'\"")
+	}
+
+	parts := []string{strings.TrimSpace(dbType) + " database"}
+	host := values["host"]
+	if port := values["port"]; host != "" && port != "" {
+		host += ":" + port
+	}
+	if host != "" {
+		parts = append(parts, "host="+host)
+	}
+	if dbName := values["dbname"]; dbName != "" {
+		parts = append(parts, "dbname="+dbName)
+	}
+	return strings.Join(parts, " ")
 }

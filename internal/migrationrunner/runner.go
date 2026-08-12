@@ -60,7 +60,7 @@ func Run(db *gorm.DB) error {
 		{"music album import media migration", migrations.RunMusicAlbumImportMediaMigration},
 		{"music artist extended fields migration", migrations.RunMusicArtistExtendedFieldsMigration},
 		{"music bookmarks playlists migration", migrations.RunMusicBookmarksPlaylistsMigration},
-		{"music favorite playlist migration", migrations.RunMusicFavoritePlaylistMigration},
+		{"music favorite playlist migration", runMusicFavoritePlaylistMigration},
 		{"music play counts migration", migrations.RunMusicPlayCountsMigration},
 		{"music lyrics migration", migrations.RunMusicLyricsMigration},
 		{"music listening migration", migrations.RunMusicListeningMigration},
@@ -80,6 +80,25 @@ func Run(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+func runMusicFavoritePlaylistMigration(db *gorm.DB) error {
+	var legacyBookmarks int64
+	if db.Migrator().HasTable("music_song_bookmarks") {
+		if err := db.Table("music_song_bookmarks").Count(&legacyBookmarks).Error; err != nil {
+			return err
+		}
+	}
+	var favoritePlaylists int64
+	if db.Migrator().HasTable("music_playlists") {
+		if err := db.Table("music_playlists").Where("kind = ?", "favorite").Count(&favoritePlaylists).Error; err != nil {
+			return err
+		}
+	}
+	if legacyBookmarks == 0 && favoritePlaylists == 0 {
+		return nil
+	}
+	return migrations.RunMusicFavoritePlaylistMigration(db)
 }
 
 func runMusicRevisionBaselinesMigration(db *gorm.DB) error {
