@@ -30,6 +30,8 @@ type Video struct {
 	ScheduledAt *time.Time   `json:"scheduled_at,omitempty" gorm:"index"`
 	PublishedAt *time.Time   `json:"published_at,omitempty" gorm:"index"`
 	ViewCount   int          `json:"view_count" gorm:"default:0"`
+	LikeCount   int          `json:"like_count" gorm:"-"`
+	Liked       bool         `json:"liked" gorm:"-"`
 	Tags        []VideoTag   `json:"tags,omitempty" gorm:"many2many:video_tag_relations;joinForeignKey:VideoID;joinReferences:TagID"`
 	Collections []Collection `json:"collections,omitempty" gorm:"many2many:video_collections;"`
 }

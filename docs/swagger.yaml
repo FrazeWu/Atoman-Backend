@@ -3114,6 +3114,13 @@ definitions:
       visibility:
         type: string
     type: object
+  handlers.VideoLikeInput:
+    properties:
+      target_id:
+        type: string
+    required:
+    - target_id
+    type: object
   handlers.VideoUpdateInput:
     properties:
       channel_id:
@@ -4629,6 +4636,10 @@ definitions:
         type: integer
       id:
         type: string
+      like_count:
+        type: integer
+      liked:
+        type: boolean
       preview_thumbnails:
         items:
           type: object
@@ -18618,6 +18629,81 @@ paths:
       summary: 提交视频导入任务
       tags:
       - video-imports
+  /api/v1/videos/likes:
+    delete:
+      consumes:
+      - application/json
+      description: 根据请求方法为视频添加或删除当前用户的点赞。
+      parameters:
+      - description: 视频 ID
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.VideoLikeInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 点赞或取消点赞视频
+      tags:
+      - videos
+    post:
+      consumes:
+      - application/json
+      description: 根据请求方法为视频添加或删除当前用户的点赞。
+      parameters:
+      - description: 视频 ID
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.VideoLikeInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 点赞或取消点赞视频
+      tags:
+      - videos
   /api/v1/videos/upload-cover:
     post:
       consumes:

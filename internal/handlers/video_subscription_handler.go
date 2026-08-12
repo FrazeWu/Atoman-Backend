@@ -29,7 +29,8 @@ func GetSubscribedVideos(db *gorm.DB) gin.HandlerFunc {
 
 		var videos []model.Video
 		query := db.Preload("Channel").Preload("Collections").Preload("Tags").
-			Where("videos.status = ? AND videos.visibility = ?", "published", "public").
+			Where("videos.status = ?", "published").
+			Where("(videos.visibility = ? OR (videos.visibility = ? AND (videos.channel_id IN (?) OR EXISTS (SELECT 1 FROM video_collections vc WHERE vc.video_id = videos.id AND vc.collection_id IN (?)))))", "public", "followers", channelIDs, collectionIDs).
 			Where("(videos.channel_id IN (?) OR EXISTS (SELECT 1 FROM video_collections vc WHERE vc.video_id = videos.id AND vc.collection_id IN (?)) )", channelIDs, collectionIDs).
 			Order("videos.created_at DESC, videos.id DESC")
 		if err := query.Find(&videos).Error; err != nil {

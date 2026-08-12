@@ -1,8 +1,6 @@
 package service
 
 import (
-	"strings"
-
 	"atoman/internal/model"
 
 	"gorm.io/gorm"
@@ -35,7 +33,5 @@ func EnsureVideoPreviewJob(db *gorm.DB, video *model.Video) error {
 }
 
 func needsVideoPreviewJob(video model.Video) bool {
-	return video.StorageType == "local" &&
-		!strings.HasPrefix(video.VideoURL, "http://") &&
-		!strings.HasPrefix(video.VideoURL, "https://")
+	return video.StorageType == "local"
 }

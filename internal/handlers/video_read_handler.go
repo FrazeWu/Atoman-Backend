@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -182,8 +185,18 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		if !isOwnerView {
-			q = q.Where("videos.status = ?", "published").
-				Where("videos.visibility = ?", "public")
+			if viewerID == nil {
+				q = q.Where("videos.status = ? AND videos.visibility = ?", "published", "public")
+			} else {
+				subscribedChannelIDs := db.Model(&model.FeedSource{}).
+					Select("feed_sources.source_id").
+					Joins("JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id").
+					Where("subscriptions.user_id = ?", viewerID).
+					Where("subscriptions.deleted_at IS NULL").
+					Where("feed_sources.source_type = ?", "internal_channel")
+				q = q.Where("videos.status = ? AND (videos.visibility = ? OR (videos.visibility = ? AND videos.channel_id IN (?)))",
+					"published", "public", "followers", subscribedChannelIDs)
+			}
 		} else {
 			// In owner view, we might still want to filter by user_id explicitly if not already implied
 			q = q.Where("videos.user_id = ?", viewerID)
@@ -238,13 +251,63 @@ func GetVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		var video model.Video
-		if err := db.Preload("Channel").Preload("Tags").Preload("Collections").
-			Where("status = ? AND visibility = ?", "published", "public").
-			First(&video, "id = ?", id).Error; err != nil {
+		query := db.Preload("Channel").Preload("Tags").Preload("Collections")
+		viewerID := currentBlogViewerID(c)
+		if err := query.First(&video, "id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
+		allowed, err := canViewVideo(db, viewerID, video)
+		if err != nil || !allowed {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		var likeCount int64
+		db.Model(&model.Like{}).Where("target_type = ? AND target_id = ?", "video", video.ID).Count(&likeCount)
+		video.LikeCount = int(likeCount)
+		if viewerID != nil {
+			var liked int64
+			db.Model(&model.Like{}).Where("user_id = ? AND target_type = ? AND target_id = ?", *viewerID, "video", video.ID).Count(&liked)
+			video.Liked = liked > 0
+		}
 		c.JSON(http.StatusOK, video)
+	}
+}
+
+func canViewVideo(db *gorm.DB, viewerID *uuid.UUID, video model.Video) (bool, error) {
+	if video.Status != "published" {
+		return viewerID != nil && video.UserID == *viewerID, nil
+	}
+	if video.UserID != uuid.Nil && viewerID != nil && video.UserID == *viewerID {
+		return true, nil
+	}
+	switch video.Visibility {
+	case "", "public":
+		return true, nil
+	case "private":
+		return false, nil
+	case "followers":
+		if viewerID == nil || video.ChannelID == nil {
+			return false, nil
+		}
+		hash := fmt.Sprintf("%x", sha256.Sum256([]byte("internal_channel:"+video.ChannelID.String())))
+		var source model.FeedSource
+		if err := db.Where("hash = ?", hash).First(&source).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return false, nil
+			}
+			return false, err
+		}
+		var subscription model.Subscription
+		if err := db.Where("user_id = ? AND feed_source_id = ? AND deleted_at IS NULL", *viewerID, source.ID).First(&subscription).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return false, nil
+			}
+			return false, err
+		}
+		return true, nil
+	default:
+		return false, nil
 	}
 }
 

@@ -38,6 +38,7 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.VideoTag{},
 		&model.VideoCollection{},
 		&model.VideoTagRelation{},
+		&model.Like{},
 		&model.StudioMetricEvent{},
 		&model.FeedSource{},
 		&model.SubscriptionGroup{},
