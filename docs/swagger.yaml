@@ -13214,6 +13214,47 @@ paths:
       summary: 重新评估用户论坛信任等级
       tags:
       - forum
+  /api/v1/music/albums:
+    get:
+      parameters:
+      - description: 搜索关键词
+        in: query
+        name: q
+        type: string
+      - description: 艺术家 ID
+        in: query
+        name: artist_id
+        type: string
+      - description: 作品分类
+        enum:
+        - album
+        - song
+        in: query
+        name: release_type
+        type: string
+      - description: 排序方式
+        in: query
+        name: sort
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取音乐专辑列表
+      tags:
+      - music
   /api/v1/music/albums/{albumId}/merge:
     post:
       consumes:

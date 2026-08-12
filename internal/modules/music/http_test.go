@@ -122,6 +122,65 @@ func TestRegisterRoutesAlbumDetailReturnsArtistCredits(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesAlbumListFiltersReleaseType(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Release Type Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+
+	albums := []model.Album{
+		{Title: "Studio Album", AlbumType: "album", EntryStatus: "open", Status: "open"},
+		{Title: "Artist Single", AlbumType: "single", EntryStatus: "open", Status: "open"},
+		{Title: "Artist Leak", AlbumType: "leak", EntryStatus: "open", Status: "open"},
+	}
+	for index := range albums {
+		if err := db.Create(&albums[index]).Error; err != nil {
+			t.Fatalf("create album: %v", err)
+		}
+		if err := db.Create(&model.AlbumArtist{AlbumID: albums[index].ID, ArtistID: artist.ID, Role: "primary", Position: 1}).Error; err != nil {
+			t.Fatalf("create album artist: %v", err)
+		}
+	}
+
+	router := newMusicHTTPRouter(service, &user)
+	for _, test := range []struct {
+		releaseType string
+		wantTitles  []string
+	}{
+		{releaseType: "album", wantTitles: []string{"Studio Album"}},
+		{releaseType: "song", wantTitles: []string{"Artist Single", "Artist Leak"}},
+	} {
+		response := httptest.NewRecorder()
+		path := "/api/v1/music/albums?artist_id=" + artist.ID.String() + "&release_type=" + test.releaseType
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("expected %s filter to return 200, got %d: %s", test.releaseType, response.Code, response.Body.String())
+		}
+
+		var payload struct {
+			Data []struct {
+				Title string `json:"title"`
+			} `json:"data"`
+			Meta struct {
+				Total int64 `json:"total"`
+			} `json:"meta"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode %s response: %v", test.releaseType, err)
+		}
+		gotTitles := make([]string, 0, len(payload.Data))
+		for _, album := range payload.Data {
+			gotTitles = append(gotTitles, album.Title)
+		}
+		slices.Sort(gotTitles)
+		slices.Sort(test.wantTitles)
+		if !slices.Equal(gotTitles, test.wantTitles) || payload.Meta.Total != int64(len(test.wantTitles)) {
+			t.Fatalf("unexpected %s releases: titles=%v total=%d", test.releaseType, gotTitles, payload.Meta.Total)
+		}
+	}
+}
+
 func TestRegisterRoutesPlaylistBookmarksMatchFrontendContract(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	owner := model.User{Username: "playlist-owner", DisplayName: "Playlist Owner", Email: "playlist-owner@example.com", Password: "hash", Role: "user", IsActive: true}

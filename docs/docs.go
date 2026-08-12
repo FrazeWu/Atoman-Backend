@@ -10680,6 +10680,68 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/albums": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "获取音乐专辑列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "搜索关键词",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "艺术家 ID",
+                        "name": "artist_id",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "album",
+                            "song"
+                        ],
+                        "type": "string",
+                        "description": "作品分类",
+                        "name": "release_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "排序方式",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/albums/{albumId}/merge": {
             "post": {
                 "security": [
