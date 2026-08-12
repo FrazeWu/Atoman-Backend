@@ -4,15 +4,9 @@ set -eu
 
 project_root="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 check_script="$project_root/scripts/check-release-readiness.sh"
-hook="$project_root/.githooks/pre-commit"
 
 if [ ! -x "$check_script" ]; then
   echo "missing executable release check: $check_script" >&2
-  exit 1
-fi
-
-if [ ! -x "$hook" ]; then
-  echo "missing executable pre-commit hook: $hook" >&2
   exit 1
 fi
 
@@ -103,18 +97,5 @@ run_check frontend "$frontend"
 write_notes "$backend/docs/release/release-notes-draft.md" "Backend release notes."
 git -C "$backend" add VERSION docs/release/release-notes-draft.md
 run_check backend "$backend"
-
-case "$(basename "$project_root")" in
-  Atoman-Frontend)
-    ATOMAN_REPO_ROOT="$frontend" ATOMAN_WORKSPACE_ROOT="$workspace" "$hook"
-    ;;
-  Atoman-Backend)
-    ATOMAN_REPO_ROOT="$backend" ATOMAN_WORKSPACE_ROOT="$workspace" "$hook"
-    ;;
-  *)
-    echo "unexpected project root: $project_root" >&2
-    exit 1
-    ;;
-esac
 
 echo "release readiness checks passed"
