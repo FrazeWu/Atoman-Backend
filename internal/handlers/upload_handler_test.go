@@ -258,6 +258,54 @@ func TestUploadCommentImageStoresCommentPurposeAndReturnsAssetID(t *testing.T) {
 	}
 }
 
+func TestUploadUserAvatarUsesUserMediaKey(t *testing.T) {
+	t.Setenv("S3_BUCKET", "atoman-test")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.MediaAsset{})
+	user := model.User{Username: "avatar-user", Email: "avatar@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	var path, contentType string
+	r := gin.New()
+	SetupUploadRoutes(r, db, fakeS3ClientForUploadTest(t, &path, &contentType))
+	body, multipartType := multipartUploadBody(t, "user.avatar", "avatar.png", "image/png", validPNGBytes())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/uploads", body)
+	req.Header.Set("Authorization", "Bearer "+apiAuthTokenForTest(t, db, user))
+	req.Header.Set("Content-Type", multipartType)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var response struct {
+		Data struct {
+			ID  string `json:"id"`
+			Key string `json:"key"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	wantPrefix := "users/avatars/users/" + user.UUID.String() + "/"
+	if !strings.HasPrefix(response.Data.Key, wantPrefix) {
+		t.Fatalf("expected avatar key prefix %q, got %q", wantPrefix, response.Data.Key)
+	}
+	var asset model.MediaAsset
+	if err := db.First(&asset, "id = ?", response.Data.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if asset.Purpose != "user.avatar" || asset.UserID == nil || *asset.UserID != user.UUID {
+		t.Fatalf("unexpected asset: %#v", asset)
+	}
+}
+
 func TestUniqueUploadFilenameUsesVerifiedImageContentTypeExtension(t *testing.T) {
 	if got := uniqueUploadFilename("spoofed.jpg", "image/png"); !strings.HasSuffix(got, ".png") {
 		t.Fatalf("expected verified PNG extension, got %q", got)

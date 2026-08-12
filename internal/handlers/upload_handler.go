@@ -57,6 +57,11 @@ var uploadPurposes = map[string]uploadPurposeConfig{
 		allowedContentType: allowedImageUploadTypes(),
 		maxSize:            10 * 1024 * 1024,
 	},
+	"user.avatar": {
+		keyKind:            "avatars",
+		allowedContentType: allowedImageUploadTypes(),
+		maxSize:            10 * 1024 * 1024,
+	},
 }
 
 type uploadAssetResponse struct {
@@ -77,12 +82,12 @@ func SetupUploadRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 // UploadAsset handles media uploads for newer API clients.
 // UploadAsset godoc
 // @Summary 上传媒体资源
-// @Description 上传音乐封面、音频或评论图片。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。
+// @Description 上传音乐封面、音频、评论图片或用户头像。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。
 // @Tags uploads
 // @Accept mpfd
 // @Produce json
 // @Param file formData file true "文件"
-// @Param purpose formData string true "用途：music.cover / music.audio / comment.image"
+// @Param purpose formData string true "用途：music.cover / music.audio / comment.image / user.avatar"
 // @Success 201 {object} uploadAssetResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 401 {object} ErrorResponse
@@ -144,6 +149,8 @@ func UploadAsset(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		key := storage.BuildMusicUploadKey(config.keyKind, current.ID.String(), filename, time.Now())
 		if purpose == "comment.image" {
 			key = storage.BuildUserMediaKey("comments", "images", current.ID.String(), filename, time.Now())
+		} else if purpose == "user.avatar" {
+			key = storage.BuildUserMediaKey("users", "avatars", current.ID.String(), filename, time.Now())
 		}
 		if _, err := s3Client.PutObject(&s3.PutObjectInput{
 			Bucket:      aws.String(bucket),

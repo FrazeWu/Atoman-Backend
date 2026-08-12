@@ -17526,7 +17526,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "上传音乐封面、音频或评论图片。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。",
+                "description": "上传音乐封面、音频、评论图片或用户头像。该接口只使用 S3 兼容存储，不回退到 /uploads 本地目录。",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -17547,7 +17547,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "用途：music.cover / music.audio / comment.image",
+                        "description": "用途：music.cover / music.audio / comment.image / user.avatar",
                         "name": "purpose",
                         "in": "formData",
                         "required": true

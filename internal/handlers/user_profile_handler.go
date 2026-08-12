@@ -15,11 +15,11 @@ import (
 )
 
 type UserProfileInput struct {
-	DisplayName string `json:"display_name"`
-	AvatarURL   string `json:"avatar_url"`
-	Bio         string `json:"bio"`
-	Website     string `json:"website"`
-	Location    string `json:"location"`
+	DisplayName *string `json:"display_name"`
+	AvatarURL   *string `json:"avatar_url"`
+	Bio         *string `json:"bio"`
+	Website     *string `json:"website"`
+	Location    *string `json:"location"`
 }
 
 // UserSettingsInput represents the request body for updating user settings
@@ -239,13 +239,24 @@ func UpdateUserProfile(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		if err := db.Model(&user).Updates(map[string]interface{}{
-			"display_name": input.DisplayName,
-			"avatar_url":   input.AvatarURL,
-			"bio":          input.Bio,
-			"website":      input.Website,
-			"location":     input.Location,
-		}).Error; err != nil {
+		updates := map[string]interface{}{}
+		if input.DisplayName != nil {
+			updates["display_name"] = strings.TrimSpace(*input.DisplayName)
+		}
+		if input.AvatarURL != nil {
+			updates["avatar_url"] = strings.TrimSpace(*input.AvatarURL)
+		}
+		if input.Bio != nil {
+			updates["bio"] = strings.TrimSpace(*input.Bio)
+		}
+		if input.Website != nil {
+			updates["website"] = strings.TrimSpace(*input.Website)
+		}
+		if input.Location != nil {
+			updates["location"] = strings.TrimSpace(*input.Location)
+		}
+
+		if err := db.Model(&user).Updates(updates).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update profile"})
 			return
 		}
