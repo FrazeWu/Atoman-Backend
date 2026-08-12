@@ -652,9 +652,9 @@ func TestParseCUESupportsUTF8AndGBK(t *testing.T) {
 	}
 }
 
-func TestParseAudioProbeReadsTitleTrackAndDiscTags(t *testing.T) {
-	metadata := parseAudioProbe([]byte(`{"format":{"duration":"245.5","tags":{"TITLE":"Tagged title","ALBUM":"Late Registration","TRACKNUMBER":"03/12","DISC":"2/2"}}}`))
-	if metadata.duration != 245.5 || metadata.title != "Tagged title" || metadata.album != "Late Registration" || metadata.trackNumber != 3 || metadata.discNumber != 2 {
+func TestParseAudioProbeReadsTitleTrackDiscAndAlbumArtistTags(t *testing.T) {
+	metadata := parseAudioProbe([]byte(`{"format":{"duration":"245.5","tags":{"TITLE":"Tagged title","ALBUM":"Late Registration","ARTIST":"Guest","ALBUM_ARTIST":"Kanye West","TRACKNUMBER":"03/12","DISC":"2/2"}}}`))
+	if metadata.duration != 245.5 || metadata.title != "Tagged title" || metadata.album != "Late Registration" || metadata.artist != "Kanye West" || metadata.trackNumber != 3 || metadata.discNumber != 2 {
 		t.Fatalf("unexpected audio metadata: %#v", metadata)
 	}
 }

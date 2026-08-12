@@ -272,10 +272,16 @@ type MediaImportProcessor struct {
 	store     mediaImportStore
 	runner    MediaCommandRunner
 	urlPrefix string
+	enricher  AlbumImportMetadataEnricher
 }
 
 func NewMediaImportProcessor(db *gorm.DB, store mediaImportStore, runner MediaCommandRunner, playbackURLPrefix string) *MediaImportProcessor {
 	return &MediaImportProcessor{db: db, store: store, runner: runner, urlPrefix: strings.TrimRight(strings.TrimSpace(playbackURLPrefix), "/")}
+}
+
+func (p *MediaImportProcessor) WithMetadataEnricher(enricher AlbumImportMetadataEnricher) *MediaImportProcessor {
+	p.enricher = enricher
+	return p
 }
 
 func (p *MediaImportProcessor) Process(ctx context.Context, job model.AlbumImportJob, heartbeat func() error) error {
@@ -456,6 +462,7 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 	type localAudio struct{ path, relative string }
 	audios := []localAudio{}
 	cues := []string{}
+	localLyrics := map[string]AlbumImportTrackLyricsPayload{}
 	cover := ""
 	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -496,6 +503,15 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 		case AlbumImportFileRoleCover:
 			if cover == "" {
 				cover = path
+			}
+		case AlbumImportFileRoleLyrics:
+			if raw, readErr := os.ReadFile(path); readErr == nil && len(raw) <= 2*1024*1024 {
+				payload := lyricsPayloadFromFile(path, raw)
+				localLyrics[normalizedLyricName(relative)] = payload
+				disc, track := discAndTrackFromPath(relative)
+				if track > 0 {
+					localLyrics[lyricSequenceKey(disc, track)] = payload
+				}
 			}
 		}
 		return nil
@@ -564,7 +580,7 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 	if processed == 0 {
 		return errors.New("no audio tracks were processed successfully")
 	}
-	if err := p.persistDerivedTracks(ctx, sessionID); err != nil {
+	if err := p.persistDerivedTracksWithLyrics(ctx, sessionID, localLyrics); err != nil {
 		return err
 	}
 	return p.setSession(ctx, sessionID, AlbumImportStatusTranscoding, AlbumImportStageTranscoding, int64(processed), int64(processed))
@@ -685,6 +701,11 @@ func (p *MediaImportProcessor) processUploadedCover(ctx context.Context, session
 }
 
 func (p *MediaImportProcessor) persistDerivedTracks(ctx context.Context, sessionID uuid.UUID) error {
+	localLyrics := p.loadUploadedLyrics(ctx, sessionID)
+	return p.persistDerivedTracksWithLyrics(ctx, sessionID, localLyrics)
+}
+
+func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Context, sessionID uuid.UUID, localLyrics map[string]AlbumImportTrackLyricsPayload) error {
 	var session model.AlbumImportSession
 	if err := p.db.WithContext(ctx).First(&session, "id = ?", sessionID).Error; err != nil {
 		return err
@@ -724,7 +745,7 @@ func (p *MediaImportProcessor) persistDerivedTracks(ctx context.Context, session
 		payload["derived_album_title"] = albumNames[primaryAlbumKey]
 	}
 
-	tracks := make([]map[string]any, 0, len(files))
+	metadataTracks := make([]AlbumImportMetadataTrack, 0, len(files))
 	for _, file := range files {
 		album := albumImportFileAlbum(file)
 		albumKey := strings.ToLower(strings.Join(strings.Fields(album), " "))
@@ -742,16 +763,72 @@ func (p *MediaImportProcessor) persistDerivedTracks(ctx context.Context, session
 		if p.urlPrefix != "" {
 			audioURL = p.urlPrefix + "/" + strings.TrimLeft(file.PlaybackKey, "/")
 		}
-		tracks = append(tracks, map[string]any{
-			"file_id":      file.ID.String(),
-			"title":        file.Title,
-			"track_number": file.TrackNumber,
-			"audio_key":    file.PlaybackKey,
-			"audio_url":    audioURL,
-			"origin":       file.RelativePath,
+		metadata := albumImportFileMetadata(file)
+		metadataTracks = append(metadataTracks, AlbumImportMetadataTrack{
+			Title: file.Title, Artist: stringValue(metadata["artist"]), Album: album,
+			DiscNumber: normalizedDiscNumber(file.DiscNumber), TrackNumber: file.TrackNumber,
+			DurationSeconds: file.DurationSeconds, Origin: file.RelativePath,
+			AudioKey: file.PlaybackKey, AudioURL: audioURL,
 		})
 	}
-	payload["derived_tracks"] = tracks
+	artist := majorityMetadataValue(metadataTracks, func(track AlbumImportMetadataTrack) string { return track.Artist })
+	if artist == "" {
+		artist = p.albumImportArtistName(ctx, payload)
+	}
+	result := AlbumImportMetadataResult{AlbumTitle: stringValue(payload["derived_album_title"]), Tracks: baseMetadataTracks(metadataTracks)}
+	if p.enricher != nil {
+		if enriched, enrichErr := p.enricher.Enrich(ctx, AlbumImportMetadataInput{
+			AlbumTitle: result.AlbumTitle, Artist: artist, Tracks: metadataTracks, LocalLyrics: localLyrics,
+		}); enrichErr == nil {
+			result = enriched
+		}
+	} else {
+		for index := range result.Tracks {
+			if lyrics, ok := findLocalLyrics(localLyrics, metadataTracks[index]); ok {
+				result.Tracks[index].Lyrics = &lyrics
+				result.Tracks[index].LyricsSource = "local"
+			}
+		}
+	}
+	derivedTracks := make([]map[string]any, 0, len(result.Tracks))
+	for _, track := range result.Tracks {
+		derived := map[string]any{
+			"title": track.Title, "disc_number": track.DiscNumber, "track_number": track.TrackNumber,
+			"audio_key": track.AudioKey, "audio_url": track.AudioURL, "origin": track.Origin,
+		}
+		for _, file := range files {
+			if file.PlaybackKey == track.AudioKey {
+				derived["file_id"] = file.ID.String()
+				break
+			}
+		}
+		if track.Lyrics != nil {
+			derived["lyrics"] = track.Lyrics
+			derived["lyrics_source"] = track.LyricsSource
+		}
+		derivedTracks = append(derivedTracks, derived)
+	}
+	payload["derived_tracks"] = derivedTracks
+	if result.AlbumTitle != "" {
+		payload["derived_album_title"] = result.AlbumTitle
+	}
+	if result.ReleaseDate != "" {
+		payload["derived_release_date"] = result.ReleaseDate
+	}
+	if result.AlbumType != "" {
+		payload["derived_album_type"] = result.AlbumType
+	}
+	if result.CoverURL != "" && stringValue(payload["cover_key"]) == "" {
+		payload["derived_cover"] = result.CoverURL
+	}
+	if result.SourceURL != "" {
+		payload["metadata_source_url"] = result.SourceURL
+	}
+	if len(result.MissingArtists) > 0 {
+		payload["missing_artists"] = result.MissingArtists
+	} else {
+		delete(payload, "missing_artists")
+	}
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -760,14 +837,89 @@ func (p *MediaImportProcessor) persistDerivedTracks(ctx context.Context, session
 }
 
 func albumImportFileAlbum(file model.AlbumImportFile) string {
-	if strings.TrimSpace(file.MetadataJSON) == "" {
-		return ""
-	}
-	var metadata map[string]any
-	if json.Unmarshal([]byte(file.MetadataJSON), &metadata) != nil {
-		return ""
-	}
+	metadata := albumImportFileMetadata(file)
 	return strings.TrimSpace(stringValue(metadata["album"]))
+}
+
+func albumImportFileMetadata(file model.AlbumImportFile) map[string]any {
+	metadata := map[string]any{}
+	if strings.TrimSpace(file.MetadataJSON) != "" {
+		_ = json.Unmarshal([]byte(file.MetadataJSON), &metadata)
+	}
+	return metadata
+}
+
+func (p *MediaImportProcessor) loadUploadedLyrics(ctx context.Context, sessionID uuid.UUID) map[string]AlbumImportTrackLyricsPayload {
+	result := map[string]AlbumImportTrackLyricsPayload{}
+	var files []model.AlbumImportFile
+	if p.store == nil || p.db.WithContext(ctx).Where("import_id = ? AND role = ? AND upload_status = ?", sessionID, AlbumImportFileRoleLyrics, AlbumImportFileUploadStatusUploaded).Find(&files).Error != nil {
+		return result
+	}
+	for _, file := range files {
+		reader, err := p.store.OpenObject(file.SourceKey)
+		if err != nil {
+			continue
+		}
+		raw, readErr := io.ReadAll(io.LimitReader(reader, 2*1024*1024+1))
+		_ = reader.Close()
+		if readErr == nil && len(raw) <= 2*1024*1024 {
+			payload := lyricsPayloadFromFile(file.FileName, raw)
+			result[normalizedLyricName(file.RelativePath)] = payload
+			disc, track := discAndTrackFromPath(file.RelativePath)
+			if track > 0 {
+				result[lyricSequenceKey(disc, track)] = payload
+			}
+			_ = p.db.WithContext(ctx).Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Updates(map[string]any{
+				"processing_status": "completed", "error_message": "",
+			}).Error
+		}
+	}
+	return result
+}
+
+func lyricsPayloadFromFile(name string, raw []byte) AlbumImportTrackLyricsPayload {
+	format := "plain"
+	if strings.EqualFold(filepath.Ext(name), ".lrc") {
+		format = "lrc"
+	}
+	return AlbumImportTrackLyricsPayload{Content: strings.TrimSpace(string(raw)), Format: format, EditSummary: "通过专辑导入添加歌词"}
+}
+
+func majorityMetadataValue(tracks []AlbumImportMetadataTrack, value func(AlbumImportMetadataTrack) string) string {
+	counts := map[string]int{}
+	values := map[string]string{}
+	best := ""
+	for _, track := range tracks {
+		current := strings.TrimSpace(value(track))
+		key := normalizedMusicText(current)
+		if key == "" {
+			continue
+		}
+		counts[key]++
+		values[key] = current
+		if best == "" || counts[key] > counts[best] {
+			best = key
+		}
+	}
+	return values[best]
+}
+
+func (p *MediaImportProcessor) albumImportArtistName(ctx context.Context, payload map[string]any) string {
+	if name := strings.TrimSpace(stringValue(payload["artist_name"])); name != "" {
+		return name
+	}
+	if p == nil || p.db == nil {
+		return ""
+	}
+	artistID, err := uuid.Parse(strings.TrimSpace(stringValue(payload["artist_id"])))
+	if err != nil {
+		return ""
+	}
+	var artist model.Artist
+	if p.db.WithContext(ctx).Select("name").First(&artist, "id = ?", artistID).Error != nil {
+		return ""
+	}
+	return strings.TrimSpace(artist.Name)
 }
 
 func (p *MediaImportProcessor) processEmbeddedCover(ctx context.Context, sessionID uuid.UUID, source string) error {
@@ -805,7 +957,7 @@ func (p *MediaImportProcessor) processAudio(ctx context.Context, sessionID uuid.
 }
 
 func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile, sourcePath, overrideTitle string, overrideTrack int, knownDuration float64, rangeSeconds ...float64) error {
-	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,album,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", sourcePath)
+	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,album,artist,album_artist,albumartist,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", sourcePath)
 	if err != nil {
 		return fmt.Errorf("ffprobe %s: %w", file.FileName, err)
 	}
@@ -920,6 +1072,7 @@ type audioProbeMetadata struct {
 	duration    float64
 	title       string
 	album       string
+	artist      string
 	discNumber  int
 	trackNumber int
 	container   string
@@ -972,6 +1125,12 @@ func parseAudioProbe(raw []byte) audioProbeMetadata {
 			metadata.title = strings.TrimSpace(value)
 		case "album":
 			metadata.album = strings.TrimSpace(value)
+		case "artist":
+			if metadata.artist == "" {
+				metadata.artist = strings.TrimSpace(value)
+			}
+		case "album_artist", "albumartist":
+			metadata.artist = strings.TrimSpace(value)
 		case "track", "tracknumber", "track_number":
 			metadata.trackNumber = albumImportTagNumber(value)
 		case "disc", "discnumber", "disc_number":
@@ -984,6 +1143,7 @@ func parseAudioProbe(raw []byte) audioProbeMetadata {
 func (m audioProbeMetadata) archiveMetadata() map[string]any {
 	return map[string]any{
 		"album":       m.album,
+		"artist":      m.artist,
 		"container":   m.container,
 		"codec":       m.codec,
 		"bit_rate":    m.bitRate,

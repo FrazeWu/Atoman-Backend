@@ -35,10 +35,11 @@ func TestRegisterAlbumImportFilesDetectsSupportedRolesAndInputModes(t *testing.T
 			files: []AlbumImportFileInput{
 				albumImportFileInput("01.flac", 1024),
 				albumImportFileInput("album.cue", 128),
+				albumImportFileInput("01.lrc", 128),
 				albumImportFileInput("cover.avif", 256),
 			},
 			wantMode: AlbumImportInputModeFiles,
-			roles:    []string{AlbumImportFileRoleAudio, AlbumImportFileRoleCue, AlbumImportFileRoleCover},
+			roles:    []string{AlbumImportFileRoleAudio, AlbumImportFileRoleCue, AlbumImportFileRoleLyrics, AlbumImportFileRoleCover},
 		},
 		{
 			name: "folder",
@@ -169,6 +170,7 @@ func TestDetectAlbumImportFileRoleSupportsConfiguredWhitelist(t *testing.T) {
 		"opus": AlbumImportFileRoleAudio, "aiff": AlbumImportFileRoleAudio, "aif": AlbumImportFileRoleAudio,
 		"wma": AlbumImportFileRoleAudio, "ape": AlbumImportFileRoleAudio, "alac": AlbumImportFileRoleAudio,
 		"cue": AlbumImportFileRoleCue,
+		"lrc": AlbumImportFileRoleLyrics, "txt": AlbumImportFileRoleLyrics,
 		"jpg": AlbumImportFileRoleCover, "jpeg": AlbumImportFileRoleCover, "png": AlbumImportFileRoleCover,
 		"webp": AlbumImportFileRoleCover, "avif": AlbumImportFileRoleCover, "heic": AlbumImportFileRoleCover,
 		"heif": AlbumImportFileRoleCover, "tiff": AlbumImportFileRoleCover, "tif": AlbumImportFileRoleCover, "bmp": AlbumImportFileRoleCover,

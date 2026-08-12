@@ -84,6 +84,8 @@ func detectAlbumImportFileRole(fileName string) (string, string, error) {
 		return AlbumImportFileRoleAudio, extension, nil
 	case extension == "cue":
 		return AlbumImportFileRoleCue, extension, nil
+	case extension == "lrc" || extension == "txt":
+		return AlbumImportFileRoleLyrics, extension, nil
 	case covers[extension]:
 		return AlbumImportFileRoleCover, extension, nil
 	default:
@@ -129,6 +131,9 @@ func normalizeAlbumImportFiles(input []AlbumImportFileInput, limits albumImportU
 		role, format, err := detectAlbumImportFileRole(fileName)
 		if err != nil {
 			return nil, "", err
+		}
+		if role == AlbumImportFileRoleLyrics && raw.FileSize > 2*1024*1024 {
+			return nil, "", apperr.BadRequest("validation.invalid_request", "lyrics file is too large")
 		}
 		if role == AlbumImportFileRoleArchive {
 			archiveCount++

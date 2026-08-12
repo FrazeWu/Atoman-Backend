@@ -40,6 +40,14 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 
 	coverURL := resolveAlbumImportCoverURL(payload)
 	albumTitle := albumImportSessionAlbumTitle(session, payload)
+	missingArtists := []string{}
+	if values, ok := payload["missing_artists"].([]any); ok {
+		for _, value := range values {
+			if item := strings.TrimSpace(stringValue(value)); item != "" {
+				missingArtists = append(missingArtists, item)
+			}
+		}
+	}
 	dto := AlbumImportDTO{
 		ImportID: session.ID.String(),
 		TargetAlbumID: func() string {
@@ -57,19 +65,23 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 			Current: session.ProgressCurrent,
 			Total:   session.ProgressTotal,
 		},
-		Files:             []AlbumImportFileDTO{},
-		Tracks:            []AlbumImportDTOTrack{},
-		Errors:            []AlbumImportErrorDTO{},
-		ArchiveName:       stringValue(payload["archive_name"]),
-		UploadProgress:    floatValue(payload["upload_progress"]),
-		UploadSpeed:       floatValue(payload["upload_speed"]),
-		CoverURL:          coverURL,
-		CoverKey:          stringValue(payload["cover_key"]),
-		DerivedAlbumTitle: stringValue(payload["derived_album_title"]),
-		DerivedCover:      stringValue(payload["derived_cover"]),
-		LastSyncedAt:      session.UpdatedAt.Format(time.RFC3339),
-		ErrorMessage:      errorMessage,
-		DerivedTracks:     []AlbumImportDTOTrack{},
+		Files:              []AlbumImportFileDTO{},
+		Tracks:             []AlbumImportDTOTrack{},
+		Errors:             []AlbumImportErrorDTO{},
+		ArchiveName:        stringValue(payload["archive_name"]),
+		UploadProgress:     floatValue(payload["upload_progress"]),
+		UploadSpeed:        floatValue(payload["upload_speed"]),
+		CoverURL:           coverURL,
+		CoverKey:           stringValue(payload["cover_key"]),
+		DerivedAlbumTitle:  stringValue(payload["derived_album_title"]),
+		DerivedCover:       stringValue(payload["derived_cover"]),
+		DerivedReleaseDate: stringValue(payload["derived_release_date"]),
+		DerivedAlbumType:   stringValue(payload["derived_album_type"]),
+		MetadataSourceURL:  stringValue(payload["metadata_source_url"]),
+		MissingArtists:     missingArtists,
+		LastSyncedAt:       session.UpdatedAt.Format(time.RFC3339),
+		ErrorMessage:       errorMessage,
+		DerivedTracks:      []AlbumImportDTOTrack{},
 	}
 	for _, file := range session.Files {
 		fileDTO := buildAlbumImportFileDTO(file)
@@ -89,11 +101,21 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 				continue
 			}
 			track := AlbumImportDTOTrack{
-				SongID:   stringValue(trackMap["song_id"]),
-				Title:    stringValue(trackMap["title"]),
-				AudioKey: stringValue(trackMap["audio_key"]),
-				AudioURL: stringValue(trackMap["audio_url"]),
-				Origin:   stringValue(trackMap["origin"]),
+				SongID:       stringValue(trackMap["song_id"]),
+				Title:        stringValue(trackMap["title"]),
+				AudioKey:     stringValue(trackMap["audio_key"]),
+				AudioURL:     stringValue(trackMap["audio_url"]),
+				Origin:       stringValue(trackMap["origin"]),
+				DiscNumber:   int(int64Value(trackMap["disc_number"])),
+				TrackNumber:  int(int64Value(trackMap["track_number"])),
+				LyricsSource: stringValue(trackMap["lyrics_source"]),
+			}
+			if lyricsMap, ok := trackMap["lyrics"].(map[string]any); ok {
+				track.Lyrics = &AlbumImportTrackLyricsPayload{
+					Content: stringValue(lyricsMap["content"]), Translation: stringValue(lyricsMap["translation"]),
+					Format: stringValue(lyricsMap["format"]), Language: stringValue(lyricsMap["language"]),
+					EditSummary: stringValue(lyricsMap["edit_summary"]),
+				}
 			}
 			dto.DerivedTracks = append(dto.DerivedTracks, track)
 			dto.Tracks = append(dto.Tracks, track)
@@ -183,6 +205,9 @@ func (s *Service) CreateAlbumImportSession(user authctx.CurrentUser, input Creat
 	}
 	if artistID := strings.TrimSpace(input.ArtistID); artistID != "" {
 		payload["artist_id"] = artistID
+	}
+	if artistName := strings.TrimSpace(input.ArtistName); artistName != "" {
+		payload["artist_name"] = artistName
 	}
 	applyAlbumImportSessionState(&session, status, payload)
 	payloadJSON, err = json.Marshal(payload)

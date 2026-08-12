@@ -23968,6 +23968,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "duration_sec": {
+                    "type": "integer"
+                },
                 "tags": {
                     "type": "array",
                     "items": {
@@ -26450,7 +26453,13 @@ const docTemplate = `{
                 "derivedAlbumTitle": {
                     "type": "string"
                 },
+                "derivedAlbumType": {
+                    "type": "string"
+                },
                 "derivedCover": {
+                    "type": "string"
+                },
+                "derivedReleaseDate": {
                     "type": "string"
                 },
                 "derivedTracks": {
@@ -26482,6 +26491,15 @@ const docTemplate = `{
                 },
                 "lastSyncedAt": {
                     "type": "string"
+                },
+                "metadataSourceUrl": {
+                    "type": "string"
+                },
+                "missingArtists": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
                 },
                 "progress": {
                     "$ref": "#/definitions/music.AlbumImportProgressDTO"
@@ -26518,6 +26536,15 @@ const docTemplate = `{
                 "audioUrl": {
                     "type": "string"
                 },
+                "discNumber": {
+                    "type": "integer"
+                },
+                "lyrics": {
+                    "$ref": "#/definitions/music.AlbumImportTrackLyricsPayload"
+                },
+                "lyricsSource": {
+                    "type": "string"
+                },
                 "origin": {
                     "type": "string"
                 },
@@ -26526,6 +26553,9 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                },
+                "trackNumber": {
+                    "type": "integer"
                 }
             }
         },
@@ -26986,6 +27016,9 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "artistId": {
+                    "type": "string"
+                },
+                "artistName": {
                     "type": "string"
                 },
                 "inputMode": {
