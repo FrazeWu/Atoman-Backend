@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	Day   = "day"
-	Month = "month"
-	Year  = "year"
+	Day     = "day"
+	Month   = "month"
+	Year    = "year"
+	Unknown = "unknown"
 )
 
 var pattern = regexp.MustCompile(`^(\d{4})(?:[-/](\d{2}|--)[-/](\d{2}|--))?$`)
@@ -19,6 +20,9 @@ func Parse(raw string) (*time.Time, string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil, "", nil
+	}
+	if trimmed == "----/--/--" {
+		return nil, Unknown, nil
 	}
 	parts := pattern.FindStringSubmatch(trimmed)
 	if parts == nil {
@@ -43,6 +47,9 @@ func Parse(raw string) (*time.Time, string, error) {
 }
 
 func Format(value time.Time, precision string) string {
+	if precision == Unknown {
+		return "----/--/--"
+	}
 	if value.IsZero() {
 		return ""
 	}

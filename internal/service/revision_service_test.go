@@ -930,7 +930,7 @@ func TestCreateRevisionBootstrapsAndAppliesArtistChanges(t *testing.T) {
 		"artist", artist.ID, uuid.New(),
 		map[string]interface{}{
 			"name": "After", "disambiguation": "Group", "bio": "New", "birth_date": "1990-01-02",
-			"artist_form": "group", "active_start_date": "2020", "stage_names_json": `[{"name":"After","is_primary":true}]`,
+			"artist_form": "group", "active_start_date": "2020", "active_end_date": "2024/12/--", "stage_names_json": `[{"name":"After","is_primary":true}]`,
 			"members": []map[string]interface{}{{"artist_id": member.ID.String(), "join_date": "2020/01/--", "leave_date": ""}},
 			"sources": []map[string]interface{}{{"type": "url", "url": "https://example.com/artist"}},
 		},
@@ -946,7 +946,7 @@ func TestCreateRevisionBootstrapsAndAppliesArtistChanges(t *testing.T) {
 	if err := db.First(&updated, "id = ?", artist.ID).Error; err != nil {
 		t.Fatalf("reload artist: %v", err)
 	}
-	if updated.Name != "After" || updated.Disambiguation != "Group" || updated.Bio != "New" || updated.BirthDate == nil || updated.ArtistForm != "group" || updated.ActiveStartDatePrecision != "year" {
+	if updated.Name != "After" || updated.Disambiguation != "Group" || updated.Bio != "New" || updated.BirthDate == nil || updated.ArtistForm != "group" || updated.ActiveStartDatePrecision != "year" || updated.ActiveEndDatePrecision != "month" {
 		t.Fatalf("unexpected updated artist: %#v", updated)
 	}
 	var relations []model.ArtistMember
@@ -964,7 +964,31 @@ func TestCreateRevisionBootstrapsAndAppliesArtistChanges(t *testing.T) {
 	if err := db.First(&reverted, "id = ?", artist.ID).Error; err != nil {
 		t.Fatalf("reload reverted artist: %v", err)
 	}
-	if reverted.Name != "Before" || reverted.BirthDate != nil {
+	if reverted.Name != "Before" || reverted.BirthDate != nil || !reverted.ActiveStartDate.IsZero() || !reverted.ActiveEndDate.IsZero() {
 		t.Fatalf("unexpected reverted artist: %#v", reverted)
+	}
+}
+
+func TestApplyArtistRevisionSnapshotPreservesEntryStatus(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.Artist{})
+	artist := model.Artist{Name: "Before", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+
+	if err := applyArtistRevisionSnapshot(db, artist.ID, map[string]interface{}{
+		"name":            "After",
+		"entry_status":    "draft",
+		"birth_date":      "----/--/--",
+		"active_end_date": "----/--/--",
+	}); err != nil {
+		t.Fatalf("apply artist revision: %v", err)
+	}
+	if err := db.First(&artist, "id = ?", artist.ID).Error; err != nil {
+		t.Fatalf("reload artist: %v", err)
+	}
+	if artist.Name != "After" || artist.EntryStatus != "open" || artist.BirthDate != nil || artist.BirthDatePrecision != "unknown" || !artist.ActiveEndDate.IsZero() || artist.ActiveEndDatePrecision != "unknown" {
+		t.Fatalf("unexpected artist after revision: %#v", artist)
 	}
 }

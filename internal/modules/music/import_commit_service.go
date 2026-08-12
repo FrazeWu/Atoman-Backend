@@ -151,9 +151,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			if err != nil {
 				return err
 			}
+			album.ReleaseDatePrecision = precision
 			if releaseDate != nil {
 				album.ReleaseDate = *releaseDate
-				album.ReleaseDatePrecision = precision
 				if album.ReleaseYear == 0 {
 					album.ReleaseYear = releaseDate.Year()
 				}
@@ -797,17 +797,17 @@ func buildArtistFromImportInput(input CommitAlbumImportArtistInput) (*model.Arti
 	}
 	if birthDate != nil {
 		artist.BirthDate = birthDate
-		artist.BirthDatePrecision = birthDatePrecision
 		artist.BirthYear = birthDate.Year()
 	}
+	artist.BirthDatePrecision = birthDatePrecision
 	if activeStartDate != nil {
 		artist.ActiveStartDate = *activeStartDate
-		artist.ActiveStartDatePrecision = activeStartDatePrecision
 	}
+	artist.ActiveStartDatePrecision = activeStartDatePrecision
 	if activeEndDate != nil {
 		artist.ActiveEndDate = *activeEndDate
-		artist.ActiveEndDatePrecision = activeEndDatePrecision
 	}
+	artist.ActiveEndDatePrecision = activeEndDatePrecision
 	return artist, nil
 }
 

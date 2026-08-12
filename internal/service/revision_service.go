@@ -384,11 +384,19 @@ func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string
 		members := make([]map[string]interface{}, 0, len(artist.MemberRelations))
 		for _, member := range artist.MemberRelations {
 			item := map[string]interface{}{"artist_id": member.MemberArtistID.String(), "join_date": "", "leave_date": ""}
-			if member.JoinDate != nil {
-				item["join_date"] = partialdate.Format(*member.JoinDate, member.JoinDatePrecision)
+			if member.JoinDate != nil || member.JoinDatePrecision == partialdate.Unknown {
+				joinDate := time.Time{}
+				if member.JoinDate != nil {
+					joinDate = *member.JoinDate
+				}
+				item["join_date"] = partialdate.Format(joinDate, member.JoinDatePrecision)
 			}
-			if member.LeaveDate != nil {
-				item["leave_date"] = partialdate.Format(*member.LeaveDate, member.LeaveDatePrecision)
+			if member.LeaveDate != nil || member.LeaveDatePrecision == partialdate.Unknown {
+				leaveDate := time.Time{}
+				if member.LeaveDate != nil {
+					leaveDate = *member.LeaveDate
+				}
+				item["leave_date"] = partialdate.Format(leaveDate, member.LeaveDatePrecision)
 			}
 			members = append(members, item)
 		}
@@ -399,13 +407,17 @@ func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string
 			"birth_date": "", "artist_form": artist.ArtistForm, "entry_status": artist.EntryStatus,
 			"active_start_date": "", "active_end_date": "", "members": members, "sources": artist.Sources,
 		}
-		if artist.BirthDate != nil {
-			snapshot["birth_date"] = partialdate.Format(*artist.BirthDate, artist.BirthDatePrecision)
+		if artist.BirthDate != nil || artist.BirthDatePrecision == partialdate.Unknown {
+			birthDate := time.Time{}
+			if artist.BirthDate != nil {
+				birthDate = *artist.BirthDate
+			}
+			snapshot["birth_date"] = partialdate.Format(birthDate, artist.BirthDatePrecision)
 		}
-		if !artist.ActiveStartDate.IsZero() {
+		if !artist.ActiveStartDate.IsZero() || artist.ActiveStartDatePrecision == partialdate.Unknown {
 			snapshot["active_start_date"] = partialdate.Format(artist.ActiveStartDate, artist.ActiveStartDatePrecision)
 		}
-		if !artist.ActiveEndDate.IsZero() {
+		if !artist.ActiveEndDate.IsZero() || artist.ActiveEndDatePrecision == partialdate.Unknown {
 			snapshot["active_end_date"] = partialdate.Format(artist.ActiveEndDate, artist.ActiveEndDatePrecision)
 		}
 		return json.Marshal(snapshot)
@@ -1032,7 +1044,7 @@ func applyArtistRevisionSnapshot(tx *gorm.DB, artistID uuid.UUID, content map[st
 	allowed := map[string]struct{}{
 		"name": {}, "disambiguation": {}, "legal_name": {}, "stage_names_json": {}, "bio": {}, "image_url": {},
 		"nationality": {}, "birth_place": {}, "birth_year": {}, "death_year": {},
-		"artist_form": {}, "entry_status": {},
+		"artist_form": {},
 	}
 	updates := make(map[string]interface{})
 	for key, value := range content {
@@ -1051,7 +1063,11 @@ func applyArtistRevisionSnapshot(tx *gorm.DB, artistID uuid.UUID, content map[st
 			}
 			updates["birth_date"] = parsed
 			updates["birth_date_precision"] = precision
-			updates["birth_year"] = parsed.Year()
+			if parsed != nil {
+				updates["birth_year"] = parsed.Year()
+			} else {
+				updates["birth_year"] = 0
+			}
 		}
 	}
 	for _, field := range []string{"active_start_date", "active_end_date"} {
@@ -1214,10 +1230,16 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 		if err != nil {
 			return fmt.Errorf("failed to parse album release date: %w", err)
 		}
-		album.ReleaseDate = *releaseDate
 		album.ReleaseDatePrecision = precision
-		album.Year = releaseDate.Year()
-		album.ReleaseYear = releaseDate.Year()
+		if releaseDate != nil {
+			album.ReleaseDate = *releaseDate
+			album.Year = releaseDate.Year()
+			album.ReleaseYear = releaseDate.Year()
+		} else {
+			album.ReleaseDate = time.Time{}
+			album.Year = 0
+			album.ReleaseYear = 0
+		}
 	} else {
 		album.ReleaseDate = time.Time{}
 		album.ReleaseDatePrecision = ""

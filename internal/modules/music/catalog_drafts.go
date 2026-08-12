@@ -8,6 +8,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/partialdate"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -93,12 +94,12 @@ func canUseArtistDraft(artist model.Artist, user authctx.CurrentUser) bool {
 
 func validateArtistPublicationFields(artist model.Artist, members []ArtistMemberPayload) error {
 	if normalizeArtistForm(artist.ArtistForm) == "group" {
-		if artist.ActiveStartDate.IsZero() || len(members) < 2 {
+		if (artist.ActiveStartDate.IsZero() && artist.ActiveStartDatePrecision != partialdate.Unknown) || len(members) < 2 {
 			return apperr.BadRequest("validation.invalid_request", "group artists require a start date and at least two members")
 		}
 		return nil
 	}
-	if strings.TrimSpace(artist.ImageURL) == "" || strings.TrimSpace(artist.LegalName) == "" || strings.TrimSpace(artist.Nationality) == "" || artist.BirthDate == nil {
+	if strings.TrimSpace(artist.ImageURL) == "" || strings.TrimSpace(artist.LegalName) == "" || strings.TrimSpace(artist.Nationality) == "" || (artist.BirthDate == nil && artist.BirthDatePrecision != partialdate.Unknown) {
 		return apperr.BadRequest("validation.invalid_request", "artist portrait, legal name, nationality and birth date are required")
 	}
 	return nil

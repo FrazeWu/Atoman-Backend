@@ -19,7 +19,7 @@ func parsePartialDate(raw string, fieldName string) (*time.Time, string, error) 
 func invalidPartialDate(fieldName string) error {
 	return apperr.BadRequest(
 		"validation.invalid_request",
-		fmt.Sprintf("%s must be YYYY-MM-DD, YYYY/MM/-- or YYYY/--/--", fieldName),
+		fmt.Sprintf("%s must be YYYY-MM-DD, YYYY/MM/--, YYYY/--/-- or ----/--/--", fieldName),
 	)
 }
 

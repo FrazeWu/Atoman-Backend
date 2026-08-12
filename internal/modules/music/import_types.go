@@ -26,8 +26,8 @@ type ArtistStageNamePayload struct {
 type ArtistMemberPayload struct {
 	ArtistID  string `json:"artist_id"`
 	Name      string `json:"name"`
-	JoinDate  string `json:"join_date"`
-	LeaveDate string `json:"leave_date"`
+	JoinDate  string `json:"join_date"`  // 支持完全未知日期 ----/--/--
+	LeaveDate string `json:"leave_date"` // 支持完全未知日期 ----/--/--
 }
 
 type AlbumImportArtistPayload struct {
@@ -37,12 +37,12 @@ type AlbumImportArtistPayload struct {
 	Bio             string                   `json:"bio"`
 	ImageURL        string                   `json:"image_url"`
 	Nationality     string                   `json:"nationality"`
-	BirthDate       string                   `json:"birth_date"`
+	BirthDate       string                   `json:"birth_date"` // 支持完全未知日期 ----/--/--
 	StageNames      []ArtistStageNamePayload `json:"stage_names"`
 	BirthPlace      string                   `json:"birth_place"`
 	ArtistForm      string                   `json:"artist_form"`
-	ActiveStartDate string                   `json:"active_start_date"`
-	ActiveEndDate   string                   `json:"active_end_date"`
+	ActiveStartDate string                   `json:"active_start_date"` // 支持完全未知日期 ----/--/--
+	ActiveEndDate   string                   `json:"active_end_date"`   // 支持完全未知日期 ----/--/--
 	Members         []ArtistMemberPayload    `json:"members"`
 }
 
@@ -51,7 +51,7 @@ type AlbumImportAlbumPayload struct {
 	Description string                    `json:"description"`
 	AlbumType   string                    `json:"album_type"`
 	CoverURL    string                    `json:"cover_url"`
-	ReleaseDate string                    `json:"release_date"`
+	ReleaseDate string                    `json:"release_date"` // 支持完全未知日期 ----/--/--
 	ReleaseYear int                       `json:"release_year"`
 	Tracks      []AlbumImportTrackPayload `json:"tracks"`
 }
@@ -89,12 +89,12 @@ type CommitAlbumImportArtistInput struct {
 	Bio             string                   `json:"bio"`
 	ImageURL        string                   `json:"image_url"`
 	Nationality     string                   `json:"nationality"`
-	BirthDate       string                   `json:"birth_date"`
+	BirthDate       string                   `json:"birth_date"` // 支持完全未知日期 ----/--/--
 	StageNames      []ArtistStageNamePayload `json:"stage_names"`
 	BirthPlace      string                   `json:"birth_place"`
 	ArtistForm      string                   `json:"artist_form"`
-	ActiveStartDate string                   `json:"active_start_date"`
-	ActiveEndDate   string                   `json:"active_end_date"`
+	ActiveStartDate string                   `json:"active_start_date"` // 支持完全未知日期 ----/--/--
+	ActiveEndDate   string                   `json:"active_end_date"`   // 支持完全未知日期 ----/--/--
 	Members         []ArtistMemberPayload    `json:"members"`
 }
 

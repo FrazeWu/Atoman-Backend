@@ -39,6 +39,42 @@ func TestParsePartialDateRejectsDayWithoutMonth(t *testing.T) {
 	}
 }
 
+func TestParsePartialDateAcceptsCompletelyUnknownDate(t *testing.T) {
+	date, precision, err := parsePartialDate("----/--/--", "date")
+	if err != nil {
+		t.Fatalf("parse unknown date: %v", err)
+	}
+	if date != nil || precision != "unknown" {
+		t.Fatalf("got date=%v precision=%q", date, precision)
+	}
+}
+
+func TestCreateArtistAcceptsCompletelyUnknownRequiredDate(t *testing.T) {
+	service, _, user := newMusicTestService(t)
+	artist, err := service.CreateArtist(user, CreateArtistRequest{
+		Name:        "Unknown Date Artist",
+		LegalName:   "Unknown Date Artist",
+		ImageURL:    "/artist.jpg",
+		Nationality: "CN",
+		BirthDate:   "----/--/--",
+		Sources:     []Source{{Title: "artist source"}},
+	})
+	if err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	if artist.BirthDate != nil || artist.BirthDatePrecision != "unknown" {
+		t.Fatalf("unexpected unknown birth date: %#v", artist)
+	}
+}
+
+func TestGroupArtistAcceptsCompletelyUnknownRequiredStartDate(t *testing.T) {
+	artist := model.Artist{ArtistForm: "group", ActiveStartDatePrecision: "unknown"}
+	members := []ArtistMemberPayload{{ArtistID: "member-1"}, {ArtistID: "member-2"}}
+	if err := validateArtistPublicationFields(artist, members); err != nil {
+		t.Fatalf("validate unknown group start date: %v", err)
+	}
+}
+
 func TestCreateArtistStoresPartialDatePrecision(t *testing.T) {
 	service, _, user := newMusicTestService(t)
 	artist, err := service.CreateArtist(user, CreateArtistRequest{

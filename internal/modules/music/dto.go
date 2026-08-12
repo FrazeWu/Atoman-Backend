@@ -84,12 +84,12 @@ type CreateArtistRequest struct {
 	ImageURL        string                   `json:"image_url"`
 	Nationality     string                   `json:"nationality"`
 	BirthPlace      string                   `json:"birth_place"`
-	BirthDate       string                   `json:"birth_date"`
+	BirthDate       string                   `json:"birth_date"` // YYYY-MM-DD、YYYY/MM/--、YYYY/--/-- 或 ----/--/--
 	BirthYear       int                      `json:"birth_year"`
 	DeathYear       int                      `json:"death_year"`
 	ArtistForm      string                   `json:"artist_form"`
-	ActiveStartDate string                   `json:"active_start_date"`
-	ActiveEndDate   string                   `json:"active_end_date"`
+	ActiveStartDate string                   `json:"active_start_date"` // 支持完全未知日期 ----/--/--
+	ActiveEndDate   string                   `json:"active_end_date"`   // 支持完全未知日期 ----/--/--
 	Members         []ArtistMemberPayload    `json:"members"`
 	Sources         []Source                 `json:"sources"`
 	DraftContext    string                   `json:"draft_context"`

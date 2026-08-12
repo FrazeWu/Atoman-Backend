@@ -58,23 +58,29 @@ func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest
 		}
 		artist.BirthDate = birthDate
 		artist.BirthDatePrecision = precision
-		artist.BirthYear = birthDate.Year()
+		if birthDate != nil {
+			artist.BirthYear = birthDate.Year()
+		}
 	}
 	if strings.TrimSpace(req.ActiveStartDate) != "" {
 		activeStartDate, precision, err := parsePartialDate(req.ActiveStartDate, "active_start_date")
 		if err != nil {
 			return model.Artist{}, err
 		}
-		artist.ActiveStartDate = *activeStartDate
 		artist.ActiveStartDatePrecision = precision
+		if activeStartDate != nil {
+			artist.ActiveStartDate = *activeStartDate
+		}
 	}
 	if strings.TrimSpace(req.ActiveEndDate) != "" {
 		activeEndDate, precision, err := parsePartialDate(req.ActiveEndDate, "active_end_date")
 		if err != nil {
 			return model.Artist{}, err
 		}
-		artist.ActiveEndDate = *activeEndDate
 		artist.ActiveEndDatePrecision = precision
+		if activeEndDate != nil {
+			artist.ActiveEndDate = *activeEndDate
+		}
 	}
 	if !memberDraft {
 		if err := validateArtistPublicationFields(artist, req.Members); err != nil {

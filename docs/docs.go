@@ -26157,6 +26157,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "release_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "release_year": {
@@ -26177,9 +26178,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "active_end_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "active_start_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "artist_form": {
@@ -26189,6 +26192,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "birth_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "birth_place": {
@@ -26636,9 +26640,11 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "join_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "leave_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "name": {
@@ -26667,9 +26673,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "active_end_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "active_start_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "artist_form": {
@@ -26682,6 +26690,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "birth_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "birth_place": {
@@ -26792,9 +26801,11 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "active_end_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "active_start_date": {
+                    "description": "支持完全未知日期 ----/--/--",
                     "type": "string"
                 },
                 "artist_form": {
@@ -26804,6 +26815,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "birth_date": {
+                    "description": "YYYY-MM-DD、YYYY/MM/--、YYYY/--/-- 或 ----/--/--",
                     "type": "string"
                 },
                 "birth_place": {

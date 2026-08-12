@@ -96,12 +96,12 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		}
 		if activeStartDate != nil {
 			artist.ActiveStartDate = *activeStartDate
-			artist.ActiveStartDatePrecision = activeStartDatePrecision
 		}
+		artist.ActiveStartDatePrecision = activeStartDatePrecision
 		if activeEndDate != nil {
 			artist.ActiveEndDate = *activeEndDate
-			artist.ActiveEndDatePrecision = activeEndDatePrecision
 		}
+		artist.ActiveEndDatePrecision = activeEndDatePrecision
 		if err := tx.Create(&artist).Error; err != nil {
 			return err
 		}
@@ -160,9 +160,9 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		if payload.ReleaseYear > 0 {
 			album.Year = payload.ReleaseYear
 		}
+		album.ReleaseDatePrecision = releaseDatePrecision
 		if releaseDate != nil {
 			album.ReleaseDate = *releaseDate
-			album.ReleaseDatePrecision = releaseDatePrecision
 			album.Year = releaseDate.Year()
 			album.ReleaseYear = releaseDate.Year()
 		}
