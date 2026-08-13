@@ -153,6 +153,7 @@ func (s *Service) CreateWithExtension(user authctx.CurrentUser, targetRef Target
 	if resolved.Kind == TargetKindForumTopic && s.forumPolicy != nil {
 		s.forumPolicy.EvaluateTrust(user.ID)
 	}
+	s.publishCreatedCommentNotifications(created.ID)
 	dto, err := s.loadCommentDTO(s.db, created.ID)
 	if err != nil {
 		return CommentDTO{}, err

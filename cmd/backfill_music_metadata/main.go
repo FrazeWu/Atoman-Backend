@@ -17,9 +17,11 @@ func main() {
 	envFile := flag.String("env", ".env.dev", "env file to load")
 	apply := flag.Bool("apply", false, "apply safe matches")
 	albumID := flag.String("album-id", "", "only process one album")
+	songID := flag.String("song-id", "", "only repair one song's lyrics")
 	stripTitlePrefix := flag.String("strip-title-prefix", "", "remove an exact prefix from existing song titles")
 	stripArtistPrefixes := flag.Bool("strip-artist-prefixes", false, "remove artist credits before the last title separator")
 	preferredReleaseID := flag.String("release-id", "", "validate one MusicBrainz release for the selected album")
+	repairTimedLyrics := flag.Bool("repair-timed-lyrics", false, "upgrade existing plain lyrics containing LRC timestamps")
 	flag.Parse()
 	if err := godotenv.Load(*envFile); err != nil {
 		log.Fatalf("load %s: %v", *envFile, err)
@@ -42,6 +44,16 @@ func main() {
 			log.Fatal(err)
 		}
 		log.Printf("updated %d song title(s)", updated)
+		return
+	}
+	if *repairTimedLyrics {
+		results, err := music.RepairCatalogTimedLyrics(context.Background(), db, *apply, *songID)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, result := range results {
+			log.Print(music.FormatCatalogLyricsRepairResult(result))
+		}
 		return
 	}
 	results, err := music.BackfillCatalogMetadata(context.Background(), db, os.Getenv("MUSICBRAINZ_USER_AGENT"), *apply, *albumID, *preferredReleaseID)

@@ -72,7 +72,7 @@ func TestReprocessVideoCreatesPreviewJobForOwner(t *testing.T) {
 	t.Cleanup(func() { middleware.SetAuthDB(nil) })
 	owner := seedVideoUser(t, db)
 	video := seedVideoWithState(t, db, owner.UUID, "draft", "public")
-	if err := db.Model(&video).Updates(map[string]any{"storage_type": "local", "processing_status": "failed"}).Error; err != nil {
+	if err := db.Model(&video).Updates(map[string]any{"storage_type": "local", "video_url": "/uploads/test.mp4", "processing_status": "failed"}).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -616,8 +616,17 @@ func TestGetSubscribedVideosReturnsVideoChannelAndCollectionUpdates(t *testing.T
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/videos/subscriptions", nil))
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	var videos []model.Video
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &videos))
+	var payload struct {
+		Data []model.Video `json:"data"`
+		Meta struct {
+			Page     int   `json:"page"`
+			PageSize int   `json:"page_size"`
+			Total    int64 `json:"total"`
+			HasMore  bool  `json:"has_more"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	videos := payload.Data
 	ids := make([]uuid.UUID, 0, len(videos))
 	for _, video := range videos {
 		ids = append(ids, video.ID)
@@ -625,6 +634,48 @@ func TestGetSubscribedVideosReturnsVideoChannelAndCollectionUpdates(t *testing.T
 	require.ElementsMatch(t, []uuid.UUID{channelVideo.ID, collectionVideo.ID}, ids)
 	require.NotContains(t, ids, unsubscribedVideo.ID)
 	require.NotContains(t, ids, hiddenCollectionVideo.ID)
+	require.Equal(t, 1, payload.Meta.Page)
+	require.Equal(t, 20, payload.Meta.PageSize)
+	require.Equal(t, int64(2), payload.Meta.Total)
+	require.False(t, payload.Meta.HasMore)
+}
+
+func TestGetSubscribedVideosPaginatesUpdates(t *testing.T) {
+	db := newVideoTestDB(t)
+	viewer := seedVideoUser(t, db)
+	owner := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, owner.UUID, "Paged Subscriptions")
+	for index := 0; index < 3; index++ {
+		video := seedVideoWithState(t, db, owner.UUID, "published", "public")
+		require.NoError(t, db.Model(&video).Updates(map[string]any{
+			"channel_id": channel.ID,
+			"created_at": time.Date(2026, time.July, 14, 12-index, 0, 0, 0, time.UTC),
+		}).Error)
+	}
+	source := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Hash: "paged-video-subscriptions", Title: channel.Name}
+	require.NoError(t, db.Create(&source).Error)
+	require.NoError(t, db.Create(&model.Subscription{UserID: viewer.UUID, FeedSourceID: source.ID}).Error)
+
+	r := gin.New()
+	r.GET("/api/v1/videos/subscriptions", withVideoAuth(viewer.UUID, GetSubscribedVideos(db)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/videos/subscriptions?page=2&page_size=2", nil))
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var payload struct {
+		Data []model.Video `json:"data"`
+		Meta struct {
+			Page     int   `json:"page"`
+			PageSize int   `json:"page_size"`
+			Total    int64 `json:"total"`
+			HasMore  bool  `json:"has_more"`
+		} `json:"meta"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	require.Len(t, payload.Data, 1)
+	require.Equal(t, 2, payload.Meta.Page)
+	require.Equal(t, 2, payload.Meta.PageSize)
+	require.Equal(t, int64(3), payload.Meta.Total)
+	require.False(t, payload.Meta.HasMore)
 }
 
 func TestGetVideoCollectionBookmarksReturnsOnlyVideoCollections(t *testing.T) {
@@ -688,19 +739,20 @@ func TestSetupVideoRoutesMountsRecommendationItemsEndpoint(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			ID          string `json:"id"`
-			Title       string `json:"title"`
-			Summary     string `json:"summary"`
-			ContentType string `json:"content_type"`
-			TargetPath  string `json:"target_path"`
-			ScoreLabel  string `json:"score_label"`
+			ID          string       `json:"id"`
+			Title       string       `json:"title"`
+			Summary     string       `json:"summary"`
+			ContentType string       `json:"content_type"`
+			TargetPath  string       `json:"target_path"`
+			ScoreLabel  string       `json:"score_label"`
+			Video       *model.Video `json:"video"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
 	require.NotEmpty(t, payload.Data, "body=%s", w.Body.String())
 
 	first := payload.Data[0]
-	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType != "video" {
+	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType != "video" || first.Video == nil || first.Video.ID.String() != first.ID {
 		t.Fatalf("expected recommendation dto fields, got %#v", first)
 	}
 }

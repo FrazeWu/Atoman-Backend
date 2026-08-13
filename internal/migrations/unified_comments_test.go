@@ -17,6 +17,9 @@ func TestUnifiedCommentSchemaCreatesRequiredIndexes(t *testing.T) {
 	assertIndexExists(t, db, "comment_entries", "uq_comment_root_floor")
 	assertIndexExists(t, db, "comment_likes", "uq_comment_like_user")
 	assertIndexExists(t, db, "comment_reports", "uq_comment_report_user")
+	assertIndexExists(t, db, "comment_entries", "idx_comment_entries_target_status_floor")
+	assertIndexExists(t, db, "comment_entries", "idx_comment_entries_target_status_hot_floor")
+	assertIndexExists(t, db, "comment_entries", "idx_comment_entries_root_status_created")
 	assertIndexExists(t, db, "comment_publish_records", "idx_comment_publish_author_created")
 	assertIndexExists(t, db, "comment_publish_records", "idx_comment_publish_duplicate_window")
 	if !db.Migrator().HasColumn(&model.DiscussionTarget{}, "resource_id") {

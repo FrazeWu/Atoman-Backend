@@ -19039,6 +19039,54 @@
                 }
             }
         },
+        "/api/v1/videos/subscriptions": {
+            "get": {
+                "description": "返回当前用户订阅频道和合集中的已发布视频。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "获取视频订阅更新",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 1,
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 20,
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.videoSubscriptionListResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/videos/upload-cover": {
             "post": {
                 "security": [
@@ -24245,6 +24293,20 @@
                 }
             }
         },
+        "handlers.videoSubscriptionListResponse": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.Video"
+                    }
+                },
+                "meta": {
+                    "$ref": "#/definitions/httpx.PageMeta"
+                }
+            }
+        },
         "httpx.PageMeta": {
             "type": "object",
             "properties": {
@@ -26955,6 +27017,9 @@
         "music.AlbumImportTrackPayload": {
             "type": "object",
             "properties": {
+                "audio_url": {
+                    "type": "string"
+                },
                 "disc_number": {
                     "type": "integer"
                 },
@@ -28202,8 +28267,7 @@
                 "totals": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
+                        "type": "integer"
                     }
                 }
             }
@@ -28364,8 +28428,7 @@
                 "items": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
+                        "type": "integer"
                     }
                 },
                 "total": {
@@ -28842,8 +28905,7 @@
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
+                        "type": "integer"
                     }
                 },
                 "title": {
@@ -28860,8 +28922,7 @@
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
+                        "type": "integer"
                     }
                 }
             }
@@ -28896,8 +28957,7 @@
                 "totals": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
+                        "type": "integer"
                     }
                 },
                 "trend": {
@@ -29023,8 +29083,7 @@
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
+                        "type": "integer"
                     }
                 },
                 "module": {
@@ -29176,8 +29235,7 @@
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer",
-                        "format": "int64"
+                        "type": "integer"
                     }
                 },
                 "module": {

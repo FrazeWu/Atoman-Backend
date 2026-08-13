@@ -184,3 +184,42 @@ func TestSyncLegacySongLyricsPreservesStructuredLyricsWhenContentIsUnchanged(t *
 		t.Fatalf("version count = %d, want 1", versionCount)
 	}
 }
+
+func TestSyncLegacySongLyricsDetectsLRCAndPersistsTimes(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Song{}, &model.MusicSongLyric{},
+		&model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
+		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
+		&model.Notification{},
+	)
+	actor := model.User{Username: "lrc-sync", Email: "lrc-sync@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&actor).Error; err != nil {
+		t.Fatal(err)
+	}
+	song := model.Song{Title: "Timed Sync", AudioURL: "/timed.mp3"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	content := "[00:01.50]Hello\n[00:05.25]World"
+	translation := "[00:01.50]你好\n[00:05.25]世界"
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		return SyncLegacySongLyricsWithFormat(tx, actor.UUID, song.ID, content, translation, "lrc", "import")
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var lyric model.MusicSongLyric
+	if err := db.First(&lyric, "song_id = ?", song.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if lyric.Format != "lrc" || lyric.Translation != translation {
+		t.Fatalf("unexpected lyric: %#v", lyric)
+	}
+	var lines []model.MusicSongLyricLine
+	if err := db.Where("lyric_id = ?", lyric.ID).Order("line_index ASC").Find(&lines).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(lines) != 2 || lines[0].TimeMS == nil || *lines[0].TimeMS != 1500 || lines[1].TimeMS == nil || *lines[1].TimeMS != 5250 || lines[0].Translation != "你好" {
+		t.Fatalf("unexpected timed lines: %#v", lines)
+	}
+}

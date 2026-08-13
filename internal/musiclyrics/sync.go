@@ -14,9 +14,27 @@ import (
 // SyncLegacySongLyrics routes legacy writes through current lyrics, parsed lines, and history.
 // Callers must pass a transaction because this function performs multiple dependent writes.
 func SyncLegacySongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, content, editSummary string) error {
+	return SyncLegacySongLyricsWithFormat(tx, actorID, songID, content, "", "", editSummary)
+}
+
+func SyncLegacySongLyricsWithFormat(tx *gorm.DB, actorID, songID uuid.UUID, content, translation, format, editSummary string) error {
 	var lyric model.MusicSongLyric
 	findErr := tx.First(&lyric, "song_id = ?", songID).Error
-	if findErr == nil && lyric.Content == content {
+	format = strings.ToLower(strings.TrimSpace(format))
+	if format == "" {
+		if _, err := ParseLRC(content, translation); err == nil {
+			format = "lrc"
+		} else {
+			format = "plain"
+		}
+	}
+	if format != "plain" && format != "lrc" {
+		return errors.New("lyrics format must be plain or lrc")
+	}
+	if translation == "" && findErr == nil {
+		translation = lyric.Translation
+	}
+	if findErr == nil && lyric.Content == content && lyric.Format == format && lyric.Translation == translation {
 		return tx.Model(&model.Song{}).Where("id = ?", songID).Update("lyrics", content).Error
 	}
 	if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
@@ -25,6 +43,20 @@ func SyncLegacySongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, content, editS
 	if errors.Is(findErr, gorm.ErrRecordNotFound) && strings.TrimSpace(content) == "" {
 		return nil
 	}
+	var lines []LRCLine
+	if format == "lrc" {
+		var err error
+		lines, err = ParseLRC(content, translation)
+		if err != nil {
+			return err
+		}
+	} else {
+		plainLines := ParsePlain(content, translation)
+		lines = make([]LRCLine, 0, len(plainLines))
+		for _, line := range plainLines {
+			lines = append(lines, LRCLine{LineKey: line.LineKey, LineIndex: line.LineIndex, Text: line.Text, Translation: line.Translation})
+		}
+	}
 
 	if errors.Is(findErr, gorm.ErrRecordNotFound) {
 		lyric = model.MusicSongLyric{SongID: songID, Version: 1}
@@ -32,8 +64,8 @@ func SyncLegacySongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, content, editS
 		lyric.Version++
 	}
 	lyric.Content = content
-	lyric.Translation = ""
-	lyric.Format = "plain"
+	lyric.Translation = translation
+	lyric.Format = format
 	lyric.UpdatedBy = actorID
 	lyric.EditSummary = editSummary
 	if errors.Is(findErr, gorm.ErrRecordNotFound) {
@@ -44,15 +76,22 @@ func SyncLegacySongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, content, editS
 		return err
 	}
 
-	lines, err := replacePlainLines(tx, lyric.ID, ParsePlain(content, ""))
+	parsedLines := make([]model.MusicSongLyricLine, 0, len(lines))
+	for _, parsed := range lines {
+		parsedLines = append(parsedLines, model.MusicSongLyricLine{
+			LyricID: lyric.ID, LineKey: parsed.LineKey, LineIndex: parsed.LineIndex,
+			TimeMS: parsed.TimeMS, Text: parsed.Text, Translation: parsed.Translation,
+		})
+	}
+	currentLines, err := replaceLines(tx, lyric.ID, parsedLines)
 	if err != nil {
 		return err
 	}
-	if err := markInvalidAnchorsForRebind(tx, actorID, songID, lines); err != nil {
+	if err := markInvalidAnchorsForRebind(tx, actorID, songID, currentLines); err != nil {
 		return err
 	}
 	version := model.MusicSongLyricVersion{
-		SongID: songID, Version: lyric.Version, Content: content, Format: "plain",
+		SongID: songID, Version: lyric.Version, Content: content, Translation: translation, Format: format,
 		EditSummary: editSummary, CreatedBy: actorID,
 	}
 	if err := tx.Create(&version).Error; err != nil {
@@ -61,7 +100,7 @@ func SyncLegacySongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, content, editS
 	return tx.Model(&model.Song{}).Where("id = ?", songID).Update("lyrics", content).Error
 }
 
-func replacePlainLines(tx *gorm.DB, lyricID uuid.UUID, parsed []PlainLine) ([]model.MusicSongLyricLine, error) {
+func replaceLines(tx *gorm.DB, lyricID uuid.UUID, parsed []model.MusicSongLyricLine) ([]model.MusicSongLyricLine, error) {
 	var oldLines []model.MusicSongLyricLine
 	if err := tx.Where("lyric_id = ?", lyricID).Find(&oldLines).Error; err != nil {
 		return nil, err
@@ -78,6 +117,7 @@ func replacePlainLines(tx *gorm.DB, lyricID uuid.UUID, parsed []PlainLine) ([]mo
 			line = model.MusicSongLyricLine{LyricID: lyricID, LineKey: parsedLine.LineKey}
 		}
 		line.LineIndex = parsedLine.LineIndex
+		line.TimeMS = parsedLine.TimeMS
 		line.Text = parsedLine.Text
 		line.Translation = parsedLine.Translation
 		if exists {

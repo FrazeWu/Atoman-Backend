@@ -257,7 +257,7 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 				return err
 			}
 			if strings.TrimSpace(song.Lyrics) == "" && track.Lyrics != nil && strings.TrimSpace(track.Lyrics.Content) != "" {
-				if err := SyncLegacySongLyrics(tx, actorID, song.ID, track.Lyrics.Content, "自动匹配歌词"); err != nil {
+				if err := SyncLegacySongLyricsWithFormat(tx, actorID, song.ID, track.Lyrics.Content, track.Lyrics.Translation, track.Lyrics.Format, "自动匹配歌词"); err != nil {
 					return err
 				}
 				result.LyricsAdded++

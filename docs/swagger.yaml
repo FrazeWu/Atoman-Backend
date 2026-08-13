@@ -3103,6 +3103,8 @@ definitions:
         type: array
       description:
         type: string
+      duration_sec:
+        type: integer
       tags:
         items:
           type: string
@@ -3207,6 +3209,15 @@ definitions:
         type: integer
       url:
         type: string
+    type: object
+  handlers.videoSubscriptionListResponse:
+    properties:
+      data:
+        items:
+          $ref: '#/definitions/model.Video'
+        type: array
+      meta:
+        $ref: '#/definitions/httpx.PageMeta'
     type: object
   httpx.PageMeta:
     properties:
@@ -4809,7 +4820,11 @@ definitions:
         type: string
       derivedAlbumTitle:
         type: string
+      derivedAlbumType:
+        type: string
       derivedCover:
+        type: string
+      derivedReleaseDate:
         type: string
       derivedTracks:
         items:
@@ -4831,6 +4846,12 @@ definitions:
         type: string
       lastSyncedAt:
         type: string
+      metadataSourceUrl:
+        type: string
+      missingArtists:
+        items:
+          type: string
+        type: array
       progress:
         $ref: '#/definitions/music.AlbumImportProgressDTO'
       stage:
@@ -4854,12 +4875,20 @@ definitions:
         type: string
       audioUrl:
         type: string
+      discNumber:
+        type: integer
+      lyrics:
+        $ref: '#/definitions/music.AlbumImportTrackLyricsPayload'
+      lyricsSource:
+        type: string
       origin:
         type: string
       songId:
         type: string
       title:
         type: string
+      trackNumber:
+        type: integer
     type: object
   music.AlbumImportErrorDTO:
     properties:
@@ -4993,6 +5022,8 @@ definitions:
     type: object
   music.AlbumImportTrackPayload:
     properties:
+      audio_url:
+        type: string
       disc_number:
         type: integer
       lyrics:
@@ -5160,6 +5191,8 @@ definitions:
   music.CreateAlbumImportSessionInput:
     properties:
       artistId:
+        type: string
+      artistName:
         type: string
       inputMode:
         type: string
@@ -5807,7 +5840,6 @@ definitions:
         type: integer
       totals:
         additionalProperties:
-          format: int64
           type: integer
         type: object
     type: object
@@ -5914,7 +5946,6 @@ definitions:
     properties:
       items:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       total:
@@ -6226,7 +6257,6 @@ definitions:
         type: string
       metrics:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       title:
@@ -6238,7 +6268,6 @@ definitions:
         type: string
       metrics:
         additionalProperties:
-          format: int64
           type: integer
         type: object
     type: object
@@ -6262,7 +6291,6 @@ definitions:
         type: array
       totals:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       trend:
@@ -6345,7 +6373,6 @@ definitions:
         type: array
       metrics:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       module:
@@ -6446,7 +6473,6 @@ definitions:
         type: string
       metrics:
         additionalProperties:
-          format: int64
           type: integer
         type: object
       module:
@@ -18741,6 +18767,38 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 点赞或取消点赞视频
+      tags:
+      - videos
+  /api/v1/videos/subscriptions:
+    get:
+      description: 返回当前用户订阅频道和合集中的已发布视频。
+      parameters:
+      - default: 1
+        description: 页码
+        in: query
+        name: page
+        type: integer
+      - default: 20
+        description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.videoSubscriptionListResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取视频订阅更新
       tags:
       - videos
   /api/v1/videos/upload-cover:

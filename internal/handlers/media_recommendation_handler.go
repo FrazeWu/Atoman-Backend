@@ -5,18 +5,20 @@ import (
 	"math"
 	"strings"
 
+	"atoman/internal/model"
 	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/apperr"
 )
 
 type recommendationItemDTO struct {
-	ID          string `json:"id"`
-	Title       string `json:"title"`
-	Summary     string `json:"summary"`
-	ContentType string `json:"content_type"`
-	ImageURL    string `json:"image_url"`
-	TargetPath  string `json:"target_path"`
-	ScoreLabel  string `json:"score_label"`
+	ID          string       `json:"id"`
+	Title       string       `json:"title"`
+	Summary     string       `json:"summary"`
+	ContentType string       `json:"content_type"`
+	ImageURL    string       `json:"image_url"`
+	TargetPath  string       `json:"target_path"`
+	ScoreLabel  string       `json:"score_label"`
+	Video       *model.Video `json:"video,omitempty"`
 }
 
 func parseRecommendationMode(raw string) (recommendation.Mode, error) {

@@ -61,7 +61,7 @@ func (s *Service) ListNotifications(user authctx.CurrentUser, query ListQuery) (
 	}
 	items := make([]NotificationDTO, 0, len(notifications))
 	for _, notification := range notifications {
-		items = append(items, toDTO(notification))
+		items = append(items, ToDTO(notification))
 	}
 	return items, total, nil
 }
@@ -192,7 +192,7 @@ func normalizeListQuery(query ListQuery) ListQuery {
 	return query
 }
 
-func toDTO(notification model.Notification) NotificationDTO {
+func ToDTO(notification model.Notification) NotificationDTO {
 	dto := NotificationDTO{
 		ID:         notification.ID.String(),
 		Type:       notification.Type,

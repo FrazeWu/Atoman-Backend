@@ -38,7 +38,6 @@ const (
 
 type ExtensionWriter func(tx *gorm.DB, comment *model.CommentEntry) error
 type DeleteExtensionWriter func(tx *gorm.DB, commentIDs []uuid.UUID) error
-
 type Service struct {
 	db          *gorm.DB
 	registry    *TargetRegistry
@@ -48,6 +47,7 @@ type Service struct {
 	checkAbuse  bool
 	forumPolicy ForumPolicy
 	references  *reference.Service
+	notify      NotificationPublisher
 }
 
 func (s *Service) SetForumPolicy(policy ForumPolicy) {

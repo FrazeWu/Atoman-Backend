@@ -281,6 +281,16 @@ func assertTargetCounters(t *testing.T, ctx commentTestContext, comments, roots 
 
 func TestNotificationReplyMentionEditMarkAndDelete(t *testing.T) {
 	ctx := newCommentTestContext(t, TargetKindBlogPost, 0)
+	var pushed []struct {
+		recipient uuid.UUID
+		typeName  string
+	}
+	ctx.service.SetNotificationPublisher(func(recipientID uuid.UUID, notification *model.Notification) {
+		pushed = append(pushed, struct {
+			recipient uuid.UUID
+			typeName  string
+		}{recipient: recipientID, typeName: notification.Type})
+	})
 	root := ctx.create(t, 1, "root", nil)
 	content := "hi @" + ctx.users[1].Username + " @" + ctx.users[2].Username
 	firstStart := len([]rune("hi "))
@@ -290,6 +300,9 @@ func TestNotificationReplyMentionEditMarkAndDelete(t *testing.T) {
 	var notifications []model.Notification
 	require.NoError(t, ctx.db.Where("source_id = ?", child.ID).Order("recipient_id").Find(&notifications).Error)
 	require.Len(t, notifications, 2)
+	require.Len(t, pushed, 2)
+	require.ElementsMatch(t, []string{NotificationTypeReply, NotificationTypeMention}, []string{pushed[0].typeName, pushed[1].typeName})
+	require.ElementsMatch(t, []uuid.UUID{ctx.users[1].ID, ctx.users[2].ID}, []uuid.UUID{pushed[0].recipient, pushed[1].recipient})
 	for _, notification := range notifications {
 		require.Equal(t, ctx.target.ResourceID.String(), notification.Meta["resource_id"])
 		require.Equal(t, child.ID.String(), notification.Meta["comment_id"])

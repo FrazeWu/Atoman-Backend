@@ -266,8 +266,12 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 		seenSongIDs := map[uuid.UUID]bool{}
 		for index, track := range payload.Album.Tracks {
-			derived := matchDerivedTrackAudio(rawDerivedTracks, track, index, usedDerivedTrackIndexes)
-			audioURL := derived.AudioURL
+			audioURL := strings.TrimSpace(track.AudioURL)
+			derived := derivedTrackAudio{}
+			if audioURL == "" {
+				derived = matchDerivedTrackAudio(rawDerivedTracks, track, index, usedDerivedTrackIndexes)
+				audioURL = derived.AudioURL
+			}
 			metadata := songAudioMetadataFromImportFile(importFilesByID[derived.FileID])
 			var existingSong *model.Song
 			if strings.TrimSpace(track.SongID) != "" {

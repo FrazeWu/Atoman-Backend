@@ -5,6 +5,7 @@ type AlbumImportTrackPayload struct {
 	Title       string                         `json:"title"`
 	DiscNumber  int                            `json:"disc_number"`
 	TrackNumber int                            `json:"track_number"`
+	AudioURL    string                         `json:"audio_url,omitempty"`
 	Lyrics      *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
 }
 

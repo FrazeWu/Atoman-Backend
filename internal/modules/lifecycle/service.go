@@ -77,6 +77,7 @@ type ScheduleResult struct {
 type contentSummary struct {
 	Module, Title, Path, CoverURL, Status, Visibility string
 	ContentID, ChannelID, OwnerID                     uuid.UUID
+	CollectionIDs                                     []uuid.UUID
 	DurationSec                                       int
 }
 
@@ -196,7 +197,7 @@ func (s *Service) SaveNotificationPreference(user authctx.CurrentUser, input Not
 	if user.ID == uuid.Nil {
 		return model.ContentNotificationPreference{}, apperr.Unauthorized("Login required")
 	}
-	if input.SourceType != "internal_user" && input.SourceType != "internal_channel" {
+	if input.SourceType != "internal_user" && input.SourceType != "internal_channel" && input.SourceType != "internal_collection" {
 		return model.ContentNotificationPreference{}, apperr.BadRequest("lifecycle.invalid_source", "source_type is invalid")
 	}
 	if input.SourceID == uuid.Nil {
@@ -496,7 +497,7 @@ func (s *Service) dispatchPublication(event model.ContentPublicationEvent) error
 	if content.Status != "published" || content.Visibility == "private" {
 		return nil
 	}
-	recipients, err := s.publicationRecipients(event.OwnerID, event.ChannelID)
+	recipients, err := s.publicationRecipients(event.OwnerID, event.ChannelID, content.CollectionIDs)
 	if err != nil {
 		return err
 	}
@@ -505,10 +506,17 @@ func (s *Service) dispatchPublication(event model.ContentPublicationEvent) error
 			continue
 		}
 		var enabled int64
-		if err := s.db.Model(&model.ContentNotificationPreference{}).Where(
-			"user_id = ? AND mode = ? AND ((source_type = ? AND source_id = ?) OR (source_type = ? AND source_id = ?))",
-			recipientID, "all", "internal_channel", event.ChannelID, "internal_user", event.OwnerID,
-		).Count(&enabled).Error; err != nil {
+		condition := "((source_type = ? AND source_id = ?) OR (source_type = ? AND source_id = ?))"
+		args := []any{"internal_channel", event.ChannelID, "internal_user", event.OwnerID}
+		if len(content.CollectionIDs) > 0 {
+			condition = "(" + condition + " OR (source_type = ? AND source_id IN ?))"
+			args = append(args, "internal_collection", content.CollectionIDs)
+		}
+		preferenceQuery := s.db.Model(&model.ContentNotificationPreference{}).Where(
+			"user_id = ? AND mode = ? AND "+condition,
+			append([]any{recipientID, "all"}, args...)...,
+		)
+		if err := preferenceQuery.Count(&enabled).Error; err != nil {
 			return err
 		}
 		if enabled == 0 {
@@ -545,13 +553,19 @@ func (s *Service) createPublicationNotification(event model.ContentPublicationEv
 	})
 }
 
-func (s *Service) publicationRecipients(ownerID, channelID uuid.UUID) ([]uuid.UUID, error) {
+func (s *Service) publicationRecipients(ownerID, channelID uuid.UUID, collectionIDs []uuid.UUID) ([]uuid.UUID, error) {
 	var ids []uuid.UUID
 	var subscriptionIDs []uuid.UUID
-	if err := s.db.Model(&model.Subscription{}).
+	condition := "((feed_sources.source_type = ? AND feed_sources.source_id = ?) OR (feed_sources.source_type = ? AND feed_sources.source_id = ?))"
+	args := []any{"internal_channel", channelID, "internal_user", ownerID}
+	if len(collectionIDs) > 0 {
+		condition = "(" + condition + " OR (feed_sources.source_type = ? AND feed_sources.source_id IN ?))"
+		args = append(args, "internal_collection", collectionIDs)
+	}
+	query := s.db.Model(&model.Subscription{}).
 		Select("subscriptions.user_id").Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id AND feed_sources.deleted_at IS NULL").
-		Where("subscriptions.deleted_at IS NULL AND ((feed_sources.source_type = ? AND feed_sources.source_id = ?) OR (feed_sources.source_type = ? AND feed_sources.source_id = ?))", "internal_channel", channelID, "internal_user", ownerID).
-		Pluck("subscriptions.user_id", &subscriptionIDs).Error; err != nil {
+		Where("subscriptions.deleted_at IS NULL AND "+condition, args...)
+	if err := query.Pluck("subscriptions.user_id", &subscriptionIDs).Error; err != nil {
 		return nil, err
 	}
 	ids = append(ids, subscriptionIDs...)
@@ -612,7 +626,11 @@ func (s *Service) resolveContent(module string, id uuid.UUID) (contentSummary, e
 		if video.ChannelID == nil {
 			return contentSummary{}, apperr.NotFound("lifecycle.content_not_found", "Content not found")
 		}
-		return contentSummary{Module: "video", ContentID: id, ChannelID: *video.ChannelID, OwnerID: video.UserID, Title: video.Title, Path: "/videos/watch/" + id.String(), CoverURL: video.ThumbnailURL, Status: video.Status, Visibility: video.Visibility, DurationSec: video.DurationSec}, nil
+		var collectionIDs []uuid.UUID
+		if err := s.db.Model(&model.VideoCollection{}).Where("video_id = ?", video.ID).Pluck("collection_id", &collectionIDs).Error; err != nil {
+			return contentSummary{}, err
+		}
+		return contentSummary{Module: "video", ContentID: id, ChannelID: *video.ChannelID, OwnerID: video.UserID, Title: video.Title, Path: "/videos/watch/" + id.String(), CoverURL: video.ThumbnailURL, Status: video.Status, Visibility: video.Visibility, CollectionIDs: collectionIDs, DurationSec: video.DurationSec}, nil
 	default:
 		return contentSummary{}, apperr.BadRequest("lifecycle.invalid_module", "module must be blog, podcast, or video")
 	}

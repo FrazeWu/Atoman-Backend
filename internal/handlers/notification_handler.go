@@ -5,6 +5,7 @@ import (
 
 	"atoman/internal/collab"
 	"atoman/internal/model"
+	"atoman/internal/modules/notification"
 )
 
 func WsPushNotif(userHub *collab.UserHub) func(uuid.UUID, *model.Notification) {
@@ -12,6 +13,6 @@ func WsPushNotif(userHub *collab.UserHub) func(uuid.UUID, *model.Notification) {
 		if userHub == nil || notif == nil {
 			return
 		}
-		userHub.Push(recipientID, "notification", notif)
+		userHub.Push(recipientID, "notification", notification.ToDTO(*notif))
 	}
 }

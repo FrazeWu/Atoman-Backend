@@ -48,7 +48,7 @@ func newLifecycleFixture(t *testing.T) lifecycleFixture {
 	t.Helper()
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.Video{},
+		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
 		&model.ContentLifecycleEvent{}, &model.ContentProgress{}, &model.ContentNotificationPreference{},
 		&model.ContentPublicationEvent{}, &model.FeedSource{}, &model.Subscription{}, &model.Follow{}, &model.Notification{},
 	)
@@ -167,6 +167,49 @@ func TestDispatchPublicationNotifiesOptedInSubscribersOnce(t *testing.T) {
 	}
 	if notifications[0].Meta["path"] != "/posts/post/"+fixture.post.ID.String() {
 		t.Fatalf("unexpected notification: %#v", notifications[0])
+	}
+}
+
+func TestDispatchPublicationNotifiesVideoCollectionSubscribers(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	videoCollection := model.Collection{ChannelID: fixture.channel.ID, ContentType: "video", Name: "Videos"}
+	if err := fixture.db.Create(&videoCollection).Error; err != nil {
+		t.Fatal(err)
+	}
+	video := model.Video{
+		UserID: fixture.owner.ID, ChannelID: &fixture.channel.ID, Title: "Lifecycle video",
+		StorageType: "external", VideoURL: "https://example.com/video.mp4", Status: "published", Visibility: "public",
+	}
+	if err := fixture.db.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.VideoCollection{VideoID: video.ID, CollectionID: videoCollection.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	source := model.FeedSource{SourceType: "internal_collection", SourceID: &videoCollection.ID, Hash: uuid.NewString(), Title: videoCollection.Name}
+	if err := fixture.db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.Subscription{UserID: fixture.viewer.ID, FeedSourceID: source.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.service.SaveNotificationPreference(fixture.viewer, NotificationPreferenceInput{
+		SourceType: "internal_collection", SourceID: videoCollection.ID, Mode: "all",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.EnqueuePublication("video", video.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.DispatchPendingPublications(10); err != nil {
+		t.Fatal(err)
+	}
+	var notifications []model.Notification
+	if err := fixture.db.Where("recipient_id = ? AND type = ?", fixture.viewer.ID, "content_published").Find(&notifications).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(notifications) != 1 || notifications[0].Meta["path"] != "/videos/watch/"+video.ID.String() {
+		t.Fatalf("expected one video collection notification, got %#v", notifications)
 	}
 }
 

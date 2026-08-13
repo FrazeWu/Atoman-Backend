@@ -573,6 +573,10 @@ func SyncLegacySongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, content, editS
 	return musiclyrics.SyncLegacySongLyrics(tx, actorID, songID, content, editSummary)
 }
 
+func SyncLegacySongLyricsWithFormat(tx *gorm.DB, actorID, songID uuid.UUID, content, translation, format, editSummary string) error {
+	return musiclyrics.SyncLegacySongLyricsWithFormat(tx, actorID, songID, content, translation, format, editSummary)
+}
+
 func replaceCurrentLyricLines(tx *gorm.DB, lyricID uuid.UUID, parsed []ParsedLyricLine) ([]model.MusicSongLyricLine, error) {
 	var oldLines []model.MusicSongLyricLine
 	if err := tx.Where("lyric_id = ?", lyricID).Find(&oldLines).Error; err != nil {

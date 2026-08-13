@@ -28,7 +28,7 @@ func GetRecommendedVideoItems(db *gorm.DB) gin.HandlerFunc {
 		page, pageSize := httpx.PageParams(c)
 
 		var videos []model.Video
-		if err := db.Preload("Channel").Preload("Tags").
+		if err := db.Preload("Channel").Preload("Tags").Preload("Collections").
 			Where("status = ? AND visibility = ?", "published", "public").
 			Order("created_at DESC").
 			Find(&videos).Error; err != nil {
@@ -62,6 +62,7 @@ func GetRecommendedVideoItems(db *gorm.DB) gin.HandlerFunc {
 			if !ok {
 				continue
 			}
+			videoCopy := video
 			items = append(items, recommendationItemDTO{
 				ID:          video.ID.String(),
 				Title:       video.Title,
@@ -70,6 +71,7 @@ func GetRecommendedVideoItems(db *gorm.DB) gin.HandlerFunc {
 				ImageURL:    video.ThumbnailURL,
 				TargetPath:  "/videos/watch/" + video.ID.String(),
 				ScoreLabel:  recommendationScoreLabel(mode, rankedItem.FinalScore),
+				Video:       &videoCopy,
 			})
 		}
 

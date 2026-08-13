@@ -4,17 +4,28 @@ import (
 	"net/http"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/httpx"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-// GetSubscribedVideos returns public videos from the user's subscribed
-// channels and video collections.
+// GetSubscribedVideos godoc
+// @Summary 获取视频订阅更新
+// @Description 返回当前用户订阅频道和合集中的已发布视频。
+// @Tags videos
+// @Produce json
+// @Param page query int false "页码" default(1)
+// @Param page_size query int false "每页数量" default(20)
+// @Success 200 {object} videoSubscriptionListResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Router /api/v1/videos/subscriptions [get]
 func GetSubscribedVideos(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
+		page, pageSize := httpx.PageParams(c)
 		channelIDs := db.Model(&model.FeedSource{}).
 			Select("feed_sources.source_id").
 			Joins("JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id").
@@ -27,18 +38,28 @@ func GetSubscribedVideos(db *gorm.DB) gin.HandlerFunc {
 			Where("subscriptions.user_id = ? AND subscriptions.deleted_at IS NULL", userID).
 			Where("feed_sources.source_type = ? AND feed_sources.source_id IS NOT NULL", "internal_collection")
 
-		var videos []model.Video
-		query := db.Preload("Channel").Preload("Collections").Preload("Tags").
+		videos := make([]model.Video, 0)
+		query := db.Model(&model.Video{}).Preload("Channel").Preload("Collections").Preload("Tags").
 			Where("videos.status = ?", "published").
 			Where("(videos.visibility = ? OR (videos.visibility = ? AND (videos.channel_id IN (?) OR EXISTS (SELECT 1 FROM video_collections vc WHERE vc.video_id = videos.id AND vc.collection_id IN (?)))))", "public", "followers", channelIDs, collectionIDs).
 			Where("(videos.channel_id IN (?) OR EXISTS (SELECT 1 FROM video_collections vc WHERE vc.video_id = videos.id AND vc.collection_id IN (?)) )", channelIDs, collectionIDs).
 			Order("videos.created_at DESC, videos.id DESC")
-		if err := query.Find(&videos).Error; err != nil {
+		var total int64
+		if err := query.Count(&total).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count subscribed videos"})
+			return
+		}
+		if err := query.Offset(httpx.Offset(page, pageSize)).Limit(pageSize).Find(&videos).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch subscribed videos"})
 			return
 		}
-		c.JSON(http.StatusOK, videos)
+		httpx.List(c, videos, page, pageSize, total)
 	}
+}
+
+type videoSubscriptionListResponse struct {
+	Data []model.Video  `json:"data"`
+	Meta httpx.PageMeta `json:"meta"`
 }
 
 type videoCollectionBookmarkResponse struct {
