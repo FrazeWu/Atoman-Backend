@@ -23,12 +23,17 @@ import (
 type Service struct {
 	db         *gorm.DB
 	repo       *Repo
+	comments   *comment.Service
 	trust      *coreservice.ForumTrustService
 	references *reference.Service
 }
 
 func NewService(db *gorm.DB) *Service {
-	return &Service{db: db, repo: NewRepo(db), trust: coreservice.NewForumTrustService(db), references: reference.NewService(db)}
+	return NewServiceWithComments(db, comment.NewService(db, comment.NewTargetRegistry(db)))
+}
+
+func NewServiceWithComments(db *gorm.DB, comments *comment.Service) *Service {
+	return &Service{db: db, repo: NewRepo(db), comments: comments, trust: coreservice.NewForumTrustService(db), references: reference.NewService(db)}
 }
 
 func (s *Service) syncTopicReferences(tx *gorm.DB, topic model.ForumTopic) ([]reference.ResolvedReference, error) {
@@ -50,7 +55,13 @@ func (s *Service) topicDTOs(db *gorm.DB, topics []model.ForumTopic, user authctx
 	dtos := make([]TopicDTO, len(topics))
 	ids := make([]uuid.UUID, 0, len(topics))
 	for index, topic := range topics {
-		dtos[index] = TopicDTO{ForumTopic: topic, References: []reference.ResolvedReference{}}
+		dtos[index] = TopicDTO{
+			ForumTopic: topic,
+			State: TopicStateDTO{
+				Closed: topic.Closed, Solved: topic.IsSolved, Pinned: topic.Pinned, Featured: topic.Featured,
+			},
+			References: []reference.ResolvedReference{},
+		}
 		ids = append(ids, topic.ID)
 	}
 	if len(ids) == 0 {
@@ -77,22 +88,46 @@ func (s *Service) topicDTOs(db *gorm.DB, topics []model.ForumTopic, user authctx
 }
 
 func (s *Service) applyTopicCapabilities(db *gorm.DB, topics []TopicDTO, user authctx.CurrentUser) error {
-	if user.ID == uuid.Nil {
-		return nil
-	}
 	categoryIDs := make([]uuid.UUID, 0, len(topics))
 	seenCategories := make(map[uuid.UUID]struct{}, len(topics))
 	for index := range topics {
-		topics[index].CanEditTopic = topics[index].UserID == user.ID || authctx.RoleAtLeast(user.Role, authctx.RoleModerator)
+		topics[index].CanEditTopic = user.ID != uuid.Nil && (topics[index].UserID == user.ID || authctx.RoleAtLeast(user.Role, authctx.RoleModerator))
 		if _, exists := seenCategories[topics[index].CategoryID]; !exists {
 			seenCategories[topics[index].CategoryID] = struct{}{}
 			categoryIDs = append(categoryIDs, topics[index].CategoryID)
 		}
 	}
+	canComment := make(map[uuid.UUID]bool, len(categoryIDs))
+	for _, categoryID := range categoryIDs {
+		if err := s.CanComment(user, categoryID); err == nil {
+			canComment[categoryID] = true
+		} else if _, ok := err.(*apperr.AppError); !ok {
+			return err
+		}
+	}
+	for index := range topics {
+		canEdit := topics[index].CanEditTopic
+		topics[index].State = TopicStateDTO{
+			Closed: topics[index].Closed, Solved: topics[index].IsSolved,
+			Pinned: topics[index].Pinned, Featured: topics[index].Featured,
+		}
+		topics[index].Permissions = TopicPermissionsDTO{
+			Edit: canEdit, Delete: canEdit,
+			Reply:      canComment[topics[index].CategoryID] && !topics[index].Closed,
+			MarkAnswer: user.ID != uuid.Nil && topics[index].UserID == user.ID,
+			Report:     user.ID != uuid.Nil,
+		}
+	}
+	if user.ID == uuid.Nil {
+		return nil
+	}
 	if authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
 		for index := range topics {
 			topics[index].CanPinTopic = true
 			topics[index].CanLockTopic = true
+			topics[index].Permissions.Pin = true
+			topics[index].Permissions.Lock = true
+			topics[index].Permissions.Feature = true
 		}
 		return nil
 	}
@@ -108,6 +143,8 @@ func (s *Service) applyTopicCapabilities(db *gorm.DB, topics []TopicDTO, user au
 			if assignment.CategoryID == nil || *assignment.CategoryID == topics[index].CategoryID {
 				topics[index].CanPinTopic = topics[index].CanPinTopic || assignment.CanPinTopic
 				topics[index].CanLockTopic = topics[index].CanLockTopic || assignment.CanLockTopic
+				topics[index].Permissions.Pin = topics[index].CanPinTopic
+				topics[index].Permissions.Lock = topics[index].CanLockTopic
 			}
 		}
 	}
@@ -115,7 +152,11 @@ func (s *Service) applyTopicCapabilities(db *gorm.DB, topics []TopicDTO, user au
 }
 
 func (s *Service) topicDTO(db *gorm.DB, topic model.ForumTopic, user authctx.CurrentUser) (TopicDTO, error) {
-	items, err := s.topicDTOs(db, []model.ForumTopic{topic}, user)
+	topics := []model.ForumTopic{topic}
+	if err := s.applyTopicState(topics, user); err != nil {
+		return TopicDTO{}, err
+	}
+	items, err := s.topicDTOs(db, topics, user)
 	if err != nil {
 		return TopicDTO{}, err
 	}
@@ -351,8 +392,23 @@ func (s *Service) DeleteTopic(user authctx.CurrentUser, topicID uuid.UUID) error
 	if err := requireTopicOwner(user, topic.UserID); err != nil {
 		return err
 	}
-	return s.db.Transaction(func(tx *gorm.DB) error {
+	return s.comments.DeleteTarget(comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: topicID}, func(tx *gorm.DB) error {
 		if err := s.references.RemoveSource(tx, "thread", topicID); err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("topic_id = ?", topicID).Delete(&model.ForumBookmark{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("target_type = ? AND target_id = ?", "topic", topicID).Delete(&model.ForumLike{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("target_type = ? AND target_id = ?", "topic", topicID).Delete(&model.ForumReport{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("target_type = ? AND target_key = ?", model.ForumFollowTargetTopic, topicID.String()).Delete(&model.ForumFollow{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("source_id = ? AND source_type IN ?", topicID, []string{"forum_topic", "forum_follow"}).Delete(&model.Notification{}).Error; err != nil {
 			return err
 		}
 		return NewRepo(tx).DeleteTopic(topicID)

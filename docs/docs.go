@@ -25394,6 +25394,23 @@ const docTemplate = `{
                 "solved_reply_id": {
                     "type": "string"
                 },
+                "state": {
+                    "type": "object",
+                    "properties": {
+                        "closed": {
+                            "type": "boolean"
+                        },
+                        "featured": {
+                            "type": "boolean"
+                        },
+                        "pinned": {
+                            "type": "boolean"
+                        },
+                        "solved": {
+                            "type": "boolean"
+                        }
+                    }
+                },
                 "tags": {
                     "type": "array",
                     "items": {
@@ -25414,6 +25431,35 @@ const docTemplate = `{
                 },
                 "view_count": {
                     "type": "integer"
+                },
+                "permissions": {
+                    "type": "object",
+                    "properties": {
+                        "delete": {
+                            "type": "boolean"
+                        },
+                        "edit": {
+                            "type": "boolean"
+                        },
+                        "feature": {
+                            "type": "boolean"
+                        },
+                        "lock": {
+                            "type": "boolean"
+                        },
+                        "mark_answer": {
+                            "type": "boolean"
+                        },
+                        "pin": {
+                            "type": "boolean"
+                        },
+                        "reply": {
+                            "type": "boolean"
+                        },
+                        "report": {
+                            "type": "boolean"
+                        }
+                    }
                 }
             }
         },

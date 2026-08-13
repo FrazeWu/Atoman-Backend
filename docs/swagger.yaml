@@ -3973,6 +3973,17 @@ definitions:
         type: integer
       solved_reply_id:
         type: string
+      state:
+        properties:
+          closed:
+            type: boolean
+          featured:
+            type: boolean
+          pinned:
+            type: boolean
+          solved:
+            type: boolean
+        type: object
       tags:
         items:
           type: string
@@ -3987,6 +3998,25 @@ definitions:
         type: string
       view_count:
         type: integer
+      permissions:
+        properties:
+          delete:
+            type: boolean
+          edit:
+            type: boolean
+          feature:
+            type: boolean
+          lock:
+            type: boolean
+          mark_answer:
+            type: boolean
+          pin:
+            type: boolean
+          reply:
+            type: boolean
+          report:
+            type: boolean
+        type: object
     type: object
   model.ForumUserModerationAction:
     properties:

@@ -42,9 +42,16 @@ func newForumHTTPTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, model.User, mo
 		&model.ForumDraft{},
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
+		&model.CommentMention{},
+		&model.CommentAttachment{},
 		&model.CommentLike{},
+		&model.CommentReport{},
+		&model.CommentTimeAnchor{},
+		&model.CommentPublishRecord{},
 		&model.ForumLike{},
 		&model.ForumBookmark{},
+		&model.ForumFollow{},
+		&model.ForumReport{},
 		&model.ForumUserTrust{},
 		&model.ForumGroup{},
 		&model.ForumGroupMember{},
@@ -52,6 +59,7 @@ func newForumHTTPTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, model.User, mo
 		&model.ForumUserModerationAction{},
 		&model.ForumModeratorAssignment{},
 		&model.ContentReference{},
+		&model.TimelineRevisionProposal{},
 		&model.Notification{},
 		&model.Post{},
 		&model.PodcastEpisode{},
@@ -216,6 +224,67 @@ func TestUpdateAndDeleteTopicReplaceThenRemoveReferences(t *testing.T) {
 	}
 }
 
+func TestDeleteTopicRemovesUnifiedCommentsAndTopicRelations(t *testing.T) {
+	router, db, user, category := newForumHTTPTestRouter(t)
+	created := performForumRequest(t, router, http.MethodPost, "/api/v1/forum/topics", map[string]any{
+		"category_id": category.ID, "title": "Delete with comments", "content": "Body",
+	})
+	topic, _ := decodeForumData[model.ForumTopic](t, created)
+	target := model.DiscussionTarget{
+		Kind: comment.TargetKindForumTopic, ResourceID: topic.ID, ResourceKey: topic.ID.String(), OwnerID: &user.UUID,
+		CommentCount: 1, RootCount: 1, PinnedCommentID: nil,
+	}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create target: %v", err)
+	}
+	entry := model.CommentEntry{TargetID: target.ID, AuthorID: user.UUID, Content: "reply", ContentHash: "reply", Status: comment.CommentStatusActive}
+	if err := db.Create(&entry).Error; err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	follow := model.ForumFollow{UserID: user.UUID, TargetType: model.ForumFollowTargetTopic, TargetKey: topic.ID.String()}
+	if err := db.Create(&follow).Error; err != nil {
+		t.Fatalf("create follow: %v", err)
+	}
+	bookmark := model.ForumBookmark{UserID: user.UUID, TopicID: topic.ID}
+	if err := db.Create(&bookmark).Error; err != nil {
+		t.Fatalf("create bookmark: %v", err)
+	}
+	like := model.ForumLike{UserID: user.UUID, TargetType: "topic", TargetID: topic.ID}
+	if err := db.Create(&like).Error; err != nil {
+		t.Fatalf("create like: %v", err)
+	}
+	notification := model.Notification{RecipientID: user.UUID, Type: "forum_follow", SourceType: "forum_topic", SourceID: topic.ID}
+	if err := db.Create(&notification).Error; err != nil {
+		t.Fatalf("create notification: %v", err)
+	}
+
+	deleted := performForumRequest(t, router, http.MethodDelete, "/api/v1/forum/topics/"+topic.ID.String(), nil)
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", deleted.Code, deleted.Body.String())
+	}
+	var count int64
+	for _, query := range []struct {
+		name  string
+		model any
+		where string
+		id    uuid.UUID
+	}{
+		{"target", &model.DiscussionTarget{}, "id = ?", target.ID},
+		{"comment", &model.CommentEntry{}, "id = ?", entry.ID},
+		{"follow", &model.ForumFollow{}, "id = ?", follow.ID},
+		{"bookmark", &model.ForumBookmark{}, "id = ?", bookmark.ID},
+		{"like", &model.ForumLike{}, "id = ?", like.ID},
+		{"notification", &model.Notification{}, "id = ?", notification.ID},
+	} {
+		if err := db.Unscoped().Model(query.model).Where(query.where, query.id).Count(&count).Error; err != nil {
+			t.Fatalf("count %s: %v", query.name, err)
+		}
+		if count != 0 {
+			t.Fatalf("expected deleted %s rows, got %d", query.name, count)
+		}
+	}
+}
+
 func TestTopicListSearchAndDetailReturnReferences(t *testing.T) {
 	router, _, user, category := newForumHTTPTestRouter(t)
 	created := performForumRequest(t, router, http.MethodPost, "/api/v1/forum/topics", map[string]any{
@@ -321,7 +390,11 @@ func TestTopicDTOReturnsTopicCapabilitiesForOwnerAndModeratorAssignment(t *testi
 	if err != nil {
 		t.Fatalf("load owner topic dto: %v", err)
 	}
-	if !ownerDTO.CanEditTopic || ownerDTO.CanPinTopic || ownerDTO.CanLockTopic {
+	if !ownerDTO.CanEditTopic || ownerDTO.CanPinTopic || ownerDTO.CanLockTopic ||
+		!ownerDTO.Permissions.Edit || !ownerDTO.Permissions.Delete || !ownerDTO.Permissions.Reply ||
+		!ownerDTO.Permissions.MarkAnswer || ownerDTO.Permissions.Pin || ownerDTO.Permissions.Lock ||
+		ownerDTO.Permissions.Feature || !ownerDTO.Permissions.Report ||
+		ownerDTO.State.Closed || ownerDTO.State.Solved || ownerDTO.State.Pinned || ownerDTO.State.Featured {
 		t.Fatalf("unexpected owner capabilities: %#v", ownerDTO)
 	}
 	moderator := model.User{Username: "forum-moderator", Email: "forum-moderator@example.com", Password: "hash", Role: authctx.RoleModerator, IsActive: true}
@@ -337,7 +410,10 @@ func TestTopicDTOReturnsTopicCapabilitiesForOwnerAndModeratorAssignment(t *testi
 	if err != nil {
 		t.Fatalf("load moderator topic dto: %v", err)
 	}
-	if !moderatorDTO.CanEditTopic || !moderatorDTO.CanPinTopic || moderatorDTO.CanLockTopic {
+	if !moderatorDTO.CanEditTopic || !moderatorDTO.CanPinTopic || moderatorDTO.CanLockTopic ||
+		!moderatorDTO.Permissions.Edit || !moderatorDTO.Permissions.Delete || !moderatorDTO.Permissions.Reply ||
+		moderatorDTO.Permissions.MarkAnswer || !moderatorDTO.Permissions.Pin || moderatorDTO.Permissions.Lock ||
+		moderatorDTO.Permissions.Feature || !moderatorDTO.Permissions.Report {
 		t.Fatalf("unexpected moderator capabilities: %#v", moderatorDTO)
 	}
 }

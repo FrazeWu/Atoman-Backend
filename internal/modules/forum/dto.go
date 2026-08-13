@@ -9,7 +9,27 @@ import (
 
 type TopicDTO struct {
 	model.ForumTopic
-	References []reference.ResolvedReference `json:"references"`
+	State       TopicStateDTO                 `json:"state"`
+	Permissions TopicPermissionsDTO           `json:"permissions"`
+	References  []reference.ResolvedReference `json:"references"`
+}
+
+type TopicStateDTO struct {
+	Closed   bool `json:"closed"`
+	Solved   bool `json:"solved"`
+	Pinned   bool `json:"pinned"`
+	Featured bool `json:"featured"`
+}
+
+type TopicPermissionsDTO struct {
+	Edit       bool `json:"edit"`
+	Delete     bool `json:"delete"`
+	Reply      bool `json:"reply"`
+	MarkAnswer bool `json:"mark_answer"`
+	Pin        bool `json:"pin"`
+	Lock       bool `json:"lock"`
+	Feature    bool `json:"feature"`
+	Report     bool `json:"report"`
 }
 
 type ListTopicsQuery struct {

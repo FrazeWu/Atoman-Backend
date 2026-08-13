@@ -40,7 +40,7 @@ func RegisterV1Routes(
 ) {
 	group := r.Group("/api/v1")
 	commentService := comment.NewService(db, comment.NewTargetRegistry(db))
-	forumService := forum.NewService(db)
+	forumService := forum.NewServiceWithComments(db, commentService)
 	commentService.SetForumPolicy(forumService)
 	comment.RegisterRoutes(group, commentService)
 	refService := reference.NewService(db)
