@@ -1348,6 +1348,26 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 	if err := db.Where("album_id = ?", beforeAlbum.ID).Order("track_number ASC").Find(&beforeSongs).Error; err != nil {
 		t.Fatalf("load songs before repair: %v", err)
 	}
+	playlist := model.Playlist{UserID: user.ID, Name: "Keep identity"}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	if err := db.Create(&model.PlaylistSong{PlaylistID: playlist.ID, SongID: beforeSongs[1].ID, Position: 1}).Error; err != nil {
+		t.Fatalf("add song to playlist: %v", err)
+	}
+	if err := db.Create(&model.MusicListeningHistory{UserID: user.ID, SongID: beforeSongs[1].ID, PlayCount: 3, LastPlayedAt: time.Now()}).Error; err != nil {
+		t.Fatalf("create listening history: %v", err)
+	}
+	lyrics, err := svc.SaveSongLyrics(user, beforeSongs[1].ID, SaveLyricsInput{Content: "work it", Format: "plain", EditSummary: "initial lyrics"})
+	if err != nil {
+		t.Fatalf("save lyrics: %v", err)
+	}
+	annotation, err := svc.CreateLyricAnnotation(user, beforeSongs[1].ID, CreateAnnotationInput{
+		LineID: lyrics.Lines[0].ID, SelectedText: "work", StartOffset: 0, EndOffset: 4, Body: "annotation",
+	})
+	if err != nil {
+		t.Fatalf("create lyric annotation: %v", err)
+	}
 	newAudioKey := "music/album-imports/playback/sessions/" + session.ID.String() + "/repair/track.mp3"
 	payload, err := readAlbumImportPayloadMap(ready.PayloadJSON)
 	if err != nil {
@@ -1396,6 +1416,22 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 	if len(songs) != 1 || songs[0].ID != beforeSongs[1].ID || songs[0].Title != "Aerodynamic (Remastered)" {
 		t.Fatalf("expected repaired tracks, got %#v", songs)
 	}
+	var playlistSong model.PlaylistSong
+	if err := db.First(&playlistSong, "playlist_id = ? AND song_id = ?", playlist.ID, beforeSongs[1].ID).Error; err != nil {
+		t.Fatalf("playlist relation did not survive repair: %v", err)
+	}
+	var history model.MusicListeningHistory
+	if err := db.First(&history, "user_id = ? AND song_id = ?", user.ID, beforeSongs[1].ID).Error; err != nil || history.PlayCount != 3 {
+		t.Fatalf("listening history did not survive repair: %#v, err=%v", history, err)
+	}
+	var savedLyrics model.MusicSongLyric
+	if err := db.First(&savedLyrics, "song_id = ?", beforeSongs[1].ID).Error; err != nil || savedLyrics.Content != "work it" {
+		t.Fatalf("lyrics did not survive repair: %#v, err=%v", savedLyrics, err)
+	}
+	var savedAnnotation model.MusicLyricAnnotation
+	if err := db.First(&savedAnnotation, "id = ? AND song_id = ?", annotation.ID, beforeSongs[1].ID).Error; err != nil {
+		t.Fatalf("lyric annotation did not survive repair: %v", err)
+	}
 	var removedSong model.Song
 	if err := db.First(&removedSong, "id = ?", beforeSongs[0].ID).Error; err != nil || removedSong.Status != "closed" {
 		t.Fatalf("expected removed track identity to be preserved as closed: %#v, err=%v", removedSong, err)
@@ -1419,6 +1455,104 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 	}
 	if !strings.Contains(string(revisions[1].ContentSnapshot), album.CoverURL) || !strings.Contains(string(revisions[1].ContentSnapshot), songs[0].AudioURL) {
 		t.Fatalf("repair revision does not reference promoted media: %#v", revisions[1])
+	}
+}
+
+func TestRepairAlbumImportSessionRejectsInvalidSongIdentity(t *testing.T) {
+	tests := []struct {
+		name   string
+		tracks func(existing []model.Song, foreign model.Song) []AlbumImportTrackPayload
+		want   string
+	}{
+		{
+			name: "invalid id",
+			tracks: func(_ []model.Song, _ model.Song) []AlbumImportTrackPayload {
+				return []AlbumImportTrackPayload{{SongID: "not-a-uuid", Title: "Changed", TrackNumber: 1, AudioURL: "/changed.mp3"}}
+			},
+			want: "invalid song id",
+		},
+		{
+			name: "duplicate id",
+			tracks: func(existing []model.Song, _ model.Song) []AlbumImportTrackPayload {
+				return []AlbumImportTrackPayload{
+					{SongID: existing[0].ID.String(), Title: "Changed 1", TrackNumber: 1, AudioURL: "/changed-1.mp3"},
+					{SongID: existing[0].ID.String(), Title: "Changed 2", TrackNumber: 2, AudioURL: "/changed-2.mp3"},
+				}
+			},
+			want: "duplicate song id",
+		},
+		{
+			name: "song from another album",
+			tracks: func(_ []model.Song, foreign model.Song) []AlbumImportTrackPayload {
+				return []AlbumImportTrackPayload{{SongID: foreign.ID.String(), Title: "Changed", TrackNumber: 1, AudioURL: "/changed.mp3"}}
+			},
+			want: "song does not belong to target album",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, db, user := newMusicTestService(t)
+			session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})
+			if err != nil {
+				t.Fatal(err)
+			}
+			seedReadyImportMedia(t, db, session.ID, "/cover.jpg", "Original")
+			committed, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+				Artist: completeAlbumImportArtistPayload("Identity Artist"),
+				Album: AlbumImportAlbumPayload{
+					Title: "Original Album", CoverURL: "/cover.jpg", ReleaseDate: "2020-01-01",
+					Tracks: []AlbumImportTrackPayload{{Title: "Original", TrackNumber: 1}},
+				},
+				ArtistSource: "artist source", AlbumSource: "album source",
+			})
+			if err != nil || committed.TargetAlbumID == nil {
+				t.Fatalf("initial commit: %#v, %v", committed, err)
+			}
+			if _, err := svc.RepairAlbumImportSession(user, session.ID); err != nil {
+				t.Fatalf("start repair: %v", err)
+			}
+
+			var existing []model.Song
+			if err := db.Where("album_id = ?", *committed.TargetAlbumID).Find(&existing).Error; err != nil {
+				t.Fatal(err)
+			}
+			foreignAlbum := model.Album{Title: "Foreign Album"}
+			if err := db.Create(&foreignAlbum).Error; err != nil {
+				t.Fatal(err)
+			}
+			foreignSong := model.Song{Title: "Foreign", AudioURL: "/foreign.mp3", Status: "open", AlbumID: &foreignAlbum.ID}
+			if err := db.Create(&foreignSong).Error; err != nil {
+				t.Fatal(err)
+			}
+			var artist model.Artist
+			if err := db.Joins("JOIN album_artists ON album_artists.artist_id = Artists.id").Where("album_artists.album_id = ?", *committed.TargetAlbumID).First(&artist).Error; err != nil {
+				t.Fatal(err)
+			}
+
+			_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+				Artists: []CommitAlbumImportArtistInput{{ArtistID: artist.ID.String()}},
+				Album: AlbumImportAlbumPayload{
+					Title: "Changed Album", CoverURL: "/changed-cover.jpg", ReleaseDate: "2021-01-01",
+					Tracks: tc.tracks(existing, foreignSong),
+				},
+				AlbumSource: "album source",
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
+			}
+			var album model.Album
+			if err := db.First(&album, "id = ?", *committed.TargetAlbumID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if album.Title != "Original Album" {
+				t.Fatalf("failed repair partially updated album: %#v", album)
+			}
+			var unchanged model.Song
+			if err := db.First(&unchanged, "id = ?", existing[0].ID).Error; err != nil || unchanged.Title != "Original" || unchanged.Status != "open" {
+				t.Fatalf("failed repair partially updated song: %#v, err=%v", unchanged, err)
+			}
+		})
 	}
 }
 
