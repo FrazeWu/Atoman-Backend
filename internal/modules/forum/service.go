@@ -56,6 +56,9 @@ func (s *Service) topicDTOs(db *gorm.DB, topics []model.ForumTopic, user authctx
 	if len(ids) == 0 {
 		return dtos, nil
 	}
+	if err := s.applyTopicCapabilities(db, dtos, user); err != nil {
+		return nil, err
+	}
 	var rows []model.ContentReference
 	if err := db.Where("source_type = ? AND source_id IN ?", "thread", ids).
 		Order("source_id ASC, source_field ASC, start_offset ASC").Find(&rows).Error; err != nil {
@@ -71,6 +74,44 @@ func (s *Service) topicDTOs(db *gorm.DB, topics []model.ForumTopic, user authctx
 		}
 	}
 	return dtos, nil
+}
+
+func (s *Service) applyTopicCapabilities(db *gorm.DB, topics []TopicDTO, user authctx.CurrentUser) error {
+	if user.ID == uuid.Nil {
+		return nil
+	}
+	categoryIDs := make([]uuid.UUID, 0, len(topics))
+	seenCategories := make(map[uuid.UUID]struct{}, len(topics))
+	for index := range topics {
+		topics[index].CanEditTopic = topics[index].UserID == user.ID || authctx.RoleAtLeast(user.Role, authctx.RoleModerator)
+		if _, exists := seenCategories[topics[index].CategoryID]; !exists {
+			seenCategories[topics[index].CategoryID] = struct{}{}
+			categoryIDs = append(categoryIDs, topics[index].CategoryID)
+		}
+	}
+	if authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		for index := range topics {
+			topics[index].CanPinTopic = true
+			topics[index].CanLockTopic = true
+		}
+		return nil
+	}
+	if !authctx.RoleAtLeast(user.Role, authctx.RoleModerator) {
+		return nil
+	}
+	var assignments []model.ForumModeratorAssignment
+	if err := db.Where("user_id = ? AND (category_id IS NULL OR category_id IN ?)", user.ID, categoryIDs).Find(&assignments).Error; err != nil {
+		return err
+	}
+	for index := range topics {
+		for _, assignment := range assignments {
+			if assignment.CategoryID == nil || *assignment.CategoryID == topics[index].CategoryID {
+				topics[index].CanPinTopic = topics[index].CanPinTopic || assignment.CanPinTopic
+				topics[index].CanLockTopic = topics[index].CanLockTopic || assignment.CanLockTopic
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) topicDTO(db *gorm.DB, topic model.ForumTopic, user authctx.CurrentUser) (TopicDTO, error) {
@@ -101,14 +142,21 @@ func (s *Service) ListTopics(user authctx.CurrentUser, query ListTopicsQuery) ([
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := s.applyCommentState(topics); err != nil {
+	if err := s.applyTopicState(topics, user); err != nil {
 		return nil, 0, err
 	}
 	return topics, total, nil
 }
 
 func (s *Service) SearchTopics(user authctx.CurrentUser, query ListTopicsQuery) ([]model.ForumTopic, int64, error) {
-	return s.repo.SearchTopics(user, query)
+	topics, total, err := s.repo.SearchTopics(user, query)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := s.applyTopicState(topics, user); err != nil {
+		return nil, 0, err
+	}
+	return topics, total, nil
 }
 
 func (s *Service) GetTopic(user authctx.CurrentUser, id uuid.UUID) (model.ForumTopic, error) {
@@ -123,7 +171,7 @@ func (s *Service) GetTopic(user authctx.CurrentUser, id uuid.UUID) (model.ForumT
 		return model.ForumTopic{}, err
 	}
 	topics := []model.ForumTopic{topic}
-	if err := s.applyCommentState(topics); err != nil {
+	if err := s.applyTopicState(topics, user); err != nil {
 		return model.ForumTopic{}, err
 	}
 	return topics[0], nil
@@ -514,7 +562,7 @@ func normalizeTags(raw []string) (model.StringSlice, error) {
 	return tags, nil
 }
 
-func (s *Service) applyCommentState(topics []model.ForumTopic) error {
+func (s *Service) applyTopicState(topics []model.ForumTopic, user authctx.CurrentUser) error {
 	if len(topics) == 0 {
 		return nil
 	}
@@ -525,6 +573,30 @@ func (s *Service) applyCommentState(topics []model.ForumTopic) error {
 		topics[i].LastReplyAt = nil
 		topics[i].IsSolved = false
 		topics[i].SolvedReplyID = nil
+		topics[i].IsLiked = false
+		topics[i].IsBookmarked = false
+	}
+	if user.ID != uuid.Nil {
+		var likes []model.ForumLike
+		if err := s.db.Where("user_id = ? AND target_type = ? AND target_id IN ?", user.ID, "topic", ids).Find(&likes).Error; err != nil {
+			return err
+		}
+		likedIDs := make(map[uuid.UUID]struct{}, len(likes))
+		for _, like := range likes {
+			likedIDs[like.TargetID] = struct{}{}
+		}
+		var bookmarks []model.ForumBookmark
+		if err := s.db.Where("user_id = ? AND topic_id IN ?", user.ID, ids).Find(&bookmarks).Error; err != nil {
+			return err
+		}
+		bookmarkedIDs := make(map[uuid.UUID]struct{}, len(bookmarks))
+		for _, bookmark := range bookmarks {
+			bookmarkedIDs[bookmark.TopicID] = struct{}{}
+		}
+		for i := range topics {
+			_, topics[i].IsLiked = likedIDs[topics[i].ID]
+			_, topics[i].IsBookmarked = bookmarkedIDs[topics[i].ID]
+		}
 	}
 	var targets []model.DiscussionTarget
 	if err := s.db.Where("kind = ? AND resource_id IN ?", comment.TargetKindForumTopic, ids).Find(&targets).Error; err != nil {

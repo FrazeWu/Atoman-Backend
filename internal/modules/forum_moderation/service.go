@@ -257,6 +257,14 @@ func (s *Service) UnpinTopic(user authctx.CurrentUser, topicID uuid.UUID) (model
 	return s.setTopicPinned(user, topicID, false)
 }
 
+func (s *Service) FeatureTopic(user authctx.CurrentUser, topicID uuid.UUID) (model.ForumTopic, error) {
+	return s.setTopicFeatured(user, topicID, true)
+}
+
+func (s *Service) UnfeatureTopic(user authctx.CurrentUser, topicID uuid.UUID) (model.ForumTopic, error) {
+	return s.setTopicFeatured(user, topicID, false)
+}
+
 func (s *Service) HideTopic(user authctx.CurrentUser, topicID uuid.UUID) (model.ForumTopic, error) {
 	return s.setTopicHidden(user, topicID, true)
 }
@@ -636,6 +644,27 @@ func (s *Service) setTopicPinned(user authctx.CurrentUser, topicID uuid.UUID, pi
 		return model.ForumTopic{}, err
 	}
 	topic.Pinned = pinned
+	if err := s.db.Save(&topic).Error; err != nil {
+		return model.ForumTopic{}, err
+	}
+	return topic, nil
+}
+
+func (s *Service) setTopicFeatured(user authctx.CurrentUser, topicID uuid.UUID, featured bool) (model.ForumTopic, error) {
+	if topicID == uuid.Nil {
+		return model.ForumTopic{}, apperr.BadRequest("validation.invalid_request", "topic_id is required")
+	}
+	if err := s.requireAdminOrOwner(user); err != nil {
+		return model.ForumTopic{}, err
+	}
+	var topic model.ForumTopic
+	if err := s.db.First(&topic, "id = ?", topicID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.ForumTopic{}, apperr.NotFound("forum.topic_not_found", "Forum topic not found")
+		}
+		return model.ForumTopic{}, err
+	}
+	topic.Featured = featured
 	if err := s.db.Save(&topic).Error; err != nil {
 		return model.ForumTopic{}, err
 	}

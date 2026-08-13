@@ -25334,6 +25334,18 @@ const docTemplate = `{
         "model.ForumTopic": {
             "type": "object",
             "properties": {
+                "can_edit_topic": {
+                    "description": "computed per-user",
+                    "type": "boolean"
+                },
+                "can_lock_topic": {
+                    "description": "computed per-user",
+                    "type": "boolean"
+                },
+                "can_pin_topic": {
+                    "description": "computed per-user",
+                    "type": "boolean"
+                },
                 "category": {
                     "$ref": "#/definitions/model.ForumCategory"
                 },

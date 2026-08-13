@@ -76,8 +76,11 @@ type ForumTopic struct {
 	LikeCount     int            `json:"like_count" gorm:"default:0"`
 	ViewCount     int            `json:"view_count" gorm:"default:0"`
 	LastReplyAt   *time.Time     `json:"last_reply_at" gorm:"-"`
-	IsLiked       bool           `json:"is_liked" gorm:"-"`      // computed per-user
-	IsBookmarked  bool           `json:"is_bookmarked" gorm:"-"` // computed per-user
+	IsLiked       bool           `json:"is_liked" gorm:"-"`       // computed per-user
+	IsBookmarked  bool           `json:"is_bookmarked" gorm:"-"`  // computed per-user
+	CanEditTopic  bool           `json:"can_edit_topic" gorm:"-"` // computed per-user
+	CanPinTopic   bool           `json:"can_pin_topic" gorm:"-"`  // computed per-user
+	CanLockTopic  bool           `json:"can_lock_topic" gorm:"-"` // computed per-user
 }
 
 func (ForumTopic) TableName() string { return "forum_topics" }

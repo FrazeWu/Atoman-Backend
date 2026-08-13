@@ -19,6 +19,8 @@ func newForumFollowTestService(t *testing.T) (*Service, authctx.CurrentUser, mod
 		&model.User{},
 		&model.ForumCategory{},
 		&model.ForumTopic{},
+		&model.ForumLike{},
+		&model.ForumBookmark{},
 		&model.ForumFollow{},
 		&model.Notification{},
 		&model.DiscussionTarget{},

@@ -69,6 +69,7 @@ func newForumConcurrencyPostgresDB(t *testing.T) *gorm.DB {
 		&model.ForumCategory{},
 		&model.ForumTopic{},
 		&model.ForumLike{},
+		&model.ForumBookmark{},
 		&model.ForumUserTrust{},
 		&model.ForumGroup{},
 		&model.ForumGroupMember{},

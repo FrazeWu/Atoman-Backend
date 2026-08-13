@@ -12,6 +12,7 @@ import (
 
 	"atoman/internal/migrations"
 	"atoman/internal/model"
+	"atoman/internal/modules/comment"
 	"atoman/internal/modules/reference"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
@@ -43,11 +44,13 @@ func newForumHTTPTestRouter(t *testing.T) (*gin.Engine, *gorm.DB, model.User, mo
 		&model.CommentEntry{},
 		&model.CommentLike{},
 		&model.ForumLike{},
+		&model.ForumBookmark{},
 		&model.ForumUserTrust{},
 		&model.ForumGroup{},
 		&model.ForumGroupMember{},
 		&model.ForumCategoryPermission{},
 		&model.ForumUserModerationAction{},
+		&model.ForumModeratorAssignment{},
 		&model.ContentReference{},
 		&model.Notification{},
 		&model.Post{},
@@ -241,6 +244,101 @@ func TestTopicListSearchAndDetailReturnReferences(t *testing.T) {
 		if len(items) != 1 || len(items[0].References) != 1 || items[0].References[0].TargetID != user.UUID {
 			t.Fatalf("unexpected list references from %s: %s", path, response.Body.String())
 		}
+	}
+}
+
+func TestTopicStateIsConsistentAcrossListSearchDetailAndUsers(t *testing.T) {
+	router, db, user, category := newForumHTTPTestRouter(t)
+	created := performForumRequest(t, router, http.MethodPost, "/api/v1/forum/topics", map[string]any{
+		"category_id": category.ID, "title": "State needle", "content": "Topic body",
+	})
+	topic, _ := decodeForumData[model.ForumTopic](t, created)
+	latestAt := time.Now().UTC().Add(-time.Minute)
+	target := model.DiscussionTarget{
+		Kind: comment.TargetKindForumTopic, ResourceID: topic.ID, ResourceKey: topic.ID.String(),
+		CommentCount: 1, RootCount: 1,
+	}
+	if err := db.Create(&target).Error; err != nil {
+		t.Fatalf("create discussion target: %v", err)
+	}
+	if err := db.Create(&model.CommentEntry{
+		Base: model.Base{CreatedAt: latestAt}, TargetID: target.ID, AuthorID: user.UUID,
+		Content: "latest reply", ContentHash: "latest-reply", Status: "active",
+	}).Error; err != nil {
+		t.Fatalf("create comment: %v", err)
+	}
+	if err := db.Create(&model.ForumLike{UserID: user.UUID, TargetType: "topic", TargetID: topic.ID}).Error; err != nil {
+		t.Fatalf("create like: %v", err)
+	}
+	if err := db.Create(&model.ForumBookmark{UserID: user.UUID, TopicID: topic.ID}).Error; err != nil {
+		t.Fatalf("create bookmark: %v", err)
+	}
+
+	type stateTopic struct {
+		model.ForumTopic
+	}
+	for _, path := range []string{
+		"/api/v1/forum/topics",
+		"/api/v1/forum/search?q=needle",
+		"/api/v1/forum/topics/" + topic.ID.String(),
+	} {
+		response := performForumRequest(t, router, http.MethodGet, path, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("expected 200 from %s, got %d: %s", path, response.Code, response.Body.String())
+		}
+		if path == "/api/v1/forum/topics/"+topic.ID.String() {
+			item, _ := decodeForumData[stateTopic](t, response)
+			if item.ReplyCount != 1 || item.LastReplyAt == nil || !item.IsLiked || !item.IsBookmarked {
+				t.Fatalf("unexpected detail state: %s", response.Body.String())
+			}
+			continue
+		}
+		items, _ := decodeForumData[[]stateTopic](t, response)
+		if len(items) != 1 || items[0].ReplyCount != 1 || items[0].LastReplyAt == nil || !items[0].IsLiked || !items[0].IsBookmarked {
+			t.Fatalf("unexpected list/search state from %s: %s", path, response.Body.String())
+		}
+	}
+
+	service := NewService(db)
+	anonymousTopics, _, err := service.ListTopics(authctx.CurrentUser{Role: authctx.RoleAnonymous}, ListTopicsQuery{})
+	if err != nil {
+		t.Fatalf("list anonymous topics: %v", err)
+	}
+	if len(anonymousTopics) != 1 || anonymousTopics[0].IsLiked || anonymousTopics[0].IsBookmarked {
+		t.Fatalf("anonymous state leaked: %#v", anonymousTopics)
+	}
+}
+
+func TestTopicDTOReturnsTopicCapabilitiesForOwnerAndModeratorAssignment(t *testing.T) {
+	router, db, user, category := newForumHTTPTestRouter(t)
+	_ = router
+	topic := model.ForumTopic{UserID: user.UUID, CategoryID: category.ID, Title: "Capabilities", Content: "Body"}
+	if err := db.Create(&topic).Error; err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	service := NewService(db)
+	ownerDTO, err := service.topicDTO(db, topic, authctx.CurrentUser{ID: user.UUID, Role: authctx.RoleUser})
+	if err != nil {
+		t.Fatalf("load owner topic dto: %v", err)
+	}
+	if !ownerDTO.CanEditTopic || ownerDTO.CanPinTopic || ownerDTO.CanLockTopic {
+		t.Fatalf("unexpected owner capabilities: %#v", ownerDTO)
+	}
+	moderator := model.User{Username: "forum-moderator", Email: "forum-moderator@example.com", Password: "hash", Role: authctx.RoleModerator, IsActive: true}
+	if err := db.Create(&moderator).Error; err != nil {
+		t.Fatalf("create moderator: %v", err)
+	}
+	if err := db.Create(&model.ForumModeratorAssignment{
+		UserID: moderator.UUID, CategoryID: &category.ID, CanPinTopic: true, CanLockTopic: false,
+	}).Error; err != nil {
+		t.Fatalf("create moderator assignment: %v", err)
+	}
+	moderatorDTO, err := service.topicDTO(db, topic, authctx.CurrentUser{ID: moderator.UUID, Role: authctx.RoleModerator})
+	if err != nil {
+		t.Fatalf("load moderator topic dto: %v", err)
+	}
+	if !moderatorDTO.CanEditTopic || !moderatorDTO.CanPinTopic || moderatorDTO.CanLockTopic {
+		t.Fatalf("unexpected moderator capabilities: %#v", moderatorDTO)
 	}
 }
 

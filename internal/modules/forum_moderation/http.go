@@ -64,8 +64,8 @@ func RegisterLegacyRoutes(group *gin.RouterGroup, service *Service) {
 
 func registerLegacyRoutes(group *gin.RouterGroup, h *Handler) {
 	group.POST("/topics/:topicID/close", h.lockTopic)
-	group.POST("/topics/:topicID/feature", h.pinTopic)
-	group.DELETE("/topics/:topicID/feature", h.unpinTopic)
+	group.POST("/topics/:topicID/feature", h.featureTopic)
+	group.DELETE("/topics/:topicID/feature", h.unfeatureTopic)
 	group.POST("/report", h.createReport)
 	group.GET("/category-requests", h.listCategoryRequests)
 	group.POST("/category-requests/:requestID/review", h.reviewCategoryRequestLegacy)
@@ -173,6 +173,14 @@ func (h *Handler) pinTopic(c *gin.Context) {
 
 func (h *Handler) unpinTopic(c *gin.Context) {
 	h.handleTopicAction(c, h.service.UnpinTopic)
+}
+
+func (h *Handler) featureTopic(c *gin.Context) {
+	h.handleTopicAction(c, h.service.FeatureTopic)
+}
+
+func (h *Handler) unfeatureTopic(c *gin.Context) {
+	h.handleTopicAction(c, h.service.UnfeatureTopic)
 }
 
 func (h *Handler) hideTopic(c *gin.Context) {

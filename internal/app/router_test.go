@@ -234,6 +234,8 @@ func TestRegisterV1RoutesForumSearchUsesOptionalAuthForPrivateCategoryMembership
 		&model.User{},
 		&model.ForumCategory{},
 		&model.ForumTopic{},
+		&model.ForumLike{},
+		&model.ForumBookmark{},
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
 		&model.ForumGroup{},

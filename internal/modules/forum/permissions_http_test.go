@@ -19,7 +19,7 @@ func newPermissionHTTPRouter(t *testing.T, role string) (*gin.Engine, *gorm.DB, 
 		&model.User{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumDraft{},
 		&model.ForumGroup{}, &model.ForumGroupMember{}, &model.ForumCategoryPermission{},
 		&model.ForumUserModerationAction{},
-		&model.ForumLike{}, &model.ForumUserTrust{},
+		&model.ForumLike{}, &model.ForumBookmark{}, &model.ForumUserTrust{},
 		&model.DiscussionTarget{}, &model.CommentEntry{},
 	)
 	actor := model.User{Username: "actor-" + role, Email: "actor-" + role + "@example.com", Password: "hash", Role: role, IsActive: true}

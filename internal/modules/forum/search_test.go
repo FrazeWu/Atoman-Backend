@@ -269,7 +269,7 @@ func TestPostgresSearchMatchesContinuousChineseText(t *testing.T) {
 	if err := db.Exec("SET search_path TO " + schema + ", public").Error; err != nil {
 		t.Fatalf("set search path: %v", err)
 	}
-	if err := db.AutoMigrate(&model.User{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.ForumUserTrust{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumLike{}, &model.ForumBookmark{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.ForumUserTrust{}); err != nil {
 		t.Fatalf("migrate PostgreSQL test schema: %v", err)
 	}
 
