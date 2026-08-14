@@ -13,6 +13,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/indexnow"
 	revisionservice "atoman/internal/service"
 	"atoman/internal/storage"
 
@@ -442,7 +443,30 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 	}
 	s.deleteAlbumImportObjects(oldObjectKeys)
 	s.updateAlbumImportNotification(out)
+	if out.Status == AlbumImportStatusCommitted {
+		s.notifyIndexNowAlbum(out.TargetAlbumID)
+	}
 	return out, nil
+}
+
+func (s *Service) notifyIndexNowAlbum(albumID *uuid.UUID) {
+	if albumID == nil || *albumID == uuid.Nil {
+		return
+	}
+	paths := []string{"/music/album/" + albumID.String()}
+	var credits []model.AlbumArtist
+	if err := s.db.Where("album_id = ?", *albumID).Find(&credits).Error; err == nil {
+		for _, credit := range credits {
+			paths = append(paths, "/music/artist/"+credit.ArtistID.String())
+		}
+	}
+	var songs []model.Song
+	if err := s.db.Where("album_id = ? AND status = ?", *albumID, "open").Find(&songs).Error; err == nil {
+		for _, song := range songs {
+			paths = append(paths, "/music/song/"+song.ID.String())
+		}
+	}
+	indexnow.NotifyPaths(paths...)
 }
 
 func (s *Service) markAlbumImportNeedsAttention(userID, importID uuid.UUID, message string) (model.AlbumImportSession, error) {

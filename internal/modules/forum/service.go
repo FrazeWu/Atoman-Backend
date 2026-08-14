@@ -13,6 +13,7 @@ import (
 	"atoman/internal/modules/reference"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/indexnow"
 	coreservice "atoman/internal/service"
 
 	"github.com/google/uuid"
@@ -280,7 +281,11 @@ func (s *Service) CreateTopic(user authctx.CurrentUser, req CreateTopicRequest) 
 		log.Printf("forum follow notification failed for topic %s: %v", topic.ID, err)
 	}
 	s.evaluateTrustAfterWrite(user.ID)
-	return s.repo.GetTopic(user, topic.ID)
+	created, err := s.repo.GetTopic(user, topic.ID)
+	if err == nil {
+		s.notifyIndexNowTopic(created)
+	}
+	return created, err
 }
 
 func (s *Service) notifyTopicFollowers(topic model.ForumTopic) error {
@@ -381,7 +386,11 @@ func (s *Service) UpdateTopic(user authctx.CurrentUser, topicID uuid.UUID, req U
 	if err != nil {
 		return model.ForumTopic{}, err
 	}
-	return s.repo.GetTopic(user, topic.ID)
+	updated, err := s.repo.GetTopic(user, topic.ID)
+	if err == nil {
+		s.notifyIndexNowTopic(updated)
+	}
+	return updated, err
 }
 
 func (s *Service) DeleteTopic(user authctx.CurrentUser, topicID uuid.UUID) error {
@@ -392,7 +401,7 @@ func (s *Service) DeleteTopic(user authctx.CurrentUser, topicID uuid.UUID) error
 	if err := requireTopicOwner(user, topic.UserID); err != nil {
 		return err
 	}
-	return s.comments.DeleteTarget(comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: topicID}, func(tx *gorm.DB) error {
+	err = s.comments.DeleteTarget(comment.TargetRef{Kind: comment.TargetKindForumTopic, ResourceID: topicID}, func(tx *gorm.DB) error {
 		if err := s.references.RemoveSource(tx, "thread", topicID); err != nil {
 			return err
 		}
@@ -413,6 +422,18 @@ func (s *Service) DeleteTopic(user authctx.CurrentUser, topicID uuid.UUID) error
 		}
 		return NewRepo(tx).DeleteTopic(topicID)
 	})
+	if err == nil {
+		s.notifyIndexNowTopic(topic)
+	}
+	return err
+}
+
+func (s *Service) notifyIndexNowTopic(topic model.ForumTopic) {
+	var restricted int64
+	if err := s.db.Model(&model.ForumCategoryPermission{}).Where("category_id = ?", topic.CategoryID).Count(&restricted).Error; err != nil || restricted > 0 {
+		return
+	}
+	indexnow.NotifyPaths("/forum/topic/" + topic.ID.String())
 }
 
 func (s *Service) ListDrafts(user authctx.CurrentUser) ([]model.ForumDraft, error) {

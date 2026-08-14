@@ -15,6 +15,7 @@ import (
 	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
+	"atoman/internal/platform/indexnow"
 	"atoman/internal/service"
 )
 
@@ -207,6 +208,7 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
+		wasPublic := video.Status == "published" && video.Visibility == "public"
 
 		var input struct {
 			ChannelID     *uuid.UUID  `json:"channel_id"`
@@ -334,6 +336,9 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		db.Preload("Channel").Preload("Tags").Preload("Collections").First(&video, "id = ?", video.ID)
+		if wasPublic || (video.Status == "published" && video.Visibility == "public") {
+			indexnow.NotifyPaths("/videos/watch/" + video.ID.String())
+		}
 		c.JSON(http.StatusOK, video)
 	}
 }
@@ -366,7 +371,14 @@ func DeleteVideo(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		db.Delete(&video)
+		wasPublic := video.Status == "published" && video.Visibility == "public"
+		if err := db.Delete(&video).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if wasPublic {
+			indexnow.NotifyPaths("/videos/watch/" + video.ID.String())
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 	}
 }

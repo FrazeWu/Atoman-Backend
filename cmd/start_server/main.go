@@ -34,6 +34,7 @@ import (
 	"atoman/internal/modules/lifecycle"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
+	"atoman/internal/platform/indexnow"
 	"atoman/internal/service"
 )
 
@@ -447,6 +448,7 @@ func main() {
 	defer stop()
 	rssCronDone := service.StartRSSCron(ctx, db)
 	fullTextWorkerDone := service.StartFullTextWorker(ctx, db)
+	indexNowWorkerDone := indexnow.StartWorker(ctx)
 	lifecycleWorkerDone := lifecycle.StartWorker(ctx, db)
 
 	log.Println("Initializing Casbin Enforcer...")
@@ -490,7 +492,7 @@ func main() {
 	if err := serveUntilShutdown(ctx, server, shutdownTimeout); err != nil {
 		fatalLogger.Fatal("Failed to start server: ", err)
 	}
-	if err := waitForWorkers(shutdownTimeout, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone); err != nil {
+	if err := waitForWorkers(shutdownTimeout, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone, indexNowWorkerDone); err != nil {
 		log.Printf("WARN: timed out waiting for background workers to stop: %v", err)
 	}
 	log.Println("Server stopped")

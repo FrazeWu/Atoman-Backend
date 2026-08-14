@@ -13,6 +13,7 @@ import (
 	"atoman/internal/modules/lifecycle"
 	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/httpx"
+	"atoman/internal/platform/indexnow"
 )
 
 // CreatePodcastEpisode godoc
@@ -173,6 +174,7 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
+		wasPublic := ep.Post.Status == "published" && (ep.Post.Visibility == "" || ep.Post.Visibility == "public")
 
 		var input struct {
 			Title           *string     `json:"title"`
@@ -281,6 +283,9 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		if ep.Post != nil && (wasPublic || (ep.Post.Status == "published" && (ep.Post.Visibility == "" || ep.Post.Visibility == "public"))) {
+			indexnow.NotifyPaths("/podcasts/episode/" + ep.ID.String())
+		}
 		c.JSON(http.StatusOK, ep)
 	}
 }
@@ -319,8 +324,19 @@ func DeletePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		db.Delete(&ep)
-		db.Delete(ep.Post)
+		wasPublic := ep.Post.Status == "published" && (ep.Post.Visibility == "" || ep.Post.Visibility == "public")
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Delete(&ep).Error; err != nil {
+				return err
+			}
+			return tx.Delete(ep.Post).Error
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if wasPublic {
+			indexnow.NotifyPaths("/podcasts/episode/" + ep.ID.String())
+		}
 		c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 	}
 }

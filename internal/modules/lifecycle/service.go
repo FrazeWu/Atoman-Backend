@@ -9,6 +9,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/indexnow"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -530,6 +531,9 @@ func (s *Service) dispatchPublication(event model.ContentPublicationEvent) error
 		if err := s.createPublicationNotification(event, notification); err != nil {
 			return err
 		}
+	}
+	if content.Visibility == "" || content.Visibility == "public" {
+		indexnow.NotifyPaths(content.Path)
 	}
 	return nil
 }

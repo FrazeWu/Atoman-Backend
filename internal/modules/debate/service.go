@@ -8,6 +8,7 @@ import (
 	"atoman/internal/modules/comment"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/indexnow"
 	"atoman/internal/platform/resourceref"
 
 	"github.com/google/uuid"
@@ -89,7 +90,11 @@ func (s *Service) CreateDebate(user authctx.CurrentUser, req CreateDebateRequest
 	if err != nil {
 		return DebateDTO{}, err
 	}
-	return s.GetDebate(debateID)
+	created, err := s.GetDebate(debateID)
+	if err == nil {
+		indexnow.NotifyPaths("/debate/" + debateID.String())
+	}
+	return created, err
 }
 
 func (s *Service) ArchiveDebate(user authctx.CurrentUser, debateID uuid.UUID) (DebateDTO, error) {
@@ -114,7 +119,11 @@ func (s *Service) ArchiveDebate(user authctx.CurrentUser, debateID uuid.UUID) (D
 	if err != nil {
 		return DebateDTO{}, err
 	}
-	return s.GetDebate(debateID)
+	archived, err := s.GetDebate(debateID)
+	if err == nil {
+		indexnow.NotifyPaths("/debate/" + debateID.String())
+	}
+	return archived, err
 }
 
 func (s *Service) SetProtection(user authctx.CurrentUser, debateID uuid.UUID, req ProtectionRequest) error {

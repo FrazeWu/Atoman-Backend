@@ -16,6 +16,7 @@ import (
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
+	"atoman/internal/platform/indexnow"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -514,6 +515,7 @@ func (h *Handler) updatePost(c *gin.Context) {
 		return
 	}
 	wasPublished := post.Status == "published"
+	wasPublic := isPublicPostState(post.Status, post.Visibility)
 
 	updates := map[string]any{
 		"title":      req.Title,
@@ -620,6 +622,9 @@ func (h *Handler) updatePost(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	if wasPublic || isPublicPostState(post.Status, post.Visibility) {
+		indexnow.NotifyPaths(seoPostPath(post.ID))
+	}
 	httpx.OK(c, http.StatusOK, postDTO)
 }
 
@@ -657,6 +662,9 @@ func (h *Handler) deletePost(c *gin.Context) {
 	}); err != nil {
 		httpx.Error(c, err)
 		return
+	}
+	if isPublicPostState(post.Status, post.Visibility) {
+		indexnow.NotifyPaths(seoPostPath(post.ID))
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
@@ -755,6 +763,7 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 		return
 	}
 	wasPublished := post.Status == "published"
+	wasPublic := isPublicPostState(post.Status, post.Visibility)
 	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{"status": status}
 		if status == "published" && post.PublishedAt == nil {
@@ -782,6 +791,9 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 	}); err != nil {
 		httpx.Error(c, err)
 		return
+	}
+	if wasPublic || isPublicPostState(post.Status, post.Visibility) {
+		indexnow.NotifyPaths(seoPostPath(post.ID))
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
@@ -815,6 +827,10 @@ func (h *Handler) updatePostPin(c *gin.Context, pinned bool) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
+}
+
+func isPublicPostState(status, visibility string) bool {
+	return status == "published" && (visibility == "" || visibility == "public")
 }
 
 func parsePostID(raw string) (uuid.UUID, error) {
