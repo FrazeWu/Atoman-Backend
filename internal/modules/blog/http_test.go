@@ -1764,6 +1764,27 @@ func TestScheduledPostIsOnlyAccessibleAndInteractiveByOwner(t *testing.T) {
 	}
 }
 
+func TestDeleteChannelAndCollectionRejectNonEmptyResources(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, owner, "Protected")
+	post := createPostRecord(t, db, owner.ID, &channel.ID, "Keep me", "published")
+	if err := db.Model(&post).Update("collection_id", collection.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.DeleteCollection(owner, collection.ID); apperr.FromError(err).HTTPStatus != http.StatusConflict {
+		t.Fatalf("expected non-empty collection conflict, got %v", err)
+	}
+	if err := service.DeleteChannel(owner, channel.ID); apperr.FromError(err).HTTPStatus != http.StatusConflict {
+		t.Fatalf("expected non-empty channel conflict, got %v", err)
+	}
+	if err := db.First(&channel, "id = ?", channel.ID).Error; err != nil {
+		t.Fatalf("expected channel to remain: %v", err)
+	}
+	if err := db.First(&collection, "id = ?", collection.ID).Error; err != nil {
+		t.Fatalf("expected collection to remain: %v", err)
+	}
+}
 
 func createOwnedChannelAndCollection(t *testing.T, service *Service, user authctx.CurrentUser, name string) (model.Channel, model.Collection) {
 	t.Helper()
