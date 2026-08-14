@@ -144,6 +144,37 @@ func TestImportWorkerSurfacesBackgroundHeartbeatFailure(t *testing.T) {
 	}
 }
 
+func TestImportWorkerLogsQueueWaitDurationAndErrorKind(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	var events []importWorkerEvent
+	previousSink := logMusicImportEventSink
+	logMusicImportEventSink = func(entry importWorkerEvent) {
+		events = append(events, entry)
+	}
+	t.Cleanup(func() { logMusicImportEventSink = previousSink })
+
+	now := job.CreatedAt.Add(3 * time.Minute)
+	worker := NewImportWorker(db, nil, "worker")
+	worker.now = func() time.Time { return now }
+	processed, err := worker.RunOnce(context.Background(), importProcessorFunc(func(context.Context, model.AlbumImportJob, func() error) error {
+		now = now.Add(2 * time.Second)
+		return errors.New("object storage unavailable")
+	}))
+	if err != nil || !processed {
+		t.Fatalf("run worker: processed=%v err=%v", processed, err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected claimed and requeued events, got %#v", events)
+	}
+	if events[0].event != "claimed" || events[0].queueWait != 3*time.Minute {
+		t.Fatalf("unexpected claimed event: %#v", events[0])
+	}
+	if events[1].event != "requeued" || events[1].duration != 2*time.Second || events[1].errorKind != "storage" {
+		t.Fatalf("unexpected requeued event: %#v", events[1])
+	}
+}
+
 func TestImportWorkerRetriesSubmittedReadyImportFinalization(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})

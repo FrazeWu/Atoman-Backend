@@ -123,7 +123,7 @@ func (w *ImportWorker) Claim(ctx context.Context) (model.AlbumImportJob, bool, e
 		if err := w.db.WithContext(ctx).First(&claimed, "id = ?", candidate.ID).Error; err != nil {
 			return model.AlbumImportJob{}, false, err
 		}
-		logMusicImportEvent("claimed", claimed, w.workerID, "")
+		logMusicImportEvent("claimed", claimed, w.workerID, "", musicImportEventQueueWait(now.Sub(claimed.CreatedAt)))
 		return claimed, true, nil
 	}
 	return model.AlbumImportJob{}, false, nil
@@ -176,7 +176,15 @@ func (w *ImportWorker) recoverExpiredLeases(ctx context.Context, now time.Time) 
 			return err
 		}
 		if event != "" {
-			logMusicImportEvent(event, recovered, w.workerID, "worker lease expired")
+			leaseAt := recovered.LockedAt
+			if recovered.HeartbeatAt != nil {
+				leaseAt = recovered.HeartbeatAt
+			}
+			leaseAge := time.Duration(0)
+			if leaseAt != nil {
+				leaseAge = now.Sub(*leaseAt)
+			}
+			logMusicImportEvent(event, recovered, w.workerID, "worker lease expired", musicImportEventLeaseAge(leaseAge))
 		}
 	}
 	return nil
@@ -231,7 +239,7 @@ func (w *ImportWorker) Complete(ctx context.Context, jobID uuid.UUID) error {
 		return nil
 	})
 	if err == nil {
-		logMusicImportEvent("completed", completed, w.workerID, "")
+		logMusicImportEvent("completed", completed, w.workerID, "", musicImportEventDurationSince(now, completed.StartedAt))
 	}
 	return err
 }
@@ -284,13 +292,78 @@ func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) 
 		return nil
 	})
 	if err == nil {
-		logMusicImportEvent(event, retried, w.workerID, message)
+		logMusicImportEvent(event, retried, w.workerID, message, musicImportEventDurationSince(now, retried.StartedAt))
 	}
 	return err
 }
 
-func logMusicImportEvent(event string, job model.AlbumImportJob, workerID, message string) {
-	log.Printf("music_import_event=%q job_id=%q import_id=%q worker_id=%q attempts=%d max_attempts=%d message=%q", event, job.ID, job.ImportID, workerID, job.Attempts, job.MaxAttempts, message)
+type importWorkerEvent struct {
+	event       string
+	job         model.AlbumImportJob
+	workerID    string
+	message     string
+	queueWait   time.Duration
+	duration    time.Duration
+	leaseAge    time.Duration
+	errorKind   string
+}
+
+var logMusicImportEventSink = func(entry importWorkerEvent) {
+	log.Printf("music_import_event=%q job_id=%q import_id=%q worker_id=%q attempts=%d max_attempts=%d queue_wait_ms=%d duration_ms=%d lease_age_ms=%d error_kind=%q message=%q", entry.event, entry.job.ID, entry.job.ImportID, entry.workerID, entry.job.Attempts, entry.job.MaxAttempts, entry.queueWait.Milliseconds(), entry.duration.Milliseconds(), entry.leaseAge.Milliseconds(), entry.errorKind, sanitizeMusicImportEventMessage(entry.message))
+}
+
+func logMusicImportEvent(event string, job model.AlbumImportJob, workerID, message string, options ...func(*importWorkerEvent)) {
+	entry := importWorkerEvent{event: event, job: job, workerID: workerID, message: message, errorKind: musicImportErrorKind(message)}
+	for _, option := range options {
+		option(&entry)
+	}
+	logMusicImportEventSink(entry)
+}
+
+func musicImportEventQueueWait(wait time.Duration) func(*importWorkerEvent) {
+	return func(entry *importWorkerEvent) { entry.queueWait = wait }
+}
+
+func musicImportEventDuration(duration time.Duration) func(*importWorkerEvent) {
+	return func(entry *importWorkerEvent) { entry.duration = duration }
+}
+
+func musicImportEventDurationSince(now time.Time, startedAt *time.Time) func(*importWorkerEvent) {
+	if startedAt == nil || startedAt.After(now) {
+		return musicImportEventDuration(0)
+	}
+	return musicImportEventDuration(now.Sub(*startedAt))
+}
+
+func musicImportEventLeaseAge(age time.Duration) func(*importWorkerEvent) {
+	return func(entry *importWorkerEvent) { entry.leaseAge = age }
+}
+
+func musicImportErrorKind(message string) string {
+	message = strings.ToLower(message)
+	switch {
+	case message == "":
+		return ""
+	case strings.Contains(message, "heartbeat") || strings.Contains(message, "not held"):
+		return "heartbeat"
+	case strings.Contains(message, "lease"):
+		return "lease"
+	case strings.Contains(message, "storage") || strings.Contains(message, "object"):
+		return "storage"
+	case strings.Contains(message, "finaliz"):
+		return "finalizer"
+	default:
+		return "processor"
+	}
+}
+
+func sanitizeMusicImportEventMessage(message string) string {
+	message = strings.Join(strings.Fields(message), " ")
+	const maxLength = 512
+	if len(message) > maxLength {
+		return message[:maxLength]
+	}
+	return message
 }
 
 var activeImportSessionStatuses = []string{AlbumImportStatusQueued, AlbumImportStatusExtracting, AlbumImportStatusAnalyzing, AlbumImportStatusTranscoding}
