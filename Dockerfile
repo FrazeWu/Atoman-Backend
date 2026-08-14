@@ -8,7 +8,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o main ./cmd/start_serve
 
 # Stage 2: runtime
 FROM alpine:3.19
-RUN apk --no-cache add ca-certificates nginx su-exec tzdata
+RUN apk --no-cache add ca-certificates nginx su-exec tzdata ffmpeg 7zip \
+    && 7zz i | grep -qE '[[:space:]]Rar[[:space:]]+rar' \
+    && 7zz i | grep -qE '[[:space:]]Rar5[[:space:]]+rar'
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
 RUN mkdir -p /app/log /app/uploads /run/nginx \
