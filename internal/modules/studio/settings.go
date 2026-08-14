@@ -91,7 +91,7 @@ func (s *Service) SaveSettings(user authctx.CurrentUser, module Module, input Se
 
 func (s *Service) settingsRecord(userID, channelID uuid.UUID, module Module) (model.StudioModuleSettings, error) {
 	var settings model.StudioModuleSettings
-	err := s.db.Where("user_id = ? AND channel_id = ? AND content_type = ?", userID, channelID, module).First(&settings).Error
+	err := s.db.Where("channel_id = ? AND content_type = ?", channelID, module).First(&settings).Error
 	if err == nil {
 		return settings, nil
 	}
@@ -100,7 +100,7 @@ func (s *Service) settingsRecord(userID, channelID uuid.UUID, module Module) (mo
 	}
 	settings = model.StudioModuleSettings{
 		UserID: userID, ChannelID: channelID, ContentType: string(module),
-		DefaultVisibility: "public", DefaultPublishStatus: "published",
+		DefaultVisibility: "public", DefaultPublishStatus: "draft",
 	}
 	if err := s.db.Create(&settings).Error; err != nil {
 		return model.StudioModuleSettings{}, err

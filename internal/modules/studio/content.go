@@ -210,21 +210,21 @@ func (s *Service) listVideoContents(userID uuid.UUID, query ContentQuery) ([]Stu
 	case "missing_cover":
 		db = db.Where("TRIM(COALESCE(videos.thumbnail_url, '')) = ''")
 	case "missing_collection":
-		db = db.Where("NOT EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id)")
+		db = db.Where("videos.collection_id IS NULL AND NOT EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id)")
 	case "processing_failed":
 		db = db.Where("videos.processing_status = ?", "failed")
 	case "external_unplayable":
 		db = db.Where("videos.storage_type = ? AND TRIM(COALESCE(videos.video_url, '')) = ''", "external")
 	}
 	if query.CollectionID != uuid.Nil {
-		db = db.Where("EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id AND video_collections.collection_id = ?)", query.CollectionID)
+		db = db.Where("videos.collection_id = ? OR EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id AND video_collections.collection_id = ?)", query.CollectionID, query.CollectionID)
 	}
 	var total int64
 	if err := db.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var videos []model.Video
-	if err := db.Preload("Collections", "content_type = ?", string(ModuleVideo)).
+	if err := db.Preload("Collection").Preload("Collections", "content_type = ?", string(ModuleVideo)).
 		Order("videos.updated_at DESC").Order("videos.id DESC").
 		Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).
 		Find(&videos).Error; err != nil {
@@ -236,14 +236,23 @@ func (s *Service) listVideoContents(userID uuid.UUID, query ContentQuery) ([]Stu
 		if video.ChannelID != nil {
 			channelID = *video.ChannelID
 		}
-		items = append(items, StudioContentItem{
+		collections := append([]model.Collection{}, video.Collections...)
+		if video.Collection != nil {
+			collections = append(collections, *video.Collection)
+		}
+		item := StudioContentItem{
 			ID: video.ID, Module: ModuleVideo, ChannelID: channelID,
 			Title: video.Title, Summary: video.Description, CoverURL: video.ThumbnailURL,
 			Status: video.Status, Visibility: studioVisibilityFromDB(video.Visibility),
-			Collections: studioCollectionSummaries(video.Collections), DurationSec: video.DurationSec,
+			Collections: studioCollectionSummaries(collections), CollectionConflict: video.CollectionConflict, DurationSec: video.DurationSec,
 			ViewCount: int64(video.ViewCount), ProcessingStatus: video.ProcessingStatus,
+			PublishedAt: video.PublishedAt, ScheduledAt: video.ScheduledAt,
 			CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt,
-		})
+		}
+		if video.Collection != nil {
+			item.Collection = &StudioCollectionSummary{ID: video.Collection.ID, Name: video.Collection.Name}
+		}
+		items = append(items, item)
 	}
 	if err := s.enrichContentMetrics(ModuleVideo, items); err != nil {
 		return nil, 0, err
@@ -357,14 +366,18 @@ func studioPostItem(module Module, id uuid.UUID, post model.Post, collections []
 	if post.ChannelID != nil {
 		channelID = *post.ChannelID
 	}
-	return StudioContentItem{
+	item := StudioContentItem{
 		ID: id, Module: module, ChannelID: channelID,
 		Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL,
 		Status: post.Status, Visibility: studioVisibilityFromDB(post.Visibility),
-		Collections: studioCollectionSummaries(collections), ViewCount: post.ViewCount,
+		Collections: studioCollectionSummaries(collections), CollectionConflict: post.CollectionConflict, ViewCount: post.ViewCount,
 		PublishedAt: post.PublishedAt, ScheduledAt: post.ScheduledAt,
 		CreatedAt: post.CreatedAt, UpdatedAt: post.UpdatedAt,
 	}
+	if post.Collection != nil {
+		item.Collection = &StudioCollectionSummary{ID: post.Collection.ID, Name: post.Collection.Name}
+	}
+	return item
 }
 
 func studioCollectionSummaries(collections []model.Collection) []StudioCollectionSummary {

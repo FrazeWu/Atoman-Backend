@@ -203,7 +203,6 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 
 	channelID := req.ChannelID
 	var collection *model.Collection
-	collectionIDs := make([]uuid.UUID, 0, 1)
 	if req.CollectionID != uuid.Nil {
 		var loaded model.Collection
 		if err := s.db.First(&loaded, "id = ?", req.CollectionID).Error; err != nil {
@@ -213,13 +212,26 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 			return model.Post{}, err
 		}
 		collection = &loaded
-		collectionIDs = append(collectionIDs, loaded.ID)
 		if channelID == uuid.Nil {
 			channelID = loaded.ChannelID
 		}
 	}
-	if err := studio.NewService(s.db).ValidateContentScope(user.ID, channelID, studio.ModuleBlog, collectionIDs, status == "published"); err != nil {
+	var requestedCollectionID *uuid.UUID
+	if req.CollectionID != uuid.Nil {
+		requestedCollectionID = &req.CollectionID
+	}
+	resolvedCollectionID, err := studio.NewService(s.db).ResolveContentCollection(
+		user.ID, channelID, studio.ModuleBlog, requestedCollectionID, nil, status == "published",
+	)
+	if err != nil {
 		return model.Post{}, err
+	}
+	if resolvedCollectionID != nil && (collection == nil || collection.ID != *resolvedCollectionID) {
+		var loaded model.Collection
+		if err := s.db.First(&loaded, "id = ?", *resolvedCollectionID).Error; err != nil {
+			return model.Post{}, err
+		}
+		collection = &loaded
 	}
 	channel, err := s.repo.GetChannel(channelID)
 	if err != nil {

@@ -29,7 +29,7 @@ func TestStudioSettingsRejectForeignDefaultCollection(t *testing.T) {
 	}
 }
 
-func TestStudioSettingsAreScopedByUserChannelAndModule(t *testing.T) {
+func TestStudioSettingsAreScopedByChannelAndModule(t *testing.T) {
 	fixture := newStudioQueryFixture(t)
 	secondChannel := model.Channel{UserID: &fixture.user.ID, Name: "Second Settings", Slug: "second-settings-" + uuid.NewString()[:8]}
 	if err := fixture.db.Create(&secondChannel).Error; err != nil {
@@ -57,7 +57,7 @@ func TestStudioSettingsAreScopedByUserChannelAndModule(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get second channel settings: %v", err)
 	}
-	if other.ChannelID != secondChannel.ID || other.DefaultCollectionID != nil || other.DefaultVisibility != "public" || other.DefaultPublishStatus != "published" {
+	if other.ChannelID != secondChannel.ID || other.DefaultCollectionID != nil || other.DefaultVisibility != "public" || other.DefaultPublishStatus != "draft" {
 		t.Fatalf("expected independent default settings, got %#v", other)
 	}
 }

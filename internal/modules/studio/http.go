@@ -17,6 +17,10 @@ type Handler struct {
 	service *Service
 }
 
+type reorderCollectionContentsInput struct {
+	ContentIDs []uuid.UUID `json:"content_ids"`
+}
+
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.Use(middleware.AuthMiddleware())
@@ -37,6 +41,79 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/:module/collections", h.createCollection)
 	group.PATCH("/:module/collections/:id", h.updateCollection)
 	group.DELETE("/:module/collections/:id", h.deleteCollection)
+	group.PUT("/:module/collections/:id/contents/order", h.reorderCollectionContents)
+	group.PUT("/:module/contents/:id/collection", h.resolveCollectionConflict)
+}
+
+type resolveCollectionConflictInput struct {
+	CollectionID uuid.UUID `json:"collection_id"`
+}
+
+// resolveCollectionConflict godoc
+// @Summary 确认历史内容合集归属
+// @Tags studio
+// @Accept json
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param id path string true "内容 UUID"
+// @Param input body resolveCollectionConflictInput true "确认的候选合集"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 409 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/contents/{id}/collection [put]
+func (h *Handler) resolveCollectionConflict(c *gin.Context) {
+	user, module, ok := requestScope(c)
+	if !ok {
+		return
+	}
+	contentID, ok := uuidParam(c, "id")
+	if !ok {
+		return
+	}
+	var input resolveCollectionConflictInput
+	if !bindJSON(c, &input) {
+		return
+	}
+	if input.CollectionID == uuid.Nil {
+		httpx.Error(c, apperr.BadRequest("studio.invalid_collection", "collection_id is required"))
+		return
+	}
+	respond(c, http.StatusOK, gin.H{"resolved": true}, h.service.ResolveCollectionConflict(user, module, contentID, input.CollectionID))
+}
+
+// reorderCollectionContents godoc
+// @Summary 调整合集内容顺序
+// @Tags studio
+// @Accept json
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param id path string true "合集 UUID"
+// @Param input body reorderCollectionContentsInput true "完整内容顺序"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/collections/{id}/contents/order [put]
+func (h *Handler) reorderCollectionContents(c *gin.Context) {
+	user, module, ok := requestScope(c)
+	if !ok {
+		return
+	}
+	collectionID, ok := uuidParam(c, "id")
+	if !ok {
+		return
+	}
+	var input reorderCollectionContentsInput
+	if !bindJSON(c, &input) {
+		return
+	}
+	respond(c, http.StatusOK, gin.H{"reordered": true}, h.service.ReorderCollectionContents(user, module, collectionID, input.ContentIDs))
 }
 
 // getAnalytics godoc

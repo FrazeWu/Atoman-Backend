@@ -14,7 +14,7 @@ import (
 func newBlogScopeTest(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, model.Channel) {
 	t.Helper()
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.ContentPublicationEvent{}, &model.BlogPostVersion{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.ContentPublicationEvent{}, &model.BlogPostVersion{}, &model.ContentReference{})
 	user := model.User{Username: "blog-scope", Email: "blog-scope@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
@@ -26,8 +26,8 @@ func newBlogScopeTest(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, mo
 	return NewService(db), db, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: user.Role}, channel
 }
 
-func TestDraftAllowsNoCollectionAndPublishRequiresCollection(t *testing.T) {
-	service, _, user, channel := newBlogScopeTest(t)
+func TestDraftAllowsNoCollectionAndPublishUsesSystemDefault(t *testing.T) {
+	service, db, user, channel := newBlogScopeTest(t)
 	draft, err := service.CreatePost(user, CreatePostRequest{
 		ChannelID: channel.ID, Title: "Draft", Content: "body", Status: "draft",
 	})
@@ -38,11 +38,21 @@ func TestDraftAllowsNoCollectionAndPublishRequiresCollection(t *testing.T) {
 		t.Fatalf("expected draft collection to be nil, got %s", *draft.CollectionID)
 	}
 
-	_, err = service.CreatePost(user, CreatePostRequest{
+	published, err := service.CreatePost(user, CreatePostRequest{
 		ChannelID: channel.ID, Title: "Published", Content: "body", Status: "published",
 	})
-	if app := apperr.FromError(err); app == nil || app.HTTPStatus != 400 {
-		t.Fatalf("expected collectionless publish to return 400, got %v", err)
+	if err != nil {
+		t.Fatalf("publish with system default collection: %v", err)
+	}
+	if published.CollectionID == nil {
+		t.Fatal("expected system default collection to be assigned")
+	}
+	var collection model.Collection
+	if err := db.First(&collection, "id = ?", *published.CollectionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !collection.IsDefault || collection.ContentType != "blog" {
+		t.Fatalf("expected blog system default collection, got %#v", collection)
 	}
 }
 

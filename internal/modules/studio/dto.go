@@ -88,23 +88,25 @@ type StudioCollectionSummary struct {
 }
 
 type StudioContentItem struct {
-	ID               uuid.UUID                 `json:"id"`
-	Module           Module                    `json:"module"`
-	ChannelID        uuid.UUID                 `json:"channel_id"`
-	Title            string                    `json:"title"`
-	Summary          string                    `json:"summary"`
-	CoverURL         string                    `json:"cover_url"`
-	Status           string                    `json:"status"`
-	Visibility       string                    `json:"visibility"`
-	Collections      []StudioCollectionSummary `json:"collections"`
-	DurationSec      int                       `json:"duration_sec,omitempty"`
-	ViewCount        int64                     `json:"view_count"`
-	Metrics          map[string]int64          `json:"metrics"`
-	ProcessingStatus string                    `json:"processing_status,omitempty"`
-	PublishedAt      *time.Time                `json:"published_at,omitempty"`
-	ScheduledAt      *time.Time                `json:"scheduled_at,omitempty"`
-	CreatedAt        time.Time                 `json:"created_at"`
-	UpdatedAt        time.Time                 `json:"updated_at"`
+	ID                 uuid.UUID                 `json:"id"`
+	Module             Module                    `json:"module"`
+	ChannelID          uuid.UUID                 `json:"channel_id"`
+	Title              string                    `json:"title"`
+	Summary            string                    `json:"summary"`
+	CoverURL           string                    `json:"cover_url"`
+	Status             string                    `json:"status"`
+	Visibility         string                    `json:"visibility"`
+	Collection         *StudioCollectionSummary  `json:"collection,omitempty"`
+	Collections        []StudioCollectionSummary `json:"collections"`
+	CollectionConflict bool                      `json:"collection_conflict"`
+	DurationSec        int                       `json:"duration_sec,omitempty"`
+	ViewCount          int64                     `json:"view_count"`
+	Metrics            map[string]int64          `json:"metrics"`
+	ProcessingStatus   string                    `json:"processing_status,omitempty"`
+	PublishedAt        *time.Time                `json:"published_at,omitempty"`
+	ScheduledAt        *time.Time                `json:"scheduled_at,omitempty"`
+	CreatedAt          time.Time                 `json:"created_at"`
+	UpdatedAt          time.Time                 `json:"updated_at"`
 }
 
 type StudioContentIssue struct {

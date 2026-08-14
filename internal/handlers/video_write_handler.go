@@ -30,6 +30,7 @@ type videoCreateParams struct {
 	Visibility    string      `json:"visibility"`
 	Status        string      `json:"status"`
 	Tags          []string    `json:"tags"`
+	CollectionID  *uuid.UUID  `json:"collection_id"`
 	CollectionIDs []uuid.UUID `json:"collection_ids"`
 }
 
@@ -130,18 +131,21 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 	if input.ChannelID != nil {
 		channelID = *input.ChannelID
 	}
-	if err := studioapi.NewService(db).ValidateContentScope(userID, channelID, studioapi.ModuleVideo, input.CollectionIDs, status == "published"); err != nil {
+	collectionID, err := studioapi.NewService(db).ResolveContentCollection(
+		userID, channelID, studioapi.ModuleVideo, input.CollectionID, input.CollectionIDs, status == "published",
+	)
+	if err != nil {
 		return model.Video{}, http.StatusBadRequest, err
 	}
 
 	video := model.Video{
-		UserID: userID, ChannelID: input.ChannelID, Title: strings.TrimSpace(input.Title),
+		UserID: userID, ChannelID: input.ChannelID, CollectionID: collectionID, Title: strings.TrimSpace(input.Title),
 		Description: input.Description, StorageType: storageType, VideoURL: input.VideoURL,
 		ThumbnailURL: input.ThumbnailURL, DurationSec: input.DurationSec,
 		Visibility: visibility, Status: status,
 	}
 	statusCode := http.StatusInternalServerError
-	err := db.Transaction(func(tx *gorm.DB) error {
+	err = db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&video).Error; err != nil {
 			return err
 		}
@@ -153,8 +157,8 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 				return fmt.Errorf("tags failed: %w", err)
 			}
 		}
-		if len(input.CollectionIDs) > 0 {
-			if err := assignVideoCollections(tx, &video, input.CollectionIDs); err != nil {
+		if collectionID != nil {
+			if err := syncVideoCollection(tx, &video, collectionID); err != nil {
 				statusCode = http.StatusBadRequest
 				return err
 			}
@@ -171,7 +175,7 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 	if err != nil {
 		return model.Video{}, statusCode, err
 	}
-	if err := db.Preload("Channel").Preload("Tags").Preload("Collections").First(&video, "id = ?", video.ID).Error; err != nil {
+	if err := db.Preload("Channel").Preload("Tags").Preload("Collection").Preload("Collections").First(&video, "id = ?", video.ID).Error; err != nil {
 		return model.Video{}, http.StatusInternalServerError, err
 	}
 	return video, http.StatusCreated, nil
@@ -200,7 +204,7 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 
 		var video model.Video
-		if err := db.Preload("Collections").First(&video, "id = ?", id).Error; err != nil {
+		if err := db.Preload("Collection").Preload("Collections").First(&video, "id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
@@ -211,14 +215,15 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 		wasPublic := video.Status == "published" && video.Visibility == "public"
 
 		var input struct {
-			ChannelID     *uuid.UUID  `json:"channel_id"`
-			Title         *string     `json:"title"`
-			Description   *string     `json:"description"`
-			ThumbnailURL  *string     `json:"thumbnail_url"`
-			Visibility    *string     `json:"visibility"`
-			Status        *string     `json:"status"`
-			Tags          []string    `json:"tags"`
-			CollectionIDs []uuid.UUID `json:"collection_ids"`
+			ChannelID     *uuid.UUID        `json:"channel_id"`
+			Title         *string           `json:"title"`
+			Description   *string           `json:"description"`
+			ThumbnailURL  *string           `json:"thumbnail_url"`
+			Visibility    *string           `json:"visibility"`
+			Status        *string           `json:"status"`
+			Tags          []string          `json:"tags"`
+			CollectionID  nullableUUIDInput `json:"collection_id"`
+			CollectionIDs []uuid.UUID       `json:"collection_ids"`
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -239,6 +244,10 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 				c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 				return
 			}
+			if video.ChannelID != nil && *input.ChannelID != *video.ChannelID {
+				httpx.Error(c, apperr.BadRequest("studio.cross_channel_move_not_supported", "Content cannot be moved between channels"))
+				return
+			}
 		}
 		effectiveChannelID := uuid.Nil
 		if video.ChannelID != nil {
@@ -252,16 +261,31 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 		if input.Status != nil {
 			effectiveStatus = *input.Status
 		}
-		effectiveCollectionIDs := input.CollectionIDs
-		if input.CollectionIDs == nil {
-			effectiveCollectionIDs = make([]uuid.UUID, 0, len(video.Collections))
-			for _, collection := range video.Collections {
-				effectiveCollectionIDs = append(effectiveCollectionIDs, collection.ID)
+		collectionChanged := input.CollectionID.Set || input.CollectionIDs != nil
+		shouldResolveCollection := collectionChanged || (!wasPublished && effectiveStatus == "published")
+		resolvedCollectionID := video.CollectionID
+		if shouldResolveCollection {
+			if video.CollectionConflict && !collectionChanged {
+				httpx.Error(c, apperr.Conflict("studio.collection_conflict", "Choose one collection before publishing"))
+				return
 			}
-		}
-		if err := studioapi.NewService(db).ValidateContentScope(userID, effectiveChannelID, studioapi.ModuleVideo, effectiveCollectionIDs, effectiveStatus == "published"); err != nil {
-			httpx.Error(c, err)
-			return
+			requestedCollectionID := video.CollectionID
+			legacyCollectionIDs := []uuid.UUID(nil)
+			if collectionChanged {
+				requestedCollectionID = nil
+				if input.CollectionID.Set {
+					requestedCollectionID = input.CollectionID.Value
+				}
+				legacyCollectionIDs = input.CollectionIDs
+			}
+			resolved, resolveErr := studioapi.NewService(db).ResolveContentCollection(
+				userID, effectiveChannelID, studioapi.ModuleVideo, requestedCollectionID, legacyCollectionIDs, effectiveStatus == "published",
+			)
+			if resolveErr != nil {
+				httpx.Error(c, resolveErr)
+				return
+			}
+			resolvedCollectionID = resolved
 		}
 
 		updates := map[string]interface{}{}
@@ -282,6 +306,10 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 		}
 		if input.Status != nil {
 			updates["status"] = *input.Status
+		}
+		if shouldResolveCollection {
+			updates["collection_id"] = resolvedCollectionID
+			updates["collection_conflict"] = false
 		}
 
 		statusCode := http.StatusInternalServerError
@@ -306,16 +334,10 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 				}
 			}
 
-			if input.CollectionIDs != nil {
-				if len(input.CollectionIDs) == 0 {
-					if err := tx.Model(&video).Association("Collections").Clear(); err != nil {
-						return err
-					}
-				} else {
-					if err := assignVideoCollections(tx, &video, input.CollectionIDs); err != nil {
-						statusCode = http.StatusBadRequest
-						return err
-					}
+			if shouldResolveCollection {
+				if err := syncVideoCollection(tx, &video, resolvedCollectionID); err != nil {
+					statusCode = http.StatusBadRequest
+					return err
 				}
 			}
 			if effectiveStatus == "published" && !wasPublished {
@@ -335,7 +357,7 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		db.Preload("Channel").Preload("Tags").Preload("Collections").First(&video, "id = ?", video.ID)
+		db.Preload("Channel").Preload("Tags").Preload("Collection").Preload("Collections").First(&video, "id = ?", video.ID)
 		if wasPublic || (video.Status == "published" && video.Visibility == "public") {
 			indexnow.NotifyPaths("/videos/watch/" + video.ID.String())
 		}
@@ -397,20 +419,19 @@ func attachVideoTags(db *gorm.DB, video *model.Video, names []string) error {
 	return db.Model(video).Association("Tags").Append(tags)
 }
 
-func assignVideoCollections(db *gorm.DB, video *model.Video, ids []uuid.UUID) error {
-	if video.ChannelID == nil {
-		return fmt.Errorf("请选择频道后再关联合集")
+func syncVideoCollection(db *gorm.DB, video *model.Video, collectionID *uuid.UUID) error {
+	if collectionID == nil {
+		return db.Model(video).Association("Collections").Clear()
 	}
-
-	var collections []model.Collection
-	if err := db.Where("id IN ? AND channel_id = ?", ids, *video.ChannelID).Find(&collections).Error; err != nil {
+	if video.ChannelID == nil {
+		return apperr.BadRequest("validation.invalid_request", "channel_id is required before selecting a collection")
+	}
+	var collection model.Collection
+	if err := db.Where("id = ? AND channel_id = ? AND content_type = ?", *collectionID, *video.ChannelID, studioapi.ModuleVideo).
+		First(&collection).Error; err != nil {
 		return err
 	}
-	if len(collections) != len(ids) {
-		return fmt.Errorf("存在无效合集或合集不属于当前频道")
-	}
-
-	return db.Model(video).Association("Collections").Replace(collections)
+	return db.Model(video).Association("Collections").Replace(&collection)
 }
 
 // GetRecommendedVideos returns up to 8 recommended videos based on same channel (score 60) and same tags (score 40).

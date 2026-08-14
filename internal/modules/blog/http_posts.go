@@ -566,21 +566,18 @@ func (h *Handler) updatePost(c *gin.Context) {
 			httpx.Error(c, apperr.Conflict("studio.collection_conflict", "Choose one collection before publishing"))
 			return
 		}
-		effectiveCollectionIDs := make([]uuid.UUID, 0, 1)
-		if requestedCollectionID != nil {
-			effectiveCollectionIDs = append(effectiveCollectionIDs, *requestedCollectionID)
-		}
-		if err := studioapi.NewService(h.service.db).ValidateContentScope(
-			user.ID, effectiveChannelID, studioapi.ModuleBlog, effectiveCollectionIDs, effectiveStatus == "published",
-		); err != nil {
+		resolvedCollectionID, err := studioapi.NewService(h.service.db).ResolveContentCollection(
+			user.ID, effectiveChannelID, studioapi.ModuleBlog, requestedCollectionID, nil, effectiveStatus == "published",
+		)
+		if err != nil {
 			httpx.Error(c, err)
 			return
 		}
-		updates["collection_id"] = requestedCollectionID
+		updates["collection_id"] = resolvedCollectionID
 		updates["collection_conflict"] = false
-		if requestedCollectionID != nil && (collectionChanged || post.CollectionID == nil) {
+		if resolvedCollectionID != nil && (collectionChanged || post.CollectionID == nil) {
 			var maxPosition int
-			if err := h.service.db.Model(&model.Post{}).Where("collection_id = ?", *requestedCollectionID).
+			if err := h.service.db.Model(&model.Post{}).Where("collection_id = ?", *resolvedCollectionID).
 				Select("COALESCE(MAX(collection_position), -1)").Scan(&maxPosition).Error; err != nil {
 				httpx.Error(c, err)
 				return

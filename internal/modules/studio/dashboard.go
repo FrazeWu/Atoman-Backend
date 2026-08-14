@@ -213,7 +213,7 @@ func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, modul
 				COALESCE(SUM(CASE WHEN videos.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
 				COALESCE(SUM(videos.view_count), 0) AS views,
 				COALESCE(SUM(CASE WHEN TRIM(COALESCE(videos.thumbnail_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
-				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id) THEN 1 ELSE 0 END), 0) AS missing_collection,
+				COALESCE(SUM(CASE WHEN videos.collection_id IS NULL AND NOT EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id) THEN 1 ELSE 0 END), 0) AS missing_collection,
 				COALESCE(SUM(CASE WHEN videos.processing_status = 'failed' THEN 1 ELSE 0 END), 0) AS processing_failed,
 				COALESCE(SUM(CASE WHEN videos.storage_type = 'external' AND TRIM(COALESCE(videos.video_url, '')) = '' THEN 1 ELSE 0 END), 0) AS external_unplayable`).
 			Where("videos.user_id = ? AND videos.channel_id = ?", userID, channel.ID).

@@ -841,7 +841,7 @@ func TestCreateVideoRollsBackWhenCollectionAssignmentFails(t *testing.T) {
 	require.Zero(t, tagCount)
 }
 
-func TestCreateVideoPublishRequiresCollection(t *testing.T) {
+func TestCreateVideoPublishUsesSystemDefaultCollection(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newVideoTestDB(t)
 	user := seedVideoUser(t, db)
@@ -854,7 +854,14 @@ func TestCreateVideoPublishRequiresCollection(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
-	require.Equal(t, http.StatusBadRequest, response.Code, response.Body.String())
+	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
+	var video model.Video
+	require.NoError(t, db.Where("title = ?", "Published").First(&video).Error)
+	require.NotNil(t, video.CollectionID)
+	var collection model.Collection
+	require.NoError(t, db.First(&collection, "id = ?", *video.CollectionID).Error)
+	require.True(t, collection.IsDefault)
+	require.Equal(t, "video", collection.ContentType)
 }
 
 func TestCreateLocalVideoPublishRequiresReadyProcessing(t *testing.T) {
@@ -897,7 +904,7 @@ func TestCreateExternalVideoPublishEnqueuesOnce(t *testing.T) {
 	require.EqualValues(t, 1, publicationCount)
 }
 
-func TestUpdateVideoUsesNewChannelWhenAssigningCollections(t *testing.T) {
+func TestUpdateVideoRejectsCrossChannelCollectionAssignment(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newVideoTestDB(t)
 	user := seedVideoUser(t, db)
@@ -919,14 +926,13 @@ func TestUpdateVideoUsesNewChannelWhenAssigningCollections(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, http.StatusBadRequest, w.Code)
 
 	var updated model.Video
 	require.NoError(t, db.Preload("Collections").First(&updated, "id = ?", video.ID).Error)
 	require.NotNil(t, updated.ChannelID)
-	require.Equal(t, newChannel.ID, *updated.ChannelID)
-	require.Len(t, updated.Collections, 1)
-	require.Equal(t, newCollection.ID, updated.Collections[0].ID)
+	require.Equal(t, oldChannel.ID, *updated.ChannelID)
+	require.Empty(t, updated.Collections)
 }
 
 func TestUpdateVideoRollsBackWhenCollectionAssignmentFails(t *testing.T) {
@@ -1033,7 +1039,7 @@ func TestUpdateVideoAcceptsOwnedGlobalChannelAndRejectsForeignChannel(t *testing
 		want      int
 	}{
 		{name: "other users channel is forbidden", channelID: otherUsersVideoChannel.ID.String(), want: http.StatusForbidden},
-		{name: "owned global channel succeeds", channelID: mismatchedChannel.ID.String(), want: http.StatusOK},
+		{name: "owned global channel cannot receive a moved video", channelID: mismatchedChannel.ID.String(), want: http.StatusBadRequest},
 		{name: "missing channel is not found", channelID: uuid.NewString(), want: http.StatusNotFound},
 	}
 

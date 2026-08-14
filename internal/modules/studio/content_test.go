@@ -102,6 +102,117 @@ func TestStudioBlogContentsFilterAndRenderManyToManyCollection(t *testing.T) {
 	}
 }
 
+func TestStudioVideoContentsUseScalarCollectionAndExposeLegacyConflict(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	videoCollection := fixture.collections[ModuleVideo]
+	secondCollection := model.Collection{ChannelID: fixture.channel.ID, ContentType: string(ModuleVideo), Name: "second video collection"}
+	if err := fixture.db.Create(&secondCollection).Error; err != nil {
+		t.Fatal(err)
+	}
+	scalar := model.Video{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &videoCollection.ID,
+		Title: "Scalar collection", VideoURL: "https://example.com/scalar.mp4", Status: "draft", Visibility: "public",
+	}
+	missing := model.Video{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID,
+		Title: "No collection", VideoURL: "https://example.com/missing.mp4", Status: "draft", Visibility: "public",
+	}
+	conflicted := model.Video{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionConflict: true,
+		Title: "Legacy conflict", VideoURL: "https://example.com/conflict.mp4", Status: "draft", Visibility: "public",
+	}
+	for _, video := range []*model.Video{&scalar, &missing, &conflicted} {
+		if err := fixture.db.Create(video).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fixture.db.Model(&conflicted).Association("Collections").Replace([]model.Collection{videoCollection, secondCollection}); err != nil {
+		t.Fatal(err)
+	}
+
+	items, total, err := fixture.service.ListContents(fixture.user, ModuleVideo, ContentQuery{
+		ChannelID: fixture.channel.ID, CollectionID: videoCollection.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || len(items) != 2 {
+		t.Fatalf("expected scalar and legacy video matches, total=%d items=%#v", total, items)
+	}
+	var foundScalar, foundConflict bool
+	for _, item := range items {
+		switch item.ID {
+		case scalar.ID:
+			foundScalar = item.Collection != nil && item.Collection.ID == videoCollection.ID && !item.CollectionConflict
+		case conflicted.ID:
+			foundConflict = item.CollectionConflict && len(item.Collections) == 2
+		}
+	}
+	if !foundScalar || !foundConflict {
+		t.Fatalf("expected scalar collection and conflict marker, got %#v", items)
+	}
+
+	missingItems, missingTotal, err := fixture.service.ListContents(fixture.user, ModuleVideo, ContentQuery{
+		ChannelID: fixture.channel.ID, Issue: "missing_collection",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if missingTotal != 1 || len(missingItems) != 1 || missingItems[0].ID != missing.ID {
+		t.Fatalf("expected only video without scalar or legacy collection, total=%d items=%#v", missingTotal, missingItems)
+	}
+}
+
+func TestStudioReorderCollectionContentsPersistsPodcastAndVideoPositions(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	podcastCollection, videoCollection := fixture.collections[ModulePodcast], fixture.collections[ModuleVideo]
+	firstPost := model.Post{UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &podcastCollection.ID, Title: "first", Content: "notes", Status: "draft", Visibility: "public"}
+	secondPost := model.Post{UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &podcastCollection.ID, Title: "second", Content: "notes", Status: "draft", Visibility: "public"}
+	for _, post := range []*model.Post{&firstPost, &secondPost} {
+		if err := fixture.db.Create(post).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	firstEpisode := model.PodcastEpisode{PostID: firstPost.ID, ChannelID: fixture.channel.ID, AudioURL: "first.mp3"}
+	secondEpisode := model.PodcastEpisode{PostID: secondPost.ID, ChannelID: fixture.channel.ID, AudioURL: "second.mp3"}
+	for _, episode := range []*model.PodcastEpisode{&firstEpisode, &secondEpisode} {
+		if err := fixture.db.Create(episode).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fixture.service.ReorderCollectionContents(fixture.user, ModulePodcast, podcastCollection.ID, []uuid.UUID{secondEpisode.ID, firstEpisode.ID}); err != nil {
+		t.Fatal(err)
+	}
+	var posts []model.Post
+	if err := fixture.db.Where("id IN ?", []uuid.UUID{firstPost.ID, secondPost.ID}).Order("collection_position ASC").Find(&posts).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(posts) != 2 || posts[0].ID != secondPost.ID {
+		t.Fatalf("unexpected podcast order: %#v", posts)
+	}
+
+	firstVideo := model.Video{UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &videoCollection.ID, Title: "first video", VideoURL: "https://example.com/one.mp4"}
+	secondVideo := model.Video{UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &videoCollection.ID, Title: "second video", VideoURL: "https://example.com/two.mp4"}
+	for _, video := range []*model.Video{&firstVideo, &secondVideo} {
+		if err := fixture.db.Create(video).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := fixture.service.ReorderCollectionContents(fixture.user, ModuleVideo, videoCollection.ID, []uuid.UUID{secondVideo.ID, firstVideo.ID}); err != nil {
+		t.Fatal(err)
+	}
+	var videos []model.Video
+	if err := fixture.db.Where("id IN ?", []uuid.UUID{firstVideo.ID, secondVideo.ID}).Order("collection_position ASC").Find(&videos).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(videos) != 2 || videos[0].ID != secondVideo.ID {
+		t.Fatalf("unexpected video order: %#v", videos)
+	}
+	if err := fixture.service.ReorderCollectionContents(fixture.user, ModuleVideo, videoCollection.ID, []uuid.UUID{firstVideo.ID}); apperr.FromError(err) == nil {
+		t.Fatalf("expected incomplete order to be rejected, got %v", err)
+	}
+}
+
 func TestStudioContentsDefaultToUpdatedDescending(t *testing.T) {
 	fixture := newStudioQueryFixture(t)
 	now := time.Now().UTC()

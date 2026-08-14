@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"errors"
 	"net/http"
 	"strings"
 
@@ -12,6 +11,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/modules/lifecycle"
 	studioapi "atoman/internal/modules/studio"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
 	"atoman/internal/platform/indexnow"
 )
@@ -50,6 +50,7 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			EpisodeNumber   int         `json:"episode_number"`
 			Status          string      `json:"status"`
 			Visibility      string      `json:"visibility"`
+			CollectionID    *uuid.UUID  `json:"collection_id"`
 			CollectionIDs   []uuid.UUID `json:"collection_ids"`
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
@@ -84,7 +85,10 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid visibility"})
 			return
 		}
-		if err := studioapi.NewService(db).ValidateContentScope(userID, chID, studioapi.ModulePodcast, input.CollectionIDs, status == "published"); err != nil {
+		collectionID, err := studioapi.NewService(db).ResolveContentCollection(
+			userID, chID, studioapi.ModulePodcast, input.CollectionID, input.CollectionIDs, status == "published",
+		)
+		if err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -96,12 +100,9 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		var ep model.PodcastEpisode
 		txErr := db.Transaction(func(tx *gorm.DB) error {
 			post := model.Post{
-				UserID:     userID,
-				ChannelID:  &chID,
-				Title:      strings.TrimSpace(input.Title),
-				Content:    input.Shownotes,
-				Status:     status,
-				Visibility: visibility,
+				UserID: userID, ChannelID: &chID, CollectionID: collectionID,
+				Title: strings.TrimSpace(input.Title), Content: input.Shownotes,
+				Status: status, Visibility: visibility,
 			}
 			if err := tx.Create(&post).Error; err != nil {
 				return err
@@ -115,8 +116,8 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 				SeasonNumber:    seasonNum,
 				EpisodeNumber:   input.EpisodeNumber,
 			}
-			if len(input.CollectionIDs) > 0 {
-				if err := assignPodcastPostCollections(tx, &post, chID, input.CollectionIDs); err != nil {
+			if collectionID != nil {
+				if err := syncPodcastPostCollection(tx, &post, chID, collectionID); err != nil {
 					return err
 				}
 			}
@@ -133,7 +134,7 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		db.Preload("Post.Collection").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID)
+		db.Preload("Post.Collection").Preload("Post.Collections").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID)
 		c.JSON(http.StatusCreated, ep)
 	}
 }
@@ -166,7 +167,7 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 
 		var ep model.PodcastEpisode
-		if err := db.Preload("Post").Preload("Post.Collections").First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
+		if err := db.Preload("Post").Preload("Post.Collection").Preload("Post.Collections").First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
 			return
 		}
@@ -177,16 +178,17 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		wasPublic := ep.Post.Status == "published" && (ep.Post.Visibility == "" || ep.Post.Visibility == "public")
 
 		var input struct {
-			Title           *string     `json:"title"`
-			Shownotes       *string     `json:"shownotes"`
-			AudioURL        *string     `json:"audio_url"`
-			EpisodeCoverURL *string     `json:"episode_cover_url"`
-			DurationSec     *int        `json:"duration_sec"`
-			SeasonNumber    *int        `json:"season_number"`
-			EpisodeNumber   *int        `json:"episode_number"`
-			Status          *string     `json:"status"`
-			Visibility      *string     `json:"visibility"`
-			CollectionIDs   []uuid.UUID `json:"collection_ids"`
+			Title           *string           `json:"title"`
+			Shownotes       *string           `json:"shownotes"`
+			AudioURL        *string           `json:"audio_url"`
+			EpisodeCoverURL *string           `json:"episode_cover_url"`
+			DurationSec     *int              `json:"duration_sec"`
+			SeasonNumber    *int              `json:"season_number"`
+			EpisodeNumber   *int              `json:"episode_number"`
+			Status          *string           `json:"status"`
+			Visibility      *string           `json:"visibility"`
+			CollectionID    nullableUUIDInput `json:"collection_id"`
+			CollectionIDs   []uuid.UUID       `json:"collection_ids"`
 		}
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -197,19 +199,31 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		if input.Status != nil {
 			effectiveStatus = *input.Status
 		}
-		effectiveCollectionIDs := input.CollectionIDs
-		if input.CollectionIDs == nil {
-			effectiveCollectionIDs = make([]uuid.UUID, 0, len(ep.Post.Collections)+1)
-			for _, collection := range ep.Post.Collections {
-				effectiveCollectionIDs = append(effectiveCollectionIDs, collection.ID)
+		collectionChanged := input.CollectionID.Set || input.CollectionIDs != nil
+		shouldResolveCollection := collectionChanged || (!wasPublished && effectiveStatus == "published")
+		resolvedCollectionID := ep.Post.CollectionID
+		if shouldResolveCollection {
+			if ep.Post.CollectionConflict && !collectionChanged {
+				httpx.Error(c, apperr.Conflict("studio.collection_conflict", "Choose one collection before publishing"))
+				return
 			}
-			if ep.Post.CollectionID != nil {
-				effectiveCollectionIDs = append(effectiveCollectionIDs, *ep.Post.CollectionID)
+			requestedCollectionID := ep.Post.CollectionID
+			legacyCollectionIDs := []uuid.UUID(nil)
+			if collectionChanged {
+				requestedCollectionID = nil
+				if input.CollectionID.Set {
+					requestedCollectionID = input.CollectionID.Value
+				}
+				legacyCollectionIDs = input.CollectionIDs
 			}
-		}
-		if err := studioapi.NewService(db).ValidateContentScope(userID, ep.ChannelID, studioapi.ModulePodcast, effectiveCollectionIDs, effectiveStatus == "published"); err != nil {
-			httpx.Error(c, err)
-			return
+			resolved, resolveErr := studioapi.NewService(db).ResolveContentCollection(
+				userID, ep.ChannelID, studioapi.ModulePodcast, requestedCollectionID, legacyCollectionIDs, effectiveStatus == "published",
+			)
+			if resolveErr != nil {
+				httpx.Error(c, resolveErr)
+				return
+			}
+			resolvedCollectionID = resolved
 		}
 
 		postUpdates := map[string]interface{}{}
@@ -228,6 +242,10 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 				return
 			}
 			postUpdates["visibility"] = *input.Visibility
+		}
+		if shouldResolveCollection {
+			postUpdates["collection_id"] = resolvedCollectionID
+			postUpdates["collection_conflict"] = false
 		}
 		epUpdates := map[string]interface{}{}
 		if input.AudioURL != nil {
@@ -258,15 +276,8 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 					return err
 				}
 			}
-			if input.CollectionIDs != nil {
-				if len(input.CollectionIDs) == 0 {
-					if err := tx.Model(ep.Post).Association("Collections").Clear(); err != nil {
-						return err
-					}
-				} else if err := assignPodcastPostCollections(tx, ep.Post, ep.ChannelID, input.CollectionIDs); err != nil {
-					if errors.Is(err, errInvalidPodcastCollections) {
-						statusCode = http.StatusBadRequest
-					}
+			if shouldResolveCollection {
+				if err := syncPodcastPostCollection(tx, ep.Post, ep.ChannelID, resolvedCollectionID); err != nil {
 					return err
 				}
 			}
@@ -341,18 +352,16 @@ func DeletePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
-var errInvalidPodcastCollections = errors.New("存在无效合集或合集不属于当前频道")
-
-func assignPodcastPostCollections(db *gorm.DB, post *model.Post, channelID uuid.UUID, ids []uuid.UUID) error {
-	var collections []model.Collection
-	if err := db.Where("id IN ? AND channel_id = ?", ids, channelID).Find(&collections).Error; err != nil {
+func syncPodcastPostCollection(db *gorm.DB, post *model.Post, channelID uuid.UUID, collectionID *uuid.UUID) error {
+	if collectionID == nil {
+		return db.Model(post).Association("Collections").Clear()
+	}
+	var collection model.Collection
+	if err := db.Where("id = ? AND channel_id = ? AND content_type = ?", *collectionID, channelID, studioapi.ModulePodcast).
+		First(&collection).Error; err != nil {
 		return err
 	}
-	if len(collections) != len(ids) {
-		return errInvalidPodcastCollections
-	}
-
-	return db.Model(post).Association("Collections").Replace(collections)
+	return db.Model(post).Association("Collections").Replace(&collection)
 }
 
 // GetPodcastRSS returns a standards-compliant podcast RSS with <enclosure> tags.

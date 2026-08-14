@@ -983,7 +983,7 @@ func TestUpdatePodcastEpisodeKeepsBadCollectionAsBadRequestAndRollsBack(t *testi
 	}
 }
 
-func TestUpdatePodcastEpisodePublishRequiresCollection(t *testing.T) {
+func TestUpdatePodcastEpisodePublishUsesSystemDefaultCollection(t *testing.T) {
 	r, db, user, channel := newPodcastHandlerTestDB(t)
 	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "draft")
 
@@ -993,15 +993,25 @@ func TestUpdatePodcastEpisodePublishRequiresCollection(t *testing.T) {
 	response := httptest.NewRecorder()
 	r.ServeHTTP(response, request)
 
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("expected collectionless publish 400, got %d: %s", response.Code, response.Body.String())
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected collectionless publish 200, got %d: %s", response.Code, response.Body.String())
 	}
 	var post model.Post
 	if err := db.First(&post, "id = ?", episode.PostID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if post.Status != "draft" {
-		t.Fatalf("expected status to remain draft, got %q", post.Status)
+	if post.Status != "published" {
+		t.Fatalf("expected status to be published, got %q", post.Status)
+	}
+	if post.CollectionID == nil {
+		t.Fatal("expected system default collection to be assigned")
+	}
+	var collection model.Collection
+	if err := db.First(&collection, "id = ?", *post.CollectionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !collection.IsDefault || collection.ContentType != "podcast" {
+		t.Fatalf("expected podcast system default collection, got %#v", collection)
 	}
 }
 

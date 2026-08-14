@@ -57,6 +57,7 @@ type VideoImportPayload struct {
 	DurationSec   int         `json:"duration_sec"`
 	Visibility    string      `json:"visibility"`
 	Tags          []string    `json:"tags"`
+	CollectionID  *uuid.UUID  `json:"collection_id"`
 	CollectionIDs []uuid.UUID `json:"collection_ids"`
 }
 
@@ -298,6 +299,11 @@ func SubmitVideoImport(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		if err := validateVideoImportSubmission(input); err != nil {
+			var appErr *apperr.AppError
+			if errors.As(err, &appErr) {
+				httpx.Error(c, appErr)
+				return
+			}
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -646,7 +652,8 @@ func finalizeVideoImport(db *gorm.DB, id, userID uuid.UUID) error {
 			ChannelID: payload.ChannelID, Title: payload.Title, Description: payload.Description,
 			StorageType: "local", VideoURL: videoImportPublicURL(session.ObjectKey), ThumbnailURL: payload.ThumbnailURL,
 			DurationSec: payload.DurationSec,
-			Visibility:  payload.Visibility, Status: status, Tags: payload.Tags, CollectionIDs: payload.CollectionIDs,
+			Visibility:  payload.Visibility, Status: status, Tags: payload.Tags,
+			CollectionID: payload.CollectionID, CollectionIDs: payload.CollectionIDs,
 		})
 		if err != nil {
 			return err
@@ -679,8 +686,11 @@ func validateVideoImportSubmission(input SubmitVideoImportInput) error {
 	if input.PublishMode != "draft" && input.PublishMode != "published" && input.PublishMode != "scheduled" {
 		return errors.New("发布方式无效")
 	}
-	if (input.PublishMode == "published" || input.PublishMode == "scheduled") && len(input.Payload.CollectionIDs) == 0 {
-		return errors.New("发布视频前请选择合集")
+	if len(input.Payload.CollectionIDs) > 1 {
+		return apperr.Unprocessable("studio.multiple_collections_not_supported", "Only one collection can be selected")
+	}
+	if input.Payload.CollectionID != nil && len(input.Payload.CollectionIDs) == 1 && *input.Payload.CollectionID != input.Payload.CollectionIDs[0] {
+		return apperr.BadRequest("studio.collection_input_conflict", "collection_id and collection_ids must identify the same collection")
 	}
 	if input.PublishMode == "scheduled" && (input.ScheduledAt == nil || !input.ScheduledAt.After(time.Now())) {
 		return errors.New("请选择未来的发布时间")

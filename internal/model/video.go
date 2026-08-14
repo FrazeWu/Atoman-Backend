@@ -10,12 +10,16 @@ import (
 // Video represents a video post published under a channel.
 type Video struct {
 	Base
-	ChannelID   *uuid.UUID `json:"channel_id,omitempty" gorm:"type:uuid;index"`
-	Channel     *Channel   `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
-	UserID      uuid.UUID  `json:"user_id" gorm:"type:uuid;not null;index"`
-	User        *User      `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	Title       string     `json:"title" gorm:"not null"`
-	Description string     `json:"description" gorm:"type:text"`
+	ChannelID          *uuid.UUID  `json:"channel_id,omitempty" gorm:"type:uuid;index"`
+	Channel            *Channel    `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
+	CollectionID       *uuid.UUID  `json:"collection_id,omitempty" gorm:"type:uuid;index"`
+	Collection         *Collection `json:"collection,omitempty" gorm:"foreignKey:CollectionID"`
+	CollectionPosition int         `json:"collection_position" gorm:"not null;default:0"`
+	CollectionConflict bool        `json:"collection_conflict" gorm:"not null;default:false;index"`
+	UserID             uuid.UUID   `json:"user_id" gorm:"type:uuid;not null;index"`
+	User               *User       `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	Title              string      `json:"title" gorm:"not null"`
+	Description        string      `json:"description" gorm:"type:text"`
 	// StorageType: "local" (S3/MinIO) or "external" (YouTube, Bilibili, etc.)
 	StorageType       string          `json:"storage_type" gorm:"not null;default:'external'"` // local | external
 	VideoURL          string          `json:"video_url" gorm:"type:text;not null"`             // S3 key or external URL
