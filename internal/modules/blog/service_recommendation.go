@@ -53,6 +53,8 @@ type blogRankedPost struct {
 	CommentsCount int64
 }
 
+const blogRecommendationCandidateLimit = 2000
+
 func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.UUID, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
 	if page < 1 {
 		page = 1
@@ -73,6 +75,8 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		 WHERE feed_sources.source_type = 'internal_channel' AND feed_sources.source_id = posts.channel_id
 		 AND subscriptions.deleted_at IS NULL AND feed_sources.deleted_at IS NULL) AS channel_followers_count`).
 		Where("posts.status = ? AND posts.visibility = ?", "published", "public").
+		Order("COALESCE(posts.published_at, posts.created_at) DESC").
+		Limit(blogRecommendationCandidateLimit).
 		Scan(&rows).Error; err != nil {
 		return nil, 0, err
 	}
@@ -97,13 +101,19 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		reads[i], likes[i], comments[i], bookmarks[i], subscribers[i] = float64(row.ViewCount), float64(row.LikesCount), float64(row.CommentsCount), float64(row.BookmarksCount), float64(row.ChannelFollowersCount)
 	}
 
+	readScores := percentileScores(reads)
+	likeScores := percentileScores(likes)
+	commentScores := percentileScores(comments)
+	bookmarkScores := percentileScores(bookmarks)
+	subscriberScores := percentileScores(subscribers)
+
 	now := time.Now().UTC()
 	ranked := make([]blogRankedPost, 0, len(rows))
 	for i, row := range rows {
 		signals := blogEngagementSignals{
-			Reads: percentileScore(reads[i], reads), Bookmarks: percentileScore(bookmarks[i], bookmarks),
-			Likes: percentileScore(likes[i], likes), Comments: percentileScore(comments[i], comments),
-			Subscribers: percentileScore(subscribers[i], subscribers),
+			Reads: readScores[i], Bookmarks: bookmarkScores[i],
+			Likes: likeScores[i], Comments: commentScores[i],
+			Subscribers: subscriberScores[i],
 		}
 		composite := blogCompositeScore(signals)
 		publishedAt := blogPublishedAt(row.Post)
@@ -166,17 +176,30 @@ func uuidValue(value *uuid.UUID) uuid.UUID {
 	return *value
 }
 
+func percentileScores(values []float64) []float64 {
+	scores := make([]float64, len(values))
+	if len(values) <= 1 {
+		for index := range scores {
+			scores[index] = 0.5
+		}
+		return scores
+	}
+	sortedValues := append([]float64(nil), values...)
+	sort.Float64s(sortedValues)
+	for index, value := range values {
+		lower := sort.SearchFloat64s(sortedValues, value)
+		scores[index] = float64(lower) / float64(len(values)-1)
+	}
+	return scores
+}
+
 func percentileScore(value float64, values []float64) float64 {
 	if len(values) <= 1 {
 		return 0.5
 	}
-	lower := 0
-	for _, candidate := range values {
-		if candidate < value {
-			lower++
-		}
-	}
-	return float64(lower) / float64(len(values)-1)
+	sortedValues := append([]float64(nil), values...)
+	sort.Float64s(sortedValues)
+	return float64(sort.SearchFloat64s(sortedValues, value)) / float64(len(values)-1)
 }
 
 func blogCompositeScore(signals blogEngagementSignals) float64 {

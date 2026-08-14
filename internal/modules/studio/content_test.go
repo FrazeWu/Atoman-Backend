@@ -52,6 +52,25 @@ func TestStudioContentsFilterByChannelModuleStatusVisibilityAndCollection(t *tes
 	}
 }
 
+func TestStudioContentsExposeScheduledPublicationTime(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	scheduledAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	post := createStudioBlogPost(t, fixture, fixture.collections[ModuleBlog], "Scheduled", "scheduled", "public", time.Now())
+	if err := fixture.db.Model(&post).Update("scheduled_at", scheduledAt).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, total, err := fixture.service.ListContents(fixture.user, ModuleBlog, ContentQuery{
+		ChannelID: fixture.channel.ID, Status: "scheduled", Page: 1, PageSize: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ScheduledAt == nil || !items[0].ScheduledAt.Equal(scheduledAt) {
+		t.Fatalf("expected scheduled content and time, total=%d items=%#v", total, items)
+	}
+}
+
 func TestStudioBlogContentsFilterAndRenderManyToManyCollection(t *testing.T) {
 	fixture := newStudioQueryFixture(t)
 	secondary := model.Collection{ChannelID: fixture.channel.ID, ContentType: string(ModuleBlog), Name: "secondary blog collection"}

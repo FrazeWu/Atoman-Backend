@@ -119,27 +119,38 @@ func (h *Handler) listPosts(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	type postEngagementCount struct {
+		PostID         uuid.UUID `gorm:"column:post_id"`
+		LikesCount     int64     `gorm:"column:likes_count"`
+		CommentsCount  int64     `gorm:"column:comments_count"`
+		BookmarksCount int64     `gorm:"column:bookmarks_count"`
+	}
+	postIDs := make([]uuid.UUID, 0, len(posts))
+	for _, post := range posts {
+		postIDs = append(postIDs, post.ID)
+	}
+	countsByPostID := make(map[uuid.UUID]postEngagementCount, len(postIDs))
+	if len(postIDs) > 0 {
+		var counts []postEngagementCount
+		if err := h.service.db.Model(&model.Post{}).Select(`posts.id AS post_id,
+			(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
+			COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count,
+			(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count`).
+			Where("posts.id IN ?", postIDs).Scan(&counts).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		for _, count := range counts {
+			countsByPostID[count.PostID] = count
+		}
+	}
 	items := make([]PostListItemDTO, 0, len(posts))
 	for index, post := range posts {
-		likes, err := h.service.CountPostLikes(post.ID)
-		if err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		var comments int64
-		if err := h.service.db.Model(&model.DiscussionTarget{}).
-			Select("COALESCE(MAX(comment_count), 0)").
-			Where("kind = ? AND resource_id = ?", "blog_post", post.ID).
-			Scan(&comments).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		var bookmarks int64
-		if err := h.service.db.Model(&model.Bookmark{}).Where("post_id = ?", post.ID).Count(&bookmarks).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		items = append(items, PostListItemDTO{PostDTO: postDTOs[index], LikesCount: likes, CommentsCount: comments, BookmarksCount: bookmarks})
+		count := countsByPostID[post.ID]
+		items = append(items, PostListItemDTO{
+			PostDTO: postDTOs[index], LikesCount: count.LikesCount,
+			CommentsCount: count.CommentsCount, BookmarksCount: count.BookmarksCount,
+		})
 	}
 
 	httpx.List(c, items, page, pageSize, total)
@@ -190,7 +201,7 @@ func (h *Handler) listRecommendedPosts(c *gin.Context) {
 
 // getPost godoc
 // @Summary 获取文章详情
-// @Description 返回指定文章；若文章为草稿，则仅作者本人可查看。
+// @Description 返回指定文章；未发布文章（草稿或定时发布）仅作者本人可查看。
 // @Tags blog
 // @Produce json
 // @Param id path string true "文章 UUID"
@@ -216,9 +227,9 @@ func (h *Handler) getPost(c *gin.Context) {
 	}
 
 	viewerID := currentViewerID(c)
-	if post.Status == "draft" {
+	if post.Status != "published" {
 		if viewerID == nil || post.UserID != *viewerID {
-			httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to view this draft"))
+			httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to view this unpublished post"))
 			return
 		}
 	} else {
@@ -230,20 +241,6 @@ func (h *Handler) getPost(c *gin.Context) {
 		if !allowed {
 			httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to view this post"))
 			return
-		}
-	}
-	if post.Status == "published" && (viewerID == nil || *viewerID != post.UserID) {
-		if err := h.service.db.Model(&model.Post{}).Where("id = ?", post.ID).
-			UpdateColumn("view_count", gorm.Expr("view_count + ?", 1)).Error; err != nil {
-			httpx.Error(c, err)
-			return
-		}
-		post.ViewCount++
-		if post.ChannelID != nil {
-			if err := studioapi.NewService(h.service.db).RecordMetricEvent(*post.ChannelID, studioapi.ModuleBlog, post.ID, "view"); err != nil {
-				httpx.Error(c, err)
-				return
-			}
 		}
 	}
 
@@ -533,6 +530,7 @@ func (h *Handler) updatePost(c *gin.Context) {
 	if req.Status == "published" || req.Status == "draft" {
 		effectiveStatus = req.Status
 		updates["status"] = req.Status
+		updates["scheduled_at"] = nil
 	}
 	effectiveChannelID := uuid.Nil
 	if post.ChannelID != nil {
@@ -544,50 +542,48 @@ func (h *Handler) updatePost(c *gin.Context) {
 			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid channel UUID"))
 			return
 		}
+		if post.ChannelID != nil && channelID != *post.ChannelID {
+			httpx.Error(c, apperr.BadRequest("studio.cross_channel_move_not_supported", "Content cannot be moved between channels"))
+			return
+		}
 		effectiveChannelID = channelID
 		updates["channel_id"] = channelID
 	}
-	effectiveCollectionIDs := make([]uuid.UUID, 0, 1)
-	if post.CollectionID != nil {
-		effectiveCollectionIDs = append(effectiveCollectionIDs, *post.CollectionID)
-	}
+	requestedCollectionID := post.CollectionID
+	collectionChanged := false
 	if req.CollectionID != nil {
 		collectionID, err := uuid.Parse(strings.TrimSpace(*req.CollectionID))
 		if err != nil {
 			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid collection UUID"))
 			return
 		}
-		var collection model.Collection
-		if err := h.service.db.Preload("Channel").First(&collection, "id = ?", collectionID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				httpx.Error(c, apperr.NotFound("blog.collection_not_found", "Collection not found"))
-				return
-			}
+		requestedCollectionID = &collectionID
+		collectionChanged = post.CollectionID == nil || *post.CollectionID != collectionID
+	}
+	shouldResolveCollection := req.CollectionID != nil || (!wasPublished && effectiveStatus == "published")
+	if shouldResolveCollection {
+		if post.CollectionConflict && req.CollectionID == nil {
+			httpx.Error(c, apperr.Conflict("studio.collection_conflict", "Choose one collection before publishing"))
+			return
+		}
+		resolvedCollectionID, err := studioapi.NewService(h.service.db).ResolveContentCollection(
+			user.ID, effectiveChannelID, studioapi.ModuleBlog, requestedCollectionID, nil, effectiveStatus == "published",
+		)
+		if err != nil {
 			httpx.Error(c, err)
 			return
 		}
-		if collection.Channel == nil || collection.Channel.UserID == nil || *collection.Channel.UserID != user.ID {
-			httpx.Error(c, apperr.Forbidden("blog.collection_forbidden", "You don't have permission to assign this collection"))
-			return
-		}
-		effectiveCollectionIDs = []uuid.UUID{collection.ID}
-		if effectiveChannelID == uuid.Nil {
-			effectiveChannelID = collection.ChannelID
-		}
-		updates["collection_id"] = collection.ID
-		updates["channel_id"] = effectiveChannelID
-		if post.CollectionID == nil || *post.CollectionID != collection.ID {
+		updates["collection_id"] = resolvedCollectionID
+		updates["collection_conflict"] = false
+		if resolvedCollectionID != nil && (collectionChanged || post.CollectionID == nil) {
 			var maxPosition int
-			if err := h.service.db.Model(&model.Post{}).Where("collection_id = ?", collection.ID).Select("COALESCE(MAX(collection_position), -1)").Scan(&maxPosition).Error; err != nil {
+			if err := h.service.db.Model(&model.Post{}).Where("collection_id = ?", *resolvedCollectionID).
+				Select("COALESCE(MAX(collection_position), -1)").Scan(&maxPosition).Error; err != nil {
 				httpx.Error(c, err)
 				return
 			}
 			updates["collection_position"] = maxPosition + 1
 		}
-	}
-	if err := studioapi.NewService(h.service.db).ValidateContentScope(user.ID, effectiveChannelID, studioapi.ModuleBlog, effectiveCollectionIDs, effectiveStatus == "published"); err != nil {
-		httpx.Error(c, err)
-		return
 	}
 
 	if req.Status == "published" && post.PublishedAt == nil {
@@ -765,7 +761,7 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 	wasPublished := post.Status == "published"
 	wasPublic := isPublicPostState(post.Status, post.Visibility)
 	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
-		updates := map[string]any{"status": status}
+		updates := map[string]any{"status": status, "scheduled_at": nil}
 		if status == "published" && post.PublishedAt == nil {
 			updates["published_at"] = time.Now().UTC()
 		}

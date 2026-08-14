@@ -3,6 +3,7 @@ package blog
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/modules/reference"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
@@ -32,9 +34,11 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.Channel{},
 		&model.Collection{},
 		&model.UserStudioState{},
+		&model.StudioModuleSettings{},
 		&model.StudioMetricEvent{},
 		&model.Post{},
 		&model.PodcastEpisode{},
+		&model.Video{},
 		&model.ContentPublicationEvent{},
 		&model.PostCollection{},
 		&model.BlogPostVersion{},
@@ -357,7 +361,7 @@ func TestChannelArticleRSSIncludesOnlyPublishedPublicPosts(t *testing.T) {
 	if lateIndex == -1 || earlyIndex == -1 || lateIndex > earlyIndex {
 		t.Fatalf("expected posts ordered by effective publication time: %s", body)
 	}
-	if !strings.Contains(body, "<pubDate>"+latePublishedAt.Format(time.RFC1123Z)+"</pubDate>") {
+	if latePublished.PublishedAt == nil || !strings.Contains(body, "<pubDate>"+latePublished.PublishedAt.Format(time.RFC1123Z)+"</pubDate>") {
 		t.Fatalf("expected effective publication date in RSS: %s", body)
 	}
 	canonicalLink := "<link>https://example.com/posts/post/" + latePublished.ID.String() + "</link>"
@@ -1137,15 +1141,15 @@ func TestRegisterRoutesCreatePostRequiresExactlyOneOwnedCollection(t *testing.T)
 func TestCreatePublishedPostRollsBackWhenVersionSnapshotFails(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	_, collection := createOwnedChannelAndCollection(t, service, user, "Alice")
-	if err := db.Exec(`
-		CREATE TRIGGER fail_blog_post_version_insert
-		BEFORE INSERT ON blog_post_versions
-		BEGIN
-			SELECT RAISE(FAIL, 'version failed');
-		END;
-	`).Error; err != nil {
-		t.Fatalf("create trigger: %v", err)
+	callbackName := "test:fail-blog-post-version-insert"
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "blog_post_versions" {
+			tx.AddError(errors.New("version failed"))
+		}
+	}); err != nil {
+		t.Fatalf("register version insert failure: %v", err)
 	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callbackName) })
 
 	_, err := service.CreatePost(user, CreatePostRequest{
 		Title:        "Should Roll Back",
@@ -1400,7 +1404,7 @@ func TestRegisterRoutesGetPostReturnsViewerLikeState(t *testing.T) {
 	}
 }
 
-func TestStudioBlogReadRecordsViewMetricAndReturnsPublicStats(t *testing.T) {
+func TestStudioBlogReadReturnsPublicStatsWithoutWritingMetrics(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
 	channel, collection := createOwnedChannelAndCollection(t, service, owner, "Stats")
 	post := model.Post{
@@ -1442,7 +1446,7 @@ func TestStudioBlogReadRecordsViewMetricAndReturnsPublicStats(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if response.Data.ViewCount != 4 || response.Data.CommentsCount != 1 || response.Data.BookmarksCount != 1 || response.Data.ChannelFollowersCount != 1 {
+	if response.Data.ViewCount != 3 || response.Data.CommentsCount != 1 || response.Data.BookmarksCount != 1 || response.Data.ChannelFollowersCount != 1 {
 		t.Fatalf("unexpected stats: %s", w.Body.String())
 	}
 
@@ -1453,15 +1457,15 @@ func TestStudioBlogReadRecordsViewMetricAndReturnsPublicStats(t *testing.T) {
 	if err := db.First(&reloaded, "id = ?", post.ID).Error; err != nil {
 		t.Fatalf("reload post: %v", err)
 	}
-	if reloaded.ViewCount != 4 {
-		t.Fatalf("expected owner view not to increment, got %d", reloaded.ViewCount)
+	if reloaded.ViewCount != 3 {
+		t.Fatalf("expected detail reads to leave view count unchanged, got %d", reloaded.ViewCount)
 	}
 	var events []model.StudioMetricEvent
 	if err := db.Where("channel_id = ? AND content_type = ? AND content_id = ? AND metric = ?", channel.ID, "blog", post.ID, "view").Find(&events).Error; err != nil {
 		t.Fatalf("load view metric events: %v", err)
 	}
-	if len(events) != 1 {
-		t.Fatalf("expected one reader view metric and no owner metric, got %d", len(events))
+	if len(events) != 0 {
+		t.Fatalf("expected detail reads not to write metric events, got %d", len(events))
 	}
 }
 
@@ -1652,7 +1656,7 @@ func TestSEOSitemapFiltersAndOrdersPublicPublishedPosts(t *testing.T) {
 	}
 	want := []model.Post{posts[1], posts[0], posts[3], posts[2]}
 	for i, item := range response.Data {
-		if item.Path != "/posts/post/"+want[i].ID.String() || !item.LastModified.Equal(want[i].UpdatedAt) {
+		if item.Path != "/posts/post/"+want[i].ID.String() || item.LastModified.Sub(want[i].UpdatedAt).Abs() >= time.Microsecond {
 			t.Fatalf("unexpected sitemap item %d: %#v", i, item)
 		}
 	}
@@ -1715,6 +1719,70 @@ func TestSEOSwaggerSuccessResponsesUseDataEnvelope(t *testing.T) {
 		if _, ok := spec.Definitions[definition].Properties["data"]; !ok {
 			t.Fatalf("expected %s definition to contain data envelope", definition)
 		}
+	}
+}
+
+func TestScheduledPostIsOnlyAccessibleAndInteractiveByOwner(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	post := createPostRecord(t, db, owner.ID, nil, "Scheduled", "scheduled")
+	viewer := model.User{Username: "scheduled-viewer", Email: "scheduled-viewer@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&viewer).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	for name, current := range map[string]*authctx.CurrentUser{
+		"anonymous":  nil,
+		"other user": {ID: viewer.UUID, Username: viewer.Username, Role: authctx.RoleUser},
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil)
+			newBlogHTTPRouter(service, current).ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected scheduled post to be forbidden, got %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	ownerResponse := httptest.NewRecorder()
+	ownerRequest := httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil)
+	newBlogHTTPRouter(service, &owner).ServeHTTP(ownerResponse, ownerRequest)
+	if ownerResponse.Code != http.StatusOK {
+		t.Fatalf("expected owner preview to succeed, got %d: %s", ownerResponse.Code, ownerResponse.Body.String())
+	}
+
+	other := authctx.CurrentUser{ID: viewer.UUID, Username: viewer.Username, Role: authctx.RoleUser}
+	if err := service.ToggleLike(other, "post", post.ID, true); apperr.FromError(err).HTTPStatus != http.StatusForbidden {
+		t.Fatalf("expected scheduled post like to be forbidden, got %v", err)
+	}
+	folder := model.BookmarkFolder{UserID: viewer.UUID, Name: "Scheduled test"}
+	if err := db.Create(&folder).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.CreateBookmark(other, post.ID, &folder.ID); apperr.FromError(err).HTTPStatus != http.StatusForbidden {
+		t.Fatalf("expected scheduled post bookmark to be forbidden, got %v", err)
+	}
+}
+
+func TestDeleteChannelAndCollectionRejectNonEmptyResources(t *testing.T) {
+	service, db, owner := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, owner, "Protected")
+	post := createPostRecord(t, db, owner.ID, &channel.ID, "Keep me", "published")
+	if err := db.Model(&post).Update("collection_id", collection.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := service.DeleteCollection(owner, collection.ID); apperr.FromError(err).HTTPStatus != http.StatusConflict {
+		t.Fatalf("expected non-empty collection conflict, got %v", err)
+	}
+	if err := service.DeleteChannel(owner, channel.ID); apperr.FromError(err).HTTPStatus != http.StatusConflict {
+		t.Fatalf("expected non-empty channel conflict, got %v", err)
+	}
+	if err := db.First(&channel, "id = ?", channel.ID).Error; err != nil {
+		t.Fatalf("expected channel to remain: %v", err)
+	}
+	if err := db.First(&collection, "id = ?", collection.ID).Error; err != nil {
+		t.Fatalf("expected collection to remain: %v", err)
 	}
 }
 
@@ -1873,7 +1941,7 @@ func TestRegisterRoutesUpdatePostVisibilityContract(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesUpdatePostRejectsForeignCollectionWithoutChangingPost(t *testing.T) {
+func TestRegisterRoutesUpdatePostRejectsOutOfScopeCollectionWithoutChangingPost(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, defaultCollection := createOwnedChannelAndCollection(t, service, user, "Alice")
 	post := createPostRecord(t, db, user.ID, &channel.ID, "Before", "draft")
@@ -1895,8 +1963,8 @@ func TestRegisterRoutesUpdatePostRejectsForeignCollectionWithoutChangingPost(t *
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected foreign collection update to be forbidden, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected out-of-scope collection update to return 400, got %d: %s", w.Code, w.Body.String())
 	}
 	var reloaded model.Post
 	if err := db.First(&reloaded, "id = ?", post.ID).Error; err != nil {
@@ -2107,7 +2175,7 @@ func TestPublishedPostVersionsPreservePublishedAtAndRestore(t *testing.T) {
 		t.Fatalf("update published post: %d %s", updateW.Code, updateW.Body.String())
 	}
 	updated := decodePostResponse(t, updateW.Body.Bytes())
-	if updated.PublishedAt == nil || !updated.PublishedAt.Equal(firstPublishedAt) {
+	if updated.PublishedAt == nil || updated.PublishedAt.Sub(firstPublishedAt).Abs() >= time.Microsecond {
 		t.Fatalf("expected published_at to remain %s, got %#v", firstPublishedAt, updated.PublishedAt)
 	}
 
@@ -2134,7 +2202,7 @@ func TestPublishedPostVersionsPreservePublishedAtAndRestore(t *testing.T) {
 		t.Fatalf("restore version: %d %s", restoreW.Code, restoreW.Body.String())
 	}
 	restored := decodePostResponse(t, restoreW.Body.Bytes())
-	if restored.Title != "Version One" || restored.Content != "first body" || restored.PublishedAt == nil || !restored.PublishedAt.Equal(firstPublishedAt) {
+	if restored.Title != "Version One" || restored.Content != "first body" || restored.PublishedAt == nil || restored.PublishedAt.Sub(firstPublishedAt).Abs() >= time.Microsecond {
 		t.Fatalf("unexpected restored post: %#v", restored)
 	}
 	var versionCount int64

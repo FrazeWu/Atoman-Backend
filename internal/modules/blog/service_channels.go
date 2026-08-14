@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"atoman/internal/model"
+	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/sitehandle"
@@ -144,7 +145,7 @@ func (s *Service) DeleteChannel(user authctx.CurrentUser, channelID uuid.UUID) e
 	if channel.UserID == nil || *channel.UserID != user.ID {
 		return apperr.Forbidden("blog.channel_forbidden", "You do not have permission to delete this channel")
 	}
-	return s.repo.DeleteChannel(channel.ID)
+	return studioapi.NewService(s.db).DeleteChannel(user, channel.ID)
 }
 
 func (s *Service) CreateCollection(user authctx.CurrentUser, channelID uuid.UUID, name string, description string, coverURL string) (model.Collection, error) {
@@ -208,7 +209,7 @@ func (s *Service) DeleteCollection(user authctx.CurrentUser, collectionID uuid.U
 	if channel.UserID == nil || *channel.UserID != user.ID {
 		return apperr.Forbidden("blog.collection_forbidden", "You do not have permission to delete this collection")
 	}
-	return s.repo.DeleteCollection(collection.ID)
+	return studioapi.NewService(s.db).DeleteCollection(user, studioapi.ModuleBlog, collection.ID)
 }
 
 func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName string) (model.Channel, error) {

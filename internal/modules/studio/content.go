@@ -46,8 +46,8 @@ func (s *Service) resolveContentChannel(userID, channelID uuid.UUID) (model.Chan
 }
 
 func (s *Service) validateContentQuery(userID uuid.UUID, module Module, query ContentQuery) error {
-	if status := strings.TrimSpace(query.Status); status != "" && status != "draft" && status != "published" {
-		return apperr.BadRequest("studio.invalid_status", "status must be draft or published")
+	if status := strings.TrimSpace(query.Status); status != "" && status != "draft" && status != "published" && status != "scheduled" {
+		return apperr.BadRequest("studio.invalid_status", "status must be draft, scheduled, or published")
 	}
 	if _, err := studioVisibilityToDB(query.Visibility); err != nil {
 		return err
@@ -362,7 +362,8 @@ func studioPostItem(module Module, id uuid.UUID, post model.Post, collections []
 		Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL,
 		Status: post.Status, Visibility: studioVisibilityFromDB(post.Visibility),
 		Collections: studioCollectionSummaries(collections), ViewCount: post.ViewCount,
-		PublishedAt: post.PublishedAt, CreatedAt: post.CreatedAt, UpdatedAt: post.UpdatedAt,
+		PublishedAt: post.PublishedAt, ScheduledAt: post.ScheduledAt,
+		CreatedAt: post.CreatedAt, UpdatedAt: post.UpdatedAt,
 	}
 }
 

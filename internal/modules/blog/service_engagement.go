@@ -110,9 +110,9 @@ func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, fol
 		}
 		return model.Bookmark{}, err
 	}
-	if post.Status == "draft" {
+	if post.Status != "published" {
 		if post.UserID != user.ID {
-			return model.Bookmark{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+			return model.Bookmark{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this unpublished post")
 		}
 	} else {
 		allowed, err := CanViewPublishedPost(s.db, &user.ID, post)
@@ -200,9 +200,9 @@ func (s *Service) ToggleLike(user authctx.CurrentUser, targetType string, target
 			}
 			return err
 		}
-		if post.Status == "draft" {
+		if post.Status != "published" {
 			if post.UserID != user.ID {
-				return apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+				return apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this unpublished post")
 			}
 		} else {
 			allowed, err := CanViewPublishedPost(s.db, &user.ID, post)

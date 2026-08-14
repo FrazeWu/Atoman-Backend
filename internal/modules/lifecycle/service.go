@@ -97,7 +97,14 @@ func (s *Service) RecordEvent(user authctx.CurrentUser, input EventInput) error 
 	if err != nil {
 		return err
 	}
-	if content.Status != "published" || content.Visibility == "private" {
+	if content.Status != "published" {
+		return apperr.NotFound("lifecycle.content_not_found", "Content not found")
+	}
+	allowed, err := s.canRecordContentEvent(user, content)
+	if err != nil {
+		return err
+	}
+	if !allowed {
 		return apperr.NotFound("lifecycle.content_not_found", "Content not found")
 	}
 	clientEventID := strings.TrimSpace(input.ClientEventID)
@@ -115,7 +122,51 @@ func (s *Service) RecordEvent(user authctx.CurrentUser, input EventInput) error 
 		ClientEventID: clientEventID, PositionSec: max(0, input.PositionSec), DurationSec: max(0, input.DurationSec),
 		Progress: clampProgress(input.Progress),
 	}
-	return s.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "client_event_id"}}, DoNothing: true}).Create(&event).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "client_event_id"}}, DoNothing: true}).Create(&event)
+		if result.Error != nil || result.RowsAffected == 0 || input.Event != "open" || input.Module != "blog" || user.ID == content.OwnerID {
+			return result.Error
+		}
+		return tx.Model(&model.Post{}).Where("id = ?", input.ContentID).
+			UpdateColumn("view_count", gorm.Expr("view_count + ?", 1)).Error
+	})
+}
+
+func (s *Service) canRecordContentEvent(user authctx.CurrentUser, content contentSummary) (bool, error) {
+	if user.ID == content.OwnerID {
+		return true, nil
+	}
+	switch content.Visibility {
+	case "public":
+		return true, nil
+	case "private":
+		return false, nil
+	case "followers", "subscribers":
+		if user.ID == uuid.Nil {
+			return false, nil
+		}
+		var subscriptionCount int64
+		if content.ChannelID != uuid.Nil {
+			if err := s.db.Model(&model.Subscription{}).
+				Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+				Where("subscriptions.user_id = ? AND feed_sources.source_type = ? AND feed_sources.source_id = ?", user.ID, "internal_channel", content.ChannelID).
+				Count(&subscriptionCount).Error; err != nil {
+				return false, err
+			}
+		}
+		if subscriptionCount > 0 {
+			return true, nil
+		}
+		var followCount int64
+		if err := s.db.Model(&model.Follow{}).
+			Where("follower_id = ? AND following_id = ?", user.ID, content.OwnerID).
+			Count(&followCount).Error; err != nil {
+			return false, err
+		}
+		return followCount > 0, nil
+	default:
+		return false, nil
+	}
 }
 
 func (s *Service) SaveProgress(user authctx.CurrentUser, input ProgressInput) (model.ContentProgress, error) {
@@ -127,7 +178,14 @@ func (s *Service) SaveProgress(user authctx.CurrentUser, input ProgressInput) (m
 	if err != nil {
 		return model.ContentProgress{}, err
 	}
-	if content.Status != "published" || content.Visibility == "private" {
+	if content.Status != "published" {
+		return model.ContentProgress{}, apperr.NotFound("lifecycle.content_not_found", "Content not found")
+	}
+	allowed, err := s.canRecordContentEvent(user, content)
+	if err != nil {
+		return model.ContentProgress{}, err
+	}
+	if !allowed {
 		return model.ContentProgress{}, apperr.NotFound("lifecycle.content_not_found", "Content not found")
 	}
 	progress := clampProgress(input.Progress)
@@ -167,7 +225,11 @@ func (s *Service) ListContinue(user authctx.CurrentUser, module string, limit in
 	items := make([]ContinueItem, 0, len(rows))
 	for _, row := range rows {
 		content, err := s.resolveContent(module, row.ContentID)
-		if err != nil || content.Status != "published" || content.Visibility == "private" {
+		if err != nil || content.Status != "published" {
+			continue
+		}
+		allowed, err := s.canRecordContentEvent(user, content)
+		if err != nil || !allowed {
 			continue
 		}
 		items = append(items, ContinueItem{
@@ -183,8 +245,19 @@ func (s *Service) GetProgress(user authctx.CurrentUser, module string, contentID
 		return nil, apperr.Unauthorized("Login required")
 	}
 	module = normalizeModule(module)
+	content, err := s.resolveContent(module, contentID)
+	if err != nil {
+		return nil, err
+	}
+	allowed, err := s.canRecordContentEvent(user, content)
+	if err != nil {
+		return nil, err
+	}
+	if content.Status != "published" || !allowed {
+		return nil, apperr.NotFound("lifecycle.content_not_found", "Content not found")
+	}
 	var progress model.ContentProgress
-	err := s.db.Where("user_id = ? AND content_type = ? AND content_id = ?", user.ID, module, contentID).First(&progress).Error
+	err = s.db.Where("user_id = ? AND content_type = ? AND content_id = ?", user.ID, module, contentID).First(&progress).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -379,7 +452,7 @@ func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool
 		if err := s.db.First(&post, "id = ?", contentID).Error; err != nil {
 			return contentError(err)
 		}
-		if strings.TrimSpace(post.Title) == "" || strings.TrimSpace(post.Content) == "" || !s.postHasCollection(post) {
+		if strings.TrimSpace(post.Title) == "" || strings.TrimSpace(post.Content) == "" || !postHasResolvedCollection(post) {
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Blog title, content, and collection are required")
 		}
 	case "podcast":
@@ -387,7 +460,7 @@ func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool
 		if err := s.db.Preload("Post").First(&episode, "id = ?", contentID).Error; err != nil {
 			return contentError(err)
 		}
-		if episode.Post == nil || strings.TrimSpace(episode.Post.Title) == "" || strings.TrimSpace(episode.AudioURL) == "" || !s.postHasCollection(*episode.Post) {
+		if episode.Post == nil || strings.TrimSpace(episode.Post.Title) == "" || strings.TrimSpace(episode.AudioURL) == "" || !postHasResolvedCollection(*episode.Post) {
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Podcast title, audio, and collection are required")
 		}
 	case "video":
@@ -395,11 +468,7 @@ func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool
 		if err := s.db.First(&video, "id = ?", contentID).Error; err != nil {
 			return contentError(err)
 		}
-		var collections int64
-		if err := s.db.Model(&model.VideoCollection{}).Where("video_id = ?", video.ID).Count(&collections).Error; err != nil {
-			return err
-		}
-		if strings.TrimSpace(video.Title) == "" || strings.TrimSpace(video.VideoURL) == "" || collections == 0 {
+		if strings.TrimSpace(video.Title) == "" || strings.TrimSpace(video.VideoURL) == "" || video.CollectionID == nil || video.CollectionConflict {
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Video title, source, and collection are required")
 		}
 		if video.StorageType == "local" && strings.HasPrefix(video.VideoURL, "/uploads/") && video.ProcessingStatus != "ready" {
@@ -415,15 +484,8 @@ func (s *Service) ValidatePublishable(module string, contentID uuid.UUID) error 
 	return s.validatePublishable(normalizeModule(module), contentID, true)
 }
 
-func (s *Service) postHasCollection(post model.Post) bool {
-	if post.CollectionID != nil {
-		return true
-	}
-	var count int64
-	if err := s.db.Model(&model.PostCollection{}).Where("post_id = ?", post.ID).Count(&count).Error; err != nil {
-		return false
-	}
-	return count > 0
+func postHasResolvedCollection(post model.Post) bool {
+	return post.CollectionID != nil && !post.CollectionConflict
 }
 
 func enqueuePublication(tx *gorm.DB, module string, contentID, channelID, ownerID uuid.UUID) error {

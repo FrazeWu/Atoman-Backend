@@ -105,6 +105,41 @@ func TestRecordEventDeduplicatesClientEventID(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("expected one deduplicated event, got %d", count)
 	}
+	var post model.Post
+	if err := fixture.db.First(&post, "id = ?", fixture.post.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if post.ViewCount != 1 {
+		t.Fatalf("expected the deduplicated open event to increment one view, got %d", post.ViewCount)
+	}
+	if err := fixture.service.RecordEvent(fixture.owner, EventInput{
+		Module: "blog", ContentID: fixture.post.ID, Event: "open", ClientEventID: "owner-open",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.First(&post, "id = ?", fixture.post.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if post.ViewCount != 1 {
+		t.Fatalf("expected owner open not to increment views, got %d", post.ViewCount)
+	}
+}
+
+func TestRecordEventRequiresFollowerAccess(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	if err := fixture.db.Model(&model.Post{}).Where("id = ?", fixture.post.ID).Update("visibility", "followers").Error; err != nil {
+		t.Fatal(err)
+	}
+	input := EventInput{Module: "blog", ContentID: fixture.post.ID, Event: "open", ClientEventID: "followers-open"}
+	if err := fixture.service.RecordEvent(fixture.viewer, input); err == nil {
+		t.Fatal("expected a non-follower event to be rejected")
+	}
+	if err := fixture.db.Create(&model.Follow{FollowerID: fixture.viewer.ID, FollowingID: fixture.owner.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.RecordEvent(fixture.viewer, input); err != nil {
+		t.Fatalf("expected follower event to succeed: %v", err)
+	}
 }
 
 func TestProgressIsCrossDeviceAndReturnsContinueItem(t *testing.T) {
