@@ -49,6 +49,14 @@ func (s *Service) ListAlbumBookmarksFiltered(user authctx.CurrentUser, page int,
 	return s.repo.ListAlbumBookmarksFiltered(user.ID, page, pageSize, sort, query)
 }
 
+func (s *Service) ListLatestAlbumBookmarksAfter(user authctx.CurrentUser, pageSize int, cursor *musicCreatedAtCursor) ([]model.AlbumBookmark, bool, error) {
+	if user.ID == uuid.Nil {
+		return nil, false, apperr.Unauthorized("Login required")
+	}
+	_, pageSize = normalizeMusicRecommendationPage(1, pageSize)
+	return s.repo.ListLatestAlbumBookmarksAfter(user.ID, pageSize, cursor)
+}
+
 func (s *Service) BookmarkAlbum(user authctx.CurrentUser, albumID uuid.UUID) (model.AlbumBookmark, error) {
 	if user.ID == uuid.Nil {
 		return model.AlbumBookmark{}, apperr.Unauthorized("Login required")

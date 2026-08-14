@@ -18888,3 +18888,48 @@ securityDefinitions:
     name: atoman_session
     type: apiKey
 swagger: "2.0"
+      - description: 仅 sort=-created_at 可用；传 cursor= 启动游标分页
+        in: query
+        name: cursor
+        type: string
+  /api/v1/music/bookmarks/albums:
+    get:
+      parameters:
+      - description: 排序方式；游标仅支持 latest
+        in: query
+        name: sort
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      - description: 仅 sort=latest 可用；传 cursor= 启动游标分页
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取当前用户收藏的专辑
+      tags:
+      - music-bookmarks

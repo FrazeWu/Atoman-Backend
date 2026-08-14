@@ -11,6 +11,10 @@ func RunMusicCatalogIndexesMigration(db *gorm.DB) error {
 	}{
 		{"Albums", `CREATE INDEX IF NOT EXISTS idx_music_albums_visible_release
 			ON "Albums" (entry_status, release_date DESC, title) WHERE deleted_at IS NULL`},
+		{"Albums", `CREATE INDEX IF NOT EXISTS idx_music_albums_created_cursor
+			ON "Albums" (created_at DESC, id DESC) WHERE deleted_at IS NULL`},
+		{"music_album_bookmarks", `CREATE INDEX IF NOT EXISTS idx_music_album_bookmarks_user_created_cursor
+			ON music_album_bookmarks (user_id, created_at DESC, id DESC) WHERE deleted_at IS NULL`},
 		{"Songs", `CREATE INDEX IF NOT EXISTS idx_music_songs_album_track
 			ON "Songs" (album_id, track_number, created_at) WHERE deleted_at IS NULL`},
 		{"music_album_import_sessions", `CREATE INDEX IF NOT EXISTS idx_music_import_sessions_user_status_updated

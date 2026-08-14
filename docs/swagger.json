@@ -29386,3 +29386,75 @@
         }
     }
 }
+                    },
+                    {
+                        "type": "string",
+                        "description": "仅 sort=-created_at 可用；传 cursor= 启动游标分页",
+                        "name": "cursor",
+                        "in": "query"
+        "/api/v1/music/bookmarks/albums": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-bookmarks"
+                ],
+                "summary": "获取当前用户收藏的专辑",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "排序方式；游标仅支持 latest",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "仅 sort=latest 可用；传 cursor= 启动游标分页",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },

@@ -430,6 +430,7 @@ func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
 // @Param sort query string false "排序方式"
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
+// @Param cursor query string false "仅 sort=-created_at 可用；传 cursor= 启动游标分页"
 // @Success 200 {object} map[string]interface{}
 // @Router /api/v1/music/albums [get]
 func (h *Handler) listAlbums(c *gin.Context) {
@@ -438,6 +439,17 @@ func (h *Handler) listAlbums(c *gin.Context) {
 	artistIDRaw := strings.TrimSpace(c.Query("artist_id"))
 	releaseType := strings.ToLower(strings.TrimSpace(c.Query("release_type")))
 	sort := strings.TrimSpace(c.Query("sort"))
+
+	cursorRaw, useCursor := c.GetQuery("cursor")
+	cursor, err := parseMusicCreatedAtCursor(strings.TrimSpace(cursorRaw))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if useCursor && sort != "-created_at" {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "cursor requires sort=-created_at"))
+		return
+	}
 
 	db := h.service.db.Model(&model.Album{}).Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed")
 	joinedArtists := false
@@ -464,14 +476,20 @@ func (h *Handler) listAlbums(c *gin.Context) {
 		db = db.Where("LOWER(COALESCE(\"Albums\".album_type, 'album')) NOT IN ?", []string{"single", "leak"})
 	}
 
-	var total int64
-	countDB := db
-	if joinedArtists {
-		countDB = countDB.Distinct("\"Albums\".id")
+	if cursor != nil {
+		db = db.Where("(\"Albums\".created_at < ? OR (\"Albums\".created_at = ? AND \"Albums\".id < ?))", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
 	}
-	if err := countDB.Count(&total).Error; err != nil {
-		httpx.Error(c, err)
-		return
+
+	var total int64
+	if !useCursor {
+		countDB := db
+		if joinedArtists {
+			countDB = countDB.Distinct("\"Albums\".id")
+		}
+		if err := countDB.Count(&total).Error; err != nil {
+			httpx.Error(c, err)
+			return
+		}
 	}
 
 	var albums []model.Album
@@ -481,10 +499,19 @@ func (h *Handler) listAlbums(c *gin.Context) {
 	if joinedArtists {
 		findDB = findDB.Distinct("\"Albums\".*")
 	}
-	for _, order := range albumSortOrders(sort) {
+	orders := albumSortOrders(sort)
+	if useCursor {
+		orders = []string{"\"Albums\".created_at DESC", "\"Albums\".id DESC"}
+	}
+	for _, order := range orders {
 		findDB = findDB.Order(order)
 	}
-	if err := findDB.Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&albums).Error; err != nil {
+	if useCursor {
+		findDB = findDB.Limit(pageSize + 1)
+	} else {
+		findDB = findDB.Limit(pageSize).Offset(httpx.Offset(page, pageSize))
+	}
+	if err := findDB.Find(&albums).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -496,6 +523,19 @@ func (h *Handler) listAlbums(c *gin.Context) {
 		resolveAlbumMediaURLs(&albums[i])
 	}
 
+	if useCursor {
+		hasMore := len(albums) > pageSize
+		if hasMore {
+			albums = albums[:pageSize]
+		}
+		nextCursor := ""
+		if hasMore && len(albums) > 0 {
+			last := albums[len(albums)-1]
+			nextCursor = encodeMusicCreatedAtCursor(last.CreatedAt, last.ID)
+		}
+		writeMusicCursorList(c, albums, pageSize, hasMore, nextCursor)
+		return
+	}
 	httpx.List(c, albums, page, pageSize, total)
 }
 

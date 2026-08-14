@@ -65,6 +65,20 @@ func (h *Handler) deleteArtistBookmark(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"deleted": true})
 }
 
+// listAlbumBookmarks godoc
+// @Summary 获取当前用户收藏的专辑
+// @Tags music-bookmarks
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param sort query string false "排序方式；游标仅支持 latest"
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Param cursor query string false "仅 sort=latest 可用；传 cursor= 启动游标分页"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Router /api/v1/music/bookmarks/albums [get]
 func (h *Handler) listAlbumBookmarks(c *gin.Context) {
 	user, ok := currentMusicUser(c)
 	if !ok {
@@ -73,6 +87,30 @@ func (h *Handler) listAlbumBookmarks(c *gin.Context) {
 	}
 	page, pageSize := httpx.PageParams(c)
 	sort := c.DefaultQuery("sort", "latest")
+	cursorRaw, useCursor := c.GetQuery("cursor")
+	cursor, err := parseMusicCreatedAtCursor(strings.TrimSpace(cursorRaw))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if useCursor {
+		if normalizeBookmarkSort(sort) != BookmarkSortLatest {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "cursor requires sort=latest"))
+			return
+		}
+		bookmarks, hasMore, err := h.service.ListLatestAlbumBookmarksAfter(user, pageSize, cursor)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		nextCursor := ""
+		if hasMore && len(bookmarks) > 0 {
+			last := bookmarks[len(bookmarks)-1]
+			nextCursor = encodeMusicCreatedAtCursor(last.CreatedAt, last.ID)
+		}
+		writeMusicCursorList(c, bookmarks, pageSize, hasMore, nextCursor)
+		return
+	}
 	bookmarks, total, err := h.service.ListAlbumBookmarks(user, page, pageSize, sort)
 	if err != nil {
 		httpx.Error(c, err)

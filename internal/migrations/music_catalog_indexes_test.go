@@ -9,12 +9,14 @@ import (
 
 func TestRunMusicCatalogIndexesMigrationCreatesIndexes(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.AlbumImportSession{}, &model.MusicSearchInteraction{})
+	testdb.Migrate(t, db, &model.Album{}, &model.AlbumBookmark{}, &model.Song{}, &model.AlbumImportSession{}, &model.MusicSearchInteraction{})
 	if err := RunMusicCatalogIndexesMigration(db); err != nil {
 		t.Fatalf("run catalog indexes: %v", err)
 	}
 	for _, expected := range []struct{ table, index string }{
 		{"Albums", "idx_music_albums_visible_release"},
+		{"Albums", "idx_music_albums_created_cursor"},
+		{"music_album_bookmarks", "idx_music_album_bookmarks_user_created_cursor"},
 		{"Songs", "idx_music_songs_album_track"},
 		{"music_album_import_sessions", "idx_music_import_sessions_user_status_updated"},
 		{"music_search_interactions", "idx_music_search_interactions_user_created"},

@@ -173,6 +173,26 @@ func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize i
 	return bookmarks, total, err
 }
 
+func (r *Repo) ListLatestAlbumBookmarksAfter(userID uuid.UUID, pageSize int, cursor *musicCreatedAtCursor) ([]model.AlbumBookmark, bool, error) {
+	db := r.db.Model(&model.AlbumBookmark{}).
+		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id").
+		Where("music_album_bookmarks.user_id = ?", userID).
+		Order("music_album_bookmarks.created_at DESC").
+		Order("music_album_bookmarks.id DESC")
+	if cursor != nil {
+		db = db.Where("(music_album_bookmarks.created_at < ? OR (music_album_bookmarks.created_at = ? AND music_album_bookmarks.id < ?))", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
+	}
+	var bookmarks []model.AlbumBookmark
+	if err := db.Preload("Album.Artists").Limit(pageSize + 1).Find(&bookmarks).Error; err != nil {
+		return nil, false, err
+	}
+	hasMore := len(bookmarks) > pageSize
+	if hasMore {
+		bookmarks = bookmarks[:pageSize]
+	}
+	return bookmarks, hasMore, nil
+}
+
 func (r *Repo) DeleteAlbumBookmark(userID uuid.UUID, albumID uuid.UUID) error {
 	return r.db.Where("user_id = ? AND album_id = ?", userID, albumID).Delete(&model.AlbumBookmark{}).Error
 }

@@ -3355,3 +3355,95 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 		t.Fatalf("expected an item-level recommendation reason, got %#v", body.Data.ForYou[0])
 	}
 }
+
+func TestRegisterRoutesMusicCursorPagination(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	older := model.Album{Title: "Older", EntryStatus: "open", Status: "open"}
+	newer := model.Album{Title: "Newer", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&older).Error; err != nil {
+		t.Fatalf("create older album: %v", err)
+	}
+	if err := db.Create(&newer).Error; err != nil {
+		t.Fatalf("create newer album: %v", err)
+	}
+	base := time.Now().UTC().Add(-time.Hour)
+	if err := db.Model(&older).Update("created_at", base).Error; err != nil {
+		t.Fatalf("set older album timestamp: %v", err)
+	}
+	if err := db.Model(&newer).Update("created_at", base.Add(time.Minute)).Error; err != nil {
+		t.Fatalf("set newer album timestamp: %v", err)
+	}
+	olderBookmark := model.AlbumBookmark{UserID: user.ID, AlbumID: older.ID}
+	newerBookmark := model.AlbumBookmark{UserID: user.ID, AlbumID: newer.ID}
+	if err := db.Create(&olderBookmark).Error; err != nil {
+		t.Fatalf("create older bookmark: %v", err)
+	}
+	if err := db.Create(&newerBookmark).Error; err != nil {
+		t.Fatalf("create newer bookmark: %v", err)
+	}
+	if err := db.Model(&olderBookmark).Update("created_at", base).Error; err != nil {
+		t.Fatalf("set older bookmark timestamp: %v", err)
+	}
+	if err := db.Model(&newerBookmark).Update("created_at", base.Add(time.Minute)).Error; err != nil {
+		t.Fatalf("set newer bookmark timestamp: %v", err)
+	}
+	r := newMusicHTTPRouter(service, &user)
+
+	testCursorPagination := func(path, expectedFirst, expectedSecond string) {
+		t.Helper()
+		first := httptest.NewRecorder()
+		r.ServeHTTP(first, httptest.NewRequest(http.MethodGet, path, nil))
+		if first.Code != http.StatusOK {
+			t.Fatalf("first cursor request: %d: %s", first.Code, first.Body.String())
+		}
+		var firstPage struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+			Meta struct {
+				NextCursor string `json:"next_cursor"`
+				Total      *int64 `json:"total"`
+			} `json:"meta"`
+		}
+		if err := json.Unmarshal(first.Body.Bytes(), &firstPage); err != nil {
+			t.Fatalf("decode first cursor page: %v", err)
+		}
+		if len(firstPage.Data) != 1 || firstPage.Data[0].ID != expectedFirst || firstPage.Meta.NextCursor == "" || firstPage.Meta.Total != nil {
+			t.Fatalf("unexpected first cursor page: %#v", firstPage)
+		}
+		second := httptest.NewRecorder()
+		r.ServeHTTP(second, httptest.NewRequest(http.MethodGet, path+"&cursor="+firstPage.Meta.NextCursor, nil))
+		if second.Code != http.StatusOK {
+			t.Fatalf("second cursor request: %d: %s", second.Code, second.Body.String())
+		}
+		var secondPage struct {
+			Data []struct {
+				ID string `json:"id"`
+			} `json:"data"`
+			Meta struct {
+				NextCursor string `json:"next_cursor"`
+			} `json:"meta"`
+		}
+		if err := json.Unmarshal(second.Body.Bytes(), &secondPage); err != nil {
+			t.Fatalf("decode second cursor page: %v", err)
+		}
+		if len(secondPage.Data) != 1 || secondPage.Data[0].ID != expectedSecond || secondPage.Meta.NextCursor != "" {
+			t.Fatalf("unexpected second cursor page: %#v", secondPage)
+		}
+	}
+
+	testCursorPagination("/api/v1/music/albums?sort=-created_at&page_size=1&cursor=", newer.ID.String(), older.ID.String())
+	testCursorPagination("/api/v1/music/bookmarks/albums?sort=latest&page_size=1&cursor=", newerBookmark.ID.String(), olderBookmark.ID.String())
+
+	unsupportedSort := httptest.NewRecorder()
+	validCursor := encodeMusicCreatedAtCursor(newer.CreatedAt, newer.ID)
+	r.ServeHTTP(unsupportedSort, httptest.NewRequest(http.MethodGet, "/api/v1/music/albums?sort=hot&cursor="+validCursor, nil))
+	if unsupportedSort.Code != http.StatusBadRequest {
+		t.Fatalf("expected unsupported cursor sort to return 400, got %d: %s", unsupportedSort.Code, unsupportedSort.Body.String())
+	}
+	invalidCursor := httptest.NewRecorder()
+	r.ServeHTTP(invalidCursor, httptest.NewRequest(http.MethodGet, "/api/v1/music/albums?sort=-created_at&cursor=invalid", nil))
+	if invalidCursor.Code != http.StatusBadRequest {
+		t.Fatalf("expected malformed cursor to return 400, got %d: %s", invalidCursor.Code, invalidCursor.Body.String())
+	}
+}
