@@ -16,6 +16,7 @@ import (
 	"atoman/internal/modules/forum_moderation"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/testdb"
 
 	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
@@ -39,9 +40,7 @@ func newForumConcurrencyPostgresDB(t *testing.T) *gorm.DB {
 	if err := adminSQL.Ping(); err != nil {
 		t.Skipf("PostgreSQL unavailable: %v", err)
 	}
-	if err := adminDB.Exec("CREATE EXTENSION IF NOT EXISTS ltree").Error; err != nil {
-		t.Fatalf("enable ltree: %v", err)
-	}
+	testdb.EnablePostgresExtension(t, adminDB, "ltree")
 	schema := "forum_concurrency_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if err := adminDB.Exec("CREATE SCHEMA " + schema).Error; err != nil {
 		t.Fatalf("create schema: %v", err)

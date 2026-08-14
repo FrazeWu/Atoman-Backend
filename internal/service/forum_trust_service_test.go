@@ -388,9 +388,7 @@ func newForumTrustPostgresDB(t *testing.T) *gorm.DB {
 	if err != nil || sqlDB.Ping() != nil {
 		t.Skip("PostgreSQL unavailable")
 	}
-	if err := admin.Exec("CREATE EXTENSION IF NOT EXISTS ltree").Error; err != nil {
-		t.Fatalf("enable ltree: %v", err)
-	}
+	testdb.EnablePostgresExtension(t, admin, "ltree")
 	schema := "forum_trust_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if err := admin.Exec("CREATE SCHEMA " + schema).Error; err != nil {
 		t.Fatalf("create schema: %v", err)

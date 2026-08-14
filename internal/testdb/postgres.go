@@ -11,6 +11,21 @@ import (
 	"gorm.io/gorm"
 )
 
+func EnablePostgresExtension(t *testing.T, db *gorm.DB, extension string) {
+	t.Helper()
+	if extension != "ltree" && extension != "pg_trgm" {
+		t.Fatalf("unsupported PostgreSQL test extension: %s", extension)
+	}
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec("SELECT pg_advisory_xact_lock(?)", int64(0x41746f6d616e7465)).Error; err != nil {
+			return err
+		}
+		return tx.Exec("CREATE EXTENSION IF NOT EXISTS " + extension).Error
+	}); err != nil {
+		t.Fatalf("enable %s: %v", extension, err)
+	}
+}
+
 func OpenPostgres(t *testing.T, schemaPrefix string) *gorm.DB {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")

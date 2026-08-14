@@ -11,6 +11,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/testdb"
 
 	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
@@ -115,9 +116,7 @@ func newForumEngagementPostgresDB(t *testing.T) *gorm.DB {
 	if err != nil || sqlDB.Ping() != nil {
 		t.Skip("PostgreSQL unavailable")
 	}
-	if err := admin.Exec("CREATE EXTENSION IF NOT EXISTS ltree").Error; err != nil {
-		t.Fatalf("enable ltree: %v", err)
-	}
+	testdb.EnablePostgresExtension(t, admin, "ltree")
 	schema := "forum_engagement_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	if err := admin.Exec("CREATE SCHEMA " + schema).Error; err != nil {
 		t.Fatalf("create schema: %v", err)
