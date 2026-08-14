@@ -169,7 +169,7 @@ func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize i
 	default:
 		db = db.Order("music_album_bookmarks.created_at DESC")
 	}
-	err := db.Preload("Album.Artists").Preload("Album.Songs").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
+	err := db.Preload("Album.Artists").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
 	return bookmarks, total, err
 }
 

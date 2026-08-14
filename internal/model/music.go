@@ -107,6 +107,7 @@ type Album struct {
 	Songs                []Song        `json:"songs,omitempty" gorm:"foreignKey:AlbumID"`
 	OtherVersions        []Album       `json:"other_versions,omitempty" gorm:"-"`
 	PlayCount            int64         `json:"play_count"`
+	SongCount            int64         `json:"song_count" gorm:"-"`
 	BookmarkCount        int64         `json:"bookmark_count" gorm:"-"`
 }
 

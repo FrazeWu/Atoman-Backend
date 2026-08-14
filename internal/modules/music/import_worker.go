@@ -378,6 +378,7 @@ func (w *ImportWorker) processWithHeartbeat(ctx context.Context, processor Impor
 	ticker := time.NewTicker(interval)
 	done := make(chan struct{})
 	heartbeatDone := make(chan struct{})
+	heartbeatErr := make(chan error, 1)
 	go func() {
 		defer close(heartbeatDone)
 		defer ticker.Stop()
@@ -388,14 +389,28 @@ func (w *ImportWorker) processWithHeartbeat(ctx context.Context, processor Impor
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = w.Heartbeat(ctx, job.ID)
+				if err := w.Heartbeat(ctx, job.ID); err != nil {
+					select {
+					case heartbeatErr <- err:
+					default:
+					}
+					return
+				}
 			}
 		}
 	}()
 	err := processor.Process(ctx, job, func() error { return w.Heartbeat(ctx, job.ID) })
 	close(done)
 	<-heartbeatDone
-	return err
+	if err != nil {
+		return err
+	}
+	select {
+	case err := <-heartbeatErr:
+		return fmt.Errorf("import worker heartbeat: %w", err)
+	default:
+		return nil
+	}
 }
 
 func (w *ImportWorker) CleanupExpired(ctx context.Context) error {

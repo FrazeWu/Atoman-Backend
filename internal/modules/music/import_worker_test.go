@@ -123,6 +123,27 @@ func TestImportWorkerFinalizesSubmittedImportAfterProcessing(t *testing.T) {
 	}
 }
 
+func TestImportWorkerSurfacesBackgroundHeartbeatFailure(t *testing.T) {
+	db := newImportWorkerTestDB(t)
+	job := createImportWorkerJob(t, db, AlbumImportStatusQueued)
+	worker := NewImportWorker(db, nil, "worker")
+	claimed, ok, err := worker.Claim(context.Background())
+	if err != nil || !ok {
+		t.Fatalf("claim: ok=%v err=%v", ok, err)
+	}
+	worker.heartbeatInterval = time.Millisecond
+	if err := db.Model(&model.AlbumImportJob{}).Where("id = ?", job.ID).Update("locked_by", "replacement").Error; err != nil {
+		t.Fatal(err)
+	}
+	err = worker.processWithHeartbeat(context.Background(), importProcessorFunc(func(context.Context, model.AlbumImportJob, func() error) error {
+		time.Sleep(5 * time.Millisecond)
+		return nil
+	}), claimed)
+	if err == nil || !strings.Contains(err.Error(), "heartbeat") {
+		t.Fatalf("expected background heartbeat error, got %v", err)
+	}
+}
+
 func TestImportWorkerRetriesSubmittedReadyImportFinalization(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})

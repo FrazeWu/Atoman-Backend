@@ -99,12 +99,23 @@ func hydrateAlbumStats(db *gorm.DB, albums []model.Album) error {
 		}
 	}
 
-	for i := range albums {
-		var playCount int64
-		for _, song := range albums[i].Songs {
-			playCount += song.PlayCount
+	var songRows []struct {
+		AlbumID   uuid.UUID
+		PlayCount int64
+		SongCount int64
+	}
+	if err := db.Model(&model.Song{}).
+		Select("album_id, COALESCE(SUM(play_count), 0) AS play_count, COUNT(*) AS song_count").
+		Where("album_id IN ?", albumIDs).
+		Group("album_id").
+		Scan(&songRows).Error; err != nil {
+		return err
+	}
+	for _, row := range songRows {
+		if idx, ok := albumIndex[row.AlbumID]; ok {
+			albums[idx].PlayCount = row.PlayCount
+			albums[idx].SongCount = row.SongCount
 		}
-		albums[i].PlayCount = playCount
 	}
 
 	return nil
@@ -466,7 +477,7 @@ func (h *Handler) listAlbums(c *gin.Context) {
 	var albums []model.Album
 	findDB := db.Preload("Artists").Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
 		return db.Order("position ASC, role ASC, custom_role ASC")
-	}).Preload("ArtistCredits.Artist").Preload("Songs")
+	}).Preload("ArtistCredits.Artist")
 	if joinedArtists {
 		findDB = findDB.Distinct("\"Albums\".*")
 	}

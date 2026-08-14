@@ -2188,9 +2188,10 @@ func TestRegisterRoutesAlbumResponsesResolveMediaURLs(t *testing.T) {
 
 	var listResp struct {
 		Data []struct {
-			ID       string `json:"id"`
-			CoverURL string `json:"cover_url"`
-			Songs    []struct {
+			ID        string `json:"id"`
+			CoverURL  string `json:"cover_url"`
+			SongCount int64  `json:"song_count"`
+			Songs     []struct {
 				AudioURL string `json:"audio_url"`
 				CoverURL string `json:"cover_url"`
 			} `json:"songs"`
@@ -2205,14 +2206,8 @@ func TestRegisterRoutesAlbumResponsesResolveMediaURLs(t *testing.T) {
 	if listResp.Data[0].CoverURL != "https://cdn.atoman.test/uploads/music/covers/albums/resolved/cover.jpg" {
 		t.Fatalf("expected resolved list cover_url, got %q", listResp.Data[0].CoverURL)
 	}
-	if len(listResp.Data[0].Songs) != 1 {
-		t.Fatalf("expected 1 song in list response, got %#v", listResp.Data[0].Songs)
-	}
-	if listResp.Data[0].Songs[0].AudioURL != "https://cdn.atoman.test/uploads/music/audio/albums/resolved/song.mp3" {
-		t.Fatalf("expected resolved list song audio_url, got %q", listResp.Data[0].Songs[0].AudioURL)
-	}
-	if listResp.Data[0].Songs[0].CoverURL != "https://cdn.atoman.test/uploads/music/covers/albums/resolved/song-cover.jpg" {
-		t.Fatalf("expected resolved list song cover_url, got %q", listResp.Data[0].Songs[0].CoverURL)
+	if listResp.Data[0].SongCount != 1 || len(listResp.Data[0].Songs) != 0 {
+		t.Fatalf("expected list summary with one song, got %#v", listResp.Data[0])
 	}
 
 	detailRecorder := httptest.NewRecorder()
