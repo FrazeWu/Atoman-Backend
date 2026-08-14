@@ -41,6 +41,8 @@ func SetupAdminRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		}
 
 		admin.GET("/feed/sources", AdminListFeedSources(db))
+		admin.GET("/feed/sources/:id/impact", GetAdminFeedSourceImpact(db))
+		admin.GET("/feed/sources/:id/diagnostics", GetAdminFeedSourceDiagnostics(db))
 		admin.PATCH("/feed/sources/:id", AdminUpdateFeedSourceRow(db))
 		admin.DELETE("/feed/sources/:id", AdminDeleteFeedSourceRow(db))
 		admin.GET("/feed/onboarding/recommendations", ListAdminOnboardingFeedRecommendations(db))

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -13,6 +14,8 @@ import (
 
 	"atoman/internal/model"
 	feedmodule "atoman/internal/modules/feed"
+	"atoman/internal/platform/audit"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/service"
 )
 
@@ -40,9 +43,115 @@ type adminFeedSourceUpdateInput struct {
 	Hidden *bool   `json:"hidden"`
 }
 
+type adminFeedSourceDeleteInput struct {
+	ConfirmTitle string `json:"confirm_title" binding:"required"`
+}
+
+type adminFeedSourceImpact struct {
+	Subscriptions    int64 `json:"subscriptions"`
+	Items            int64 `json:"items"`
+	ReadRecords      int64 `json:"read_records"`
+	StarredItems     int64 `json:"starred_items"`
+	ReadingListItems int64 `json:"reading_list_items"`
+}
+
+func requireFeedSourceOwner(c *gin.Context) (authctx.CurrentUser, bool) {
+	user, ok := authctx.Current(c)
+	if !ok || user.Role != authctx.RoleOwner {
+		c.JSON(http.StatusForbidden, gin.H{"error": "owner role is required"})
+		return authctx.CurrentUser{}, false
+	}
+	return user, true
+}
+
+func feedSourceImpact(db *gorm.DB, sourceID uuid.UUID) (adminFeedSourceImpact, error) {
+	impact := adminFeedSourceImpact{}
+	if err := db.Model(&model.Subscription{}).Where("feed_source_id = ?", sourceID).Count(&impact.Subscriptions).Error; err != nil {
+		return impact, err
+	}
+	if err := db.Model(&model.FeedItem{}).Where("feed_source_id = ?", sourceID).Count(&impact.Items).Error; err != nil {
+		return impact, err
+	}
+	itemQuery := db.Model(&model.FeedItem{}).Select("id").Where("feed_source_id = ?", sourceID)
+	if err := db.Model(&model.FeedItemRead{}).Where("feed_item_id IN (?)", itemQuery).Count(&impact.ReadRecords).Error; err != nil {
+		return impact, err
+	}
+	if err := db.Model(&model.FeedItemStar{}).Where("feed_item_id IN (?)", itemQuery).Count(&impact.StarredItems).Error; err != nil {
+		return impact, err
+	}
+	if err := db.Model(&model.ReadingListItem{}).Where("target_type = ? AND target_id IN (?)", "feed_item", itemQuery).Count(&impact.ReadingListItems).Error; err != nil {
+		return impact, err
+	}
+	return impact, nil
+}
+
 type adminFeedSourceInput struct {
 	RssURL string `json:"rss_url"`
 	Title  string `json:"title"`
+}
+
+// GetAdminFeedSourceImpact godoc
+// @Summary 预览订阅源永久删除影响
+// @Tags admin
+// @Produce json
+// @Param id path string true "订阅源 UUID"
+// @Success 200 {object} adminFeedSourceImpact
+// @Security BearerAuth
+// @Router /api/v1/admin/feed/sources/{id}/impact [get]
+func GetAdminFeedSourceImpact(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid source id"})
+			return
+		}
+		var source model.FeedSource
+		if err := db.First(&source, "id = ?", id).Error; err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "feed source not found"})
+			return
+		}
+		impact, err := feedSourceImpact(db, source.ID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load source impact"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"source": gin.H{"id": source.ID, "title": source.Title}, "impact": impact})
+	}
+}
+
+// GetAdminFeedSourceDiagnostics godoc
+// @Summary 获取订阅源诊断历史
+// @Description 返回最近 90 天的全文抓取失败和恢复记录。
+// @Tags admin
+// @Produce json
+// @Param id path string true "订阅源 UUID"
+// @Param page query int false "页码"
+// @Param limit query int false "每页数量"
+// @Success 200 {object} object
+// @Security BearerAuth
+// @Router /api/v1/admin/feed/sources/{id}/diagnostics [get]
+func GetAdminFeedSourceDiagnostics(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sourceID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid source id"})
+			return
+		}
+		page, limit := parseAdminListParams(c)
+		var total int64
+		query := db.Model(&model.FeedSourceDiagnostic{}).
+			Where("feed_source_id = ? AND created_at >= ?", sourceID, time.Now().UTC().Add(-90*24*time.Hour))
+		if err := query.Count(&total).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to count diagnostics"})
+			return
+		}
+		var diagnostics []model.FeedSourceDiagnostic
+		if err := query.Order("created_at DESC").Offset((page - 1) * limit).Limit(limit).Find(&diagnostics).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load diagnostics"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": diagnostics, "meta": gin.H{"page": page, "limit": limit, "total": total}})
+	}
 }
 
 func normalizeExternalRSSURL(db *gorm.DB, rawURL string) (string, error) {
@@ -161,21 +270,54 @@ func AdminUpdateFeedSourceRow(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload feed source"})
 			return
 		}
+		user, _ := authctx.Current(c)
+		if err := audit.Record(db, audit.Entry{
+			ActorID: &user.ID, Action: "feed_source.updated", EntityType: "feed_source", EntityID: &source.ID,
+			Metadata: map[string]any{"fields": updates},
+		}); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to audit feed source update"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"item": source})
 	}
 }
 
 func AdminDeleteFeedSourceRow(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := strings.TrimSpace(c.Param("id"))
-		if id == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "source id is required"})
+		owner, ok := requireFeedSourceOwner(c)
+		if !ok {
+			return
+		}
+		id, err := uuid.Parse(strings.TrimSpace(c.Param("id")))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid source id"})
+			return
+		}
+		var input adminFeedSourceDeleteInput
+		if err := c.ShouldBindJSON(&input); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "confirmation is required"})
 			return
 		}
 
-		if err := db.Transaction(func(tx *gorm.DB) error {
+		err = db.Transaction(func(tx *gorm.DB) error {
 			var source model.FeedSource
 			if err := tx.First(&source, "id = ?", id).Error; err != nil {
+				return err
+			}
+			if strings.TrimSpace(input.ConfirmTitle) != source.Title {
+				return fmt.Errorf("source title confirmation does not match")
+			}
+			impact, err := feedSourceImpact(tx, source.ID)
+			if err != nil {
+				return err
+			}
+			if impact.StarredItems > 0 || impact.ReadingListItems > 0 {
+				return fmt.Errorf("source has user saved items")
+			}
+			if err := audit.Record(tx, audit.Entry{
+				ActorID: &owner.ID, Action: "feed_source.deleted", EntityType: "feed_source", EntityID: &source.ID,
+				Metadata: map[string]any{"title": source.Title, "impact": impact},
+			}); err != nil {
 				return err
 			}
 			if err := tx.Where("feed_source_id = ?", source.ID).Delete(&model.Subscription{}).Error; err != nil {
@@ -189,26 +331,27 @@ func AdminDeleteFeedSourceRow(db *gorm.DB) gin.HandlerFunc {
 				if err := tx.Where("feed_item_id IN ?", itemIDs).Delete(&model.FeedItemRead{}).Error; err != nil {
 					return err
 				}
-				if err := tx.Where("feed_item_id IN ?", itemIDs).Delete(&model.FeedItemStar{}).Error; err != nil {
-					return err
-				}
-				if err := tx.Where("target_type = ? AND target_id IN ?", "feed_item", itemIDs).Delete(&model.ReadingListItem{}).Error; err != nil {
-					return err
-				}
+			}
+			if err := tx.Where("feed_source_id = ?", source.ID).Delete(&model.FeedSourceDiagnostic{}).Error; err != nil {
+				return err
 			}
 			if err := tx.Where("feed_source_id = ?", source.ID).Delete(&model.FeedItem{}).Error; err != nil {
 				return err
 			}
 			return tx.Delete(&source).Error
-		}); err != nil {
+		})
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "feed source not found"})
+				return
+			}
+			if strings.Contains(err.Error(), "confirmation") || strings.Contains(err.Error(), "saved items") {
+				c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 				return
 			}
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete feed source"})
 			return
 		}
-
 		c.JSON(http.StatusOK, gin.H{"message": "ok"})
 	}
 }

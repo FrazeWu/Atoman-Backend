@@ -43,6 +43,9 @@ func (s *Service) SyncSubscription(user authctx.CurrentUser, subscriptionID uuid
 	if err != nil {
 		return SubscriptionSyncResult{}, err
 	}
+	if subscription.IsPaused {
+		return SubscriptionSyncResult{}, apperr.BadRequest("feed.subscription_paused", "Paused subscriptions cannot be refreshed")
+	}
 	if subscription.FeedSource == nil || subscription.FeedSource.SourceType != "external_rss" {
 		return SubscriptionSyncResult{}, apperr.BadRequest("feed.subscription_not_external", "Only external RSS subscriptions can be refreshed")
 	}
@@ -64,25 +67,40 @@ func (s *Service) SyncAllSubscriptions(user authctx.CurrentUser) (SubscriptionSy
 
 	external := make([]model.Subscription, 0, len(subscriptions))
 	for _, subscription := range subscriptions {
+		if subscription.IsPaused {
+			continue
+		}
 		if subscription.FeedSource != nil && subscription.FeedSource.SourceType == "external_rss" {
 			external = append(external, subscription)
 		}
 	}
 
 	results := make([]SubscriptionSyncResult, len(external))
+	type syncOutcome struct {
+		index  int
+		result SubscriptionSyncResult
+	}
+	outcomes := make(chan syncOutcome, len(external))
 	const maxConcurrency = 4
 	semaphore := make(chan struct{}, maxConcurrency)
 	var wg sync.WaitGroup
-	for i := range external {
+	for index, subscription := range external {
 		wg.Add(1)
-		go func(index int) {
+		go func(index int, subscription model.Subscription) {
 			defer wg.Done()
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
-			results[index], _ = s.syncLoadedSubscription(external[index])
-		}(i)
+			result, _ := s.syncLoadedSubscription(subscription)
+			outcomes <- syncOutcome{index: index, result: result}
+		}(index, subscription)
 	}
-	wg.Wait()
+	go func() {
+		wg.Wait()
+		close(outcomes)
+	}()
+	for outcome := range outcomes {
+		results[outcome.index] = outcome.result
+	}
 
 	summary := SubscriptionSyncSummary{Total: len(results), Results: results}
 	for i := range results {
@@ -113,7 +131,7 @@ func (s *Service) HasExternalFeedUpdates(user authctx.CurrentUser, query FeedQue
 	}
 	sourceIDs := make([]uuid.UUID, 0, len(subscriptions))
 	for _, subscription := range subscriptions {
-		if query.SourceID == uuid.Nil && subscription.IsMuted {
+		if query.SourceID == uuid.Nil && (subscription.IsMuted || subscription.IsPaused) {
 			continue
 		}
 		if subscription.FeedSource != nil && subscription.FeedSource.SourceType == "external_rss" {

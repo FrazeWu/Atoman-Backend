@@ -103,7 +103,7 @@ func GetTimeline(db *gorm.DB) gin.HandlerFunc {
 		hideDuplicates := c.Query("hide_duplicates") == "true"
 
 		var userSubscriptions []model.Subscription
-		query := db.Where("subscriptions.user_id = ?", userID)
+		query := db.Where("subscriptions.user_id = ? AND subscriptions.is_paused = ?", userID, false)
 
 		if sourceType != "" {
 			query = query.Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
@@ -130,6 +130,7 @@ func GetTimeline(db *gorm.DB) gin.HandlerFunc {
 		var channelIDs []uuid.UUID
 		var collectionIDs []uuid.UUID
 		var feedSourceIDs []uuid.UUID
+		feedSourceVisibleAfter := make(map[uuid.UUID]*time.Time)
 
 		for _, sub := range userSubscriptions {
 			fs := sub.FeedSource
@@ -151,6 +152,7 @@ func GetTimeline(db *gorm.DB) gin.HandlerFunc {
 				}
 			case "external_rss":
 				feedSourceIDs = append(feedSourceIDs, fs.ID)
+				feedSourceVisibleAfter[fs.ID] = sub.ResumedAfter
 			}
 		}
 
@@ -201,6 +203,15 @@ func GetTimeline(db *gorm.DB) gin.HandlerFunc {
 				Order("feed_items.published_at DESC").
 				Find(&feedItems)
 			service.AnnotateDuplicateFeedItems(feedItems)
+			visibleFeedItems := feedItems[:0]
+			for _, item := range feedItems {
+				visibleAfter := feedSourceVisibleAfter[item.FeedSourceID]
+				if visibleAfter != nil && item.PublishedAt.Before(*visibleAfter) {
+					continue
+				}
+				visibleFeedItems = append(visibleFeedItems, item)
+			}
+			feedItems = visibleFeedItems
 		}
 
 		var readFeedItemIDs map[uuid.UUID]bool

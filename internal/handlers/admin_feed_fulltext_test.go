@@ -15,6 +15,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/service"
 	"atoman/internal/testdb"
 )
@@ -189,7 +190,7 @@ func TestAdminDeleteFeedSourceCleansDependentFeedItemTables(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newAdminFeedFullTextTestDB(t)
 
-	user := model.User{Username: "reader", Email: "reader@example.com", Password: "hashed"}
+	user := model.User{Username: "reader", Email: "reader@example.com", Password: "hashed", Role: authctx.RoleOwner}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -234,33 +235,28 @@ func TestAdminDeleteFeedSourceCleansDependentFeedItemTables(t *testing.T) {
 	}
 
 	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: user.UUID, Role: authctx.RoleOwner})
+	})
 	r.DELETE("/api/v1/admin/feed/sources/:id", AdminDeleteFeedSourceRow(db))
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/feed/sources/"+source.ID.String(), nil)
+	body := bytes.NewBufferString(`{"confirm_title":"Delete Cleanup"}`)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/admin/feed/sources/"+source.ID.String(), body)
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status=200 got=%d body=%s", w.Code, w.Body.String())
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected saved items to block deletion, got=%d body=%s", w.Code, w.Body.String())
 	}
 
-	assertTableEmpty := func(name string, value any) {
-		t.Helper()
-		var count int64
-		if err := db.Model(value).Count(&count).Error; err != nil {
-			t.Fatalf("count %s: %v", name, err)
-		}
-		if count != 0 {
-			t.Fatalf("expected %s to be empty, got %d", name, count)
-		}
+	var sourceCount int64
+	if err := db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Count(&sourceCount).Error; err != nil {
+		t.Fatalf("count source: %v", err)
 	}
-
-	assertTableEmpty("feed_sources", &model.FeedSource{})
-	assertTableEmpty("subscriptions", &model.Subscription{})
-	assertTableEmpty("feed_items", &model.FeedItem{})
-	assertTableEmpty("feed_item_reads", &model.FeedItemRead{})
-	assertTableEmpty("feed_item_stars", &model.FeedItemStar{})
-	assertTableEmpty("reading_list_items", &model.ReadingListItem{})
+	if sourceCount != 1 {
+		t.Fatal("expected blocked deletion to preserve the source")
+	}
 }
 
 func TestAdminListFeedSourcesRequiresAdmin(t *testing.T) {

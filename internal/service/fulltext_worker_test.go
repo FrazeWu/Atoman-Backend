@@ -27,7 +27,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func openFullTextWorkerTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{})
+	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{}, &model.FeedSourceDiagnostic{})
 	if err := migrations.RunFeedItemUniqueIndex(db); err != nil {
 		return nil, err
 	}

@@ -183,6 +183,7 @@ func createAutoSubscription(db *gorm.DB, userID uuid.UUID, target autoSubscripti
 			FeedSourceID:        source.ID,
 			Title:               firstNonBlank(title, target.Title, source.Title),
 			SubscriptionGroupID: &group.ID,
+			Position:            nextSubscriptionPosition(tx, userID, &group.ID),
 		}
 		if err := tx.Create(&subscription).Error; err != nil {
 			if isAutoSubscriptionDuplicateSubscriptionError(err) {

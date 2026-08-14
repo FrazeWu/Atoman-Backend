@@ -13,6 +13,10 @@ func TestAdminFeedHandlersAreSplitByResponsibility(t *testing.T) {
 	expected := map[string][]string{
 		"admin_feed_source_handler.go": {
 			"normalizeExternalRSSURL",
+			"requireFeedSourceOwner",
+			"feedSourceImpact",
+			"GetAdminFeedSourceImpact",
+			"GetAdminFeedSourceDiagnostics",
 			"AdminListFeedSources",
 			"AdminUpdateFeedSourceRow",
 			"AdminDeleteFeedSourceRow",

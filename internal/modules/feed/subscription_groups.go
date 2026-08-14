@@ -14,6 +14,12 @@ import (
 
 const defaultSubscriptionGroupName = "默认分组"
 
+func nextSubscriptionGroupPosition(db *gorm.DB, userID uuid.UUID) int {
+	var position int
+	db.Model(&model.SubscriptionGroup{}).Where("user_id = ?", userID).Select("COALESCE(MAX(position), -1)").Scan(&position)
+	return position + 1
+}
+
 func getOrCreateDefaultSubscriptionGroup(db *gorm.DB, userID uuid.UUID) (*model.SubscriptionGroup, error) {
 	var canonical model.SubscriptionGroup
 
@@ -98,7 +104,7 @@ func GetSubscriptionGroups(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var groups []model.SubscriptionGroup
-		if err := db.Where("user_id = ?", userID).Find(&groups).Error; err != nil {
+		if err := db.Where("user_id = ?", userID).Order("position ASC, created_at ASC").Find(&groups).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch groups"})
 			return
 		}
@@ -156,8 +162,9 @@ func CreateSubscriptionGroup(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		group := model.SubscriptionGroup{
-			UserID: userID,
-			Name:   name,
+			UserID:   userID,
+			Name:     name,
+			Position: nextSubscriptionGroupPosition(db, userID),
 		}
 
 		if err := db.Create(&group).Error; err != nil {

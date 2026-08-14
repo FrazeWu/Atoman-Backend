@@ -233,12 +233,15 @@ func markFullTextSuccess(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 	source.FullTextLastSuccessAt = &now
 	source.FullTextLastErrorCode = ""
 	source.FullTextLastError = ""
-	return db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(map[string]any{
+	if err := db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(map[string]any{
 		"full_text_success_count":   source.FullTextSuccessCount,
 		"full_text_last_success_at": source.FullTextLastSuccessAt,
 		"full_text_last_error_code": "",
 		"full_text_last_error":      "",
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	return recordFeedSourceDiagnostic(db, source.ID, &item.ID, "recovered", "", "full text fetch recovered", item.FullTextAttemptCount, &now)
 }
 
 func markFullTextFailure(db *gorm.DB, item *model.FeedItem, source *model.FeedSource, errorCode, errorMessage string, now time.Time) error {
@@ -270,13 +273,16 @@ func markFullTextFailure(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 		source.FullTextEnabled = false
 	}
 
-	return db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(map[string]any{
+	if err := db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(map[string]any{
 		"full_text_enabled":         source.FullTextEnabled,
 		"full_text_failure_count":   source.FullTextFailureCount,
 		"full_text_last_failure_at": source.FullTextLastFailureAt,
 		"full_text_last_error_code": source.FullTextLastErrorCode,
 		"full_text_last_error":      source.FullTextLastError,
-	}).Error
+	}).Error; err != nil {
+		return err
+	}
+	return recordFeedSourceDiagnostic(db, source.ID, &item.ID, "failure", errorCode, errorMessage, item.FullTextAttemptCount, nil)
 }
 
 func shouldAutoDisableFullTextSource(errorCode string, failureCount int) bool {

@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"atoman/internal/model"
-	"atoman/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -118,37 +117,59 @@ func importFeedSourceFromURL(db *gorm.DB, title, xmlURL string) (importedFeedSou
 	return importedFeedSourceResult{Source: feedSource, Imported: true}, nil
 }
 
-func importFeedFromURL(db *gorm.DB, userID uuid.UUID, title, xmlURL string) error {
-	defaultGroup, err := getOrCreateDefaultSubscriptionGroup(db, userID)
-	if err != nil {
-		return err
+type userOPMLImportResult struct {
+	Imported bool
+}
+
+func importFeedFromURL(db *gorm.DB, userID uuid.UUID, title, xmlURL string, groupID *uuid.UUID) (userOPMLImportResult, error) {
+	if groupID == nil {
+		defaultGroup, err := getOrCreateDefaultSubscriptionGroup(db, userID)
+		if err != nil {
+			return userOPMLImportResult{}, err
+		}
+		groupID = &defaultGroup.ID
 	}
 
 	result, err := importFeedSourceFromURL(db, title, xmlURL)
 	if err != nil {
-		return err
+		return userOPMLImportResult{}, err
 	}
 	feedSource := result.Source
 
 	var existingSub model.Subscription
 	if err := db.Where("user_id = ? AND feed_source_id = ?", userID, feedSource.ID).First(&existingSub).Error; err == nil {
-		return nil
+		return userOPMLImportResult{Imported: false}, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return userOPMLImportResult{}, err
 	}
 
 	subscription := model.Subscription{
 		UserID:              userID,
 		FeedSourceID:        feedSource.ID,
 		Title:               title,
-		SubscriptionGroupID: &defaultGroup.ID,
+		SubscriptionGroupID: groupID,
+		Position:            nextSubscriptionPosition(db, userID, groupID),
 	}
 
 	if err := db.Create(&subscription).Error; err != nil {
-		return err
+		return userOPMLImportResult{}, err
 	}
 	applySubscriptionRulesForSubscription(db, subscription)
 
-	go service.SyncSingleRSS(db, *feedSource)
-	return nil
+	syncFeedSource(db, *feedSource)
+	return userOPMLImportResult{Imported: true}, nil
+}
+
+func findOrCreateOPMLGroup(db *gorm.DB, userID uuid.UUID, name string) (*model.SubscriptionGroup, error) {
+	trimmedName := strings.TrimSpace(name)
+	if trimmedName == "" {
+		return nil, nil
+	}
+	group := model.SubscriptionGroup{UserID: userID, Name: trimmedName}
+	if err := db.Where("user_id = ? AND name = ?", userID, trimmedName).FirstOrCreate(&group).Error; err != nil {
+		return nil, err
+	}
+	return &group, nil
 }
 
 // ImportOPML godoc
@@ -194,25 +215,63 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		imported := 0
+		reused := 0
 		failed := 0
 		failedSources := []gin.H{}
 
-		walkOPMLOutlines(opml.Body.Outlines, func(outline OPMLOutline) {
-			if outline.XMLURL == "" {
-				return
+		var importOutlines func([]OPMLOutline, *uuid.UUID, string)
+		importOutlines = func(outlines []OPMLOutline, groupID *uuid.UUID, groupName string) {
+			for _, outline := range outlines {
+				currentGroupID := groupID
+				currentGroupName := groupName
+				if strings.TrimSpace(outline.XMLURL) == "" && len(outline.Outlines) > 0 {
+					candidateName := strings.TrimSpace(outline.Title)
+					if candidateName == "" {
+						candidateName = strings.TrimSpace(outline.Text)
+					}
+					group, groupErr := findOrCreateOPMLGroup(db, userID, candidateName)
+					if groupErr != nil {
+						failed += len(outline.Outlines)
+						for _, child := range outline.Outlines {
+							failedSources = append(failedSources, gin.H{
+								"url": child.XMLURL, "title": child.Title, "group": candidateName, "reason": groupErr.Error(),
+							})
+						}
+						continue
+					}
+					if group != nil {
+						currentGroupID = &group.ID
+						currentGroupName = group.Name
+					}
+				}
+
+				if strings.TrimSpace(outline.XMLURL) != "" {
+					title := strings.TrimSpace(outline.Title)
+					if title == "" {
+						title = strings.TrimSpace(outline.Text)
+					}
+					result, importErr := importFeedFromURL(db, userID, title, outline.XMLURL, currentGroupID)
+					if importErr != nil {
+						failed++
+						failedSources = append(failedSources, gin.H{
+							"url": outline.XMLURL, "title": title, "group": currentGroupName, "reason": importErr.Error(),
+						})
+					} else if result.Imported {
+						imported++
+					} else {
+						reused++
+					}
+				}
+
+				importOutlines(outline.Outlines, currentGroupID, currentGroupName)
 			}
-			if err := importFeedFromURL(db, userID, outline.Text, outline.XMLURL); err != nil {
-				failed++
-				failedSources = append(failedSources, gin.H{"url": outline.XMLURL, "reason": err.Error()})
-			} else {
-				imported++
-			}
-		})
+		}
+		importOutlines(opml.Body.Outlines, nil, "")
 
 		c.JSON(http.StatusOK, gin.H{
 			"message":        "OPML import completed",
 			"imported":       imported,
-			"reused":         0,
+			"reused":         reused,
 			"failed":         failed,
 			"failed_sources": failedSources,
 		})

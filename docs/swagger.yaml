@@ -29,6 +29,8 @@ definitions:
         type: string
       collection:
         $ref: '#/definitions/model.Collection'
+      collection_conflict:
+        type: boolean
       collection_id:
         type: string
       collection_position:
@@ -1020,6 +1022,32 @@ definitions:
       title:
         type: string
     type: object
+  feed.BatchSubscriptionDeleteInput:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
+    required:
+    - ids
+    type: object
+  feed.BatchSubscriptionUpdateInput:
+    properties:
+      auto_add_reading_list:
+        type: boolean
+      auto_mark_read:
+        type: boolean
+      group_id:
+        type: string
+      ids:
+        items:
+          type: string
+        type: array
+      is_muted:
+        type: boolean
+    required:
+    - ids
+    type: object
   feed.ErrorResponse:
     properties:
       error:
@@ -1156,11 +1184,30 @@ definitions:
         example: ok
         type: string
     type: object
+  feed.OPMLImportFailure:
+    properties:
+      group:
+        example: Research
+        type: string
+      reason:
+        example: feed unavailable
+        type: string
+      title:
+        example: Example Feed
+        type: string
+      url:
+        example: https://example.com/feed.xml
+        type: string
+    type: object
   feed.OPMLImportResponse:
     properties:
       failed:
         example: 1
         type: integer
+      failed_sources:
+        items:
+          $ref: '#/definitions/feed.OPMLImportFailure'
+        type: array
       imported:
         example: 12
         type: integer
@@ -1332,6 +1379,20 @@ definitions:
         example: ok
         type: string
     type: object
+  feed.SubscriptionOrderInput:
+    properties:
+      ids:
+        items:
+          type: string
+        type: array
+    required:
+    - ids
+    type: object
+  feed.SubscriptionPauseInput:
+    properties:
+      paused:
+        type: boolean
+    type: object
   feed.SubscriptionResponse:
     properties:
       data:
@@ -1440,6 +1501,8 @@ definitions:
         type: string
       collection:
         $ref: '#/definitions/model.Collection'
+      collection_conflict:
+        type: boolean
       collection_id:
         type: string
       collection_position:
@@ -3097,6 +3160,8 @@ definitions:
     properties:
       channel_id:
         type: string
+      collection_id:
+        type: string
       collection_ids:
         items:
           type: string
@@ -3165,6 +3230,19 @@ definitions:
       view_count:
         type: integer
     type: object
+  handlers.adminFeedSourceImpact:
+    properties:
+      items:
+        type: integer
+      read_records:
+        type: integer
+      reading_list_items:
+        type: integer
+      starred_items:
+        type: integer
+      subscriptions:
+        type: integer
+    type: object
   handlers.oauthVerifyEmailRequest:
     properties:
       code:
@@ -3196,6 +3274,13 @@ definitions:
       patch:
         additionalProperties: {}
         type: object
+    type: object
+  handlers.transferChannelOwnershipInput:
+    properties:
+      user_id:
+        type: string
+    required:
+    - user_id
     type: object
   handlers.uploadAssetResponse:
     properties:
@@ -3275,6 +3360,8 @@ definitions:
       release_date_precision:
         type: string
       release_year:
+        type: integer
+      song_count:
         type: integer
       songs:
         items:
@@ -3984,17 +4071,6 @@ definitions:
         type: integer
       solved_reply_id:
         type: string
-      state:
-        properties:
-          closed:
-            type: boolean
-          featured:
-            type: boolean
-          pinned:
-            type: boolean
-          solved:
-            type: boolean
-        type: object
       tags:
         items:
           type: string
@@ -4009,25 +4085,6 @@ definitions:
         type: string
       view_count:
         type: integer
-      permissions:
-        properties:
-          delete:
-            type: boolean
-          edit:
-            type: boolean
-          feature:
-            type: boolean
-          lock:
-            type: boolean
-          mark_answer:
-            type: boolean
-          pin:
-            type: boolean
-          reply:
-            type: boolean
-          report:
-            type: boolean
-        type: object
     type: object
   model.ForumUserModerationAction:
     properties:
@@ -4054,6 +4111,27 @@ definitions:
         type: string
       level:
         type: integer
+      user_id:
+        type: string
+    type: object
+  model.MediaAsset:
+    properties:
+      content_type:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      key:
+        type: string
+      purpose:
+        type: string
+      size:
+        type: integer
+      updated_at:
+        type: string
+      url:
+        type: string
       user_id:
         type: string
     type: object
@@ -4224,6 +4302,8 @@ definitions:
         type: string
       collection:
         $ref: '#/definitions/model.Collection'
+      collection_conflict:
+        type: boolean
       collection_id:
         type: string
       collection_position:
@@ -4491,7 +4571,13 @@ definitions:
         type: string
       is_muted:
         type: boolean
+      is_paused:
+        type: boolean
       last_checked:
+        type: string
+      position:
+        type: integer
+      resumed_after:
         type: string
       subscription:
         $ref: '#/definitions/model.SubscriptionGroup'
@@ -4514,6 +4600,8 @@ definitions:
         type: string
       name:
         type: string
+      position:
+        type: integer
       updated_at:
         type: string
       user_id:
@@ -4674,6 +4762,14 @@ definitions:
         $ref: '#/definitions/model.Channel'
       channel_id:
         type: string
+      collection:
+        $ref: '#/definitions/model.Collection'
+      collection_conflict:
+        type: boolean
+      collection_id:
+        type: string
+      collection_position:
+        type: integer
       collections:
         items:
           $ref: '#/definitions/model.Collection'
@@ -5262,6 +5358,15 @@ definitions:
       start_offset:
         type: integer
     type: object
+  music.CreateMusicAssetUploadInput:
+    properties:
+      content_type:
+        type: string
+      file_name:
+        type: string
+      size:
+        type: integer
+    type: object
   music.CreatePlaylistBookmarkRequest:
     properties:
       playlist_id:
@@ -5384,6 +5489,8 @@ definitions:
         type: string
       release_year:
         type: integer
+      song_count:
+        type: integer
       songs:
         items:
           $ref: '#/definitions/model.Song'
@@ -5460,6 +5567,45 @@ definitions:
         type: string
     required:
     - vote
+    type: object
+  music.MusicAssetUploadPart:
+    properties:
+      etag:
+        type: string
+      part_number:
+        type: integer
+      size:
+        type: integer
+    type: object
+  music.MusicAssetUploadPartURL:
+    properties:
+      part_number:
+        type: integer
+      upload_url:
+        type: string
+    type: object
+  music.MusicAssetUploadSessionDTO:
+    properties:
+      asset:
+        $ref: '#/definitions/model.MediaAsset'
+      completed_parts:
+        items:
+          $ref: '#/definitions/music.MusicAssetUploadPart'
+        type: array
+      content_type:
+        type: string
+      expires_at:
+        type: string
+      file_name:
+        type: string
+      id:
+        type: string
+      part_size:
+        type: integer
+      size:
+        type: integer
+      status:
+        type: string
     type: object
   music.MusicHomeSection:
     properties:
@@ -5840,6 +5986,7 @@ definitions:
         type: integer
       totals:
         additionalProperties:
+          format: int64
           type: integer
         type: object
     type: object
@@ -5946,6 +6093,7 @@ definitions:
     properties:
       items:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       total:
@@ -6257,6 +6405,7 @@ definitions:
         type: string
       metrics:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       title:
@@ -6268,6 +6417,7 @@ definitions:
         type: string
       metrics:
         additionalProperties:
+          format: int64
           type: integer
         type: object
     type: object
@@ -6291,6 +6441,7 @@ definitions:
         type: array
       totals:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       trend:
@@ -6373,6 +6524,7 @@ definitions:
         type: array
       metrics:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       module:
@@ -6459,6 +6611,10 @@ definitions:
     properties:
       channel_id:
         type: string
+      collection:
+        $ref: '#/definitions/studio.StudioCollectionSummary'
+      collection_conflict:
+        type: boolean
       collections:
         items:
           $ref: '#/definitions/studio.StudioCollectionSummary'
@@ -6473,6 +6629,7 @@ definitions:
         type: string
       metrics:
         additionalProperties:
+          format: int64
           type: integer
         type: object
       module:
@@ -6480,6 +6637,8 @@ definitions:
       processing_status:
         type: string
       published_at:
+        type: string
+      scheduled_at:
         type: string
       status:
         type: string
@@ -6561,6 +6720,18 @@ definitions:
       name:
         type: string
     type: object
+  studio.reorderCollectionContentsInput:
+    properties:
+      content_ids:
+        items:
+          type: string
+        type: array
+    type: object
+  studio.resolveCollectionConflictInput:
+    properties:
+      collection_id:
+        type: string
+    type: object
 info:
   contact: {}
   description: Atoman 后端 API 文档。
@@ -6605,6 +6776,58 @@ paths:
       summary: 合并艺人
       tags:
       - music-artists
+  /api/v1/admin/channels/{id}/owner:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 频道 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 新所有者
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.transferChannelOwnershipInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.Channel'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 转移频道所有权
+      tags:
+      - admin-users
   /api/v1/admin/comment-reports:
     get:
       parameters:
@@ -6782,6 +7005,55 @@ paths:
       summary: Review DM report
       tags:
       - dm-admin
+  /api/v1/admin/feed/sources/{id}/diagnostics:
+    get:
+      description: 返回最近 90 天的全文抓取失败和恢复记录。
+      parameters:
+      - description: 订阅源 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+      security:
+      - BearerAuth: []
+      summary: 获取订阅源诊断历史
+      tags:
+      - admin
+  /api/v1/admin/feed/sources/{id}/impact:
+    get:
+      parameters:
+      - description: 订阅源 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.adminFeedSourceImpact'
+      security:
+      - BearerAuth: []
+      summary: 预览订阅源永久删除影响
+      tags:
+      - admin
   /api/v1/admin/music/entries:
     get:
       description: 管理员按类型和状态筛选音乐 wiki 条目。
@@ -9199,7 +9471,7 @@ paths:
       - blog
   /api/v1/blog/posts/{id}:
     get:
-      description: 返回指定文章；若文章为草稿，则仅作者本人可查看。
+      description: 返回指定文章；未发布文章（草稿或定时发布）仅作者本人可查看。
       parameters:
       - description: 文章 UUID
         in: path
@@ -11137,6 +11409,59 @@ paths:
       summary: 更新订阅分组
       tags:
       - feed
+  /api/v1/feed/groups/{id}/subscriptions/order:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 分组 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 完整订阅 ID 顺序
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/feed.SubscriptionOrderInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.MessageResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 重排分组内订阅源
+      tags:
+      - feed
+  /api/v1/feed/groups/order:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 完整分组 ID 顺序
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/feed.SubscriptionOrderInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.MessageResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 重排订阅分组
+      tags:
+      - feed
   /api/v1/feed/items/{id}:
     get:
       description: 返回单个 feed item 详情。
@@ -11929,6 +12254,40 @@ paths:
       summary: 标记订阅源全部未读
       tags:
       - feed
+  /api/v1/feed/subscriptions/{id}/pause:
+    put:
+      consumes:
+      - application/json
+      description: 暂停仅影响当前用户的时间线与手动刷新，恢复后不补回暂停期间内容。
+      parameters:
+      - description: 订阅 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 暂停状态
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/feed.SubscriptionPauseInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.SubscriptionResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 暂停或恢复订阅
+      tags:
+      - feed
   /api/v1/feed/subscriptions/{id}/sync:
     post:
       description: 立即抓取当前用户指定的外部 RSS 订阅源并返回新增条目数。
@@ -11998,6 +12357,72 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 自动添加订阅
+      tags:
+      - feed
+  /api/v1/feed/subscriptions/batch-delete:
+    post:
+      consumes:
+      - application/json
+      description: 批量删除当前用户订阅；任一订阅无效时整体失败。
+      parameters:
+      - description: 批量删除参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/feed.BatchSubscriptionDeleteInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 批量取消订阅
+      tags:
+      - feed
+  /api/v1/feed/subscriptions/batch-update:
+    put:
+      consumes:
+      - application/json
+      description: 批量更新当前用户订阅的分组与处理策略；任一订阅无效时整体失败。
+      parameters:
+      - description: 批量更新参数
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/feed.BatchSubscriptionUpdateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 批量更新订阅
       tags:
       - feed
   /api/v1/feed/subscriptions/health/check-all:
@@ -13403,6 +13828,10 @@ paths:
         in: query
         name: page_size
         type: integer
+      - description: 仅 sort=-created_at 可用；传 cursor= 启动游标分页
+        in: query
+        name: cursor
+        type: string
       produces:
       - application/json
       responses:
@@ -13540,6 +13969,47 @@ paths:
       summary: 创建艺术家
       tags:
       - music
+  /api/v1/music/bookmarks/albums:
+    get:
+      parameters:
+      - description: 排序方式；游标仅支持 latest
+        in: query
+        name: sort
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      - description: 仅 sort=latest 可用；传 cursor= 启动游标分页
+        in: query
+        name: cursor
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取当前用户收藏的专辑
+      tags:
+      - music-bookmarks
   /api/v1/music/bookmarks/playlists:
     get:
       produces:
@@ -15158,6 +15628,168 @@ paths:
       summary: 恢复歌词历史版本
       tags:
       - music-lyrics
+  /api/v1/music/uploads:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 音频文件信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.CreateMusicAssetUploadInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/music.MusicAssetUploadSessionDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 创建可恢复的音乐音频上传
+      tags:
+      - music-uploads
+  /api/v1/music/uploads/{uploadId}:
+    delete:
+      parameters:
+      - description: 上传会话 UUID
+        in: path
+        name: uploadId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 取消可恢复音乐音频上传
+      tags:
+      - music-uploads
+    get:
+      parameters:
+      - description: 上传会话 UUID
+        in: path
+        name: uploadId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicAssetUploadSessionDTO'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取可恢复音乐音频上传状态
+      tags:
+      - music-uploads
+  /api/v1/music/uploads/{uploadId}/complete:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 上传会话 UUID
+        in: path
+        name: uploadId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/model.MediaAsset'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 完成可恢复音乐音频上传
+      tags:
+      - music-uploads
+  /api/v1/music/uploads/{uploadId}/parts/{partNumber}:
+    post:
+      parameters:
+      - description: 上传会话 UUID
+        in: path
+        name: uploadId
+        required: true
+        type: string
+      - description: 分片序号
+        in: path
+        name: partNumber
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicAssetUploadPartURL'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取音乐音频分片上传地址
+      tags:
+      - music-uploads
+  /api/v1/music/uploads/{uploadId}/parts/{partNumber}/complete:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 上传会话 UUID
+        in: path
+        name: uploadId
+        required: true
+        type: string
+      - description: 分片序号
+        in: path
+        name: partNumber
+        required: true
+        type: integer
+      - description: 分片 ETag 与大小
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.MusicAssetUploadPart'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.MusicAssetUploadSessionDTO'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 记录音乐音频分片上传结果
+      tags:
+      - music-uploads
   /api/v1/notifications:
     get:
       description: type 为精确类型筛选且优先于 category；category 可为 like、interaction、mention、reply、collaboration
@@ -16511,6 +17143,61 @@ paths:
       summary: 更新模块合集
       tags:
       - studio
+  /api/v1/studio/{module}/collections/{id}/contents/order:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 完整内容顺序
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.reorderCollectionContentsInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 调整合集内容顺序
+      tags:
+      - studio
   /api/v1/studio/{module}/contents:
     get:
       parameters:
@@ -16575,6 +17262,65 @@ paths:
       security:
       - BearerAuth: []
       summary: 获取创作内容
+      tags:
+      - studio
+  /api/v1/studio/{module}/contents/{id}/collection:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 内容 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 确认的候选合集
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.resolveCollectionConflictInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 确认历史内容合集归属
       tags:
       - studio
   /api/v1/studio/{module}/contents/{id}/share:
@@ -18888,48 +19634,3 @@ securityDefinitions:
     name: atoman_session
     type: apiKey
 swagger: "2.0"
-      - description: 仅 sort=-created_at 可用；传 cursor= 启动游标分页
-        in: query
-        name: cursor
-        type: string
-  /api/v1/music/bookmarks/albums:
-    get:
-      parameters:
-      - description: 排序方式；游标仅支持 latest
-        in: query
-        name: sort
-        type: string
-      - description: 页码
-        in: query
-        name: page
-        type: integer
-      - description: 每页数量
-        in: query
-        name: page_size
-        type: integer
-      - description: 仅 sort=latest 可用；传 cursor= 启动游标分页
-        in: query
-        name: cursor
-        type: string
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            additionalProperties: true
-            type: object
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      security:
-      - BearerAuth: []
-      - CookieAuth: []
-      summary: 获取当前用户收藏的专辑
-      tags:
-      - music-bookmarks

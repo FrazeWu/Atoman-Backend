@@ -20,6 +20,7 @@ type adminFeedFullTextSourceRow struct {
 	Title           string     `json:"title"`
 	RssURL          string     `json:"rss_url"`
 	FullTextEnabled bool       `json:"full_text_enabled"`
+	Hidden          bool       `json:"hidden"`
 	SuccessCount    int64      `json:"success_count"`
 	RetryCount      int64      `json:"retry_count"`
 	FailedCount     int64      `json:"failed_count"`
@@ -179,6 +180,7 @@ func GetAdminFeedFullTextSources(db *gorm.DB) gin.HandlerFunc {
 		q := strings.TrimSpace(c.Query("q"))
 		enabled := strings.TrimSpace(c.Query("enabled"))
 		status := strings.TrimSpace(c.Query("status"))
+		hidden := strings.TrimSpace(c.Query("hidden"))
 		sortKey := strings.TrimSpace(c.DefaultQuery("sort", "title"))
 
 		query := adminFullTextBlogSourceQuery(db)
@@ -190,6 +192,11 @@ func GetAdminFeedFullTextSources(db *gorm.DB) gin.HandlerFunc {
 			query = query.Where("full_text_enabled = ?", true)
 		} else if enabled == "false" {
 			query = query.Where("full_text_enabled = ?", false)
+		}
+		if hidden == "true" {
+			query = query.Where("hidden = ?", true)
+		} else if hidden == "false" {
+			query = query.Where("hidden = ?", false)
 		}
 
 		var sources []model.FeedSource
@@ -219,6 +226,7 @@ func GetAdminFeedFullTextSources(db *gorm.DB) gin.HandlerFunc {
 				Title:           source.Title,
 				RssURL:          source.RssURL,
 				FullTextEnabled: source.FullTextEnabled,
+				Hidden:          source.Hidden,
 				SuccessCount:    successCount,
 				RetryCount:      retryCount,
 				FailedCount:     failedCount,

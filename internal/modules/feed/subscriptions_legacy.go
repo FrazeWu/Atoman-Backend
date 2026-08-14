@@ -100,6 +100,7 @@ func CreateSubscription(db *gorm.DB) gin.HandlerFunc {
 			FeedSourceID:        source.ID,
 			Title:               input.Title,
 			SubscriptionGroupID: subscriptionGroupID,
+			Position:            nextSubscriptionPosition(db, userID, subscriptionGroupID),
 		}
 
 		result := db.Clauses(clause.OnConflict{
@@ -291,7 +292,7 @@ func GetSubscriptions(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var subscriptions []model.Subscription
-		if err := db.Preload("FeedSource").Preload("SubscriptionGroup").Where("user_id = ?", userID).Find(&subscriptions).Error; err != nil {
+		if err := db.Preload("FeedSource").Preload("SubscriptionGroup").Where("user_id = ?", userID).Order("subscription_group_id ASC, position ASC, created_at ASC").Find(&subscriptions).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch subscriptions"})
 			return
 		}

@@ -55,6 +55,7 @@ func Run(db *gorm.DB) error {
 		{"feed recommendation indexes migration", migrations.RunFeedRecommendationIndexes},
 		{"forum draft unique index migration", migrations.RunForumDraftUniqueIndex},
 		{"forum search indexes migration", migrations.RunForumSearchIndexes},
+		{"blog search indexes migration", migrations.RunBlogSearchIndexes},
 		{"revision unique indexes migration", migrations.RunRevisionUniqueIndexes},
 		{"music album import v2 migration", migrations.RunMusicAlbumImportV2Migration},
 		{"music album import media migration", migrations.RunMusicAlbumImportMediaMigration},
@@ -73,6 +74,7 @@ func Run(db *gorm.DB) error {
 		{"music revision baselines migration", runMusicRevisionBaselinesMigration},
 		{"unified studio migration", migrations.RunUnifiedStudioMigration},
 		{"user default resources migration", backfillUserDefaultResources},
+		{"resource management migration", migrations.RunResourceManagementMigration},
 	}
 	for _, step := range postSchemaSteps {
 		if err := step.run(db); err != nil {
@@ -219,6 +221,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.Bookmark{}, &model.BookmarkFolder{}, &model.ChannelBookmark{}, &model.SiteSetting{},
 		&model.FeedSource{}, &model.OnboardingFeedRecommendation{}, &model.Subscription{},
 		&model.FeedSubscriptionRule{}, &model.FeedPreference{}, &model.SubscriptionGroup{}, &model.FeedItem{},
+		&model.FeedSourceDiagnostic{},
 		&model.FeedItemRead{}, &model.FeedStarGroup{}, &model.FeedItemStar{}, &model.ReadingListItem{},
 		&model.SourceReadEvent{}, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{}, &model.Revision{}, &model.EditConflict{},
 		&model.ContentProtection{}, &model.ForumCategory{}, &model.ForumTopic{}, &model.ForumLike{},
@@ -252,6 +255,7 @@ func MigrateSchema(db *gorm.DB) error {
 		{"content publication event index migration", migrations.RunContentPublicationEventIndexes},
 		{"dm v2 migration", migrations.RunDMV2Migration},
 		{"content references migration", migrations.RunContentReferencesMigration},
+		{"feed subscription management migration", migrations.RunFeedSubscriptionManagementMigration},
 	}
 	for _, step := range steps {
 		if err := step.run(db); err != nil {

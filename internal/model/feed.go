@@ -85,7 +85,7 @@ type Channel struct {
 	Base
 	UserID      *uuid.UUID `json:"user_id,omitempty" gorm:"type:uuid;index"`
 	User        *User      `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	Name        string     `json:"name" gorm:"not null;uniqueIndex:idx_channels_name"`
+	Name        string     `json:"name" gorm:"not null"`
 	Slug        string     `json:"slug" gorm:"uniqueIndex"`
 	Description string     `json:"description" gorm:"type:text"`
 	CoverURL    string     `json:"cover_url" gorm:"type:text"`
@@ -98,11 +98,11 @@ func (Channel) TableName() string { return "channels" }
 
 type Collection struct {
 	Base
-	ChannelID   uuid.UUID  `json:"channel_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_collection_channel_type_name,priority:1"`
+	ChannelID   uuid.UUID  `json:"channel_id" gorm:"type:uuid;not null;index"`
 	Channel     *Channel   `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
-	ContentType string     `json:"content_type" gorm:"type:varchar(16);not null;default:'blog';index;uniqueIndex:idx_collection_channel_type_name,priority:2"`
+	ContentType string     `json:"content_type" gorm:"type:varchar(16);not null;default:'blog';index"`
 	CreatedBy   *uuid.UUID `json:"created_by,omitempty" gorm:"type:uuid;index"`
-	Name        string     `json:"name" gorm:"not null;uniqueIndex:idx_collection_channel_type_name,priority:3"`
+	Name        string     `json:"name" gorm:"not null"`
 	Description string     `json:"description" gorm:"type:text"`
 	CoverURL    string     `json:"cover_url" gorm:"type:text"`
 	IsDefault   bool       `json:"is_default" gorm:"default:false;index"`
@@ -120,6 +120,7 @@ type Post struct {
 	Collection         *Collection  `json:"collection,omitempty" gorm:"foreignKey:CollectionID"`
 	Collections        []Collection `json:"collections,omitempty" gorm:"many2many:post_collections;"`
 	CollectionPosition int          `json:"collection_position" gorm:"not null;default:0"`
+	CollectionConflict bool         `json:"collection_conflict" gorm:"not null;default:false;index"`
 	Title              string       `json:"title" gorm:"not null"`
 	Content            string       `json:"content" gorm:"type:text;not null"`
 	Summary            string       `json:"summary" gorm:"type:text"`
@@ -259,6 +260,9 @@ type Subscription struct {
 	IsMuted             bool               `json:"is_muted" gorm:"not null;default:false"`
 	AutoMarkRead        bool               `json:"auto_mark_read" gorm:"not null;default:false"`
 	AutoAddReadingList  bool               `json:"auto_add_reading_list" gorm:"not null;default:false"`
+	IsPaused            bool               `json:"is_paused" gorm:"not null;default:false;index"`
+	ResumedAfter        *time.Time         `json:"resumed_after,omitempty" gorm:"index"`
+	Position            int                `json:"position" gorm:"not null;default:0;index"`
 }
 
 func (Subscription) TableName() string { return "subscriptions" }
@@ -367,10 +371,24 @@ type SourceReadEvent struct {
 
 func (SourceReadEvent) TableName() string { return "source_read_events" }
 
+type FeedSourceDiagnostic struct {
+	Base
+	FeedSourceID uuid.UUID  `json:"feed_source_id" gorm:"type:uuid;not null;index:idx_feed_source_diagnostics_source_created,priority:1"`
+	FeedItemID   *uuid.UUID `json:"feed_item_id,omitempty" gorm:"type:uuid;index"`
+	Kind         string     `json:"kind" gorm:"type:varchar(32);not null;index"`
+	ErrorCode    string     `json:"error_code" gorm:"type:varchar(64);index"`
+	Message      string     `json:"message" gorm:"type:text"`
+	AttemptCount int        `json:"attempt_count" gorm:"not null;default:0"`
+	RecoveredAt  *time.Time `json:"recovered_at,omitempty"`
+}
+
+func (FeedSourceDiagnostic) TableName() string { return "feed_source_diagnostics" }
+
 type SubscriptionGroup struct {
 	Base
-	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null;uniqueIndex:idx_subscription_groups_user_name,priority:1,where:deleted_at IS NULL"`
-	Name   string    `json:"name" gorm:"not null;uniqueIndex:idx_subscription_groups_user_name,priority:2,where:deleted_at IS NULL"`
+	UserID   uuid.UUID `json:"user_id" gorm:"type:uuid;not null;uniqueIndex:idx_subscription_groups_user_name,priority:1,where:deleted_at IS NULL"`
+	Name     string    `json:"name" gorm:"not null;uniqueIndex:idx_subscription_groups_user_name,priority:2,where:deleted_at IS NULL"`
+	Position int       `json:"position" gorm:"not null;default:0;index"`
 }
 
 func (SubscriptionGroup) TableName() string { return "subscription_groups" }

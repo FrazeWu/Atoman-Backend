@@ -63,7 +63,13 @@ func BatchSubscribeFeedSources(db *gorm.DB) gin.HandlerFunc {
 				missingIDs = append(missingIDs, sourceID)
 				continue
 			}
-			sub := model.Subscription{UserID: userID, FeedSourceID: source.ID, Title: source.Title, SubscriptionGroupID: &group.ID}
+			sub := model.Subscription{
+				UserID:              userID,
+				FeedSourceID:        source.ID,
+				Title:               source.Title,
+				SubscriptionGroupID: &group.ID,
+				Position:            nextSubscriptionPosition(db, userID, &group.ID),
+			}
 			result := db.Where("user_id = ? AND feed_source_id = ?", userID, source.ID).FirstOrCreate(&sub)
 			if result.Error == nil && result.RowsAffected > 0 {
 				created++

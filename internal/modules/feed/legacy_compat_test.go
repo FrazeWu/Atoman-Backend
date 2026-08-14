@@ -834,6 +834,100 @@ func TestImportOPMLStillCreatesUserSubscriptions(t *testing.T) {
 	}
 }
 
+func TestImportOPMLPreservesGroupsAndCountsReusedSubscriptions(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/opml/import", withFeedAuth(user.UUID, ImportOPML(db)))
+
+	opml := `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><body><outline text="Engineering">
+  <outline text="Grouped Feed" type="rss" xmlUrl="https://example.com/grouped.xml" />
+</outline></body></opml>`
+
+	importOnce := func() struct {
+		Imported int `json:"imported"`
+		Reused   int `json:"reused"`
+		Failed   int `json:"failed"`
+	} {
+		req := newOPMLUploadRequest(t, "/api/v1/feed/opml/import", opml)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var payload struct {
+			Imported int `json:"imported"`
+			Reused   int `json:"reused"`
+			Failed   int `json:"failed"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return payload
+	}
+
+	first := importOnce()
+	if first.Imported != 1 || first.Reused != 0 || first.Failed != 0 {
+		t.Fatalf("unexpected first import counts: %#v", first)
+	}
+	var subscription model.Subscription
+	if err := db.Preload("SubscriptionGroup").Where("user_id = ?", user.UUID).First(&subscription).Error; err != nil {
+		t.Fatalf("load imported subscription: %v", err)
+	}
+	if subscription.SubscriptionGroup == nil || subscription.SubscriptionGroup.Name != "Engineering" {
+		t.Fatalf("expected imported subscription in Engineering group: %#v", subscription.SubscriptionGroup)
+	}
+
+	second := importOnce()
+	if second.Imported != 0 || second.Reused != 1 || second.Failed != 0 {
+		t.Fatalf("unexpected repeated import counts: %#v", second)
+	}
+}
+
+func TestImportOPMLFailureIncludesRetryContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	disableFeedSourceSync(t)
+	user := seedFeedTestUser(t, db)
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.POST("/opml/import", withFeedAuth(user.UUID, ImportOPML(db)))
+
+	opml := `<?xml version="1.0"?><opml version="2.0"><body><outline text="Broken">
+	<outline text="Bad Feed" type="rss" xmlUrl="file:///etc/passwd" />
+</outline></body></opml>`
+	req := newOPMLUploadRequest(t, "/api/v1/feed/opml/import", opml)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		Failed        int `json:"failed"`
+		FailedSources []struct {
+			URL   string `json:"url"`
+			Title string `json:"title"`
+			Group string `json:"group"`
+		} `json:"failed_sources"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.Failed != 1 || len(payload.FailedSources) != 1 {
+		t.Fatalf("unexpected failure response: %#v", payload)
+	}
+	failure := payload.FailedSources[0]
+	if failure.URL != "file:///etc/passwd" || failure.Title != "Bad Feed" || failure.Group != "Broken" {
+		t.Fatalf("missing OPML retry context: %#v", failure)
+	}
+}
+
 func TestSubscribeChannelAcceptsExternalFeedSourceID(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newFeedHandlerTestDB(t)

@@ -76,6 +76,87 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/admin/channels/{id}/owner": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin-users"
+                ],
+                "summary": "转移频道所有权",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "新所有者",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.transferChannelOwnershipInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.Channel"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/admin/comment-reports": {
             "get": {
                 "security": [
@@ -352,6 +433,85 @@ const docTemplate = `{
                         "description": "Forbidden",
                         "schema": {
                             "$ref": "#/definitions/dm.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/sources/{id}/diagnostics": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "返回最近 90 天的全文抓取失败和恢复记录。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "获取订阅源诊断历史",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订阅源 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/admin/feed/sources/{id}/impact": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "admin"
+                ],
+                "summary": "预览订阅源永久删除影响",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订阅源 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.adminFeedSourceImpact"
                         }
                     }
                 }
@@ -4191,7 +4351,7 @@ const docTemplate = `{
         },
         "/api/v1/blog/posts/{id}": {
             "get": {
-                "description": "返回指定文章；若文章为草稿，则仅作者本人可查看。",
+                "description": "返回指定文章；未发布文章（草稿或定时发布）仅作者本人可查看。",
                 "produces": [
                     "application/json"
                 ],
@@ -7083,6 +7243,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/groups/order": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "重排订阅分组",
+                "parameters": [
+                    {
+                        "description": "完整分组 ID 顺序",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionOrderInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.MessageResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/feed/groups/{id}": {
             "put": {
                 "security": [
@@ -7198,6 +7399,54 @@ const docTemplate = `{
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/groups/{id}/subscriptions/order": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "重排分组内订阅源",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "分组 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "完整订阅 ID 顺序",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionOrderInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.MessageResponse"
                         }
                     }
                 }
@@ -8208,6 +8457,114 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/subscriptions/batch-delete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "批量删除当前用户订阅；任一订阅无效时整体失败。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "批量取消订阅",
+                "parameters": [
+                    {
+                        "description": "批量删除参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.BatchSubscriptionDeleteInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/subscriptions/batch-update": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "批量更新当前用户订阅的分组与处理策略；任一订阅无效时整体失败。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "批量更新订阅",
+                "parameters": [
+                    {
+                        "description": "批量更新参数",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.BatchSubscriptionUpdateInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/feed/subscriptions/health/check-all": {
             "post": {
                 "security": [
@@ -8707,6 +9064,61 @@ const docTemplate = `{
                         "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/subscriptions/{id}/pause": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "暂停仅影响当前用户的时间线与手动刷新，恢复后不补回暂停期间内容。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "暂停或恢复订阅",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订阅 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "暂停状态",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionPauseInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionResponse"
                         }
                     },
                     "404": {
@@ -10844,6 +11256,12 @@ const docTemplate = `{
                         "description": "每页数量",
                         "name": "page_size",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "仅 sort=-created_at 可用；传 cursor= 启动游标分页",
+                        "name": "cursor",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -11041,6 +11459,72 @@ const docTemplate = `{
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/model.Artist"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/bookmarks/albums": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-bookmarks"
+                ],
+                "summary": "获取当前用户收藏的专辑",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "排序方式；游标仅支持 latest",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "仅 sort=latest 可用；传 cursor= 启动游标分页",
+                        "name": "cursor",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     },
                     "400": {
@@ -13626,6 +14110,275 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/uploads": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-uploads"
+                ],
+                "summary": "创建可恢复的音乐音频上传",
+                "parameters": [
+                    {
+                        "description": "音频文件信息",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.CreateMusicAssetUploadInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicAssetUploadSessionDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/uploads/{uploadId}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-uploads"
+                ],
+                "summary": "获取可恢复音乐音频上传状态",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "上传会话 UUID",
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicAssetUploadSessionDTO"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-uploads"
+                ],
+                "summary": "取消可恢复音乐音频上传",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "上传会话 UUID",
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/uploads/{uploadId}/complete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-uploads"
+                ],
+                "summary": "完成可恢复音乐音频上传",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "上传会话 UUID",
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/model.MediaAsset"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/uploads/{uploadId}/parts/{partNumber}": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-uploads"
+                ],
+                "summary": "获取音乐音频分片上传地址",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "上传会话 UUID",
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "分片序号",
+                        "name": "partNumber",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicAssetUploadPartURL"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/uploads/{uploadId}/parts/{partNumber}/complete": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music-uploads"
+                ],
+                "summary": "记录音乐音频分片上传结果",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "上传会话 UUID",
+                        "name": "uploadId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "分片序号",
+                        "name": "partNumber",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "分片 ETag 与大小",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicAssetUploadPart"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicAssetUploadSessionDTO"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/notifications": {
             "get": {
                 "security": [
@@ -16080,6 +16833,90 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/studio/{module}/collections/{id}/contents/order": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio"
+                ],
+                "summary": "调整合集内容顺序",
+                "parameters": [
+                    {
+                        "enum": [
+                            "blog",
+                            "podcast",
+                            "video"
+                        ],
+                        "type": "string",
+                        "description": "内容模块",
+                        "name": "module",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "合集 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "完整内容顺序",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.reorderCollectionContentsInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/studio/{module}/contents": {
             "get": {
                 "security": [
@@ -16174,6 +17011,96 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/studio/{module}/contents/{id}/collection": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio"
+                ],
+                "summary": "确认历史内容合集归属",
+                "parameters": [
+                    {
+                        "enum": [
+                            "blog",
+                            "podcast",
+                            "video"
+                        ],
+                        "type": "string",
+                        "description": "内容模块",
+                        "name": "module",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "内容 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "确认的候选合集",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.resolveCollectionConflictInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -19538,6 +20465,9 @@ const docTemplate = `{
                 "collection": {
                     "$ref": "#/definitions/model.Collection"
                 },
+                "collection_conflict": {
+                    "type": "boolean"
+                },
                 "collection_id": {
                     "type": "string"
                 },
@@ -21063,6 +21993,46 @@ const docTemplate = `{
                 }
             }
         },
+        "feed.BatchSubscriptionDeleteInput": {
+            "type": "object",
+            "required": [
+                "ids"
+            ],
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "feed.BatchSubscriptionUpdateInput": {
+            "type": "object",
+            "required": [
+                "ids"
+            ],
+            "properties": {
+                "auto_add_reading_list": {
+                    "type": "boolean"
+                },
+                "auto_mark_read": {
+                    "type": "boolean"
+                },
+                "group_id": {
+                    "type": "string"
+                },
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "is_muted": {
+                    "type": "boolean"
+                }
+            }
+        },
         "feed.ErrorResponse": {
             "type": "object",
             "properties": {
@@ -21267,12 +22237,39 @@ const docTemplate = `{
                 }
             }
         },
+        "feed.OPMLImportFailure": {
+            "type": "object",
+            "properties": {
+                "group": {
+                    "type": "string",
+                    "example": "Research"
+                },
+                "reason": {
+                    "type": "string",
+                    "example": "feed unavailable"
+                },
+                "title": {
+                    "type": "string",
+                    "example": "Example Feed"
+                },
+                "url": {
+                    "type": "string",
+                    "example": "https://example.com/feed.xml"
+                }
+            }
+        },
         "feed.OPMLImportResponse": {
             "type": "object",
             "properties": {
                 "failed": {
                     "type": "integer",
                     "example": 1
+                },
+                "failed_sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/feed.OPMLImportFailure"
+                    }
                 },
                 "imported": {
                     "type": "integer",
@@ -21522,6 +22519,28 @@ const docTemplate = `{
                 }
             }
         },
+        "feed.SubscriptionOrderInput": {
+            "type": "object",
+            "required": [
+                "ids"
+            ],
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "feed.SubscriptionPauseInput": {
+            "type": "object",
+            "properties": {
+                "paused": {
+                    "type": "boolean"
+                }
+            }
+        },
         "feed.SubscriptionResponse": {
             "type": "object",
             "properties": {
@@ -21686,6 +22705,9 @@ const docTemplate = `{
                 },
                 "collection": {
                     "$ref": "#/definitions/model.Collection"
+                },
+                "collection_conflict": {
+                    "type": "boolean"
                 },
                 "collection_id": {
                     "type": "string"
@@ -24127,6 +25149,9 @@ const docTemplate = `{
                 "channel_id": {
                     "type": "string"
                 },
+                "collection_id": {
+                    "type": "string"
+                },
                 "collection_ids": {
                     "type": "array",
                     "items": {
@@ -24227,6 +25252,26 @@ const docTemplate = `{
                 }
             }
         },
+        "handlers.adminFeedSourceImpact": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "integer"
+                },
+                "read_records": {
+                    "type": "integer"
+                },
+                "reading_list_items": {
+                    "type": "integer"
+                },
+                "starred_items": {
+                    "type": "integer"
+                },
+                "subscriptions": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.oauthVerifyEmailRequest": {
             "type": "object",
             "required": [
@@ -24273,6 +25318,17 @@ const docTemplate = `{
                 "patch": {
                     "type": "object",
                     "additionalProperties": {}
+                }
+            }
+        },
+        "handlers.transferChannelOwnershipInput": {
+            "type": "object",
+            "required": [
+                "user_id"
+            ],
+            "properties": {
+                "user_id": {
+                    "type": "string"
                 }
             }
         },
@@ -24394,6 +25450,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "release_year": {
+                    "type": "integer"
+                },
+                "song_count": {
                     "type": "integer"
                 },
                 "songs": {
@@ -25456,23 +26515,6 @@ const docTemplate = `{
                 "solved_reply_id": {
                     "type": "string"
                 },
-                "state": {
-                    "type": "object",
-                    "properties": {
-                        "closed": {
-                            "type": "boolean"
-                        },
-                        "featured": {
-                            "type": "boolean"
-                        },
-                        "pinned": {
-                            "type": "boolean"
-                        },
-                        "solved": {
-                            "type": "boolean"
-                        }
-                    }
-                },
                 "tags": {
                     "type": "array",
                     "items": {
@@ -25493,35 +26535,6 @@ const docTemplate = `{
                 },
                 "view_count": {
                     "type": "integer"
-                },
-                "permissions": {
-                    "type": "object",
-                    "properties": {
-                        "delete": {
-                            "type": "boolean"
-                        },
-                        "edit": {
-                            "type": "boolean"
-                        },
-                        "feature": {
-                            "type": "boolean"
-                        },
-                        "lock": {
-                            "type": "boolean"
-                        },
-                        "mark_answer": {
-                            "type": "boolean"
-                        },
-                        "pin": {
-                            "type": "boolean"
-                        },
-                        "reply": {
-                            "type": "boolean"
-                        },
-                        "report": {
-                            "type": "boolean"
-                        }
-                    }
                 }
             }
         },
@@ -25562,6 +26575,38 @@ const docTemplate = `{
                 },
                 "level": {
                     "type": "integer"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.MediaAsset": {
+            "type": "object",
+            "properties": {
+                "content_type": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                },
+                "purpose": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "url": {
+                    "type": "string"
                 },
                 "user_id": {
                     "type": "string"
@@ -25819,6 +26864,9 @@ const docTemplate = `{
                 },
                 "collection": {
                     "$ref": "#/definitions/model.Collection"
+                },
+                "collection_conflict": {
+                    "type": "boolean"
                 },
                 "collection_id": {
                     "type": "string"
@@ -26219,7 +27267,16 @@ const docTemplate = `{
                 "is_muted": {
                     "type": "boolean"
                 },
+                "is_paused": {
+                    "type": "boolean"
+                },
                 "last_checked": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "resumed_after": {
                     "type": "string"
                 },
                 "subscription": {
@@ -26253,6 +27310,9 @@ const docTemplate = `{
                 },
                 "name": {
                     "type": "string"
+                },
+                "position": {
+                    "type": "integer"
                 },
                 "updated_at": {
                     "type": "string"
@@ -26493,6 +27553,18 @@ const docTemplate = `{
                 },
                 "channel_id": {
                     "type": "string"
+                },
+                "collection": {
+                    "$ref": "#/definitions/model.Collection"
+                },
+                "collection_conflict": {
+                    "type": "boolean"
+                },
+                "collection_id": {
+                    "type": "string"
+                },
+                "collection_position": {
+                    "type": "integer"
                 },
                 "collections": {
                     "type": "array",
@@ -27383,6 +28455,20 @@ const docTemplate = `{
                 }
             }
         },
+        "music.CreateMusicAssetUploadInput": {
+            "type": "object",
+            "properties": {
+                "content_type": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
         "music.CreatePlaylistBookmarkRequest": {
             "type": "object",
             "properties": {
@@ -27569,6 +28655,9 @@ const docTemplate = `{
                 "release_year": {
                     "type": "integer"
                 },
+                "song_count": {
+                    "type": "integer"
+                },
                 "songs": {
                     "type": "array",
                     "items": {
@@ -27683,6 +28772,66 @@ const docTemplate = `{
             ],
             "properties": {
                 "vote": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.MusicAssetUploadPart": {
+            "type": "object",
+            "properties": {
+                "etag": {
+                    "type": "string"
+                },
+                "part_number": {
+                    "type": "integer"
+                },
+                "size": {
+                    "type": "integer"
+                }
+            }
+        },
+        "music.MusicAssetUploadPartURL": {
+            "type": "object",
+            "properties": {
+                "part_number": {
+                    "type": "integer"
+                },
+                "upload_url": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.MusicAssetUploadSessionDTO": {
+            "type": "object",
+            "properties": {
+                "asset": {
+                    "$ref": "#/definitions/model.MediaAsset"
+                },
+                "completed_parts": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.MusicAssetUploadPart"
+                    }
+                },
+                "content_type": {
+                    "type": "string"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "part_size": {
+                    "type": "integer"
+                },
+                "size": {
+                    "type": "integer"
+                },
+                "status": {
                     "type": "string"
                 }
             }
@@ -28270,7 +29419,8 @@ const docTemplate = `{
                 "totals": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 }
             }
@@ -28431,7 +29581,8 @@ const docTemplate = `{
                 "items": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "total": {
@@ -28908,7 +30059,8 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "title": {
@@ -28925,7 +30077,8 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 }
             }
@@ -28960,7 +30113,8 @@ const docTemplate = `{
                 "totals": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "trend": {
@@ -29086,7 +30240,8 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "module": {
@@ -29217,6 +30372,12 @@ const docTemplate = `{
                 "channel_id": {
                     "type": "string"
                 },
+                "collection": {
+                    "$ref": "#/definitions/studio.StudioCollectionSummary"
+                },
+                "collection_conflict": {
+                    "type": "boolean"
+                },
                 "collections": {
                     "type": "array",
                     "items": {
@@ -29238,7 +30399,8 @@ const docTemplate = `{
                 "metrics": {
                     "type": "object",
                     "additionalProperties": {
-                        "type": "integer"
+                        "type": "integer",
+                        "format": "int64"
                     }
                 },
                 "module": {
@@ -29248,6 +30410,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "published_at": {
+                    "type": "string"
+                },
+                "scheduled_at": {
                     "type": "string"
                 },
                 "status": {
@@ -29372,6 +30537,25 @@ const docTemplate = `{
                     "type": "string"
                 }
             }
+        },
+        "studio.reorderCollectionContentsInput": {
+            "type": "object",
+            "properties": {
+                "content_ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                }
+            }
+        },
+        "studio.resolveCollectionConflictInput": {
+            "type": "object",
+            "properties": {
+                "collection_id": {
+                    "type": "string"
+                }
+            }
         }
     },
     "securityDefinitions": {
@@ -29407,75 +30591,3 @@ var SwaggerInfo = &swag.Spec{
 func init() {
 	swag.Register(SwaggerInfo.InstanceName(), SwaggerInfo)
 }
-                    },
-                    {
-                        "type": "string",
-                        "description": "仅 sort=-created_at 可用；传 cursor= 启动游标分页",
-                        "name": "cursor",
-                        "in": "query"
-        "/api/v1/music/bookmarks/albums": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    },
-                    {
-                        "CookieAuth": []
-                    }
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "music-bookmarks"
-                ],
-                "summary": "获取当前用户收藏的专辑",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "排序方式；游标仅支持 latest",
-                        "name": "sort",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    },
-                    {
-                        "type": "string",
-                        "description": "仅 sort=latest 可用；传 cursor= 启动游标分页",
-                        "name": "cursor",
-                        "in": "query"
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "OK",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "400": {
-                        "description": "Bad Request",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },

@@ -54,11 +54,19 @@ type SubscriptionGroupListResponse struct {
 	Message string                    `json:"message" example:"ok"`
 }
 
+type OPMLImportFailure struct {
+	URL    string `json:"url" example:"https://example.com/feed.xml"`
+	Title  string `json:"title,omitempty" example:"Example Feed"`
+	Group  string `json:"group,omitempty" example:"Research"`
+	Reason string `json:"reason" example:"feed unavailable"`
+}
+
 type OPMLImportResponse struct {
-	Message  string `json:"message" example:"OPML import completed"`
-	Imported int    `json:"imported" example:"12"`
-	Reused   int    `json:"reused" example:"3"`
-	Failed   int    `json:"failed" example:"1"`
+	Message       string              `json:"message" example:"OPML import completed"`
+	Imported      int                 `json:"imported" example:"12"`
+	Reused        int                 `json:"reused" example:"3"`
+	Failed        int                 `json:"failed" example:"1"`
+	FailedSources []OPMLImportFailure `json:"failed_sources"`
 }
 
 type StarToggleInput struct {
