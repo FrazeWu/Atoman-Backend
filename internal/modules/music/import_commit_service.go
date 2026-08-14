@@ -21,6 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var albumImportCreateAlbumHook func(*gorm.DB, *model.Album) error
@@ -42,7 +43,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			out = session
 			return nil
 		}
-		if session.Status != AlbumImportStatusReady {
+		if session.Status != AlbumImportStatusReady && !isAlbumImportValidationRetry(session) {
 			if !isAlbumImportActiveStatus(session.Status) {
 				return apperr.Unprocessable("music.import_invalid_status", "Import session cannot be submitted")
 			}
@@ -118,6 +119,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if strings.TrimSpace(session.PayloadJSON) != "" {
 			_ = json.Unmarshal([]byte(session.PayloadJSON), &sessionPayload)
 		}
+		delete(sessionPayload, "commit_validation_failed")
 		if len(payload.Album.Tracks) == 0 {
 			payload.Album.Tracks = albumImportTracksFromDerived(sessionPayload)
 		}
@@ -469,17 +471,47 @@ func (s *Service) notifyIndexNowAlbum(albumID *uuid.UUID) {
 	indexnow.NotifyPaths(paths...)
 }
 
+func isAlbumImportValidationRetry(session model.AlbumImportSession) bool {
+	if session.Status != AlbumImportStatusNeedsAttention {
+		return false
+	}
+	payload := map[string]any{}
+	return json.Unmarshal([]byte(session.PayloadJSON), &payload) == nil && payload["commit_validation_failed"] == true
+}
+
 func (s *Service) markAlbumImportNeedsAttention(userID, importID uuid.UUID, message string) (model.AlbumImportSession, error) {
-	if err := s.db.Model(&model.AlbumImportSession{}).
-		Where("id = ? AND user_id = ? AND status = ?", importID, userID, AlbumImportStatusReady).
-		Updates(map[string]any{
-			"status":        AlbumImportStatusNeedsAttention,
-			"stage":         AlbumImportStageReady,
-			"error_message": strings.TrimSpace(message),
-		}).Error; err != nil {
+	var out model.AlbumImportSession
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		var session model.AlbumImportSession
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("id = ? AND user_id = ? AND status = ?", importID, userID, AlbumImportStatusReady).
+			First(&session).Error; err != nil {
+			return err
+		}
+		payload := map[string]any{}
+		if strings.TrimSpace(session.PayloadJSON) != "" {
+			if err := json.Unmarshal([]byte(session.PayloadJSON), &payload); err != nil {
+				return err
+			}
+		}
+		payload["commit_validation_failed"] = true
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		session.Status = AlbumImportStatusNeedsAttention
+		session.Stage = AlbumImportStageReady
+		session.ErrorMessage = strings.TrimSpace(message)
+		session.PayloadJSON = string(encoded)
+		if err := tx.Save(&session).Error; err != nil {
+			return err
+		}
+		out = session
+		return nil
+	}); err != nil {
 		return model.AlbumImportSession{}, err
 	}
-	return loadAlbumImportSession(s.db, importID, &userID)
+	return out, nil
 }
 
 func persistAlbumImportTrackLyrics(tx *gorm.DB, actorID, songID uuid.UUID, payload *AlbumImportTrackLyricsPayload) error {

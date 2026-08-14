@@ -1179,6 +1179,15 @@ func TestFinalizeSubmittedAlbumImportMarksValidationFailureForAttention(t *testi
 	if stored.Status != AlbumImportStatusNeedsAttention || stored.ErrorMessage == "" {
 		t.Fatalf("expected needs attention with an error, got %#v", stored)
 	}
+	if retried, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artist: completeAlbumImportArtistPayload("Incomplete Artist"),
+		Album: AlbumImportAlbumPayload{
+			Title: "Complete Album", CoverURL: "https://cdn.test/complete.jpg", ReleaseDate: "2020-01-01",
+			Tracks: []AlbumImportTrackPayload{{Title: "Complete Track", TrackNumber: 1, AudioURL: "https://cdn.test/complete.mp3"}},
+		},
+	}); err != nil || retried.Status != AlbumImportStatusCommitted {
+		t.Fatalf("retry validation failure: session=%#v err=%v", retried, err)
+	}
 }
 
 func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T) {
