@@ -44,7 +44,6 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.MusicSearchInteraction{},
 		&model.AlbumImportSession{},
 		&model.MusicAssetUploadSession{},
-		&model.MediaAsset{},
 		&model.AlbumImportFile{},
 		&model.AlbumImportJob{},
 		&model.MusicEdit{},
@@ -121,6 +120,62 @@ func TestRegisterRoutesAlbumDetailReturnsArtistCredits(t *testing.T) {
 	}
 	if !hasCustomRole {
 		t.Fatalf("expected custom role and artist data, got %#v", payload.Data.Credits)
+	}
+}
+
+func TestRegisterRoutesAlbumDetailReturnsSongAudioSpecification(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	album := model.Album{Title: "Technical Album", EntryStatus: "open", Status: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	song := model.Song{
+		Title:              "Technical Track",
+		AlbumID:            &album.ID,
+		AudioURL:           "https://cdn.test/technical-track.mp3",
+		Status:             "open",
+		SourceContainer:    "flac",
+		SourceCodec:        "flac",
+		SourceBitrateKbps:  2763,
+		SourceSampleRateHz: 96000,
+		SourceBitDepth:     24,
+		SourceChannels:     2,
+		SourceSizeBytes:    95 * 1024 * 1024,
+		SourceLossless:     true,
+	}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), nil)
+	newMusicHTTPRouter(service, &user).ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Songs []struct {
+				SourceContainer    string `json:"source_container"`
+				SourceCodec        string `json:"source_codec"`
+				SourceBitrateKbps  int    `json:"source_bitrate_kbps"`
+				SourceSampleRateHz int    `json:"source_sample_rate_hz"`
+				SourceBitDepth     int    `json:"source_bit_depth"`
+				SourceChannels     int    `json:"source_channels"`
+				SourceSizeBytes    int64  `json:"source_size_bytes"`
+				SourceLossless     bool   `json:"source_lossless"`
+			} `json:"songs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode album detail: %v", err)
+	}
+	if len(payload.Data.Songs) != 1 {
+		t.Fatalf("expected one song, got %#v", payload.Data.Songs)
+	}
+	got := payload.Data.Songs[0]
+	if got.SourceContainer != "flac" || got.SourceCodec != "flac" || got.SourceBitrateKbps != 2763 || got.SourceSampleRateHz != 96000 || got.SourceBitDepth != 24 || got.SourceChannels != 2 || got.SourceSizeBytes != 95*1024*1024 || !got.SourceLossless {
+		t.Fatalf("unexpected song audio specification: %#v", got)
 	}
 }
 
@@ -3414,8 +3469,7 @@ func TestRegisterRoutesMusicCursorPagination(t *testing.T) {
 			t.Fatalf("unexpected first cursor page: %#v", firstPage)
 		}
 		second := httptest.NewRecorder()
-		secondPath := strings.Replace(path, "cursor=", "cursor="+firstPage.Meta.NextCursor, 1)
-		r.ServeHTTP(second, httptest.NewRequest(http.MethodGet, secondPath, nil))
+		r.ServeHTTP(second, httptest.NewRequest(http.MethodGet, path+"&cursor="+firstPage.Meta.NextCursor, nil))
 		if second.Code != http.StatusOK {
 			t.Fatalf("second cursor request: %d: %s", second.Code, second.Body.String())
 		}

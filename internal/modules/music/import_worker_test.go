@@ -167,10 +167,10 @@ func TestImportWorkerLogsQueueWaitDurationAndErrorKind(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("expected claimed and requeued events, got %#v", events)
 	}
-	if events[0].event != "claimed" || events[0].queueWait < 3*time.Minute-time.Microsecond || events[0].queueWait > 3*time.Minute+time.Microsecond {
+	if events[0].event != "claimed" || events[0].queueWait != 3*time.Minute {
 		t.Fatalf("unexpected claimed event: %#v", events[0])
 	}
-	if events[1].event != "requeued" || events[1].duration < 2*time.Second-time.Microsecond || events[1].duration > 2*time.Second+time.Microsecond || events[1].errorKind != "storage" {
+	if events[1].event != "requeued" || events[1].duration != 2*time.Second || events[1].errorKind != "storage" {
 		t.Fatalf("unexpected requeued event: %#v", events[1])
 	}
 }

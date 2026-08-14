@@ -25,11 +25,10 @@ func TestCommitAlbumImportSessionPreservesDiscNumberWhenMatchingAudio(t *testing
 
 	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 		Artist: completeAlbumImportArtistPayload("Multi Disc Artist"),
-		Album: AlbumImportAlbumPayload{Title: "Multi Disc Album", CoverURL: "/cover.jpg", ReleaseDate: "2020-01-01", Tracks: []AlbumImportTrackPayload{
+		Album: AlbumImportAlbumPayload{Title: "Multi Disc Album", Tracks: []AlbumImportTrackPayload{
 			{Title: "Intro", DiscNumber: 1, TrackNumber: 1},
 			{Title: "Intro", DiscNumber: 2, TrackNumber: 1},
 		}},
-		ArtistSource: "artist source", AlbumSource: "album source",
 	})
 	if err != nil {
 		t.Fatal(err)
