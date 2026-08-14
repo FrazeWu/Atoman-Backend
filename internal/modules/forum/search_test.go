@@ -11,7 +11,6 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
-	"atoman/internal/testdb"
 
 	"github.com/google/uuid"
 	"gorm.io/driver/postgres"
@@ -255,8 +254,12 @@ func TestPostgresSearchMatchesContinuousChineseText(t *testing.T) {
 	}
 
 	schema := "forum_search_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	testdb.EnablePostgresExtension(t, db, "ltree")
-	testdb.EnablePostgresExtension(t, db, "pg_trgm")
+	if err := db.Exec(`CREATE EXTENSION IF NOT EXISTS ltree`).Error; err != nil {
+		t.Fatalf("enable ltree: %v", err)
+	}
+	if err := db.Exec(`CREATE EXTENSION IF NOT EXISTS pg_trgm`).Error; err != nil {
+		t.Fatalf("enable pg_trgm: %v", err)
+	}
 	if err := db.Exec("CREATE SCHEMA " + schema).Error; err != nil {
 		t.Fatalf("create test schema: %v", err)
 	}

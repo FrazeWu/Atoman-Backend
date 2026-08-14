@@ -5,9 +5,7 @@ import (
 	"testing"
 
 	"atoman/internal/model"
-
-	"github.com/glebarez/sqlite"
-	"gorm.io/gorm"
+	"atoman/internal/testdb"
 )
 
 func TestSaveInputAcceptsMediaModule(t *testing.T) {
@@ -21,10 +19,7 @@ func TestSaveInputAcceptsMediaModule(t *testing.T) {
 }
 
 func TestSaveInputRejectsStaleRevision(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/site-access.sqlite"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testdb.Open(t)
 	if err := db.AutoMigrate(&model.SiteSetting{}); err != nil {
 		t.Fatalf("migrate site settings: %v", err)
 	}
@@ -63,10 +58,7 @@ func TestSaveInputRejectsStaleRevision(t *testing.T) {
 }
 
 func TestSaveInputRejectsMissingRevisionForExistingSetting(t *testing.T) {
-	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/site-access.sqlite"), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testdb.Open(t)
 	if err := db.AutoMigrate(&model.SiteSetting{}); err != nil {
 		t.Fatalf("migrate site settings: %v", err)
 	}
@@ -79,7 +71,7 @@ func TestSaveInputRejectsMissingRevisionForExistingSetting(t *testing.T) {
 	input := DefaultSiteAccessMatrix().ToInput()
 	feedEnabled := false
 	input.Modules["feed"] = SiteAccessModuleInput{Enabled: &feedEnabled}
-	err = svc.SaveInput(input)
+	err := svc.SaveInput(input)
 	if !errors.Is(err, ErrSiteAccessConflict) {
 		t.Fatalf("save without revision error = %v, want ErrSiteAccessConflict", err)
 	}
