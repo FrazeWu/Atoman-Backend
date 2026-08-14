@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
@@ -22,6 +23,9 @@ func newShortNoteHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.Curr
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.User{}, &model.ShortNote{}, &model.ShortNoteMedia{}, &model.Like{}, &model.DiscussionTarget{}, &model.ContentReference{}, &model.Notification{})
+	if err := migrations.RunNotificationDMIndexes(db); err != nil {
+		t.Fatalf("create notification indexes: %v", err)
+	}
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)

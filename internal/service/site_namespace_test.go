@@ -8,7 +8,6 @@ import (
 	"atoman/internal/service"
 	"atoman/internal/testdb"
 
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -79,8 +78,11 @@ func TestSiteNamespaceUserChannelConflictChecks(t *testing.T) {
 
 func TestSiteNamespaceChannelSlugAllowsExcludedChannel(t *testing.T) {
 	db := setupSiteNamespaceTestDB(t)
-	ownerID := uuid.New()
-	channel := model.Channel{Name: "Design", Slug: "design", UserID: &ownerID}
+	owner := model.User{Username: "owner", Email: "owner@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&owner).Error; err != nil {
+		t.Fatalf("create channel owner: %v", err)
+	}
+	channel := model.Channel{Name: "Design", Slug: "design", UserID: &owner.UUID}
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatalf("create channel: %v", err)
 	}

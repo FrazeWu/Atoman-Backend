@@ -324,6 +324,7 @@ func TestCommentDTOIncludesAuthorsAndPersistsReplyIdentity(t *testing.T) {
 	require.Equal(t, nested.ID, page.Items[0].ID)
 	require.Equal(t, ctx.users[1].ID, page.Items[0].ReplyToAuthor.ID)
 	require.Equal(t, direct.ID, page.Items[1].ID)
+	require.NoError(t, ctx.db.Unscoped().Where("recipient_id = ? OR actor_id = ?", ctx.users[1].ID, ctx.users[1].ID).Delete(&model.Notification{}).Error)
 	require.NoError(t, ctx.db.Unscoped().Delete(&model.User{}, "uuid = ?", ctx.users[1].ID).Error)
 	page, err = ctx.service.ListReplies(Viewer{}, root.ID, 1, 20)
 	require.NoError(t, err)

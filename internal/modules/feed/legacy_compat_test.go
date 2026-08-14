@@ -18,7 +18,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -28,15 +27,12 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/authsession"
 	"atoman/internal/service"
+	"atoman/internal/testdb"
 )
 
 func newFeedHandlerTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
+	db := testdb.Open(t)
 	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionGroup{}, &model.Subscription{}, &model.FeedSource{}, &model.FeedItem{}, &model.FeedItemRead{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -47,12 +43,8 @@ func newFeedHandlerTestDB(t *testing.T) *gorm.DB {
 
 func newFeedHandlerTestDBWithLogBuffer(t *testing.T, sink io.Writer) *gorm.DB {
 	t.Helper()
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", uuid.NewString())
 	logger := gormlogger.New(log.New(sink, "", 0), gormlogger.Config{LogLevel: gormlogger.Info, Colorful: false})
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger})
-	if err != nil {
-		t.Fatalf("open sqlite with logger: %v", err)
-	}
+	db := testdb.OpenWithConfig(t, &gorm.Config{Logger: logger})
 	if err := db.AutoMigrate(&model.User{}, &model.SubscriptionGroup{}, &model.Subscription{}, &model.FeedSource{}, &model.FeedItem{}, &model.FeedItemRead{}); err != nil {
 		t.Fatalf("migrate with logger: %v", err)
 	}
@@ -63,27 +55,31 @@ func newFeedHandlerTestDBWithLogBuffer(t *testing.T, sink io.Writer) *gorm.DB {
 
 func createLegacyFeedSourcesTable(t *testing.T, db *gorm.DB) {
 	t.Helper()
-	if err := db.Exec(`DROP TABLE IF EXISTS feed_sources`).Error; err != nil {
+	dropStatement := `DROP TABLE IF EXISTS feed_sources`
+	if db.Dialector.Name() == "postgres" {
+		dropStatement += ` CASCADE`
+	}
+	if err := db.Exec(dropStatement).Error; err != nil {
 		t.Fatalf("drop feed_sources: %v", err)
 	}
 	if err := db.Exec(`
 		CREATE TABLE feed_sources (
 			id TEXT PRIMARY KEY,
-			created_at DATETIME,
-			updated_at DATETIME,
-			deleted_at DATETIME,
+			created_at TIMESTAMPTZ,
+			updated_at TIMESTAMPTZ,
+			deleted_at TIMESTAMPTZ,
 			source_type TEXT NOT NULL,
 			source_id TEXT,
 			rss_url TEXT,
 			hash TEXT,
 			title TEXT,
 			cover_url TEXT,
-			last_fetched_at DATETIME,
+			last_fetched_at TIMESTAMPTZ,
 			full_text_enabled NUMERIC NOT NULL DEFAULT 0,
 			full_text_success_count INTEGER NOT NULL DEFAULT 0,
 			full_text_failure_count INTEGER NOT NULL DEFAULT 0,
-			full_text_last_success_at DATETIME,
-			full_text_last_failure_at DATETIME,
+			full_text_last_success_at TIMESTAMPTZ,
+			full_text_last_failure_at TIMESTAMPTZ,
 			full_text_last_error_code TEXT,
 			full_text_last_error TEXT
 		)

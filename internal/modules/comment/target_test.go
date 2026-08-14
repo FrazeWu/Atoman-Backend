@@ -258,6 +258,8 @@ func TestContentResolversRespectPublicationVisibilityAndOwnership(t *testing.T) 
 	registry, db := newTargetTestRegistry(t)
 	owner := createTargetTestUser(t, db, "content-owner")
 	ownerViewer := Viewer{UserID: &owner.UUID}
+	channel := model.Channel{UserID: &owner.UUID, Name: "Content channel", Slug: "content-channel"}
+	require.NoError(t, db.Create(&channel).Error)
 
 	post := model.Post{UserID: owner.UUID, Title: "post", Content: "body", Status: "draft", Visibility: "private"}
 	video := model.Video{UserID: owner.UUID, Title: "video", VideoURL: "video.mp4", Status: "draft", Visibility: "private", DurationSec: 75}
@@ -265,7 +267,7 @@ func TestContentResolversRespectPublicationVisibilityAndOwnership(t *testing.T) 
 	require.NoError(t, db.Create(&video).Error)
 	episodePost := model.Post{UserID: owner.UUID, Title: "episode", Content: "body", Status: "draft", Visibility: "private"}
 	require.NoError(t, db.Create(&episodePost).Error)
-	episode := model.PodcastEpisode{PostID: episodePost.ID, ChannelID: uuid.New(), AudioURL: "episode.mp3", DurationSec: 125}
+	episode := model.PodcastEpisode{PostID: episodePost.ID, ChannelID: channel.ID, AudioURL: "episode.mp3", DurationSec: 125}
 	require.NoError(t, db.Create(&episode).Error)
 
 	refs := []TargetRef{
@@ -321,6 +323,8 @@ func TestContentResolversAllowChannelSubscribersToSeePublishedFollowersContent(t
 func TestResolversCoverAllKindsDurationsOwnersAndMarkLabels(t *testing.T) {
 	registry, db := newTargetTestRegistry(t)
 	owner := createTargetTestUser(t, db, "all-owner")
+	channel := model.Channel{UserID: &owner.UUID, Name: "All content channel", Slug: "all-content-channel"}
+	require.NoError(t, db.Create(&channel).Error)
 	category := model.ForumCategory{Name: "general"}
 	require.NoError(t, db.Create(&category).Error)
 	source := model.FeedSource{SourceType: "external_rss", Provider: "rss", Category: "blog", Hash: uuid.NewString()}
@@ -332,7 +336,7 @@ func TestResolversCoverAllKindsDurationsOwnersAndMarkLabels(t *testing.T) {
 	require.NoError(t, db.Create(&post).Error)
 	require.NoError(t, db.Create(&video).Error)
 	require.NoError(t, db.Create(&episodePost).Error)
-	episode := model.PodcastEpisode{PostID: episodePost.ID, ChannelID: uuid.New(), AudioURL: "episode.mp3", DurationSec: 181}
+	episode := model.PodcastEpisode{PostID: episodePost.ID, ChannelID: channel.ID, AudioURL: "episode.mp3", DurationSec: 181}
 	feedItem := model.FeedItem{FeedSourceID: source.ID, GUID: "all", Link: "https://example.com/article"}
 	artist := model.Artist{Name: "artist", EntryStatus: "open"}
 	album := model.Album{Title: "album", Status: "open", EntryStatus: "open"}

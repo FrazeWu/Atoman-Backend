@@ -14,6 +14,20 @@ import (
 	"gorm.io/gorm"
 )
 
+func createRevisionTestUser(t *testing.T, db *gorm.DB) uuid.UUID {
+	t.Helper()
+	userID := uuid.New()
+	suffix := strings.ReplaceAll(userID.String(), "-", "")
+	user := model.User{
+		UUID: userID, Username: "revision-" + suffix[:12], Email: suffix + "@example.test",
+		Password: "test", IsActive: true,
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create revision test user: %v", err)
+	}
+	return userID
+}
+
 func TestRevisionContributorsAreDistinctRecentAndSafe(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.User{}, &model.Revision{})
@@ -84,7 +98,7 @@ func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *test
 	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{}, &model.EditConflict{})
 
 	contentID := uuid.New()
-	editorID := uuid.New()
+	editorID := createRevisionTestUser(t, db)
 	if err := db.Create(&model.Album{Base: model.Base{ID: contentID}, Title: "base"}).Error; err != nil {
 		t.Fatalf("create album: %v", err)
 	}
@@ -150,6 +164,7 @@ func TestCreateRevisionConcurrentAutoApproveKeepsUniqueVersionAndCurrent(t *test
 func TestCreateRevisionDetectsStaleAlbumFieldConflict(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{}, &model.EditConflict{})
+	actorID := createRevisionTestUser(t, db)
 	album := model.Album{Title: "base"}
 	if err := db.Create(&album).Error; err != nil {
 		t.Fatalf("create album: %v", err)
@@ -157,7 +172,7 @@ func TestCreateRevisionDetectsStaleAlbumFieldConflict(t *testing.T) {
 	base := model.Revision{
 		ContentType: "album", ContentID: album.ID, VersionNumber: 1,
 		ContentSnapshot: []byte(`{"album":{"title":"base"},"songs":[]}`),
-		EditorID:        uuid.New(), EditSummary: "base", EditType: "creation", Status: "approved", IsCurrent: true,
+		EditorID:        actorID, EditSummary: "base", EditType: "creation", Status: "approved", IsCurrent: true,
 	}
 	if err := db.Create(&base).Error; err != nil {
 		t.Fatalf("create base revision: %v", err)
@@ -165,12 +180,12 @@ func TestCreateRevisionDetectsStaleAlbumFieldConflict(t *testing.T) {
 
 	revisionService := NewRevisionService(db)
 	if _, _, err := revisionService.CreateRevision(
-		"album", album.ID, uuid.New(), map[string]interface{}{"title": "first"}, "first", 1, true,
+		"album", album.ID, actorID, map[string]interface{}{"title": "first"}, "first", 1, true,
 	); err != nil {
 		t.Fatalf("create first revision: %v", err)
 	}
 	revision, conflicts, err := revisionService.CreateRevision(
-		"album", album.ID, uuid.New(), map[string]interface{}{"title": "second"}, "second", 1, true,
+		"album", album.ID, actorID, map[string]interface{}{"title": "second"}, "second", 1, true,
 	)
 	if err != nil {
 		t.Fatalf("detect conflict: %v", err)
@@ -183,6 +198,7 @@ func TestCreateRevisionDetectsStaleAlbumFieldConflict(t *testing.T) {
 func TestCreateRevisionAutoApproveAppliesArtistChanges(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.Artist{}, &model.Revision{})
+	actorID := createRevisionTestUser(t, db)
 
 	artist := model.Artist{Name: "Before"}
 	if err := db.Create(&artist).Error; err != nil {
@@ -194,7 +210,7 @@ func TestCreateRevisionAutoApproveAppliesArtistChanges(t *testing.T) {
 		ContentID:       artist.ID,
 		VersionNumber:   1,
 		ContentSnapshot: []byte(`{"name":"Before"}`),
-		EditorID:        uuid.New(),
+		EditorID:        actorID,
 		EditSummary:     "base",
 		EditType:        "creation",
 		Status:          "approved",
@@ -207,7 +223,7 @@ func TestCreateRevisionAutoApproveAppliesArtistChanges(t *testing.T) {
 	if _, _, err := NewRevisionService(db).CreateRevision(
 		"artist",
 		artist.ID,
-		uuid.New(),
+		actorID,
 		map[string]interface{}{"name": "After"},
 		"rename",
 		1,
@@ -230,8 +246,8 @@ func TestApproveRevisionKeepsOnlyOneCurrentWithUniqueIndex(t *testing.T) {
 	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{})
 
 	contentID := uuid.New()
-	editorID := uuid.New()
-	reviewerID := uuid.New()
+	editorID := createRevisionTestUser(t, db)
+	reviewerID := createRevisionTestUser(t, db)
 	album := model.Album{Base: model.Base{ID: contentID}, Title: "base"}
 	if err := db.Create(&album).Error; err != nil {
 		t.Fatalf("create album: %v", err)
@@ -286,6 +302,7 @@ func TestApproveRevisionKeepsOnlyOneCurrentWithUniqueIndex(t *testing.T) {
 func TestApproveArtistRevisionRollsBackWhenTargetDoesNotExist(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.Artist{}, &model.Revision{})
+	actorID := createRevisionTestUser(t, db)
 
 	contentID := uuid.New()
 	current := model.Revision{
@@ -293,7 +310,7 @@ func TestApproveArtistRevisionRollsBackWhenTargetDoesNotExist(t *testing.T) {
 		ContentID:       contentID,
 		VersionNumber:   1,
 		ContentSnapshot: []byte(`{"name":"base"}`),
-		EditorID:        uuid.New(),
+		EditorID:        actorID,
 		Status:          "approved",
 		IsCurrent:       true,
 	}
@@ -306,14 +323,14 @@ func TestApproveArtistRevisionRollsBackWhenTargetDoesNotExist(t *testing.T) {
 		VersionNumber:      2,
 		PreviousRevisionID: &current.ID,
 		ContentSnapshot:    []byte(`{"name":"next"}`),
-		EditorID:           uuid.New(),
+		EditorID:           actorID,
 		Status:             "pending",
 	}
 	if err := db.Create(&pending).Error; err != nil {
 		t.Fatalf("create pending revision: %v", err)
 	}
 
-	if err := NewRevisionService(db).ApproveRevision(pending.ID, uuid.New(), "approve"); err == nil {
+	if err := NewRevisionService(db).ApproveRevision(pending.ID, actorID, "approve"); err == nil {
 		t.Fatal("expected approval to fail when target artist does not exist")
 	}
 
@@ -583,6 +600,7 @@ func TestApproveAlbumRevisionAppliesSongCollectionSnapshot(t *testing.T) {
 func TestApproveAlbumRevisionRejectsFlatSnapshot(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.Album{}, &model.Song{}, &model.Revision{})
+	actorID := createRevisionTestUser(t, db)
 
 	album := model.Album{Title: "Before", AlbumType: "album", EntryStatus: "open", Status: "open"}
 	if err := db.Create(&album).Error; err != nil {
@@ -598,7 +616,7 @@ func TestApproveAlbumRevisionRejectsFlatSnapshot(t *testing.T) {
 		ContentID:       album.ID,
 		VersionNumber:   1,
 		ContentSnapshot: []byte(`{"album":{"title":"Before"},"songs":[{"id":"` + song.ID.String() + `","title":"Existing Track"}]}`),
-		EditorID:        uuid.New(),
+		EditorID:        actorID,
 		Status:          "approved",
 		IsCurrent:       true,
 	}
@@ -611,14 +629,14 @@ func TestApproveAlbumRevisionRejectsFlatSnapshot(t *testing.T) {
 		VersionNumber:      2,
 		PreviousRevisionID: &current.ID,
 		ContentSnapshot:    []byte(`{"title":"Legacy Flat Snapshot"}`),
-		EditorID:           uuid.New(),
+		EditorID:           actorID,
 		Status:             "pending",
 	}
 	if err := db.Create(&pending).Error; err != nil {
 		t.Fatalf("create pending revision: %v", err)
 	}
 
-	if err := NewRevisionService(db).ApproveRevision(pending.ID, uuid.New(), "approve"); err == nil {
+	if err := NewRevisionService(db).ApproveRevision(pending.ID, actorID, "approve"); err == nil {
 		t.Fatal("expected flat album snapshot approval to fail")
 	}
 
@@ -642,13 +660,14 @@ func TestApproveAlbumRevisionRejectsFlatSnapshot(t *testing.T) {
 func TestCreateRevisionBaselineUsesEmptySongsArray(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.Revision{}, &model.EditConflict{})
+	actorID := createRevisionTestUser(t, db)
 
 	album := model.Album{Title: "No Tracks", AlbumType: "album", EntryStatus: "open", Status: "open"}
 	if err := db.Create(&album).Error; err != nil {
 		t.Fatalf("create album: %v", err)
 	}
 	if _, _, err := NewRevisionService(db).CreateRevision(
-		"album", album.ID, uuid.New(), map[string]interface{}{"title": "Still No Tracks"}, "edit", 0, true,
+		"album", album.ID, actorID, map[string]interface{}{"title": "Still No Tracks"}, "edit", 0, true,
 	); err != nil {
 		t.Fatalf("create album revision: %v", err)
 	}
@@ -673,6 +692,7 @@ func TestCreateRevisionBootstrapsAndAppliesAlbumEditorChanges(t *testing.T) {
 		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
 		&model.Revision{}, &model.EditConflict{},
 	)
+	actorID := createRevisionTestUser(t, db)
 
 	primary := model.Artist{Name: "Primary", EntryStatus: "open"}
 	featured := model.Artist{Name: "Featured", EntryStatus: "open"}
@@ -688,7 +708,7 @@ func TestCreateRevisionBootstrapsAndAppliesAlbumEditorChanges(t *testing.T) {
 
 	revisionService := NewRevisionService(db)
 	revision, conflicts, err := revisionService.CreateRevision(
-		"album", album.ID, uuid.New(),
+		"album", album.ID, actorID,
 		map[string]interface{}{
 			"title":        "After",
 			"description":  "New",
@@ -734,7 +754,7 @@ func TestCreateRevisionBootstrapsAndAppliesAlbumEditorChanges(t *testing.T) {
 		t.Fatalf("expected revised album in featured artist list, got %#v", linkedAlbums)
 	}
 
-	if _, err := revisionService.RevertToRevision("album", album.ID, 1, uuid.New(), "恢复初始版本"); err != nil {
+	if _, err := revisionService.RevertToRevision("album", album.ID, 1, actorID, "恢复初始版本"); err != nil {
 		t.Fatalf("revert album: %v", err)
 	}
 	if err := db.Preload("ArtistCredits").First(&updated, "id = ?", album.ID).Error; err != nil {
@@ -776,7 +796,7 @@ func TestRevertAlbumRevisionRestoresSoftDeletedSong(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal current snapshot: %v", err)
 	}
-	editorID := uuid.New()
+	editorID := createRevisionTestUser(t, db)
 	revisions := []model.Revision{
 		{ContentType: "album", ContentID: album.ID, VersionNumber: 1, ContentSnapshot: targetSnapshot, EditorID: editorID, EditType: "creation", Status: "approved"},
 		{ContentType: "album", ContentID: album.ID, VersionNumber: 2, ContentSnapshot: currentSnapshot, EditorID: editorID, EditType: "edit", Status: "approved", IsCurrent: true},
@@ -804,13 +824,14 @@ func TestRevertAlbumRevisionRestoresSoftDeletedSong(t *testing.T) {
 func TestCreateRevisionRejectsProtectedArtistFields(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.Artist{}, &model.ArtistMember{}, &model.Revision{}, &model.EditConflict{})
+	actorID := createRevisionTestUser(t, db)
 	artist := model.Artist{Name: "Artist", EntryStatus: "protected"}
 	if err := db.Create(&artist).Error; err != nil {
 		t.Fatalf("create artist: %v", err)
 	}
 
 	if _, _, err := NewRevisionService(db).CreateRevision(
-		"artist", artist.ID, uuid.New(), map[string]interface{}{"entry_status": "open"}, "bypass", 0, true,
+		"artist", artist.ID, actorID, map[string]interface{}{"entry_status": "open"}, "bypass", 0, true,
 	); err == nil {
 		t.Fatal("expected protected artist field to be rejected")
 	}
@@ -832,6 +853,7 @@ func TestSongRevisionAppliesStructuredFieldsCreditsAndReverts(t *testing.T) {
 		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
 		&model.Revision{}, &model.EditConflict{},
 	)
+	actorID := createRevisionTestUser(t, db)
 
 	primary := model.Artist{Name: "Primary", EntryStatus: "open"}
 	producer := model.Artist{Name: "Producer", EntryStatus: "open"}
@@ -850,7 +872,7 @@ func TestSongRevisionAppliesStructuredFieldsCreditsAndReverts(t *testing.T) {
 	}
 
 	revisionService := NewRevisionService(db)
-	revision, conflicts, err := revisionService.CreateRevision("song", song.ID, uuid.New(), map[string]interface{}{
+	revision, conflicts, err := revisionService.CreateRevision("song", song.ID, actorID, map[string]interface{}{
 		"title":        "After",
 		"track_number": 4,
 		"disc_number":  2,
@@ -876,7 +898,7 @@ func TestSongRevisionAppliesStructuredFieldsCreditsAndReverts(t *testing.T) {
 		t.Fatalf("unexpected updated song: %#v", updated)
 	}
 
-	if _, err := revisionService.RevertToRevision("song", song.ID, 1, uuid.New(), "恢复初始版本"); err != nil {
+	if _, err := revisionService.RevertToRevision("song", song.ID, 1, actorID, "恢复初始版本"); err != nil {
 		t.Fatalf("revert song: %v", err)
 	}
 	if err := db.Preload("ArtistCredits").First(&updated, "id = ?", song.ID).Error; err != nil {
@@ -916,6 +938,7 @@ func TestMergeSongRevisionChangesRejectsInvalidArtistRoles(t *testing.T) {
 func TestCreateRevisionBootstrapsAndAppliesArtistChanges(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.Artist{}, &model.ArtistMember{}, &model.Revision{}, &model.EditConflict{})
+	actorID := createRevisionTestUser(t, db)
 	artist := model.Artist{Name: "Before", Bio: "Old", EntryStatus: "open"}
 	if err := db.Create(&artist).Error; err != nil {
 		t.Fatalf("create artist: %v", err)
@@ -927,7 +950,7 @@ func TestCreateRevisionBootstrapsAndAppliesArtistChanges(t *testing.T) {
 
 	revisionService := NewRevisionService(db)
 	revision, conflicts, err := revisionService.CreateRevision(
-		"artist", artist.ID, uuid.New(),
+		"artist", artist.ID, actorID,
 		map[string]interface{}{
 			"name": "After", "disambiguation": "Group", "bio": "New", "birth_date": "1990-01-02",
 			"artist_form": "group", "active_start_date": "2020", "active_end_date": "2024/12/--", "stage_names_json": `[{"name":"After","is_primary":true}]`,
@@ -954,7 +977,7 @@ func TestCreateRevisionBootstrapsAndAppliesArtistChanges(t *testing.T) {
 		t.Fatalf("unexpected artist members: relations=%#v err=%v", relations, err)
 	}
 
-	if _, err := revisionService.RevertToRevision("artist", artist.ID, 1, uuid.New(), "恢复初始版本"); err != nil {
+	if _, err := revisionService.RevertToRevision("artist", artist.ID, 1, actorID, "恢复初始版本"); err != nil {
 		t.Fatalf("revert artist: %v", err)
 	}
 	if err := db.Where("group_artist_id = ?", artist.ID).Find(&relations).Error; err != nil || len(relations) != 0 {

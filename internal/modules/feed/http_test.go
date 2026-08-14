@@ -1349,9 +1349,9 @@ func TestFeedRecommendationChannelsIncludePreviewAndStats(t *testing.T) {
 		t.Fatalf("create second channel subscription: %v", err)
 	}
 
-	if err := db.Exec("INSERT INTO source_read_events (source_type, source_id, event_type, created_at) VALUES (?, ?, ?, ?), (?, ?, ?, ?)",
-		"internal_channel", channel.ID.String(), "detail_open", time.Now().Add(-2*time.Hour).UTC(),
-		"internal_channel", channel.ID.String(), "detail_open", time.Now().Add(-1*time.Hour).UTC(),
+	if err := db.Exec("INSERT INTO source_read_events (id, source_type, source_id, event_type, created_at) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+		uuid.New(), "internal_channel", channel.ID.String(), "detail_open", time.Now().Add(-2*time.Hour).UTC(),
+		uuid.New(), "internal_channel", channel.ID.String(), "detail_open", time.Now().Add(-1*time.Hour).UTC(),
 	).Error; err != nil {
 		t.Fatalf("seed channel read events: %v", err)
 	}
@@ -1540,10 +1540,10 @@ func TestFeedRecommendationExternalChannelsIncludePreviewAndStats(t *testing.T) 
 		t.Fatalf("create second external subscription: %v", err)
 	}
 
-	if err := db.Exec("INSERT INTO source_read_events (source_type, source_id, event_type, created_at) VALUES (?, ?, ?, ?), (?, ?, ?, ?), (?, ?, ?, ?)",
-		"external_rss", source.ID.String(), "detail_open", now.Add(-3*time.Hour),
-		"external_rss", source.ID.String(), "original_click", now.Add(-2*time.Hour),
-		"external_rss", source.ID.String(), "original_click", now.Add(-1*time.Hour),
+	if err := db.Exec("INSERT INTO source_read_events (id, source_type, source_id, event_type, created_at) VALUES (?, ?, ?, ?, ?), (?, ?, ?, ?, ?), (?, ?, ?, ?, ?)",
+		uuid.New(), "external_rss", source.ID.String(), "detail_open", now.Add(-3*time.Hour),
+		uuid.New(), "external_rss", source.ID.String(), "original_click", now.Add(-2*time.Hour),
+		uuid.New(), "external_rss", source.ID.String(), "original_click", now.Add(-1*time.Hour),
 	).Error; err != nil {
 		t.Fatalf("seed external source read events: %v", err)
 	}

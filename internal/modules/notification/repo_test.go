@@ -11,8 +11,12 @@ import (
 
 func TestRepoListNotificationsFiltersKnownAndSystemCategories(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{})
-	recipientID := uuid.New()
+	testdb.Migrate(t, db, &model.User{}, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{})
+	recipient := model.User{Username: "recipient", Email: "recipient@example.test", Password: "test", IsActive: true}
+	if err := db.Create(&recipient).Error; err != nil {
+		t.Fatalf("create notification recipient: %v", err)
+	}
+	recipientID := recipient.UUID
 	if err := db.Create(&[]model.Notification{
 		{RecipientID: recipientID, Type: "comment_reply", SourceType: "test", SourceID: uuid.New()},
 		{RecipientID: recipientID, Type: "comment_like", SourceType: "test", SourceID: uuid.New()},

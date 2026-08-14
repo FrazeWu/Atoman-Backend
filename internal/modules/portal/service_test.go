@@ -131,6 +131,7 @@ func TestHotContentReturnsEmptyResponseWhenNoContentExists(t *testing.T) {
 func TestHotContentExcludesForumTopicsFromRestrictedCategories(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
+		&model.User{},
 		&model.ForumCategory{},
 		&model.ForumTopic{},
 		&model.ForumGroup{},
@@ -143,7 +144,8 @@ func TestHotContentExcludesForumTopicsFromRestrictedCategories(t *testing.T) {
 	publicCategory := model.ForumCategory{Name: "Public"}
 	restrictedCategory := model.ForumCategory{Name: "Restricted"}
 	group := model.ForumGroup{Name: "Private readers"}
-	for _, record := range []any{&publicCategory, &restrictedCategory, &group} {
+	owner := model.User{Username: "forum-owner", Email: "forum-owner@example.test", Password: "test", IsActive: true}
+	for _, record := range []any{&owner, &publicCategory, &restrictedCategory, &group} {
 		if err := db.Create(record).Error; err != nil {
 			t.Fatalf("create forum fixture: %v", err)
 		}
@@ -157,11 +159,13 @@ func TestHotContentExcludesForumTopicsFromRestrictedCategories(t *testing.T) {
 	}
 
 	publicTopic := model.ForumTopic{
+		UserID:     owner.UUID,
 		CategoryID: publicCategory.ID,
 		Title:      "Public topic",
 		Content:    "visible to everyone",
 	}
 	restrictedTopic := model.ForumTopic{
+		UserID:     owner.UUID,
 		CategoryID: restrictedCategory.ID,
 		Title:      "Restricted topic",
 		Content:    "members only",
@@ -264,6 +268,7 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
+		&model.Channel{},
 		&model.Post{},
 		&model.Video{},
 		&model.FeedSource{},
@@ -286,6 +291,11 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
+	channel := model.Channel{UserID: &userID, Name: "Portal channel", Slug: "portal-channel"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
 	post := model.Post{
 		UserID:     userID,
 		Title:      "Podcast post",
@@ -294,6 +304,7 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 		Visibility: "public",
 	}
 	video := model.Video{
+		UserID:      userID,
 		Title:       "Portal video",
 		Description: "desc",
 		Status:      "published",
@@ -335,7 +346,8 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 	}
 
 	episode := model.PodcastEpisode{
-		PostID: post.ID,
+		PostID:    post.ID,
+		ChannelID: channel.ID,
 	}
 	if err := db.Create(&episode).Error; err != nil {
 		t.Fatalf("create episode: %v", err)

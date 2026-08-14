@@ -1003,7 +1003,7 @@ func TestSubscribedBlogFeedSortsByPublishedAt(t *testing.T) {
 	if items[0].Post == nil || items[0].Post.ID != latePublished.ID {
 		t.Fatalf("expected most recently published post first, got %#v", items)
 	}
-	if !items[0].PublishedAt.Equal(latePublishedAt) {
+	if items[0].PublishedAt.Sub(latePublishedAt).Abs() >= time.Microsecond {
 		t.Fatalf("expected timeline published_at %s, got %s", latePublishedAt, items[0].PublishedAt)
 	}
 }
@@ -1118,7 +1118,10 @@ func TestGetSubscribedFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
 	}
 
 	queries := sql.String()
-	feedItemQueryStart := strings.Index(queries, "FROM `feed_items`")
+	feedItemQueryStart := strings.Index(strings.ToLower(queries), `from "feed_items"`)
+	if feedItemQueryStart == -1 {
+		feedItemQueryStart = strings.Index(strings.ToLower(queries), "from `feed_items`")
+	}
 	if feedItemQueryStart == -1 || !strings.Contains(strings.ToUpper(queries[feedItemQueryStart:]), "LIMIT 1") {
 		t.Fatalf("expected feed item timeline query to be limited to requested page, got SQL:\n%s", queries)
 	}
@@ -1236,7 +1239,10 @@ func TestGetPublicFeedLimitsFeedItemQueryToRequestedPage(t *testing.T) {
 	}
 
 	queries := sql.String()
-	feedItemQueryStart := strings.Index(queries, "FROM `feed_items`")
+	feedItemQueryStart := strings.Index(strings.ToLower(queries), `from "feed_items"`)
+	if feedItemQueryStart == -1 {
+		feedItemQueryStart = strings.Index(strings.ToLower(queries), "from `feed_items`")
+	}
 	if feedItemQueryStart == -1 || !strings.Contains(strings.ToUpper(queries[feedItemQueryStart:]), "LIMIT 1") {
 		t.Fatalf("expected public feed item query to be limited to requested page, got SQL:\n%s", queries)
 	}
