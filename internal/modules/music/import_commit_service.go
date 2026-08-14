@@ -430,11 +430,32 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 	})
 	if err != nil {
 		s.deleteAlbumImportObjects(newObjectKeys)
+		var appErr *apperr.AppError
+		if errors.As(err, &appErr) && appErr.HTTPStatus >= 400 && appErr.HTTPStatus < 500 {
+			failed, markErr := s.markAlbumImportNeedsAttention(user.ID, id, appErr.Message)
+			if markErr == nil {
+				s.updateAlbumImportNotification(failed)
+				return failed, nil
+			}
+		}
 		return model.AlbumImportSession{}, err
 	}
 	s.deleteAlbumImportObjects(oldObjectKeys)
 	s.updateAlbumImportNotification(out)
 	return out, nil
+}
+
+func (s *Service) markAlbumImportNeedsAttention(userID, importID uuid.UUID, message string) (model.AlbumImportSession, error) {
+	if err := s.db.Model(&model.AlbumImportSession{}).
+		Where("id = ? AND user_id = ? AND status = ?", importID, userID, AlbumImportStatusReady).
+		Updates(map[string]any{
+			"status":        AlbumImportStatusNeedsAttention,
+			"stage":         AlbumImportStageReady,
+			"error_message": strings.TrimSpace(message),
+		}).Error; err != nil {
+		return model.AlbumImportSession{}, err
+	}
+	return loadAlbumImportSession(s.db, importID, &userID)
 }
 
 func persistAlbumImportTrackLyrics(tx *gorm.DB, actorID, songID uuid.UUID, payload *AlbumImportTrackLyricsPayload) error {

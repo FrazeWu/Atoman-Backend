@@ -1152,6 +1152,35 @@ func TestFinalizeSubmittedAlbumImportCommitsReadySession(t *testing.T) {
 	}
 }
 
+func TestFinalizeSubmittedAlbumImportMarksValidationFailureForAttention(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	payload, err := json.Marshal(map[string]any{"commit_request": CommitAlbumImportSessionInput{
+		Artist: completeAlbumImportArtistPayload("Incomplete Artist"),
+		Album:  AlbumImportAlbumPayload{Title: "Incomplete Album"},
+	}})
+	if err != nil {
+		t.Fatalf("encode deferred commit: %v", err)
+	}
+	if err := db.Model(&model.AlbumImportSession{}).Where("id = ?", session.ID).Update("payload_json", string(payload)).Error; err != nil {
+		t.Fatalf("save deferred commit: %v", err)
+	}
+
+	if err := svc.FinalizeSubmittedAlbumImport(session.ID); err != nil {
+		t.Fatalf("finalize import: %v", err)
+	}
+	var stored model.AlbumImportSession
+	if err := db.First(&stored, "id = ?", session.ID).Error; err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	if stored.Status != AlbumImportStatusNeedsAttention || stored.ErrorMessage == "" {
+		t.Fatalf("expected needs attention with an error, got %#v", stored)
+	}
+}
+
 func TestCommitAlbumImportSessionPromotesS3AssetsAndDeletesUploads(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	var copiedSources []string
