@@ -9,7 +9,6 @@ import (
 
 	"github.com/casbin/casbin/v3"
 	"github.com/casbin/casbin/v3/model"
-	gormadapter "github.com/casbin/gorm-adapter/v3"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -18,7 +17,7 @@ var Enforcer *casbin.Enforcer
 
 // InitCasbin initializes the casbin enforcer with GORM adapter
 func InitCasbin(db *gorm.DB) error {
-	adapter, err := gormadapter.NewAdapterByDB(db)
+	adapter, err := newPostgresCasbinAdapter(db)
 	if err != nil {
 		return err
 	}

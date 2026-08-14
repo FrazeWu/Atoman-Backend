@@ -93,6 +93,7 @@ func createDMV2Constraints(db *gorm.DB) error {
 		return nil
 	}
 	for _, statement := range []string{
+		`ALTER TABLE dm_messages DROP CONSTRAINT IF EXISTS fk_dm_messages_sender`,
 		`ALTER TABLE dm_conversations ALTER COLUMN participant_a_type SET NOT NULL`,
 		`ALTER TABLE dm_conversations ALTER COLUMN participant_b_type SET NOT NULL`,
 		`ALTER TABLE dm_messages ALTER COLUMN sender_type SET NOT NULL`,

@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"atoman/internal/model"
+	"atoman/internal/testdb"
 
-	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
@@ -103,10 +103,7 @@ func TestServiceRejectsSelfAndOwnedChannelTargets(t *testing.T) {
 
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	db, err := gorm.Open(sqlite.Open(t.TempDir()+"/dm.sqlite"), &gorm.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	db := testdb.Open(t)
 	if err := db.AutoMigrate(&model.User{}, &model.Channel{}, &model.UserSettings{}, &model.DMChannelSettings{}, &model.UserBlock{}, &model.Follow{}, &model.DMConversation{}, &model.DMMessage{}); err != nil {
 		t.Fatal(err)
 	}

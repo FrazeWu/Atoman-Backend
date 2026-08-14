@@ -286,11 +286,11 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		}
 
 		var existingCount int64
-		if err := db.Table("Songs").
-			Joins("JOIN Albums ON Albums.id = Songs.album_id").
-			Joins("JOIN album_artists ON album_artists.album_id = Albums.id").
-			Joins("JOIN Artists ON Artists.id = album_artists.artist_id").
-			Where("Songs.title = ? AND Albums.title = ? AND Artists.name = ? AND Songs.status NOT IN ?",
+		if err := db.Table(`"Songs" AS songs`).
+			Joins(`JOIN "Albums" AS albums ON albums.id = songs.album_id`).
+			Joins("JOIN album_artists ON album_artists.album_id = albums.id").
+			Joins(`JOIN "Artists" AS artists ON artists.id = album_artists.artist_id`).
+			Where("songs.title = ? AND albums.title = ? AND artists.name = ? AND songs.status NOT IN ?",
 				input.Title, checkAlbum, input.Artist, []string{"closed", "rejected", "draft"}).
 			Count(&existingCount).Error; err != nil {
 			log.Printf("Error checking for duplicates: %v", err)
@@ -302,11 +302,11 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			log.Printf("Skipping duplicate song: %s - %s - %s", input.Title, checkAlbum, input.Artist)
 
 			var existingSong model.Song
-			db.Table("Songs").
-				Joins("JOIN Albums ON Albums.id = Songs.album_id").
-				Joins("JOIN album_artists ON album_artists.album_id = Albums.id").
-				Joins("JOIN Artists ON Artists.id = album_artists.artist_id").
-				Where("Songs.title = ? AND Albums.title = ? AND Artists.name = ? AND Songs.status NOT IN ?",
+			db.Table(`"Songs" AS songs`).
+				Joins(`JOIN "Albums" AS albums ON albums.id = songs.album_id`).
+				Joins("JOIN album_artists ON album_artists.album_id = albums.id").
+				Joins(`JOIN "Artists" AS artists ON artists.id = album_artists.artist_id`).
+				Where("songs.title = ? AND albums.title = ? AND artists.name = ? AND songs.status NOT IN ?",
 					input.Title, checkAlbum, input.Artist, []string{"closed", "rejected", "draft"}).
 				First(&existingSong)
 

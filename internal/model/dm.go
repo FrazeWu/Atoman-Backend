@@ -38,7 +38,7 @@ type DMMessage struct {
 	SenderType     string    `json:"-" gorm:"type:varchar(16);not null;default:'user'"`
 	SenderID       uuid.UUID `json:"sender_id" gorm:"type:uuid;not null;index"`
 	// Deprecated: retained only while the legacy DM handler is still compiled.
-	Sender          *User      `json:"sender,omitempty" gorm:"foreignKey:SenderID;references:UUID"`
+	Sender          *User      `json:"sender,omitempty" gorm:"-"`
 	ActorUserID     uuid.UUID  `json:"-" gorm:"type:uuid;not null;index"`
 	ClientMessageID uuid.UUID  `json:"-" gorm:"type:uuid;not null"`
 	Content         string     `json:"content" gorm:"type:text"`
