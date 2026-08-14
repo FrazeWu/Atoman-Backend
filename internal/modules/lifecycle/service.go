@@ -465,10 +465,10 @@ func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool
 		}
 	case "video":
 		var video model.Video
-		if err := s.db.First(&video, "id = ?", contentID).Error; err != nil {
+		if err := s.db.Preload("Collections").First(&video, "id = ?", contentID).Error; err != nil {
 			return contentError(err)
 		}
-		if strings.TrimSpace(video.Title) == "" || strings.TrimSpace(video.VideoURL) == "" || video.CollectionID == nil || video.CollectionConflict {
+		if strings.TrimSpace(video.Title) == "" || strings.TrimSpace(video.VideoURL) == "" || len(video.Collections) == 0 {
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Video title, source, and collection are required")
 		}
 		if video.StorageType == "local" && strings.HasPrefix(video.VideoURL, "/uploads/") && video.ProcessingStatus != "ready" {
