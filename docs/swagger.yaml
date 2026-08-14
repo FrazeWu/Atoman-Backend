@@ -6720,6 +6720,13 @@ definitions:
       name:
         type: string
     type: object
+  studio.collectionConflictResolution:
+    properties:
+      collection_id:
+        type: string
+      content_id:
+        type: string
+    type: object
   studio.reorderCollectionContentsInput:
     properties:
       content_ids:
@@ -6731,6 +6738,13 @@ definitions:
     properties:
       collection_id:
         type: string
+    type: object
+  studio.resolveCollectionConflictsInput:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/studio.collectionConflictResolution'
+        type: array
     type: object
 info:
   contact: {}
@@ -17366,6 +17380,60 @@ paths:
       security:
       - BearerAuth: []
       summary: 记录内容分享
+      tags:
+      - studio
+  /api/v1/studio/{module}/contents/collections/resolve:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 确认的候选合集
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.resolveCollectionConflictsInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 批量确认历史内容合集归属
       tags:
       - studio
   /api/v1/studio/{module}/interactions:

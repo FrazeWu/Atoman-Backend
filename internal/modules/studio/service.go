@@ -25,9 +25,6 @@ type Service struct {
 }
 
 func recordStudioAudit(tx *gorm.DB, userID uuid.UUID, action, entityType string, entityID uuid.UUID, metadata map[string]any) error {
-	if !tx.Migrator().HasTable(&model.AuditLog{}) {
-		return nil
-	}
 	return audit.Record(tx, audit.Entry{ActorID: &userID, Action: action, EntityType: entityType, EntityID: &entityID, Metadata: metadata})
 }
 

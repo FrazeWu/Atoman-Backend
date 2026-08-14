@@ -26,6 +26,7 @@ func newStudioQueryFixture(t *testing.T) studioQueryFixture {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
+		&model.AuditLog{},
 		&model.Channel{},
 		&model.Collection{},
 		&model.UserStudioState{},

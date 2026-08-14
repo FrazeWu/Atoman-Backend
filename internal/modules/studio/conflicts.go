@@ -9,6 +9,38 @@ import (
 	"gorm.io/gorm"
 )
 
+type collectionConflictResolution struct {
+	ContentID    uuid.UUID `json:"content_id"`
+	CollectionID uuid.UUID `json:"collection_id"`
+}
+
+func (s *Service) ResolveCollectionConflicts(user authctx.CurrentUser, module Module, items []collectionConflictResolution) error {
+	if err := requireUser(user); err != nil {
+		return err
+	}
+	if len(items) == 0 {
+		return apperr.BadRequest("validation.invalid_request", "items is required")
+	}
+	seen := make(map[uuid.UUID]struct{}, len(items))
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		txService := *s
+		txService.db = tx
+		for _, item := range items {
+			if item.ContentID == uuid.Nil || item.CollectionID == uuid.Nil {
+				return apperr.BadRequest("validation.invalid_request", "content_id and collection_id are required")
+			}
+			if _, exists := seen[item.ContentID]; exists {
+				return apperr.BadRequest("validation.invalid_request", "content_id must be unique")
+			}
+			seen[item.ContentID] = struct{}{}
+			if err := txService.ResolveCollectionConflict(user, module, item.ContentID, item.CollectionID); err != nil {
+				return err
+			}
+		}
+		return recordStudioAudit(tx, user.ID, "studio.collection_conflicts_resolved", "collection_conflict_batch", uuid.Nil, map[string]any{"module": module, "content_count": len(items)})
+	})
+}
+
 func (s *Service) ResolveCollectionConflict(user authctx.CurrentUser, module Module, contentID, collectionID uuid.UUID) error {
 	if err := requireUser(user); err != nil {
 		return err

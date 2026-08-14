@@ -17015,6 +17015,89 @@
                 }
             }
         },
+        "/api/v1/studio/{module}/contents/collections/resolve": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio"
+                ],
+                "summary": "批量确认历史内容合集归属",
+                "parameters": [
+                    {
+                        "enum": [
+                            "blog",
+                            "podcast",
+                            "video"
+                        ],
+                        "type": "string",
+                        "description": "内容模块",
+                        "name": "module",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "确认的候选合集",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/studio.resolveCollectionConflictsInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/studio/{module}/contents/{id}/collection": {
             "put": {
                 "security": [
@@ -30535,6 +30618,17 @@
                 }
             }
         },
+        "studio.collectionConflictResolution": {
+            "type": "object",
+            "properties": {
+                "collection_id": {
+                    "type": "string"
+                },
+                "content_id": {
+                    "type": "string"
+                }
+            }
+        },
         "studio.reorderCollectionContentsInput": {
             "type": "object",
             "properties": {
@@ -30551,6 +30645,17 @@
             "properties": {
                 "collection_id": {
                     "type": "string"
+                }
+            }
+        },
+        "studio.resolveCollectionConflictsInput": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/studio.collectionConflictResolution"
+                    }
                 }
             }
         }

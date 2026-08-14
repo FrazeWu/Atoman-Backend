@@ -43,10 +43,42 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.DELETE("/:module/collections/:id", h.deleteCollection)
 	group.PUT("/:module/collections/:id/contents/order", h.reorderCollectionContents)
 	group.PUT("/:module/contents/:id/collection", h.resolveCollectionConflict)
+	group.PUT("/:module/contents/collections/resolve", h.resolveCollectionConflicts)
 }
 
 type resolveCollectionConflictInput struct {
 	CollectionID uuid.UUID `json:"collection_id"`
+}
+
+type resolveCollectionConflictsInput struct {
+	Items []collectionConflictResolution `json:"items"`
+}
+
+// resolveCollectionConflicts godoc
+// @Summary 批量确认历史内容合集归属
+// @Tags studio
+// @Accept json
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog,podcast,video)
+// @Param input body resolveCollectionConflictsInput true "确认的候选合集"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 409 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/{module}/contents/collections/resolve [put]
+func (h *Handler) resolveCollectionConflicts(c *gin.Context) {
+	user, module, ok := requestScope(c)
+	if !ok {
+		return
+	}
+	var input resolveCollectionConflictsInput
+	if !bindJSON(c, &input) {
+		return
+	}
+	respond(c, http.StatusOK, gin.H{"resolved": true}, h.service.ResolveCollectionConflicts(user, module, input.Items))
 }
 
 // resolveCollectionConflict godoc

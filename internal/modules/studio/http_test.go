@@ -31,6 +31,7 @@ func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
+		&model.AuditLog{},
 		&model.Channel{},
 		&model.Collection{},
 		&model.Post{},
