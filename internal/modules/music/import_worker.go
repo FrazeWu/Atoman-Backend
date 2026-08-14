@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -122,6 +123,7 @@ func (w *ImportWorker) Claim(ctx context.Context) (model.AlbumImportJob, bool, e
 		if err := w.db.WithContext(ctx).First(&claimed, "id = ?", candidate.ID).Error; err != nil {
 			return model.AlbumImportJob{}, false, err
 		}
+		logMusicImportEvent("claimed", claimed, w.workerID, "")
 		return claimed, true, nil
 	}
 	return model.AlbumImportJob{}, false, nil
@@ -138,6 +140,8 @@ func (w *ImportWorker) recoverExpiredLeases(ctx context.Context, now time.Time) 
 		return err
 	}
 	for _, candidate := range jobs {
+		event := ""
+		var recovered model.AlbumImportJob
 		if err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			var job model.AlbumImportJob
 			if err := tx.First(&job, "id = ?", candidate.ID).Error; err != nil {
@@ -156,15 +160,23 @@ func (w *ImportWorker) recoverExpiredLeases(ctx context.Context, now time.Time) 
 				if result.Error != nil || result.RowsAffected == 0 {
 					return result.Error
 				}
-				return tx.Model(&model.AlbumImportSession{}).Where("id = ? AND status IN ?", session.ID, activeImportSessionStatuses).Updates(map[string]any{"status": AlbumImportStatusNeedsAttention, "stage": AlbumImportStageFailed, "error_message": "worker lease expired", "expires_at": expires}).Error
+				if err := tx.Model(&model.AlbumImportSession{}).Where("id = ? AND status IN ?", session.ID, activeImportSessionStatuses).Updates(map[string]any{"status": AlbumImportStatusNeedsAttention, "stage": AlbumImportStageFailed, "error_message": "worker lease expired", "expires_at": expires}).Error; err != nil {
+					return err
+				}
+				event, recovered = "lease_failed", job
+				return nil
 			}
 			result := tx.Model(&model.AlbumImportJob{}).Where("id = ? AND status = ? AND ((heartbeat_at IS NOT NULL AND heartbeat_at <= ?) OR (heartbeat_at IS NULL AND locked_at <= ?))", job.ID, AlbumImportJobStatusRunning, cutoff, cutoff).Updates(map[string]any{"status": AlbumImportJobStatusQueued, "stage": AlbumImportStageQueued, "locked_by": "", "locked_at": nil, "heartbeat_at": nil, "next_attempt_at": now})
 			if result.Error != nil || result.RowsAffected == 0 {
 				return result.Error
 			}
+			event, recovered = "lease_requeued", job
 			return nil
 		}); err != nil {
 			return err
+		}
+		if event != "" {
+			logMusicImportEvent(event, recovered, w.workerID, "worker lease expired")
 		}
 	}
 	return nil
@@ -191,7 +203,8 @@ func (w *ImportWorker) Heartbeat(ctx context.Context, jobID uuid.UUID) error {
 
 func (w *ImportWorker) Complete(ctx context.Context, jobID uuid.UUID) error {
 	now := w.now()
-	return w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var completed model.AlbumImportJob
+	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var job model.AlbumImportJob
 		if err := tx.First(&job, "id = ?", jobID).Error; err != nil {
 			return err
@@ -214,8 +227,13 @@ func (w *ImportWorker) Complete(ctx context.Context, jobID uuid.UUID) error {
 		if result.RowsAffected == 0 {
 			return errors.New("music import session is no longer active")
 		}
+		completed = job
 		return nil
 	})
+	if err == nil {
+		logMusicImportEvent("completed", completed, w.workerID, "")
+	}
+	return err
 }
 
 func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) error {
@@ -224,7 +242,9 @@ func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) 
 	if cause != nil {
 		message = cause.Error()
 	}
-	return w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	event := ""
+	var retried model.AlbumImportJob
+	err := w.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var job model.AlbumImportJob
 		if err := tx.First(&job, "id = ?", jobID).Error; err != nil {
 			return err
@@ -249,6 +269,7 @@ func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) 
 			if result.RowsAffected == 0 {
 				return errors.New("music import session is no longer active")
 			}
+			event, retried = "failed", job
 			return nil
 		}
 		next := now.Add(importRetryDelay(job.Attempts))
@@ -259,8 +280,17 @@ func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) 
 		if result.RowsAffected == 0 {
 			return errors.New("music import job is not held by this worker")
 		}
+		event, retried = "requeued", job
 		return nil
 	})
+	if err == nil {
+		logMusicImportEvent(event, retried, w.workerID, message)
+	}
+	return err
+}
+
+func logMusicImportEvent(event string, job model.AlbumImportJob, workerID, message string) {
+	log.Printf("music_import_event=%q job_id=%q import_id=%q worker_id=%q attempts=%d max_attempts=%d message=%q", event, job.ID, job.ImportID, workerID, job.Attempts, job.MaxAttempts, message)
 }
 
 var activeImportSessionStatuses = []string{AlbumImportStatusQueued, AlbumImportStatusExtracting, AlbumImportStatusAnalyzing, AlbumImportStatusTranscoding}

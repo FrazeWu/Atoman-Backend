@@ -14,6 +14,8 @@ import (
 const (
 	musicHomeRecentLimit = 8
 	musicHomeForYouLimit = 8
+	// Keep recommendation work bounded before applying the diversity rule.
+	musicHomeCandidateLimit = musicHomeForYouLimit * 8
 )
 
 type homeAlbumCandidate struct {
@@ -264,37 +266,30 @@ func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums
 		artistIDs = append(artistIDs, artistID)
 	}
 
-	var albums []model.Album
-	if err := s.db.Model(&model.Album{}).
+	query := s.db.Model(&model.Album{}).
 		Joins("JOIN album_artists ON album_artists.album_id = \"Albums\".id").
 		Where("album_artists.artist_id IN ?", artistIDs).
 		Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed").
-		Distinct("\"Albums\".*").
+		Where("COALESCE(\"Albums\".cover_url, '') <> ''").
+		Where(`EXISTS (SELECT 1 FROM "Songs" WHERE "Songs".album_id = "Albums".id AND "Songs".deleted_at IS NULL AND COALESCE("Songs".audio_url, '') <> '')`)
+	if len(seenAlbums) > 0 {
+		query = query.Where("\"Albums\".id NOT IN ?", homeUUIDs(seenAlbums))
+	}
+	if len(seenSongs) > 0 {
+		query = query.Where(`NOT EXISTS (SELECT 1 FROM "Songs" WHERE "Songs".album_id = "Albums".id AND "Songs".deleted_at IS NULL AND "Songs".id IN ?)`, homeUUIDs(seenSongs))
+	}
+
+	var albums []model.Album
+	if err := query.Distinct("\"Albums\".*").
 		Preload("Artists").
-		Preload("Songs").
+		Order("\"Albums\".hot_score DESC, \"Albums\".release_date DESC").
+		Limit(musicHomeCandidateLimit).
 		Find(&albums).Error; err != nil {
 		return nil, err
 	}
 
 	candidates := make([]homeAlbumCandidate, 0, len(albums))
 	for _, album := range albums {
-		if _, seen := seenAlbums[album.ID]; seen {
-			continue
-		}
-		if !isDiscoverableHomeAlbum(album) {
-			continue
-		}
-		containsSeenSong := false
-		for _, song := range album.Songs {
-			if _, seen := seenSongs[song.ID]; seen {
-				containsSeenSong = true
-				break
-			}
-		}
-		if containsSeenSong {
-			continue
-		}
-
 		score := album.HotScore * 0.2
 		for _, artist := range album.Artists {
 			score += affinity[artist.ID]
@@ -331,6 +326,23 @@ func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums
 		}
 	}
 
+	if len(selectedAlbums) > 0 {
+		selectedIDs := make([]uuid.UUID, 0, len(selectedAlbums))
+		for _, album := range selectedAlbums {
+			selectedIDs = append(selectedIDs, album.ID)
+		}
+		var hydrated []model.Album
+		if err := s.db.Where("id IN ?", selectedIDs).Preload("Artists").Preload("Songs").Find(&hydrated).Error; err != nil {
+			return nil, err
+		}
+		byID := make(map[uuid.UUID]model.Album, len(hydrated))
+		for _, album := range hydrated {
+			byID[album.ID] = album
+		}
+		for index, album := range selectedAlbums {
+			selectedAlbums[index] = byID[album.ID]
+		}
+	}
 	if err := hydrateAlbumStats(s.db, selectedAlbums); err != nil {
 		return nil, err
 	}
@@ -353,6 +365,14 @@ func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums
 		results = append(results, HomeAlbumRecommendation{Album: selectedAlbums[index], Reason: reason})
 	}
 	return results, nil
+}
+
+func homeUUIDs(ids map[uuid.UUID]struct{}) []uuid.UUID {
+	values := make([]uuid.UUID, 0, len(ids))
+	for id := range ids {
+		values = append(values, id)
+	}
+	return values
 }
 
 func isDiscoverableHomeAlbum(album model.Album) bool {

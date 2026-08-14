@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"atoman/internal/model"
+
+	"github.com/google/uuid"
 )
 
 func TestIsDiscoverableHomeAlbum(t *testing.T) {
@@ -72,6 +74,49 @@ func TestHomeReturnsPublicSectionsForAnonymousListeners(t *testing.T) {
 	for _, section := range home.Sections {
 		if len(section.Albums) == 0 || section.Albums[0].ID != album.ID {
 			t.Fatalf("unexpected section %#v", section)
+		}
+	}
+}
+
+func TestRecommendHomeAlbumsExcludesAlbumsContainingSeenSongs(t *testing.T) {
+	service, db, _ := newMusicTestService(t)
+	artist := model.Artist{Name: "Affinity Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	createAlbum := func(title string) (model.Album, model.Song) {
+		t.Helper()
+		album := model.Album{Title: title, CoverURL: "/" + title + ".jpg", Status: "open", EntryStatus: "open"}
+		if err := db.Create(&album).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
+			t.Fatal(err)
+		}
+		song := model.Song{Title: title + " song", AlbumID: &album.ID, AudioURL: "/" + title + ".mp3", Status: "open"}
+		if err := db.Create(&song).Error; err != nil {
+			t.Fatal(err)
+		}
+		return album, song
+	}
+
+	excludedAlbum, seenSong := createAlbum("Excluded")
+	includedAlbum, _ := createAlbum("Included")
+	recommendations, err := service.recommendHomeAlbums(
+		map[uuid.UUID]float64{artist.ID: 1},
+		map[uuid.UUID]struct{}{},
+		map[uuid.UUID]struct{}{seenSong.ID: {}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recommendations) != 1 || recommendations[0].ID != includedAlbum.ID {
+		t.Fatalf("unexpected recommendations: %#v", recommendations)
+	}
+	for _, recommendation := range recommendations {
+		if recommendation.ID == excludedAlbum.ID {
+			t.Fatalf("returned album containing a seen song: %s", excludedAlbum.ID)
 		}
 	}
 }
