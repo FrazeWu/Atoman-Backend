@@ -23,8 +23,20 @@ This deployment path runs the Go backend directly on the host and keeps Nginx on
 ```bash
 cd /home/fa/Atoman-Backend
 go build -o start_server ./cmd/start_server
+go build -o migrate ./cmd/migrate
 go build -o music_import_worker ./cmd/music_import_worker
 ```
+
+## Migrate
+
+Production startup intentionally does not run schema migrations. Run the migration binary after building the release and before restarting either service:
+
+```bash
+cd /home/fa/Atoman-Backend
+./migrate --env .env.prod
+```
+
+Do not restart the backend or worker when this command fails.
 
 ## Install systemd unit
 
@@ -44,7 +56,7 @@ EnvironmentFile=/home/fa/Atoman-Backend/.env.prod
 Environment=ENV=production
 Environment=GIN_MODE=release
 Environment=PORT=8080
-ExecStart=/home/fa/Atoman-Backend/start_server
+ExecStart=/home/fa/Atoman-Backend/start_server --mode prod
 Restart=always
 RestartSec=5
 StandardOutput=journal

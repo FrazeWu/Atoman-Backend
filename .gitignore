@@ -21,6 +21,8 @@ output.txt
 nvim.log
 .claude/
 .codegraph/
+.pi/
+.wrangler/
 .gstack/
 .worktrees/
 nginx/ssl/*
