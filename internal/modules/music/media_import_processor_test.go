@@ -31,17 +31,40 @@ func (r *fakeMediaCommandRunner) LookPath(name string) (string, error) {
 func (r *fakeMediaCommandRunner) Run(_ context.Context, name string, args ...string) ([]byte, error) {
 	r.runs = append(r.runs, append([]string{name}, args...))
 	if r.run != nil {
-		return r.run(name, args)
+		output, err := r.run(name, args)
+		return fakeMediaCommandOutput(name, args, output, err)
 	}
 	if name == "ffprobe" {
 		return []byte(`{"format":{"duration":"123.5","tags":{"title":"Tagged title"}}}`), nil
 	}
 	for _, arg := range args {
 		if strings.HasSuffix(arg, ".mp3") || strings.HasSuffix(arg, ".webp") {
-			return nil, os.WriteFile(arg, []byte("derived"), 0600)
+			if err := os.WriteFile(arg, []byte("derived"), 0600); err != nil {
+				return nil, err
+			}
 		}
 	}
-	return nil, nil
+	return fakeMediaCommandOutput(name, args, nil, nil)
+}
+
+func fakeMediaCommandOutput(name string, args []string, output []byte, err error) ([]byte, error) {
+	if err == nil && name == "ffmpeg" {
+		for _, arg := range args {
+			if strings.HasSuffix(arg, ".mp3") {
+				if writeErr := os.WriteFile(arg, []byte("derived"), 0600); writeErr != nil {
+					return nil, writeErr
+				}
+			}
+		}
+	}
+	if err == nil && name == "ffmpeg" && len(output) == 0 {
+		for _, arg := range args {
+			if arg == "pipe:1" {
+				return bytes.Repeat([]byte{0x00, 0x20}, WaveformPeakCount), nil
+			}
+		}
+	}
+	return output, err
 }
 
 func TestMediaImportProcessorExtractsArchiveInTempTreeAndKeepsDiscPath(t *testing.T) {
@@ -134,7 +157,7 @@ func TestProcessExtractedTreeFallsBackToEmbeddedAudioCover(t *testing.T) {
 			}
 			return []byte(`{"format":{"duration":"12","tags":{}}}`), nil
 		}
-		if name == "ffmpeg" && containsMediaArg(args, "-map") {
+		if name == "ffmpeg" && containsMediaArg(args, "0:v:0") {
 			extractAttempts++
 			if extractAttempts == 1 {
 				return nil, errors.New("no embedded artwork")
@@ -182,7 +205,7 @@ func TestProcessExtractedTreePrefersExplicitCoverOverEmbeddedAudioCover(t *testi
 		t.Fatal(err)
 	}
 	for _, run := range runner.runs {
-		if run[0] == "ffmpeg" && containsMediaArg(run, "-map") {
+		if run[0] == "ffmpeg" && containsMediaArg(run, "0:v:0") {
 			t.Fatalf("explicit cover must prevent embedded artwork extraction: %#v", runner.runs)
 		}
 	}
@@ -214,7 +237,7 @@ func TestProcessExtractedTreeRejectsBannerEmbeddedCover(t *testing.T) {
 			}
 			return []byte(`{"format":{"duration":"12","tags":{}}}`), nil
 		}
-		if name == "ffmpeg" && containsMediaArg(args, "-map") {
+		if name == "ffmpeg" && containsMediaArg(args, "0:v:0") {
 			extractAttempts++
 			return nil, os.WriteFile(args[len(args)-1], []byte("cover"), 0600)
 		}
@@ -267,15 +290,16 @@ func TestMediaImportProcessorArchiveRetrySkipsCompletedDerivedAudio(t *testing.T
 		if name == "ffprobe" {
 			return []byte(`{"format":{"duration":"12"}}`), nil
 		}
-		if name == "ffmpeg" && strings.HasSuffix(args[len(args)-1], ".mp3") {
-			ffmpegs++
-			if ffmpegs == 2 {
-				return nil, errors.New("second track transient failure")
-			}
+		if name == "ffmpeg" {
 			for _, arg := range args {
-				if strings.HasSuffix(arg, ".mp3") {
-					return nil, os.WriteFile(arg, []byte("derived"), 0600)
+				if !strings.HasSuffix(arg, ".mp3") {
+					continue
 				}
+				ffmpegs++
+				if ffmpegs == 2 {
+					return nil, errors.New("second track transient failure")
+				}
+				return nil, os.WriteFile(arg, []byte("derived"), 0600)
 			}
 		}
 		return nil, nil

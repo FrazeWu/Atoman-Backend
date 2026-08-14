@@ -228,7 +228,7 @@ func TestRegisterAlbumImportFilesRejectsInvalidDescriptors(t *testing.T) {
 		{name: "parent segment", files: []AlbumImportFileInput{{RelativePath: "disc/../track.flac", FileName: "track.flac", FileSize: 1}}},
 		{name: "mismatched basename", files: []AlbumImportFileInput{{RelativePath: "disc/track.flac", FileName: "other.flac", FileSize: 1}}},
 		{name: "zero size", files: []AlbumImportFileInput{{RelativePath: "track.flac", FileName: "track.flac"}}},
-		{name: "unsupported", files: []AlbumImportFileInput{albumImportFileInput("notes.txt", 1)}},
+		{name: "unsupported", files: []AlbumImportFileInput{albumImportFileInput("program.exe", 1)}},
 		{name: "archive mixed with audio", files: []AlbumImportFileInput{albumImportFileInput("album.zip", 1), albumImportFileInput("track.flac", 1)}},
 		{name: "multiple archives", files: []AlbumImportFileInput{albumImportFileInput("one.zip", 1), albumImportFileInput("two.rar", 1)}},
 		{name: "multiple folder roots", files: []AlbumImportFileInput{albumImportFileInput("AlbumA/01.flac", 1), albumImportFileInput("AlbumB/02.flac", 1)}},

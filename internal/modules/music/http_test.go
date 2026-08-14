@@ -43,6 +43,8 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.MusicListeningHistory{},
 		&model.MusicSearchInteraction{},
 		&model.AlbumImportSession{},
+		&model.MusicAssetUploadSession{},
+		&model.MediaAsset{},
 		&model.AlbumImportFile{},
 		&model.AlbumImportJob{},
 		&model.MusicEdit{},
@@ -3412,7 +3414,8 @@ func TestRegisterRoutesMusicCursorPagination(t *testing.T) {
 			t.Fatalf("unexpected first cursor page: %#v", firstPage)
 		}
 		second := httptest.NewRecorder()
-		r.ServeHTTP(second, httptest.NewRequest(http.MethodGet, path+"&cursor="+firstPage.Meta.NextCursor, nil))
+		secondPath := strings.Replace(path, "cursor=", "cursor="+firstPage.Meta.NextCursor, 1)
+		r.ServeHTTP(second, httptest.NewRequest(http.MethodGet, secondPath, nil))
 		if second.Code != http.StatusOK {
 			t.Fatalf("second cursor request: %d: %s", second.Code, second.Body.String())
 		}
