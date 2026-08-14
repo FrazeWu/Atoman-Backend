@@ -89,6 +89,7 @@ func SetupAdminUserRoutes(router *gin.Engine, db *gorm.DB) {
 	users.DELETE("/:id/sessions", handler.revokeAllSessions)
 	users.GET("/:id/audit-logs", handler.listUserAuditLogs)
 	users.DELETE("/:id", handler.delete)
+	admin.PUT("/channels/:id/owner", handler.transferChannelOwnership)
 	admin.GET("/user-audit-logs", handler.listAuditLogs)
 }
 

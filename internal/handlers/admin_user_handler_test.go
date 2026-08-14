@@ -387,6 +387,65 @@ func TestAdminCanInspectLoginHistoryAndRevokeSessionWithAudit(t *testing.T) {
 	}
 }
 
+func TestAdminChannelOwnershipTransferPreservesAuthorshipAndWritesAudit(t *testing.T) {
+	env := newAdminUserTestEnv(t, authctx.RoleAdmin)
+	source := seedManagedUser(t, env.db, "channel-source", authctx.RoleUser, true)
+	target := seedManagedUser(t, env.db, "channel-target", authctx.RoleUser, true)
+	channel := model.Channel{UserID: &source.UUID, Name: "Transfer Channel", Slug: "transfer-channel"}
+	if err := env.db.Create(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	settings := model.StudioModuleSettings{UserID: source.UUID, ChannelID: channel.ID, ContentType: "blog"}
+	if err := env.db.Create(&settings).Error; err != nil {
+		t.Fatal(err)
+	}
+	state := model.UserStudioState{UserID: source.UUID, ChannelID: &channel.ID}
+	if err := env.db.Create(&state).Error; err != nil {
+		t.Fatal(err)
+	}
+	collection := model.Collection{ChannelID: channel.ID, CreatedBy: &source.UUID, ContentType: "blog", Name: "Authorship remains"}
+	if err := env.db.Create(&collection).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	response := env.request(t, http.MethodPut, "/api/v1/admin/channels/"+channel.ID.String()+"/owner", `{"user_id":"`+target.UUID.String()+`"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var updatedChannel model.Channel
+	if err := env.db.First(&updatedChannel, "id = ?", channel.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updatedChannel.UserID == nil || *updatedChannel.UserID != target.UUID {
+		t.Fatalf("expected channel owner to change, got %#v", updatedChannel.UserID)
+	}
+	var updatedSettings model.StudioModuleSettings
+	if err := env.db.First(&updatedSettings, "id = ?", settings.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updatedSettings.UserID != target.UUID {
+		t.Fatalf("expected settings compatibility owner to change, got %s", updatedSettings.UserID)
+	}
+	var updatedState model.UserStudioState
+	if err := env.db.First(&updatedState, "user_id = ?", source.UUID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if updatedState.ChannelID != nil {
+		t.Fatalf("expected original owner selection to clear, got %s", updatedState.ChannelID)
+	}
+	var preservedCollection model.Collection
+	if err := env.db.First(&preservedCollection, "id = ?", collection.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if preservedCollection.CreatedBy == nil || *preservedCollection.CreatedBy != source.UUID {
+		t.Fatalf("expected collection creator to remain source, got %#v", preservedCollection.CreatedBy)
+	}
+	var auditLog model.AuditLog
+	if err := env.db.Where("action = ? AND entity_id = ?", "admin_channel.owner_transferred", channel.ID).First(&auditLog).Error; err != nil {
+		t.Fatalf("expected transfer audit record: %v", err)
+	}
+}
+
 func TestAdminUserMutationsWriteAuditLogs(t *testing.T) {
 	env := newAdminUserTestEnv(t, authctx.RoleAdmin)
 	member := seedManagedUser(t, env.db, "audited-member", authctx.RoleUser, true)
