@@ -24,6 +24,12 @@ const artistDisambiguationSearchExpression = `COALESCE(to_jsonb("Artists")->>'di
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service, playLimiter: ratelimit.New()}
 	group.Use(musicOperationLog())
+	group.POST("/uploads", h.createMusicAssetUpload)
+	group.GET("/uploads/:uploadId", h.getMusicAssetUpload)
+	group.POST("/uploads/:uploadId/parts/:partNumber", h.createMusicAssetUploadPart)
+	group.POST("/uploads/:uploadId/parts/:partNumber/complete", h.completeMusicAssetUploadPart)
+	group.POST("/uploads/:uploadId/complete", h.completeMusicAssetUpload)
+	group.DELETE("/uploads/:uploadId", h.cancelMusicAssetUpload)
 	group.POST("/imports/albums", h.createAlbumImportSession)
 	group.GET("/imports/albums", h.listAlbumImportSessions)
 	group.POST("/imports/albums/:sessionId/upload", h.uploadAlbumImportArchive)

@@ -63,6 +63,14 @@ func newS3AlbumImportMultipartStore(client *s3.S3) albumImportMultipartStore {
 	return &s3AlbumImportMultipartStore{client: client, bucket: bucket}
 }
 
+func newS3PublicMusicMultipartStore(client *s3.S3) albumImportMultipartStore {
+	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	if client == nil || bucket == "" {
+		return nil
+	}
+	return &s3AlbumImportMultipartStore{client: client, bucket: bucket}
+}
+
 // NewMusicImportObjectStore creates the source-object cleanup store used by
 // the independent import worker.
 func NewMusicImportObjectStore(client *s3.S3) MusicImportObjectStore {

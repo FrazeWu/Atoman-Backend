@@ -74,6 +74,10 @@ func StartImportWorker(ctx context.Context, db *gorm.DB, s3Client *s3.S3) <-chan
 		defer close(done)
 		log.Printf("music import worker started as %s", workerID)
 		run := func() {
+			if err := importService.CleanupExpiredMusicAssetUploads(ctx); err != nil {
+				log.Printf("WARN: music import worker could not clean expired audio uploads: %v", err)
+			}
+
 			finalized, finalizeErr := worker.FinalizeSubmittedReady(ctx)
 			if finalizeErr != nil {
 				log.Printf("WARN: music import worker could not finalize ready imports: %v", finalizeErr)

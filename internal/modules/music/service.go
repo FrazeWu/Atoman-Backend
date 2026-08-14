@@ -12,6 +12,7 @@ type Service struct {
 	repo                 *Repo
 	s3                   *s3.S3
 	albumImportMultipart albumImportMultipartStore
+	assetUploadMultipart albumImportMultipartStore
 	lyricsSaveMu         sync.Mutex
 	lyricsVoteMu         sync.Mutex
 }
@@ -24,6 +25,7 @@ func NewServiceWithS3(db *gorm.DB, s3Client *s3.S3) *Service {
 		repo:                 NewRepo(db),
 		s3:                   s3Client,
 		albumImportMultipart: newS3AlbumImportMultipartStore(s3Client),
+		assetUploadMultipart: newS3PublicMusicMultipartStore(s3Client),
 	}
 }
 
