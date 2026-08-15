@@ -76,13 +76,16 @@ func TestBuildAlbumImportDTOUsesTargetAlbumTitle(t *testing.T) {
 	}
 }
 
-func TestBuildAlbumImportDTOUsesDeferredCommitTitle(t *testing.T) {
+func TestBuildAlbumImportDTOUsesDeferredCommitTitleAndSources(t *testing.T) {
 	dto := buildAlbumImportDTO(model.AlbumImportSession{
-		PayloadJSON: `{"commit_request":{"album":{"title":"再想想"}},"derived_album_title":"Archive Guess"}`,
+		PayloadJSON: `{"commit_request":{"artist_source":"https://example.test/artist","album":{"title":"再想想"},"album_source":"https://example.test/album"},"derived_album_title":"Archive Guess"}`,
 	})
 
 	if dto.AlbumTitle != "再想想" {
 		t.Fatalf("expected deferred commit title, got %q", dto.AlbumTitle)
+	}
+	if dto.ArtistSource != "https://example.test/artist" || dto.AlbumSource != "https://example.test/album" {
+		t.Fatalf("expected deferred commit sources, got artist=%q album=%q", dto.ArtistSource, dto.AlbumSource)
 	}
 }
 

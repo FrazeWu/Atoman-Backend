@@ -27850,10 +27850,16 @@ const docTemplate = `{
                 "albumTitle": {
                     "type": "string"
                 },
+                "albumSource": {
+                    "type": "string"
+                },
                 "archiveName": {
                     "type": "string"
                 },
                 "artistId": {
+                    "type": "string"
+                },
+                "artistSource": {
                     "type": "string"
                 },
                 "coverKey": {

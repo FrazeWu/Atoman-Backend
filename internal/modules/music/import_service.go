@@ -40,6 +40,7 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 
 	coverURL := resolveAlbumImportCoverURL(payload)
 	albumTitle := albumImportSessionAlbumTitle(session, payload)
+	artistSource, albumSource := albumImportCommitSources(payload)
 	missingArtists := []string{}
 	if values, ok := payload["missing_artists"].([]any); ok {
 		for _, value := range values {
@@ -56,11 +57,13 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 			}
 			return session.TargetAlbumID.String()
 		}(),
-		ArtistID:   stringValue(payload["artist_id"]),
-		AlbumTitle: albumTitle,
-		Status:     session.Status,
-		InputMode:  inputMode,
-		Stage:      stage,
+		ArtistID:     stringValue(payload["artist_id"]),
+		ArtistSource: artistSource,
+		AlbumTitle:   albumTitle,
+		AlbumSource:  albumSource,
+		Status:       session.Status,
+		InputMode:    inputMode,
+		Stage:        stage,
 		Progress: AlbumImportProgressDTO{
 			Current: session.ProgressCurrent,
 			Total:   session.ProgressTotal,
@@ -126,6 +129,14 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	}
 
 	return dto
+}
+
+func albumImportCommitSources(payload map[string]any) (artistSource, albumSource string) {
+	request, ok := payload["commit_request"].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	return strings.TrimSpace(stringValue(request["artist_source"])), strings.TrimSpace(stringValue(request["album_source"]))
 }
 
 func albumImportSessionAlbumTitle(session model.AlbumImportSession, payload map[string]any) string {

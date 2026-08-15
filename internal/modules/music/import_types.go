@@ -193,7 +193,9 @@ type AlbumImportDTO struct {
 	ImportID           string                 `json:"importId"`
 	TargetAlbumID      string                 `json:"targetAlbumId"`
 	ArtistID           string                 `json:"artistId"`
+	ArtistSource       string                 `json:"artistSource"`
 	AlbumTitle         string                 `json:"albumTitle"`
+	AlbumSource        string                 `json:"albumSource"`
 	Status             string                 `json:"status"`
 	InputMode          string                 `json:"inputMode"`
 	Stage              string                 `json:"stage"`

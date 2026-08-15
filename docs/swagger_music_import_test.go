@@ -55,15 +55,17 @@ func TestSwaggerDocumentsAlbumImportFileAPIs(t *testing.T) {
 			}
 		}
 	}
-	for _, definition := range []string{
-		"music.AlbumImportResponse",
-		"music.AlbumImportFileResponse",
-		"music.AlbumImportMultipartPartUploadResponse",
-		"music.RegisterAlbumImportFilesInput",
-		"music.AlbumImportFileInput",
-	} {
-		if _, ok := spec.Definitions[definition]; !ok {
-			t.Fatalf("missing Swagger definition %s", definition)
+	definition, ok := spec.Definitions["music.AlbumImportDTO"].(map[string]any)
+	if !ok {
+		t.Fatal("missing Swagger definition music.AlbumImportDTO")
+	}
+	properties, ok := definition["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("missing AlbumImportDTO properties")
+	}
+	for _, field := range []string{"artistSource", "albumSource"} {
+		if _, ok := properties[field]; !ok {
+			t.Fatalf("missing AlbumImportDTO field %s", field)
 		}
 	}
 }
