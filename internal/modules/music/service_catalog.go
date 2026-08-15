@@ -90,9 +90,6 @@ func (s *Service) CreateArtist(user authctx.CurrentUser, req CreateArtistRequest
 
 	oldObjectKey, newObjectKey := "", ""
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		if err := ensureArtistDisplayNameAvailable(tx, artist.Name, artist.Disambiguation, nil); err != nil {
-			return err
-		}
 		if err := validateArtistMemberReferences(tx, user, req.Members); err != nil {
 			return err
 		}

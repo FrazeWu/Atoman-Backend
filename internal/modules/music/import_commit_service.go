@@ -906,9 +906,6 @@ func buildArtistFromImportInput(input CommitAlbumImportArtistInput) (*model.Arti
 }
 
 func createAlbumImportArtist(tx *gorm.DB, artist *model.Artist) error {
-	if err := ensureArtistDisplayNameAvailable(tx, artist.Name, artist.Disambiguation, nil); err != nil {
-		return err
-	}
 	return tx.Create(artist).Error
 }
 

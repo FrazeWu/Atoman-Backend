@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"atoman/internal/model"
-	"atoman/internal/platform/apperr"
 
 	"gorm.io/gorm"
 )
@@ -22,7 +21,7 @@ func completeArtistDraftRequest(name string) CreateArtistRequest {
 	}
 }
 
-func TestCreateArtistCreatesOwnedDraftAndRequiresDisambiguationForSameName(t *testing.T) {
+func TestCreateArtistCreatesOwnedDraftsWithSameName(t *testing.T) {
 	service, _, user := newMusicTestService(t)
 	first, err := service.CreateArtist(user, completeArtistDraftRequest("Same Name"))
 	if err != nil {
@@ -32,20 +31,12 @@ func TestCreateArtistCreatesOwnedDraftAndRequiresDisambiguationForSameName(t *te
 		t.Fatalf("expected owned draft, got %#v", first)
 	}
 
-	_, err = service.CreateArtist(user, completeArtistDraftRequest("Same Name"))
-	var appErr *apperr.AppError
-	if !errors.As(err, &appErr) || appErr.Code != "music.artist_disambiguation_required" {
-		t.Fatalf("expected disambiguation conflict, got %v", err)
-	}
-
-	request := completeArtistDraftRequest("Same Name")
-	request.Disambiguation = "南京音乐人"
-	second, err := service.CreateArtist(user, request)
+	second, err := service.CreateArtist(user, completeArtistDraftRequest("Same Name"))
 	if err != nil {
-		t.Fatalf("create disambiguated artist: %v", err)
+		t.Fatalf("create second artist with same name: %v", err)
 	}
-	if second.DisplayName != "Same Name（南京音乐人）" {
-		t.Fatalf("unexpected display name: %q", second.DisplayName)
+	if second.ID == first.ID || second.Name != first.Name {
+		t.Fatalf("expected distinct same-name artists, got first=%#v second=%#v", first, second)
 	}
 }
 

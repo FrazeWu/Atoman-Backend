@@ -23,7 +23,5 @@ func RunMusicArtistDraftsMigration(db *gorm.DB) error {
 	if err := db.Exec(`DROP INDEX IF EXISTS "uni_Artists_name"`).Error; err != nil {
 		return err
 	}
-	return db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_artists_display_name_unique
-		ON "Artists" (LOWER(TRIM(name)), LOWER(TRIM(COALESCE(disambiguation, ''))))
-		WHERE deleted_at IS NULL`).Error
+	return db.Exec(`DROP INDEX IF EXISTS idx_artists_display_name_unique`).Error
 }

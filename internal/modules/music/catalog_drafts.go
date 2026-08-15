@@ -64,30 +64,6 @@ func artistDisplayName(name, disambiguation string) string {
 	return displayName
 }
 
-func ensureArtistDisplayNameAvailable(tx *gorm.DB, name, disambiguation string, excludeID *uuid.UUID) error {
-	query := tx.Model(&model.Artist{}).
-		Where("LOWER(TRIM(name)) = LOWER(TRIM(?))", name)
-	if excludeID != nil {
-		query = query.Where("id <> ?", *excludeID)
-	}
-	var sameName []model.Artist
-	if err := query.Find(&sameName).Error; err != nil {
-		return err
-	}
-	if len(sameName) == 0 {
-		return nil
-	}
-	if strings.TrimSpace(disambiguation) == "" {
-		return apperr.Conflict("music.artist_disambiguation_required", "Artist name already exists; disambiguation is required")
-	}
-	for _, artist := range sameName {
-		if strings.EqualFold(strings.TrimSpace(artist.Disambiguation), strings.TrimSpace(disambiguation)) {
-			return apperr.Conflict("music.artist_already_exists", "Artist display name already exists")
-		}
-	}
-	return nil
-}
-
 func canUseArtistDraft(artist model.Artist, user authctx.CurrentUser) bool {
 	return artist.EntryStatus != artistEntryDraft || (artist.CreatedBy != nil && *artist.CreatedBy == user.ID)
 }
