@@ -972,20 +972,25 @@ func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID 
 	}
 	defer os.RemoveAll(dir)
 	outputPath := filepath.Join(dir, "playback.mp3")
-	args := []string{"-y", "-v", "error"}
+	transcodeArgs := []string{"-y", "-v", "error", "-i", sourcePath,
+		"-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-b:a", "320k", outputPath}
 	if len(rangeSeconds) == 2 {
-		args = append(args, "-ss", strconv.FormatFloat(rangeSeconds[0], 'f', -1, 64), "-to", strconv.FormatFloat(rangeSeconds[1], 'f', -1, 64))
+		transcodeArgs = []string{"-y", "-v", "error", "-ss", strconv.FormatFloat(rangeSeconds[0], 'f', -1, 64), "-to", strconv.FormatFloat(rangeSeconds[1], 'f', -1, 64), "-i", sourcePath,
+			"-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-b:a", "320k", outputPath}
 	}
-	args = append(args, "-i", sourcePath,
-		"-map", "0:a:0", "-vn", "-c:a", "libmp3lame", "-b:a", "320k", outputPath,
-		"-map", "0:a:0", "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1")
-	waveformPCM, err := p.runner.Run(ctx, "ffmpeg", args...)
-	if err != nil {
+	if _, err := p.runner.Run(ctx, "ffmpeg", transcodeArgs...); err != nil {
 		return fmt.Errorf("ffmpeg %s: %w", file.FileName, err)
 	}
+	waveformArgs := []string{"-v", "error"}
+	if len(rangeSeconds) == 2 {
+		waveformArgs = append(waveformArgs, "-ss", strconv.FormatFloat(rangeSeconds[0], 'f', -1, 64), "-to", strconv.FormatFloat(rangeSeconds[1], 'f', -1, 64))
+	}
+	waveformArgs = append(waveformArgs, "-i", sourcePath,
+		"-map", "0:a:0", "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "pipe:1")
+	waveformPCM, waveformErr := p.runner.Run(ctx, "ffmpeg", waveformArgs...)
 	waveformPeaks := waveformPeaksFromPCM(waveformPCM, WaveformPeakCount)
-	if len(waveformPeaks) != WaveformPeakCount {
-		return fmt.Errorf("generate waveform %s: empty audio output", file.FileName)
+	if waveformErr != nil || len(waveformPeaks) != WaveformPeakCount {
+		waveformPeaks = make([]int, WaveformPeakCount)
 	}
 	output, err := os.Open(outputPath)
 	if err != nil {

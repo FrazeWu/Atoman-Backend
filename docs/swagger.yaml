@@ -4914,6 +4914,8 @@ definitions:
         type: string
       artistSource:
         type: string
+      commitRequest:
+        $ref: '#/definitions/music.CommitAlbumImportSessionInput'
       coverKey:
         type: string
       coverUrl:

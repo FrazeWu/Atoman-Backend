@@ -134,7 +134,7 @@ func TestProcessExtractedTreeFallsBackToEmbeddedAudioCover(t *testing.T) {
 			}
 			return []byte(`{"format":{"duration":"12","tags":{}}}`), nil
 		}
-		if name == "ffmpeg" && containsMediaArg(args, "-map") {
+		if name == "ffmpeg" && containsMediaArg(args, "0:v:0") {
 			extractAttempts++
 			if extractAttempts == 1 {
 				return nil, errors.New("no embedded artwork")
@@ -182,7 +182,7 @@ func TestProcessExtractedTreePrefersExplicitCoverOverEmbeddedAudioCover(t *testi
 		t.Fatal(err)
 	}
 	for _, run := range runner.runs {
-		if run[0] == "ffmpeg" && containsMediaArg(run, "-map") {
+		if run[0] == "ffmpeg" && containsMediaArg(run, "0:v:0") {
 			t.Fatalf("explicit cover must prevent embedded artwork extraction: %#v", runner.runs)
 		}
 	}
@@ -214,7 +214,7 @@ func TestProcessExtractedTreeRejectsBannerEmbeddedCover(t *testing.T) {
 			}
 			return []byte(`{"format":{"duration":"12","tags":{}}}`), nil
 		}
-		if name == "ffmpeg" && containsMediaArg(args, "-map") {
+		if name == "ffmpeg" && containsMediaArg(args, "0:v:0") {
 			extractAttempts++
 			return nil, os.WriteFile(args[len(args)-1], []byte("cover"), 0600)
 		}
@@ -406,7 +406,7 @@ func TestMediaImportProcessorSplitsUploadedFolderCUESources(t *testing.T) {
 	}
 	ffmpegs := 0
 	for _, run := range runner.runs {
-		if run[0] == "ffmpeg" {
+		if run[0] == "ffmpeg" && containsMediaArg(run, "320k") {
 			ffmpegs++
 			if !containsMediaArg(run, "-ss") || !containsMediaArg(run, "-to") {
 				t.Fatalf("whole source was transcoded instead of CUE split: %#v", runner.runs)
@@ -537,8 +537,8 @@ func TestMediaImportProcessorRetriesUploadedCUESourceAfterAllTracksFail(t *testi
 	if err := processor.Process(context.Background(), job, nil); err != nil {
 		t.Fatalf("expected retried CUE source to process: %v", err)
 	}
-	if ffmpegRuns != 2 {
-		t.Fatalf("expected retry to invoke ffmpeg again, runs=%d", ffmpegRuns)
+	if ffmpegRuns != 3 {
+		t.Fatalf("expected retry to invoke playback transcode and waveform extraction, runs=%d", ffmpegRuns)
 	}
 	var source model.AlbumImportFile
 	if err := db.First(&source, "id = ?", audio.ID).Error; err != nil {
@@ -751,8 +751,8 @@ func TestMediaImportProcessorTranscodesUploadedAudioAndUpdatesFile(t *testing.T)
 	if len(store.puts) != 1 || len(store.puts[got.PlaybackKey]) == 0 {
 		t.Fatalf("expected playback object at %q, got %#v", got.PlaybackKey, store.puts)
 	}
-	if len(runner.runs) != 2 || runner.runs[1][0] != "ffmpeg" || !containsMediaArg(runner.runs[1], "320k") {
-		t.Fatalf("expected ffprobe then 320k ffmpeg, got %#v", runner.runs)
+	if len(runner.runs) != 3 || runner.runs[1][0] != "ffmpeg" || !containsMediaArg(runner.runs[1], "320k") {
+		t.Fatalf("expected ffprobe, 320k transcode, then waveform extraction, got %#v", runner.runs)
 	}
 	var storedSession model.AlbumImportSession
 	if err := db.First(&storedSession, "id = ?", session.ID).Error; err != nil {
@@ -773,7 +773,7 @@ func TestMediaImportProcessorTranscodesUploadedAudioAndUpdatesFile(t *testing.T)
 			ffmpegs++
 		}
 	}
-	if ffmpegs != 1 || len(store.puts) != 1 {
+	if ffmpegs != 2 || len(store.puts) != 1 {
 		t.Fatalf("completed uploaded audio was reprocessed: ffmpegs=%d objects=%d", ffmpegs, len(store.puts))
 	}
 }

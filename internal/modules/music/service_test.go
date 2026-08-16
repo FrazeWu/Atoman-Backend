@@ -41,6 +41,7 @@ func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser)
 		&model.MusicSearchInteraction{},
 		&model.AlbumImportSession{},
 		&model.MusicAssetUploadSession{},
+		&model.MediaAsset{},
 		&model.AlbumImportFile{},
 		&model.AlbumImportJob{},
 		&model.MusicEdit{},

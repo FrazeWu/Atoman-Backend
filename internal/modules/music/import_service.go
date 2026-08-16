@@ -41,6 +41,7 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 	coverURL := resolveAlbumImportCoverURL(payload)
 	albumTitle := albumImportSessionAlbumTitle(session, payload)
 	artistSource, albumSource := albumImportCommitSources(payload)
+	commitRequest := albumImportCommitRequest(payload)
 	missingArtists := []string{}
 	if values, ok := payload["missing_artists"].([]any); ok {
 		for _, value := range values {
@@ -57,13 +58,14 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 			}
 			return session.TargetAlbumID.String()
 		}(),
-		ArtistID:     stringValue(payload["artist_id"]),
-		ArtistSource: artistSource,
-		AlbumTitle:   albumTitle,
-		AlbumSource:  albumSource,
-		Status:       session.Status,
-		InputMode:    inputMode,
-		Stage:        stage,
+		ArtistID:      stringValue(payload["artist_id"]),
+		ArtistSource:  artistSource,
+		CommitRequest: commitRequest,
+		AlbumTitle:    albumTitle,
+		AlbumSource:   albumSource,
+		Status:        session.Status,
+		InputMode:     inputMode,
+		Stage:         stage,
 		Progress: AlbumImportProgressDTO{
 			Current: session.ProgressCurrent,
 			Total:   session.ProgressTotal,
@@ -132,11 +134,27 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 }
 
 func albumImportCommitSources(payload map[string]any) (artistSource, albumSource string) {
-	request, ok := payload["commit_request"].(map[string]any)
-	if !ok {
+	request := albumImportCommitRequest(payload)
+	if request == nil {
 		return "", ""
 	}
-	return strings.TrimSpace(stringValue(request["artist_source"])), strings.TrimSpace(stringValue(request["album_source"]))
+	return strings.TrimSpace(request.ArtistSource), strings.TrimSpace(request.AlbumSource)
+}
+
+func albumImportCommitRequest(payload map[string]any) *CommitAlbumImportSessionInput {
+	raw, ok := payload["commit_request"]
+	if !ok {
+		return nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var request CommitAlbumImportSessionInput
+	if err := json.Unmarshal(encoded, &request); err != nil {
+		return nil
+	}
+	return &request
 }
 
 func albumImportSessionAlbumTitle(session model.AlbumImportSession, payload map[string]any) string {

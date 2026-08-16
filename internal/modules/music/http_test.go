@@ -3468,8 +3468,9 @@ func TestRegisterRoutesMusicCursorPagination(t *testing.T) {
 		if len(firstPage.Data) != 1 || firstPage.Data[0].ID != expectedFirst || firstPage.Meta.NextCursor == "" || firstPage.Meta.Total != nil {
 			t.Fatalf("unexpected first cursor page: %#v", firstPage)
 		}
+		nextPath := strings.TrimSuffix(path, "cursor=") + "cursor=" + firstPage.Meta.NextCursor
 		second := httptest.NewRecorder()
-		r.ServeHTTP(second, httptest.NewRequest(http.MethodGet, path+"&cursor="+firstPage.Meta.NextCursor, nil))
+		r.ServeHTTP(second, httptest.NewRequest(http.MethodGet, nextPath, nil))
 		if second.Code != http.StatusOK {
 			t.Fatalf("second cursor request: %d: %s", second.Code, second.Body.String())
 		}

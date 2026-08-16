@@ -27862,6 +27862,9 @@ const docTemplate = `{
                 "artistSource": {
                     "type": "string"
                 },
+                "commitRequest": {
+                    "$ref": "#/definitions/music.CommitAlbumImportSessionInput"
+                },
                 "coverKey": {
                     "type": "string"
                 },

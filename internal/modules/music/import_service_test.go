@@ -84,6 +84,9 @@ func TestBuildAlbumImportDTOUsesDeferredCommitTitleAndSources(t *testing.T) {
 	if dto.AlbumTitle != "再想想" {
 		t.Fatalf("expected deferred commit title, got %q", dto.AlbumTitle)
 	}
+	if dto.CommitRequest == nil || dto.CommitRequest.Album.Title != "再想想" {
+		t.Fatalf("expected deferred commit request, got %#v", dto.CommitRequest)
+	}
 	if dto.ArtistSource != "https://example.test/artist" || dto.AlbumSource != "https://example.test/album" {
 		t.Fatalf("expected deferred commit sources, got artist=%q album=%q", dto.ArtistSource, dto.AlbumSource)
 	}
@@ -1183,7 +1186,9 @@ func TestFinalizeSubmittedAlbumImportMarksValidationFailureForAttention(t *testi
 		t.Fatalf("expected needs attention with an error, got %#v", stored)
 	}
 	if retried, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
-		Artist: completeAlbumImportArtistPayload("Incomplete Artist"),
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
+		Artist:       completeAlbumImportArtistPayload("Incomplete Artist"),
 		Album: AlbumImportAlbumPayload{
 			Title: "Complete Album", CoverURL: "https://cdn.test/complete.jpg", ReleaseDate: "2020-01-01",
 			Tracks: []AlbumImportTrackPayload{{Title: "Complete Track", TrackNumber: 1, AudioURL: "https://cdn.test/complete.mp3"}},
@@ -1426,7 +1431,7 @@ func TestRepairAlbumImportSessionUpdatesOriginalAlbum(t *testing.T) {
 		t.Fatalf("update repair payload: %v", err)
 	}
 	var artist model.Artist
-	if err := db.Joins("JOIN album_artists ON album_artists.artist_id = Artists.id").Where("album_artists.album_id = ?", *committed.TargetAlbumID).First(&artist).Error; err != nil {
+	if err := db.Joins("JOIN album_artists ON album_artists.artist_id = \"Artists\".id").Where("album_artists.album_id = ?", *committed.TargetAlbumID).First(&artist).Error; err != nil {
 		t.Fatalf("load artist: %v", err)
 	}
 	_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
@@ -1550,8 +1555,12 @@ func TestRepairAlbumImportSessionRejectsInvalidSongIdentity(t *testing.T) {
 			if err != nil || committed.TargetAlbumID == nil {
 				t.Fatalf("initial commit: %#v, %v", committed, err)
 			}
-			if _, err := svc.RepairAlbumImportSession(user, session.ID); err != nil {
+			repaired, err := svc.RepairAlbumImportSession(user, session.ID)
+			if err != nil {
 				t.Fatalf("start repair: %v", err)
+			}
+			if repaired.Status != AlbumImportStatusReady || repaired.TargetAlbumID == nil || *repaired.TargetAlbumID != *committed.TargetAlbumID {
+				t.Fatalf("unexpected repair state: %#v", repaired)
 			}
 
 			var existing []model.Song
@@ -1567,11 +1576,11 @@ func TestRepairAlbumImportSessionRejectsInvalidSongIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			var artist model.Artist
-			if err := db.Joins("JOIN album_artists ON album_artists.artist_id = Artists.id").Where("album_artists.album_id = ?", *committed.TargetAlbumID).First(&artist).Error; err != nil {
+			if err := db.Joins("JOIN album_artists ON album_artists.artist_id = \"Artists\".id").Where("album_artists.album_id = ?", *committed.TargetAlbumID).First(&artist).Error; err != nil {
 				t.Fatal(err)
 			}
 
-			_, err = svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+			result, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
 				Artists: []CommitAlbumImportArtistInput{{ArtistID: artist.ID.String()}},
 				Album: AlbumImportAlbumPayload{
 					Title: "Changed Album", CoverURL: "/changed-cover.jpg", ReleaseDate: "2021-01-01",
@@ -1579,8 +1588,8 @@ func TestRepairAlbumImportSessionRejectsInvalidSongIdentity(t *testing.T) {
 				},
 				AlbumSource: "album source",
 			})
-			if err == nil || !strings.Contains(err.Error(), tc.want) {
-				t.Fatalf("error = %v, want %q", err, tc.want)
+			if err != nil || result.Status != AlbumImportStatusNeedsAttention || !strings.Contains(result.ErrorMessage, tc.want) {
+				t.Fatalf("commit result = %#v, error = %v, want needs_attention with %q", result, err, tc.want)
 			}
 			var album model.Album
 			if err := db.First(&album, "id = ?", *committed.TargetAlbumID).Error; err != nil {
@@ -2193,12 +2202,12 @@ func TestCommitAlbumImportSessionRollsBackArtistWhenAlbumCreateFails(t *testing.
 	}
 
 	if _, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
-		Artist: AlbumImportArtistPayload{
-			Name:      "Rollback Artist",
-			LegalName: "Rollback Legal",
-		},
+		ArtistSource: "artist source",
+		AlbumSource:  "album source",
+		Artist:       completeAlbumImportArtistPayload("Rollback Artist"),
 		Album: AlbumImportAlbumPayload{
-			Title: "LP1",
+			Title: "LP1", CoverURL: "https://cdn.test/cover.jpg", ReleaseDate: "2020-01-01",
+			Tracks: []AlbumImportTrackPayload{{Title: "Track 1", TrackNumber: 1, AudioURL: "https://cdn.test/track.mp3"}},
 		},
 	}); err == nil {
 		t.Fatal("expected commit to fail when album create fails")
