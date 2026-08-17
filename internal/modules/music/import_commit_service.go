@@ -484,7 +484,7 @@ func (s *Service) markAlbumImportNeedsAttention(userID, importID uuid.UUID, mess
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		var session model.AlbumImportSession
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("id = ? AND user_id = ? AND status = ?", importID, userID, AlbumImportStatusReady).
+			Where("id = ? AND user_id = ? AND status IN ?", importID, userID, []string{AlbumImportStatusReady, AlbumImportStatusNeedsAttention}).
 			First(&session).Error; err != nil {
 			return err
 		}

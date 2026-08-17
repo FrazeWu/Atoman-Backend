@@ -1606,6 +1606,39 @@ func TestRepairAlbumImportSessionRejectsInvalidSongIdentity(t *testing.T) {
 	}
 }
 
+func TestCommitAlbumImportSessionCanRetryValidationFailureInPlace(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusReady})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedReadyImportMedia(t, db, session.ID, "/cover.jpg", "Original")
+	input := CommitAlbumImportSessionInput{
+		Artist: completeAlbumImportArtistPayload("Retry Artist"),
+		Album: AlbumImportAlbumPayload{
+			Title: "Retry Album", CoverURL: "/cover.jpg", ReleaseDate: "2020-01-01",
+			Tracks: []AlbumImportTrackPayload{{Title: "Original", TrackNumber: 1}},
+		},
+	}
+
+	first, err := svc.CommitAlbumImportSession(user, session.ID, input)
+	if err != nil || first.Status != AlbumImportStatusNeedsAttention {
+		t.Fatalf("first commit = %#v, error = %v", first, err)
+	}
+	second, err := svc.CommitAlbumImportSession(user, session.ID, input)
+	if err != nil || second.Status != AlbumImportStatusNeedsAttention || second.ID != first.ID {
+		t.Fatalf("retry commit = %#v, error = %v", second, err)
+	}
+
+	var count int64
+	if err := db.Model(&model.AlbumImportSession{}).Where("user_id = ?", user.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("validation retry created duplicate sessions: %d", count)
+	}
+}
+
 func TestCommitAlbumImportSessionUsesExistingArtistWhenArtistIDProvided(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 
