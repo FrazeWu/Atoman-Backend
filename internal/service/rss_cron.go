@@ -135,7 +135,7 @@ type ExtAtomAuthor struct {
 	URI   string `xml:"uri"`
 }
 
-var firstImageSrcRe = regexp.MustCompile(`(?is)<img[^>]+src=["']([^"' >]+)["']`)
+var firstImageSrcRe = regexp.MustCompile(`(?is)<img[^>]+(?:src|data-src|data-original)=["']([^"' >]+)["']`)
 var feedSummaryHTMLTagRe = regexp.MustCompile(`(?is)<[^>]+>`)
 var feedSummaryWhitespaceRe = regexp.MustCompile(`\s+`)
 var feedSummaryPunctuationSpaceRe = regexp.MustCompile(`\s+([.,;:!?])`)
@@ -292,7 +292,14 @@ func normalizeRSSItem(item ExtRSSItem, sourceTitle string, channelImageURL strin
 
 	contentHTML := selectFeedContent(item)
 	summaryText := strings.TrimSpace(item.Description)
-	imageURL := selectItemImageURL(item.ITunesImage.Href, firstNonEmpty(item.MediaContent.URL, item.MediaThumbnail.URL), channelImageURL, contentHTML)
+	itemImageURL := firstNonEmpty(item.ITunesImage.Href, item.MediaContent.URL, item.MediaThumbnail.URL)
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(item.Enclosure.Type)), "image/") {
+		itemImageURL = firstNonEmpty(itemImageURL, item.Enclosure.URL)
+	}
+	imageURL := selectItemImageURL(itemImageURL, "", channelImageURL, contentHTML)
+	if linkURL, err := url.Parse(strings.TrimSpace(item.Link)); err == nil {
+		imageURL = resolveFeedImageURL(imageURL, linkURL)
+	}
 
 	return normalizedFeedItem{
 		Title:             strings.TrimSpace(item.Title),
@@ -335,6 +342,11 @@ func normalizeAtomEntry(entry ExtAtomEntry, sourceTitle string, feedImageURL str
 		identifier = link
 	}
 
+	imageURL := selectItemImageURL("", "", feedImageURL, firstNonEmpty(contentHTML, summaryText))
+	if linkURL, err := url.Parse(link); err == nil {
+		imageURL = resolveFeedImageURL(imageURL, linkURL)
+	}
+
 	return normalizedFeedItem{
 		Title:             strings.TrimSpace(entry.Title),
 		Link:              link,
@@ -343,7 +355,7 @@ func normalizeAtomEntry(entry ExtAtomEntry, sourceTitle string, feedImageURL str
 		PublishedAt:       publishedAt,
 		ContentHTML:       contentHTML,
 		SummaryText:       summaryText,
-		ImageURL:          selectItemImageURL("", "", feedImageURL, firstNonEmpty(contentHTML, summaryText)),
+		ImageURL:          imageURL,
 		LooksLikeFullText: inferFeedContentQuality(contentHTML),
 	}
 }
@@ -661,6 +673,9 @@ func FetchAndParseRSS(feedURL string) ([]ExtRSSItem, string, string, error) {
 			parsedRSS.Channel.MediaThumbnail.URL,
 			parsedRSS.Channel.Image.URL,
 		)
+		if parsedURL, parseErr := url.Parse(feedURL); parseErr == nil {
+			coverURL = resolveFeedImageURL(coverURL, parsedURL)
+		}
 		return parsedRSS.Channel.Items, parsedRSS.Channel.Title, coverURL, nil
 	}
 
@@ -668,6 +683,9 @@ func FetchAndParseRSS(feedURL string) ([]ExtRSSItem, string, string, error) {
 	var parsedAtom ExtAtom
 	if err := xml.Unmarshal([]byte(bodyStr), &parsedAtom); err == nil {
 		feedImageURL := firstNonEmpty(parsedAtom.Logo, parsedAtom.Icon)
+		if parsedURL, parseErr := url.Parse(feedURL); parseErr == nil {
+			feedImageURL = resolveFeedImageURL(feedImageURL, parsedURL)
+		}
 		items := make([]ExtRSSItem, len(parsedAtom.Entries))
 		for i, entry := range parsedAtom.Entries {
 			normalized := normalizeAtomEntry(entry, strings.TrimSpace(parsedAtom.Title), feedImageURL, time.Time{})

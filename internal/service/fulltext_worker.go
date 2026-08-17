@@ -198,6 +198,12 @@ func processFullTextItem(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 		return markFullTextFailure(db, item, source, FullTextErrorResponseTooLarge, "response too large", now)
 	}
 
+	if metadata, metadataErr := ExtractFeedImageMetadata(item.Link, strings.NewReader(string(body))); metadataErr == nil {
+		if err := persistFeedImageMetadata(db, item, source, metadata); err != nil {
+			log.Printf("fulltext worker image fallback failed for item %s: %v", item.ID, err)
+		}
+	}
+
 	result, errCode, err := ExtractAndSanitizeFullText(item.Link, strings.NewReader(string(body)))
 	if err != nil {
 		if errCode == "" {
@@ -206,6 +212,28 @@ func processFullTextItem(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 		return markFullTextFailure(db, item, source, errCode, err.Error(), now)
 	}
 	return markFullTextSuccess(db, item, source, result, now)
+}
+
+func persistFeedImageMetadata(db *gorm.DB, item *model.FeedItem, source *model.FeedSource, metadata FeedImageMetadata) error {
+	fallbackURL := firstNonEmpty(metadata.ImageURL, metadata.IconURL)
+	if fallbackURL == "" {
+		return nil
+	}
+
+	if strings.TrimSpace(item.ImageURL) == "" {
+		if err := db.Model(&model.FeedItem{}).Where("id = ?", item.ID).Update("image_url", fallbackURL).Error; err != nil {
+			return err
+		}
+		item.ImageURL = fallbackURL
+	}
+
+	if source != nil && strings.TrimSpace(source.CoverURL) == "" {
+		if err := db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Update("cover_url", fallbackURL).Error; err != nil {
+			return err
+		}
+		source.CoverURL = fallbackURL
+	}
+	return nil
 }
 
 func markFullTextSuccess(db *gorm.DB, item *model.FeedItem, source *model.FeedSource, result FullTextResult, now time.Time) error {
