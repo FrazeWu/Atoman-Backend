@@ -214,6 +214,8 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 			ScoreLabel:    musicRecommendationScoreLabel(mode, item.FinalScore),
 			PlayCount:     artistPlayCounts[art.ID],
 			BookmarkCount: artistBookmarkCounts[art.ID],
+			BirthYear:     art.BirthYear,
+			BirthDate:     art.BirthDate,
 		})
 	}
 

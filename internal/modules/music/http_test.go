@@ -2556,9 +2556,12 @@ func TestMusicRecommendationAlbumsReturnsData(t *testing.T) {
 
 func TestMusicRecommendationArtistsReturnsData(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
+	birthDate := time.Date(1994, time.October, 27, 0, 0, 0, 0, time.UTC)
 	artist := model.Artist{
 		Name:        "Recommend Artist",
 		EntryStatus: "open",
+		BirthYear:   1994,
+		BirthDate:   &birthDate,
 	}
 	if err := db.Create(&artist).Error; err != nil {
 		t.Fatalf("create artist: %v", err)
@@ -2586,14 +2589,16 @@ func TestMusicRecommendationArtistsReturnsData(t *testing.T) {
 
 	var resp struct {
 		Data []struct {
-			ID            string `json:"id"`
-			Title         string `json:"title"`
-			Summary       string `json:"summary"`
-			ImageURL      string `json:"image_url"`
-			TargetPath    string `json:"target_path"`
-			ScoreLabel    string `json:"score_label"`
-			PlayCount     int64  `json:"play_count"`
-			BookmarkCount int64  `json:"bookmark_count"`
+			ID            string    `json:"id"`
+			Title         string    `json:"title"`
+			Summary       string    `json:"summary"`
+			ImageURL      string    `json:"image_url"`
+			TargetPath    string    `json:"target_path"`
+			ScoreLabel    string    `json:"score_label"`
+			PlayCount     int64     `json:"play_count"`
+			BookmarkCount int64     `json:"bookmark_count"`
+			BirthYear     int       `json:"birth_year"`
+			BirthDate     time.Time `json:"birth_date"`
 		} `json:"data"`
 		Meta struct {
 			Total int64 `json:"total"`
@@ -2614,6 +2619,9 @@ func TestMusicRecommendationArtistsReturnsData(t *testing.T) {
 	}
 	if first.PlayCount != 4 || first.BookmarkCount != 1 {
 		t.Fatalf("expected recommendation stats, got %#v", first)
+	}
+	if first.BirthYear != 1994 || !first.BirthDate.Equal(birthDate) {
+		t.Fatalf("expected artist birth data, got %#v", first)
 	}
 	if resp.Meta.Total == 0 {
 		t.Fatalf("expected total > 0, got %#v", resp.Meta)

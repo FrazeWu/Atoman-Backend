@@ -68,6 +68,8 @@ type RecommendationItemDTO struct {
 	ScoreLabel           string                     `json:"score_label"`
 	PlayCount            int64                      `json:"play_count"`
 	BookmarkCount        int64                      `json:"bookmark_count"`
+	BirthYear            int                        `json:"birth_year,omitempty"`
+	BirthDate            *time.Time                 `json:"birth_date,omitempty"`
 	ReadCount            int64                      `json:"read_count"`
 	UpdateFrequencyLabel string                     `json:"update_frequency_label"`
 	LastPublishedAt      *time.Time                 `json:"last_published_at,omitempty"`
