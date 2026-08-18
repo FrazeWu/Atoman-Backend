@@ -101,7 +101,7 @@ func TestRegisterAlbumImportFilesPersistsCleanupWhenDatabaseAndAbortFail(t *test
 	}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Callback().Create().Remove(callback) })
+	t.Cleanup(func() { _ = db.Callback().Update().Remove(callback) })
 
 	if _, err := svc.RegisterAlbumImportFiles(user, session.ID, RegisterAlbumImportFilesInput{Files: []AlbumImportFileInput{albumImportFileInput("track.flac", 1024)}}); err == nil {
 		t.Fatal("expected file insert failure")
