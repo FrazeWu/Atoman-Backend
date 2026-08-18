@@ -86,6 +86,7 @@ type musicBrainzRelease struct {
 	TrackCount   int                       `json:"track-count"`
 	ArtistCredit []musicBrainzArtistCredit `json:"artist-credit"`
 	ReleaseGroup struct {
+		ID          string `json:"id"`
 		PrimaryType string `json:"primary-type"`
 		Title       string `json:"title"`
 	} `json:"release-group"`

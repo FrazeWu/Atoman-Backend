@@ -13,6 +13,7 @@ type Service struct {
 	s3                   *s3.S3
 	albumImportMultipart albumImportMultipartStore
 	assetUploadMultipart albumImportMultipartStore
+	albumLinkSuggestions AlbumLinkSuggestionProvider
 	lyricsSaveMu         sync.Mutex
 	lyricsVoteMu         sync.Mutex
 }
@@ -27,6 +28,13 @@ func NewServiceWithS3(db *gorm.DB, s3Client *s3.S3) *Service {
 		albumImportMultipart: newS3AlbumImportMultipartStore(s3Client),
 		assetUploadMultipart: newS3PublicMusicMultipartStore(s3Client),
 	}
+}
+
+// WithAlbumLinkSuggestionProvider enables MusicBrainz-backed album suggestions.
+// The provider is optional so catalog reads remain available without external metadata.
+func (s *Service) WithAlbumLinkSuggestionProvider(provider AlbumLinkSuggestionProvider) *Service {
+	s.albumLinkSuggestions = provider
+	return s
 }
 
 func normalizeMusicRecommendationPage(page int, pageSize int) (int, int) {

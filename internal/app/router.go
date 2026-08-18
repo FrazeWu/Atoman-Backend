@@ -1,6 +1,11 @@
 package app
 
 import (
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
 	"atoman/internal/collab"
 	"atoman/internal/handlers"
 	"atoman/internal/middleware"
@@ -64,7 +69,21 @@ func RegisterV1Routes(
 	debate_voting.RegisterRoutes(debateGroup, debate_voting.NewService(db))
 	musicGroup := group.Group("/music")
 	musicGroup.Use(middleware.OptionalAuthMiddleware())
-	music.RegisterRoutes(musicGroup, music.NewServiceWithS3(db, s3Client))
+	musicService := music.NewServiceWithS3(db, s3Client)
+	if userAgent := strings.TrimSpace(os.Getenv("MUSICBRAINZ_USER_AGENT")); userAgent != "" {
+		musicBrainzBaseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("MUSICBRAINZ_BASE_URL")), "/")
+		if musicBrainzBaseURL == "" {
+			musicBrainzBaseURL = "https://musicbrainz.org"
+		}
+		musicService.WithAlbumLinkSuggestionProvider(music.NewExternalAlbumMetadataEnricher(
+			&http.Client{Timeout: 5 * time.Second},
+			musicBrainzBaseURL,
+			"",
+			"",
+			userAgent,
+		))
+	}
+	music.RegisterRoutes(musicGroup, musicService)
 	portal.RegisterRoutes(group.Group("/portal"), portal.NewService(db))
 	studio.RegisterRoutes(group.Group("/studio"), studio.NewService(db))
 	lifecycle.RegisterRoutes(group.Group("/content"), lifecycle.NewService(db))

@@ -5211,6 +5211,47 @@ definitions:
       track_number:
         type: integer
     type: object
+  music.AlbumLinkSuggestion:
+    properties:
+      album:
+        $ref: '#/definitions/model.Album'
+      already_linked:
+        type: boolean
+      match_kind:
+        type: string
+      musicbrainz:
+        $ref: '#/definitions/music.MusicBrainzReleaseCandidate'
+    type: object
+  music.AlbumLinkSuggestionResponse:
+    properties:
+      external_only:
+        items:
+          $ref: '#/definitions/music.MusicBrainzReleaseCandidate'
+        type: array
+      local_matches:
+        items:
+          $ref: '#/definitions/music.AlbumLinkSuggestion'
+        type: array
+      metadata_status:
+        type: string
+    type: object
+  music.MusicBrainzReleaseCandidate:
+    properties:
+      artist_names:
+        items:
+          type: string
+        type: array
+      release_date:
+        type: string
+      release_group_id:
+        type: string
+      release_id:
+        type: string
+      source_url:
+        type: string
+      title:
+        type: string
+    type: object
   music.AlbumMergePreviewResponse:
     properties:
       matches:
@@ -14136,6 +14177,32 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 创建艺术家
+      tags:
+      - music
+  /api/v1/music/artists/{artistId}/album-link-suggestions:
+    get:
+      parameters:
+      - description: 艺术家 ID
+        in: path
+        name: artistId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/music.AlbumLinkSuggestionResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取关联专辑建议
       tags:
       - music
   /api/v1/music/bookmarks/albums:

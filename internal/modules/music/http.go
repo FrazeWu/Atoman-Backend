@@ -3,9 +3,11 @@ package music
 import (
 	"errors"
 	"io"
+	"net/http"
 
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/platform/httpx"
 	"atoman/internal/platform/ratelimit"
 
 	"github.com/gin-gonic/gin"
@@ -60,6 +62,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/search/interactions", h.recordSearchInteraction)
 	group.GET("/library", h.library)
 	group.POST("/artists", h.createArtist)
+	group.GET("/artists/:artistId/album-link-suggestions", h.albumLinkSuggestions)
 	group.GET("/artists/:artistId", h.getArtist)
 	group.GET("/albums", h.listAlbums)
 	group.GET("/albums/:albumId", h.getAlbum)
@@ -108,6 +111,31 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.PATCH("/songs/:songId/lyrics/annotations/:annotationId", h.updateLyricAnnotation)
 	group.DELETE("/songs/:songId/lyrics/annotations/:annotationId", h.deleteLyricAnnotation)
 	group.POST("/songs/:songId/lyrics/annotations/:annotationId/votes", h.voteLyricAnnotation)
+}
+
+// albumLinkSuggestions godoc
+// @Summary 获取关联专辑建议
+// @Description 根据艺术家的 MusicBrainz 来源识别已收录的专辑，并返回目录外发行作为参考。
+// @Tags music
+// @Produce json
+// @Param artistId path string true "艺术家 ID"
+// @Success 200 {object} AlbumLinkSuggestionResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/music/artists/{artistId}/album-link-suggestions [get]
+func (h *Handler) albumLinkSuggestions(c *gin.Context) {
+	artistID, err := parseMusicID(c.Param("artistId"), "artistId")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	viewer, hasViewer := currentMusicUser(c)
+	response, err := h.service.AlbumLinkSuggestions(c.Request.Context(), musicViewer(viewer, hasViewer), artistID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, response)
 }
 
 func currentMusicUser(c *gin.Context) (authctx.CurrentUser, bool) {
