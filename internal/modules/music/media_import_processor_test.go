@@ -771,8 +771,8 @@ func TestMediaImportProcessorTranscodesUploadedAudioAndUpdatesFile(t *testing.T)
 	if len(store.puts) != 1 || len(store.puts[got.PlaybackKey]) == 0 {
 		t.Fatalf("expected playback object at %q, got %#v", got.PlaybackKey, store.puts)
 	}
-	if len(runner.runs) != 3 || runner.runs[1][0] != "ffmpeg" || !containsMediaArg(runner.runs[1], "320k") {
-		t.Fatalf("expected ffprobe, 320k transcode, then waveform extraction, got %#v", runner.runs)
+	if len(runner.runs) != 4 || runner.runs[0][0] != "ffprobe" || runner.runs[1][0] != "ffmpeg" || !containsMediaArg(runner.runs[1], "320k") || runner.runs[2][0] != "ffprobe" || runner.runs[3][0] != "ffmpeg" {
+		t.Fatalf("expected source probe, 320k transcode, playback probe, then waveform extraction, got %#v", runner.runs)
 	}
 	var storedSession model.AlbumImportSession
 	if err := db.First(&storedSession, "id = ?", session.ID).Error; err != nil {

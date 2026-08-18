@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,37 @@ import (
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+func TestMain(m *testing.M) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		dsn = os.Getenv("TEST_POSTGRES_DSN")
+	}
+	var cleanup func() error
+	if dsn != "" {
+		name, remove, err := testdb.CreatePostgresTemplate(dsn, "music_template", musicTestModels()...)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "music tests: PostgreSQL template unavailable, using schema isolation: %v\n", err)
+		} else if err := os.Setenv("TEST_POSTGRES_TEMPLATE_DATABASE", name); err != nil {
+			_ = remove()
+			fmt.Fprintf(os.Stderr, "music tests: cannot enable PostgreSQL template, using schema isolation: %v\n", err)
+		} else {
+			cleanup = remove
+		}
+	}
+	code := m.Run()
+	if cleanup != nil {
+		_ = os.Unsetenv("TEST_POSTGRES_TEMPLATE_DATABASE")
+		if err := cleanup(); err != nil {
+			code = 1
+		}
+	}
+	os.Exit(code)
+}
+
+func musicTestModels() []any {
+	return []any{&model.User{}, &model.Artist{}, &model.ArtistMember{}, &model.ArtistAlias{}, &model.ArtistMerge{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.SongArtist{}, &model.ArtistBookmark{}, &model.AlbumBookmark{}, &model.PlaylistBookmark{}, &model.Playlist{}, &model.PlaylistSong{}, &model.MusicListeningHistory{}, &model.MusicSearchInteraction{}, &model.AlbumImportSession{}, &model.MusicAssetUploadSession{}, &model.MediaAsset{}, &model.AlbumImportFile{}, &model.AlbumImportJob{}, &model.MusicEdit{}, &model.MusicEditVote{}, &model.MusicEditDecision{}, &model.MusicEditChange{}, &model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{}, &model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{}, &model.AuditLog{}, &model.Notification{}, &model.Revision{}, &model.EditConflict{}, &model.MusicEntryStateEvent{}, &model.MusicEntryStateRequest{}, &model.SongAudioReplacement{}}
+}
 
 func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) {
 	t.Helper()

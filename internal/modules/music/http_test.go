@@ -341,7 +341,7 @@ func newMusicHTTPRouter(service *Service, current *authctx.CurrentUser) *gin.Eng
 func TestRegisterRoutesMusicSearchAndSongDetailHideNonPublicSongs(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	visible := model.Song{Title: "Visible Search Song", AudioURL: "/visible.mp3", Status: "open"}
-	draft := model.Song{Title: "Hidden Search Song", AudioURL: "/draft.mp3", Status: "draft"}
+	draft := model.Song{Title: "Hidden Search Song", AudioURL: "/draft.mp3", Status: "draft", LifecycleStatus: model.MusicLifecycleDraft}
 	if err := db.Create(&visible).Error; err != nil {
 		t.Fatalf("create visible song: %v", err)
 	}

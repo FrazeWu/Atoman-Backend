@@ -20,6 +20,9 @@ func OpenPostgres(t *testing.T, schemaPrefix string) *gorm.DB {
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL or TEST_POSTGRES_DSN is not configured")
 	}
+	if templateName := os.Getenv("TEST_POSTGRES_TEMPLATE_DATABASE"); templateName != "" {
+		return openTemplateDatabase(t, dsn, schemaPrefix, templateName)
+	}
 
 	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{DisableAutomaticPing: true})
 	if err != nil {

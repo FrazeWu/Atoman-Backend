@@ -72,6 +72,9 @@ func OpenWithConfig(t *testing.T, config *gorm.Config) *gorm.DB {
 
 func Migrate(t *testing.T, db *gorm.DB, models ...any) {
 	t.Helper()
+	if os.Getenv("TEST_POSTGRES_TEMPLATE_DATABASE") != "" {
+		return
+	}
 	if err := db.AutoMigrate(models...); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

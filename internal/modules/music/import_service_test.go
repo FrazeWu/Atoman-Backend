@@ -2430,6 +2430,9 @@ func (f *fakeAlbumImportMultipartStore) PresignUploadPart(key string, uploadID s
 func (f *fakeAlbumImportMultipartStore) CompleteMultipartUpload(key string, uploadID string, parts []AlbumImportMultipartPartDTO) error {
 	f.completeCalls++
 	f.objectCompleted = true
+	if len(f.objectBody) == 0 {
+		f.objectBody = []byte("fLaC")
+	}
 	f.completeKey = key
 	f.completeUploadID = uploadID
 	f.completedPartNumbers = nil

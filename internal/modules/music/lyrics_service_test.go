@@ -971,8 +971,15 @@ func TestUpdateAndDeleteLyricAnnotationLockSongBeforeAnnotation(t *testing.T) {
 			} else if err := svc.DeleteLyricAnnotation(user, song.ID, annotation.ID); err != nil {
 				t.Fatal(err)
 			}
-			if len(lockedTables) < 2 || lockedTables[0] != "Songs" || lockedTables[1] != "music_lyric_annotations" {
-				t.Fatalf("expected Song then annotation locks, got %#v", lockedTables)
+			annotationLockIndex := -1
+			for i, table := range lockedTables {
+				if table == "music_lyric_annotations" {
+					annotationLockIndex = i
+					break
+				}
+			}
+			if annotationLockIndex < 1 || lockedTables[0] != "Songs" {
+				t.Fatalf("expected Song lock before annotation lock, got %#v", lockedTables)
 			}
 		})
 	}
