@@ -10,6 +10,7 @@ import (
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/audit"
 	"atoman/internal/platform/authctx"
+	revisionservice "atoman/internal/service"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -27,6 +28,12 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := revisionservice.ValidateMusicEntryEdit(tx, "artist", targetArtistID, user.ID); err != nil {
+			return err
+		}
+		if err := revisionservice.ValidateMusicEntryEdit(tx, "artist", sourceArtistID, user.ID); err != nil {
+			return err
+		}
 		var source model.Artist
 		if err := tx.Preload("Aliases").First(&source, "id = ?", sourceArtistID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -125,7 +132,7 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 			}
 		}
 
-		if err := tx.Model(&model.Artist{}).Where("id = ?", sourceArtistID).Updates(map[string]any{"entry_status": "closed", "redirect_to": targetArtistID}).Error; err != nil {
+		if err := tx.Model(&model.Artist{}).Where("id = ?", sourceArtistID).Updates(map[string]any{"entry_status": "closed", "lifecycle_status": model.MusicLifecycleMerged, "redirect_to": targetArtistID}).Error; err != nil {
 			return err
 		}
 

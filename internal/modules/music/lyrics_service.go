@@ -12,6 +12,7 @@ import (
 	"atoman/internal/musiclyrics"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	revisionservice "atoman/internal/service"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -143,6 +144,9 @@ func (s *Service) SaveSongLyrics(user authctx.CurrentUser, songID uuid.UUID, inp
 		if err := lockLyricsSong(tx, songID); err != nil {
 			return err
 		}
+		if err := revisionservice.ValidateMusicEntryEdit(tx, "song", songID, user.ID, "lyrics"); err != nil {
+			return err
+		}
 		lines, err := prepareLyricsSave(tx, songID, &input)
 		if err != nil {
 			return err
@@ -179,6 +183,22 @@ func (s *Service) ListSongLyricVersions(songID uuid.UUID) ([]MusicSongLyricsVers
 	return dtos, nil
 }
 
+func (s *Service) ListVisibleSongLyricVersions(user authctx.CurrentUser, songID uuid.UUID) ([]MusicSongLyricsVersionDTO, error) {
+	viewer := &user
+	if user.ID == uuid.Nil {
+		viewer = nil
+	}
+	var song model.Song
+	query := scopeVisibleMusicEntries(s.db, "\"Songs\"", "uploaded_by", viewer, false)
+	if err := query.Select("\"Songs\".id").First(&song, "\"Songs\".id = ?", songID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, apperr.NotFound("music.song_not_found", "Song not found")
+		}
+		return nil, err
+	}
+	return s.ListSongLyricVersions(songID)
+}
+
 func (s *Service) RevertSongLyrics(user authctx.CurrentUser, songID uuid.UUID, version int, editSummary string) (MusicLyricsDTO, error) {
 	if user.ID == uuid.Nil {
 		return MusicLyricsDTO{}, apperr.Unauthorized("Login required")
@@ -194,6 +214,9 @@ func (s *Service) RevertSongLyrics(user authctx.CurrentUser, songID uuid.UUID, v
 	defer unlock()
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		if err := lockLyricsSong(tx, songID); err != nil {
+			return err
+		}
+		if err := revisionservice.ValidateMusicEntryEdit(tx, "song", songID, user.ID, "lyrics"); err != nil {
 			return err
 		}
 		var target model.MusicSongLyricVersion
@@ -261,17 +284,91 @@ func persistSongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, input SaveLyricsI
 	if err := tx.Create(&created).Error; err != nil {
 		return err
 	}
-	return tx.Model(&model.Song{}).Where("id = ?", songID).Update("lyrics", input.Content).Error
+	if err := detectLyricsEditWar(tx, songID); err != nil {
+		return err
+	}
+	if err := tx.Model(&model.Song{}).Where("id = ?", songID).Update("lyrics", input.Content).Error; err != nil {
+		return err
+	}
+	return revisionservice.SupersedeAllMusicCloseRequests(tx, "song", songID)
+}
+
+func detectLyricsEditWar(tx *gorm.DB, songID uuid.UUID) error {
+	var versions []model.MusicSongLyricVersion
+	if err := tx.Preload("CreatedByUser").Where("song_id = ?", songID).Order("version DESC").Limit(100).Find(&versions).Error; err != nil {
+		return err
+	}
+	sort.Slice(versions, func(i, j int) bool { return versions[i].Version < versions[j].Version })
+	if len(versions) < 4 {
+		return nil
+	}
+	windowStart := versions[len(versions)-1].CreatedAt.Add(-24 * time.Hour)
+	type stats struct {
+		count   int
+		editors map[uuid.UUID]struct{}
+	}
+	fields := map[string]func(model.MusicSongLyricVersion) string{
+		"lyrics.content":     func(version model.MusicSongLyricVersion) string { return version.Content },
+		"lyrics.translation": func(version model.MusicSongLyricVersion) string { return version.Translation },
+	}
+	for field, valueOf := range fields {
+		item := stats{editors: map[uuid.UUID]struct{}{}}
+		for index := 1; index < len(versions); index++ {
+			version := versions[index]
+			if version.CreatedAt.Before(windowStart) || (version.CreatedByUser != nil && authctx.RoleAtLeast(version.CreatedByUser.Role, authctx.RoleAdmin)) {
+				continue
+			}
+			value := valueOf(version)
+			if value == valueOf(versions[index-1]) {
+				continue
+			}
+			reverted := false
+			for previous := 0; previous < index-1; previous++ {
+				if valueOf(versions[previous]) == value {
+					reverted = true
+					break
+				}
+			}
+			if reverted {
+				item.count++
+				item.editors[version.CreatedBy] = struct{}{}
+			}
+		}
+		if item.count < 3 || len(item.editors) < 2 {
+			continue
+		}
+		result := tx.Model(&model.Song{}).Where("id = ? AND edit_status = ?", songID, model.MusicEditDevelopment).Update("edit_status", model.MusicEditLocked)
+		if result.Error != nil || result.RowsAffected == 0 {
+			return result.Error
+		}
+		if tx.Migrator().HasTable(&model.MusicEntryStateEvent{}) {
+			event := model.MusicEntryStateEvent{
+				EntityType: "song", EntityID: songID, FromStatus: model.MusicEditDevelopment,
+				ToStatus: model.MusicEditLocked, Trigger: "automatic", Reason: "Automatic edit-war lock after repeated changes to " + field,
+			}
+			return tx.Create(&event).Error
+		}
+		return nil
+	}
+	return nil
 }
 
 func prepareLyricsSave(tx *gorm.DB, songID uuid.UUID, input *SaveLyricsInput) ([]ParsedLyricLine, error) {
 	target := normalizedLyricsTarget(input.Target)
 	if target == "restore" {
-		return ParseLyricLines(input.Content, input.Translation, input.Format)
+		lines, err := ParseLyricLines(input.Content, input.Translation, input.Format)
+		if err == nil && hasDescendingLyricTime(lines) {
+			return nil, lyricValidationError("lyric timestamps must be in ascending order")
+		}
+		return lines, err
 	}
 	if target == "all" {
 		if strings.TrimSpace(input.Target) == "" {
-			return ParseLyricLines(input.Content, input.Translation, input.Format)
+			lines, err := ParseLyricLines(input.Content, input.Translation, input.Format)
+			if err == nil && hasDescendingLyricTime(lines) {
+				return nil, lyricValidationError("lyric timestamps must be in ascending order")
+			}
+			return lines, err
 		}
 		var lyric model.MusicSongLyric
 		err := tx.First(&lyric, "song_id = ?", songID).Error
@@ -289,7 +386,11 @@ func prepareLyricsSave(tx *gorm.DB, songID uuid.UUID, input *SaveLyricsInput) ([
 			input.Format = "plain"
 		}
 		input.Language = strings.TrimSpace(input.Language)
-		return ParseLyricLines(input.Content, input.Translation, input.Format)
+		lines, err := ParseLyricLines(input.Content, input.Translation, input.Format)
+		if err == nil && hasDescendingLyricTime(lines) {
+			return nil, lyricValidationError("lyric timestamps must be in ascending order")
+		}
+		return lines, err
 	}
 	if target != "original" && target != "translation" && target != "timing" && target != "import" {
 		return nil, lyricValidationError("target must be all, original, translation, timing, or import")
@@ -728,6 +829,9 @@ func (s *Service) CreateLyricAnnotation(user authctx.CurrentUser, songID uuid.UU
 		if err := lockLyricsSong(tx, songID); err != nil {
 			return err
 		}
+		if err := revisionservice.ValidateMusicEntryEdit(tx, "song", songID, user.ID, "lyrics_annotation"); err != nil {
+			return err
+		}
 		line, err := findCurrentLyricLine(tx, songID, input.LineID, input.LineKey)
 		if err != nil {
 			return err
@@ -793,6 +897,9 @@ func (s *Service) UpdateLyricAnnotation(user authctx.CurrentUser, songID, annota
 		if err := lockLyricsSong(tx, songID); err != nil {
 			return err
 		}
+		if err := revisionservice.ValidateMusicEntryEdit(tx, "song", songID, user.ID, "lyrics_annotation"); err != nil {
+			return err
+		}
 		annotation, err := findEditableLyricAnnotation(tx, user, songID, annotationID)
 		if err != nil {
 			return err
@@ -841,6 +948,9 @@ func (s *Service) DeleteLyricAnnotation(user authctx.CurrentUser, songID, annota
 		if err := lockLyricsSong(tx, songID); err != nil {
 			return err
 		}
+		if err := revisionservice.ValidateMusicEntryEdit(tx, "song", songID, user.ID, "lyrics_annotation"); err != nil {
+			return err
+		}
 		annotation, err := findEditableLyricAnnotation(tx, user, songID, annotationID)
 		if err != nil {
 			return err
@@ -883,6 +993,14 @@ func (s *Service) SetLyricAnnotationVote(user authctx.CurrentUser, songID, annot
 	defer unlock()
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var song model.Song
+		viewer := user
+		if err := scopeVisibleMusicEntries(tx, "\"Songs\"", "uploaded_by", &viewer, false).Select("\"Songs\".id").First(&song, "\"Songs\".id = ?", songID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("music.song_not_found", "Song not found")
+			}
+			return err
+		}
 		var annotation model.MusicLyricAnnotation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND song_id = ? AND status <> ?", annotationID, songID, "deleted").First(&annotation).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

@@ -17,7 +17,7 @@ func (s *Service) RecordSongPlay(userID *uuid.UUID, songID uuid.UUID) error {
 	}
 
 	result := s.db.Model(&model.Song{}).
-		Where("id = ? AND status NOT IN ? AND audio_url <> ?", songID, []string{"closed", "rejected", "draft"}, "")
+		Where("id = ? AND lifecycle_status = ? AND audio_url <> ?", songID, model.MusicLifecycleActive, "")
 	var count int64
 	if err := result.Count(&count).Error; err != nil {
 		return err

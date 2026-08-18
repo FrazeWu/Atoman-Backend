@@ -9,6 +9,7 @@ import (
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/audit"
 	"atoman/internal/platform/authctx"
+	revisionservice "atoman/internal/service"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -111,6 +112,12 @@ func (s *Service) MergeAlbums(user authctx.CurrentUser, targetAlbumID, sourceAlb
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := revisionservice.ValidateMusicEntryEdit(tx, "album", targetAlbumID, user.ID); err != nil {
+			return err
+		}
+		if err := revisionservice.ValidateMusicEntryEdit(tx, "album", sourceAlbumID, user.ID); err != nil {
+			return err
+		}
 		if err := mergeAlbumCredits(tx, sourceAlbumID, targetAlbumID); err != nil {
 			return err
 		}
@@ -119,7 +126,7 @@ func (s *Service) MergeAlbums(user authctx.CurrentUser, targetAlbumID, sourceAlb
 				if err := mergeSongRelations(tx, sourceSong.ID, targetSongID); err != nil {
 					return err
 				}
-				if err := tx.Model(&model.Song{}).Where("id = ?", sourceSong.ID).Update("status", "closed").Error; err != nil {
+				if err := tx.Model(&model.Song{}).Where("id = ?", sourceSong.ID).Updates(map[string]any{"status": "closed", "lifecycle_status": model.MusicLifecycleRetired}).Error; err != nil {
 					return err
 				}
 				continue
@@ -139,7 +146,7 @@ func (s *Service) MergeAlbums(user authctx.CurrentUser, targetAlbumID, sourceAlb
 				return err
 			}
 		}
-		if err := tx.Model(&model.Album{}).Where("id = ?", sourceAlbumID).Updates(map[string]any{"entry_status": "closed", "status": "closed", "redirect_to": targetAlbumID}).Error; err != nil {
+		if err := tx.Model(&model.Album{}).Where("id = ?", sourceAlbumID).Updates(map[string]any{"entry_status": "closed", "status": "closed", "lifecycle_status": model.MusicLifecycleMerged, "redirect_to": targetAlbumID}).Error; err != nil {
 			return err
 		}
 		return audit.Record(tx, audit.Entry{ActorID: &user.ID, Action: "music.album.merge", EntityType: "album", EntityID: &targetAlbumID, Reason: "合并重复专辑", Metadata: map[string]any{"source_album_id": sourceAlbumID, "song_matches": len(validMatches)}})

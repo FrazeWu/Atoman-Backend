@@ -34,7 +34,7 @@ func SetupAlbumRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		albums.GET("", GetAlbumsHandler(db))
 		albums.GET("/:id", GetAlbumHandler(db))
 		albums.POST("", middleware.AuthMiddleware(), CreateAlbumHandler(db, s3Client))
-		albums.DELETE("/:id", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), DeleteAlbumHandler(db, s3Client))
+		albums.DELETE("/:id", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RetiredLegacyMusicWriteHandler())
 	}
 }
 
@@ -50,7 +50,8 @@ func SetupAlbumRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 func GetAlbumsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var albums []model.Album
-		if err := db.Where("status NOT IN ?", []string{"closed", "rejected", "draft"}).Preload("Artists").Order("release_date ASC, title ASC").Find(&albums).Error; err != nil {
+		query := scopeVisibleLegacyMusic(c, db.Model(&model.Album{}), "\"Albums\"", "uploaded_by", false)
+		if err := query.Preload("Artists").Order("release_date DESC, title ASC").Find(&albums).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch albums"})
 			return
 		}
@@ -76,7 +77,8 @@ func GetAlbumHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
 		var album model.Album
-		if err := db.Preload("Artists").First(&album, "id = ?", id).Error; err != nil {
+		query := scopeVisibleLegacyMusic(c, db, "\"Albums\"", "uploaded_by", true)
+		if err := query.Preload("Artists").First(&album, "\"Albums\".id = ?", id).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				c.JSON(http.StatusNotFound, gin.H{"error": "Album not found"})
 				return

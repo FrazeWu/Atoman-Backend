@@ -12,8 +12,13 @@ import (
 )
 
 func (s *Service) GetSongLyrics(user authctx.CurrentUser, songID uuid.UUID) (MusicLyricsDTO, error) {
+	viewer := &user
+	if user.ID == uuid.Nil {
+		viewer = nil
+	}
 	var song model.Song
-	if err := s.db.First(&song, "id = ?", songID).Error; err != nil {
+	query := scopeVisibleMusicEntries(s.db, "\"Songs\"", "uploaded_by", viewer, false)
+	if err := query.First(&song, "\"Songs\".id = ?", songID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return MusicLyricsDTO{}, apperr.NotFound("music.song_not_found", "Song not found")
 		}
@@ -56,7 +61,7 @@ func (s *Service) ListPendingLyricAnnotations(user authctx.CurrentUser) ([]Pendi
 	var rows []row
 	if err := s.db.Table("music_lyric_annotations AS a").
 		Select("a.id AS annotation_id, a.song_id, s.album_id").
-		Joins(`JOIN "Songs" AS s ON s.id = a.song_id`).
+		Joins(`JOIN "Songs" AS s ON s.id = a.song_id AND s.lifecycle_status = 'active'`).
 		Where("a.created_by = ? AND a.status = ? AND a.deleted_at IS NULL AND s.album_id IS NOT NULL", user.ID, "needs_rebind").
 		Order("a.updated_at DESC").Scan(&rows).Error; err != nil {
 		return nil, err

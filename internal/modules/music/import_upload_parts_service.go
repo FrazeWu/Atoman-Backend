@@ -32,6 +32,9 @@ func (s *Service) CreateAlbumImportFilePartUpload(user authctx.CurrentUser, sess
 	if session.Status != AlbumImportStatusUploading || file.UploadStatus != AlbumImportFileUploadStatusUploading || file.UploadID == "" || file.SourceKey == "" {
 		return AlbumImportMultipartPartUploadDTO{}, apperr.Unprocessable("music.import_invalid_status", "Album import file is not uploading")
 	}
+	if expectedAlbumImportFilePartSize(file, partNumber) <= 0 {
+		return AlbumImportMultipartPartUploadDTO{}, apperr.BadRequest("validation.invalid_request", "part number is invalid")
+	}
 	uploadURL, err := s.albumImportMultipart.PresignUploadPart(file.SourceKey, file.UploadID, partNumber, 15*time.Minute)
 	if err != nil {
 		return AlbumImportMultipartPartUploadDTO{}, err
@@ -56,6 +59,9 @@ func (s *Service) CompleteAlbumImportFilePart(user authctx.CurrentUser, sessionI
 		}
 		if session.Status != AlbumImportStatusUploading || file.UploadStatus != AlbumImportFileUploadStatusUploading || file.UploadID == "" {
 			return apperr.Unprocessable("music.import_invalid_status", "Album import file is not uploading")
+		}
+		if expected := expectedAlbumImportFilePartSize(file, partNumber); expected <= 0 || input.Size != expected {
+			return apperr.BadRequest("validation.invalid_request", "completed part size is invalid")
 		}
 		parts, err := albumImportFileCompletedParts(file)
 		if err != nil {
@@ -118,8 +124,8 @@ func (s *Service) CompleteAlbumImportFile(user authctx.CurrentUser, sessionID, f
 		if err != nil {
 			return err
 		}
-		if len(parts) == 0 {
-			return apperr.Unprocessable("music.import_invalid_status", "Multipart upload is incomplete")
+		if err := validateAlbumImportFileParts(file, parts); err != nil {
+			return err
 		}
 		if file.UploadStatus == AlbumImportFileUploadStatusUploading {
 			file.UploadStatus = AlbumImportFileUploadStatusCompleting
@@ -173,6 +179,34 @@ func (s *Service) CompleteAlbumImportFile(user authctx.CurrentUser, sessionID, f
 		return AlbumImportFileDTO{}, err
 	}
 	return buildAlbumImportFileDTO(upload), nil
+}
+
+func expectedAlbumImportFilePartSize(file model.AlbumImportFile, partNumber int) int64 {
+	if file.Size <= 0 || file.PartSize <= 0 || partNumber <= 0 {
+		return 0
+	}
+	totalParts := int((file.Size + file.PartSize - 1) / file.PartSize)
+	if partNumber > totalParts || totalParts > 10000 {
+		return 0
+	}
+	if partNumber == totalParts {
+		return file.Size - int64(partNumber-1)*file.PartSize
+	}
+	return file.PartSize
+}
+
+func validateAlbumImportFileParts(file model.AlbumImportFile, parts []AlbumImportMultipartPartDTO) error {
+	totalParts := int((file.Size + file.PartSize - 1) / file.PartSize)
+	if file.Size <= 0 || file.PartSize <= 0 || totalParts <= 0 || totalParts > 10000 || len(parts) != totalParts {
+		return apperr.Unprocessable("music.import_incomplete", "Multipart upload is incomplete")
+	}
+	for index, part := range parts {
+		expectedNumber := index + 1
+		if part.PartNumber != expectedNumber || strings.TrimSpace(part.ETag) == "" || part.Size != expectedAlbumImportFilePartSize(file, expectedNumber) {
+			return apperr.Unprocessable("music.import_incomplete", "Multipart upload is incomplete")
+		}
+	}
+	return nil
 }
 
 func (s *Service) failAlbumImportFileUpload(userID, sessionID uuid.UUID, upload model.AlbumImportFile, message string) error {

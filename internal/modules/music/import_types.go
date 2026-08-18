@@ -1,12 +1,13 @@
 package music
 
 type AlbumImportTrackPayload struct {
-	SongID      string                         `json:"song_id"`
-	Title       string                         `json:"title"`
-	DiscNumber  int                            `json:"disc_number"`
-	TrackNumber int                            `json:"track_number"`
-	AudioURL    string                         `json:"audio_url,omitempty"`
-	Lyrics      *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
+	SongID      string `json:"song_id"`
+	Title       string `json:"title"`
+	DiscNumber  int    `json:"disc_number"`
+	TrackNumber int    `json:"track_number"`
+	// AudioURL is retained for internal processors and legacy tests only. Client JSON cannot set it.
+	AudioURL string                         `json:"-"`
+	Lyrics   *AlbumImportTrackLyricsPayload `json:"lyrics,omitempty"`
 }
 
 type AlbumImportTrackLyricsPayload struct {

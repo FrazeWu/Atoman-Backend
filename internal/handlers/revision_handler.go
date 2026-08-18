@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
+	"log"
 	"net/http"
 	"path"
 	"strconv"
@@ -253,7 +255,7 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 			c.JSON(http.StatusForbidden, gin.H{"error": "This album is fully protected. Only admins can edit."})
 			return
 		}
-		oldObjectKeys, newObjectKeys, err := promoteAlbumRevisionAssets(s3Client, albumID, input.Changes)
+		oldObjectKeys, newObjectKeys, consumedAssetIDs, err := promoteAlbumRevisionAssets(db, s3Client, albumID, editorUUID, input.Changes)
 		if err != nil {
 			storage.DeleteMusicObjects(s3Client, newObjectKeys)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -285,6 +287,12 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 				"conflicts": conflicts,
 			})
 			return
+		}
+		if len(consumedAssetIDs) > 0 {
+			if err := db.Where("id IN ? AND user_id = ? AND purpose = ?", consumedAssetIDs, editorUUID, "music.audio").Delete(&model.MediaAsset{}).Error; err != nil {
+				log.Printf("consume album revision audio assets: %v", err)
+				oldObjectKeys = nil
+			}
 		}
 		storage.DeleteMusicObjects(s3Client, oldObjectKeys)
 
@@ -540,9 +548,10 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 	}
 }
 
-func promoteAlbumRevisionAssets(s3Client *s3.S3, albumID uuid.UUID, changes map[string]interface{}) ([]string, []string, error) {
+func promoteAlbumRevisionAssets(db *gorm.DB, s3Client *s3.S3, albumID, editorID uuid.UUID, changes map[string]interface{}) ([]string, []string, []uuid.UUID, error) {
 	oldKeys := []string{}
 	newKeys := []string{}
+	consumedAssetIDs := []uuid.UUID{}
 	promote := func(rawURL, destinationKey string) (string, error) {
 		asset, err := storage.PromoteMusicUploadAsset(s3Client, rawURL, destinationKey)
 		if err != nil {
@@ -556,38 +565,60 @@ func promoteAlbumRevisionAssets(s3Client *s3.S3, albumID uuid.UUID, changes map[
 	if coverURL, ok := changes["cover_url"].(string); ok && strings.TrimSpace(coverURL) != "" {
 		promotedURL, err := promote(coverURL, storage.BuildMusicAlbumCoverVersionKey(albumID.String(), uuid.NewString(), path.Ext(coverURL)))
 		if err != nil {
-			return oldKeys, newKeys, err
+			return oldKeys, newKeys, consumedAssetIDs, err
 		}
 		changes["cover_url"] = promotedURL
 	}
 	rawTracks, ok := changes["tracks"]
 	if !ok {
-		return oldKeys, newKeys, nil
+		return oldKeys, newKeys, consumedAssetIDs, nil
 	}
 	encoded, err := json.Marshal(rawTracks)
 	if err != nil {
-		return oldKeys, newKeys, err
+		return oldKeys, newKeys, consumedAssetIDs, err
 	}
 	var tracks []map[string]interface{}
 	if err := json.Unmarshal(encoded, &tracks); err != nil {
-		return oldKeys, newKeys, err
+		return oldKeys, newKeys, consumedAssetIDs, err
 	}
 	for _, track := range tracks {
 		if removed, _ := track["removed"].(bool); removed {
 			continue
 		}
-		songID, _ := track["id"].(string)
-		if strings.TrimSpace(songID) == "" {
+		originalSongID, _ := track["id"].(string)
+		songID := strings.TrimSpace(originalSongID)
+		delete(track, "audio_url")
+		delete(track, "resolved_audio_url")
+		assetID, _ := track["audio_asset_id"].(string)
+		assetID = strings.TrimSpace(assetID)
+		if songID == "" {
+			parsedAssetID, err := uuid.Parse(assetID)
+			if err != nil {
+				return oldKeys, newKeys, consumedAssetIDs, errors.New("new tracks require a valid audio_asset_id")
+			}
+			var audioAsset model.MediaAsset
+			if err := db.First(&audioAsset, "id = ? AND user_id = ? AND purpose = ?", parsedAssetID, editorID, "music.audio").Error; err != nil {
+				return oldKeys, newKeys, consumedAssetIDs, err
+			}
+			if !uploadPurposes["music.audio"].allowedContentType[audioAsset.ContentType] {
+				return oldKeys, newKeys, consumedAssetIDs, errors.New("audio_asset_id is not a supported audio asset")
+			}
 			songID = uuid.NewString()
 			track["id"] = songID
+			promotedURL, err := promote(audioAsset.URL, storage.BuildMusicAlbumTrackVersionKey(albumID.String(), songID, uuid.NewString(), path.Ext(audioAsset.Key)))
+			if err != nil {
+				return oldKeys, newKeys, consumedAssetIDs, err
+			}
+			consumedAssetIDs = append(consumedAssetIDs, audioAsset.ID)
+			track["resolved_audio_url"] = promotedURL
+		} else if assetID != "" {
+			return oldKeys, newKeys, consumedAssetIDs, errors.New("existing track audio must use the audio replacement endpoint")
 		}
+		delete(track, "audio_asset_id")
 		for _, media := range []struct {
 			field string
 			key   func(string) string
 		}{
-			{field: "audio_url", key: func(rawURL string) string {
-				return storage.BuildMusicAlbumTrackVersionKey(albumID.String(), songID, uuid.NewString(), path.Ext(rawURL))
-			}},
 			{field: "cover_url", key: func(rawURL string) string {
 				return storage.BuildMusicAlbumCoverVersionKey(albumID.String(), uuid.NewString(), path.Ext(rawURL))
 			}},
@@ -598,13 +629,13 @@ func promoteAlbumRevisionAssets(s3Client *s3.S3, albumID uuid.UUID, changes map[
 			}
 			promotedURL, err := promote(rawURL, media.key(rawURL))
 			if err != nil {
-				return oldKeys, newKeys, err
+				return oldKeys, newKeys, consumedAssetIDs, err
 			}
 			track[media.field] = promotedURL
 		}
 	}
 	changes["tracks"] = tracks
-	return oldKeys, newKeys, nil
+	return oldKeys, newKeys, consumedAssetIDs, nil
 }
 
 func promoteSongRevisionAssets(db *gorm.DB, s3Client *s3.S3, songID uuid.UUID, changes map[string]interface{}) ([]string, []string, error) {

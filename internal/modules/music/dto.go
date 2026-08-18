@@ -272,6 +272,8 @@ type ArtistDetailResponse struct {
 	ActiveEndDatePrecision   string                     `json:"active_end_date_precision,omitempty"`
 	Members                  string                     `json:"members"`
 	EntryStatus              string                     `json:"entry_status"`
+	LifecycleStatus          string                     `json:"lifecycle_status"`
+	EditStatus               string                     `json:"edit_status"`
 	RedirectTo               *uuid.UUID                 `json:"redirect_to,omitempty"`
 	Albums                   any                        `json:"albums,omitempty"`
 	Aliases                  any                        `json:"aliases,omitempty"`

@@ -12,14 +12,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const musicRecommendationCandidateLimit = 1000
+
 func (s *Service) RecommendAlbumsByMode(mode recommendation.Mode, page int, pageSize int) ([]feed.RecommendationItemDTO, int64, error) {
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
 
 	var albums []model.Album
 	if err := s.db.Model(&model.Album{}).
-		Preload("Songs").
-		Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed").
-		Order("\"Albums\".created_at DESC").
+		Preload("Songs", "lifecycle_status = ?", model.MusicLifecycleActive).
+		Where("\"Albums\".lifecycle_status = ?", model.MusicLifecycleActive).
+		Order("\"Albums\".hot_score DESC, \"Albums\".created_at DESC").
+		Limit(musicRecommendationCandidateLimit).
 		Find(&albums).Error; err != nil {
 		return nil, 0, err
 	}
@@ -116,9 +119,11 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 	if err := s.db.Table("Artists").
 		Select("\"Artists\".*, COALESCE(MAX(a.hot_score), 0) as max_hot_score, COUNT(a.id) as album_count").
 		Joins("LEFT JOIN album_artists aa ON aa.artist_id = \"Artists\".id").
-		Joins("LEFT JOIN \"Albums\" a ON a.id = aa.album_id AND COALESCE(a.entry_status, '') <> 'closed' AND COALESCE(a.status, '') <> 'closed'").
-		Where("COALESCE(\"Artists\".entry_status, '') NOT IN ?", []string{"closed", artistEntryDraft}).
+		Joins("LEFT JOIN \"Albums\" a ON a.id = aa.album_id AND a.lifecycle_status = 'active'").
+		Where("\"Artists\".lifecycle_status = ?", model.MusicLifecycleActive).
 		Group("\"Artists\".id").
+		Order("max_hot_score DESC, \"Artists\".created_at DESC").
+		Limit(musicRecommendationCandidateLimit).
 		Find(&dbArtists).Error; err != nil {
 		return nil, 0, err
 	}
@@ -162,7 +167,7 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 		}
 		if err := s.db.Table("song_artists").
 			Select("song_artists.artist_id AS artist_id, COALESCE(SUM(\"Songs\".play_count), 0) AS play_count").
-			Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id").
+			Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id AND \"Songs\".lifecycle_status = 'active'").
 			Where("song_artists.artist_id IN ?", artistIDs).
 			Group("song_artists.artist_id").
 			Scan(&playRows).Error; err != nil {
@@ -321,7 +326,7 @@ func (s *Service) Discover(mode recommendation.Mode, page int, pageSize int) ([]
 	albumMetaByID := make(map[string]model.Album, len(albumIDs))
 	if len(albumIDs) > 0 {
 		var discoverAlbums []model.Album
-		if err := s.db.Preload("Artists").Where("id IN ?", albumIDs).Find(&discoverAlbums).Error; err != nil {
+		if err := s.db.Preload("Artists").Where("id IN ? AND lifecycle_status = ?", albumIDs, model.MusicLifecycleActive).Find(&discoverAlbums).Error; err != nil {
 			return nil, 0, err
 		}
 		for _, album := range discoverAlbums {

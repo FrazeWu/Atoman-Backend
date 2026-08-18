@@ -197,7 +197,8 @@ func (h *Handler) listSongLyricVersions(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	versions, err := h.service.ListSongLyricVersions(songID)
+	user, _ := currentMusicUser(c)
+	versions, err := h.service.ListVisibleSongLyricVersions(user, songID)
 	if err != nil {
 		httpx.Error(c, err)
 		return

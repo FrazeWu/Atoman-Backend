@@ -39,20 +39,16 @@ func GetArtistsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		q := c.Query("q")
 		var artists []model.Artist
+		query := scopeVisibleLegacyMusic(c, db.Model(&model.Artist{}), "\"Artists\"", "created_by", false)
 		if q != "" {
 			like := "%" + strings.ToLower(q) + "%"
-			if err := db.Raw(`SELECT DISTINCT "Artists".* FROM "Artists"
-				LEFT JOIN artist_aliases ON artist_aliases.artist_id = "Artists".id
-				WHERE LOWER("Artists".name) LIKE ? OR LOWER(artist_aliases.alias) LIKE ?
-				ORDER BY "Artists".name ASC`, like, like).Scan(&artists).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch artists"})
-				return
-			}
-		} else {
-			if err := db.Order("name ASC").Find(&artists).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch artists"})
-				return
-			}
+			query = query.Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
+				Where("LOWER(\"Artists\".name) LIKE ? OR LOWER(artist_aliases.alias) LIKE ?", like, like).
+				Distinct("\"Artists\".*")
+		}
+		if err := query.Order("\"Artists\".name ASC").Find(&artists).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch artists"})
+			return
 		}
 		c.JSON(http.StatusOK, artists)
 	}

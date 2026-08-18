@@ -1572,7 +1572,7 @@ func TestRegisterRoutesRateLimitsAnonymousPlayReports(t *testing.T) {
 
 func TestRegisterRoutesRejectsPlayReportsForNonPublicSongs(t *testing.T) {
 	service, db, _ := newMusicHTTPTestService(t)
-	song := model.Song{Title: "Draft Play", AudioURL: "/audio/draft.mp3", Status: "draft"}
+	song := model.Song{Title: "Draft Play", AudioURL: "/audio/draft.mp3", Status: "draft", LifecycleStatus: model.MusicLifecycleRetired}
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}

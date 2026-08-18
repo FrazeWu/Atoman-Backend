@@ -1,11 +1,14 @@
 package music
 
 import (
+	"errors"
+
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func (s *Service) ListArtistBookmarks(user authctx.CurrentUser, page int, pageSize int, sort string) ([]model.ArtistBookmark, int64, error) {
@@ -26,6 +29,13 @@ func (s *Service) BookmarkArtist(user authctx.CurrentUser, artistID uuid.UUID) (
 	}
 	if artistID == uuid.Nil {
 		return model.ArtistBookmark{}, apperr.BadRequest("validation.invalid_request", "artist_id is required")
+	}
+	var artist model.Artist
+	if err := s.db.First(&artist, "id = ? AND lifecycle_status = ?", artistID, model.MusicLifecycleActive).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.ArtistBookmark{}, apperr.NotFound("music.artist_not_found", "Artist not found")
+		}
+		return model.ArtistBookmark{}, err
 	}
 	return s.repo.UpsertArtistBookmark(user.ID, artistID)
 }
@@ -63,6 +73,13 @@ func (s *Service) BookmarkAlbum(user authctx.CurrentUser, albumID uuid.UUID) (mo
 	}
 	if albumID == uuid.Nil {
 		return model.AlbumBookmark{}, apperr.BadRequest("validation.invalid_request", "album_id is required")
+	}
+	var album model.Album
+	if err := s.db.First(&album, "id = ? AND lifecycle_status = ?", albumID, model.MusicLifecycleActive).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.AlbumBookmark{}, apperr.NotFound("music.album_not_found", "Album not found")
+		}
+		return model.AlbumBookmark{}, err
 	}
 	return s.repo.UpsertAlbumBookmark(user.ID, albumID)
 }

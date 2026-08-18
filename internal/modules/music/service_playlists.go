@@ -168,7 +168,7 @@ func (s *Service) AddPlaylistSong(user authctx.CurrentUser, playlistID uuid.UUID
 		return model.PlaylistSong{}, err
 	}
 	var song model.Song
-	if err := s.db.First(&song, "id = ? AND status NOT IN ?", songID, []string{"closed", "rejected", "draft"}).Error; err != nil {
+	if err := s.db.First(&song, "id = ? AND lifecycle_status = ?", songID, model.MusicLifecycleActive).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.PlaylistSong{}, apperr.NotFound("music.song_not_found", "Song not found")
 		}
@@ -204,7 +204,9 @@ func (s *Service) PlaylistSongIDs(user authctx.CurrentUser, playlistID uuid.UUID
 	}
 	var ids []uuid.UUID
 	err := s.db.Model(&model.PlaylistSong{}).
-		Where("playlist_id = ? AND song_id IN ?", playlistID, songIDs).
+		Select("music_playlist_songs.song_id").
+		Joins("JOIN \"Songs\" ON \"Songs\".id = music_playlist_songs.song_id AND \"Songs\".deleted_at IS NULL AND \"Songs\".lifecycle_status = ?", model.MusicLifecycleActive).
+		Where("music_playlist_songs.playlist_id = ? AND music_playlist_songs.song_id IN ?", playlistID, songIDs).
 		Order("song_id ASC").
 		Pluck("song_id", &ids).Error
 	return ids, err

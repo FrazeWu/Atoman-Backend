@@ -166,6 +166,46 @@ func TestPostgresConcurrentSaveSongLyricsAcrossServices(t *testing.T) {
 	}
 }
 
+func TestPostgresConcurrentListeningHistoryIsAtomicAcrossServices(t *testing.T) {
+	db := openLyricsPostgresTestDB(t)
+	if err := db.AutoMigrate(&model.MusicListeningHistory{}); err != nil {
+		t.Fatalf("migrate listening history: %v", err)
+	}
+	user, song := createLyricsPostgresFixture(t, db)
+	services := []*Service{NewService(db.Session(&gorm.Session{})), NewService(db.Session(&gorm.Session{}))}
+	const attempts = 12
+	start := make(chan struct{})
+	errs := make(chan error, attempts)
+	var wg sync.WaitGroup
+	for index := 0; index < attempts; index++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			<-start
+			errs <- services[index%len(services)].RecordSongPlay(&user.ID, song.ID)
+		}(index)
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("record concurrent play: %v", err)
+		}
+	}
+
+	var histories []model.MusicListeningHistory
+	if err := db.Where("user_id = ? AND song_id = ?", user.ID, song.ID).Find(&histories).Error; err != nil {
+		t.Fatalf("load listening history: %v", err)
+	}
+	if len(histories) != 1 {
+		t.Fatalf("expected one listening history row, got %d", len(histories))
+	}
+	if histories[0].PlayCount != attempts {
+		t.Fatalf("expected history play count %d, got %d", attempts, histories[0].PlayCount)
+	}
+}
+
 func TestPostgresConcurrentPlaylistBookmarkIsIdempotentAcrossServices(t *testing.T) {
 	db := openLyricsPostgresTestDB(t)
 	if err := db.AutoMigrate(&model.Playlist{}, &model.PlaylistBookmark{}); err != nil {

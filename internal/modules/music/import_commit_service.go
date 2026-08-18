@@ -133,18 +133,20 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 
 		album := model.Album{
-			Title:       strings.TrimSpace(payload.Album.Title),
-			Description: strings.TrimSpace(payload.Album.Description),
-			ReleaseYear: payload.Album.ReleaseYear,
-			Year:        payload.Album.ReleaseYear,
-			CoverURL:    coverURL,
-			CoverSource: coverSourceFromURL(coverURL),
-			Status:      "open",
-			EntryStatus: "open",
-			AlbumType:   strings.TrimSpace(payload.Album.AlbumType),
-			UploadedBy:  &user.ID,
-			SourcesJSON: albumSourcesJSON,
-			Sources:     albumSources,
+			Title:           strings.TrimSpace(payload.Album.Title),
+			Description:     strings.TrimSpace(payload.Album.Description),
+			ReleaseYear:     payload.Album.ReleaseYear,
+			Year:            payload.Album.ReleaseYear,
+			CoverURL:        coverURL,
+			CoverSource:     coverSourceFromURL(coverURL),
+			Status:          "open",
+			EntryStatus:     "open",
+			LifecycleStatus: model.MusicLifecycleActive,
+			EditStatus:      model.MusicEditDevelopment,
+			AlbumType:       strings.TrimSpace(payload.Album.AlbumType),
+			UploadedBy:      &user.ID,
+			SourcesJSON:     albumSourcesJSON,
+			Sources:         albumSources,
 		}
 		if album.AlbumType == "" {
 			album.AlbumType = "album"
@@ -174,6 +176,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				return err
 			}
 			if _, err := revisions.EnsureInitialRevision("album", existing.ID, user.ID); err != nil {
+				return err
+			}
+			if err := revisionservice.ValidateMusicEntryEdit(tx, "album", existing.ID, user.ID); err != nil {
 				return err
 			}
 			existing.Title = album.Title
@@ -232,12 +237,14 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				return err
 			}
 			if err := tx.Model(resolved.Artist).Updates(map[string]any{
-				"entry_status": artistEntryOpen,
-				"sources_json": artistSourcesJSON,
+				"entry_status":     artistEntryOpen,
+				"lifecycle_status": model.MusicLifecycleActive,
+				"sources_json":     artistSourcesJSON,
 			}).Error; err != nil {
 				return err
 			}
 			resolved.Artist.EntryStatus = artistEntryOpen
+			resolved.Artist.LifecycleStatus = model.MusicLifecycleActive
 			resolved.Artist.Sources = artistSources
 			resolved.Artist.SourcesJSON = artistSourcesJSON
 		}
@@ -269,12 +276,8 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 		seenSongIDs := map[uuid.UUID]bool{}
 		for index, track := range payload.Album.Tracks {
-			audioURL := strings.TrimSpace(track.AudioURL)
-			derived := derivedTrackAudio{}
-			if audioURL == "" {
-				derived = matchDerivedTrackAudio(rawDerivedTracks, track, index, usedDerivedTrackIndexes)
-				audioURL = derived.AudioURL
-			}
+			derived := matchDerivedTrackAudio(rawDerivedTracks, track, index, usedDerivedTrackIndexes)
+			audioURL := strings.TrimSpace(derived.AudioURL)
 			metadata := songAudioMetadataFromImportFile(importFilesByID[derived.FileID])
 			var existingSong *model.Song
 			if strings.TrimSpace(track.SongID) != "" {
@@ -342,6 +345,8 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				ReleaseDatePrecision: album.ReleaseDatePrecision,
 				AlbumID:              &album.ID,
 				Status:               "open",
+				LifecycleStatus:      model.MusicLifecycleActive,
+				EditStatus:           model.MusicEditDevelopment,
 				AudioURL:             audioURL,
 				AudioSource:          coverSourceFromURL(audioURL),
 				UploadedBy:           &user.ID,
@@ -382,7 +387,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				if seenSongIDs[song.ID] {
 					continue
 				}
-				if err := tx.Model(&song).Update("status", "closed").Error; err != nil {
+				if err := tx.Model(&song).Updates(map[string]any{"status": "closed", "lifecycle_status": model.MusicLifecycleRetired}).Error; err != nil {
 					return err
 				}
 			}
@@ -874,16 +879,18 @@ func buildArtistFromImportInput(input CommitAlbumImportArtistInput) (*model.Arti
 		return nil, err
 	}
 	artist := &model.Artist{
-		Name:           strings.TrimSpace(input.Name),
-		Disambiguation: strings.TrimSpace(input.Disambiguation),
-		LegalName:      strings.TrimSpace(input.LegalName),
-		Bio:            strings.TrimSpace(input.Bio),
-		ImageURL:       strings.TrimSpace(input.ImageURL),
-		Nationality:    strings.TrimSpace(input.Nationality),
-		StageNamesJSON: mustMarshalStageNames(input.StageNames),
-		BirthPlace:     strings.TrimSpace(input.BirthPlace),
-		ArtistForm:     normalizeArtistForm(input.ArtistForm),
-		EntryStatus:    artistEntryDraft,
+		Name:            strings.TrimSpace(input.Name),
+		Disambiguation:  strings.TrimSpace(input.Disambiguation),
+		LegalName:       strings.TrimSpace(input.LegalName),
+		Bio:             strings.TrimSpace(input.Bio),
+		ImageURL:        strings.TrimSpace(input.ImageURL),
+		Nationality:     strings.TrimSpace(input.Nationality),
+		StageNamesJSON:  mustMarshalStageNames(input.StageNames),
+		BirthPlace:      strings.TrimSpace(input.BirthPlace),
+		ArtistForm:      normalizeArtistForm(input.ArtistForm),
+		EntryStatus:     artistEntryDraft,
+		LifecycleStatus: model.MusicLifecycleDraft,
+		EditStatus:      model.MusicEditDevelopment,
 	}
 	birthDate, birthDatePrecision, err := parseOptionalDate(strings.TrimSpace(input.BirthDate), "birth_date")
 	if err != nil {

@@ -8,6 +8,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/httpx"
+	revisionservice "atoman/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -63,15 +64,16 @@ func (h *Handler) search(c *gin.Context) {
 	typeFilter := strings.TrimSpace(c.Query("type"))
 	include := func(kind string) bool { return typeFilter == "" || typeFilter == kind }
 	result := newResult()
+	viewer, hasViewer := currentMusicUser(c)
+	viewerPtr := musicViewer(viewer, hasViewer)
 
 	if include("song") {
 		var total int64
 		songQuery := func() *gorm.DB {
-			return h.service.db.Model(&model.Song{}).
+			return scopeVisibleMusicEntries(h.service.db.Model(&model.Song{}), "\"Songs\"", "uploaded_by", viewerPtr, false).
 				Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
 				Joins("LEFT JOIN song_artists ON song_artists.song_id = \"Songs\".id").
 				Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = song_artists.artist_id").
-				Where("\"Songs\".status NOT IN ?", []string{"closed", "rejected", "draft"}).
 				Where("LOWER(\"Songs\".title) LIKE LOWER(?) OR LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?)", pattern, pattern, pattern)
 		}
 		if err := songQuery().Distinct("\"Songs\".id").Count(&total).Error; err != nil {
@@ -92,14 +94,14 @@ func (h *Handler) search(c *gin.Context) {
 	if include("album") {
 		var total int64
 		albumQuery := func() *gorm.DB {
-			return h.service.db.Model(&model.Album{}).Joins("LEFT JOIN album_artists ON album_artists.album_id = \"Albums\".id").Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = album_artists.artist_id").Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed").Where("LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?)", pattern, pattern)
+			return scopeVisibleMusicEntries(h.service.db.Model(&model.Album{}), "\"Albums\"", "uploaded_by", viewerPtr, false).Joins("LEFT JOIN album_artists ON album_artists.album_id = \"Albums\".id").Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = album_artists.artist_id").Where("LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?)", pattern, pattern)
 		}
 		if err := albumQuery().Distinct("\"Albums\".id").Count(&total).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
 		result.Meta.Totals["album"] = total
-		if err := albumQuery().Distinct("\"Albums\".*").Preload("Artists").Preload("Songs").Order("\"Albums\".hot_score DESC, \"Albums\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
+		if err := albumQuery().Distinct("\"Albums\".*").Preload("Artists").Preload("Songs", visibleSongPreload(viewerPtr)).Order("\"Albums\".hot_score DESC, \"Albums\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -110,7 +112,7 @@ func (h *Handler) search(c *gin.Context) {
 	if include("artist") {
 		var total int64
 		artistQuery := func() *gorm.DB {
-			return h.service.db.Model(&model.Artist{}).Where("COALESCE(entry_status, '') NOT IN ?", []string{"closed", artistEntryDraft}).Where("LOWER(name) LIKE LOWER(?) OR LOWER("+artistDisambiguationSearchExpression+") LIKE LOWER(?) OR LOWER(legal_name) LIKE LOWER(?)", pattern, pattern, pattern)
+			return scopeVisibleMusicEntries(h.service.db.Model(&model.Artist{}), "\"Artists\"", "created_by", viewerPtr, false).Where("LOWER(name) LIKE LOWER(?) OR LOWER("+artistDisambiguationSearchExpression+") LIKE LOWER(?) OR LOWER(legal_name) LIKE LOWER(?)", pattern, pattern, pattern)
 		}
 		if err := artistQuery().Count(&total).Error; err != nil {
 			httpx.Error(c, err)
@@ -209,20 +211,19 @@ type songDetailResponse struct {
 }
 
 type createSongAudioReplacementRequest struct {
-	AudioURL  string `json:"audio_url" binding:"required"`
-	SourceKey string `json:"source_key"`
+	AssetID uuid.UUID `json:"asset_id" binding:"required"`
 }
 
 // createSongAudioReplacement godoc
 // @Summary 排队替换歌曲音频
-// @Description 新音频后台成功后原子切换；失败时保留原音频。
+// @Description 仅接受当前用户已完成的本地音频上传 asset_id；后台成功后原子切换，失败时保留原音频。
 // @Tags music
 // @Accept json
 // @Produce json
 // @Security BearerAuth
 // @Security CookieAuth
 // @Param songId path string true "歌曲 ID"
-// @Param input body createSongAudioReplacementRequest true "新音频"
+// @Param input body createSongAudioReplacementRequest true "已完成的音频上传资产"
 // @Success 202 {object} model.SongAudioReplacement
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
@@ -244,9 +245,25 @@ func (h *Handler) createSongAudioReplacement(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	input.AudioURL = strings.TrimSpace(input.AudioURL)
-	if input.AudioURL == "" {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "audio_url is required"))
+	if input.AssetID == uuid.Nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "asset_id is required"))
+		return
+	}
+	if err := revisionservice.ValidateMusicEntryEdit(h.service.db, "song", songID, user.ID, "audio_url"); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var asset model.MediaAsset
+	if err := h.service.db.First(&asset, "id = ? AND user_id = ? AND purpose = ?", input.AssetID, user.ID, "music.audio").Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(c, apperr.NotFound("music.audio_asset_not_found", "Completed audio upload not found"))
+		} else {
+			httpx.Error(c, err)
+		}
+		return
+	}
+	if !isMusicAudioContentType(asset.ContentType) || strings.TrimSpace(asset.URL) == "" || strings.TrimSpace(asset.Key) == "" {
+		httpx.Error(c, apperr.Unprocessable("music.audio_asset_invalid", "Uploaded asset is not valid audio"))
 		return
 	}
 	var song model.Song
@@ -259,8 +276,8 @@ func (h *Handler) createSongAudioReplacement(c *gin.Context) {
 		return
 	}
 	job := model.SongAudioReplacement{
-		SongID: songID, RequestedBy: user.ID, AudioURL: input.AudioURL,
-		SourceKey: strings.TrimSpace(input.SourceKey), PreviousAudioURL: song.AudioURL, Status: "pending",
+		SongID: songID, RequestedBy: user.ID, AssetID: &asset.ID, AudioURL: asset.URL,
+		SourceKey: asset.Key, PreviousAudioURL: song.AudioURL, Status: "pending",
 	}
 	if err := h.service.db.Create(&job).Error; err != nil {
 		httpx.Error(c, err)
@@ -281,8 +298,11 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	viewer, hasViewer := currentMusicUser(c)
+	viewerPtr := musicViewer(viewer, hasViewer)
 	var song model.Song
-	if err := h.service.db.Preload("Album.Artists").Preload("Artists").First(&song, "id = ? AND status NOT IN ?", songID, []string{"closed", "rejected", "draft"}).Error; err != nil {
+	query := scopeVisibleMusicEntries(h.service.db, "\"Songs\"", "uploaded_by", viewerPtr, false)
+	if err := query.Preload("Album.Artists").Preload("Artists").First(&song, "\"Songs\".id = ?", songID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			httpx.Error(c, apperr.NotFound("music.song_not_found", "Song not found"))
 		} else {
@@ -332,14 +352,14 @@ func loadAdjacentAlbumSongs(db *gorm.DB, song model.Song) (model.Song, model.Son
 	}
 	var previous, next model.Song
 	discNumber := normalizedDiscNumber(song.DiscNumber)
-	visibleStatuses := []string{"closed", "rejected", "draft"}
+	visibleStatus := model.MusicLifecycleActive
 	db.Where(
-		"album_id = ? AND (COALESCE(NULLIF(disc_number, 0), 1) < ? OR (COALESCE(NULLIF(disc_number, 0), 1) = ? AND track_number < ?)) AND status NOT IN ?",
-		*song.AlbumID, discNumber, discNumber, song.TrackNumber, visibleStatuses,
+		"album_id = ? AND lifecycle_status = ? AND (COALESCE(NULLIF(disc_number, 0), 1) < ? OR (COALESCE(NULLIF(disc_number, 0), 1) = ? AND track_number < ?))",
+		*song.AlbumID, visibleStatus, discNumber, discNumber, song.TrackNumber,
 	).Order("COALESCE(NULLIF(disc_number, 0), 1) DESC, track_number DESC, created_at DESC").First(&previous)
 	db.Where(
-		"album_id = ? AND (COALESCE(NULLIF(disc_number, 0), 1) > ? OR (COALESCE(NULLIF(disc_number, 0), 1) = ? AND track_number > ?)) AND status NOT IN ?",
-		*song.AlbumID, discNumber, discNumber, song.TrackNumber, visibleStatuses,
+		"album_id = ? AND lifecycle_status = ? AND (COALESCE(NULLIF(disc_number, 0), 1) > ? OR (COALESCE(NULLIF(disc_number, 0), 1) = ? AND track_number > ?))",
+		*song.AlbumID, visibleStatus, discNumber, discNumber, song.TrackNumber,
 	).Order("COALESCE(NULLIF(disc_number, 0), 1) ASC, track_number ASC, created_at ASC").First(&next)
 	return previous, next
 }
@@ -362,7 +382,7 @@ func (h *Handler) addToLaterPlaylist(c *gin.Context) {
 		return
 	}
 	var song model.Song
-	if err := h.service.db.First(&song, "id = ? AND status NOT IN ?", songID, []string{"closed", "rejected", "draft"}).Error; err != nil {
+	if err := h.service.db.First(&song, "id = ? AND lifecycle_status = ?", songID, model.MusicLifecycleActive).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("music.song_not_found", "Song not found"))
 		} else {

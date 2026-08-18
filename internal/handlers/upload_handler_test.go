@@ -318,6 +318,21 @@ func TestUniqueUploadFilenameUsesVerifiedImageContentTypeExtension(t *testing.T)
 	}
 }
 
+func TestUploadContentMatchesDeclaredAudio(t *testing.T) {
+	valid := bytes.NewReader([]byte("ID3\x04\x00\x00audio"))
+	if !uploadContentMatchesDeclared(valid, "audio/mpeg") {
+		t.Fatal("valid MP3 header was rejected")
+	}
+	spoofed := bytes.NewReader([]byte("plain text pretending to be audio"))
+	if uploadContentMatchesDeclared(spoofed, "audio/mpeg") {
+		t.Fatal("spoofed MP3 content was accepted")
+	}
+	mismatch := bytes.NewReader([]byte("fLaC\x00\x00"))
+	if uploadContentMatchesDeclared(mismatch, "audio/mpeg") {
+		t.Fatal("FLAC content was accepted as MP3")
+	}
+}
+
 func TestUploadMusicCoverRejectsSpoofedImageContentType(t *testing.T) {
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")

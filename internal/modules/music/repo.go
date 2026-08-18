@@ -104,7 +104,7 @@ func (r *Repo) ListArtistBookmarks(userID uuid.UUID, page int, pageSize int, sor
 func (r *Repo) ListArtistBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.ArtistBookmark, int64, error) {
 	var total int64
 	db := r.db.Model(&model.ArtistBookmark{}).
-		Joins("JOIN \"Artists\" ON \"Artists\".id = music_artist_bookmarks.artist_id").
+		Joins("JOIN \"Artists\" ON \"Artists\".id = music_artist_bookmarks.artist_id AND \"Artists\".lifecycle_status = 'active'").
 		Where("music_artist_bookmarks.user_id = ?", userID)
 	if query = strings.TrimSpace(query); query != "" {
 		pattern := "%" + strings.ToLower(query) + "%"
@@ -119,7 +119,7 @@ func (r *Repo) ListArtistBookmarksFiltered(userID uuid.UUID, page int, pageSize 
 		playCountSubquery := r.db.
 			Table("song_artists").
 			Select("song_artists.artist_id AS artist_id, COALESCE(SUM(\"Songs\".play_count), 0) AS play_count").
-			Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id").
+			Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id AND \"Songs\".lifecycle_status = 'active'").
 			Group("song_artists.artist_id")
 		db = db.Joins("LEFT JOIN (?) AS artist_popularity ON artist_popularity.artist_id = music_artist_bookmarks.artist_id", playCountSubquery).
 			Order("COALESCE(artist_popularity.play_count, 0) DESC").
@@ -150,7 +150,7 @@ func (r *Repo) ListAlbumBookmarks(userID uuid.UUID, page int, pageSize int, sort
 func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.AlbumBookmark, int64, error) {
 	var total int64
 	db := r.db.Model(&model.AlbumBookmark{}).
-		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id").
+		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".lifecycle_status = 'active'").
 		Where("music_album_bookmarks.user_id = ?", userID)
 	if query = strings.TrimSpace(query); query != "" {
 		db = db.Where("LOWER(\"Albums\".title) LIKE ?", "%"+strings.ToLower(query)+"%")
@@ -175,7 +175,7 @@ func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize i
 
 func (r *Repo) ListLatestAlbumBookmarksAfter(userID uuid.UUID, pageSize int, cursor *musicCreatedAtCursor) ([]model.AlbumBookmark, bool, error) {
 	db := r.db.Model(&model.AlbumBookmark{}).
-		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id").
+		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".lifecycle_status = 'active'").
 		Where("music_album_bookmarks.user_id = ?", userID).
 		Order("music_album_bookmarks.created_at DESC").
 		Order("music_album_bookmarks.id DESC")
@@ -266,7 +266,7 @@ func (r *Repo) ListPlaylistBookmarksFiltered(userID uuid.UUID, page int, pageSiz
 func (r *Repo) ListPlaylistSongsFiltered(playlistID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.PlaylistSong, int64, error) {
 	var total int64
 	db := r.db.Model(&model.PlaylistSong{}).
-		Joins("JOIN \"Songs\" ON \"Songs\".id = music_playlist_songs.song_id").
+		Joins("JOIN \"Songs\" ON \"Songs\".id = music_playlist_songs.song_id AND \"Songs\".lifecycle_status = 'active'").
 		Where("music_playlist_songs.playlist_id = ?", playlistID)
 	if query = strings.TrimSpace(query); query != "" {
 		db = db.Where("LOWER(\"Songs\".title) LIKE ?", "%"+strings.ToLower(query)+"%")
@@ -374,9 +374,10 @@ func (r *Repo) CountPlaylistSongs(playlistIDs []uuid.UUID) (map[uuid.UUID]int64,
 		Count      int64
 	}
 	if err := r.db.Model(&model.PlaylistSong{}).
-		Select("playlist_id, COUNT(*) AS count").
-		Where("playlist_id IN ?", playlistIDs).
-		Group("playlist_id").
+		Select("music_playlist_songs.playlist_id, COUNT(*) AS count").
+		Joins("JOIN \"Songs\" ON \"Songs\".id = music_playlist_songs.song_id AND \"Songs\".deleted_at IS NULL AND \"Songs\".lifecycle_status = ?", model.MusicLifecycleActive).
+		Where("music_playlist_songs.playlist_id IN ?", playlistIDs).
+		Group("music_playlist_songs.playlist_id").
 		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
@@ -438,13 +439,15 @@ func (r *Repo) UpsertPlaylistSong(playlistID uuid.UUID, songID uuid.UUID) (model
 }
 
 func (r *Repo) ListPlaylistSongs(playlistID uuid.UUID, page int, pageSize int) ([]model.PlaylistSong, int64, error) {
+	base := r.db.Model(&model.PlaylistSong{}).
+		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_playlist_songs.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
+		Where("music_playlist_songs.playlist_id = ?", playlistID)
 	var total int64
-	db := r.db.Model(&model.PlaylistSong{}).Where("playlist_id = ?", playlistID)
-	if err := db.Count(&total).Error; err != nil {
+	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var songs []model.PlaylistSong
-	err := db.Preload("Song.Artists").Preload("Song.Album").Order("position ASC, created_at ASC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&songs).Error
+	err := base.Preload("Song.Artists").Preload("Song.Album").Order("music_playlist_songs.position ASC, music_playlist_songs.created_at ASC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&songs).Error
 	return songs, total, err
 }
 
@@ -477,34 +480,31 @@ func (r *Repo) IncrementSongPlayCount(songID uuid.UUID) error {
 }
 
 func (r *Repo) RecordListeningHistory(userID, songID uuid.UUID, playedAt time.Time) error {
-	var history model.MusicListeningHistory
-	err := r.db.Where("user_id = ? AND song_id = ?", userID, songID).First(&history).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return r.db.Create(&model.MusicListeningHistory{
-			UserID:       userID,
-			SongID:       songID,
-			PlayCount:    1,
-			LastPlayedAt: playedAt,
-		}).Error
+	history := model.MusicListeningHistory{
+		UserID: userID, SongID: songID, PlayCount: 1, LastPlayedAt: playedAt,
 	}
-	if err != nil {
-		return err
-	}
-	return r.db.Model(&history).Updates(map[string]any{
-		"play_count":     gorm.Expr("play_count + 1"),
-		"last_played_at": playedAt,
-	}).Error
+	return r.db.Clauses(clause.OnConflict{
+		Columns:     []clause.Column{{Name: "user_id"}, {Name: "song_id"}},
+		TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Name: "deleted_at"}, Value: nil}}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"play_count":     gorm.Expr("music_listening_histories.play_count + 1"),
+			"last_played_at": playedAt,
+			"updated_at":     playedAt,
+		}),
+	}).Create(&history).Error
 }
 
 func (r *Repo) ListListeningHistory(userID uuid.UUID, page, pageSize int) ([]model.MusicListeningHistory, int64, error) {
-	db := r.db.Model(&model.MusicListeningHistory{}).Where("user_id = ?", userID)
+	base := r.db.Model(&model.MusicListeningHistory{}).
+		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_listening_histories.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
+		Where("music_listening_histories.user_id = ?", userID)
 	var total int64
-	if err := db.Count(&total).Error; err != nil {
+	if err := base.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	var rows []model.MusicListeningHistory
-	err := db.Preload("Song.Artists").Preload("Song.Album").
-		Order("last_played_at DESC").
+	err := base.Preload("Song.Artists").Preload("Song.Album").
+		Order("music_listening_histories.last_played_at DESC").
 		Limit(pageSize).Offset((page - 1) * pageSize).
 		Find(&rows).Error
 	return rows, total, err

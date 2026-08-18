@@ -106,7 +106,7 @@ func hydrateAlbumStats(db *gorm.DB, albums []model.Album) error {
 	}
 	if err := db.Model(&model.Song{}).
 		Select("album_id, COALESCE(SUM(play_count), 0) AS play_count, COUNT(*) AS song_count").
-		Where("album_id IN ?", albumIDs).
+		Where("album_id IN ? AND lifecycle_status = ?", albumIDs, model.MusicLifecycleActive).
 		Group("album_id").
 		Scan(&songRows).Error; err != nil {
 		return err
@@ -156,7 +156,7 @@ func hydrateArtistStats(db *gorm.DB, artists []model.Artist) error {
 	}
 	if err := db.Table("song_artists").
 		Select("song_artists.artist_id AS artist_id, COALESCE(SUM(\"Songs\".play_count), 0) AS play_count").
-		Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id").
+		Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id AND \"Songs\".lifecycle_status = 'active'").
 		Where("song_artists.artist_id IN ?", artistIDs).
 		Group("song_artists.artist_id").
 		Scan(&playRows).Error; err != nil {
@@ -193,7 +193,7 @@ func hydrateArtistDisplayImages(db *gorm.DB, artists []model.Artist) error {
 		Joins("JOIN \"Albums\" ON \"Albums\".id = album_artists.album_id").
 		Where("album_artists.artist_id IN ?", missingImageIDs).
 		Where("TRIM(COALESCE(\"Albums\".cover_url, '')) <> ''").
-		Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed").
+		Where("\"Albums\".lifecycle_status = ?", model.MusicLifecycleActive).
 		Order("album_artists.artist_id ASC").
 		Order("\"Albums\".release_date DESC").
 		Order("\"Albums\".created_at DESC").
@@ -220,12 +220,8 @@ func (h *Handler) listArtists(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
 	query := strings.TrimSpace(c.Query("q"))
 
-	db := h.service.db.Model(&model.Artist{}).Distinct("\"Artists\".*").Where("COALESCE(\"Artists\".entry_status, '') <> ?", "closed")
-	if user, ok := currentMusicUser(c); ok {
-		db = db.Where("COALESCE(\"Artists\".entry_status, '') <> ? OR \"Artists\".created_by = ?", artistEntryDraft, user.ID)
-	} else {
-		db = db.Where("COALESCE(\"Artists\".entry_status, '') <> ?", artistEntryDraft)
-	}
+	viewer, hasViewer := currentMusicUser(c)
+	db := scopeVisibleMusicEntries(h.service.db.Model(&model.Artist{}).Distinct("\"Artists\".*"), "\"Artists\"", "created_by", musicViewer(viewer, hasViewer), false)
 	if query != "" {
 		like := "%" + strings.ToLower(query) + "%"
 		db = db.
@@ -300,14 +296,21 @@ func (h *Handler) getArtist(c *gin.Context) {
 		return
 	}
 
+	viewer, hasViewer := currentMusicUser(c)
+	viewerPtr := musicViewer(viewer, hasViewer)
 	var artist model.Artist
-	query := h.service.db.Preload("Aliases").Preload("Albums.Artists").Preload("Albums.ArtistCredits", func(db *gorm.DB) *gorm.DB {
+	query := scopeVisibleMusicEntries(h.service.db, "\"Artists\"", "created_by", viewerPtr, true).
+		Preload("Aliases").
+		Preload("Albums", func(db *gorm.DB) *gorm.DB {
+			return scopeVisibleMusicEntries(db, "\"Albums\"", "uploaded_by", viewerPtr, false)
+		}).
+		Preload("Albums.Artists").Preload("Albums.ArtistCredits", func(db *gorm.DB) *gorm.DB {
 		return db.Order("position ASC, role ASC, custom_role ASC")
-	}).Preload("Albums.ArtistCredits.Artist").Preload("Albums.Songs")
+	}).Preload("Albums.ArtistCredits.Artist").Preload("Albums.Songs", visibleSongPreload(viewerPtr))
 	if h.service.db.Migrator().HasTable(&model.ArtistMember{}) {
 		query = query.Preload("MemberRelations.MemberArtist")
 	}
-	if err := query.First(&artist, "id = ?", artistID).Error; err != nil {
+	if err := query.First(&artist, "\"Artists\".id = ?", artistID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("music.artist_not_found", "Artist not found"))
 			return
@@ -315,13 +318,14 @@ func (h *Handler) getArtist(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	if artist.EntryStatus == artistEntryDraft {
-		user, ok := currentMusicUser(c)
-		if !ok || artist.CreatedBy == nil || *artist.CreatedBy != user.ID {
-			httpx.Error(c, apperr.NotFound("music.artist_not_found", "Artist not found"))
-			return
+	visibleRelations := artist.MemberRelations[:0]
+	for _, relation := range artist.MemberRelations {
+		if relation.MemberArtist == nil || !canViewMusicLifecycle(relation.MemberArtist.LifecycleStatus, relation.MemberArtist.CreatedBy, viewerPtr, false) {
+			continue
 		}
+		visibleRelations = append(visibleRelations, relation)
 	}
+	artist.MemberRelations = visibleRelations
 	artistRows := []model.Artist{artist}
 	if err := hydrateArtistStats(h.service.db, artistRows); err != nil {
 		httpx.Error(c, err)
@@ -370,6 +374,8 @@ func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
 		ArtistForm:               artist.ArtistForm,
 		Members:                  artist.Members,
 		EntryStatus:              artist.EntryStatus,
+		LifecycleStatus:          artist.LifecycleStatus,
+		EditStatus:               artist.EditStatus,
 		RedirectTo:               artist.RedirectTo,
 		Albums:                   artist.Albums,
 		Aliases:                  artist.Aliases,
@@ -399,7 +405,7 @@ func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
 			ImageURL:           relation.MemberArtist.ImageURL,
 			JoinDatePrecision:  relation.JoinDatePrecision,
 			LeaveDatePrecision: relation.LeaveDatePrecision,
-			IsPublished:        relation.MemberArtist.EntryStatus != artistEntryDraft,
+			IsPublished:        relation.MemberArtist.LifecycleStatus == "" || relation.MemberArtist.LifecycleStatus == model.MusicLifecycleActive,
 		}
 		if relation.JoinDate != nil {
 			item.JoinDate = relation.JoinDate.Format("2006-01-02")
@@ -451,7 +457,8 @@ func (h *Handler) listAlbums(c *gin.Context) {
 		return
 	}
 
-	db := h.service.db.Model(&model.Album{}).Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed")
+	viewer, hasViewer := currentMusicUser(c)
+	db := scopeVisibleMusicEntries(h.service.db.Model(&model.Album{}), "\"Albums\"", "uploaded_by", musicViewer(viewer, hasViewer), false)
 	joinedArtists := false
 	if query != "" {
 		like := "%" + strings.ToLower(query) + "%"
@@ -546,12 +553,15 @@ func (h *Handler) getAlbum(c *gin.Context) {
 		return
 	}
 
+	viewer, hasViewer := currentMusicUser(c)
+	viewerPtr := musicViewer(viewer, hasViewer)
 	var album model.Album
-	if err := h.service.db.Preload("Artists").Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
+	query := scopeVisibleMusicEntries(h.service.db, "\"Albums\"", "uploaded_by", viewerPtr, true)
+	if err := query.Preload("Artists").Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
 		return db.Order("position ASC, role ASC, custom_role ASC")
-	}).Preload("ArtistCredits.Artist").Preload("Songs.ArtistCredits", func(db *gorm.DB) *gorm.DB {
+	}).Preload("ArtistCredits.Artist").Preload("Songs", visibleSongPreload(viewerPtr)).Preload("Songs.ArtistCredits", func(db *gorm.DB) *gorm.DB {
 		return db.Order("position ASC, role ASC, custom_role ASC")
-	}).Preload("Songs.ArtistCredits.Artist").First(&album, "id = ?", albumID).Error; err != nil {
+	}).Preload("Songs.ArtistCredits.Artist").First(&album, "\"Albums\".id = ?", albumID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("music.album_not_found", "Album not found"))
 			return
@@ -765,8 +775,10 @@ func albumSortOrders(sort string) []string {
 		return []string{"\"Albums\".created_at DESC", "\"Albums\".title ASC"}
 	case "release_date":
 		return []string{"\"Albums\".release_date ASC", "\"Albums\".title ASC"}
+	case "-release_date":
+		return []string{"\"Albums\".release_date DESC", "\"Albums\".title ASC"}
 	default:
-		return []string{"\"Albums\".release_date ASC", "\"Albums\".title ASC"}
+		return []string{"\"Albums\".release_date DESC", "\"Albums\".title ASC"}
 	}
 }
 

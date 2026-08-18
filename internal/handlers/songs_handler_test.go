@@ -17,6 +17,9 @@ import (
 )
 
 func TestLegacySongCreateAndUpdateKeepLyricsWikiInSync(t *testing.T) {
+	t.Setenv("S3_BUCKET", "atoman-test")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
+	t.Setenv("STORAGE_TYPE", "s3")
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
@@ -26,18 +29,23 @@ func TestLegacySongCreateAndUpdateKeepLyricsWikiInSync(t *testing.T) {
 		&model.Revision{},
 	)
 	user := createDeleteSongTestUser(t, db, "legacy-editor", authctx.RoleUser)
+	var s3Path string
+	var s3ContentType string
+	s3Client := fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
 		c.Set("user_id", user.UUID)
 		c.Set("role", user.Role)
 		c.Next()
 	})
-	r.POST("/api/v1/songs", CreateSongHandler(db, nil))
+	r.POST("/api/v1/songs", CreateSongHandler(db, s3Client))
 	r.PUT("/api/v1/songs/:id", UpdateSongHandler(db, nil))
 
-	create := url.Values{"title": {"Legacy API Song"}, "artist": {"Artist"}, "audio_url": {"/song.mp3"}, "lyrics": {"first\nsecond"}}
-	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/songs", strings.NewReader(create.Encode()))
-	createReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	createBody, createContentType := multipartLegacyMusicAudioBody(t, map[string]string{
+		"title": "Legacy API Song", "artist": "Artist", "lyrics": "first\nsecond",
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/songs", createBody)
+	createReq.Header.Set("Content-Type", createContentType)
 	createW := httptest.NewRecorder()
 	r.ServeHTTP(createW, createReq)
 	if createW.Code != http.StatusCreated {
@@ -55,7 +63,7 @@ func TestLegacySongCreateAndUpdateKeepLyricsWikiInSync(t *testing.T) {
 		t.Fatalf("unexpected initial song revision: %#v", revision)
 	}
 
-	update := url.Values{"title": {"Legacy API Song"}, "artist": {"Artist"}, "album": {"Unknown Album"}, "audio_url": {"/song.mp3"}, "lyrics": {"updated"}}
+	update := url.Values{"title": {"Legacy API Song"}, "artist": {"Artist"}, "album": {"Unknown Album"}, "lyrics": {"updated"}}
 	updateReq := httptest.NewRequest(http.MethodPut, "/api/v1/songs/"+song.ID.String(), strings.NewReader(update.Encode()))
 	updateReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	updateW := httptest.NewRecorder()

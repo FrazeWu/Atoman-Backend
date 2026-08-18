@@ -14,6 +14,7 @@ import (
 
 // createMusicAssetUpload godoc
 // @Summary 创建可恢复的音乐音频上传
+// @Description 单文件最大 200MB；完成后服务端校验实际音频文件头。
 // @Tags music-uploads
 // @Accept json
 // @Produce json

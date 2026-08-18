@@ -212,7 +212,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.ShortNoteMedia{}, &model.Like{},
 		&model.AuditLog{}, &model.ActivityLog{}, &model.MediaAsset{},
 		&model.Artist{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.SongArtist{}, &model.SongCorrection{}, &model.AlbumCorrection{},
-		&model.SongAudioReplacement{},
+		&model.SongAudioReplacement{}, &model.MusicEntryStateRequest{}, &model.MusicEntryStateEvent{},
 		&model.ArtistCorrection{}, &model.ArtistAlias{}, &model.ArtistMerge{},
 		&model.MusicEdit{}, &model.MusicEditVote{}, &model.MusicEditDecision{}, &model.MusicEditChange{},
 		&model.AlbumImportSession{}, &model.AlbumImportFile{}, &model.AlbumImportJob{}, &model.MusicAssetUploadSession{},
@@ -255,6 +255,7 @@ func MigrateSchema(db *gorm.DB) error {
 		{"content publication event index migration", migrations.RunContentPublicationEventIndexes},
 		{"dm v2 migration", migrations.RunDMV2Migration},
 		{"content references migration", migrations.RunContentReferencesMigration},
+		{"music wiki state migration", migrations.RunMusicWikiStateMigration},
 		{"feed subscription management migration", migrations.RunFeedSubscriptionManagementMigration},
 	}
 	for _, step := range steps {

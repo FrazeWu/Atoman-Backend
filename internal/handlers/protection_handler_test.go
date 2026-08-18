@@ -81,14 +81,18 @@ func TestSetAlbumProtectionCanBeReenabledAfterSoftDelete(t *testing.T) {
 
 func TestIsContentProtectionDuplicateKeyErrorRecognizesLiveUniqueIndex(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.ContentProtection{})
+	testdb.Migrate(t, db, &model.User{}, &model.ContentProtection{})
+	admin := model.User{Username: "protection-admin", Email: "protection-admin@example.com", Password: "hash", Role: authctx.RoleAdmin, IsActive: true}
+	if err := db.Create(&admin).Error; err != nil {
+		t.Fatalf("create protection admin: %v", err)
+	}
 
 	contentID := uuid.New()
 	protection := model.ContentProtection{
 		ContentType:     "album",
 		ContentID:       contentID,
 		ProtectionLevel: "full",
-		ProtectedBy:     uuid.New(),
+		ProtectedBy:     admin.UUID,
 	}
 	if err := db.Create(&protection).Error; err != nil {
 		t.Fatalf("create protection: %v", err)
@@ -98,7 +102,7 @@ func TestIsContentProtectionDuplicateKeyErrorRecognizesLiveUniqueIndex(t *testin
 		ContentType:     "album",
 		ContentID:       contentID,
 		ProtectionLevel: "semi",
-		ProtectedBy:     uuid.New(),
+		ProtectedBy:     admin.UUID,
 	}
 	err := db.Create(&duplicate).Error
 	if err == nil {

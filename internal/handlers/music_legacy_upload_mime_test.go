@@ -14,6 +14,32 @@ import (
 	"gorm.io/gorm"
 )
 
+func multipartLegacyMusicAudioBody(t *testing.T, fields map[string]string) (*bytes.Buffer, string) {
+	t.Helper()
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	for key, value := range fields {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatalf("write field %s: %v", key, err)
+		}
+	}
+	part, err := writer.CreatePart(map[string][]string{
+		"Content-Disposition": {`form-data; name="audio"; filename="song.mp3"`},
+		"Content-Type":        {"audio/mpeg"},
+	})
+	if err != nil {
+		t.Fatalf("create audio part: %v", err)
+	}
+	if _, err := part.Write([]byte("ID3\x04\x00\x00\x00\x00\x00\x00")); err != nil {
+		t.Fatalf("write audio part: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+	return body, writer.FormDataContentType()
+}
+
 func multipartLegacyMusicCoverBody(t *testing.T, fields map[string]string, filename, contentType string, content []byte) (*bytes.Buffer, string) {
 	t.Helper()
 
@@ -23,6 +49,16 @@ func multipartLegacyMusicCoverBody(t *testing.T, fields map[string]string, filen
 		if err := writer.WriteField(key, value); err != nil {
 			t.Fatalf("write field %s: %v", key, err)
 		}
+	}
+	audioPart, err := writer.CreatePart(map[string][]string{
+		"Content-Disposition": {`form-data; name="audio"; filename="song.mp3"`},
+		"Content-Type":        {"audio/mpeg"},
+	})
+	if err != nil {
+		t.Fatalf("create audio part: %v", err)
+	}
+	if _, err := audioPart.Write([]byte("ID3\x04\x00\x00\x00\x00\x00\x00")); err != nil {
+		t.Fatalf("write audio part: %v", err)
 	}
 	part, err := writer.CreatePart(map[string][]string{
 		"Content-Disposition": {`form-data; name="cover"; filename="` + filename + `"`},
@@ -81,10 +117,9 @@ func TestCreateSongRejectsSpoofedCoverImageContentType(t *testing.T) {
 	r.POST("/api/v1/songs", CreateSongHandler(db, fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)))
 
 	body, contentType := multipartLegacyMusicCoverBody(t, map[string]string{
-		"title":     "Spoofed Song",
-		"artist":    "Alice",
-		"album":     "Spoofed Album",
-		"audio_url": "/uploads/song.mp3",
+		"title":  "Spoofed Song",
+		"artist": "Alice",
+		"album":  "Spoofed Album",
 	}, "cover.png", "image/png", []byte("not really a png"))
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/songs", body)
 	req.Header.Set("Content-Type", contentType)

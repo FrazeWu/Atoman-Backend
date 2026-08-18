@@ -2,6 +2,7 @@ package music
 
 import (
 	"context"
+	"log"
 	"path"
 	"time"
 
@@ -68,7 +69,18 @@ func runSongAudioReplacementOnce(ctx context.Context, db *gorm.DB, workerID stri
 		return true, err
 	}
 	if mediaService != nil {
-		storage.DeleteMusicObjects(mediaService.s3, []string{oldObjectKey})
+		deleteSource := candidate.AssetID == nil
+		if candidate.AssetID != nil {
+			result := db.Where("id = ? AND user_id = ? AND purpose = ?", *candidate.AssetID, candidate.RequestedBy, "music.audio").Delete(&model.MediaAsset{})
+			if result.Error != nil {
+				log.Printf("consume song audio replacement asset %s: %v", candidate.AssetID.String(), result.Error)
+			} else {
+				deleteSource = true
+			}
+		}
+		if deleteSource {
+			storage.DeleteMusicObjects(mediaService.s3, []string{oldObjectKey})
+		}
 	}
 	return true, nil
 }

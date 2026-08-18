@@ -37,6 +37,8 @@ type Artist struct {
 	ActiveEndDatePrecision   string         `json:"active_end_date_precision,omitempty"`
 	Members                  string         `json:"members" gorm:"type:text"`
 	EntryStatus              string         `json:"entry_status" gorm:"default:'open'"`
+	LifecycleStatus          string         `json:"lifecycle_status" gorm:"not null;default:'active';index;check:chk_artists_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
+	EditStatus               string         `json:"edit_status" gorm:"not null;default:'development';index;check:chk_artists_edit_status,edit_status IN ('development','locked','closed')"`
 	CreatedBy                *uuid.UUID     `json:"created_by,omitempty" gorm:"type:uuid;index"`
 	SourcesJSON              string         `json:"-" gorm:"type:jsonb;default:'[]'"`
 	Sources                  []MusicSource  `json:"sources,omitempty" gorm:"-"`
@@ -97,6 +99,8 @@ type Album struct {
 	CanonicalAlbumID     *uuid.UUID    `json:"canonical_album_id,omitempty" gorm:"type:uuid;index"`
 	HotScore             float64       `json:"hot_score" gorm:"default:0;index"`
 	EntryStatus          string        `json:"entry_status" gorm:"default:'open'"`
+	LifecycleStatus      string        `json:"lifecycle_status" gorm:"not null;default:'active';index;check:chk_albums_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
+	EditStatus           string        `json:"edit_status" gorm:"not null;default:'development';index;check:chk_albums_edit_status,edit_status IN ('development','locked','closed')"`
 	SourcesJSON          string        `json:"-" gorm:"type:jsonb;default:'[]'"`
 	Sources              []MusicSource `json:"sources,omitempty" gorm:"-"`
 	RedirectTo           *uuid.UUID    `json:"redirect_to,omitempty" gorm:"type:uuid;index"`
@@ -180,6 +184,8 @@ type Song struct {
 	CoverSource          string          `json:"cover_source" gorm:"default:'local'"`
 	BatchID              string          `json:"batch_id" gorm:"index"`
 	Status               string          `json:"status" gorm:"default:'open'"`
+	LifecycleStatus      string          `json:"lifecycle_status" gorm:"not null;default:'active';index;check:chk_songs_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
+	EditStatus           string          `json:"edit_status" gorm:"not null;default:'development';index;check:chk_songs_edit_status,edit_status IN ('development','locked','closed')"`
 	AlbumID              *uuid.UUID      `json:"album_id" gorm:"type:uuid"`
 	Album                *Album          `json:"album,omitempty"`
 	Artists              []Artist        `json:"artists,omitempty" gorm:"many2many:song_artists;"`
@@ -239,6 +245,7 @@ type SongAudioReplacement struct {
 	SongID           uuid.UUID  `json:"song_id" gorm:"type:uuid;not null;index"`
 	Song             *Song      `json:"song,omitempty" gorm:"foreignKey:SongID"`
 	RequestedBy      uuid.UUID  `json:"requested_by" gorm:"type:uuid;not null;index"`
+	AssetID          *uuid.UUID `json:"asset_id,omitempty" gorm:"type:uuid;index"`
 	AudioURL         string     `json:"audio_url" gorm:"type:text;not null"`
 	SourceKey        string     `json:"source_key" gorm:"type:text"`
 	PreviousAudioURL string     `json:"previous_audio_url" gorm:"type:text"`

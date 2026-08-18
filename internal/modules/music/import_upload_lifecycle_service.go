@@ -89,7 +89,7 @@ func (s *Service) RepairAlbumImportSession(user authctx.CurrentUser, sessionID u
 			return err
 		}
 		var songs []model.Song
-		if err := tx.Where("album_id = ? AND status <> ?", album.ID, "closed").Order("disc_number ASC, track_number ASC, created_at ASC").Find(&songs).Error; err != nil {
+		if err := tx.Where("album_id = ? AND lifecycle_status = ?", album.ID, model.MusicLifecycleActive).Order("disc_number ASC, track_number ASC, created_at ASC").Find(&songs).Error; err != nil {
 			return err
 		}
 		currentTracks := make([]map[string]any, 0, len(songs))

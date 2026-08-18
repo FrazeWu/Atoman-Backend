@@ -11,6 +11,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	"atoman/internal/musicmedia"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -204,10 +205,6 @@ func uploadContentMatchesDeclared(file interface {
 	Read([]byte) (int, error)
 	Seek(int64, int) (int64, error)
 }, declared string) bool {
-	if !strings.HasPrefix(declared, "image/") {
-		return true
-	}
-
 	var header [512]byte
 	n, err := file.Read(header[:])
 	if err != nil && err != io.EOF {
@@ -216,8 +213,13 @@ func uploadContentMatchesDeclared(file interface {
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return false
 	}
-
-	return http.DetectContentType(header[:n]) == declared
+	if strings.HasPrefix(declared, "image/") {
+		return http.DetectContentType(header[:n]) == declared
+	}
+	if strings.HasPrefix(declared, "audio/") || declared == "application/ogg" {
+		return musicmedia.AudioHeaderMatches(header[:n], declared)
+	}
+	return false
 }
 
 func uniqueUploadFilename(originalName string, contentType string) string {

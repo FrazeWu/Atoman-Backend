@@ -95,8 +95,8 @@ func (s *Service) homePublicSections() ([]MusicHomeSection, error) {
 	sections := make([]MusicHomeSection, 0, len(specs))
 	for _, spec := range specs {
 		var albums []model.Album
-		if err := s.db.Where("COALESCE(entry_status, '') <> ? AND COALESCE(status, '') <> ?", "closed", "closed").
-			Preload("Artists").Preload("Songs").Order(spec.order).Limit(32).Find(&albums).Error; err != nil {
+		if err := s.db.Where("lifecycle_status = ?", model.MusicLifecycleActive).
+			Preload("Artists").Preload("Songs", "lifecycle_status = ?", model.MusicLifecycleActive).Order(spec.order).Limit(32).Find(&albums).Error; err != nil {
 			return nil, err
 		}
 		visible := make([]model.Album, 0, musicHomeForYouLimit)
@@ -269,9 +269,9 @@ func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums
 	query := s.db.Model(&model.Album{}).
 		Joins("JOIN album_artists ON album_artists.album_id = \"Albums\".id").
 		Where("album_artists.artist_id IN ?", artistIDs).
-		Where("COALESCE(\"Albums\".entry_status, '') <> ? AND COALESCE(\"Albums\".status, '') <> ?", "closed", "closed").
+		Where("\"Albums\".lifecycle_status = ?", model.MusicLifecycleActive).
 		Where("COALESCE(\"Albums\".cover_url, '') <> ''").
-		Where(`EXISTS (SELECT 1 FROM "Songs" WHERE "Songs".album_id = "Albums".id AND "Songs".deleted_at IS NULL AND COALESCE("Songs".audio_url, '') <> '')`)
+		Where(`EXISTS (SELECT 1 FROM "Songs" WHERE "Songs".album_id = "Albums".id AND "Songs".deleted_at IS NULL AND "Songs".lifecycle_status = 'active' AND COALESCE("Songs".audio_url, '') <> '')`)
 	if len(seenAlbums) > 0 {
 		query = query.Where("\"Albums\".id NOT IN ?", homeUUIDs(seenAlbums))
 	}
@@ -332,7 +332,7 @@ func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums
 			selectedIDs = append(selectedIDs, album.ID)
 		}
 		var hydrated []model.Album
-		if err := s.db.Where("id IN ?", selectedIDs).Preload("Artists").Preload("Songs").Find(&hydrated).Error; err != nil {
+		if err := s.db.Where("id IN ? AND lifecycle_status = ?", selectedIDs, model.MusicLifecycleActive).Preload("Artists").Preload("Songs", "lifecycle_status = ?", model.MusicLifecycleActive).Find(&hydrated).Error; err != nil {
 			return nil, err
 		}
 		byID := make(map[uuid.UUID]model.Album, len(hydrated))

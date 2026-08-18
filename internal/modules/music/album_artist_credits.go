@@ -67,7 +67,7 @@ func normalizeAlbumArtistCredits(tx *gorm.DB, albumID uuid.UUID, credits []Album
 			return nil, apperr.BadRequest("validation.invalid_request", "artist_credits must contain valid artist_id values")
 		}
 		var count int64
-		if err := tx.Model(&model.Artist{}).Where("id = ? AND COALESCE(entry_status, '') <> ?", artistID, "closed").Count(&count).Error; err != nil {
+		if err := tx.Model(&model.Artist{}).Where("id = ? AND lifecycle_status IN ?", artistID, []string{model.MusicLifecycleActive, model.MusicLifecycleDraft}).Count(&count).Error; err != nil {
 			return nil, err
 		}
 		if count == 0 {

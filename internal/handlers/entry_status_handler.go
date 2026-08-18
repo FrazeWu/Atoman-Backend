@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
@@ -84,29 +83,29 @@ func ListMusicQualityIssuesHandler(db *gorm.DB) gin.HandlerFunc {
 			}
 			return nil
 		}
-		if err := appendAlbums("missing_cover", db.Model(&model.Album{}).Where("COALESCE(cover_url, '') = '' AND COALESCE(entry_status, '') <> 'closed'")); err != nil {
+		if err := appendAlbums("missing_cover", db.Model(&model.Album{}).Where("COALESCE(cover_url, '') = '' AND lifecycle_status = ?", model.MusicLifecycleActive)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 			return
 		}
-		if err := appendAlbums("missing_tracks", db.Model(&model.Album{}).Where("COALESCE(entry_status, '') <> 'closed' AND NOT EXISTS (SELECT 1 FROM \"Songs\" WHERE \"Songs\".album_id = \"Albums\".id AND \"Songs\".deleted_at IS NULL)")); err != nil {
+		if err := appendAlbums("missing_tracks", db.Model(&model.Album{}).Where("lifecycle_status = ? AND NOT EXISTS (SELECT 1 FROM \"Songs\" WHERE \"Songs\".album_id = \"Albums\".id AND \"Songs\".deleted_at IS NULL AND \"Songs\".lifecycle_status = 'active')", model.MusicLifecycleActive)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 			return
 		}
-		if err := appendAlbums("missing_metadata", db.Model(&model.Album{}).Where("COALESCE(entry_status, '') <> 'closed' AND (TRIM(COALESCE(title, '')) = '' OR (COALESCE(release_year, 0) = 0 AND COALESCE(year, 0) = 0) OR NOT EXISTS (SELECT 1 FROM album_artists WHERE album_artists.album_id = \"Albums\".id))")); err != nil {
+		if err := appendAlbums("missing_metadata", db.Model(&model.Album{}).Where("lifecycle_status = ? AND (TRIM(COALESCE(title, '')) = '' OR (COALESCE(release_year, 0) = 0 AND COALESCE(year, 0) = 0) OR NOT EXISTS (SELECT 1 FROM album_artists WHERE album_artists.album_id = \"Albums\".id))", model.MusicLifecycleActive)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 			return
 		}
-		if err := appendAlbums("duplicate_candidate", db.Model(&model.Album{}).Where("COALESCE(entry_status, '') <> 'closed' AND TRIM(COALESCE(title, '')) <> '' AND EXISTS (SELECT 1 FROM \"Albums\" AS duplicate_album WHERE duplicate_album.id <> \"Albums\".id AND duplicate_album.deleted_at IS NULL AND LOWER(TRIM(duplicate_album.title)) = LOWER(TRIM(\"Albums\".title)))")); err != nil {
+		if err := appendAlbums("duplicate_candidate", db.Model(&model.Album{}).Where("lifecycle_status = ? AND TRIM(COALESCE(title, '')) <> '' AND EXISTS (SELECT 1 FROM \"Albums\" AS duplicate_album WHERE duplicate_album.id <> \"Albums\".id AND duplicate_album.deleted_at IS NULL AND duplicate_album.lifecycle_status = 'active' AND LOWER(TRIM(duplicate_album.title)) = LOWER(TRIM(\"Albums\".title)))", model.MusicLifecycleActive)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 			return
 		}
-		if err := appendArtists("duplicate_candidate", db.Model(&model.Artist{}).Where("TRIM(COALESCE(name, '')) <> '' AND EXISTS (SELECT 1 FROM \"Artists\" AS duplicate_artist WHERE duplicate_artist.id <> \"Artists\".id AND duplicate_artist.deleted_at IS NULL AND LOWER(TRIM(duplicate_artist.name)) = LOWER(TRIM(\"Artists\".name)))")); err != nil {
+		if err := appendArtists("duplicate_candidate", db.Model(&model.Artist{}).Where("lifecycle_status = ? AND TRIM(COALESCE(name, '')) <> '' AND EXISTS (SELECT 1 FROM \"Artists\" AS duplicate_artist WHERE duplicate_artist.id <> \"Artists\".id AND duplicate_artist.deleted_at IS NULL AND duplicate_artist.lifecycle_status = 'active' AND LOWER(TRIM(duplicate_artist.name)) = LOWER(TRIM(\"Artists\".name)))", model.MusicLifecycleActive)); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 			return
 		}
 		if filter == "all" || filter == "missing_audio" {
 			var songs []model.Song
-			if err := db.Where("COALESCE(audio_url, '') = '' AND COALESCE(status, '') <> 'closed'").Order("title ASC, id ASC").Find(&songs).Error; err != nil {
+			if err := db.Where("COALESCE(audio_url, '') = '' AND lifecycle_status = ?", model.MusicLifecycleActive).Order("title ASC, id ASC").Find(&songs).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load music quality issues"})
 				return
 			}
@@ -179,32 +178,9 @@ func ListMusicQualityIssuesHandler(db *gorm.DB) gin.HandlerFunc {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/albums/{id}/entry-status [put]
-func ChangeAlbumStatusHandler(db *gorm.DB) gin.HandlerFunc {
+func ChangeAlbumStatusHandler(_ *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		albumID, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid album ID"})
-			return
-		}
-		var input struct {
-			Status string `json:"status" binding:"required"`
-			Reason string `json:"reason"`
-		}
-		if err := c.ShouldBindJSON(&input); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		validStatuses := map[string]bool{"open": true, "confirmed": true, "disputed": true}
-		if !validStatuses[input.Status] {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid status. Must be open, confirmed, or disputed"})
-			return
-		}
-		if err := db.Model(&model.Album{}).Where("id = ?", albumID).
-			Update("entry_status", input.Status).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update status"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "Album entry status updated", "status": input.Status})
+		c.JSON(http.StatusGone, gin.H{"error": "This endpoint is retired; use music Wiki state requests"})
 	}
 }
 
@@ -222,32 +198,9 @@ func ChangeAlbumStatusHandler(db *gorm.DB) gin.HandlerFunc {
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/artists/{id}/entry-status [put]
-func ChangeArtistStatusHandler(db *gorm.DB) gin.HandlerFunc {
+func ChangeArtistStatusHandler(_ *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		artistID, err := uuid.Parse(c.Param("id"))
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid artist ID"})
-			return
-		}
-		var input struct {
-			Status string `json:"status" binding:"required"`
-			Reason string `json:"reason"`
-		}
-		if err := c.ShouldBindJSON(&input); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		validStatuses := map[string]bool{"open": true, "confirmed": true, "disputed": true}
-		if !validStatuses[input.Status] {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid status. Must be open, confirmed, or disputed"})
-			return
-		}
-		if err := db.Model(&model.Artist{}).Where("id = ?", artistID).
-			Update("entry_status", input.Status).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update status"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "Artist entry status updated", "status": input.Status})
+		c.JSON(http.StatusGone, gin.H{"error": "This endpoint is retired; use music Wiki state requests"})
 	}
 }
 
@@ -256,6 +209,8 @@ type MusicEntryItem struct {
 	Name                string `json:"name"`
 	Type                string `json:"type"`
 	EntryStatus         string `json:"entry_status"`
+	LifecycleStatus     string `json:"lifecycle_status"`
+	EditStatus          string `json:"edit_status"`
 	AlbumType           string `json:"album_type,omitempty"`
 	UpdatedAt           string `json:"updated_at"`
 	LastEditor          string `json:"last_editor,omitempty"`
@@ -267,8 +222,8 @@ type MusicEntryItem struct {
 // @Description 管理员按类型和状态筛选音乐 wiki 条目。
 // @Tags music-entry-status
 // @Produce json
-// @Param type query string false "条目类型" Enums(all,album,artist)
-// @Param status query string false "条目状态" Enums(all,open,confirmed,disputed)
+// @Param type query string false "条目类型" Enums(all,album,artist,song)
+// @Param status query string false "编辑状态" Enums(all,development,locked,closed)
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
 // @Success 200 {object} MusicEntryListResponse
@@ -293,7 +248,7 @@ func ListMusicEntriesHandler(db *gorm.DB) gin.HandlerFunc {
 			var albums []model.Album
 			q := db.Model(&model.Album{})
 			if statusFilter != "all" {
-				q = q.Where("entry_status = ?", statusFilter)
+				q = q.Where("edit_status = ?", statusFilter)
 			}
 			q.Count(&total)
 			q.Offset(offset).Limit(pageSize).Order("updated_at DESC").Find(&albums)
@@ -312,6 +267,8 @@ func ListMusicEntriesHandler(db *gorm.DB) gin.HandlerFunc {
 					Name:                a.Title,
 					Type:                "album",
 					EntryStatus:         a.EntryStatus,
+					LifecycleStatus:     a.LifecycleStatus,
+					EditStatus:          a.EditStatus,
 					AlbumType:           a.AlbumType,
 					UpdatedAt:           a.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 					LastEditor:          lastEditor,
@@ -324,7 +281,7 @@ func ListMusicEntriesHandler(db *gorm.DB) gin.HandlerFunc {
 			var artists []model.Artist
 			q := db.Model(&model.Artist{})
 			if statusFilter != "all" {
-				q = q.Where("entry_status = ?", statusFilter)
+				q = q.Where("edit_status = ?", statusFilter)
 			}
 			var artistCount int64
 			q.Count(&artistCount)
@@ -339,8 +296,29 @@ func ListMusicEntriesHandler(db *gorm.DB) gin.HandlerFunc {
 					Name:                a.Name,
 					Type:                "artist",
 					EntryStatus:         a.EntryStatus,
+					LifecycleStatus:     a.LifecycleStatus,
+					EditStatus:          a.EditStatus,
 					UpdatedAt:           a.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 					OpenDiscussionCount: discCount,
+				})
+			}
+		}
+
+		if entryType == "all" || entryType == "song" {
+			var songs []model.Song
+			q := db.Model(&model.Song{})
+			if statusFilter != "all" {
+				q = q.Where("edit_status = ?", statusFilter)
+			}
+			var songCount int64
+			q.Count(&songCount)
+			total += songCount
+			q.Offset(offset).Limit(pageSize).Order("updated_at DESC").Find(&songs)
+			for _, song := range songs {
+				results = append(results, MusicEntryItem{
+					ID: song.ID.String(), Name: song.Title, Type: "song",
+					EntryStatus: song.Status, LifecycleStatus: song.LifecycleStatus, EditStatus: song.EditStatus,
+					UpdatedAt: song.UpdatedAt.Format("2006-01-02T15:04:05Z"),
 				})
 			}
 		}

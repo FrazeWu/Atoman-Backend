@@ -159,6 +159,9 @@ func (s *RevisionService) CreateCurrentSnapshotRevision(contentType string, cont
 	if err := s.db.Create(&revision).Error; err != nil {
 		return nil, fmt.Errorf("failed to create revision: %w", err)
 	}
+	if err := HandleMusicRevisionApplied(s.db, &revision); err != nil {
+		return nil, err
+	}
 	return &revision, nil
 }
 
@@ -176,6 +179,13 @@ func (s *RevisionService) CreateRevision(
 	var conflicts []model.EditConflict
 
 	err := s.db.Transaction(func(tx *gorm.DB) error {
+		fields := make([]string, 0, len(changes))
+		for field := range changes {
+			fields = append(fields, field)
+		}
+		if err := ValidateMusicEntryEdit(tx, contentType, contentID, editorID, fields...); err != nil {
+			return err
+		}
 		var currentRevision model.Revision
 		currentQuery := tx.Where("content_id = ? AND content_type = ? AND is_current = ?",
 			contentID, contentType, true).
@@ -265,6 +275,9 @@ func (s *RevisionService) CreateRevision(
 		if autoApprove {
 			if err := s.applyRevisionToContent(tx, &newRevision); err != nil {
 				return fmt.Errorf("failed to apply revision: %w", err)
+			}
+			if err := HandleMusicRevisionApplied(tx, &newRevision); err != nil {
+				return err
 			}
 		}
 
@@ -460,15 +473,16 @@ var revisionArtistRoles = map[string]struct{}{
 }
 
 type albumRevisionTrackInput struct {
-	ID            string                     `json:"id"`
-	Title         string                     `json:"title"`
-	TrackNumber   int                        `json:"track_number"`
-	DiscNumber    int                        `json:"disc_number"`
-	Lyrics        string                     `json:"lyrics"`
-	AudioURL      string                     `json:"audio_url"`
-	CoverURL      string                     `json:"cover_url"`
-	ArtistCredits []albumRevisionCreditInput `json:"artist_credits"`
-	Removed       bool                       `json:"removed"`
+	ID               string                     `json:"id"`
+	Title            string                     `json:"title"`
+	TrackNumber      int                        `json:"track_number"`
+	DiscNumber       int                        `json:"disc_number"`
+	Lyrics           string                     `json:"lyrics"`
+	AudioAssetID     string                     `json:"audio_asset_id"`
+	ResolvedAudioURL string                     `json:"resolved_audio_url"`
+	CoverURL         string                     `json:"cover_url"`
+	ArtistCredits    []albumRevisionCreditInput `json:"artist_credits"`
+	Removed          bool                       `json:"removed"`
 }
 
 type songRevisionChanges struct {
@@ -476,7 +490,6 @@ type songRevisionChanges struct {
 	TrackNumber   *int                        `json:"track_number"`
 	DiscNumber    *int                        `json:"disc_number"`
 	Lyrics        *string                     `json:"lyrics"`
-	AudioURL      *string                     `json:"audio_url"`
 	CoverURL      *string                     `json:"cover_url"`
 	ArtistCredits *[]albumRevisionCreditInput `json:"artist_credits"`
 }
@@ -599,17 +612,29 @@ func mergeRevisionChanges(contentType string, current []byte, changes map[string
 		snapshot.ArtistCredits = credits
 	}
 	if input.Tracks != nil {
+		currentSongs := make(map[string]albumRevisionSong, len(snapshot.Songs))
+		for _, song := range snapshot.Songs {
+			currentSongs[song.ID] = song
+		}
 		songs := make([]albumRevisionSong, 0, len(*input.Tracks))
 		for _, track := range *input.Tracks {
 			if track.Removed {
 				continue
+			}
+			existing, exists := currentSongs[strings.TrimSpace(track.ID)]
+			audioURL := existing.AudioURL
+			if !exists {
+				audioURL = strings.TrimSpace(track.ResolvedAudioURL)
+				if audioURL == "" {
+					return nil, errors.New("new tracks require a completed local audio upload")
+				}
 			}
 			if err := validateRevisionCredits(track.ArtistCredits, false); err != nil {
 				return nil, err
 			}
 			songs = append(songs, albumRevisionSong{
 				ID: track.ID, Title: track.Title, TrackNumber: track.TrackNumber,
-				DiscNumber: track.DiscNumber, Lyrics: track.Lyrics, AudioURL: track.AudioURL,
+				DiscNumber: track.DiscNumber, Lyrics: track.Lyrics, AudioURL: audioURL,
 				CoverURL: track.CoverURL, Status: "open",
 				ArtistCredits: revisionCreditsFromInput(track.ArtistCredits),
 			})
@@ -622,7 +647,7 @@ func mergeRevisionChanges(contentType string, current []byte, changes map[string
 func mergeSongRevisionChanges(current []byte, changes map[string]interface{}) ([]byte, error) {
 	allowed := map[string]struct{}{
 		"title": {}, "track_number": {}, "disc_number": {}, "lyrics": {},
-		"audio_url": {}, "cover_url": {}, "artist_credits": {},
+		"cover_url": {}, "artist_credits": {},
 	}
 	for key := range changes {
 		if _, ok := allowed[key]; !ok {
@@ -652,9 +677,6 @@ func mergeSongRevisionChanges(current []byte, changes map[string]interface{}) ([
 	}
 	if input.Lyrics != nil {
 		snapshot.Lyrics = *input.Lyrics
-	}
-	if input.AudioURL != nil {
-		snapshot.AudioURL = strings.TrimSpace(*input.AudioURL)
 	}
 	if input.CoverURL != nil {
 		snapshot.CoverURL = strings.TrimSpace(*input.CoverURL)
@@ -841,6 +863,9 @@ func (s *RevisionService) ApproveRevision(
 	now := time.Now()
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := ValidateMusicEntryEdit(tx, revision.ContentType, revision.ContentID, revision.EditorID); err != nil {
+			return err
+		}
 		// Mark previous current revision as not current
 		if err := tx.Model(&model.Revision{}).
 			Where("content_id = ? AND content_type = ? AND is_current = ? AND id != ?",
@@ -864,8 +889,7 @@ func (s *RevisionService) ApproveRevision(
 		if err := s.applyRevisionToContent(tx, &revision); err != nil {
 			return fmt.Errorf("failed to apply revision: %w", err)
 		}
-
-		return nil
+		return HandleMusicRevisionApplied(tx, &revision)
 	})
 }
 
@@ -905,6 +929,9 @@ func (s *RevisionService) RevertToRevision(
 	var revertRevision model.Revision
 
 	return &revertRevision, s.db.Transaction(func(tx *gorm.DB) error {
+		if err := ValidateMusicEntryEdit(tx, contentType, contentID, editorID); err != nil {
+			return err
+		}
 		// Get target revision
 		var targetRevision model.Revision
 		if err := tx.Where("content_id = ? AND content_type = ? AND version_number = ?",
@@ -952,8 +979,10 @@ func (s *RevisionService) RevertToRevision(
 			return err
 		}
 
-		// Apply to actual content
-		return s.applyRevisionToContent(tx, &revertRevision)
+		if err := s.applyRevisionToContent(tx, &revertRevision); err != nil {
+			return err
+		}
+		return HandleMusicRevisionApplied(tx, &revertRevision)
 	})
 }
 
@@ -965,6 +994,9 @@ func (s *RevisionService) ApplySongAudioReplacement(jobID uuid.UUID) error {
 			query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 		}
 		if err := query.First(&job).Error; err != nil {
+			return err
+		}
+		if err := ValidateMusicEntryEdit(tx, "song", job.SongID, job.RequestedBy, "audio_url"); err != nil {
 			return err
 		}
 
@@ -1007,6 +1039,9 @@ func (s *RevisionService) ApplySongAudioReplacement(jobID uuid.UUID) error {
 			return err
 		}
 		if err := applySongRevisionSnapshot(tx, job.SongID, job.RequestedBy, raw); err != nil {
+			return err
+		}
+		if err := HandleMusicRevisionApplied(tx, &revision); err != nil {
 			return err
 		}
 		now := time.Now().UTC()

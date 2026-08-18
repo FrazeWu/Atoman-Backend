@@ -26,25 +26,31 @@ func SetupProtectionRoutes(router *gin.Engine, db *gorm.DB) {
 		albums := protected.Group("/albums/:id")
 		{
 			albums.GET("/protection", GetAlbumProtectionHandler(db))
-			albums.PUT("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), SetAlbumProtectionHandler(db))
-			albums.DELETE("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RemoveAlbumProtectionHandler(db))
+			albums.PUT("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RetiredMusicProtectionHandler())
+			albums.DELETE("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RetiredMusicProtectionHandler())
 		}
 
 		// Song protection
 		songs := protected.Group("/songs/:id")
 		{
 			songs.GET("/protection", GetSongProtectionHandler(db))
-			songs.PUT("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), SetSongProtectionHandler(db))
-			songs.DELETE("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RemoveSongProtectionHandler(db))
+			songs.PUT("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RetiredMusicProtectionHandler())
+			songs.DELETE("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RetiredMusicProtectionHandler())
 		}
 
 		// Artist protection
 		artists := protected.Group("/artists/:id")
 		{
 			artists.GET("/protection", GetArtistProtectionHandler(db))
-			artists.PUT("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), SetArtistProtectionHandler(db))
-			artists.DELETE("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RemoveArtistProtectionHandler(db))
+			artists.PUT("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RetiredMusicProtectionHandler())
+			artists.DELETE("/protection", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RetiredMusicProtectionHandler())
 		}
+	}
+}
+
+func RetiredMusicProtectionHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusGone, gin.H{"error": "This endpoint is retired; use music Wiki state requests"})
 	}
 }
 
@@ -479,14 +485,20 @@ func SetupStatusRoutes(router *gin.Engine, db *gorm.DB) {
 		// Album status
 		albums := status.Group("/albums/:id")
 		{
-			albums.POST("/status", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), UpdateAlbumStatusHandler(db))
+			albums.POST("/status", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RetiredMusicStatusHandler())
 		}
 
 		// Song status
 		songs := status.Group("/songs/:id")
 		{
-			songs.POST("/status", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), UpdateSongStatusHandler(db))
+			songs.POST("/status", middleware.AuthMiddleware(), middleware.AdminMiddleware(db), RetiredMusicStatusHandler())
 		}
+	}
+}
+
+func RetiredMusicStatusHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.JSON(http.StatusGone, gin.H{"error": "This endpoint is retired; use music Wiki state requests"})
 	}
 }
 

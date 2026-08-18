@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/musicmedia"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/storage"
@@ -22,6 +24,7 @@ import (
 
 const (
 	musicAssetUploadPartSize = 16 * 1024 * 1024
+	musicAssetUploadMaxSize  = 200 * 1024 * 1024
 	musicAssetUploadLifetime = 24 * time.Hour
 
 	musicAssetUploadStatusUploading  = "uploading"
@@ -121,6 +124,9 @@ func (s *Service) CreateMusicAssetUpload(user authctx.CurrentUser, input CreateM
 	contentType := strings.TrimSpace(input.ContentType)
 	if fileName == "" || !isMusicAudioContentType(contentType) || input.Size <= 0 {
 		return MusicAssetUploadSessionDTO{}, apperr.BadRequest("validation.invalid_request", "audio upload metadata is invalid")
+	}
+	if input.Size > musicAssetUploadMaxSize {
+		return MusicAssetUploadSessionDTO{}, apperr.BadRequest("music.upload_too_large", "Audio file exceeds the 200MB limit")
 	}
 	urlPrefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
 	if urlPrefix == "" {
@@ -360,19 +366,41 @@ func (s *Service) CompleteMusicAssetUpload(user authctx.CurrentUser, id uuid.UUI
 	size, err := s.assetUploadMultipart.ObjectSize(session.ObjectKey)
 	if err != nil {
 		if err := s.assetUploadMultipart.CompleteMultipartUpload(session.ObjectKey, session.UploadID, storageParts); err != nil {
+			s.failMusicAssetUpload(session, err, false)
 			return nil, err
 		}
 		size, err = s.assetUploadMultipart.ObjectSize(session.ObjectKey)
 		if err != nil {
+			s.failMusicAssetUpload(session, err, true)
 			return nil, err
 		}
 	}
 	if size != session.Size {
-		return nil, apperr.Unprocessable("music.upload_size_mismatch", "Uploaded audio size does not match")
+		err := apperr.Unprocessable("music.upload_size_mismatch", "Uploaded audio size does not match")
+		s.failMusicAssetUpload(session, err, true)
+		return nil, err
+	}
+	object, err := s.assetUploadMultipart.OpenObject(session.ObjectKey)
+	if err != nil {
+		s.failMusicAssetUpload(session, err, true)
+		return nil, err
+	}
+	matchesAudio := musicmedia.MatchesDeclaredAudio(object, session.ContentType)
+	closeErr := object.Close()
+	if closeErr != nil {
+		s.failMusicAssetUpload(session, closeErr, true)
+		return nil, closeErr
+	}
+	if !matchesAudio {
+		err := apperr.Unprocessable("music.upload_content_type_mismatch", "Uploaded file content is not valid audio")
+		s.failMusicAssetUpload(session, err, true)
+		return nil, err
 	}
 	urlPrefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
 	if urlPrefix == "" {
-		return nil, apperr.Internal(errors.New("s3 url prefix is not configured"))
+		err := apperr.Internal(errors.New("s3 url prefix is not configured"))
+		s.failMusicAssetUpload(session, err, true)
+		return nil, err
 	}
 
 	var asset model.MediaAsset
@@ -397,9 +425,26 @@ func (s *Service) CompleteMusicAssetUpload(user authctx.CurrentUser, id uuid.UUI
 		locked.AssetID = &asset.ID
 		return tx.Save(&locked).Error
 	}); err != nil {
+		s.failMusicAssetUpload(session, err, true)
 		return nil, err
 	}
 	return &asset, nil
+}
+
+func (s *Service) failMusicAssetUpload(session model.MusicAssetUploadSession, cause error, deleteObject bool) {
+	if err := s.assetUploadMultipart.AbortMultipartUpload(session.ObjectKey, session.UploadID); err != nil {
+		log.Printf("abort failed music asset upload %s: %v", session.ID, err)
+	}
+	if deleteObject {
+		if err := s.assetUploadMultipart.DeleteObject(session.ObjectKey); err != nil {
+			log.Printf("delete failed music asset upload object %s: %v", session.ID, err)
+		}
+	}
+	if err := s.db.Model(&model.MusicAssetUploadSession{}).
+		Where("id = ? AND status = ?", session.ID, musicAssetUploadStatusCompleting).
+		Updates(map[string]any{"status": musicAssetUploadStatusFailed, "error_message": truncateMusicAssetUploadError(cause.Error())}).Error; err != nil {
+		log.Printf("mark failed music asset upload %s: %v", session.ID, err)
+	}
 }
 
 func validateMusicAssetUploadParts(size, partSize int64, parts []MusicAssetUploadPart) error {

@@ -30,7 +30,6 @@ type SongInput struct {
 	TrackNumber int    `form:"track_number"`
 	Lyrics      string `form:"lyrics"`
 	BatchID     string `form:"batch_id"`
-	AudioURL    string `form:"audio_url"` // For reusing existing audio
 	CoverURL    string `form:"cover_url"` // For reusing existing cover
 }
 
@@ -81,8 +80,8 @@ func SetupSongRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		songs.GET("", GetSongsHandler(db))
 		songs.GET("/:id", GetSongHandler(db))
 		songs.POST("", middleware.AuthMiddleware(), CreateSongHandler(db, s3Client))
-		songs.PUT("/:id", middleware.AuthMiddleware(), UpdateSongHandler(db, s3Client))
-		songs.DELETE("/:id", middleware.AuthMiddleware(), DeleteSongHandler(db, s3Client))
+		songs.PUT("/:id", middleware.AuthMiddleware(), RetiredLegacyMusicWriteHandler())
+		songs.DELETE("/:id", middleware.AuthMiddleware(), RetiredLegacyMusicWriteHandler())
 	}
 }
 
@@ -100,7 +99,7 @@ func GetSongsHandler(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var songs []model.Song
 
-		query := db.Where("status NOT IN ?", []string{"closed", "rejected", "draft"})
+		query := scopeVisibleLegacyMusic(c, db.Model(&model.Song{}), "\"Songs\"", "uploaded_by", false)
 		if keyword := strings.TrimSpace(c.Query("q")); keyword != "" {
 			pattern := "%" + keyword + "%"
 			query = query.
@@ -184,7 +183,8 @@ func GetSongHandler(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 
 		var song model.Song
-		if err := db.Preload("Album").Preload("Album.Artists").Preload("Artists").First(&song, "id = ?", id).Error; err != nil {
+		query := scopeVisibleLegacyMusic(c, db, "\"Songs\"", "uploaded_by", false)
+		if err := query.Preload("Album").Preload("Album.Artists").Preload("Artists").First(&song, "\"Songs\".id = ?", id).Error; err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "Song not found"})
 			return
 		}
@@ -236,7 +236,7 @@ func GetSongHandler(db *gorm.DB) gin.HandlerFunc {
 // CreateSongHandler creates a new song with optional audio upload
 // CreateSongHandler godoc
 // @Summary 创建歌曲
-// @Description 通过 multipart form 创建歌曲，可上传音频和封面或复用已有 URL。
+// @Description 通过 multipart form 创建歌曲，音频必须使用本地文件上传。
 // @Tags music-songs
 // @Accept mpfd
 // @Produce json
@@ -247,9 +247,7 @@ func GetSongHandler(db *gorm.DB) gin.HandlerFunc {
 // @Param track_number formData int false "曲目序号"
 // @Param lyrics formData string false "歌词"
 // @Param batch_id formData string false "批次 ID"
-// @Param audio_url formData string false "已存在音频 URL"
-// @Param cover_url formData string false "已存在封面 URL"
-// @Param audio formData file false "音频文件"
+// @Param audio formData file true "音频文件"
 // @Param cover formData file false "封面文件"
 // @Success 201 {object} model.Song
 // @Failure 400 {object} ErrorResponse
@@ -290,8 +288,8 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			Joins(`JOIN "Albums" AS albums ON albums.id = songs.album_id`).
 			Joins("JOIN album_artists ON album_artists.album_id = albums.id").
 			Joins(`JOIN "Artists" AS artists ON artists.id = album_artists.artist_id`).
-			Where("songs.title = ? AND albums.title = ? AND artists.name = ? AND songs.status NOT IN ?",
-				input.Title, checkAlbum, input.Artist, []string{"closed", "rejected", "draft"}).
+			Where("songs.title = ? AND albums.title = ? AND artists.name = ? AND songs.lifecycle_status = ?",
+				input.Title, checkAlbum, input.Artist, model.MusicLifecycleActive).
 			Count(&existingCount).Error; err != nil {
 			log.Printf("Error checking for duplicates: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error checking duplicates"})
@@ -306,8 +304,8 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 				Joins(`JOIN "Albums" AS albums ON albums.id = songs.album_id`).
 				Joins("JOIN album_artists ON album_artists.album_id = albums.id").
 				Joins(`JOIN "Artists" AS artists ON artists.id = album_artists.artist_id`).
-				Where("songs.title = ? AND albums.title = ? AND artists.name = ? AND songs.status NOT IN ?",
-					input.Title, checkAlbum, input.Artist, []string{"closed", "rejected", "draft"}).
+				Where("songs.title = ? AND albums.title = ? AND artists.name = ? AND songs.lifecycle_status = ?",
+					input.Title, checkAlbum, input.Artist, model.MusicLifecycleActive).
 				First(&existingSong)
 
 			c.JSON(http.StatusCreated, existingSong)
@@ -320,14 +318,22 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		var coverURL string
 		var coverSource string
 
-		// Audio file handling
-		if input.AudioURL != "" {
-			audioURL = input.AudioURL
-			if strings.HasPrefix(audioURL, "/uploads/") {
-				audioSource = "local"
-			} else if os.Getenv("STORAGE_TYPE") == "local" {
-				audioSource = "s3"
+		if input.CoverURL == "" {
+			coverFile, coverHeader, err := c.Request.FormFile("cover")
+			if err == nil {
+				if status, message := validateUploadedImageFile(coverFile, coverHeader); status != http.StatusOK {
+					_ = coverFile.Close()
+					c.JSON(status, gin.H{"error": message})
+					return
+				}
+				_ = coverFile.Close()
 			}
+		}
+
+		// Audio file handling
+		if strings.TrimSpace(c.PostForm("audio_url")) != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "audio_url is not supported; upload an audio file"})
+			return
 		} else {
 			file, header, err := c.Request.FormFile("audio")
 			if err != nil {
@@ -335,6 +341,10 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 				return
 			}
 			defer file.Close()
+			if status, message := validateUploadedAudioFile(file, header); status != http.StatusOK {
+				c.JSON(status, gin.H{"error": message})
+				return
+			}
 
 			if os.Getenv("STORAGE_TYPE") == "s3" {
 				if !requireS3(c, s3Client) {
@@ -432,7 +442,7 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 
 		// 1. Find or Create Artist
 		var artist model.Artist
-		if err := tx.FirstOrCreate(&artist, model.Artist{Name: input.Artist}).Error; err != nil {
+		if err := tx.FirstOrCreate(&artist, model.Artist{Name: input.Artist, LifecycleStatus: model.MusicLifecycleActive, EditStatus: model.MusicEditDevelopment}).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process artist"})
 			return
@@ -454,7 +464,7 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 
 		status := "open"
 
-		if err := tx.Where("title = ? AND year = ?", albumTitle, releaseDate.Year()).FirstOrCreate(&album, model.Album{Title: albumTitle, Year: releaseDate.Year(), ReleaseDate: releaseDate, UploadedBy: userID, Status: status}).Error; err != nil {
+		if err := tx.Where("title = ? AND year = ?", albumTitle, releaseDate.Year()).FirstOrCreate(&album, model.Album{Title: albumTitle, Year: releaseDate.Year(), ReleaseDate: releaseDate, UploadedBy: userID, Status: status, LifecycleStatus: model.MusicLifecycleActive, EditStatus: model.MusicEditDevelopment}).Error; err != nil {
 			tx.Rollback()
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process album"})
 			return
@@ -482,18 +492,20 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		}
 
 		song := model.Song{
-			Title:       input.Title,
-			ReleaseDate: releaseDate,
-			TrackNumber: input.TrackNumber,
-			Lyrics:      input.Lyrics,
-			AudioURL:    audioURL,
-			AudioSource: audioSource,
-			CoverURL:    coverURL,
-			CoverSource: coverSource,
-			Status:      status,
-			AlbumID:     &album.ID,
-			UploadedBy:  userID,
-			BatchID:     input.BatchID,
+			Title:           input.Title,
+			ReleaseDate:     releaseDate,
+			TrackNumber:     input.TrackNumber,
+			Lyrics:          input.Lyrics,
+			AudioURL:        audioURL,
+			AudioSource:     audioSource,
+			CoverURL:        coverURL,
+			CoverSource:     coverSource,
+			Status:          status,
+			LifecycleStatus: model.MusicLifecycleActive,
+			EditStatus:      model.MusicEditDevelopment,
+			AlbumID:         &album.ID,
+			UploadedBy:      userID,
+			BatchID:         input.BatchID,
 		}
 
 		if err := tx.Create(&song).Error; err != nil {

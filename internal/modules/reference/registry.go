@@ -82,19 +82,20 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 		return target(targetType, row.ID, row.Title, "feed", "/item/"+row.ID.String()), nil
 	case "artist":
 		var row model.Artist
-		if err := r.db.Where("redirect_to IS NULL").First(&row, "id = ?", id).Error; err != nil {
+		query := visibleMusicWikiEntries(r.db.Model(&model.Artist{}), viewer, "created_by").Where("redirect_to IS NULL")
+		if err := query.First(&row, "id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
 		return target(targetType, row.ID, row.Name, "music", "/artist/"+row.ID.String()), nil
 	case "album":
 		var row model.Album
-		if err := r.db.First(&row, "id = ?", id).Error; err != nil {
+		if err := visibleMusicWikiEntries(r.db.Model(&model.Album{}), viewer, "uploaded_by").First(&row, "id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
 		return target(targetType, row.ID, row.Title, "music", "/album/"+row.ID.String()), nil
 	case "song":
 		var row model.Song
-		if err := r.db.First(&row, "id = ?", id).Error; err != nil {
+		if err := visibleMusicWikiEntries(r.db.Model(&model.Song{}), viewer, "uploaded_by").First(&row, "id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
 		path := "/?song_id=" + row.ID.String()
@@ -206,6 +207,13 @@ func (r *Registry) Search(viewer Viewer, targetType, query string, limit int) ([
 	return items, nil
 }
 
+func visibleMusicWikiEntries(db *gorm.DB, viewer Viewer, ownerColumn string) *gorm.DB {
+	if viewer.UserID != uuid.Nil {
+		return db.Where("(lifecycle_status = ? OR (lifecycle_status = ? AND "+ownerColumn+" = ?))", model.MusicLifecycleActive, model.MusicLifecycleDraft, viewer.UserID)
+	}
+	return db.Where("lifecycle_status = ?", model.MusicLifecycleActive)
+}
+
 func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, limit int) ([]uuid.UUID, error) {
 	like := "%" + strings.ToLower(search) + "%"
 	var query *gorm.DB
@@ -226,11 +234,11 @@ func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, l
 		idColumn = "feed_items.id"
 		createdAtColumn = "feed_items.created_at"
 	case "artist":
-		query = r.db.Model(&model.Artist{}).Where("redirect_to IS NULL AND LOWER(name) LIKE ?", like)
+		query = visibleMusicWikiEntries(r.db.Model(&model.Artist{}), viewer, "created_by").Where("redirect_to IS NULL AND LOWER(name) LIKE ?", like)
 	case "album":
-		query = r.db.Model(&model.Album{}).Where("LOWER(title) LIKE ?", like)
+		query = visibleMusicWikiEntries(r.db.Model(&model.Album{}), viewer, "uploaded_by").Where("LOWER(title) LIKE ?", like)
 	case "song":
-		query = r.db.Model(&model.Song{}).Where("LOWER(title) LIKE ?", like)
+		query = visibleMusicWikiEntries(r.db.Model(&model.Song{}), viewer, "uploaded_by").Where("LOWER(title) LIKE ?", like)
 	case "playlist":
 		query = r.db.Model(&model.Playlist{}).Where("LOWER(name) LIKE ?", like).Where("is_public = ?", true)
 		if viewer.UserID != uuid.Nil {
