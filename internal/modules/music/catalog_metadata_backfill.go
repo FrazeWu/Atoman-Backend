@@ -277,6 +277,9 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 
 func musicArtistSearchNames(artist model.Artist) []string {
 	names := []string{artist.Name, artist.LegalName}
+	if legalParts := strings.Fields(strings.TrimSpace(artist.LegalName)); len(legalParts) >= 3 {
+		names = append(names, legalParts[0]+" "+legalParts[len(legalParts)-1])
+	}
 	for _, alias := range artist.Aliases {
 		names = append(names, alias.Alias)
 	}

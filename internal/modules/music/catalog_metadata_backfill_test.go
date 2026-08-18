@@ -7,6 +7,26 @@ import (
 	"atoman/internal/model"
 )
 
+func TestCatalogSongSourceTitleRemovesNumericTrackPrefix(t *testing.T) {
+	song := model.Song{Title: "King Kunta", SourceFileName: "03. King Kunta.mp3"}
+	if got := catalogSongSourceTitle(song, "Kendrick Lamar", []string{"Kendrick Lamar"}); got != "King Kunta" {
+		t.Fatalf("title = %q", got)
+	}
+}
+
+func TestCatalogSongSourceTitleRemovesUnlistedHistoricalArtistPrefix(t *testing.T) {
+	song := model.Song{Title: "Lord I Need You", SourceFileName: "Kanye West - Lord I Need You.mp3"}
+	if got := catalogSongSourceTitle(song, "Ye", []string{"Ye", "Kanye Omari West"}); got != "Lord I Need You" {
+		t.Fatalf("title = %q", got)
+	}
+}
+
+func TestStripKnownArtistPrefixUsesArtistAliases(t *testing.T) {
+	if got := stripKnownArtistPrefix("Kanye West - Lord I Need You", []string{"Ye", "Kanye West"}); got != "Lord I Need You" {
+		t.Fatalf("title = %q", got)
+	}
+}
+
 func TestExistingSongSourceTitleRemovesArtistPrefix(t *testing.T) {
 	song := model.Song{Title: "Wrong", SourceFileName: "Jean Grae - Block Party.mp3"}
 	if got := existingSongSourceTitle(song, "Jean Grae"); got != "Block Party" {
@@ -39,6 +59,14 @@ func TestMusicArtistSearchNamesIncludesLegalNameAndAliases(t *testing.T) {
 	artist := model.Artist{Name: "Ye", LegalName: "Kanye Omari West", Aliases: []model.ArtistAlias{{Alias: "Kanye West"}, {Alias: "Ye"}}}
 	got := musicArtistSearchNames(artist)
 	if len(got) != 3 || got[0] != "Ye" || got[1] != "Kanye Omari West" || got[2] != "Kanye West" {
+		t.Fatalf("names = %#v", got)
+	}
+}
+
+func TestMusicArtistSearchNamesAddsCommonLegalNameVariant(t *testing.T) {
+	artist := model.Artist{Name: "Ye", LegalName: "Kanye Omari West"}
+	got := musicArtistSearchNames(artist)
+	if len(got) != 3 || got[2] != "Kanye West" {
 		t.Fatalf("names = %#v", got)
 	}
 }

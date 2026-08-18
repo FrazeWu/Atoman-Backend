@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -60,6 +62,9 @@ type ExternalAlbumMetadataEnricher struct {
 	requestMu       sync.Mutex
 	lastMBRequest   time.Time
 	musicBrainzWait time.Duration
+	lrcLibMu        sync.Mutex
+	lastLRCRequest  time.Time
+	lrcLibWait      time.Duration
 }
 
 func NewExternalAlbumMetadataEnricher(httpClient *http.Client, musicBrainzBase, coverArtBase, lrcLibBase, userAgent string) *ExternalAlbumMetadataEnricher {
@@ -69,7 +74,7 @@ func NewExternalAlbumMetadataEnricher(httpClient *http.Client, musicBrainzBase, 
 	return &ExternalAlbumMetadataEnricher{
 		httpClient: httpClient, musicBrainzBase: strings.TrimRight(musicBrainzBase, "/"),
 		coverArtBase: strings.TrimRight(coverArtBase, "/"), lrcLibBase: strings.TrimRight(lrcLibBase, "/"),
-		userAgent: strings.TrimSpace(userAgent), musicBrainzWait: time.Second,
+		userAgent: strings.TrimSpace(userAgent), musicBrainzWait: time.Second, lrcLibWait: time.Second,
 	}
 }
 
@@ -135,10 +140,11 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 	if err != nil && input.PreferredReleaseID != "" {
 		return result, err
 	}
+	releaseMatched := err == nil && release.ID != ""
 	if err != nil {
 		result.MetadataError = err.Error()
 	}
-	if err == nil && release.ID != "" {
+	if releaseMatched {
 		result.AlbumTitle = release.Title
 		result.ReleaseDate = release.Date
 		result.AlbumType = normalizeMusicBrainzAlbumType(release.ReleaseGroup.PrimaryType)
@@ -161,6 +167,10 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		}
 		missingLyrics = append(missingLyrics, index)
 	}
+	if !releaseMatched {
+		log.Printf("WARN: skipping LRCLIB lookup because MusicBrainz did not safely match album=%q error=%v", input.AlbumTitle, result.MetadataError)
+		return result, nil
+	}
 	var lyricsWG sync.WaitGroup
 	lyricsSlots := make(chan struct{}, 4)
 	for _, index := range missingLyrics {
@@ -171,10 +181,18 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 			lyricsSlots <- struct{}{}
 			defer func() { <-lyricsSlots }()
 			original := metadataTrackForResult(input.Tracks, result.Tracks[index])
-			lyrics, lookupErr := e.findLRCLyrics(ctx, result.AlbumTitle, original.Artist, result.Tracks[index], original.DurationSeconds)
+			artistCandidates := musicBrainzReleaseArtistNames(release)
+			if len(artistCandidates) == 0 {
+				artistCandidates = uniqueMusicArtists(append([]string{original.Artist, input.Artist}, input.Artists...))
+			}
+			lyrics, matchedArtist, lookupErr := e.findLRCLyricsForMusicBrainzTrack(ctx, result.AlbumTitle, artistCandidates, result.Tracks[index], original.DurationSeconds)
 			if lookupErr == nil && lyrics.Content != "" {
 				result.Tracks[index].Lyrics = &lyrics
 				result.Tracks[index].LyricsSource = "lrclib"
+				return
+			}
+			if lookupErr != nil {
+				log.Printf("WARN: LRCLIB lyric lookup failed: title=%q artists=%q matched_artist=%q error=%v", result.Tracks[index].Title, strings.Join(artistCandidates, ","), matchedArtist, lookupErr)
 			}
 		}()
 	}
@@ -738,8 +756,37 @@ func (e *ExternalAlbumMetadataEnricher) musicBrainzJSON(ctx context.Context, end
 	return err
 }
 
-func (e *ExternalAlbumMetadataEnricher) findLRCLyrics(ctx context.Context, album, artist string, track AlbumImportDTOTrack, duration float64) (AlbumImportTrackLyricsPayload, error) {
-	if e.lrcLibBase == "" || track.Title == "" || artist == "" {
+func musicBrainzReleaseArtistNames(release musicBrainzRelease) []string {
+	names := make([]string, 0, len(release.ArtistCredit)*3)
+	for _, credit := range release.ArtistCredit {
+		names = append(names, credit.Name, credit.Artist.Name)
+		for _, alias := range credit.Artist.Aliases {
+			names = append(names, alias.Name)
+		}
+	}
+	return uniqueMusicArtists(names)
+}
+
+func (e *ExternalAlbumMetadataEnricher) findLRCLyricsForMusicBrainzTrack(ctx context.Context, album string, artists []string, track AlbumImportDTOTrack, duration float64) (AlbumImportTrackLyricsPayload, string, error) {
+	if e.lrcLibBase == "" {
+		return AlbumImportTrackLyricsPayload{}, "", errors.New("LRCLIB is not configured")
+	}
+	var lastErr error
+	for _, artist := range uniqueMusicArtists(artists) {
+		lyrics, err := e.findLRCLyricsForTitle(ctx, album, artist, track, duration)
+		if err == nil {
+			return lyrics, artist, nil
+		}
+		lastErr = err
+	}
+	if lastErr == nil {
+		lastErr = errors.New("not enough metadata for LRCLIB lookup")
+	}
+	return AlbumImportTrackLyricsPayload{}, "", lastErr
+}
+
+func (e *ExternalAlbumMetadataEnricher) findLRCLyricsForTitle(ctx context.Context, album, artist string, track AlbumImportDTOTrack, duration float64) (AlbumImportTrackLyricsPayload, error) {
+	if track.Title == "" {
 		return AlbumImportTrackLyricsPayload{}, errors.New("not enough metadata for LRCLIB lookup")
 	}
 	params := url.Values{"track_name": {track.Title}, "artist_name": {artist}}
@@ -754,17 +801,128 @@ func (e *ExternalAlbumMetadataEnricher) findLRCLyrics(ctx context.Context, album
 		SyncedLyrics string  `json:"syncedLyrics"`
 		Duration     float64 `json:"duration"`
 	}
-	if err := e.getJSON(ctx, e.lrcLibBase+"/api/get?"+params.Encode(), &response, e.userAgent); err != nil {
+	if err := e.lrcLibJSON(ctx, e.lrcLibBase+"/api/get?"+params.Encode(), &response); err != nil {
+		if !isMetadataServiceStatus(err, http.StatusNotFound) {
+			return AlbumImportTrackLyricsPayload{}, err
+		}
+		return e.searchLRCLyrics(ctx, artist, track, duration)
+	}
+	if lyrics, ok := newLRCLyricsPayload(response.PlainLyrics, response.SyncedLyrics, response.Duration, duration); ok {
+		return lyrics, nil
+	}
+	return e.searchLRCLyrics(ctx, artist, track, duration)
+}
+
+func (e *ExternalAlbumMetadataEnricher) searchLRCLyrics(ctx context.Context, artist string, track AlbumImportDTOTrack, duration float64) (AlbumImportTrackLyricsPayload, error) {
+	params := url.Values{"track_name": {track.Title}, "artist_name": {artist}}
+	var responses []struct {
+		TrackName    string  `json:"trackName"`
+		PlainLyrics  string  `json:"plainLyrics"`
+		SyncedLyrics string  `json:"syncedLyrics"`
+		Duration     float64 `json:"duration"`
+	}
+	if err := e.lrcLibJSON(ctx, e.lrcLibBase+"/api/search?"+params.Encode(), &responses); err != nil {
 		return AlbumImportTrackLyricsPayload{}, err
 	}
-	if duration > 0 && response.Duration > 0 && absFloat(duration-response.Duration) > 4 {
-		return AlbumImportTrackLyricsPayload{}, errors.New("LRCLIB duration mismatch")
+	for _, response := range responses {
+		if response.TrackName != "" && comparableMusicTitle(response.TrackName) != comparableMusicTitle(track.Title) {
+			continue
+		}
+		if lyrics, ok := newLRCLyricsPayload(response.PlainLyrics, response.SyncedLyrics, response.Duration, duration); ok {
+			return lyrics, nil
+		}
 	}
-	content, format := strings.TrimSpace(response.SyncedLyrics), "lrc"
-	if content == "" {
-		content, format = strings.TrimSpace(response.PlainLyrics), "plain"
+	return AlbumImportTrackLyricsPayload{}, errors.New("LRCLIB returned no lyrics")
+}
+
+func newLRCLyricsPayload(plainLyrics, syncedLyrics string, responseDuration, requestedDuration float64) (AlbumImportTrackLyricsPayload, bool) {
+	if requestedDuration > 0 && responseDuration > 0 && absFloat(requestedDuration-responseDuration) > 4 {
+		return AlbumImportTrackLyricsPayload{}, false
 	}
-	return AlbumImportTrackLyricsPayload{Content: content, Format: format, EditSummary: "自动匹配歌词"}, nil
+	plain := strings.TrimSpace(plainLyrics)
+	synced := strings.TrimSpace(syncedLyrics)
+	if synced != "" {
+		if _, err := ParseLyricLines(synced, "", "lrc"); err == nil {
+			return AlbumImportTrackLyricsPayload{Content: synced, Format: "lrc", EditSummary: "自动匹配歌词"}, true
+		}
+	}
+	if plain != "" {
+		return AlbumImportTrackLyricsPayload{Content: plain, Format: "plain", EditSummary: "自动匹配歌词"}, true
+	}
+	return AlbumImportTrackLyricsPayload{}, false
+}
+
+type metadataServiceHTTPError struct {
+	statusCode int
+	status     string
+	retryAfter time.Duration
+}
+
+func (e metadataServiceHTTPError) Error() string {
+	return fmt.Sprintf("metadata service returned %s", e.status)
+}
+
+func isMetadataServiceStatus(err error, statusCode int) bool {
+	var statusErr metadataServiceHTTPError
+	return errors.As(err, &statusErr) && statusErr.statusCode == statusCode
+}
+
+func (e *ExternalAlbumMetadataEnricher) lrcLibJSON(ctx context.Context, endpoint string, target any) error {
+	for attempt := 0; attempt < 3; attempt++ {
+		if err := e.waitForLRCLIBRequest(ctx); err != nil {
+			return err
+		}
+		err := e.getJSON(ctx, endpoint, target, e.userAgent)
+		var statusErr metadataServiceHTTPError
+		if err == nil || !errors.As(err, &statusErr) || statusErr.statusCode != http.StatusTooManyRequests || attempt == 2 {
+			return err
+		}
+		wait := statusErr.retryAfter
+		if wait <= 0 {
+			wait = time.Duration(2<<attempt) * time.Second
+		}
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return errors.New("LRCLIB request retries exhausted")
+}
+
+func (e *ExternalAlbumMetadataEnricher) waitForLRCLIBRequest(ctx context.Context) error {
+	e.lrcLibMu.Lock()
+	defer e.lrcLibMu.Unlock()
+	if wait := e.lrcLibWait - time.Since(e.lastLRCRequest); wait > 0 {
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	e.lastLRCRequest = time.Now()
+	return nil
+}
+
+func parseRetryAfter(value string) time.Duration {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.Atoi(value); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	if retryAt, err := http.ParseTime(value); err == nil {
+		if wait := time.Until(retryAt); wait > 0 {
+			return wait
+		}
+	}
+	return 0
 }
 
 func (e *ExternalAlbumMetadataEnricher) getJSON(ctx context.Context, endpoint string, target any, userAgent string) error {
@@ -781,7 +939,7 @@ func (e *ExternalAlbumMetadataEnricher) getJSON(ctx context.Context, endpoint st
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("metadata service returned %s", response.Status)
+		return metadataServiceHTTPError{statusCode: response.StatusCode, status: response.Status, retryAfter: parseRetryAfter(response.Header.Get("Retry-After"))}
 	}
 	return json.NewDecoder(io.LimitReader(response.Body, 4*1024*1024)).Decode(target)
 }
@@ -809,11 +967,7 @@ func normalizedLyricName(value string) string {
 	if slash := strings.LastIndex(base, "/"); slash >= 0 {
 		base = base[slash+1:]
 	}
-	if dot := strings.LastIndex(base, "."); dot > 0 {
-		base = base[:dot]
-	}
-	_, _, track := albumImportTrackInfoFromFileName(base)
-	name, _, _ := albumImportTrackInfoFromFileName(base)
+	name, _, track := albumImportTrackInfoFromFileName(base)
 	if name != "" {
 		return normalizedMusicText(name)
 	}

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path"
@@ -46,7 +47,16 @@ func NewSystemMediaCommandRunner() MediaCommandRunner { return systemMediaComman
 
 func (systemMediaCommandRunner) LookPath(name string) (string, error) { return exec.LookPath(name) }
 func (systemMediaCommandRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	switch name {
+	case "ffmpeg":
+		return exec.CommandContext(ctx, "ffmpeg", args...).CombinedOutput()
+	case "ffprobe":
+		return exec.CommandContext(ctx, "ffprobe", args...).CombinedOutput()
+	case "7zz":
+		return exec.CommandContext(ctx, "7zz", args...).CombinedOutput()
+	default:
+		return nil, fmt.Errorf("unsupported media command: %s", name)
+	}
 }
 
 type errMissingMediaTool struct{ name string }
@@ -775,12 +785,26 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 	if artist == "" {
 		artist = p.albumImportArtistName(ctx, payload)
 	}
-	result := AlbumImportMetadataResult{AlbumTitle: stringValue(payload["derived_album_title"]), Tracks: baseMetadataTracks(metadataTracks)}
+	for index := range metadataTracks {
+		if strings.TrimSpace(metadataTracks[index].Artist) == "" {
+			metadataTracks[index].Artist = artist
+		}
+	}
+	albumTitle := strings.TrimSpace(stringValue(payload["derived_album_title"]))
+	if albumTitle == "" {
+		albumTitle = albumImportPayloadAlbumTitle(payload)
+		if albumTitle != "" {
+			payload["derived_album_title"] = albumTitle
+		}
+	}
+	result := AlbumImportMetadataResult{AlbumTitle: albumTitle, Tracks: baseMetadataTracks(metadataTracks)}
 	if p.enricher != nil {
 		if enriched, enrichErr := p.enricher.Enrich(ctx, AlbumImportMetadataInput{
 			AlbumTitle: result.AlbumTitle, Artist: artist, Tracks: metadataTracks, LocalLyrics: localLyrics,
 		}); enrichErr == nil {
 			result = enriched
+		} else {
+			log.Printf("WARN: album import metadata enrichment failed: import_id=%s error=%v", sessionID, enrichErr)
 		}
 	} else {
 		for index := range result.Tracks {
@@ -922,6 +946,24 @@ func (p *MediaImportProcessor) albumImportArtistName(ctx context.Context, payloa
 	return strings.TrimSpace(artist.Name)
 }
 
+func albumImportPayloadAlbumTitle(payload map[string]any) string {
+	for _, path := range [][]string{{"album", "title"}, {"commit_request", "album", "title"}} {
+		current := any(payload)
+		for _, key := range path {
+			values, ok := current.(map[string]any)
+			if !ok {
+				current = nil
+				break
+			}
+			current = values[key]
+		}
+		if title := strings.TrimSpace(stringValue(current)); title != "" {
+			return title
+		}
+	}
+	return ""
+}
+
 func (p *MediaImportProcessor) processEmbeddedCover(ctx context.Context, sessionID uuid.UUID, source string) error {
 	output := filepath.Join(filepath.Dir(source), ".atoman-embedded-cover-"+uuid.NewString()+".webp")
 	defer os.Remove(output)
@@ -980,6 +1022,19 @@ func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID 
 	}
 	if _, err := p.runner.Run(ctx, "ffmpeg", transcodeArgs...); err != nil {
 		return fmt.Errorf("ffmpeg %s: %w", file.FileName, err)
+	}
+	if duration <= 0 || taggedTitle == "" || metadata.album == "" || metadata.artist == "" {
+		fallbackProbe, probeErr := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,album,artist,album_artist,albumartist,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", outputPath)
+		if probeErr == nil {
+			fallback := parseAudioProbe(fallbackProbe)
+			metadata = mergeAudioProbeMetadata(metadata, fallback)
+			if duration <= 0 {
+				duration = fallback.duration
+			}
+			if taggedTitle == "" {
+				taggedTitle = fallback.title
+			}
+		}
 	}
 	waveformArgs := []string{"-v", "error"}
 	if len(rangeSeconds) == 2 {
@@ -1158,6 +1213,54 @@ func (m audioProbeMetadata) archiveMetadata() map[string]any {
 	}
 }
 
+func mergeAudioProbeMetadata(primary, fallback audioProbeMetadata) audioProbeMetadata {
+	if primary.duration <= 0 {
+		primary.duration = fallback.duration
+	}
+	if primary.title == "" {
+		primary.title = fallback.title
+	}
+	if primary.album == "" {
+		primary.album = fallback.album
+	}
+	if primary.artist == "" {
+		primary.artist = fallback.artist
+	}
+	if primary.discNumber <= 0 {
+		primary.discNumber = fallback.discNumber
+	}
+	if primary.trackNumber <= 0 {
+		primary.trackNumber = fallback.trackNumber
+	}
+	if primary.container == "" {
+		primary.container = fallback.container
+	}
+	if primary.codec == "" {
+		primary.codec = fallback.codec
+	}
+	if primary.bitRate <= 0 {
+		primary.bitRate = fallback.bitRate
+	}
+	if primary.sampleRate <= 0 {
+		primary.sampleRate = fallback.sampleRate
+	}
+	if primary.bitDepth <= 0 {
+		primary.bitDepth = fallback.bitDepth
+	}
+	if primary.channels <= 0 {
+		primary.channels = fallback.channels
+	}
+	return primary
+}
+
+func isAlbumImportMediaExtension(extension string) bool {
+	switch strings.ToLower(extension) {
+	case ".aac", ".aiff", ".ape", ".flac", ".m4a", ".mka", ".mkv", ".mp3", ".mp4", ".ogg", ".oga", ".opus", ".wav", ".webm", ".wma", ".wv", ".cue", ".lrc", ".txt":
+		return true
+	default:
+		return false
+	}
+}
 func albumImportTagNumber(value string) int {
 	matched := regexp.MustCompile(`^\s*(\d+)`).FindStringSubmatch(value)
 	if len(matched) != 2 {
@@ -1204,7 +1307,10 @@ func discAndTrackFromPath(relativePath string) (int, int) {
 }
 
 func albumImportTrackInfoFromFileName(name string) (string, int, int) {
-	base := strings.TrimSpace(strings.TrimSuffix(filepath.Base(name), filepath.Ext(name)))
+	base := strings.TrimSpace(filepath.Base(name))
+	if extension := filepath.Ext(base); isAlbumImportMediaExtension(extension) {
+		base = strings.TrimSpace(strings.TrimSuffix(base, extension))
+	}
 	multiDisc := regexp.MustCompile(`(?i)^\s*(\d{1,2})\s*[-_.]\s*(\d{1,3})(?:\s*[-_.]\s*|\s+)(.+?)\s*$`).FindStringSubmatch(base)
 	if len(multiDisc) == 4 {
 		disc, _ := strconv.Atoi(multiDisc[1])

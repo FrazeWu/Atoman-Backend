@@ -22,6 +22,7 @@ func main() {
 	stripArtistPrefixes := flag.Bool("strip-artist-prefixes", false, "remove artist credits before the last title separator")
 	preferredReleaseID := flag.String("release-id", "", "validate one MusicBrainz release for the selected album")
 	repairTimedLyrics := flag.Bool("repair-timed-lyrics", false, "upgrade existing plain lyrics containing LRC timestamps")
+	lyricsOnly := flag.Bool("lyrics-only", false, "match lyrics for songs that do not have lyrics")
 	flag.Parse()
 	if err := godotenv.Load(*envFile); err != nil {
 		log.Fatalf("load %s: %v", *envFile, err)
@@ -53,6 +54,16 @@ func main() {
 		}
 		for _, result := range results {
 			log.Print(music.FormatCatalogLyricsRepairResult(result))
+		}
+		return
+	}
+	if *lyricsOnly {
+		results, err := music.BackfillCatalogLyrics(context.Background(), db, os.Getenv("MUSICBRAINZ_USER_AGENT"), *apply, *songID, *preferredReleaseID)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, result := range results {
+			log.Print(music.FormatCatalogLyricsBackfillResult(result))
 		}
 		return
 	}

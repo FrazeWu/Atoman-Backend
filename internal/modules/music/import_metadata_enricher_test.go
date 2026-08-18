@@ -52,6 +52,9 @@ func TestFindLocalLyricsUsesDiscAndTrackBeforeFileName(t *testing.T) {
 
 func TestExternalAlbumMetadataEnricherFallsBackToLRCLIB(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeMatchingMusicBrainzRelease(w, r) {
+			return
+		}
 		if r.URL.Path != "/api/get" || r.URL.Query().Get("track_name") != "First Song" || r.URL.Query().Get("duration") != "200" {
 			http.NotFound(w, r)
 			return
@@ -60,16 +63,111 @@ func TestExternalAlbumMetadataEnricherFallsBackToLRCLIB(t *testing.T) {
 	}))
 	defer server.Close()
 
-	enricher := NewExternalAlbumMetadataEnricher(server.Client(), "", "", server.URL, "Atoman/test")
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), server.URL, "", server.URL, "Atoman/test")
 	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
-		AlbumTitle: "Album",
-		Tracks:     []AlbumImportMetadataTrack{{Title: "First Song", Artist: "Artist", DurationSeconds: 200}},
+		AlbumTitle: "Album", Artist: "Artist",
+		Tracks: []AlbumImportMetadataTrack{{Title: "First Song", Artist: "Artist", DurationSeconds: 200}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.Tracks[0].Lyrics == nil || result.Tracks[0].Lyrics.Content != "[00:01.00]synced" || result.Tracks[0].Lyrics.Format != "lrc" || result.Tracks[0].LyricsSource != "lrclib" {
 		t.Fatalf("unexpected LRCLIB result: %#v", result.Tracks[0])
+	}
+}
+
+func TestExternalAlbumMetadataEnricherUsesInputArtistWhenTrackArtistMissing(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeMatchingMusicBrainzRelease(w, r) {
+			return
+		}
+		if r.URL.Path != "/api/get" || r.URL.Query().Get("artist_name") != "Artist" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"plainLyrics":"remote"}`))
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), server.URL, "", server.URL, "Atoman/test")
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "Album", Artist: "Artist",
+		Tracks: []AlbumImportMetadataTrack{{Title: "First Song", DurationSeconds: 0}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Tracks[0].Lyrics == nil || result.Tracks[0].Lyrics.Content != "remote" {
+		t.Fatalf("expected lyrics from input artist fallback: %#v", result.Tracks[0])
+	}
+}
+
+func TestExternalAlbumMetadataEnricherUsesMusicBrainzTrackTitleForLRCLIB(t *testing.T) {
+	var requestedTitle string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeMatchingMusicBrainzRelease(w, r) {
+			return
+		}
+		if r.URL.Path != "/api/get" {
+			http.NotFound(w, r)
+			return
+		}
+		requestedTitle = r.URL.Query().Get("track_name")
+		if requestedTitle != "First Song" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`{"plainLyrics":"remote"}`))
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), server.URL, "", server.URL, "Atoman/test")
+	enricher.musicBrainzWait = 0
+	enricher.lrcLibWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "Album", Artist: "Artist",
+		Tracks: []AlbumImportMetadataTrack{{Title: "01. Local Name", TrackNumber: 1, DurationSeconds: 200}},
+	})
+	if err != nil || result.Tracks[0].Lyrics == nil || result.Tracks[0].Lyrics.Content != "remote" {
+		t.Fatalf("unexpected strict lyrics result: %#v, err=%v", result, err)
+	}
+	if requestedTitle != "First Song" {
+		t.Fatalf("LRCLIB title = %q, want MusicBrainz title", requestedTitle)
+	}
+}
+
+func TestExternalAlbumMetadataEnricherFallsBackToLRCLIBSearchAfterMusicBrainzMatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeMatchingMusicBrainzRelease(w, r) {
+			return
+		}
+		switch r.URL.Path {
+		case "/api/get":
+			http.NotFound(w, r)
+		case "/api/search":
+			_, _ = w.Write([]byte(`[{"trackName":"First Song","duration":46,"plainLyrics":"searched"}]`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), server.URL, "", server.URL, "Atoman/test")
+	enricher.musicBrainzWait = 0
+	enricher.lrcLibWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "Album", Artist: "Artist",
+		Tracks: []AlbumImportMetadataTrack{{Title: "First Song", DurationSeconds: 46}},
+	})
+	if err != nil || result.Tracks[0].Lyrics == nil || result.Tracks[0].Lyrics.Content != "searched" {
+		t.Fatalf("unexpected search fallback result: %#v, err=%v", result, err)
+	}
+}
+
+func TestNewLRCLyricsPayloadFallsBackToPlainWhenSyncedLyricsAreInvalid(t *testing.T) {
+	lyrics, ok := newLRCLyricsPayload("plain lyrics", "[00:01.00]valid\ninvalid", 100, 100)
+	if !ok || lyrics.Format != "plain" || lyrics.Content != "plain lyrics" {
+		t.Fatalf("lyrics = %#v, ok = %v", lyrics, ok)
 	}
 }
 
@@ -553,6 +651,47 @@ func TestExternalAlbumMetadataEnricherDoesNotDropArtistForSingle(t *testing.T) {
 	}
 	if releaseSearches.Load() != 1 || !releaseSearchHadArtist.Load() || result.SourceURL != "" {
 		t.Fatalf("single search dropped artist: searches=%d artist=%v result=%#v", releaseSearches.Load(), releaseSearchHadArtist.Load(), result)
+	}
+}
+
+func TestExternalAlbumMetadataEnricherSkipsLRCLIBWhenMusicBrainzDoesNotMatch(t *testing.T) {
+	var lyricsRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			lyricsRequests.Add(1)
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	enricher := NewExternalAlbumMetadataEnricher(server.Client(), server.URL, "", server.URL, "Atoman/test")
+	enricher.musicBrainzWait = 0
+	enricher.lrcLibWait = 0
+	result, err := enricher.Enrich(context.Background(), AlbumImportMetadataInput{
+		AlbumTitle: "Unknown Album", Artist: "Unknown Artist",
+		Tracks: []AlbumImportMetadataTrack{{Title: "Unknown Song", DurationSeconds: 180}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SourceURL != "" || result.Tracks[0].Lyrics != nil || result.MetadataError == "" {
+		t.Fatalf("unexpected unmatched result: %#v", result)
+	}
+	if lyricsRequests.Load() != 0 {
+		t.Fatalf("LRCLIB must not be called when MusicBrainz does not match")
+	}
+}
+
+func writeMatchingMusicBrainzRelease(w http.ResponseWriter, r *http.Request) bool {
+	switch r.URL.Path {
+	case "/ws/2/release/":
+		_, _ = w.Write([]byte(`{"releases":[{"id":"release-id","title":"Album"}]}`))
+		return true
+	case "/ws/2/release/release-id":
+		_, _ = w.Write([]byte(`{"id":"release-id","title":"Album","release-group":{"title":"Album","primary-type":"Album"},"media":[{"position":1,"tracks":[{"position":1,"title":"First Song","length":200000}]}]}`))
+		return true
+	default:
+		return false
 	}
 }
 

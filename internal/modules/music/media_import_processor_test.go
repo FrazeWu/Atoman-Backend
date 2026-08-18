@@ -659,6 +659,25 @@ func TestParseAudioProbeReadsTitleTrackDiscAndAlbumArtistTags(t *testing.T) {
 	}
 }
 
+func TestMergeAudioProbeMetadataUsesFallbackValues(t *testing.T) {
+	primary := audioProbeMetadata{title: "Tagged", duration: 10, channels: 2}
+	fallback := audioProbeMetadata{title: "Fallback", duration: 20, album: "Album", artist: "Artist", codec: "mp3", sampleRate: 44100}
+	merged := mergeAudioProbeMetadata(primary, fallback)
+	if merged.title != "Tagged" || merged.duration != 10 || merged.album != "Album" || merged.artist != "Artist" || merged.codec != "mp3" || merged.sampleRate != 44100 {
+		t.Fatalf("unexpected merged metadata: %#v", merged)
+	}
+}
+
+func TestAlbumImportPayloadAlbumTitleFallsBackToCommitRequest(t *testing.T) {
+	payload := map[string]any{
+		"album":          map[string]any{"title": ""},
+		"commit_request": map[string]any{"album": map[string]any{"title": "Section.80"}},
+	}
+	if got := albumImportPayloadAlbumTitle(payload); got != "Section.80" {
+		t.Fatalf("album title = %q", got)
+	}
+}
+
 func TestPersistDerivedTracksKeepsOnlyMajorityAlbum(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{Status: AlbumImportStatusAnalyzing, Stage: AlbumImportStageAnalyzing, PayloadJSON: `{}`}
@@ -710,6 +729,7 @@ func TestAlbumImportTrackInfoFromFileNameIsConservative(t *testing.T) {
 		{name: "2-01 Main Theme.flac", wantTitle: "Main Theme", wantDisc: 2, wantTrack: 1},
 		{name: "03. Outro.flac", wantTitle: "Outro", wantTrack: 3},
 		{name: "01 Hidden Track.flac", wantTitle: "Hidden Track", wantTrack: 1},
+		{name: "03. A.D.H.D.mp3", wantTitle: "A.D.H.D", wantTrack: 3},
 		{name: "99 Problems.flac", wantTitle: "99 Problems", wantTrack: 99},
 		{name: "1979.flac", wantTitle: "1979"},
 	}
