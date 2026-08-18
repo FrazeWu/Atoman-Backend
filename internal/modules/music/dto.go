@@ -111,6 +111,30 @@ type RecordSongPlayRequest struct {
 	SongID uuid.UUID `json:"song_id"`
 }
 
+type SavePlaybackProgressRequest struct {
+	SongID          uuid.UUID `json:"song_id" binding:"required"`
+	PositionSeconds float64   `json:"position_seconds" binding:"required"`
+	DurationSeconds float64   `json:"duration_seconds"`
+	Completed       bool      `json:"completed"`
+	ReportedAt      time.Time `json:"reported_at"`
+}
+
+type SavePlaybackSessionRequest struct {
+	SongIDs         []uuid.UUID `json:"song_ids" binding:"required"`
+	CurrentSongID   uuid.UUID   `json:"current_song_id" binding:"required"`
+	PositionSeconds float64     `json:"position_seconds" binding:"required"`
+	PlaybackMode    string      `json:"playback_mode" binding:"required"`
+	ReportedAt      time.Time   `json:"reported_at"`
+}
+
+type PlaybackSessionResponse struct {
+	Queue           []model.Song `json:"queue"`
+	CurrentSongID   uuid.UUID    `json:"current_song_id"`
+	PositionSeconds float64      `json:"position_seconds"`
+	PlaybackMode    string       `json:"playback_mode"`
+	UpdatedAt       time.Time    `json:"updated_at"`
+}
+
 type PlaylistSongStatusResponse struct {
 	Data struct {
 		SongIDs []uuid.UUID `json:"song_ids"`
@@ -203,7 +227,7 @@ type ListeningHistoryListResponse struct {
 
 type HomeResponse struct {
 	Personalized      bool                          `json:"personalized"`
-	ContinueListening *model.MusicListeningHistory  `json:"continue_listening,omitempty"`
+	ContinueListening *model.MusicPlaybackProgress  `json:"continue_listening,omitempty"`
 	RecentlyPlayed    []model.MusicListeningHistory `json:"recently_played"`
 	ForYou            []HomeAlbumRecommendation     `json:"for_you"`
 	ForYouReason      string                        `json:"for_you_reason,omitempty"`

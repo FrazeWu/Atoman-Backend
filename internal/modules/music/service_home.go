@@ -62,9 +62,19 @@ func (s *Service) Home(user *authctx.CurrentUser, discoverPage, discoverPageSize
 	if err != nil {
 		return response, err
 	}
-	if len(history) > 0 {
-		response.ContinueListening = &history[0]
-		response.RecentlyPlayed = history[1:]
+	progress, err := s.GetPlaybackProgress(*user)
+	if err != nil {
+		return response, err
+	}
+	response.RecentlyPlayed = history
+	if progress != nil {
+		response.ContinueListening = progress
+		response.RecentlyPlayed = make([]model.MusicListeningHistory, 0, len(history))
+		for _, item := range history {
+			if item.SongID != progress.SongID {
+				response.RecentlyPlayed = append(response.RecentlyPlayed, item)
+			}
+		}
 	}
 	response.Personalized = len(history) > 0
 

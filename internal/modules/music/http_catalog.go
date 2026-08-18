@@ -632,6 +632,133 @@ func (h *Handler) recordSongPlay(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, gin.H{"recorded": true})
 }
 
+// getPlaybackProgress godoc
+// @Summary 获取跨端续听进度
+// @Description 返回当前用户最近一首未完成歌曲的播放进度；没有可续听内容时返回 null。
+// @Tags music
+// @Produce json
+// @Success 200 {object} model.MusicPlaybackProgress
+// @Failure 401 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/music/playback-progress [get]
+func (h *Handler) getPlaybackProgress(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	progress, err := h.service.GetPlaybackProgress(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if progress != nil && progress.Song != nil {
+		progress.Song.AudioURL = resolveMusicMediaURL(progress.Song.AudioURL)
+		progress.Song.CoverURL = resolveMusicMediaURL(progress.Song.CoverURL)
+		if progress.Song.Album != nil {
+			progress.Song.Album.CoverURL = resolveMusicMediaURL(progress.Song.Album.CoverURL)
+		}
+	}
+	httpx.OK(c, http.StatusOK, progress)
+}
+
+// savePlaybackProgress godoc
+// @Summary 保存跨端续听进度
+// @Tags music
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param input body SavePlaybackProgressRequest true "播放进度"
+// @Success 200 {object} model.MusicPlaybackProgress
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/music/playback-progress [put]
+func (h *Handler) savePlaybackProgress(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var input SavePlaybackProgressRequest
+	if err := bindJSON(c, &input); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	progress, err := h.service.SavePlaybackProgress(user, input)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, progress)
+}
+
+// getPlaybackSession godoc
+// @Summary 获取跨端播放队列
+// @Tags music
+// @Produce json
+// @Success 200 {object} PlaybackSessionResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/music/playback-session [get]
+func (h *Handler) getPlaybackSession(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	session, err := h.service.GetPlaybackSession(user)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if session != nil {
+		for index := range session.Queue {
+			session.Queue[index].AudioURL = resolveMusicMediaURL(session.Queue[index].AudioURL)
+			session.Queue[index].CoverURL = resolveMusicMediaURL(session.Queue[index].CoverURL)
+			if session.Queue[index].Album != nil {
+				session.Queue[index].Album.CoverURL = resolveMusicMediaURL(session.Queue[index].Album.CoverURL)
+			}
+		}
+	}
+	httpx.OK(c, http.StatusOK, session)
+}
+
+// savePlaybackSession godoc
+// @Summary 保存跨端播放队列
+// @Tags music
+// @Accept json
+// @Produce json
+// @Security BearerAuth
+// @Security CookieAuth
+// @Param input body SavePlaybackSessionRequest true "播放队列"
+// @Success 200 {object} PlaybackSessionResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Router /api/v1/music/playback-session [put]
+func (h *Handler) savePlaybackSession(c *gin.Context) {
+	user, ok := currentMusicUser(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var input SavePlaybackSessionRequest
+	if err := bindJSON(c, &input); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	session, err := h.service.SavePlaybackSession(user, input)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, session)
+}
+
 // listListeningHistory godoc
 // @Summary 获取最近播放
 // @Description 返回当前用户最近播放的歌曲，每首歌曲保留最近时间和累计播放次数。

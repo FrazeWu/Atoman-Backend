@@ -435,6 +435,36 @@ func (MusicListeningHistory) TableName() string {
 	return "music_listening_histories"
 }
 
+type MusicPlaybackSession struct {
+	Base
+	UserID          uuid.UUID       `json:"user_id" gorm:"type:uuid;not null;uniqueIndex:idx_music_playback_sessions_user,where:deleted_at IS NULL"`
+	CurrentSongID   *uuid.UUID      `json:"current_song_id,omitempty" gorm:"type:uuid;index"`
+	QueueJSON       json.RawMessage `json:"-" gorm:"type:jsonb;not null;default:'[]'"`
+	PositionSeconds float64         `json:"position_seconds" gorm:"not null;default:0"`
+	PlaybackMode    string          `json:"playback_mode" gorm:"type:varchar(16);not null;default:'loop'"`
+	ReportedAt      time.Time       `json:"reported_at" gorm:"not null;default:CURRENT_TIMESTAMP;index"`
+}
+
+func (MusicPlaybackSession) TableName() string {
+	return "music_playback_sessions"
+}
+
+type MusicPlaybackProgress struct {
+	Base
+	UserID          uuid.UUID `json:"user_id" gorm:"type:uuid;not null;uniqueIndex:idx_music_playback_progress_user_song,priority:1,where:deleted_at IS NULL"`
+	SongID          uuid.UUID `json:"song_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_music_playback_progress_user_song,priority:2,where:deleted_at IS NULL"`
+	Song            *Song     `json:"song,omitempty" gorm:"foreignKey:SongID"`
+	PositionSeconds float64   `json:"position_seconds" gorm:"not null;default:0"`
+	DurationSeconds float64   `json:"duration_seconds" gorm:"not null;default:0"`
+	Completed       bool      `json:"completed" gorm:"not null;default:false"`
+	ReportedAt      time.Time `json:"reported_at" gorm:"not null;default:CURRENT_TIMESTAMP;index"`
+	UpdatedAt       time.Time `json:"updated_at" gorm:"not null;index:idx_music_playback_progress_user_updated,priority:2,sort:desc"`
+}
+
+func (MusicPlaybackProgress) TableName() string {
+	return "music_playback_progresses"
+}
+
 type MusicSearchInteraction struct {
 	Base
 	UserID     uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index"`
