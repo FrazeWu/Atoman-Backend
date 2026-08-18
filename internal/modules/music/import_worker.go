@@ -298,14 +298,14 @@ func (w *ImportWorker) Retry(ctx context.Context, jobID uuid.UUID, cause error) 
 }
 
 type importWorkerEvent struct {
-	event       string
-	job         model.AlbumImportJob
-	workerID    string
-	message     string
-	queueWait   time.Duration
-	duration    time.Duration
-	leaseAge    time.Duration
-	errorKind   string
+	event     string
+	job       model.AlbumImportJob
+	workerID  string
+	message   string
+	queueWait time.Duration
+	duration  time.Duration
+	leaseAge  time.Duration
+	errorKind string
 }
 
 var logMusicImportEventSink = func(entry importWorkerEvent) {
