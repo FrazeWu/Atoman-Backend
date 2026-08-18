@@ -66,6 +66,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			if err := tx.Save(&session).Error; err != nil {
 				return err
 			}
+			if err := queueSubmittedAlbumImportWhenUploadsComplete(tx, &session); err != nil {
+				return err
+			}
 			out = session
 			return nil
 		}

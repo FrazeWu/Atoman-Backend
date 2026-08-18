@@ -418,6 +418,35 @@ func TestCompleteLastAlbumImportFileQueuesEarlySubmission(t *testing.T) {
 	}
 }
 
+func TestCommitAlbumImportQueuesWhenFilesWereAlreadyUploaded(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{
+		albumImportFileInput("Album/01 - Intro.flac", 1024),
+	})
+	if err := db.Model(&model.AlbumImportFile{}).Where("id = ?", file.ID).Update("upload_status", AlbumImportFileUploadStatusUploaded).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	committed, err := svc.CommitAlbumImportSession(user, session.ID, CommitAlbumImportSessionInput{
+		Artist: AlbumImportArtistPayload{Name: "Folder Artist"},
+		Album:  AlbumImportAlbumPayload{Title: "Folder Album"},
+	})
+	if err != nil {
+		t.Fatalf("submit completed folder import: %v", err)
+	}
+	if committed.Status != AlbumImportStatusQueued || committed.Stage != AlbumImportStageQueued {
+		t.Fatalf("completed upload was not queued: %#v", committed)
+	}
+
+	var jobs int64
+	if err := db.Model(&model.AlbumImportJob{}).Where("import_id = ?", session.ID).Count(&jobs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if jobs != 1 {
+		t.Fatalf("expected one import job, got %d", jobs)
+	}
+}
+
 func TestCompleteAlbumImportSessionRequiresUploadedArchiveOrAudio(t *testing.T) {
 	tests := []struct {
 		name      string
