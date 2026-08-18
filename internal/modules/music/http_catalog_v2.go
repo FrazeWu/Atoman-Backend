@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type musicSearchResponse struct {
@@ -61,6 +62,7 @@ func (h *Handler) search(c *gin.Context) {
 	}
 	offset := httpx.Offset(page, pageSize)
 	pattern := "%" + query + "%"
+	prefix := query + "%"
 	typeFilter := strings.TrimSpace(c.Query("type"))
 	include := func(kind string) bool { return typeFilter == "" || typeFilter == kind }
 	result := newResult()
@@ -74,7 +76,9 @@ func (h *Handler) search(c *gin.Context) {
 				Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
 				Joins("LEFT JOIN song_artists ON song_artists.song_id = \"Songs\".id").
 				Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = song_artists.artist_id").
-				Where("LOWER(\"Songs\".title) LIKE LOWER(?) OR LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?)", pattern, pattern, pattern)
+				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
+				Joins("LEFT JOIN music_song_lyrics ON music_song_lyrics.song_id = \"Songs\".id AND music_song_lyrics.deleted_at IS NULL").
+				Where("LOWER(\"Songs\".title) LIKE LOWER(?) OR LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) OR LOWER(music_song_lyrics.content) LIKE LOWER(?) OR LOWER(music_song_lyrics.translation) LIKE LOWER(?)", pattern, pattern, pattern, pattern, pattern, pattern)
 		}
 		if err := songQuery().Distinct("\"Songs\".id").Count(&total).Error; err != nil {
 			httpx.Error(c, err)
@@ -82,7 +86,9 @@ func (h *Handler) search(c *gin.Context) {
 		}
 		result.Meta.Totals["song"] = total
 		if err := songQuery().
-			Distinct("\"Songs\".*").Preload("Album").Preload("Artists").Order("\"Songs\".play_count DESC, \"Songs\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Songs).Error; err != nil {
+			Distinct("\"Songs\".*").Preload("Album").Preload("Artists").
+			Order(clause.Expr{SQL: `CASE WHEN LOWER("Songs".title) = LOWER(?) THEN 0 WHEN LOWER("Songs".title) LIKE LOWER(?) THEN 1 WHEN LOWER("Albums".title) LIKE LOWER(?) OR LOWER("Artists".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 2 ELSE 3 END`, Vars: []any{query, prefix, prefix, prefix, prefix}}).
+			Order("\"Songs\".play_count DESC, \"Songs\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Songs).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -94,14 +100,20 @@ func (h *Handler) search(c *gin.Context) {
 	if include("album") {
 		var total int64
 		albumQuery := func() *gorm.DB {
-			return scopeVisibleMusicEntries(h.service.db.Model(&model.Album{}), "\"Albums\"", "uploaded_by", viewerPtr, false).Joins("LEFT JOIN album_artists ON album_artists.album_id = \"Albums\".id").Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = album_artists.artist_id").Where("LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?)", pattern, pattern)
+			return scopeVisibleMusicEntries(h.service.db.Model(&model.Album{}), "\"Albums\"", "uploaded_by", viewerPtr, false).
+				Joins("LEFT JOIN album_artists ON album_artists.album_id = \"Albums\".id").
+				Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = album_artists.artist_id").
+				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
+				Where("LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?)", pattern, pattern, pattern)
 		}
 		if err := albumQuery().Distinct("\"Albums\".id").Count(&total).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
 		result.Meta.Totals["album"] = total
-		if err := albumQuery().Distinct("\"Albums\".*").Preload("Artists").Preload("Songs", visibleSongPreload(viewerPtr)).Order("\"Albums\".hot_score DESC, \"Albums\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
+		if err := albumQuery().Distinct("\"Albums\".*").Preload("Artists").Preload("Songs", visibleSongPreload(viewerPtr)).
+			Order(clause.Expr{SQL: `CASE WHEN LOWER("Albums".title) = LOWER(?) THEN 0 WHEN LOWER("Albums".title) LIKE LOWER(?) THEN 1 ELSE 2 END`, Vars: []any{query, prefix}}).
+			Order("\"Albums\".hot_score DESC, \"Albums\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -112,14 +124,18 @@ func (h *Handler) search(c *gin.Context) {
 	if include("artist") {
 		var total int64
 		artistQuery := func() *gorm.DB {
-			return scopeVisibleMusicEntries(h.service.db.Model(&model.Artist{}), "\"Artists\"", "created_by", viewerPtr, false).Where("LOWER(name) LIKE LOWER(?) OR LOWER("+artistDisambiguationSearchExpression+") LIKE LOWER(?) OR LOWER(legal_name) LIKE LOWER(?)", pattern, pattern, pattern)
+			return scopeVisibleMusicEntries(h.service.db.Model(&model.Artist{}), "\"Artists\"", "created_by", viewerPtr, false).
+				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
+				Where("LOWER(\"Artists\".name) LIKE LOWER(?) OR LOWER("+artistDisambiguationSearchExpression+") LIKE LOWER(?) OR LOWER(\"Artists\".legal_name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?)", pattern, pattern, pattern, pattern)
 		}
 		if err := artistQuery().Count(&total).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
 		result.Meta.Totals["artist"] = total
-		if err := artistQuery().Order("name ASC").Limit(pageSize).Offset(offset).Find(&result.Artists).Error; err != nil {
+		if err := artistQuery().Distinct("\"Artists\".*").
+			Order(clause.Expr{SQL: `CASE WHEN LOWER("Artists".name) = LOWER(?) THEN 0 WHEN LOWER("Artists".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 1 ELSE 2 END`, Vars: []any{query, prefix, prefix}}).
+			Order("\"Artists\".name ASC").Limit(pageSize).Offset(offset).Find(&result.Artists).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -141,7 +157,7 @@ func (h *Handler) search(c *gin.Context) {
 			return
 		}
 		result.Meta.Totals["playlist"] = total
-		if err := playlistQuery().Order("updated_at DESC").Limit(pageSize).Offset(offset).Find(&result.Playlists).Error; err != nil {
+		if err := playlistQuery().Order(clause.Expr{SQL: `CASE WHEN LOWER(name) = LOWER(?) THEN 0 WHEN LOWER(name) LIKE LOWER(?) THEN 1 ELSE 2 END`, Vars: []any{query, prefix}}).Order("updated_at DESC").Limit(pageSize).Offset(offset).Find(&result.Playlists).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}

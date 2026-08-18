@@ -1,6 +1,8 @@
 package music
 
 import (
+	"encoding/json"
+	"errors"
 	"time"
 
 	"atoman/internal/model"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (s *Service) RecordSongPlay(userID *uuid.UUID, songID uuid.UUID) error {
@@ -36,6 +39,252 @@ func (s *Service) RecordSongPlay(userID *uuid.UUID, songID uuid.UUID) error {
 		}
 		return repo.RecordListeningHistory(*userID, songID, time.Now())
 	})
+}
+
+func normalizePlaybackReportedAt(reportedAt time.Time) (time.Time, error) {
+	now := time.Now().UTC()
+	if reportedAt.IsZero() {
+		return now, nil
+	}
+	reportedAt = reportedAt.UTC()
+	if reportedAt.After(now.Add(5 * time.Minute)) {
+		return time.Time{}, apperr.BadRequest("validation.invalid_request", "reported_at cannot be in the future")
+	}
+	return reportedAt, nil
+}
+
+func (s *Service) SavePlaybackProgress(user authctx.CurrentUser, input SavePlaybackProgressRequest) (model.MusicPlaybackProgress, error) {
+	if user.ID == uuid.Nil {
+		return model.MusicPlaybackProgress{}, apperr.Unauthorized("Login required")
+	}
+	if input.SongID == uuid.Nil || input.PositionSeconds < 0 || input.DurationSeconds < 0 {
+		return model.MusicPlaybackProgress{}, apperr.BadRequest("validation.invalid_request", "song_id and non-negative playback position are required")
+	}
+	reportedAt, err := normalizePlaybackReportedAt(input.ReportedAt)
+	if err != nil {
+		return model.MusicPlaybackProgress{}, err
+	}
+	if input.DurationSeconds > 0 && input.PositionSeconds > input.DurationSeconds {
+		input.PositionSeconds = input.DurationSeconds
+	}
+	if input.DurationSeconds > 0 && input.DurationSeconds-input.PositionSeconds <= 5 {
+		input.Completed = true
+		input.PositionSeconds = input.DurationSeconds
+	}
+
+	var count int64
+	if err := s.db.Model(&model.Song{}).
+		Where("id = ? AND lifecycle_status = ? AND audio_url <> ?", input.SongID, model.MusicLifecycleActive, "").
+		Count(&count).Error; err != nil {
+		return model.MusicPlaybackProgress{}, err
+	}
+	if count == 0 {
+		return model.MusicPlaybackProgress{}, apperr.NotFound("music.song_not_found", "Song not found")
+	}
+
+	var result model.MusicPlaybackProgress
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		var stored model.MusicPlaybackProgress
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND song_id = ?", user.ID, input.SongID).First(&stored).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			candidate := model.MusicPlaybackProgress{UserID: user.ID, SongID: input.SongID, PositionSeconds: input.PositionSeconds, DurationSeconds: input.DurationSeconds, Completed: input.Completed, ReportedAt: reportedAt}
+			create := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&candidate)
+			if create.Error != nil {
+				return create.Error
+			}
+			if create.RowsAffected > 0 {
+				result = candidate
+				return nil
+			}
+			err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND song_id = ?", user.ID, input.SongID).First(&stored).Error
+		}
+		if err != nil {
+			return err
+		}
+		if stored.ReportedAt.After(reportedAt) {
+			result = stored
+			return nil
+		}
+		if err := tx.Model(&stored).Updates(map[string]any{
+			"position_seconds": input.PositionSeconds,
+			"duration_seconds": input.DurationSeconds,
+			"completed":        input.Completed,
+			"reported_at":      reportedAt,
+		}).Error; err != nil {
+			return err
+		}
+		result = stored
+		result.PositionSeconds = input.PositionSeconds
+		result.DurationSeconds = input.DurationSeconds
+		result.Completed = input.Completed
+		result.ReportedAt = reportedAt
+		return nil
+	})
+	return result, err
+}
+
+func (s *Service) SavePlaybackSession(user authctx.CurrentUser, input SavePlaybackSessionRequest) (PlaybackSessionResponse, error) {
+	if user.ID == uuid.Nil {
+		return PlaybackSessionResponse{}, apperr.Unauthorized("Login required")
+	}
+	if len(input.SongIDs) == 0 || len(input.SongIDs) > 200 || input.CurrentSongID == uuid.Nil || input.PositionSeconds < 0 {
+		return PlaybackSessionResponse{}, apperr.BadRequest("validation.invalid_request", "a current song, non-negative position, and up to 200 queued songs are required")
+	}
+	if input.PlaybackMode != "loop" && input.PlaybackMode != "single" && input.PlaybackMode != "random" {
+		return PlaybackSessionResponse{}, apperr.BadRequest("validation.invalid_request", "invalid playback_mode")
+	}
+	reportedAt, err := normalizePlaybackReportedAt(input.ReportedAt)
+	if err != nil {
+		return PlaybackSessionResponse{}, err
+	}
+	seen := make(map[uuid.UUID]struct{}, len(input.SongIDs))
+	currentInQueue := false
+	for _, songID := range input.SongIDs {
+		if songID == uuid.Nil {
+			return PlaybackSessionResponse{}, apperr.BadRequest("validation.invalid_request", "song_ids must be valid UUIDs")
+		}
+		if _, exists := seen[songID]; exists {
+			return PlaybackSessionResponse{}, apperr.BadRequest("validation.invalid_request", "song_ids must not contain duplicates")
+		}
+		seen[songID] = struct{}{}
+		currentInQueue = currentInQueue || songID == input.CurrentSongID
+	}
+	if !currentInQueue {
+		return PlaybackSessionResponse{}, apperr.BadRequest("validation.invalid_request", "current_song_id must be in song_ids")
+	}
+
+	queue, err := s.loadPlaybackSessionQueue(input.SongIDs)
+	if err != nil {
+		return PlaybackSessionResponse{}, err
+	}
+	serialized, err := json.Marshal(input.SongIDs)
+	if err != nil {
+		return PlaybackSessionResponse{}, err
+	}
+	currentSongID := input.CurrentSongID
+	var stored model.MusicPlaybackSession
+	txErr := s.db.Transaction(func(tx *gorm.DB) error {
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", user.ID).First(&stored).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			candidate := model.MusicPlaybackSession{UserID: user.ID, CurrentSongID: &currentSongID, QueueJSON: serialized, PositionSeconds: input.PositionSeconds, PlaybackMode: input.PlaybackMode, ReportedAt: reportedAt}
+			create := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&candidate)
+			if create.Error != nil {
+				return create.Error
+			}
+			if create.RowsAffected > 0 {
+				stored = candidate
+				return nil
+			}
+			err = tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", user.ID).First(&stored).Error
+		}
+		if err != nil {
+			return err
+		}
+		if stored.ReportedAt.After(reportedAt) {
+			return nil
+		}
+		if err := tx.Model(&stored).Updates(map[string]any{
+			"current_song_id":  currentSongID,
+			"queue_json":       serialized,
+			"position_seconds": input.PositionSeconds,
+			"playback_mode":    input.PlaybackMode,
+			"reported_at":      reportedAt,
+		}).Error; err != nil {
+			return err
+		}
+		stored.CurrentSongID = &currentSongID
+		stored.QueueJSON = serialized
+		stored.PositionSeconds = input.PositionSeconds
+		stored.PlaybackMode = input.PlaybackMode
+		stored.ReportedAt = reportedAt
+		return nil
+	})
+	if txErr != nil {
+		return PlaybackSessionResponse{}, txErr
+	}
+	if stored.ReportedAt.After(reportedAt) {
+		queue, err = s.loadPlaybackSessionQueueFromStored(stored)
+		if err != nil {
+			return PlaybackSessionResponse{}, err
+		}
+	}
+	if stored.CurrentSongID == nil {
+		return PlaybackSessionResponse{}, apperr.NotFound("music.song_not_found", "Song not found")
+	}
+	return PlaybackSessionResponse{Queue: queue, CurrentSongID: *stored.CurrentSongID, PositionSeconds: stored.PositionSeconds, PlaybackMode: stored.PlaybackMode, UpdatedAt: stored.UpdatedAt}, nil
+}
+
+func (s *Service) GetPlaybackSession(user authctx.CurrentUser) (*PlaybackSessionResponse, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	var session model.MusicPlaybackSession
+	if err := s.db.Where("user_id = ?", user.ID).First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var songIDs []uuid.UUID
+	if err := json.Unmarshal(session.QueueJSON, &songIDs); err != nil || len(songIDs) == 0 || session.CurrentSongID == nil {
+		return nil, nil
+	}
+	queue, err := s.loadPlaybackSessionQueue(songIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, song := range queue {
+		if song.ID == *session.CurrentSongID {
+			return &PlaybackSessionResponse{Queue: queue, CurrentSongID: *session.CurrentSongID, PositionSeconds: session.PositionSeconds, PlaybackMode: session.PlaybackMode, UpdatedAt: session.UpdatedAt}, nil
+		}
+	}
+	return nil, nil
+}
+
+func (s *Service) loadPlaybackSessionQueueFromStored(session model.MusicPlaybackSession) ([]model.Song, error) {
+	var songIDs []uuid.UUID
+	if err := json.Unmarshal(session.QueueJSON, &songIDs); err != nil || len(songIDs) == 0 {
+		return nil, apperr.NotFound("music.song_not_found", "Song not found")
+	}
+	return s.loadPlaybackSessionQueue(songIDs)
+}
+
+func (s *Service) loadPlaybackSessionQueue(songIDs []uuid.UUID) ([]model.Song, error) {
+	var songs []model.Song
+	if err := s.db.Preload("Album").Preload("Artists").
+		Where("id IN ? AND lifecycle_status = ? AND audio_url <> ?", songIDs, model.MusicLifecycleActive, "").
+		Find(&songs).Error; err != nil {
+		return nil, err
+	}
+	if len(songs) != len(songIDs) {
+		return nil, apperr.NotFound("music.song_not_found", "Song not found")
+	}
+	byID := make(map[uuid.UUID]model.Song, len(songs))
+	for _, song := range songs {
+		byID[song.ID] = song
+	}
+	ordered := make([]model.Song, 0, len(songIDs))
+	for _, songID := range songIDs {
+		ordered = append(ordered, byID[songID])
+	}
+	return ordered, nil
+}
+
+func (s *Service) GetPlaybackProgress(user authctx.CurrentUser) (*model.MusicPlaybackProgress, error) {
+	if user.ID == uuid.Nil {
+		return nil, apperr.Unauthorized("Login required")
+	}
+	var progress model.MusicPlaybackProgress
+	err := s.db.Preload("Song.Album").Preload("Song.Artists").
+		Where("user_id = ? AND completed = ?", user.ID, false).
+		Order("updated_at DESC").First(&progress).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &progress, nil
 }
 
 func (s *Service) ListListeningHistory(user authctx.CurrentUser, page, pageSize int) ([]model.MusicListeningHistory, int64, error) {

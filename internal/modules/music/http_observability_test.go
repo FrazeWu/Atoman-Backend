@@ -7,6 +7,8 @@ func TestMusicOperationClassifiesObservedRoutes(t *testing.T) {
 		"/api/v1/music/search":                        "search",
 		"/api/v1/music/imports/albums/session/commit": "import",
 		"/api/v1/music/plays":                         "play",
+		"/api/v1/music/playback-progress":             "playback_progress",
+		"/api/v1/music/playback-session":              "playback_session",
 		"/api/v1/music/recommend/albums":              "recommend",
 		"/api/v1/music/albums":                        "",
 	}

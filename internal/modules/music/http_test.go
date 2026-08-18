@@ -41,6 +41,8 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.Playlist{},
 		&model.PlaylistSong{},
 		&model.MusicListeningHistory{},
+		&model.MusicPlaybackSession{},
+		&model.MusicPlaybackProgress{},
 		&model.MusicSearchInteraction{},
 		&model.AlbumImportSession{},
 		&model.MusicAssetUploadSession{},
@@ -364,6 +366,53 @@ func TestRegisterRoutesMusicSearchAndSongDetailHideNonPublicSongs(t *testing.T) 
 	}
 	detail := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/songs/"+draft.ID.String(), "")
 	assertMusicHTTPError(t, detail, http.StatusNotFound, "music.song_not_found")
+}
+
+func TestRegisterRoutesMusicSearchMatchesLyricsAndArtistAliases(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Primary Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	if err := db.Create(&model.ArtistAlias{ArtistID: artist.ID, Alias: "Needle Alias"}).Error; err != nil {
+		t.Fatalf("create artist alias: %v", err)
+	}
+	exact := model.Song{Title: "Needle", AudioURL: "/needle.mp3", Status: "open"}
+	prefix := model.Song{Title: "Needle Live", AudioURL: "/needle-live.mp3", Status: "open"}
+	lyrics := model.Song{Title: "Lyric Match", AudioURL: "/lyric-match.mp3", Status: "open"}
+	for _, song := range []*model.Song{&exact, &prefix, &lyrics} {
+		if err := db.Create(song).Error; err != nil {
+			t.Fatalf("create song: %v", err)
+		}
+		if err := db.Model(song).Association("Artists").Append(&artist); err != nil {
+			t.Fatalf("link song artist: %v", err)
+		}
+	}
+	if err := db.Create(&model.MusicSongLyric{SongID: lyrics.ID, Content: "a lyric contains the needle", UpdatedBy: user.ID}).Error; err != nil {
+		t.Fatalf("create lyrics: %v", err)
+	}
+	router := newMusicHTTPRouter(service, &user)
+
+	search := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/search?q=Needle&type=song", "")
+	if search.Code != http.StatusOK {
+		t.Fatalf("song search status = %d, body=%s", search.Code, search.Body.String())
+	}
+	var songs struct {
+		Data struct {
+			Songs []model.Song `json:"songs"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(search.Body.Bytes(), &songs); err != nil {
+		t.Fatalf("decode song search: %v", err)
+	}
+	if len(songs.Data.Songs) != 3 || songs.Data.Songs[0].ID != exact.ID || songs.Data.Songs[1].ID != prefix.ID {
+		t.Fatalf("expected exact then prefix song search order, got %#v", songs.Data.Songs)
+	}
+
+	aliasSearch := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/search?q=Needle+Alias", "")
+	if aliasSearch.Code != http.StatusOK || !strings.Contains(aliasSearch.Body.String(), artist.ID.String()) || !strings.Contains(aliasSearch.Body.String(), exact.ID.String()) {
+		t.Fatalf("artist alias search did not return related entities: %d %s", aliasSearch.Code, aliasSearch.Body.String())
+	}
 }
 
 func TestRegisterRoutesMusicLaterPlaylistRejectsMissingSong(t *testing.T) {
@@ -1416,6 +1465,65 @@ func TestRegisterRoutesMusicStatsUseRealCounts(t *testing.T) {
 	}
 	if albumDetailResp.Data.PlayCount != 12 || albumDetailResp.Data.BookmarkCount != 1 {
 		t.Fatalf("unexpected album stats response: %#v", albumDetailResp.Data)
+	}
+}
+
+func TestRegisterRoutesPlaybackProgressRoundTrip(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Resume Song", AudioURL: "/resume.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	router := newMusicHTTPRouter(service, &user)
+
+	save := performMusicJSONRequest(t, router, http.MethodPut, "/api/v1/music/playback-progress", `{"song_id":"`+song.ID.String()+`","position_seconds":42.5,"duration_seconds":180,"completed":false}`)
+	if save.Code != http.StatusOK {
+		t.Fatalf("save status = %d, body=%s", save.Code, save.Body.String())
+	}
+
+	load := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/playback-progress", "")
+	if load.Code != http.StatusOK {
+		t.Fatalf("load status = %d, body=%s", load.Code, load.Body.String())
+	}
+	var payload struct {
+		Data model.MusicPlaybackProgress `json:"data"`
+	}
+	if err := json.Unmarshal(load.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode playback progress: %v", err)
+	}
+	if payload.Data.SongID != song.ID || payload.Data.PositionSeconds != 42.5 || payload.Data.DurationSeconds != 180 || payload.Data.Completed || payload.Data.Song == nil || payload.Data.Song.ID != song.ID {
+		t.Fatalf("unexpected playback progress: %#v", payload.Data)
+	}
+}
+
+func TestRegisterRoutesPlaybackSessionRoundTrip(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	first := model.Song{Title: "First Queue Song", AudioURL: "/first.mp3", Status: "open"}
+	second := model.Song{Title: "Second Queue Song", AudioURL: "/second.mp3", Status: "open"}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("create first song: %v", err)
+	}
+	if err := db.Create(&second).Error; err != nil {
+		t.Fatalf("create second song: %v", err)
+	}
+	router := newMusicHTTPRouter(service, &user)
+	body := `{"song_ids":["` + second.ID.String() + `","` + first.ID.String() + `"],"current_song_id":"` + first.ID.String() + `","position_seconds":23,"playback_mode":"random"}`
+	save := performMusicJSONRequest(t, router, http.MethodPut, "/api/v1/music/playback-session", body)
+	if save.Code != http.StatusOK {
+		t.Fatalf("save session status = %d, body=%s", save.Code, save.Body.String())
+	}
+	load := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/playback-session", "")
+	if load.Code != http.StatusOK {
+		t.Fatalf("load session status = %d, body=%s", load.Code, load.Body.String())
+	}
+	var payload struct {
+		Data PlaybackSessionResponse `json:"data"`
+	}
+	if err := json.Unmarshal(load.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode playback session: %v", err)
+	}
+	if payload.Data.CurrentSongID != first.ID || payload.Data.PositionSeconds != 23 || payload.Data.PlaybackMode != "random" || len(payload.Data.Queue) != 2 || payload.Data.Queue[0].ID != second.ID || payload.Data.Queue[1].ID != first.ID {
+		t.Fatalf("unexpected playback session: %#v", payload.Data)
 	}
 }
 
@@ -3371,6 +3479,9 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 	if err := service.RecordSongPlay(&user.ID, playedSong.ID); err != nil {
 		t.Fatalf("record play: %v", err)
 	}
+	if _, err := service.SavePlaybackProgress(user, SavePlaybackProgressRequest{SongID: playedSong.ID, PositionSeconds: 42.5, DurationSeconds: 180}); err != nil {
+		t.Fatalf("save playback progress: %v", err)
+	}
 
 	router := newMusicHTTPRouter(service, &user)
 	response := performMusicJSONRequest(t, router, http.MethodGet, "/api/v1/music/home", "")
@@ -3381,7 +3492,8 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 		Data struct {
 			Personalized      bool `json:"personalized"`
 			ContinueListening *struct {
-				Song struct {
+				PositionSeconds float64 `json:"position_seconds"`
+				Song            struct {
 					ID string `json:"id"`
 				} `json:"song"`
 			} `json:"continue_listening"`
@@ -3402,7 +3514,7 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 	if !body.Data.Personalized {
 		t.Fatal("expected home to be personalized after a recorded play")
 	}
-	if body.Data.ContinueListening == nil || body.Data.ContinueListening.Song.ID != playedSong.ID.String() || len(body.Data.RecentlyPlayed) != 0 {
+	if body.Data.ContinueListening == nil || body.Data.ContinueListening.Song.ID != playedSong.ID.String() || body.Data.ContinueListening.PositionSeconds != 42.5 || len(body.Data.RecentlyPlayed) != 0 {
 		t.Fatalf("unexpected continue/recent plays: %#v %#v", body.Data.ContinueListening, body.Data.RecentlyPlayed)
 	}
 	if len(body.Data.ForYou) != 1 || body.Data.ForYou[0].ID != candidateAlbum.ID.String() {
@@ -3410,6 +3522,70 @@ func TestRegisterRoutesMusicHomeUsesHistoryForUnheardAlbumRecommendations(t *tes
 	}
 	if body.Data.ForYou[0].Reason == "" {
 		t.Fatalf("expected an item-level recommendation reason, got %#v", body.Data.ForYou[0])
+	}
+}
+
+func TestSavePlaybackProgressCompletesNearSongEnd(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Almost Finished", AudioURL: "/almost-finished.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	progress, err := service.SavePlaybackProgress(user, SavePlaybackProgressRequest{SongID: song.ID, PositionSeconds: 178, DurationSeconds: 180})
+	if err != nil {
+		t.Fatalf("save playback progress: %v", err)
+	}
+	if !progress.Completed || progress.PositionSeconds != 180 {
+		t.Fatalf("expected completed progress at song end, got %#v", progress)
+	}
+	resumable, err := service.GetPlaybackProgress(user)
+	if err != nil {
+		t.Fatalf("get playback progress: %v", err)
+	}
+	if resumable != nil {
+		t.Fatalf("completed progress should not be resumable: %#v", resumable)
+	}
+}
+
+func TestSavePlaybackProgressIgnoresStaleDeviceReport(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Stale Progress Song", AudioURL: "/stale.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	newer := time.Now().UTC().Add(-time.Minute)
+	if _, err := service.SavePlaybackProgress(user, SavePlaybackProgressRequest{SongID: song.ID, PositionSeconds: 80, DurationSeconds: 180, ReportedAt: newer}); err != nil {
+		t.Fatalf("save newer progress: %v", err)
+	}
+	stored, err := service.SavePlaybackProgress(user, SavePlaybackProgressRequest{SongID: song.ID, PositionSeconds: 20, DurationSeconds: 180, ReportedAt: newer.Add(-time.Minute)})
+	if err != nil {
+		t.Fatalf("save stale progress: %v", err)
+	}
+	if stored.PositionSeconds != 80 || !stored.ReportedAt.Equal(newer) {
+		t.Fatalf("stale progress overwrote newer state: %#v", stored)
+	}
+}
+
+func TestSavePlaybackSessionIgnoresStaleDeviceReport(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	first := model.Song{Title: "Session First", AudioURL: "/session-first.mp3", Status: "open"}
+	second := model.Song{Title: "Session Second", AudioURL: "/session-second.mp3", Status: "open"}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("create first song: %v", err)
+	}
+	if err := db.Create(&second).Error; err != nil {
+		t.Fatalf("create second song: %v", err)
+	}
+	newer := time.Now().UTC().Add(-time.Minute)
+	if _, err := service.SavePlaybackSession(user, SavePlaybackSessionRequest{SongIDs: []uuid.UUID{first.ID, second.ID}, CurrentSongID: second.ID, PositionSeconds: 55, PlaybackMode: "random", ReportedAt: newer}); err != nil {
+		t.Fatalf("save newer session: %v", err)
+	}
+	stored, err := service.SavePlaybackSession(user, SavePlaybackSessionRequest{SongIDs: []uuid.UUID{second.ID, first.ID}, CurrentSongID: first.ID, PositionSeconds: 5, PlaybackMode: "loop", ReportedAt: newer.Add(-time.Minute)})
+	if err != nil {
+		t.Fatalf("save stale session: %v", err)
+	}
+	if stored.CurrentSongID != second.ID || stored.PositionSeconds != 55 || stored.PlaybackMode != "random" || len(stored.Queue) != 2 || stored.Queue[0].ID != first.ID {
+		t.Fatalf("stale session overwrote newer state: %#v", stored)
 	}
 }
 
