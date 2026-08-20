@@ -754,7 +754,7 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 		httpx.Error(c, err)
 		return
 	}
-	if post.UserID != user.ID {
+	if post.UserID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
 		httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to modify this post"))
 		return
 	}

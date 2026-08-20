@@ -2100,6 +2100,32 @@ func TestRegisterRoutesUnpublishPostUpdatesStatus(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesAdminCanUnpublishAnotherUsersPost(t *testing.T) {
+	service, db, author := newBlogHTTPTestService(t)
+	channel, _ := createOwnedChannelAndCollection(t, service, author, "Author")
+	post := createPostRecord(t, db, author.ID, &channel.ID, "Moderated post", "published")
+	admin := model.User{Username: "blog-admin", Email: "blog-admin@example.com", Password: "hash", Role: authctx.RoleAdmin, IsActive: true}
+	if err := db.Create(&admin).Error; err != nil {
+		t.Fatalf("create admin: %v", err)
+	}
+
+	r := newBlogHTTPRouter(service, &authctx.CurrentUser{ID: admin.UUID, Username: admin.Username, Role: admin.Role})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/unpublish", nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updated model.Post
+	if err := db.First(&updated, "id = ?", post.ID).Error; err != nil {
+		t.Fatalf("reload post: %v", err)
+	}
+	if updated.Status != "draft" {
+		t.Fatalf("expected draft, got %s", updated.Status)
+	}
+}
+
 func TestRegisterRoutesPinPostUpdatesPinnedState(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, _ := createOwnedChannelAndCollection(t, service, user, "Alice")
