@@ -13938,6 +13938,57 @@
                 }
             }
         },
+        "/api/v1/music/songs": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "获取歌曲列表",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "艺术家 ID",
+                        "name": "artist_id",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "-release_date",
+                            "release_date",
+                            "hot"
+                        ],
+                        "type": "string",
+                        "description": "排序方式",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/songs/{songId}": {
             "get": {
                 "produces": [

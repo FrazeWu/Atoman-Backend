@@ -134,6 +134,10 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if coverURL == "" || strings.TrimSpace(payload.Album.ReleaseDate) == "" || len(payload.Album.Tracks) == 0 {
 			return apperr.BadRequest("validation.invalid_request", "album cover, release date and at least one track are required")
 		}
+		albumType := strings.ToLower(strings.TrimSpace(payload.Album.AlbumType))
+		if (albumType == "single" || albumType == "leak") && len(payload.Album.Tracks) != 1 {
+			return apperr.BadRequest("validation.invalid_request", "single and leak releases must contain exactly one track")
+		}
 
 		album := model.Album{
 			Title:           strings.TrimSpace(payload.Album.Title),

@@ -31,6 +31,64 @@ type musicSearchMeta struct {
 	HasMore  map[string]bool  `json:"has_more"`
 }
 
+// listSongs godoc
+// @Summary 获取歌曲列表
+// @Tags music
+// @Produce json
+// @Param artist_id query string false "艺术家 ID"
+// @Param sort query string false "排序方式" Enums(-release_date,release_date,hot)
+// @Param page query int false "页码"
+// @Param page_size query int false "每页数量"
+// @Success 200 {object} map[string]interface{}
+// @Router /api/v1/music/songs [get]
+func (h *Handler) listSongs(c *gin.Context) {
+	page, pageSize := httpx.PageParams(c)
+	viewer, hasViewer := currentMusicUser(c)
+	viewerPtr := musicViewer(viewer, hasViewer)
+	query := scopeVisibleMusicEntries(h.service.db.Model(&model.Song{}), "\"Songs\"", "uploaded_by", viewerPtr, false)
+
+	if rawArtistID := strings.TrimSpace(c.Query("artist_id")); rawArtistID != "" {
+		artistID, err := parseMusicID(rawArtistID, "artist_id")
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		query = query.Joins("JOIN song_artists AS filter_song_artists ON filter_song_artists.song_id = \"Songs\".id").Where("filter_song_artists.artist_id = ?", artistID)
+	}
+
+	var total int64
+	if err := query.Distinct("\"Songs\".id").Count(&total).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+
+	order := "\"Songs\".created_at DESC"
+	switch strings.TrimSpace(c.Query("sort")) {
+	case "release_date":
+		order = "\"Albums\".release_date ASC, \"Songs\".track_number ASC"
+	case "hot":
+		order = "\"Songs\".play_count DESC, \"Songs\".created_at DESC"
+	default:
+		order = "\"Albums\".release_date DESC, \"Songs\".track_number ASC"
+	}
+
+	var songs []model.Song
+	if err := query.Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").Distinct("\"Songs\".*").
+		Preload("Album").Preload("Artists").Order(order).Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&songs).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	for i := range songs {
+		songs[i].AudioURL = resolveMusicMediaURL(songs[i].AudioURL)
+		songs[i].CoverURL = resolveMusicMediaURL(songs[i].CoverURL)
+		if songs[i].Album != nil {
+			resolveAlbumMediaURLs(songs[i].Album)
+		}
+	}
+	httpx.List(c, songs, page, pageSize, total)
+}
+
+// recordSearchInteractionRequest stores a completed music search selection.
 type recordSearchInteractionRequest struct {
 	Query      string    `json:"query"`
 	EntityType string    `json:"entity_type" binding:"required"`

@@ -65,6 +65,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/artists/:artistId/album-link-suggestions", h.albumLinkSuggestions)
 	group.GET("/artists/:artistId", h.getArtist)
 	group.GET("/albums", h.listAlbums)
+	group.GET("/songs", h.listSongs)
 	group.GET("/albums/:albumId", h.getAlbum)
 	group.GET("/songs/:songId", h.getSongDetail)
 	group.POST("/songs/:songId/audio-replacements", h.createSongAudioReplacement)

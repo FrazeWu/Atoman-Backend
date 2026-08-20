@@ -15653,6 +15653,40 @@ paths:
       summary: 记录音乐搜索点击
       tags:
       - music
+  /api/v1/music/songs:
+    get:
+      parameters:
+      - description: 艺术家 ID
+        in: query
+        name: artist_id
+        type: string
+      - description: 排序方式
+        enum:
+        - -release_date
+        - release_date
+        - hot
+        in: query
+        name: sort
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: page_size
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 获取歌曲列表
+      tags:
+      - music
   /api/v1/music/songs/{songId}:
     get:
       parameters:
