@@ -2,13 +2,12 @@ package music
 
 import (
 	"sort"
-	"strings"
 
 	"atoman/internal/model"
-	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const (
@@ -23,37 +22,11 @@ type homeAlbumCandidate struct {
 	score float64
 }
 
-func (s *Service) Home(user *authctx.CurrentUser, discoverPage, discoverPageSize int) (HomeResponse, error) {
-	discoverPage, discoverPageSize = normalizeMusicRecommendationPage(discoverPage, discoverPageSize)
+func (s *Service) Home(user *authctx.CurrentUser) (HomeResponse, error) {
 	response := HomeResponse{
 		RecentlyPlayed: []model.MusicListeningHistory{},
 		ForYou:         []HomeAlbumRecommendation{},
-		Sections:       []MusicHomeSection{},
-		Discover:       []DiscoverItemResponse{},
 	}
-	sections, err := s.homePublicSections()
-	if err != nil {
-		return response, err
-	}
-	response.Sections = sections
-	discover, total, err := s.Discover(recommendation.ModeHot, discoverPage, discoverPageSize)
-	if err != nil {
-		return response, err
-	}
-	for index := range discover {
-		discover[index].Section = discover[index].Type
-		switch discover[index].Type {
-		case "album":
-			discover[index].Reason = "近期热门专辑"
-		case "artist":
-			discover[index].Reason = "近期热门艺人"
-		case "playlist":
-			discover[index].Reason = "最新公开歌单"
-		}
-	}
-	response.Discover = discover
-	response.DiscoverMore = int64(discoverPage*discoverPageSize) < total
-	response.DiscoverMeta = PaginationMetaResponse{Page: discoverPage, PageSize: discoverPageSize, Total: total, HasMore: response.DiscoverMore}
 	if user == nil || user.ID == uuid.Nil {
 		return response, nil
 	}
@@ -92,45 +65,6 @@ func (s *Service) Home(user *authctx.CurrentUser, discoverPage, discoverPageSize
 		response.ForYouReason = "基于播放、收藏、歌单和搜索记录"
 	}
 	return response, err
-}
-
-func (s *Service) homePublicSections() ([]MusicHomeSection, error) {
-	specs := []struct {
-		key, title, order string
-	}{
-		{key: "hot", title: "热门", order: "hot_score DESC, play_count DESC, title ASC"},
-		{key: "latest", title: "最新入库", order: "created_at DESC, title ASC"},
-		{key: "random", title: "随机发现", order: "RANDOM()"},
-	}
-	sections := make([]MusicHomeSection, 0, len(specs))
-	for _, spec := range specs {
-		var albums []model.Album
-		if err := s.db.Where("lifecycle_status = ?", model.MusicLifecycleActive).
-			Preload("Artists").Preload("Songs", "lifecycle_status = ?", model.MusicLifecycleActive).Order(spec.order).Limit(32).Find(&albums).Error; err != nil {
-			return nil, err
-		}
-		visible := make([]model.Album, 0, musicHomeForYouLimit)
-		for _, album := range albums {
-			if !isDiscoverableHomeAlbum(album) {
-				continue
-			}
-			visible = append(visible, album)
-			if len(visible) == musicHomeForYouLimit {
-				break
-			}
-		}
-		if len(visible) == 0 {
-			continue
-		}
-		if err := hydrateAlbumStats(s.db, visible); err != nil {
-			return nil, err
-		}
-		for index := range visible {
-			resolveAlbumMediaURLs(&visible[index])
-		}
-		sections = append(sections, MusicHomeSection{Key: spec.key, Title: spec.title, Albums: visible})
-	}
-	return sections, nil
 }
 
 func (s *Service) homeAffinity(userID uuid.UUID, history []model.MusicListeningHistory) (map[uuid.UUID]float64, map[uuid.UUID]struct{}, map[uuid.UUID]struct{}, error) {
@@ -291,7 +225,9 @@ func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums
 
 	var albums []model.Album
 	if err := query.Distinct("\"Albums\".*").
-		Preload("Artists").
+		Preload("Artists", func(db *gorm.DB) *gorm.DB {
+			return db.Select("id", "name")
+		}).
 		Order("\"Albums\".hot_score DESC, \"Albums\".release_date DESC").
 		Limit(musicHomeCandidateLimit).
 		Find(&albums).Error; err != nil {
@@ -342,7 +278,11 @@ func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums
 			selectedIDs = append(selectedIDs, album.ID)
 		}
 		var hydrated []model.Album
-		if err := s.db.Where("id IN ? AND lifecycle_status = ?", selectedIDs, model.MusicLifecycleActive).Preload("Artists").Preload("Songs", "lifecycle_status = ?", model.MusicLifecycleActive).Find(&hydrated).Error; err != nil {
+		if err := s.db.Where("id IN ? AND lifecycle_status = ?", selectedIDs, model.MusicLifecycleActive).
+			Preload("Artists", func(db *gorm.DB) *gorm.DB {
+				return db.Select("id", "name")
+			}).
+			Find(&hydrated).Error; err != nil {
 			return nil, err
 		}
 		byID := make(map[uuid.UUID]model.Album, len(hydrated))
@@ -372,9 +312,44 @@ func (s *Service) recommendHomeAlbums(affinity map[uuid.UUID]float64, seenAlbums
 		if strongestArtist != nil {
 			reason = "基于你与 " + strongestArtist.Name + " 相关的记录"
 		}
-		results = append(results, HomeAlbumRecommendation{Album: selectedAlbums[index], Reason: reason})
+		results = append(results, homeAlbumRecommendation(selectedAlbums[index], reason))
 	}
 	return results, nil
+}
+
+func homeAlbumRecommendation(album model.Album, reason string) HomeAlbumRecommendation {
+	year := album.Year
+	if year == 0 {
+		year = album.ReleaseYear
+	}
+	if year == 0 && !album.ReleaseDate.IsZero() {
+		year = album.ReleaseDate.Year()
+	}
+
+	artists := make([]HomeAlbumArtist, 0, len(album.Artists))
+	for _, artist := range album.Artists {
+		artists = append(artists, HomeAlbumArtist{ID: artist.ID, Name: artist.Name})
+	}
+
+	recommendation := HomeAlbumRecommendation{
+		ID:                   album.ID,
+		Title:                album.Title,
+		CoverURL:             resolveMusicMediaURL(album.CoverURL),
+		Status:               album.Status,
+		EntryStatus:          album.EntryStatus,
+		Year:                 year,
+		ReleaseDatePrecision: album.ReleaseDatePrecision,
+		AlbumType:            album.AlbumType,
+		Artists:              artists,
+		PlayCount:            album.PlayCount,
+		BookmarkCount:        album.BookmarkCount,
+		SongCount:            album.SongCount,
+		Reason:               reason,
+	}
+	if !album.ReleaseDate.IsZero() {
+		recommendation.ReleaseDate = album.ReleaseDate.Format("2006-01-02")
+	}
+	return recommendation
 }
 
 func homeUUIDs(ids map[uuid.UUID]struct{}) []uuid.UUID {
@@ -383,16 +358,4 @@ func homeUUIDs(ids map[uuid.UUID]struct{}) []uuid.UUID {
 		values = append(values, id)
 	}
 	return values
-}
-
-func isDiscoverableHomeAlbum(album model.Album) bool {
-	if strings.TrimSpace(album.CoverURL) == "" {
-		return false
-	}
-	for _, song := range album.Songs {
-		if strings.TrimSpace(song.AudioURL) != "" {
-			return true
-		}
-	}
-	return false
 }

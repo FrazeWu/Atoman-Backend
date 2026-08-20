@@ -7508,6 +7508,76 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/items/{id}/content-feedback": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "提交当前订阅正文的缺失、排版、图片或噪声问题；同一用户的同类反馈幂等。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "反馈订阅正文质量",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Feed item UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "正文质量反馈",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/feed.ContentFeedbackInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/feed/opml/export": {
             "get": {
                 "security": [
@@ -11477,6 +11547,47 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/artists/{artistId}/album-link-suggestions": {
+            "get": {
+                "description": "根据艺术家的 MusicBrainz 来源识别已收录的专辑，并返回目录外发行作为参考。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "获取关联专辑建议",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "艺术家 ID",
+                        "name": "artistId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.AlbumLinkSuggestionResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/bookmarks/albums": {
             "get": {
                 "security": [
@@ -11865,28 +11976,14 @@ const docTemplate = `{
         },
         "/api/v1/music/home": {
             "get": {
-                "description": "登录用户返回最近播放和基于播放/收藏艺术家的未接触专辑；其他用户返回非个性化结果。",
+                "description": "登录用户返回最近播放、续播和基于播放与收藏记录的推荐；访客返回空的个性化内容。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "music"
                 ],
-                "summary": "获取音乐首页内容",
-                "parameters": [
-                    {
-                        "type": "integer",
-                        "description": "发现页码",
-                        "name": "page",
-                        "in": "query"
-                    },
-                    {
-                        "type": "integer",
-                        "description": "发现每页数量",
-                        "name": "page_size",
-                        "in": "query"
-                    }
-                ],
+                "summary": "获取个性化音乐首页内容",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -22524,6 +22621,20 @@ const docTemplate = `{
                 }
             }
         },
+        "feed.ContentFeedbackInput": {
+            "type": "object",
+            "properties": {
+                "kind": {
+                    "type": "string",
+                    "enum": [
+                        "missing",
+                        "layout",
+                        "image",
+                        "noise"
+                    ]
+                }
+            }
+        },
         "feed.ErrorResponse": {
             "type": "object",
             "properties": {
@@ -26572,6 +26683,12 @@ const docTemplate = `{
                 "author": {
                     "type": "string"
                 },
+                "content_html": {
+                    "type": "string"
+                },
+                "content_source": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -26614,9 +26731,6 @@ const docTemplate = `{
                 "full_text_attempt_count": {
                     "type": "integer"
                 },
-                "full_text_error": {
-                    "type": "string"
-                },
                 "full_text_error_code": {
                     "type": "string"
                 },
@@ -26656,6 +26770,18 @@ const docTemplate = `{
                 "published_at": {
                     "type": "string"
                 },
+                "reader_quality_flags": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "reader_quality_score": {
+                    "type": "integer"
+                },
+                "reader_version": {
+                    "type": "integer"
+                },
                 "summary": {
                     "type": "string"
                 },
@@ -26681,6 +26807,9 @@ const docTemplate = `{
                 },
                 "created_at": {
                     "type": "string"
+                },
+                "full_text_consecutive_failure_count": {
+                    "type": "integer"
                 },
                 "full_text_enabled": {
                     "type": "boolean"
@@ -28724,6 +28853,43 @@ const docTemplate = `{
                 }
             }
         },
+        "music.AlbumLinkSuggestion": {
+            "type": "object",
+            "properties": {
+                "album": {
+                    "$ref": "#/definitions/model.Album"
+                },
+                "already_linked": {
+                    "type": "boolean"
+                },
+                "match_kind": {
+                    "type": "string"
+                },
+                "musicbrainz": {
+                    "$ref": "#/definitions/music.MusicBrainzReleaseCandidate"
+                }
+            }
+        },
+        "music.AlbumLinkSuggestionResponse": {
+            "type": "object",
+            "properties": {
+                "external_only": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.MusicBrainzReleaseCandidate"
+                    }
+                },
+                "local_matches": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumLinkSuggestion"
+                    }
+                },
+                "metadata_status": {
+                    "type": "string"
+                }
+            }
+        },
         "music.AlbumMergePreviewResponse": {
             "type": "object",
             "properties": {
@@ -29130,82 +29296,6 @@ const docTemplate = `{
                 }
             }
         },
-        "music.DiscoverItemResponse": {
-            "type": "object",
-            "properties": {
-                "artists": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "id": {
-                                "type": "string"
-                            },
-                            "name": {
-                                "type": "string"
-                            }
-                        }
-                    }
-                },
-                "bio": {
-                    "type": "string"
-                },
-                "bookmark_count": {
-                    "type": "integer"
-                },
-                "cover_url": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "image_url": {
-                    "type": "string"
-                },
-                "legal_name": {
-                    "type": "string"
-                },
-                "name": {
-                    "type": "string"
-                },
-                "owner_user_id": {
-                    "type": "string"
-                },
-                "play_count": {
-                    "type": "integer"
-                },
-                "reason": {
-                    "type": "string"
-                },
-                "release_date": {
-                    "type": "string"
-                },
-                "section": {
-                    "type": "string"
-                },
-                "song_count": {
-                    "type": "integer"
-                },
-                "summary": {
-                    "type": "string"
-                },
-                "target_path": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "type": {
-                    "type": "string"
-                },
-                "year": {
-                    "type": "integer"
-                }
-            }
-        },
         "music.EmergencyMusicStateInput": {
             "type": "object",
             "properties": {
@@ -29217,73 +29307,45 @@ const docTemplate = `{
                 }
             }
         },
+        "music.HomeAlbumArtist": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
         "music.HomeAlbumRecommendation": {
             "type": "object",
             "properties": {
                 "album_type": {
                     "type": "string"
                 },
-                "artist_credits": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.AlbumArtist"
-                    }
-                },
                 "artists": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.Artist"
+                        "$ref": "#/definitions/music.HomeAlbumArtist"
                     }
                 },
                 "bookmark_count": {
                     "type": "integer"
                 },
-                "canonical_album_id": {
-                    "type": "string"
-                },
-                "cover_source": {
-                    "type": "string"
-                },
                 "cover_url": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "description": {
-                    "type": "string"
-                },
-                "edit_status": {
-                    "type": "string"
-                },
-                "edition_type": {
                     "type": "string"
                 },
                 "entry_status": {
                     "type": "string"
                 },
-                "hot_score": {
-                    "type": "number"
-                },
                 "id": {
                     "type": "string"
-                },
-                "lifecycle_status": {
-                    "type": "string"
-                },
-                "other_versions": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.Album"
-                    }
                 },
                 "play_count": {
                     "type": "integer"
                 },
                 "reason": {
-                    "type": "string"
-                },
-                "redirect_to": {
                     "type": "string"
                 },
                 "release_date": {
@@ -29292,38 +29354,14 @@ const docTemplate = `{
                 "release_date_precision": {
                     "type": "string"
                 },
-                "release_year": {
-                    "type": "integer"
-                },
                 "song_count": {
                     "type": "integer"
-                },
-                "songs": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.Song"
-                    }
-                },
-                "sources": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/model.MusicSource"
-                    }
                 },
                 "status": {
                     "type": "string"
                 },
                 "title": {
                     "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "uploaded_by": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
                 },
                 "year": {
                     "type": "integer"
@@ -29335,18 +29373,6 @@ const docTemplate = `{
             "properties": {
                 "continue_listening": {
                     "$ref": "#/definitions/model.MusicPlaybackProgress"
-                },
-                "discover": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/music.DiscoverItemResponse"
-                    }
-                },
-                "discover_has_more": {
-                    "type": "boolean"
-                },
-                "discover_meta": {
-                    "$ref": "#/definitions/music.PaginationMetaResponse"
                 },
                 "for_you": {
                     "type": "array",
@@ -29364,12 +29390,6 @@ const docTemplate = `{
                     "type": "array",
                     "items": {
                         "$ref": "#/definitions/model.MusicListeningHistory"
-                    }
-                },
-                "sections": {
-                    "type": "array",
-                    "items": {
-                        "$ref": "#/definitions/music.MusicHomeSection"
                     }
                 }
             }
@@ -29476,16 +29496,25 @@ const docTemplate = `{
                 }
             }
         },
-        "music.MusicHomeSection": {
+        "music.MusicBrainzReleaseCandidate": {
             "type": "object",
             "properties": {
-                "albums": {
+                "artist_names": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.Album"
+                        "type": "string"
                     }
                 },
-                "key": {
+                "release_date": {
+                    "type": "string"
+                },
+                "release_group_id": {
+                    "type": "string"
+                },
+                "release_id": {
+                    "type": "string"
+                },
+                "source_url": {
                     "type": "string"
                 },
                 "title": {

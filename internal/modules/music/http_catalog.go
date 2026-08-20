@@ -817,12 +817,10 @@ func (h *Handler) clearListeningHistory(c *gin.Context) {
 }
 
 // home godoc
-// @Summary 获取音乐首页内容
-// @Description 登录用户返回最近播放和基于播放/收藏艺术家的未接触专辑；其他用户返回非个性化结果。
+// @Summary 获取个性化音乐首页内容
+// @Description 登录用户返回最近播放、续播和基于播放与收藏记录的推荐；访客返回空的个性化内容。
 // @Tags music
 // @Produce json
-// @Param page query int false "发现页码"
-// @Param page_size query int false "发现每页数量"
 // @Success 200 {object} HomeResponse
 // @Router /api/v1/music/home [get]
 func (h *Handler) home(c *gin.Context) {
@@ -830,8 +828,7 @@ func (h *Handler) home(c *gin.Context) {
 	if current, ok := authctx.Current(c); ok {
 		user = &current
 	}
-	page, pageSize := httpx.PageParams(c)
-	response, err := h.service.Home(user, page, pageSize)
+	response, err := h.service.Home(user)
 	if err != nil {
 		httpx.Error(c, err)
 		return

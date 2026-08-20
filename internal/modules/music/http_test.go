@@ -3175,7 +3175,7 @@ func createMusicPlaylistViaAPI(t *testing.T, router *gin.Engine, body string) st
 	return resp.Data
 }
 
-func TestRegisterRoutesMusicHomeReturnsMixedDiscoverItems(t *testing.T) {
+func TestRegisterRoutesMusicHomeOmitsPublicDiscoveryPayload(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 
 	artist := model.Artist{
@@ -3242,41 +3242,15 @@ func TestRegisterRoutesMusicHomeReturnsMixedDiscoverItems(t *testing.T) {
 	}
 
 	var resp struct {
-		Data struct {
-			Discover []struct {
-				Type          string `json:"type"`
-				ID            string `json:"id"`
-				Title         string `json:"title"`
-				Summary       string `json:"summary"`
-				ImageURL      string `json:"image_url"`
-				TargetPath    string `json:"target_path"`
-				PlayCount     int64  `json:"play_count"`
-				BookmarkCount int64  `json:"bookmark_count"`
-				SongCount     int64  `json:"song_count"`
-				OwnerUserID   string `json:"owner_user_id"`
-			} `json:"discover"`
-		} `json:"data"`
+		Data map[string]json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode discover response: %v", err)
+		t.Fatalf("decode music home response: %v", err)
 	}
-	if len(resp.Data.Discover) < 3 {
-		t.Fatalf("expected at least 3 discover items, got %#v", resp.Data.Discover)
-	}
-	wantTypes := []string{"album", "artist", "playlist"}
-	for i, want := range wantTypes {
-		if resp.Data.Discover[i].Type != want {
-			t.Fatalf("expected discover type order %v, got %#v", wantTypes, resp.Data.Discover[:3])
+	for _, field := range []string{"sections", "discover", "discover_has_more", "discover_meta"} {
+		if _, exists := resp.Data[field]; exists {
+			t.Fatalf("music home should not include %q: %#v", field, resp.Data)
 		}
-	}
-	if resp.Data.Discover[0].PlayCount != 3 || resp.Data.Discover[0].BookmarkCount != 1 {
-		t.Fatalf("expected album discover item stats to be present, got %#v", resp.Data.Discover[0])
-	}
-	if resp.Data.Discover[1].PlayCount != 3 || resp.Data.Discover[1].BookmarkCount != 1 {
-		t.Fatalf("expected artist discover item stats to be present, got %#v", resp.Data.Discover[1])
-	}
-	if resp.Data.Discover[2].ID != playlistID.String() || resp.Data.Discover[2].SongCount != 1 || resp.Data.Discover[2].OwnerUserID != user.ID.String() {
-		t.Fatalf("unexpected playlist discover item: %#v", resp.Data.Discover[2])
 	}
 }
 

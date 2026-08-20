@@ -152,32 +152,6 @@ type PlaylistSummaryResponse struct {
 	SongCount   int64     `json:"song_count"`
 }
 
-type DiscoverItemResponse struct {
-	Type          string `json:"type"`
-	Section       string `json:"section,omitempty"`
-	Reason        string `json:"reason,omitempty"`
-	ID            string `json:"id"`
-	Title         string `json:"title"`
-	Summary       string `json:"summary,omitempty"`
-	ImageURL      string `json:"image_url,omitempty"`
-	TargetPath    string `json:"target_path"`
-	PlayCount     int64  `json:"play_count,omitempty"`
-	BookmarkCount int64  `json:"bookmark_count,omitempty"`
-	SongCount     int64  `json:"song_count,omitempty"`
-	OwnerUserID   string `json:"owner_user_id,omitempty"`
-	Name          string `json:"name,omitempty"`
-	LegalName     string `json:"legal_name,omitempty"`
-	Bio           string `json:"bio,omitempty"`
-	CoverURL      string `json:"cover_url,omitempty"`
-	Description   string `json:"description,omitempty"`
-	ReleaseDate   string `json:"release_date,omitempty"`
-	Year          int    `json:"year,omitempty"`
-	Artists       []struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"artists,omitempty"`
-}
-
 type PaginationMetaResponse struct {
 	Page     int   `json:"page"`
 	PageSize int   `json:"page_size"`
@@ -193,11 +167,6 @@ type PlaylistSummaryListResponse struct {
 type PlaylistBookmarkListResponse struct {
 	Data []model.PlaylistBookmark `json:"data"`
 	Meta PaginationMetaResponse   `json:"meta"`
-}
-
-type DiscoverListResponse struct {
-	Data []DiscoverItemResponse `json:"data"`
-	Meta PaginationMetaResponse `json:"meta"`
 }
 
 type PlaylistSongsListResponse struct {
@@ -231,21 +200,28 @@ type HomeResponse struct {
 	RecentlyPlayed    []model.MusicListeningHistory `json:"recently_played"`
 	ForYou            []HomeAlbumRecommendation     `json:"for_you"`
 	ForYouReason      string                        `json:"for_you_reason,omitempty"`
-	Sections          []MusicHomeSection            `json:"sections"`
-	Discover          []DiscoverItemResponse        `json:"discover"`
-	DiscoverMore      bool                          `json:"discover_has_more"`
-	DiscoverMeta      PaginationMetaResponse        `json:"discover_meta"`
 }
 
 type HomeAlbumRecommendation struct {
-	model.Album
-	Reason string `json:"reason"`
+	ID                   uuid.UUID         `json:"id"`
+	Title                string            `json:"title"`
+	CoverURL             string            `json:"cover_url,omitempty"`
+	Status               string            `json:"status,omitempty"`
+	EntryStatus          string            `json:"entry_status"`
+	Year                 int               `json:"year,omitempty"`
+	ReleaseDate          string            `json:"release_date,omitempty"`
+	ReleaseDatePrecision string            `json:"release_date_precision,omitempty"`
+	AlbumType            string            `json:"album_type,omitempty"`
+	Artists              []HomeAlbumArtist `json:"artists,omitempty"`
+	PlayCount            int64             `json:"play_count"`
+	BookmarkCount        int64             `json:"bookmark_count"`
+	SongCount            int64             `json:"song_count"`
+	Reason               string            `json:"reason"`
 }
 
-type MusicHomeSection struct {
-	Key    string        `json:"key"`
-	Title  string        `json:"title"`
-	Albums []model.Album `json:"albums"`
+type HomeAlbumArtist struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
 }
 
 type PlaylistSongDetail struct {

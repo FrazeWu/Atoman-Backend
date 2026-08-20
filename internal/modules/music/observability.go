@@ -18,12 +18,13 @@ func musicOperationLog() gin.HandlerFunc {
 		}
 		status := c.Writer.Status()
 		log.Printf(
-			"music_operation=%q request_id=%q method=%q status=%d duration_ms=%d failed=%t",
+			"music_operation=%q request_id=%q method=%q status=%d duration_ms=%d response_bytes=%d failed=%t",
 			operation,
 			c.GetString("request_id"),
 			c.Request.Method,
 			status,
 			time.Since(startedAt).Milliseconds(),
+			c.Writer.Size(),
 			status >= 400,
 		)
 	}
