@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Non-interactive root shells may omit sbin directories needed by deployment checks.
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin${PATH:+:$PATH}"
+
 MODE="${1:-update}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd -P)"
@@ -126,11 +129,11 @@ sync_source() {
 }
 
 wait_for_postgres() {
-  local container_id state attempt
+  local container_id state
   container_id="$(docker compose -f "$COMPOSE_FILE" ps -q postgres)"
   [[ -n "$container_id" ]] || die "PostgreSQL container was not created"
 
-  for attempt in {1..30}; do
+  for _ in {1..30}; do
     state="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container_id")"
     if [[ "$state" == "healthy" || "$state" == "running" ]]; then
       log "PostgreSQL is $state"
@@ -278,8 +281,8 @@ install_nginx_config() {
 }
 
 wait_for_url() {
-  local url="$1" attempt
-  for attempt in {1..30}; do
+  local url="$1"
+  for _ in {1..30}; do
     if curl --fail --silent --show-error --max-time 5 "$url" >/dev/null 2>&1; then
       return 0
     fi
@@ -352,7 +355,11 @@ check_runtime() {
   fi
 
   if [[ -f "$SERVICE_FILE" ]]; then
-    systemctl is-active --quiet "$SERVICE_NAME" && log "$SERVICE_NAME is active" || log "$SERVICE_NAME is not active"
+    if systemctl is-active --quiet "$SERVICE_NAME"; then
+      log "$SERVICE_NAME is active"
+    else
+      log "$SERVICE_NAME is not active"
+    fi
   else
     log "$SERVICE_NAME is not installed"
   fi
