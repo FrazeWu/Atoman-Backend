@@ -45,3 +45,12 @@ func TestNewMusicImportMediaStoreUsesDedicatedPlaybackBucketWithFallback(t *test
 		t.Fatalf("fallback bucket = %q", playback.bucket)
 	}
 }
+
+func TestMusicPlaybackCacheControl(t *testing.T) {
+	if got := musicPlaybackCacheControl("audio/mpeg"); got != immutableMusicPlaybackCacheControl {
+		t.Fatalf("audio/mpeg cache control = %q", got)
+	}
+	if got := musicPlaybackCacheControl("image/webp"); got != "" {
+		t.Fatalf("image/webp cache control = %q, want empty", got)
+	}
+}

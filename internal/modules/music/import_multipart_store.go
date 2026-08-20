@@ -31,6 +31,15 @@ type s3AlbumImportMultipartStore struct {
 	bucket string
 }
 
+const immutableMusicPlaybackCacheControl = "public, max-age=31536000, immutable"
+
+func musicPlaybackCacheControl(contentType string) string {
+	if strings.EqualFold(strings.TrimSpace(contentType), "audio/mpeg") {
+		return immutableMusicPlaybackCacheControl
+	}
+	return ""
+}
+
 type s3MediaImportStore struct{ source, playback albumImportMultipartStore }
 
 func NewMusicImportMediaStore(client *s3.S3) mediaImportStore {
@@ -90,7 +99,16 @@ func (s *s3AlbumImportMultipartStore) CreateMultipartUpload(key string, contentT
 }
 
 func (s *s3AlbumImportMultipartStore) PutObject(key string, contentType string, body io.Reader) error {
-	_, err := s3manager.NewUploaderWithClient(s.client).Upload(&s3manager.UploadInput{Bucket: aws.String(s.bucket), Key: aws.String(key), ContentType: aws.String(contentType), Body: body})
+	input := &s3manager.UploadInput{
+		Bucket:      aws.String(s.bucket),
+		Key:         aws.String(key),
+		ContentType: aws.String(contentType),
+		Body:        body,
+	}
+	if cacheControl := musicPlaybackCacheControl(contentType); cacheControl != "" {
+		input.CacheControl = aws.String(cacheControl)
+	}
+	_, err := s3manager.NewUploaderWithClient(s.client).Upload(input)
 	return err
 }
 
