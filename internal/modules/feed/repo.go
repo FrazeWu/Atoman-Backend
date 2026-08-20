@@ -464,7 +464,7 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 		"feed_items.published_at",
 		"COALESCE(feed_items.summary, '') <> '' AS has_summary",
 		"COALESCE(feed_items.image_url, '') <> '' AS has_image",
-		"COALESCE(feed_items.full_text_html, '') <> '' AS has_full_text",
+		"COALESCE(feed_items.reader_html, '') <> '' OR COALESCE(feed_items.full_text_html, '') <> '' AS has_full_text",
 		"feed_sources.category AS source_category",
 	}
 	if includeText {

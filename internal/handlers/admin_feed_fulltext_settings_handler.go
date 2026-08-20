@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -17,61 +15,26 @@ type adminFeedFullTextSourceSettingsInput struct {
 	FullTextEnabled *bool `json:"full_text_enabled"`
 }
 
-const adminFeedFullTextSettingsKey = "feed.fulltext.settings"
-
-type adminFeedFullTextSettings struct {
-	AutoSyncEnabled        bool `json:"auto_sync_enabled"`
-	AutoSyncIntervalMinute int  `json:"auto_sync_interval_minutes"`
-}
+type adminFeedFullTextSettings = service.FeedFullTextSettings
 
 type adminFeedFullTextSettingsInput struct {
 	AutoSyncEnabled        *bool `json:"auto_sync_enabled"`
 	AutoSyncIntervalMinute *int  `json:"auto_sync_interval_minutes"`
+	ReaderCrawlEnabled     *bool `json:"reader_crawl_enabled"`
+	ReaderCrawlDays        *int  `json:"reader_crawl_days"`
+	ReaderCrawlBatchSize   *int  `json:"reader_crawl_batch_size"`
 }
 
 func defaultAdminFeedFullTextSettings() adminFeedFullTextSettings {
-	return adminFeedFullTextSettings{
-		AutoSyncEnabled:        service.FullTextWorkerEnabledDefault,
-		AutoSyncIntervalMinute: 2,
-	}
+	return service.DefaultFeedFullTextSettings()
 }
 
 func loadAdminFeedFullTextSettings(db *gorm.DB) (adminFeedFullTextSettings, error) {
-	settings := defaultAdminFeedFullTextSettings()
-
-	var stored model.SiteSetting
-	if err := db.First(&stored, "key = ?", adminFeedFullTextSettingsKey).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return settings, nil
-		}
-		return settings, err
-	}
-
-	var input adminFeedFullTextSettingsInput
-	if err := json.Unmarshal([]byte(stored.Value), &input); err != nil {
-		return settings, err
-	}
-	if input.AutoSyncEnabled != nil {
-		settings.AutoSyncEnabled = *input.AutoSyncEnabled
-	}
-	if input.AutoSyncIntervalMinute != nil {
-		settings.AutoSyncIntervalMinute = *input.AutoSyncIntervalMinute
-	}
-	return settings, nil
+	return service.LoadFeedFullTextSettings(db)
 }
 
 func saveAdminFeedFullTextSettings(db *gorm.DB, settings adminFeedFullTextSettings) error {
-	value, err := json.Marshal(settings)
-	if err != nil {
-		return err
-	}
-
-	setting := model.SiteSetting{
-		Key:         adminFeedFullTextSettingsKey,
-		Value:       string(value),
-		Description: "Feed full text global settings",
-	}
-	return db.Save(&setting).Error
+	return service.SaveFeedFullTextSettings(db, settings)
 }
 
 func GetAdminFeedFullTextSettings(db *gorm.DB) gin.HandlerFunc {
@@ -92,15 +55,37 @@ func UpdateAdminFeedFullTextSettings(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_settings_payload"})
 			return
 		}
-		if input.AutoSyncEnabled == nil || input.AutoSyncIntervalMinute == nil || *input.AutoSyncIntervalMinute <= 0 {
+		if input.AutoSyncEnabled == nil && input.AutoSyncIntervalMinute == nil && input.ReaderCrawlEnabled == nil && input.ReaderCrawlDays == nil && input.ReaderCrawlBatchSize == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_settings_payload"})
+			return
+		}
+		settings, err := loadAdminFeedFullTextSettings(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "settings_load_failed"})
+			return
+		}
+		if input.AutoSyncEnabled != nil {
+			settings.AutoSyncEnabled = *input.AutoSyncEnabled
+		}
+		if input.AutoSyncIntervalMinute != nil {
+			settings.AutoSyncIntervalMinute = *input.AutoSyncIntervalMinute
+		}
+		if input.ReaderCrawlEnabled != nil {
+			settings.ReaderCrawlEnabled = *input.ReaderCrawlEnabled
+		}
+		if input.ReaderCrawlDays != nil {
+			settings.ReaderCrawlDays = *input.ReaderCrawlDays
+		}
+		if input.ReaderCrawlBatchSize != nil {
+			settings.ReaderCrawlBatchSize = *input.ReaderCrawlBatchSize
+		}
+		if settings.AutoSyncIntervalMinute < service.FeedFullTextSyncIntervalMin || settings.AutoSyncIntervalMinute > service.FeedFullTextSyncIntervalMax ||
+			settings.ReaderCrawlDays < service.FeedReaderCrawlDaysMin || settings.ReaderCrawlDays > service.FeedReaderCrawlDaysMax ||
+			settings.ReaderCrawlBatchSize < service.FeedReaderCrawlBatchMin || settings.ReaderCrawlBatchSize > service.FeedReaderCrawlBatchMax {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_settings_payload"})
 			return
 		}
 
-		settings := adminFeedFullTextSettings{
-			AutoSyncEnabled:        *input.AutoSyncEnabled,
-			AutoSyncIntervalMinute: *input.AutoSyncIntervalMinute,
-		}
 		if err := saveAdminFeedFullTextSettings(db, settings); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "settings_save_failed"})
 			return

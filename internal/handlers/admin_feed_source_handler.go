@@ -467,7 +467,10 @@ func SyncAdminFeedSource(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		go service.SyncSingleRSS(db, source)
+		go func() {
+			service.SyncSingleRSS(db, source)
+			service.RequestFullTextWorkerRun()
+		}()
 
 		c.JSON(http.StatusOK, gin.H{
 			"id":      source.ID,

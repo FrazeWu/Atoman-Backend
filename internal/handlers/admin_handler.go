@@ -31,6 +31,7 @@ func SetupAdminRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 			feedFullText.GET("/settings", GetAdminFeedFullTextSettings(db))
 			feedFullText.PUT("/settings", UpdateAdminFeedFullTextSettings(db))
 			feedFullText.GET("/health", GetAdminFeedFullTextHealth(db))
+			feedFullText.POST("/crawl", RunAdminFeedFullTextCrawl(db))
 			feedFullText.GET("/sources", GetAdminFeedFullTextSources(db))
 			feedFullText.POST("/sources", CreateAdminFeedSource(db))
 			feedFullText.PUT("/sources/:source_id", UpdateAdminFeedSource(db))

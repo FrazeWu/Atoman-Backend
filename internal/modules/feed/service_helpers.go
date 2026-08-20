@@ -59,7 +59,7 @@ func matchesTimelineSearch(item TimelineItemDTO, search string) bool {
 }
 
 func timelineSearchValues(item TimelineItemDTO) []string {
-	values := make([]string, 0, 6)
+	values := make([]string, 0, 7)
 	if item.Post != nil {
 		values = append(values, item.Post.Title, item.Post.Summary)
 		if item.Post.Channel != nil {
@@ -67,7 +67,7 @@ func timelineSearchValues(item TimelineItemDTO) []string {
 		}
 	}
 	if item.FeedItem != nil {
-		values = append(values, item.FeedItem.Title, item.FeedItem.Summary, item.FeedItem.FullTextHTML)
+		values = append(values, item.FeedItem.Title, item.FeedItem.Summary, item.FeedItem.ReaderHTML, item.FeedItem.FullTextHTML)
 		if item.FeedItem.FeedSource != nil {
 			values = append(values, item.FeedItem.FeedSource.Title, item.FeedItem.FeedSource.RssURL)
 		}

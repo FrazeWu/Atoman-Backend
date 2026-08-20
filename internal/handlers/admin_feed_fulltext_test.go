@@ -543,6 +543,7 @@ func newAdminFeedFullTextTestDB(t *testing.T) *gorm.DB {
 		&model.FeedItemStar{},
 		&model.ReadingListItem{},
 		&model.SourceReadEvent{},
+		&model.FeedContentFeedback{},
 	)
 	return db
 }
@@ -581,6 +582,9 @@ func TestAdminFeedFullTextSettingsRoutesReadAndPersist(t *testing.T) {
 	var initial struct {
 		AutoSyncEnabled        bool `json:"auto_sync_enabled"`
 		AutoSyncIntervalMinute int  `json:"auto_sync_interval_minutes"`
+		ReaderCrawlEnabled     bool `json:"reader_crawl_enabled"`
+		ReaderCrawlDays        int  `json:"reader_crawl_days"`
+		ReaderCrawlBatchSize   int  `json:"reader_crawl_batch_size"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &initial); err != nil {
 		t.Fatalf("decode initial settings: %v", err)
@@ -600,11 +604,14 @@ func TestAdminFeedFullTextSettingsRoutesReadAndPersist(t *testing.T) {
 	var updated struct {
 		AutoSyncEnabled        bool `json:"auto_sync_enabled"`
 		AutoSyncIntervalMinute int  `json:"auto_sync_interval_minutes"`
+		ReaderCrawlEnabled     bool `json:"reader_crawl_enabled"`
+		ReaderCrawlDays        int  `json:"reader_crawl_days"`
+		ReaderCrawlBatchSize   int  `json:"reader_crawl_batch_size"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
 		t.Fatalf("decode updated settings: %v", err)
 	}
-	if updated.AutoSyncEnabled || updated.AutoSyncIntervalMinute != 45 {
+	if updated.AutoSyncEnabled || updated.AutoSyncIntervalMinute != 45 || !updated.ReaderCrawlEnabled || updated.ReaderCrawlDays != service.FeedReaderCrawlDaysDefault || updated.ReaderCrawlBatchSize != service.FeedReaderCrawlBatchDefault {
 		t.Fatalf("unexpected updated settings: %+v", updated)
 	}
 
@@ -619,12 +626,86 @@ func TestAdminFeedFullTextSettingsRoutesReadAndPersist(t *testing.T) {
 	var persisted struct {
 		AutoSyncEnabled        bool `json:"auto_sync_enabled"`
 		AutoSyncIntervalMinute int  `json:"auto_sync_interval_minutes"`
+		ReaderCrawlEnabled     bool `json:"reader_crawl_enabled"`
+		ReaderCrawlDays        int  `json:"reader_crawl_days"`
+		ReaderCrawlBatchSize   int  `json:"reader_crawl_batch_size"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &persisted); err != nil {
 		t.Fatalf("decode persisted settings: %v", err)
 	}
 	if persisted != updated {
 		t.Fatalf("expected persisted settings %+v got %+v", updated, persisted)
+	}
+}
+
+func TestRunAdminFeedFullTextCrawlRebuildsStoredReaderContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAdminFeedFullTextTestDB(t)
+	adminUser := model.User{
+		Username: "crawl_admin_" + uuid.NewString()[:8],
+		Email:    uuid.NewString() + "@example.com",
+		Password: "secret",
+		Role:     "admin",
+		IsActive: true,
+	}
+	if err := db.Create(&adminUser).Error; err != nil {
+		t.Fatalf("create admin user: %v", err)
+	}
+	source := model.FeedSource{
+		SourceType:      "external_rss",
+		Hash:            "crawl-source-" + uuid.NewString(),
+		RssURL:          "https://example.com/feed.xml",
+		FullTextEnabled: true,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	now := time.Now().UTC()
+	item := model.FeedItem{
+		FeedSourceID:   source.ID,
+		GUID:           "crawl-item-" + uuid.NewString(),
+		Link:           "https://example.com/article",
+		FullTextHTML:   `<article><p>` + strings.Repeat("Article sentence. ", 30) + `</p></article>`,
+		FullTextStatus: service.FullTextStatusSuccess,
+		PublishedAt:    now,
+		FetchedAt:      now,
+	}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatalf("create item: %v", err)
+	}
+
+	router := gin.New()
+	SetupAdminRoutes(router, db, nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/feed/fulltext/crawl", nil)
+	req.Header.Set("Authorization", adminFeedFullTextAuthHeader(t, db, adminUser))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("crawl status=%d body=%s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Scanned        int  `json:"scanned"`
+		Updated        int  `json:"updated"`
+		WorkerNotified bool `json:"worker_notified"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode crawl response: %v", err)
+	}
+	if payload.Scanned != 1 || payload.Updated != 1 || payload.WorkerNotified {
+		t.Fatalf("unexpected crawl response: %+v", payload)
+	}
+	if err := db.First(&item, "id = ?", item.ID).Error; err != nil {
+		t.Fatalf("reload item: %v", err)
+	}
+	if item.ReaderHTML == "" || item.ReaderSource != service.ReaderSourcePage || item.ReaderVersion != service.ReaderVersionCurrent {
+		t.Fatalf("reader content was not rebuilt: %+v", item)
+	}
+	status, err := service.LoadFeedReaderCrawlStatus(db)
+	if err != nil {
+		t.Fatalf("load crawl status: %v", err)
+	}
+	if status.LastRunAt.IsZero() || status.Updated != 1 {
+		t.Fatalf("unexpected crawl status: %+v", status)
 	}
 }
 
@@ -690,6 +771,7 @@ func TestGetAdminFeedFullTextHealth(t *testing.T) {
 		SuccessItems      int64     `json:"success_items"`
 		FailedItems       int64     `json:"failed_items"`
 		SuccessRate       float64   `json:"success_rate"`
+		ReaderCrawlPending int64     `json:"reader_crawl_pending"`
 		OldestPendingAt   time.Time `json:"oldest_pending_at"`
 		WorkerEnabled     bool      `json:"enabled"`
 		WorkerConcurrency int       `json:"concurrency"`
@@ -705,8 +787,8 @@ func TestGetAdminFeedFullTextHealth(t *testing.T) {
 	if payload.PendingItems != 2 || payload.FetchingItems != 1 || payload.RetryItems != 1 || payload.SuccessItems != 1 || payload.FailedItems != 1 {
 		t.Fatalf("unexpected item counts: %+v", payload)
 	}
-	if payload.SuccessRate != 0.5 {
-		t.Fatalf("expected success_rate=0.5 got %v", payload.SuccessRate)
+	if payload.SuccessRate != 0.5 || payload.ReaderCrawlPending != 1 {
+		t.Fatalf("expected success_rate=0.5 and reader_crawl_pending=1, got %+v", payload)
 	}
 	if !payload.OldestPendingAt.Equal(oldestCreatedAt) {
 		t.Fatalf("expected oldest_pending_at=%s got %s", oldestCreatedAt, payload.OldestPendingAt)

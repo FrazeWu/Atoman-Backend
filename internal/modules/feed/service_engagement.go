@@ -193,6 +193,37 @@ func (s *Service) RemoveReadingListItem(user authctx.CurrentUser, targetType str
 	return s.repo.DeleteReadingListItem(user.ID, targetType, targetID)
 }
 
+func (s *Service) RecordContentFeedback(user authctx.CurrentUser, feedItemID uuid.UUID, kind string) (bool, error) {
+	if user.ID == uuid.Nil {
+		return false, apperr.Unauthorized("Login required")
+	}
+	allowedKinds := map[string]bool{"missing": true, "layout": true, "image": true, "noise": true}
+	if !allowedKinds[kind] {
+		return false, apperr.BadRequest("validation.invalid_request", "kind must be missing, layout, image or noise")
+	}
+
+	var item model.FeedItem
+	if err := s.db.Select("id", "reader_source", "reader_version").First(&item, "id = ?", feedItemID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return false, apperr.NotFound("feed.feed_item_not_found", "Feed item not found")
+		}
+		return false, err
+	}
+	readerSource := item.ReaderSource
+	if readerSource == "" {
+		readerSource = "summary"
+	}
+	feedback := model.FeedContentFeedback{
+		FeedItemID:    feedItemID,
+		UserID:        user.ID,
+		Kind:          kind,
+		ReaderSource:  readerSource,
+		ReaderVersion: item.ReaderVersion,
+	}
+	result := s.db.Where("user_id = ? AND feed_item_id = ? AND kind = ?", user.ID, feedItemID, kind).FirstOrCreate(&feedback)
+	return result.RowsAffected > 0, result.Error
+}
+
 func (s *Service) RecordSourceReadEvent(sourceType string, sourceID string, eventType string) error {
 	if sourceType == "" || sourceID == "" || eventType == "" {
 		return apperr.BadRequest("validation.invalid_request", "source_type, source_id and event_type are required")

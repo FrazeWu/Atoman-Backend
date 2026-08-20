@@ -957,8 +957,9 @@ func TestGetSubscribedFeedHandlerSearchMatchesFeedItemContentHTML(t *testing.T) 
 		t.Fatalf("find feed item: %v", err)
 	}
 	if err := db.Model(&feedItem).Updates(map[string]any{
-		"full_text_html": "<p>longform body phrase for search</p>",
-		"summary":        "short summary only",
+		"reader_html":   "<p>reader body phrase for search</p>",
+		"reader_source": "feed",
+		"summary":       "short summary only",
 	}).Error; err != nil {
 		t.Fatalf("update feed item body: %v", err)
 	}
@@ -966,7 +967,7 @@ func TestGetSubscribedFeedHandlerSearchMatchesFeedItemContentHTML(t *testing.T) 
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?q=longform+body+phrase", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?q=reader+body+phrase", nil)
 	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
@@ -982,14 +983,14 @@ func TestGetSubscribedFeedHandlerSearchMatchesFeedItemContentHTML(t *testing.T) 
 		t.Fatalf("decode response: %v", err)
 	}
 	if len(payload.Data) == 0 {
-		t.Fatalf("expected search results for full_text_html, got body %s", rr.Body.String())
+		t.Fatalf("expected search results for reader_html, got body %s", rr.Body.String())
 	}
 	for _, item := range payload.Data {
 		if item.Type == "feed_item" && item.FeedItem != nil && item.FeedItem.ID == feedItem.ID {
 			return
 		}
 	}
-	t.Fatalf("expected full_text_html search to return feed item %s, got %#v", feedItem.ID, payload.Data)
+	t.Fatalf("expected reader_html search to return feed item %s, got %#v", feedItem.ID, payload.Data)
 }
 
 func TestFeedRecommendationModeValidation(t *testing.T) {

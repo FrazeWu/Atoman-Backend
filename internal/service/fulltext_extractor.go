@@ -9,6 +9,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	readability "codeberg.org/readeck/go-readability/v2"
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 )
@@ -16,19 +17,77 @@ import (
 const fullTextMinimumCharacters = 120
 
 type FullTextResult struct {
-	HTML      string
-	WordCount int
+	HTML         string
+	WordCount    int
+	QualityScore int
+	QualityFlags []string
+	Extractor    string
 }
 
 func ExtractAndSanitizeFullText(sourceURL string, body io.Reader) (FullTextResult, string, error) {
-	doc, err := html.Parse(body)
+	rawHTML, err := io.ReadAll(body)
 	if err != nil {
 		return FullTextResult{}, FullTextErrorRequestFailed, err
 	}
 
+	readabilityCandidate, readabilityErr := extractReadabilityCandidate(sourceURL, rawHTML)
+	heuristicCandidate, errorCode, heuristicErr := extractHeuristicCandidate(sourceURL, rawHTML)
+	candidate := ChooseReaderCandidate(heuristicCandidate, readabilityCandidate)
+	if candidate.HTML == "" {
+		if heuristicErr != nil {
+			return FullTextResult{}, errorCode, heuristicErr
+		}
+		return FullTextResult{}, FullTextErrorSanitizeEmpty, readabilityErr
+	}
+	if hasReaderQualityFlag(candidate.QualityFlags, "login_wall") {
+		return FullTextResult{}, FullTextErrorLoginWallDetected, errors.New("login or app wall detected")
+	}
+	if candidate.CharacterCount < fullTextMinimumCharacters {
+		return FullTextResult{}, FullTextErrorExtractTooShort, errors.New("content too short")
+	}
+
+	return FullTextResult{
+		HTML:         candidate.HTML,
+		WordCount:    candidate.CharacterCount,
+		QualityScore: candidate.QualityScore,
+		QualityFlags: candidate.QualityFlags,
+		Extractor:    candidate.Extractor,
+	}, "", nil
+}
+
+func extractReadabilityCandidate(sourceURL string, rawHTML []byte) (ReaderCandidate, error) {
+	pageURL, err := url.Parse(sourceURL)
+	if err != nil {
+		return ReaderCandidate{}, err
+	}
+	parser := readability.NewParser()
+	parser.CharThresholds = 80
+	article, err := parser.Parse(bytes.NewReader(rawHTML), pageURL)
+	if err != nil {
+		return ReaderCandidate{}, err
+	}
+	var rendered bytes.Buffer
+	if err := article.RenderHTML(&rendered); err != nil {
+		return ReaderCandidate{}, err
+	}
+	candidate, err := sanitizeReaderFragment(sourceURL, rendered.String())
+	if err != nil {
+		return ReaderCandidate{}, err
+	}
+	candidate.Source = ReaderSourcePage
+	candidate.Extractor = "readability-v2"
+	return candidate, nil
+}
+
+func extractHeuristicCandidate(sourceURL string, rawHTML []byte) (ReaderCandidate, string, error) {
+	doc, err := html.Parse(bytes.NewReader(rawHTML))
+	if err != nil {
+		return ReaderCandidate{}, FullTextErrorRequestFailed, err
+	}
+
 	candidate := pickFullTextContentNode(doc)
 	if candidate == nil {
-		return FullTextResult{}, FullTextErrorSanitizeEmpty, errors.New("full text candidate not found")
+		return ReaderCandidate{}, FullTextErrorSanitizeEmpty, errors.New("full text candidate not found")
 	}
 	if candidate.DataAtom == atom.Body {
 		if fallback := findBestFullTextChild(candidate); fallback != nil {
@@ -39,22 +98,37 @@ func ExtractAndSanitizeFullText(sourceURL string, body io.Reader) (FullTextResul
 	normalizeFullTextNode(sourceURL, candidate)
 	cleanHTML, text, err := sanitizeFullTextHTML(candidate)
 	if err != nil {
-		return FullTextResult{}, FullTextErrorSanitizeEmpty, err
+		return ReaderCandidate{}, FullTextErrorSanitizeEmpty, err
 	}
 	if cleanHTML == "" {
-		return FullTextResult{}, FullTextErrorSanitizeEmpty, errors.New("sanitized html empty")
+		return ReaderCandidate{}, FullTextErrorSanitizeEmpty, errors.New("sanitized html empty")
 	}
 	if looksLikeLoginWallText(text) {
-		return FullTextResult{}, FullTextErrorLoginWallDetected, errors.New("login or app wall detected")
+		return ReaderCandidate{}, FullTextErrorLoginWallDetected, errors.New("login or app wall detected")
 	}
 	if utf8.RuneCountInString(text) < fullTextMinimumCharacters {
-		return FullTextResult{}, FullTextErrorExtractTooShort, errors.New("content too short")
+		return ReaderCandidate{}, FullTextErrorExtractTooShort, errors.New("content too short")
 	}
 
-	return FullTextResult{
-		HTML:      cleanHTML,
-		WordCount: utf8.RuneCountInString(text),
+	score, flags := scoreReaderContent(candidate, text)
+	return ReaderCandidate{
+		HTML:           cleanHTML,
+		Source:         ReaderSourcePage,
+		QualityScore:   score,
+		QualityFlags:   flags,
+		CharacterCount: utf8.RuneCountInString(text),
+		ContentHash:    hashReaderContent(cleanHTML),
+		Extractor:      "heuristic-v2",
 	}, "", nil
+}
+
+func hasReaderQualityFlag(flags []string, target string) bool {
+	for _, flag := range flags {
+		if flag == target {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeLoginWallText(text string) bool {
@@ -213,13 +287,13 @@ func normalizeFullTextNode(sourceURL string, node *html.Node) {
 		if current.Type != html.ElementNode {
 			return
 		}
-		cleanNodeAttributes(current)
 		switch current.DataAtom {
 		case atom.A:
 			normalizeAnchor(baseURL, current)
 		case atom.Img:
 			normalizeImage(baseURL, current)
 		}
+		cleanNodeAttributes(current)
 	})
 }
 
@@ -248,31 +322,40 @@ func normalizeAnchor(baseURL *url.URL, node *html.Node) {
 
 func normalizeImage(baseURL *url.URL, node *html.Node) {
 	src := strings.TrimSpace(attrValue(node, "src"))
-	if src == "" {
-		detachNode(node)
-		return
-	}
-	parsed, err := url.Parse(src)
-	if err != nil {
-		detachNode(node)
-		return
-	}
-	if parsed.Scheme == "" {
-		if baseURL == nil {
-			detachNode(node)
-			return
+	if src == "" || strings.HasPrefix(strings.ToLower(src), "data:image/") {
+		for _, key := range []string{"data-src", "data-original", "data-lazy-src", "data-url"} {
+			if lazySource := strings.TrimSpace(attrValue(node, key)); lazySource != "" {
+				src = lazySource
+				break
+			}
 		}
-		setAttr(node, "src", baseURL.ResolveReference(parsed).String())
-		return
 	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+	if src == "" {
+		src = firstImageSourceSetURL(attrValue(node, "srcset"))
+	}
+	resolved := resolveReaderURL(baseURL, src)
+	if resolved == "" {
 		detachNode(node)
 		return
 	}
-
+	setAttr(node, "src", resolved)
 	if isLikelyDecorativeImage(node) {
 		detachNode(node)
+		return
 	}
+	setAttr(node, "src", MaybeProxyFeedImageURL(resolved))
+	setAttr(node, "loading", "lazy")
+	setAttr(node, "decoding", "async")
+}
+
+func firstImageSourceSetURL(srcset string) string {
+	for _, candidate := range strings.Split(srcset, ",") {
+		fields := strings.Fields(strings.TrimSpace(candidate))
+		if len(fields) > 0 {
+			return fields[0]
+		}
+	}
+	return ""
 }
 
 func isLikelyDecorativeImage(node *html.Node) bool {
@@ -609,6 +692,12 @@ func cloneSanitizedNode(node *html.Node) []*html.Node {
 		return nil
 	}
 	if node.Type == html.TextNode {
+		if isInsidePreformattedNode(node) {
+			if node.Data == "" {
+				return nil
+			}
+			return []*html.Node{{Type: html.TextNode, Data: node.Data}}
+		}
 		text := compactFullTextText(node.Data)
 		if text == "" {
 			return nil
@@ -660,12 +749,21 @@ func sanitizedChildrenWithSpacing(node *html.Node) []*html.Node {
 		if len(cloned) == 0 {
 			continue
 		}
-		if needsSpaceBetweenSanitizedNodes(nodes, cloned) {
+		if node.DataAtom != atom.Pre && needsSpaceBetweenSanitizedNodes(nodes, cloned) {
 			nodes = append(nodes, &html.Node{Type: html.TextNode, Data: " "})
 		}
 		nodes = append(nodes, cloned...)
 	}
 	return nodes
+}
+
+func isInsidePreformattedNode(node *html.Node) bool {
+	for current := node.Parent; current != nil; current = current.Parent {
+		if current.DataAtom == atom.Pre {
+			return true
+		}
+	}
+	return false
 }
 
 func needsSpaceBetweenSanitizedNodes(existing, incoming []*html.Node) bool {
@@ -758,7 +856,9 @@ func isAllowedFullTextAttr(tag atom.Atom, attr html.Attribute) bool {
 	case atom.A:
 		return key == "href" || key == "rel" || key == "target"
 	case atom.Img:
-		return key == "src" || key == "alt" || key == "title" || key == "width" || key == "height"
+		return key == "src" || key == "alt" || key == "title" || key == "width" || key == "height" || key == "loading" || key == "decoding"
+	case atom.Th, atom.Td:
+		return key == "colspan" || key == "rowspan" || key == "scope"
 	default:
 		return false
 	}
@@ -778,10 +878,19 @@ var allowedFullTextElements = map[atom.Atom]bool{
 	atom.B:          true,
 	atom.I:          true,
 	atom.U:          true,
+	atom.S:          true,
+	atom.Del:        true,
+	atom.Mark:       true,
+	atom.Sup:        true,
+	atom.Sub:        true,
+	atom.Hr:         true,
 	atom.Blockquote: true,
 	atom.Ul:         true,
 	atom.Ol:         true,
 	atom.Li:         true,
+	atom.Dl:         true,
+	atom.Dt:         true,
+	atom.Dd:         true,
 	atom.Pre:        true,
 	atom.Code:       true,
 	atom.A:          true,
@@ -798,5 +907,6 @@ var allowedFullTextElements = map[atom.Atom]bool{
 
 var voidFullTextElements = map[atom.Atom]bool{
 	atom.Br:  true,
+	atom.Hr:  true,
 	atom.Img: true,
 }

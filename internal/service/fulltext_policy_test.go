@@ -123,22 +123,6 @@ func TestIsFeedItemEligibleForFullText(t *testing.T) {
 	}
 }
 
-func TestInferFeedContentQualityReturnsFalseForExcerptLikeContent(t *testing.T) {
-	content := "<p>short teaser only</p>"
-
-	if inferFeedContentQuality(content) {
-		t.Fatal("expected excerpt-like content to stay below fulltext threshold")
-	}
-}
-
-func TestInferFeedContentQualityReturnsTrueForLongArticleLikeContent(t *testing.T) {
-	content := "<p>" + strings.Repeat("complete article body. ", 30) + "</p>"
-
-	if !inferFeedContentQuality(content) {
-		t.Fatal("expected article-like content to cross fulltext threshold")
-	}
-}
-
 func TestDefaultFullTextStatusForSourceSkipsCompleteFeedContent(t *testing.T) {
 	originalResolver := resolveFullTextHostname
 	resolveFullTextHostname = func(host string) ([]net.IP, error) {

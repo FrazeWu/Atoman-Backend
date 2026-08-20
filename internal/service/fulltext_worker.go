@@ -1,20 +1,25 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+
+	"github.com/google/uuid"
 )
 
 const (
@@ -25,7 +30,7 @@ const (
 
 	fullTextWorkerInterval              = 2 * time.Minute
 	fullTextWorkerStartupDelay          = 120 * time.Second
-	fullTextWorkerBatchSize             = 4
+	fullTextWorkerBatchSize             = 100
 	fullTextStaleFetchAfter             = 20 * time.Minute
 	fullTextMaxResponseBytes            = 5 * 1024 * 1024
 	fullTextMaxRedirects                = 5
@@ -34,7 +39,8 @@ const (
 )
 
 var fullTextHTTPClient = &http.Client{
-	Timeout: FullTextWorkerTimeout,
+	Timeout:   FullTextWorkerTimeout,
+	Transport: newFullTextSafeHTTPTransport(),
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= fullTextMaxRedirects {
 			return errors.New(fullTextRedirectLimitMessage)
@@ -48,6 +54,7 @@ type fullTextWorkerConfig struct {
 	StartupDelay time.Duration
 	Interval     time.Duration
 	BatchSize    int
+	Concurrency  int
 }
 
 func parseEnvPositiveInt(name string, fallback int) int {
@@ -69,7 +76,67 @@ func loadFullTextWorkerConfig() fullTextWorkerConfig {
 		StartupDelay: parseEnvDuration("FULLTEXT_WORKER_STARTUP_DELAY", fullTextWorkerStartupDelay),
 		Interval:     parseEnvDuration("FULLTEXT_WORKER_INTERVAL", fullTextWorkerInterval),
 		BatchSize:    parseEnvPositiveInt("FULLTEXT_WORKER_BATCH_SIZE", fullTextWorkerBatchSize),
+		Concurrency:  parseEnvPositiveInt("FULLTEXT_WORKER_CONCURRENCY", FullTextWorkerConcurrency),
 	}
+}
+
+var (
+	fullTextWorkerWakeMu sync.RWMutex
+	fullTextWorkerWake   chan struct{}
+)
+
+func registerFullTextWorkerWake(wake chan struct{}) {
+	fullTextWorkerWakeMu.Lock()
+	defer fullTextWorkerWakeMu.Unlock()
+	fullTextWorkerWake = wake
+}
+
+func unregisterFullTextWorkerWake(wake chan struct{}) {
+	fullTextWorkerWakeMu.Lock()
+	defer fullTextWorkerWakeMu.Unlock()
+	if fullTextWorkerWake == wake {
+		fullTextWorkerWake = nil
+	}
+}
+
+func FullTextWorkerEnvironmentEnabled() bool {
+	return parseEnvBool("FULLTEXT_WORKER_ENABLED", FullTextWorkerEnabledDefault)
+}
+
+func RequestFullTextWorkerRun() bool {
+	fullTextWorkerWakeMu.RLock()
+	wake := fullTextWorkerWake
+	fullTextWorkerWakeMu.RUnlock()
+	if wake == nil {
+		return false
+	}
+	select {
+	case wake <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+func fullTextBatchSizeForSettings(cfg fullTextWorkerConfig, settings FeedFullTextSettings) int {
+	if settings.ReaderCrawlBatchSize < cfg.BatchSize {
+		return settings.ReaderCrawlBatchSize
+	}
+	return cfg.BatchSize
+}
+
+func runConfiguredFullTextCycle(db *gorm.DB, now time.Time, cfg fullTextWorkerConfig, settings FeedFullTextSettings) {
+	if !settings.AutoSyncEnabled {
+		return
+	}
+	if settings.ReaderCrawlEnabled {
+		result, err := RunFeedReaderCrawl(db, settings, now)
+		if err != nil {
+			log.Printf("feed reader crawl preparation failed: %v", err)
+		} else if result.Scanned > 0 {
+			log.Printf("feed reader crawl prepared scanned=%d updated=%d requeued=%d skipped=%d", result.Scanned, result.Updated, result.Requeued, result.Skipped)
+		}
+	}
+	runFullTextCycle(db, now, fullTextBatchSizeForSettings(cfg, settings), cfg.Concurrency)
 }
 
 func StartFullTextWorker(ctx context.Context, db *gorm.DB) <-chan struct{} {
@@ -81,32 +148,153 @@ func StartFullTextWorker(ctx context.Context, db *gorm.DB) <-chan struct{} {
 		return done
 	}
 
-	return startPeriodicWorker(ctx, cfg.StartupDelay, cfg.Interval, func() {
-		runFullTextCycle(db, time.Now(), cfg.BatchSize)
-	})
+	wake := make(chan struct{}, 1)
+	registerFullTextWorkerWake(wake)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer unregisterFullTextWorkerWake(wake)
+
+		timer := time.NewTimer(cfg.StartupDelay)
+		defer timer.Stop()
+		var lastRun time.Time
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-wake:
+				now := time.Now().UTC()
+				settings, err := LoadFeedFullTextSettings(db)
+				if err != nil {
+					log.Printf("fulltext worker load settings failed: %v", err)
+					continue
+				}
+				runFullTextCycle(db, now, fullTextBatchSizeForSettings(cfg, settings), cfg.Concurrency)
+				lastRun = now
+			case now := <-timer.C:
+				settings, err := LoadFeedFullTextSettings(db)
+				if err != nil {
+					log.Printf("fulltext worker load settings failed: %v", err)
+				} else {
+					interval := time.Duration(settings.AutoSyncIntervalMinute) * time.Minute
+					if settings.AutoSyncEnabled && (lastRun.IsZero() || now.Sub(lastRun) >= interval) {
+						runConfiguredFullTextCycle(db, now.UTC(), cfg, settings)
+						lastRun = now
+					}
+				}
+				timer.Reset(cfg.Interval)
+			}
+		}
+	}()
+	return done
 }
 
-func runFullTextCycle(db *gorm.DB, now time.Time, batchSize int) {
+type claimedFullTextItem struct {
+	item   model.FeedItem
+	source model.FeedSource
+}
+
+func runFullTextCycle(db *gorm.DB, now time.Time, batchSize, concurrency int) {
 	if err := recoverStaleFullTextFetches(db, now); err != nil {
 		log.Printf("fulltext worker recover stale fetches failed: %v", err)
 	}
 
+	claimed := make([]claimedFullTextItem, 0, batchSize)
+	excludedSourceIDs := make([]uuid.UUID, 0, batchSize)
 	for i := 0; i < batchSize; i++ {
-		item, source, ok, err := claimNextFullTextItem(db, now)
+		item, source, ok, err := claimNextFullTextItemExcluding(db, now, excludedSourceIDs)
 		if err != nil {
 			log.Printf("fulltext worker claim failed: %v", err)
-			return
+			break
+		}
+		if !ok && len(excludedSourceIDs) > 0 {
+			excludedSourceIDs = excludedSourceIDs[:0]
+			item, source, ok, err = claimNextFullTextItemExcluding(db, now, nil)
+			if err != nil {
+				log.Printf("fulltext worker claim failed: %v", err)
+				break
+			}
 		}
 		if !ok {
-			return
+			break
 		}
-		if err := processFullTextItem(db, &item, &source, now); err != nil {
-			log.Printf("fulltext worker process failed for item %s: %v", item.ID, err)
+		claimed = append(claimed, claimedFullTextItem{item: item, source: source})
+		excludedSourceIDs = append(excludedSourceIDs, source.ID)
+	}
+	if len(claimed) == 0 {
+		return
+	}
+	if concurrency > len(claimed) {
+		concurrency = len(claimed)
+	}
+	if concurrency < 1 {
+		concurrency = 1
+	}
+
+	domainLocks := make(map[string]chan struct{}, len(claimed))
+	sourceLocks := make(map[uuid.UUID]chan struct{}, len(claimed))
+	for _, claimedItem := range claimed {
+		key := fullTextDomainKey(claimedItem.item.Link)
+		if _, exists := domainLocks[key]; !exists {
+			domainLocks[key] = make(chan struct{}, 1)
 		}
+		if _, exists := sourceLocks[claimedItem.source.ID]; !exists {
+			sourceLocks[claimedItem.source.ID] = make(chan struct{}, 1)
+		}
+	}
+	jobs := make(chan claimedFullTextItem)
+	done := make(chan struct{}, concurrency)
+	worker := func() {
+		defer func() { done <- struct{}{} }()
+		for claimedItem := range jobs {
+			sourceLock := sourceLocks[claimedItem.source.ID]
+			domainLock := domainLocks[fullTextDomainKey(claimedItem.item.Link)]
+			sourceLock <- struct{}{}
+			domainLock <- struct{}{}
+			var currentSource model.FeedSource
+			err := db.First(&currentSource, "id = ?", claimedItem.source.ID).Error
+			if err == nil {
+				err = processFullTextItem(db, &claimedItem.item, &currentSource, now)
+			}
+			<-domainLock
+			<-sourceLock
+			if err != nil {
+				log.Printf("fulltext worker process failed for item %s: %v", claimedItem.item.ID, err)
+			}
+		}
+	}
+	launchFullTextWorkers(concurrency, worker)
+	for _, claimedItem := range claimed {
+		jobs <- claimedItem
+	}
+	close(jobs)
+	for i := 0; i < concurrency; i++ {
+		<-done
 	}
 }
 
+func launchFullTextWorkers(count int, worker func()) {
+	if count <= 0 {
+		return
+	}
+	go worker()
+	launchFullTextWorkers(count-1, worker)
+}
+
+func fullTextDomainKey(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Hostname() == "" {
+		return rawURL
+	}
+	return strings.ToLower(parsed.Hostname())
+}
+
 func claimNextFullTextItem(db *gorm.DB, now time.Time) (model.FeedItem, model.FeedSource, bool, error) {
+	return claimNextFullTextItemExcluding(db, now, nil)
+}
+
+func claimNextFullTextItemExcluding(db *gorm.DB, now time.Time, excludedSourceIDs []uuid.UUID) (model.FeedItem, model.FeedSource, bool, error) {
 	for {
 		var candidates []model.FeedItem
 		query := db.Preload("FeedSource").
@@ -119,8 +307,13 @@ func claimNextFullTextItem(db *gorm.DB, now time.Time) (model.FeedItem, model.Fe
 			Where("COALESCE(feed_items.enclosure_url, '') = ''").
 			Where("COALESCE(feed_items.enclosure_type, '') NOT LIKE ?", "audio/%").
 			Where("COALESCE(feed_items.enclosure_type, '') NOT LIKE ?", "video/%").
-			Where("COALESCE(feed_items.duration, '') = ''").
-			Order("feed_items.published_at DESC")
+			Where("COALESCE(feed_items.duration, '') = ''")
+		if len(excludedSourceIDs) > 0 {
+			query = query.Where("feed_items.feed_source_id NOT IN ?", excludedSourceIDs)
+		}
+		query = query.
+			Order("CASE WHEN EXISTS (SELECT 1 FROM reading_list_items WHERE target_type = 'feed_item' AND target_id = feed_items.id) THEN 0 WHEN EXISTS (SELECT 1 FROM feed_item_stars WHERE feed_item_id = feed_items.id) THEN 1 ELSE 2 END").
+			Order("feed_items.created_at ASC, feed_items.published_at ASC")
 		result := query.Limit(1).Find(&candidates)
 		if result.Error != nil {
 			return model.FeedItem{}, model.FeedSource{}, false, result.Error
@@ -184,9 +377,23 @@ func processFullTextItem(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		if shouldTryFullTextRenderer(resp.StatusCode) {
+			if renderedBody, attempted, rendererErr := fetchRenderedFullText(item.Link); attempted {
+				if rendererErr == nil {
+					return processFullTextDocument(db, item, source, renderedBody, now, false)
+				}
+				log.Printf("fulltext renderer fallback failed for item %s: %v", item.ID, sanitizeRSSLogError(rendererErr))
+			}
+		}
 		return markFullTextFailure(db, item, source, FullTextErrorHTTPStatus, fmt.Sprintf("status=%d", resp.StatusCode), now)
 	}
 	if contentType := strings.ToLower(resp.Header.Get("Content-Type")); !strings.Contains(contentType, "text/html") {
+		if renderedBody, attempted, rendererErr := fetchRenderedFullText(item.Link); attempted {
+			if rendererErr == nil {
+				return processFullTextDocument(db, item, source, renderedBody, now, false)
+			}
+			log.Printf("fulltext renderer fallback failed for item %s: %v", item.ID, sanitizeRSSLogError(rendererErr))
+		}
 		return markFullTextFailure(db, item, source, FullTextErrorNonHTML, contentType, now)
 	}
 
@@ -198,13 +405,29 @@ func processFullTextItem(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 		return markFullTextFailure(db, item, source, FullTextErrorResponseTooLarge, "response too large", now)
 	}
 
-	if metadata, metadataErr := ExtractFeedImageMetadata(item.Link, strings.NewReader(string(body))); metadataErr == nil {
+	return processFullTextDocument(db, item, source, body, now, true)
+}
+
+func shouldTryFullTextRenderer(statusCode int) bool {
+	return statusCode == http.StatusUnauthorized || statusCode == http.StatusForbidden || statusCode == http.StatusTooManyRequests
+}
+
+func processFullTextDocument(db *gorm.DB, item *model.FeedItem, source *model.FeedSource, body []byte, now time.Time, allowRenderer bool) error {
+	if metadata, metadataErr := ExtractFeedImageMetadata(item.Link, bytes.NewReader(body)); metadataErr == nil {
 		if err := persistFeedImageMetadata(db, item, source, metadata); err != nil {
 			log.Printf("fulltext worker image fallback failed for item %s: %v", item.ID, err)
 		}
 	}
 
-	result, errCode, err := ExtractAndSanitizeFullText(item.Link, strings.NewReader(string(body)))
+	result, errCode, err := ExtractAndSanitizeFullText(item.Link, bytes.NewReader(body))
+	if err != nil && allowRenderer {
+		if renderedBody, attempted, rendererErr := fetchRenderedFullText(item.Link); attempted {
+			if rendererErr == nil {
+				return processFullTextDocument(db, item, source, renderedBody, now, false)
+			}
+			log.Printf("fulltext renderer fallback failed for item %s: %v", item.ID, sanitizeRSSLogError(rendererErr))
+		}
+	}
 	if err != nil {
 		if errCode == "" {
 			errCode = FullTextErrorRequestFailed
@@ -237,6 +460,28 @@ func persistFeedImageMetadata(db *gorm.DB, item *model.FeedItem, source *model.F
 }
 
 func markFullTextSuccess(db *gorm.DB, item *model.FeedItem, source *model.FeedSource, result FullTextResult, now time.Time) error {
+	pageCandidate := ReaderCandidate{
+		HTML:           result.HTML,
+		Source:         ReaderSourcePage,
+		QualityScore:   result.QualityScore,
+		QualityFlags:   result.QualityFlags,
+		CharacterCount: result.WordCount,
+		ContentHash:    hashReaderContent(result.HTML),
+		Extractor:      result.Extractor,
+	}
+	if pageCandidate.QualityScore == 0 {
+		if rescored, err := sanitizeReaderFragment(item.Link, result.HTML); err == nil {
+			pageCandidate = rescored
+			pageCandidate.Source = ReaderSourcePage
+			pageCandidate.Extractor = firstNonEmpty(result.Extractor, "legacy")
+		}
+	}
+	var feedCandidate ReaderCandidate
+	if candidate, err := SanitizeFeedContent(item.Link, item.FeedContentHTML); err == nil {
+		feedCandidate = candidate
+	}
+	selected := ChooseReaderCandidate(feedCandidate, pageCandidate)
+
 	item.FullTextStatus = FullTextStatusSuccess
 	item.FullTextHTML = result.HTML
 	item.FullTextWordCount = result.WordCount
@@ -244,6 +489,12 @@ func markFullTextSuccess(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 	item.FullTextErrorCode = ""
 	item.FullTextError = ""
 	item.NextFullTextAttemptAt = nil
+	item.ReaderHTML = selected.HTML
+	item.ReaderSource = selected.Source
+	item.ReaderQualityScore = selected.QualityScore
+	item.ReaderQualityFlags = ReaderQualityFlagsJSON(selected.QualityFlags)
+	item.ReaderVersion = ReaderVersionCurrent
+	item.ReaderContentHash = selected.ContentHash
 
 	if err := db.Model(&model.FeedItem{}).Where("id = ?", item.ID).Updates(map[string]any{
 		"full_text_status":          item.FullTextStatus,
@@ -253,19 +504,27 @@ func markFullTextSuccess(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 		"full_text_error_code":      "",
 		"full_text_error":           "",
 		"next_full_text_attempt_at": nil,
+		"reader_html":               item.ReaderHTML,
+		"reader_source":             item.ReaderSource,
+		"reader_quality_score":      item.ReaderQualityScore,
+		"reader_quality_flags":      item.ReaderQualityFlags,
+		"reader_version":            item.ReaderVersion,
+		"reader_content_hash":       item.ReaderContentHash,
 	}).Error; err != nil {
 		return err
 	}
 
 	source.FullTextSuccessCount++
+	source.FullTextConsecutiveFailureCount = 0
 	source.FullTextLastSuccessAt = &now
 	source.FullTextLastErrorCode = ""
 	source.FullTextLastError = ""
 	if err := db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(map[string]any{
-		"full_text_success_count":   source.FullTextSuccessCount,
-		"full_text_last_success_at": source.FullTextLastSuccessAt,
-		"full_text_last_error_code": "",
-		"full_text_last_error":      "",
+		"full_text_success_count":             source.FullTextSuccessCount,
+		"full_text_consecutive_failure_count": 0,
+		"full_text_last_success_at":           source.FullTextLastSuccessAt,
+		"full_text_last_error_code":           "",
+		"full_text_last_error":                "",
 	}).Error; err != nil {
 		return err
 	}
@@ -294,19 +553,21 @@ func markFullTextFailure(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 	}
 
 	source.FullTextFailureCount++
+	source.FullTextConsecutiveFailureCount++
 	source.FullTextLastFailureAt = &now
 	source.FullTextLastErrorCode = errorCode
 	source.FullTextLastError = errorMessage
-	if shouldAutoDisableFullTextSource(errorCode, source.FullTextFailureCount) {
+	if shouldAutoDisableFullTextSource(errorCode, source.FullTextConsecutiveFailureCount) {
 		source.FullTextEnabled = false
 	}
 
 	if err := db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(map[string]any{
-		"full_text_enabled":         source.FullTextEnabled,
-		"full_text_failure_count":   source.FullTextFailureCount,
-		"full_text_last_failure_at": source.FullTextLastFailureAt,
-		"full_text_last_error_code": source.FullTextLastErrorCode,
-		"full_text_last_error":      source.FullTextLastError,
+		"full_text_enabled":                   source.FullTextEnabled,
+		"full_text_failure_count":             source.FullTextFailureCount,
+		"full_text_consecutive_failure_count": source.FullTextConsecutiveFailureCount,
+		"full_text_last_failure_at":           source.FullTextLastFailureAt,
+		"full_text_last_error_code":           source.FullTextLastErrorCode,
+		"full_text_last_error":                source.FullTextLastError,
 	}).Error; err != nil {
 		return err
 	}

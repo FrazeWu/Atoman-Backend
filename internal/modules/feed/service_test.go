@@ -49,6 +49,7 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		&model.FeedItemStar{},
 		&model.ReadingListItem{},
 		&model.SourceReadEvent{},
+		&model.FeedContentFeedback{},
 	)
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: authctx.RoleUser, DisplayName: "Alice", IsActive: true}

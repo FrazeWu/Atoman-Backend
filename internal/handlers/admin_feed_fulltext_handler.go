@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
@@ -16,36 +17,55 @@ import (
 )
 
 type adminFeedFullTextSourceRow struct {
-	ID              uuid.UUID  `json:"id"`
-	Title           string     `json:"title"`
-	RssURL          string     `json:"rss_url"`
-	FullTextEnabled bool       `json:"full_text_enabled"`
-	Hidden          bool       `json:"hidden"`
-	SuccessCount    int64      `json:"success_count"`
-	RetryCount      int64      `json:"retry_count"`
-	FailedCount     int64      `json:"failed_count"`
-	PendingCount    int64      `json:"pending_count"`
-	SuccessRate     float64    `json:"success_rate"`
-	Status          string     `json:"status"`
-	LastSuccessAt   *time.Time `json:"last_success_at"`
-	LastFailureAt   *time.Time `json:"last_failure_at"`
-	LastErrorCode   string     `json:"last_error_code"`
-	LastError       string     `json:"last_error"`
+	ID                     uuid.UUID  `json:"id"`
+	Title                  string     `json:"title"`
+	RssURL                 string     `json:"rss_url"`
+	FullTextEnabled        bool       `json:"full_text_enabled"`
+	Hidden                 bool       `json:"hidden"`
+	SuccessCount           int64      `json:"success_count"`
+	RetryCount             int64      `json:"retry_count"`
+	FailedCount            int64      `json:"failed_count"`
+	PendingCount           int64      `json:"pending_count"`
+	SuccessRate            float64    `json:"success_rate"`
+	ReaderReadyCount       int64      `json:"reader_ready_count"`
+	ReaderQualityPassCount int64      `json:"reader_quality_pass_count"`
+	SummaryFallbackCount   int64      `json:"summary_fallback_count"`
+	ReaderQualityPassRate  float64    `json:"reader_quality_pass_rate"`
+	Status                 string     `json:"status"`
+	LastSuccessAt          *time.Time `json:"last_success_at"`
+	LastFailureAt          *time.Time `json:"last_failure_at"`
+	LastErrorCode          string     `json:"last_error_code"`
+	LastError              string     `json:"last_error"`
+}
+
+type adminFeedFullTextSourceAggregate struct {
+	SourceID               uuid.UUID `gorm:"column:source_id"`
+	SuccessCount           int64     `gorm:"column:success_count"`
+	RetryCount             int64     `gorm:"column:retry_count"`
+	FailedCount            int64     `gorm:"column:failed_count"`
+	PendingCount           int64     `gorm:"column:pending_count"`
+	ReaderReadyCount       int64     `gorm:"column:reader_ready_count"`
+	ReaderQualityPassCount int64     `gorm:"column:reader_quality_pass_count"`
+	SummaryFallbackCount   int64     `gorm:"column:summary_fallback_count"`
 }
 
 type adminFeedFullTextItemRow struct {
-	ID                    uuid.UUID  `json:"id"`
-	Title                 string     `json:"title"`
-	Link                  string     `json:"link"`
-	SourceID              uuid.UUID  `json:"source_id"`
-	SourceTitle           string     `json:"source_title"`
-	FullTextStatus        string     `json:"full_text_status"`
-	FullTextAttemptCount  int        `json:"attempt_count"`
-	FullTextErrorCode     string     `json:"error_code"`
-	FullTextError         string     `json:"error_message"`
-	LastFullTextAttemptAt *time.Time `json:"last_attempt_at"`
-	NextFullTextAttemptAt *time.Time `json:"next_attempt_at"`
-	PublishedAt           time.Time  `json:"published_at"`
+	ID                    uuid.UUID       `json:"id"`
+	Title                 string          `json:"title"`
+	Link                  string          `json:"link"`
+	SourceID              uuid.UUID       `json:"source_id"`
+	SourceTitle           string          `json:"source_title"`
+	FullTextStatus        string          `json:"full_text_status"`
+	FullTextAttemptCount  int             `json:"attempt_count"`
+	FullTextErrorCode     string          `json:"error_code"`
+	FullTextError         string          `json:"error_message"`
+	LastFullTextAttemptAt *time.Time      `json:"last_attempt_at"`
+	NextFullTextAttemptAt *time.Time      `json:"next_attempt_at"`
+	PublishedAt           time.Time       `json:"published_at"`
+	ReaderSource          string          `json:"reader_source"`
+	ReaderQualityScore    int             `json:"reader_quality_score"`
+	ReaderQualityFlags    json.RawMessage `json:"reader_quality_flags"`
+	ReaderVersion         int             `json:"reader_version"`
 }
 
 func parseAdminListParams(c *gin.Context) (page int, limit int) {
@@ -119,6 +139,12 @@ func GetAdminFeedFullTextHealth(db *gorm.DB) gin.HandlerFunc {
 		var retryItems int64
 		var successItems int64
 		var failedItems int64
+		var readerReadyItems int64
+		var readerQualityPassItems int64
+		var readerFeedItems int64
+		var readerPageItems int64
+		var readerSummaryItems int64
+		var pendingOverSevenDays int64
 		var latestSuccessAt *time.Time
 		var latestFailureAt *time.Time
 		var oldestPendingItem model.FeedItem
@@ -133,6 +159,12 @@ func GetAdminFeedFullTextHealth(db *gorm.DB) gin.HandlerFunc {
 		externalItems().Where("feed_items.full_text_status = ?", service.FullTextStatusRetry).Count(&retryItems)
 		externalItems().Where("feed_items.full_text_status = ?", service.FullTextStatusSuccess).Count(&successItems)
 		externalItems().Where("feed_items.full_text_status = ?", service.FullTextStatusFailed).Count(&failedItems)
+		externalItems().Where("COALESCE(feed_items.reader_html, '') <> ''").Count(&readerReadyItems)
+		externalItems().Where("COALESCE(feed_items.reader_html, '') <> '' AND feed_items.reader_quality_score >= ?", service.ReaderQualityReadyThreshold).Count(&readerQualityPassItems)
+		externalItems().Where("feed_items.reader_source = ?", service.ReaderSourceFeed).Count(&readerFeedItems)
+		externalItems().Where("feed_items.reader_source = ?", service.ReaderSourcePage).Count(&readerPageItems)
+		externalItems().Where("feed_items.reader_source = ? OR COALESCE(feed_items.reader_html, '') = ''", service.ReaderSourceSummary).Count(&readerSummaryItems)
+		externalItems().Where("feed_items.full_text_status IN ? AND feed_items.created_at < ?", []string{service.FullTextStatusPending, service.FullTextStatusRetry}, time.Now().UTC().Add(-7*24*time.Hour)).Count(&pendingOverSevenDays)
 		externalItems().Select("feed_items.full_text_fetched_at").Where("feed_items.full_text_fetched_at IS NOT NULL").Order("feed_items.full_text_fetched_at DESC").Limit(1).Scan(&latestSuccessAt)
 		externalSources().Select("full_text_last_failure_at").Where("full_text_last_failure_at IS NOT NULL").Order("full_text_last_failure_at DESC").Limit(1).Scan(&latestFailureAt)
 		externalItems().
@@ -146,19 +178,74 @@ func GetAdminFeedFullTextHealth(db *gorm.DB) gin.HandlerFunc {
 			successRate = float64(successItems) / float64(totalCompleted)
 		}
 
+		readerQualityPassRate := 0.0
+		if readerReadyItems > 0 {
+			readerQualityPassRate = float64(readerQualityPassItems) / float64(readerReadyItems)
+		}
+		type feedbackCount struct {
+			Kind  string `gorm:"column:kind"`
+			Count int64  `gorm:"column:count"`
+		}
+		var feedbackRows []feedbackCount
+		if err := db.Model(&model.FeedContentFeedback{}).
+			Select("feed_content_feedback.kind, COUNT(*) AS count").
+			Joins("JOIN feed_items ON feed_items.id = feed_content_feedback.feed_item_id").
+			Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+			Where("feed_sources.source_type = ?", "external_rss").
+			Group("feed_content_feedback.kind").Scan(&feedbackRows).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to aggregate reader feedback"})
+			return
+		}
+		feedbackCounts := map[string]int64{"missing": 0, "layout": 0, "image": 0, "noise": 0}
+		for _, row := range feedbackRows {
+			feedbackCounts[row.Kind] = row.Count
+		}
+
+		settings, err := service.LoadFeedFullTextSettings(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load reader crawl settings"})
+			return
+		}
+		readerCrawlPending, err := service.CountFeedReaderCrawlCandidates(db, settings, time.Now().UTC())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count reader crawl candidates"})
+			return
+		}
+		readerCrawlStatus, err := service.LoadFeedReaderCrawlStatus(db)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load reader crawl status"})
+			return
+		}
+
 		payload := gin.H{
-			"enabled_sources":  enabledSources,
-			"disabled_sources": disabledSources,
-			"pending_items":    pendingItems,
-			"fetching_items":   fetchingItems,
-			"retry_items":      retryItems,
-			"success_items":    successItems,
-			"failed_items":     failedItems,
-			"success_rate":     successRate,
-			"enabled":          service.FullTextWorkerEnabledDefault,
-			"concurrency":      service.FullTextWorkerConcurrency,
-			"timeout_seconds":  int(service.FullTextWorkerTimeout / time.Second),
-			"max_attempts":     service.FullTextWorkerMaxAttempts,
+			"enabled_sources":           enabledSources,
+			"disabled_sources":          disabledSources,
+			"pending_items":             pendingItems,
+			"fetching_items":            fetchingItems,
+			"retry_items":               retryItems,
+			"success_items":             successItems,
+			"failed_items":              failedItems,
+			"reader_ready_items":        readerReadyItems,
+			"reader_quality_pass_items": readerQualityPassItems,
+			"reader_quality_pass_rate":  readerQualityPassRate,
+			"reader_feed_items":         readerFeedItems,
+			"reader_page_items":         readerPageItems,
+			"reader_summary_items":      readerSummaryItems,
+			"pending_over_7d":           pendingOverSevenDays,
+			"feedback_counts":           feedbackCounts,
+			"reader_crawl_pending":      readerCrawlPending,
+			"reader_crawl_last_scanned": readerCrawlStatus.Scanned,
+			"reader_crawl_last_updated": readerCrawlStatus.Updated,
+			"reader_crawl_last_requeued": readerCrawlStatus.Requeued,
+			"reader_crawl_last_skipped": readerCrawlStatus.Skipped,
+			"success_rate":              successRate,
+			"enabled":                   service.FullTextWorkerEnvironmentEnabled() && settings.AutoSyncEnabled,
+			"concurrency":               service.FullTextWorkerConcurrency,
+			"timeout_seconds":           int(service.FullTextWorkerTimeout / time.Second),
+			"max_attempts":              service.FullTextWorkerMaxAttempts,
+		}
+		if !readerCrawlStatus.LastRunAt.IsZero() {
+			payload["reader_crawl_last_run_at"] = readerCrawlStatus.LastRunAt
 		}
 		if latestSuccessAt != nil {
 			payload["latest_success_at"] = *latestSuccessAt
@@ -205,38 +292,65 @@ func GetAdminFeedFullTextSources(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
+		aggregatesBySource := make(map[uuid.UUID]adminFeedFullTextSourceAggregate, len(sources))
+		if len(sources) > 0 {
+			sourceIDs := make([]uuid.UUID, 0, len(sources))
+			for _, source := range sources {
+				sourceIDs = append(sourceIDs, source.ID)
+			}
+			var aggregates []adminFeedFullTextSourceAggregate
+			if err := adminFullTextBlogItemQuery(db).
+				Select(`feed_items.feed_source_id AS source_id,
+					SUM(CASE WHEN feed_items.full_text_status = 'success' THEN 1 ELSE 0 END) AS success_count,
+					SUM(CASE WHEN feed_items.full_text_status = 'retry' THEN 1 ELSE 0 END) AS retry_count,
+					SUM(CASE WHEN feed_items.full_text_status = 'failed' THEN 1 ELSE 0 END) AS failed_count,
+					SUM(CASE WHEN feed_items.full_text_status = 'pending' THEN 1 ELSE 0 END) AS pending_count,
+					SUM(CASE WHEN COALESCE(feed_items.reader_html, '') <> '' THEN 1 ELSE 0 END) AS reader_ready_count,
+					SUM(CASE WHEN COALESCE(feed_items.reader_html, '') <> '' AND feed_items.reader_quality_score >= ? THEN 1 ELSE 0 END) AS reader_quality_pass_count,
+					SUM(CASE WHEN feed_items.reader_source = 'summary' OR COALESCE(feed_items.reader_html, '') = '' THEN 1 ELSE 0 END) AS summary_fallback_count`, service.ReaderQualityReadyThreshold).
+				Where("feed_items.feed_source_id IN ?", sourceIDs).
+				Group("feed_items.feed_source_id").
+				Scan(&aggregates).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to aggregate full text sources"})
+				return
+			}
+			for _, aggregate := range aggregates {
+				aggregatesBySource[aggregate.SourceID] = aggregate
+			}
+		}
+
 		rows := make([]adminFeedFullTextSourceRow, 0, len(sources))
 		for _, source := range sources {
-			var pendingCount int64
-			var retryCount int64
-			var failedCount int64
-			var successCount int64
-			adminFullTextBlogItemQuery(db).Where("feed_items.feed_source_id = ? AND feed_items.full_text_status = ?", source.ID, service.FullTextStatusPending).Count(&pendingCount)
-			adminFullTextBlogItemQuery(db).Where("feed_items.feed_source_id = ? AND feed_items.full_text_status = ?", source.ID, service.FullTextStatusRetry).Count(&retryCount)
-			adminFullTextBlogItemQuery(db).Where("feed_items.feed_source_id = ? AND feed_items.full_text_status = ?", source.ID, service.FullTextStatusFailed).Count(&failedCount)
-			adminFullTextBlogItemQuery(db).Where("feed_items.feed_source_id = ? AND feed_items.full_text_status = ?", source.ID, service.FullTextStatusSuccess).Count(&successCount)
-
-			completed := successCount + failedCount
+			aggregate := aggregatesBySource[source.ID]
+			completed := aggregate.SuccessCount + aggregate.FailedCount
 			successRate := 0.0
 			if completed > 0 {
-				successRate = float64(successCount) / float64(completed)
+				successRate = float64(aggregate.SuccessCount) / float64(completed)
+			}
+			readerQualityPassRate := 0.0
+			if aggregate.ReaderReadyCount > 0 {
+				readerQualityPassRate = float64(aggregate.ReaderQualityPassCount) / float64(aggregate.ReaderReadyCount)
 			}
 			row := adminFeedFullTextSourceRow{
-				ID:              source.ID,
-				Title:           source.Title,
-				RssURL:          source.RssURL,
-				FullTextEnabled: source.FullTextEnabled,
-				Hidden:          source.Hidden,
-				SuccessCount:    successCount,
-				RetryCount:      retryCount,
-				FailedCount:     failedCount,
-				PendingCount:    pendingCount,
-				SuccessRate:     successRate,
-				Status:          adminFeedFullTextHealthStatus(source.FullTextEnabled, pendingCount, retryCount, failedCount, successCount),
-				LastSuccessAt:   source.FullTextLastSuccessAt,
-				LastFailureAt:   source.FullTextLastFailureAt,
-				LastErrorCode:   source.FullTextLastErrorCode,
-				LastError:       source.FullTextLastError,
+				ID:                     source.ID,
+				Title:                  source.Title,
+				RssURL:                 source.RssURL,
+				FullTextEnabled:        source.FullTextEnabled,
+				Hidden:                 source.Hidden,
+				SuccessCount:           aggregate.SuccessCount,
+				RetryCount:             aggregate.RetryCount,
+				FailedCount:            aggregate.FailedCount,
+				PendingCount:           aggregate.PendingCount,
+				SuccessRate:            successRate,
+				ReaderReadyCount:       aggregate.ReaderReadyCount,
+				ReaderQualityPassCount: aggregate.ReaderQualityPassCount,
+				SummaryFallbackCount:   aggregate.SummaryFallbackCount,
+				ReaderQualityPassRate:  readerQualityPassRate,
+				Status:                 adminFeedFullTextHealthStatus(source.FullTextEnabled, aggregate.PendingCount, aggregate.RetryCount, aggregate.FailedCount, aggregate.SuccessCount),
+				LastSuccessAt:          source.FullTextLastSuccessAt,
+				LastFailureAt:          source.FullTextLastFailureAt,
+				LastErrorCode:          source.FullTextLastErrorCode,
+				LastError:              source.FullTextLastError,
 			}
 			if status != "" && row.Status != status {
 				continue
@@ -360,6 +474,10 @@ func GetAdminFeedFullTextItems(db *gorm.DB) gin.HandlerFunc {
 				LastFullTextAttemptAt: item.LastFullTextAttemptAt,
 				NextFullTextAttemptAt: item.NextFullTextAttemptAt,
 				PublishedAt:           item.PublishedAt,
+				ReaderSource:          item.ReaderSource,
+				ReaderQualityScore:    item.ReaderQualityScore,
+				ReaderQualityFlags:    item.ReaderQualityFlags,
+				ReaderVersion:         item.ReaderVersion,
 			}
 			if item.FeedSource != nil {
 				row.SourceID = item.FeedSource.ID
@@ -406,6 +524,7 @@ func RetryAdminFeedFullTextItem(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retry full text item"})
 			return
 		}
+		service.RequestFullTextWorkerRun()
 		c.JSON(http.StatusOK, gin.H{
 			"id":               item.ID,
 			"full_text_status": service.FullTextStatusPending,

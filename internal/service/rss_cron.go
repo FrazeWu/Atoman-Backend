@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -91,14 +90,59 @@ type ExtAtom struct {
 type ExtAtomEntry struct {
 	Title     string        `xml:"title"`
 	Links     []ExtAtomLink `xml:"link"`
-	Summary   string        `xml:"summary"`
-	Content   string        `xml:"content"`
+	Summary   string        `xml:"-"`
+	Content   string        `xml:"-"`
 	Published string        `xml:"published"`
 	Updated   string        `xml:"updated"`
 	Modified  string        `xml:"modified"`
 	Issued    string        `xml:"issued"`
 	ID        string        `xml:"id"`
 	Author    ExtAtomAuthor `xml:"author"`
+}
+
+type atomHTMLValue struct {
+	Type      string `xml:"type,attr"`
+	InnerHTML string `xml:",innerxml"`
+}
+
+func (entry *ExtAtomEntry) UnmarshalXML(decoder *xml.Decoder, start xml.StartElement) error {
+	var decoded struct {
+		Title     string        `xml:"title"`
+		Links     []ExtAtomLink `xml:"link"`
+		Summary   atomHTMLValue `xml:"summary"`
+		Content   atomHTMLValue `xml:"content"`
+		Published string        `xml:"published"`
+		Updated   string        `xml:"updated"`
+		Modified  string        `xml:"modified"`
+		Issued    string        `xml:"issued"`
+		ID        string        `xml:"id"`
+		Author    ExtAtomAuthor `xml:"author"`
+	}
+	if err := decoder.DecodeElement(&decoded, &start); err != nil {
+		return err
+	}
+	entry.Title = decoded.Title
+	entry.Links = decoded.Links
+	entry.Summary = decodeAtomHTMLValue(decoded.Summary)
+	entry.Content = decodeAtomHTMLValue(decoded.Content)
+	entry.Published = decoded.Published
+	entry.Updated = decoded.Updated
+	entry.Modified = decoded.Modified
+	entry.Issued = decoded.Issued
+	entry.ID = decoded.ID
+	entry.Author = decoded.Author
+	return nil
+}
+
+func decodeAtomHTMLValue(value atomHTMLValue) string {
+	inner := strings.TrimSpace(value.InnerHTML)
+	if inner == "" {
+		return ""
+	}
+	if strings.EqualFold(strings.TrimSpace(value.Type), "xhtml") {
+		return inner
+	}
+	return html.UnescapeString(inner)
 }
 
 type ExtAtomLink struct {
@@ -117,11 +161,13 @@ type normalizedFeedItem struct {
 	ImageURL          string
 	EnclosureURL      string
 	EnclosureType     string
-	Duration          string
-	LooksLikeFullText bool
+	Duration      string
 }
 
-var rssFetchHTTPClient = &http.Client{Timeout: 10 * time.Second}
+var rssFetchHTTPClient = &http.Client{
+	Timeout:   10 * time.Second,
+	Transport: newFullTextSafeHTTPTransport(),
+}
 
 type rssCronConfig struct {
 	Enabled      bool
@@ -202,14 +248,6 @@ func buildSummaryFromNormalizedContent(contentHTML string, fallbackSummary strin
 		return buildFeedItemSummary(contentHTML)
 	}
 	return buildFeedItemSummary(strings.TrimSpace(fallbackSummary))
-}
-
-func inferFeedContentQuality(content string) bool {
-	text := buildFeedItemSummary(content)
-	if utf8.RuneCountInString(text) < 280 {
-		return false
-	}
-	return strings.Count(text, ".") >= 2 || strings.Count(text, "。") >= 2
 }
 
 func parsePreferredRSSDate(item ExtRSSItem, fallbackTime time.Time) time.Time {
@@ -311,9 +349,8 @@ func normalizeRSSItem(item ExtRSSItem, sourceTitle string, channelImageURL strin
 		SummaryText:       summaryText,
 		ImageURL:          imageURL,
 		EnclosureURL:      strings.TrimSpace(item.Enclosure.URL),
-		EnclosureType:     strings.TrimSpace(item.Enclosure.Type),
-		Duration:          strings.TrimSpace(item.ITunesDur),
-		LooksLikeFullText: inferFeedContentQuality(contentHTML),
+		EnclosureType: strings.TrimSpace(item.Enclosure.Type),
+		Duration:      strings.TrimSpace(item.ITunesDur),
 	}
 }
 
@@ -354,9 +391,8 @@ func normalizeAtomEntry(entry ExtAtomEntry, sourceTitle string, feedImageURL str
 		Author:            author,
 		PublishedAt:       publishedAt,
 		ContentHTML:       contentHTML,
-		SummaryText:       summaryText,
-		ImageURL:          imageURL,
-		LooksLikeFullText: inferFeedContentQuality(contentHTML),
+		SummaryText: summaryText,
+		ImageURL:    imageURL,
 	}
 }
 
@@ -405,20 +441,34 @@ func loadRSSCronConfig() rssCronConfig {
 
 func buildModelFeedItem(src model.FeedSource, normalized normalizedFeedItem, fetchedAt time.Time) model.FeedItem {
 	newFeedItem := model.FeedItem{
-		FeedSourceID:  src.ID,
-		GUID:          normalized.Identifier,
-		Title:         normalized.Title,
-		Link:          normalized.Link,
-		Summary:       buildSummaryFromNormalizedContent(normalized.ContentHTML, normalized.SummaryText),
-		Author:        normalized.Author,
-		PublishedAt:   normalized.PublishedAt,
-		FetchedAt:     fetchedAt,
-		EnclosureURL:  normalized.EnclosureURL,
-		EnclosureType: normalized.EnclosureType,
-		Duration:      normalized.Duration,
-		ImageURL:      normalized.ImageURL,
+		FeedSourceID:       src.ID,
+		GUID:               normalized.Identifier,
+		Title:              normalized.Title,
+		Link:               normalized.Link,
+		Summary:            buildSummaryFromNormalizedContent(normalized.ContentHTML, normalized.SummaryText),
+		Author:             normalized.Author,
+		PublishedAt:        normalized.PublishedAt,
+		FetchedAt:          fetchedAt,
+		EnclosureURL:       normalized.EnclosureURL,
+		EnclosureType:      normalized.EnclosureType,
+		Duration:           normalized.Duration,
+		ImageURL:           normalized.ImageURL,
+		ReaderSource:       ReaderSourceSummary,
+		ReaderQualityFlags: ReaderQualityFlagsJSON(nil),
 	}
-	newFeedItem.FullTextStatus = defaultFullTextStatusForSource(src, newFeedItem, normalized.LooksLikeFullText)
+
+	feedCandidate, err := SanitizeFeedContent(normalized.Link, firstNonEmpty(normalized.ContentHTML, normalized.SummaryText))
+	if err == nil {
+		newFeedItem.FeedContentHTML = feedCandidate.HTML
+		newFeedItem.ReaderHTML = feedCandidate.HTML
+		newFeedItem.ReaderSource = feedCandidate.Source
+		newFeedItem.ReaderQualityScore = feedCandidate.QualityScore
+		newFeedItem.ReaderQualityFlags = ReaderQualityFlagsJSON(feedCandidate.QualityFlags)
+		newFeedItem.ReaderVersion = ReaderVersionCurrent
+		newFeedItem.ReaderContentHash = feedCandidate.ContentHash
+	}
+	feedIsComplete := newFeedItem.ReaderSource == ReaderSourceFeed && newFeedItem.ReaderQualityScore >= ReaderQualityReadyThreshold
+	newFeedItem.FullTextStatus = defaultFullTextStatusForSource(src, newFeedItem, feedIsComplete)
 	return newFeedItem
 }
 
@@ -435,13 +485,46 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		},
 		DoNothing: true,
 	}).Create(&newFeedItem)
-	if result.Error == nil {
-		return result.RowsAffected > 0, nil
+	if result.Error == nil && result.RowsAffected > 0 {
+		return true, nil
 	}
-	if isFeedItemDuplicateKeyError(result.Error) {
-		return false, nil
+	if result.Error != nil && !isFeedItemDuplicateKeyError(result.Error) {
+		return false, result.Error
 	}
-	return false, result.Error
+
+	var existing model.FeedItem
+	if err := db.Where("feed_source_id = ? AND guid = ?", src.ID, normalized.Identifier).First(&existing).Error; err != nil {
+		if result.Error != nil && isFeedItemDuplicateKeyError(result.Error) {
+			return false, nil
+		}
+		return false, err
+	}
+	updates := map[string]any{
+		"title":             newFeedItem.Title,
+		"link":              newFeedItem.Link,
+		"summary":           newFeedItem.Summary,
+		"author":            newFeedItem.Author,
+		"published_at":      newFeedItem.PublishedAt,
+		"fetched_at":        newFeedItem.FetchedAt,
+		"enclosure_url":     newFeedItem.EnclosureURL,
+		"enclosure_type":    newFeedItem.EnclosureType,
+		"duration":          newFeedItem.Duration,
+		"image_url":         newFeedItem.ImageURL,
+		"feed_content_html": newFeedItem.FeedContentHTML,
+	}
+	if newFeedItem.ReaderHTML != "" && (existing.ReaderSource != ReaderSourcePage || newFeedItem.ReaderQualityScore > existing.ReaderQualityScore) {
+		updates["reader_html"] = newFeedItem.ReaderHTML
+		updates["reader_source"] = newFeedItem.ReaderSource
+		updates["reader_quality_score"] = newFeedItem.ReaderQualityScore
+		updates["reader_quality_flags"] = newFeedItem.ReaderQualityFlags
+		updates["reader_version"] = newFeedItem.ReaderVersion
+		updates["reader_content_hash"] = newFeedItem.ReaderContentHash
+	}
+	if existing.FullTextStatus == FullTextStatusDisabled && newFeedItem.FullTextStatus == FullTextStatusPending {
+		updates["full_text_status"] = FullTextStatusPending
+		updates["next_full_text_attempt_at"] = nil
+	}
+	return false, db.Model(&model.FeedItem{}).Where("id = ?", existing.ID).Updates(updates).Error
 }
 
 func isFeedItemDuplicateKeyError(err error) bool {

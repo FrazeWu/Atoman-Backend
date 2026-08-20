@@ -27,7 +27,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func openFullTextWorkerTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{}, &model.FeedSourceDiagnostic{})
+	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{}, &model.FeedSourceDiagnostic{}, &model.ReadingListItem{}, &model.FeedItemStar{})
 	if err := migrations.RunFeedItemUniqueIndex(db); err != nil {
 		return nil, err
 	}
@@ -110,11 +110,12 @@ func TestMarkFullTextFailureAutoDisablesSourceAfterRepeatedLoginWalls(t *testing
 
 	now := time.Date(2026, 6, 29, 8, 0, 0, 0, time.UTC)
 	source := model.FeedSource{
-		SourceType:           "external_rss",
-		Hash:                 "worker-source-login-wall",
-		RssURL:               "https://example.com/feed.xml",
-		FullTextEnabled:      true,
-		FullTextFailureCount: fullTextAutoDisableFailureThreshold - 1,
+		SourceType:                      "external_rss",
+		Hash:                            "worker-source-login-wall",
+		RssURL:                          "https://example.com/feed.xml",
+		FullTextEnabled:                 true,
+		FullTextFailureCount:            fullTextAutoDisableFailureThreshold - 1,
+		FullTextConsecutiveFailureCount: fullTextAutoDisableFailureThreshold - 1,
 	}
 	if err := db.Create(&source).Error; err != nil {
 		t.Fatal(err)
@@ -664,38 +665,51 @@ func TestSyncSingleRSSDisablesPodcastFullTextStatus(t *testing.T) {
 	}
 }
 
-func TestSyncSingleRSSRecordsSourceFailureState(t *testing.T) {
+func TestRunFullTextCycleRefreshesSourceFailureStateBetweenItems(t *testing.T) {
 	db, err := openFullTextWorkerTestDB(t)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	source := model.FeedSource{
 		SourceType:      "external_rss",
-		Hash:            "worker-source-sync-failure",
-		RssURL:          "http://127.0.0.1:1/unreachable.xml",
-		Title:           "Original Title",
-		CoverURL:        "https://example.com/original.png",
+		Hash:            "worker-source-failure-refresh",
+		RssURL:          "https://feeds.example.com/rss.xml",
 		FullTextEnabled: true,
 	}
 	if err := db.Create(&source).Error; err != nil {
 		t.Fatal(err)
 	}
-
-	beforeFetchedAt := source.LastFetchedAt
-	SyncSingleRSS(db, source)
-
-	var got model.FeedSource
-	if err := db.First(&got, "id = ?", source.ID).Error; err != nil {
+	now := time.Now().UTC()
+	items := []model.FeedItem{
+		{FeedSourceID: source.ID, GUID: "refresh-1", Title: "First", Link: "https://example.com/first", FullTextStatus: FullTextStatusPending, PublishedAt: now, FetchedAt: now},
+		{FeedSourceID: source.ID, GUID: "refresh-2", Title: "Second", Link: "https://example.com/second", FullTextStatus: FullTextStatusPending, PublishedAt: now.Add(-time.Minute), FetchedAt: now},
+	}
+	if err := db.Create(&items).Error; err != nil {
 		t.Fatal(err)
 	}
-	if got.LastFetchedAt != beforeFetchedAt {
-		t.Fatalf("expected last_fetched_at unchanged on sync failure, got %v want %v", got.LastFetchedAt, beforeFetchedAt)
+
+	originalResolver := resolveFullTextHostname
+	resolveFullTextHostname = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
 	}
-	if got.Title != source.Title {
-		t.Fatalf("expected title unchanged on sync failure, got %q want %q", got.Title, source.Title)
+	t.Cleanup(func() { resolveFullTextHostname = originalResolver })
+	originalClient := fullTextHTTPClient
+	fullTextHTTPClient = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusForbidden,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader("forbidden")),
+		}, nil
+	})}
+	t.Cleanup(func() { fullTextHTTPClient = originalClient })
+
+	runFullTextCycle(db, now, 2, 2)
+
+	var updatedSource model.FeedSource
+	if err := db.First(&updatedSource, "id = ?", source.ID).Error; err != nil {
+		t.Fatal(err)
 	}
-	if got.CoverURL != source.CoverURL {
-		t.Fatalf("expected cover_url unchanged on sync failure, got %q want %q", got.CoverURL, source.CoverURL)
+	if updatedSource.FullTextFailureCount != 2 || updatedSource.FullTextConsecutiveFailureCount != 2 {
+		t.Fatalf("failure counts=(%d,%d), want (2,2)", updatedSource.FullTextFailureCount, updatedSource.FullTextConsecutiveFailureCount)
 	}
 }

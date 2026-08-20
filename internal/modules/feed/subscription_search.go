@@ -101,12 +101,15 @@ func GetFeedItem(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		contentHTML := strings.TrimSpace(item.Summary)
-		contentSource := "summary"
-		fullTextHTML := strings.TrimSpace(item.FullTextHTML)
-		if item.FullTextStatus == service.FullTextStatusSuccess && fullTextHTML != "" {
-			contentHTML = fullTextHTML
-			contentSource = "full_text"
+		contentHTML := strings.TrimSpace(item.ReaderHTML)
+		contentSource := strings.TrimSpace(item.ReaderSource)
+		if contentHTML == "" && item.FullTextStatus == service.FullTextStatusSuccess {
+			contentHTML = strings.TrimSpace(item.FullTextHTML)
+			contentSource = service.ReaderSourcePage
+		}
+		if contentHTML == "" {
+			contentHTML = strings.TrimSpace(item.Summary)
+			contentSource = service.ReaderSourceSummary
 		}
 
 		c.JSON(http.StatusOK, gin.H{

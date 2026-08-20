@@ -25,6 +25,10 @@ type ReadingListInput struct {
 	TargetID   uuid.UUID `json:"target_id"`
 }
 
+type ContentFeedbackInput struct {
+	Kind string `json:"kind" enums:"missing,layout,image,noise"`
+}
+
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	h := &Handler{service: service}
 	group.GET("/timeline", middleware.OptionalAuthMiddleware(), h.getSubscribedFeed)
@@ -36,6 +40,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 
 	group.GET("/rss/:username", GetUserRSS(service.db))
 	group.GET("/items/:id", GetFeedItem(service.db))
+	group.GET("/media/image", proxyFeedImage)
 
 	protected := group.Group("")
 	protected.Use(middleware.AuthMiddleware())
@@ -47,6 +52,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.GET("/timeline/updates", h.getTimelineUpdates)
 		protected.POST("/timeline/star", h.toggleStar)
 		protected.POST("/events/read", h.recordReadEvent)
+		protected.POST("/items/:id/content-feedback", h.recordContentFeedback)
 		protected.GET("/reading-list", h.listReadingList)
 		protected.POST("/reading-list", h.toggleReadingList)
 		protected.DELETE("/reading-list/:target_type/:id", h.removeReadingListItem)
@@ -506,6 +512,45 @@ func (h *Handler) recordReadEvent(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"ok": true})
+}
+
+// recordContentFeedback godoc
+// @Summary 反馈订阅正文质量
+// @Description 提交当前订阅正文的缺失、排版、图片或噪声问题；同一用户的同类反馈幂等。
+// @Tags feed
+// @Accept json
+// @Produce json
+// @Param id path string true "Feed item UUID"
+// @Param input body ContentFeedbackInput true "正文质量反馈"
+// @Success 200 {object} map[string]bool
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/items/{id}/content-feedback [post]
+func (h *Handler) recordContentFeedback(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	itemID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "feed item id must be a valid uuid"))
+		return
+	}
+	var req ContentFeedbackInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	created, err := h.service.RecordContentFeedback(user, itemID, strings.TrimSpace(req.Kind))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"recorded": true, "created": created})
 }
 
 // toggleReadingList godoc
