@@ -22,6 +22,15 @@ func BuildUserMediaKey(prefix, kind, userID, filename string, createdAt time.Tim
 	return strings.Trim(prefix, "/") + "/" + strings.Trim(kind, "/") + "/users/" + strings.Trim(userID, "/") + "/" + buildYearMonth(createdAt) + "/" + cleanFilename(filename)
 }
 
+const (
+	UserAvatarOldSlot = "old"
+	UserAvatarNewSlot = "new"
+)
+
+func BuildUserAvatarSlotKey(userID, slot string) string {
+	return "users/avatars/" + strings.Trim(userID, "/") + "/" + strings.Trim(slot, "/")
+}
+
 func BuildMusicUploadKey(kind, userID, filename string, createdAt time.Time) string {
 	return "music/" + strings.Trim(kind, "/") + "/uploads/users/" + strings.Trim(userID, "/") + "/" + buildYearMonth(createdAt) + "/" + cleanFilename(filename)
 }

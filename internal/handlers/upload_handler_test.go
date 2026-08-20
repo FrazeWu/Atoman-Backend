@@ -63,8 +63,12 @@ func fakeS3ClientForUploadTest(t *testing.T, capturedPath *string, capturedConte
 func fakeS3ClientForUploadTestWithACL(t *testing.T, capturedPath *string, capturedContentType *string, capturedACL *string) *s3.S3 {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
 		if r.Method != http.MethodPut {
-			t.Fatalf("expected S3 PUT, got %s", r.Method)
+			t.Fatalf("expected S3 PUT or HEAD, got %s", r.Method)
 		}
 		*capturedPath = r.URL.EscapedPath()
 		*capturedContentType = r.Header.Get("Content-Type")
@@ -293,9 +297,9 @@ func TestUploadUserAvatarUsesUserMediaKey(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatal(err)
 	}
-	wantPrefix := "users/avatars/users/" + user.UUID.String() + "/"
-	if !strings.HasPrefix(response.Data.Key, wantPrefix) {
-		t.Fatalf("expected avatar key prefix %q, got %q", wantPrefix, response.Data.Key)
+	wantKey := "users/avatars/" + user.UUID.String() + "/new"
+	if response.Data.Key != wantKey {
+		t.Fatalf("expected avatar key %q, got %q", wantKey, response.Data.Key)
 	}
 	var asset model.MediaAsset
 	if err := db.First(&asset, "id = ?", response.Data.ID).Error; err != nil {

@@ -15,6 +15,23 @@ func TestBuildUserMediaKey(t *testing.T) {
 	}
 }
 
+func TestBuildUserAvatarSlotKey(t *testing.T) {
+	tests := []struct {
+		slot string
+		want string
+	}{
+		{slot: UserAvatarOldSlot, want: "users/avatars/user-123/old"},
+		{slot: UserAvatarNewSlot, want: "users/avatars/user-123/new"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.slot, func(t *testing.T) {
+			if key := BuildUserAvatarSlotKey("user-123", tt.slot); key != tt.want {
+				t.Fatalf("unexpected key: %s", key)
+			}
+		})
+	}
+}
+
 func TestBuildMusicUploadKey(t *testing.T) {
 	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
 

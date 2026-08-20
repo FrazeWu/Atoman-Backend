@@ -3257,6 +3257,22 @@ definitions:
       subscriptions:
         type: integer
     type: object
+  handlers.avatarRestoreAvailabilityResponse:
+    properties:
+      available:
+        type: boolean
+    type: object
+  handlers.avatarRestoreResponse:
+    properties:
+      content_type:
+        type: string
+      key:
+        type: string
+      size:
+        type: integer
+      url:
+        type: string
+    type: object
   handlers.oauthVerifyEmailRequest:
     properties:
       code:
@@ -18988,6 +19004,65 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 上传媒体资源
+      - uploads
+  /api/v1/uploads/avatar/restore:
+    post:
+      description: 将当前头像与上一张头像交换，并将上一张头像设为当前头像。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/handlers.avatarRestoreResponse"
+        "400":
+          description: Bad Request
+          schema:
+            $ref: "#/definitions/handlers.ErrorResponse"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/handlers.ErrorResponse"
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: "#/definitions/handlers.ErrorResponse"
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: "#/definitions/handlers.ErrorResponse"
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 恢复上一张头像
+      tags:
+      - uploads
+  /api/v1/uploads/avatar/restore-available:
+    get:
+      description: 检查当前用户是否存在可恢复的上一张头像。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: "#/definitions/handlers.avatarRestoreAvailabilityResponse"
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: "#/definitions/handlers.ErrorResponse"
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: "#/definitions/handlers.ErrorResponse"
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: "#/definitions/handlers.ErrorResponse"
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 检查上一张头像
       tags:
       - uploads
   /api/v1/users/{id}/follow:
