@@ -17,6 +17,7 @@ func TestMusicServiceOnlyOwnsCompositionAndSharedPagination(t *testing.T) {
 	expected := map[string]bool{
 		"NewService":                       true,
 		"NewServiceWithS3":                 true,
+		"WithAlbumLinkSuggestionProvider":  true,
 		"normalizeMusicRecommendationPage": true,
 	}
 	actual := make(map[string]bool)

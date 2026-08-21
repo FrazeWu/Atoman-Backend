@@ -18,10 +18,11 @@ func TestMusicHTTPOnlyOwnsRouteAssemblyAndSharedTransportHelpers(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"RegisterRoutes":   true,
-		"currentMusicUser": true,
-		"parseMusicID":     true,
-		"bindJSON":         true,
+		"RegisterRoutes":       true,
+		"albumLinkSuggestions": true,
+		"currentMusicUser":     true,
+		"parseMusicID":         true,
+		"bindJSON":             true,
 	}
 	actual := make(map[string]bool)
 	for _, declaration := range parsed.Decls {
