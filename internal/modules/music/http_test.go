@@ -299,8 +299,8 @@ func TestRegisterRoutesSongListFiltersArtistAndStandaloneReleaseTypes(t *testing
 	legacyResponse := httptest.NewRecorder()
 	legacyPath := "/api/v1/music/songs?artist_id=" + artist.ID.String() + "&release_type=song"
 	newMusicHTTPRouter(service, &user).ServeHTTP(legacyResponse, httptest.NewRequest(http.MethodGet, legacyPath, nil))
-	if legacyResponse.Code != http.StatusOK {
-		t.Fatalf("expected temporary release_type=song compatibility to return 200, got %d: %s", legacyResponse.Code, legacyResponse.Body.String())
+	if legacyResponse.Code != http.StatusBadRequest {
+		t.Fatalf("expected removed release_type=song to return 400, got %d: %s", legacyResponse.Code, legacyResponse.Body.String())
 	}
 
 	detailResponse := httptest.NewRecorder()

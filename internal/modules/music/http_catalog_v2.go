@@ -65,21 +65,16 @@ func (h *Handler) listSongs(c *gin.Context) {
 	rawReleaseTypes := strings.ToLower(strings.TrimSpace(c.Query("release_type")))
 	if rawReleaseTypes != "" {
 		releaseTypes := make([]string, 0, 2)
-		if rawReleaseTypes == "song" {
-			// Keep the previous artist drawer working during the staged rollout.
-			releaseTypes = append(releaseTypes, "single", "leak")
-		} else {
-			seenReleaseTypes := map[string]bool{}
-			for _, raw := range strings.Split(rawReleaseTypes, ",") {
-				releaseType := strings.TrimSpace(raw)
-				if releaseType != "single" && releaseType != "leak" {
-					httpx.Error(c, apperr.BadRequest("validation.invalid_request", "release_type must contain only single or leak"))
-					return
-				}
-				if !seenReleaseTypes[releaseType] {
-					releaseTypes = append(releaseTypes, releaseType)
-					seenReleaseTypes[releaseType] = true
-				}
+		seenReleaseTypes := map[string]bool{}
+		for _, raw := range strings.Split(rawReleaseTypes, ",") {
+			releaseType := strings.TrimSpace(raw)
+			if releaseType != "single" && releaseType != "leak" {
+				httpx.Error(c, apperr.BadRequest("validation.invalid_request", "release_type must contain only single or leak"))
+				return
+			}
+			if !seenReleaseTypes[releaseType] {
+				releaseTypes = append(releaseTypes, releaseType)
+				seenReleaseTypes[releaseType] = true
 			}
 		}
 		query = query.Where(`"Songs".album_id IS NULL AND LOWER("Songs".release_type) IN ?`, releaseTypes)
