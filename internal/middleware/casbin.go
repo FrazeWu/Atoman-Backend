@@ -73,9 +73,6 @@ func initDefaultPolicies() {
 	if ok, _ := Enforcer.AddPolicy("anonymous", "/api/*", "GET"); ok {
 		policyAdded = true
 	}
-	if ok, _ := Enforcer.AddPolicy("anonymous", "/api/v1/site/visits", "POST"); ok {
-		policyAdded = true
-	}
 	if ok, _ := Enforcer.AddPolicy("anonymous", "/api/v1/music/plays", "POST"); ok {
 		policyAdded = true
 	}
@@ -156,6 +153,12 @@ func CasbinMiddleware() gin.HandlerFunc {
 
 		// Special case: ignore OPTIONS
 		if method == "OPTIONS" {
+			c.Next()
+			return
+		}
+
+		// Public page-view reporting is intentionally anonymous.
+		if role == "anonymous" && method == "POST" && path == "/api/v1/site/visits" {
 			c.Next()
 			return
 		}
