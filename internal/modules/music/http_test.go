@@ -240,6 +240,72 @@ func TestRegisterRoutesAlbumListFiltersReleaseType(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesSongListFiltersArtistAndSortsByAlbumReleaseDate(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	artist := model.Artist{Name: "Song List Artist", EntryStatus: "open"}
+	otherArtist := model.Artist{Name: "Other Song Artist", EntryStatus: "open"}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	if err := db.Create(&otherArtist).Error; err != nil {
+		t.Fatalf("create other artist: %v", err)
+	}
+
+	olderAlbum := model.Album{Title: "Older Album", ReleaseDate: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC), EntryStatus: "open", Status: "open"}
+	newerAlbum := model.Album{Title: "Newer Album", ReleaseDate: time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC), EntryStatus: "open", Status: "open"}
+	if err := db.Create(&olderAlbum).Error; err != nil {
+		t.Fatalf("create older album: %v", err)
+	}
+	if err := db.Create(&newerAlbum).Error; err != nil {
+		t.Fatalf("create newer album: %v", err)
+	}
+
+	olderSong := model.Song{Title: "Older Song", AlbumID: &olderAlbum.ID, AudioURL: "/audio/older.mp3", Status: "open"}
+	newerSong := model.Song{Title: "Newer Song", AlbumID: &newerAlbum.ID, AudioURL: "/audio/newer.mp3", Status: "open"}
+	otherSong := model.Song{Title: "Other Song", AlbumID: &newerAlbum.ID, AudioURL: "/audio/other.mp3", Status: "open"}
+	for _, song := range []*model.Song{&olderSong, &newerSong, &otherSong} {
+		if err := db.Create(song).Error; err != nil {
+			t.Fatalf("create song: %v", err)
+		}
+	}
+	credits := []model.SongArtist{
+		{SongID: olderSong.ID, ArtistID: artist.ID, Role: "primary", Position: 1},
+		{SongID: olderSong.ID, ArtistID: artist.ID, Role: "custom", CustomRole: "Composer", Position: 1},
+		{SongID: newerSong.ID, ArtistID: artist.ID, Role: "primary", Position: 1},
+		{SongID: otherSong.ID, ArtistID: otherArtist.ID, Role: "primary", Position: 1},
+	}
+	for index := range credits {
+		if err := db.Create(&credits[index]).Error; err != nil {
+			t.Fatalf("create song artist: %v", err)
+		}
+	}
+
+	response := httptest.NewRecorder()
+	path := "/api/v1/music/songs?artist_id=" + artist.ID.String() + "&sort=-release_date"
+	newMusicHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected artist song list to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			Title string `json:"title"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode song list response: %v", err)
+	}
+	if payload.Meta.Total != 2 || len(payload.Data) != 2 {
+		t.Fatalf("expected two unique artist songs, got total=%d data=%#v", payload.Meta.Total, payload.Data)
+	}
+	if payload.Data[0].Title != newerSong.Title || payload.Data[1].Title != olderSong.Title {
+		t.Fatalf("unexpected release date order: %#v", payload.Data)
+	}
+}
+
 func TestRegisterRoutesPlaylistBookmarksMatchFrontendContract(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	owner := model.User{Username: "playlist-owner", DisplayName: "Playlist Owner", Email: "playlist-owner@example.com", Password: "hash", Role: "user", IsActive: true}

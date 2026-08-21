@@ -53,11 +53,16 @@ func (h *Handler) listSongs(c *gin.Context) {
 			httpx.Error(c, err)
 			return
 		}
-		query = query.Joins("JOIN song_artists AS filter_song_artists ON filter_song_artists.song_id = \"Songs\".id").Where("filter_song_artists.artist_id = ?", artistID)
+		query = query.Where(`EXISTS (
+			SELECT 1
+			FROM song_artists AS filter_song_artists
+			WHERE filter_song_artists.song_id = "Songs".id
+				AND filter_song_artists.artist_id = ?
+		)`, artistID)
 	}
 
 	var total int64
-	if err := query.Distinct("\"Songs\".id").Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -73,7 +78,7 @@ func (h *Handler) listSongs(c *gin.Context) {
 	}
 
 	var songs []model.Song
-	if err := query.Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").Distinct("\"Songs\".*").
+	if err := query.Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
 		Preload("Album").Preload("Artists").Order(order).Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&songs).Error; err != nil {
 		httpx.Error(c, err)
 		return
