@@ -13959,6 +13959,16 @@ const docTemplate = `{
                     },
                     {
                         "enum": [
+                            "album",
+                            "song"
+                        ],
+                        "type": "string",
+                        "description": "作品分类",
+                        "name": "release_type",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
                             "-release_date",
                             "release_date",
                             "hot"

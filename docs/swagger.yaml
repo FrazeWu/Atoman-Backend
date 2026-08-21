@@ -15660,6 +15660,13 @@ paths:
         in: query
         name: artist_id
         type: string
+      - description: 作品分类
+        enum:
+        - album
+        - song
+        in: query
+        name: release_type
+        type: string
       - description: 排序方式
         enum:
         - -release_date

@@ -36,6 +36,7 @@ type musicSearchMeta struct {
 // @Tags music
 // @Produce json
 // @Param artist_id query string false "艺术家 ID"
+// @Param release_type query string false "作品分类" Enums(album, song)
 // @Param sort query string false "排序方式" Enums(-release_date,release_date,hot)
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
@@ -59,6 +60,17 @@ func (h *Handler) listSongs(c *gin.Context) {
 			WHERE filter_song_artists.song_id = "Songs".id
 				AND filter_song_artists.artist_id = ?
 		)`, artistID)
+	}
+
+	releaseType := strings.ToLower(strings.TrimSpace(c.Query("release_type")))
+	if releaseType == "song" || releaseType == "album" {
+		albumTypes := h.service.db.Model(&model.Album{}).Select("id")
+		if releaseType == "song" {
+			albumTypes = albumTypes.Where("LOWER(COALESCE(album_type, 'album')) IN ?", []string{"single", "leak"})
+		} else {
+			albumTypes = albumTypes.Where("LOWER(COALESCE(album_type, 'album')) NOT IN ?", []string{"single", "leak"})
+		}
+		query = query.Where("\"Songs\".album_id IN (?)", albumTypes)
 	}
 
 	var total int64

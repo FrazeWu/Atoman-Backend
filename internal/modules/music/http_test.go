@@ -240,7 +240,7 @@ func TestRegisterRoutesAlbumListFiltersReleaseType(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesSongListFiltersArtistAndSortsByAlbumReleaseDate(t *testing.T) {
+func TestRegisterRoutesSongListFiltersArtistReleaseTypeAndSortsByAlbumReleaseDate(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Song List Artist", EntryStatus: "open"}
 	otherArtist := model.Artist{Name: "Other Song Artist", EntryStatus: "open"}
@@ -251,19 +251,24 @@ func TestRegisterRoutesSongListFiltersArtistAndSortsByAlbumReleaseDate(t *testin
 		t.Fatalf("create other artist: %v", err)
 	}
 
-	olderAlbum := model.Album{Title: "Older Album", ReleaseDate: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC), EntryStatus: "open", Status: "open"}
-	newerAlbum := model.Album{Title: "Newer Album", ReleaseDate: time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC), EntryStatus: "open", Status: "open"}
+	olderAlbum := model.Album{Title: "Older Leak", AlbumType: "leak", ReleaseDate: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC), EntryStatus: "open", Status: "open"}
+	newerAlbum := model.Album{Title: "Newer Single", AlbumType: "single", ReleaseDate: time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC), EntryStatus: "open", Status: "open"}
+	studioAlbum := model.Album{Title: "Studio Album", AlbumType: "album", ReleaseDate: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), EntryStatus: "open", Status: "open"}
 	if err := db.Create(&olderAlbum).Error; err != nil {
 		t.Fatalf("create older album: %v", err)
 	}
 	if err := db.Create(&newerAlbum).Error; err != nil {
 		t.Fatalf("create newer album: %v", err)
 	}
+	if err := db.Create(&studioAlbum).Error; err != nil {
+		t.Fatalf("create studio album: %v", err)
+	}
 
 	olderSong := model.Song{Title: "Older Song", AlbumID: &olderAlbum.ID, AudioURL: "/audio/older.mp3", Status: "open"}
 	newerSong := model.Song{Title: "Newer Song", AlbumID: &newerAlbum.ID, AudioURL: "/audio/newer.mp3", Status: "open"}
+	studioSong := model.Song{Title: "Studio Album Track", AlbumID: &studioAlbum.ID, AudioURL: "/audio/studio.mp3", Status: "open"}
 	otherSong := model.Song{Title: "Other Song", AlbumID: &newerAlbum.ID, AudioURL: "/audio/other.mp3", Status: "open"}
-	for _, song := range []*model.Song{&olderSong, &newerSong, &otherSong} {
+	for _, song := range []*model.Song{&olderSong, &newerSong, &studioSong, &otherSong} {
 		if err := db.Create(song).Error; err != nil {
 			t.Fatalf("create song: %v", err)
 		}
@@ -272,6 +277,7 @@ func TestRegisterRoutesSongListFiltersArtistAndSortsByAlbumReleaseDate(t *testin
 		{SongID: olderSong.ID, ArtistID: artist.ID, Role: "primary", Position: 1},
 		{SongID: olderSong.ID, ArtistID: artist.ID, Role: "custom", CustomRole: "Composer", Position: 1},
 		{SongID: newerSong.ID, ArtistID: artist.ID, Role: "primary", Position: 1},
+		{SongID: studioSong.ID, ArtistID: artist.ID, Role: "primary", Position: 1},
 		{SongID: otherSong.ID, ArtistID: otherArtist.ID, Role: "primary", Position: 1},
 	}
 	for index := range credits {
@@ -281,7 +287,7 @@ func TestRegisterRoutesSongListFiltersArtistAndSortsByAlbumReleaseDate(t *testin
 	}
 
 	response := httptest.NewRecorder()
-	path := "/api/v1/music/songs?artist_id=" + artist.ID.String() + "&sort=-release_date"
+	path := "/api/v1/music/songs?artist_id=" + artist.ID.String() + "&release_type=song&sort=-release_date"
 	newMusicHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected artist song list to return 200, got %d: %s", response.Code, response.Body.String())
@@ -299,7 +305,7 @@ func TestRegisterRoutesSongListFiltersArtistAndSortsByAlbumReleaseDate(t *testin
 		t.Fatalf("decode song list response: %v", err)
 	}
 	if payload.Meta.Total != 2 || len(payload.Data) != 2 {
-		t.Fatalf("expected two unique artist songs, got total=%d data=%#v", payload.Meta.Total, payload.Data)
+		t.Fatalf("expected the artist's unique single and leak songs, got total=%d data=%#v", payload.Meta.Total, payload.Data)
 	}
 	if payload.Data[0].Title != newerSong.Title || payload.Data[1].Title != olderSong.Title {
 		t.Fatalf("unexpected release date order: %#v", payload.Data)
