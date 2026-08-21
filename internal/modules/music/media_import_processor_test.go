@@ -743,6 +743,14 @@ func TestAlbumImportTrackInfoFromFileNameIsConservative(t *testing.T) {
 	}
 }
 
+func TestTitleFromFileNameForTrackUsesArchiveSequenceForUnpaddedNumbers(t *testing.T) {
+	if got := titleFromFileNameForTrack("10 Song.mp3", 10); got != "Song" {
+		t.Fatalf("expected matching sequence prefix to be removed, got %q", got)
+	}
+	if got := titleFromFileNameForTrack("99 Problems.mp3", 1); got != "99 Problems" {
+		t.Fatalf("expected unmatched numeric title to be preserved, got %q", got)
+	}
+}
 func TestMediaImportProcessorTranscodesUploadedAudioAndUpdatesFile(t *testing.T) {
 	_, db, _ := newMusicTestService(t)
 	session := model.AlbumImportSession{Status: AlbumImportStatusQueued, Stage: AlbumImportStageQueued, PayloadJSON: "{}"}

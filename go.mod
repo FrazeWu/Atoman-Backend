@@ -15,6 +15,7 @@ require (
 	github.com/jackc/pgx/v5 v5.8.0
 	github.com/joho/godotenv v1.4.0
 	github.com/lib/pq v1.12.3
+	github.com/nwaples/rardecode v1.1.3
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/stretchr/testify v1.11.1
 	github.com/yuin/goldmark v1.7.8

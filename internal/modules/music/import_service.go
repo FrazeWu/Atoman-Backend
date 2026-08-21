@@ -182,6 +182,20 @@ func albumImportSessionAlbumTitle(session model.AlbumImportSession, payload map[
 			return strings.TrimSpace(strings.TrimSuffix(file.FileName, filepath.Ext(file.FileName)))
 		}
 	}
+	for _, file := range session.Files {
+		if file.Role != AlbumImportFileRoleAudio {
+			continue
+		}
+		if album := albumImportFileAlbum(file); album != "" {
+			return album
+		}
+		if title := strings.TrimSpace(file.Title); title != "" {
+			return title
+		}
+		if fileName := strings.TrimSpace(file.FileName); fileName != "" {
+			return titleFromFileName(fileName)
+		}
+	}
 	return ""
 }
 

@@ -102,6 +102,15 @@ func TestBuildAlbumImportDTOFallsBackToArchiveName(t *testing.T) {
 	}
 }
 
+func TestBuildAlbumImportDTOFallsBackToAudioTitle(t *testing.T) {
+	dto := buildAlbumImportDTO(model.AlbumImportSession{
+		Files: []model.AlbumImportFile{{Role: AlbumImportFileRoleAudio, FileName: "10 Song.mp3", Title: "Song"}},
+	})
+
+	if dto.AlbumTitle != "Song" {
+		t.Fatalf("expected audio title fallback, got %q", dto.AlbumTitle)
+	}
+}
 func TestDeleteAlbumImportRecordRemovesItsNotification(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	session := model.AlbumImportSession{UserID: &user.ID, Status: AlbumImportStatusCanceled, PayloadJSON: `{}`}

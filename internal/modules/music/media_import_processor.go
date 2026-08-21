@@ -22,6 +22,7 @@ import (
 	"atoman/internal/model"
 
 	"github.com/google/uuid"
+	"github.com/nwaples/rardecode"
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"gorm.io/gorm"
 )
@@ -307,8 +308,10 @@ func (p *MediaImportProcessor) Process(ctx context.Context, job model.AlbumImpor
 	}
 	for _, file := range session.Files {
 		if file.Role == AlbumImportFileRoleArchive && file.UploadStatus == AlbumImportFileUploadStatusUploaded {
-			if err := ValidateArchiveToolchain(p.runner); err != nil {
-				return err
+			if !strings.EqualFold(file.DetectedFormat, "rar") {
+				if err := ValidateArchiveToolchain(p.runner); err != nil {
+					return err
+				}
 			}
 			return p.processArchive(ctx, session, file, heartbeat)
 		}
@@ -454,18 +457,123 @@ func (p *MediaImportProcessor) processArchive(ctx context.Context, session model
 	if err := p.setSession(ctx, session.ID, AlbumImportStatusExtracting, AlbumImportStageExtracting, 0, 1); err != nil {
 		return err
 	}
+	extracted := filepath.Join(dir, "extracted")
+	if strings.EqualFold(archive.DetectedFormat, "rar") {
+		if err := extractRARArchive(archivePath, extracted); err != nil {
+			return fmt.Errorf("extract archive %s: %w", archive.FileName, err)
+		}
+		return p.processExtractedTree(ctx, session.ID, extracted, heartbeat)
+	}
 	listing, err := p.runner.Run(ctx, "7zz", "l", "-slt", archivePath)
 	if err != nil {
-		return fmt.Errorf("list archive %s: %w", archive.FileName, err)
+		return fmt.Errorf("list archive %s: %w", archive.FileName, mediaCommandError(err, listing))
 	}
 	if err := validateArchiveListing(listing); err != nil {
 		return err
 	}
-	extracted := filepath.Join(dir, "extracted")
-	if _, err := p.runner.Run(ctx, "7zz", "x", "-y", "-o"+extracted, archivePath); err != nil {
-		return fmt.Errorf("extract archive %s: %w", archive.FileName, err)
+	output, err := p.runner.Run(ctx, "7zz", "x", "-y", "-o"+extracted, archivePath)
+	if err != nil {
+		return fmt.Errorf("extract archive %s: %w", archive.FileName, mediaCommandError(err, output))
 	}
 	return p.processExtractedTree(ctx, session.ID, extracted, heartbeat)
+}
+
+func mediaCommandError(err error, output []byte) error {
+	message := strings.TrimSpace(string(output))
+	if len(message) > 2000 {
+		message = message[len(message)-2000:]
+	}
+	if message == "" {
+		return err
+	}
+	return fmt.Errorf("%w: %s", err, message)
+}
+
+func extractRARArchive(archivePath, extracted string) error {
+	reader, err := rardecode.OpenReader(archivePath, "")
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+
+	if err := os.MkdirAll(extracted, 0700); err != nil {
+		return err
+	}
+	seen := make(map[string]struct{})
+	var totalSize int64
+	entryCount := 0
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		entryCount++
+		if entryCount > mediaArchiveMaxEntries {
+			return errors.New("archive has too many entries")
+		}
+		if header.UnPackedSize < 0 || header.PackedSize < 0 {
+			return errors.New("invalid archive size")
+		}
+		if header.PackedSize > 0 && header.UnPackedSize > header.PackedSize*mediaArchiveMaxRatio {
+			return fmt.Errorf("archive compression ratio is too high for %q", header.Name)
+		}
+		clean, err := safeArchiveEntryPath(header.Name)
+		if err != nil {
+			return err
+		}
+		if header.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("unsafe archive entry %q", header.Name)
+		}
+		if header.IsDir {
+			if err := os.MkdirAll(filepath.Join(extracted, filepath.FromSlash(clean)), 0700); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, exists := seen[clean]; exists {
+			return fmt.Errorf("duplicate archive entry %q", header.Name)
+		}
+		seen[clean] = struct{}{}
+		if header.UnPackedSize > mediaArchiveMaxBytes-totalSize {
+			return errors.New("archive expands beyond size limit")
+		}
+		target := filepath.Join(extracted, filepath.FromSlash(clean))
+		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
+			return err
+		}
+		output, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			return err
+		}
+		written, copyErr := io.Copy(output, reader)
+		closeErr := output.Close()
+		if copyErr != nil {
+			return copyErr
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		if !header.UnKnownSize && written != header.UnPackedSize {
+			return fmt.Errorf("archive entry %q has an unexpected size", header.Name)
+		}
+		totalSize += written
+	}
+	return nil
+}
+
+func safeArchiveEntryPath(value string) (string, error) {
+	normalized := strings.ReplaceAll(value, `\`, "/")
+	if strings.TrimSpace(normalized) == "" || strings.HasPrefix(normalized, "/") || regexp.MustCompile(`^[A-Za-z]:`).MatchString(normalized) {
+		return "", fmt.Errorf("unsafe archive path %q", value)
+	}
+	clean := path.Clean(normalized)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.Contains(clean, "/../") {
+		return "", fmt.Errorf("unsafe archive path %q", value)
+	}
+	return clean, nil
 }
 
 func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, sessionID uuid.UUID, root string, heartbeat func() error) error {
@@ -538,6 +646,7 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 	}
 	processed := 0
 	used := map[string]bool{}
+	nextTrackByDisc := map[int]int{}
 	for _, cuePath := range cues {
 		raw, err := os.ReadFile(cuePath)
 		if err != nil {
@@ -562,6 +671,12 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 		}
 	}
 	for _, audio := range audios {
+		disc, _ := discAndTrackFromPath(audio.relative)
+		if disc <= 0 {
+			disc = 1
+		}
+		nextTrackByDisc[disc]++
+		expectedTrack := nextTrackByDisc[disc]
 		if used[audio.path] {
 			continue
 		}
@@ -581,7 +696,7 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 			processed++
 			continue
 		}
-		if err := p.processLocalAudio(ctx, sessionID, &file, audio.path, "", 0, 0); err != nil {
+		if err := p.processLocalAudio(ctx, sessionID, &file, audio.path, "", 0, expectedTrack, 0); err != nil {
 			_ = p.failFile(ctx, file.ID, err)
 			continue
 		}
@@ -633,7 +748,7 @@ func (p *MediaImportProcessor) processCUEAudio(ctx context.Context, sessionID uu
 			_ = p.failFile(ctx, file.ID, errors.New("invalid CUE track range"))
 			continue
 		}
-		if err := p.processLocalAudio(ctx, sessionID, &file, sourcePath, track.title, track.number, end-track.startSeconds, track.startSeconds, end); err != nil {
+		if err := p.processLocalAudio(ctx, sessionID, &file, sourcePath, track.title, track.number, 0, end-track.startSeconds, track.startSeconds, end); err != nil {
 			_ = p.failFile(ctx, file.ID, err)
 			continue
 		}
@@ -995,10 +1110,10 @@ func (p *MediaImportProcessor) processAudio(ctx context.Context, sessionID uuid.
 	if err := p.downloadSource(sourcePath, file.SourceKey); err != nil {
 		return err
 	}
-	return p.processLocalAudio(ctx, sessionID, file, sourcePath, "", 0, 0)
+	return p.processLocalAudio(ctx, sessionID, file, sourcePath, "", 0, 0, 0)
 }
 
-func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile, sourcePath, overrideTitle string, overrideTrack int, knownDuration float64, rangeSeconds ...float64) error {
+func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID uuid.UUID, file *model.AlbumImportFile, sourcePath, overrideTitle string, overrideTrack, filenameTrackHint int, knownDuration float64, rangeSeconds ...float64) error {
 	probe, err := p.runner.Run(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration,format_name,bit_rate,size:format_tags=title,album,artist,album_artist,albumartist,track,tracknumber,track_number,disc,discnumber,disc_number:stream=codec_name,sample_rate,bits_per_raw_sample,bits_per_sample,channels,bit_rate", "-of", "json", sourcePath)
 	if err != nil {
 		return fmt.Errorf("ffprobe %s: %w", file.FileName, err)
@@ -1061,7 +1176,7 @@ func (p *MediaImportProcessor) processLocalAudio(ctx context.Context, sessionID 
 		title = overrideTitle
 	}
 	if title == "" {
-		title = titleFromFileName(file.FileName)
+		title = titleFromFileNameForTrack(file.FileName, filenameTrackHint)
 	}
 	disc, track := discAndTrackFromPath(file.RelativePath)
 	if metadata.discNumber > 0 {
@@ -1285,6 +1400,22 @@ func parseImageDimensions(raw []byte) (int, int) {
 
 func titleFromFileName(name string) string {
 	title, _, _ := albumImportTrackInfoFromFileName(name)
+	return title
+}
+
+func titleFromFileNameForTrack(name string, expectedTrack int) string {
+	title, _, parsedTrack := albumImportTrackInfoFromFileName(name)
+	if expectedTrack <= 0 || parsedTrack != expectedTrack {
+		return title
+	}
+	base := strings.TrimSpace(filepath.Base(name))
+	if extension := filepath.Ext(base); isAlbumImportMediaExtension(extension) {
+		base = strings.TrimSpace(strings.TrimSuffix(base, extension))
+	}
+	matched := regexp.MustCompile(`^\s*\d{1,3}\s+(.+?)\s*$`).FindStringSubmatch(base)
+	if len(matched) == 2 {
+		return strings.TrimSpace(matched[1])
+	}
 	return title
 }
 
