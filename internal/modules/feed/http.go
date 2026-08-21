@@ -288,8 +288,13 @@ func (h *Handler) getRecommendedArticles(c *gin.Context) {
 	}
 	category := c.Query("category")
 	theme := c.Query("theme")
+	languageCode, err := parseRecommendationLanguage(c.Query("language"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.RecommendArticlesByMode(mode, category, theme, page, pageSize)
+	items, total, err := h.service.RecommendArticlesByMode(mode, category, theme, languageCode, page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -305,8 +310,13 @@ func (h *Handler) getRecommendedChannels(c *gin.Context) {
 	}
 	category := c.Query("category")
 	theme := c.Query("theme")
+	languageCode, err := parseRecommendationLanguage(c.Query("language"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.RecommendChannelsByMode(mode, category, theme, page, pageSize)
+	items, total, err := h.service.RecommendChannelsByMode(mode, category, theme, languageCode, page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return

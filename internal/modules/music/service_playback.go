@@ -208,7 +208,7 @@ func (s *Service) SavePlaybackSession(user authctx.CurrentUser, input SavePlayba
 			return PlaybackSessionResponse{}, err
 		}
 	}
-	if stored.CurrentSongID == nil {
+	if stored.CurrentSongID == nil || !playbackQueueContains(queue, *stored.CurrentSongID) {
 		return PlaybackSessionResponse{}, apperr.NotFound("music.song_not_found", "Song not found")
 	}
 	return PlaybackSessionResponse{Queue: queue, CurrentSongID: *stored.CurrentSongID, PositionSeconds: stored.PositionSeconds, PlaybackMode: stored.PlaybackMode, UpdatedAt: stored.UpdatedAt}, nil
@@ -229,16 +229,17 @@ func (s *Service) GetPlaybackSession(user authctx.CurrentUser) (*PlaybackSession
 	if err := json.Unmarshal(session.QueueJSON, &songIDs); err != nil || len(songIDs) == 0 || session.CurrentSongID == nil {
 		return nil, nil
 	}
-	queue, err := s.loadPlaybackSessionQueue(songIDs)
+	queue, err := s.loadAvailablePlaybackSessionQueue(songIDs)
 	if err != nil {
 		return nil, err
 	}
-	for _, song := range queue {
-		if song.ID == *session.CurrentSongID {
-			return &PlaybackSessionResponse{Queue: queue, CurrentSongID: *session.CurrentSongID, PositionSeconds: session.PositionSeconds, PlaybackMode: session.PlaybackMode, UpdatedAt: session.UpdatedAt}, nil
-		}
+	if len(queue) == 0 {
+		return nil, apperr.NotFound("music.song_not_found", "Song not found")
 	}
-	return nil, nil
+	if !playbackQueueContains(queue, *session.CurrentSongID) {
+		return nil, nil
+	}
+	return &PlaybackSessionResponse{Queue: queue, CurrentSongID: *session.CurrentSongID, PositionSeconds: session.PositionSeconds, PlaybackMode: session.PlaybackMode, UpdatedAt: session.UpdatedAt}, nil
 }
 
 func (s *Service) loadPlaybackSessionQueueFromStored(session model.MusicPlaybackSession) ([]model.Song, error) {
@@ -246,28 +247,47 @@ func (s *Service) loadPlaybackSessionQueueFromStored(session model.MusicPlayback
 	if err := json.Unmarshal(session.QueueJSON, &songIDs); err != nil || len(songIDs) == 0 {
 		return nil, apperr.NotFound("music.song_not_found", "Song not found")
 	}
-	return s.loadPlaybackSessionQueue(songIDs)
+	return s.loadAvailablePlaybackSessionQueue(songIDs)
 }
 
-func (s *Service) loadPlaybackSessionQueue(songIDs []uuid.UUID) ([]model.Song, error) {
+func (s *Service) loadAvailablePlaybackSessionQueue(songIDs []uuid.UUID) ([]model.Song, error) {
 	var songs []model.Song
 	if err := s.db.Preload("Album").Preload("Artists").
 		Where("id IN ? AND lifecycle_status = ? AND audio_url <> ?", songIDs, model.MusicLifecycleActive, "").
 		Find(&songs).Error; err != nil {
 		return nil, err
 	}
-	if len(songs) != len(songIDs) {
-		return nil, apperr.NotFound("music.song_not_found", "Song not found")
-	}
 	byID := make(map[uuid.UUID]model.Song, len(songs))
 	for _, song := range songs {
 		byID[song.ID] = song
 	}
-	ordered := make([]model.Song, 0, len(songIDs))
+	ordered := make([]model.Song, 0, len(songs))
 	for _, songID := range songIDs {
-		ordered = append(ordered, byID[songID])
+		if song, ok := byID[songID]; ok {
+			ordered = append(ordered, song)
+		}
 	}
 	return ordered, nil
+}
+
+func (s *Service) loadPlaybackSessionQueue(songIDs []uuid.UUID) ([]model.Song, error) {
+	ordered, err := s.loadAvailablePlaybackSessionQueue(songIDs)
+	if err != nil {
+		return nil, err
+	}
+	if len(ordered) != len(songIDs) {
+		return nil, apperr.NotFound("music.song_not_found", "Song not found")
+	}
+	return ordered, nil
+}
+
+func playbackQueueContains(queue []model.Song, songID uuid.UUID) bool {
+	for _, song := range queue {
+		if song.ID == songID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) GetPlaybackProgress(user authctx.CurrentUser) (*model.MusicPlaybackProgress, error) {
@@ -275,9 +295,10 @@ func (s *Service) GetPlaybackProgress(user authctx.CurrentUser) (*model.MusicPla
 		return nil, apperr.Unauthorized("Login required")
 	}
 	var progress model.MusicPlaybackProgress
-	err := s.db.Preload("Song.Album").Preload("Song.Artists").
-		Where("user_id = ? AND completed = ?", user.ID, false).
-		Order("updated_at DESC").First(&progress).Error
+	err := s.db.Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_playback_progresses.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ? AND visible_song.audio_url <> ?", model.MusicLifecycleActive, "").
+		Preload("Song.Album").Preload("Song.Artists").
+		Where("music_playback_progresses.user_id = ? AND music_playback_progresses.completed = ?", user.ID, false).
+		Order("music_playback_progresses.updated_at DESC").First(&progress).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}

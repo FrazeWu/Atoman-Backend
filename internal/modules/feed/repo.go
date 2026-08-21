@@ -28,6 +28,7 @@ type ExploreSourceRow struct {
 	Title             string                    `json:"title"`
 	RSSURL            string                    `json:"rss_url"`
 	Category          string                    `json:"category"`
+	LanguageCode      string                    `json:"language_code,omitempty"`
 	SubscriptionCount int64                     `json:"subscription_count"`
 	RecentItemCount   int64                     `json:"recent_item_count"`
 	LastPublishedAt   *time.Time                `json:"last_published_at"`
@@ -413,13 +414,14 @@ func (r *Repo) ListRecommendationPosts() ([]model.Post, error) {
 }
 
 type RecommendationArticlePostRow struct {
-	ID        uuid.UUID
-	UserID    uuid.UUID
-	ChannelID *uuid.UUID
-	ViewCount int
-	CreatedAt time.Time
-	Title     string
-	Summary   string
+	ID           uuid.UUID
+	UserID       uuid.UUID
+	ChannelID    *uuid.UUID
+	ViewCount    int
+	CreatedAt    time.Time
+	Title        string
+	Summary      string
+	LanguageCode string
 }
 
 type RecommendationArticleFeedItemRow struct {
@@ -433,10 +435,11 @@ type RecommendationArticleFeedItemRow struct {
 	EnclosureType  string
 	PublishedAt    time.Time
 	SourceCategory string
+	LanguageCode   string
 }
 
-func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, limit int) ([]RecommendationArticlePostRow, error) {
-	columns := []string{"id", "user_id", "channel_id", "view_count", "created_at", "'' AS title", "'' AS summary"}
+func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, languageCode string, limit int) ([]RecommendationArticlePostRow, error) {
+	columns := []string{"id", "user_id", "channel_id", "view_count", "created_at", "'' AS title", "'' AS summary", "language_code"}
 	if includeText {
 		columns[5] = "title"
 		columns[6] = "summary"
@@ -446,15 +449,17 @@ func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter t
 	db := r.db.Model(&model.Post{}).
 		Select(columns).
 		Where("status = ?", "published").
+		Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
 		Where("created_at >= ?", publishedAfter).
 		Order("created_at DESC, id DESC").
 		Limit(limit)
+	db = applyRecommendationLanguageFilter(db, "language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "title", "summary", keywords)
 	err := db.Scan(&posts).Error
 	return posts, err
 }
 
-func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category string, publishedAfter time.Time, keywords []string, limit int) ([]RecommendationArticleFeedItemRow, error) {
+func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category string, publishedAfter time.Time, keywords []string, languageCode string, limit int) ([]RecommendationArticleFeedItemRow, error) {
 	columns := []string{
 		"feed_items.id",
 		"feed_items.feed_source_id",
@@ -466,6 +471,7 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 		"COALESCE(feed_items.image_url, '') <> '' AS has_image",
 		"COALESCE(feed_items.reader_html, '') <> '' OR COALESCE(feed_items.full_text_html, '') <> '' AS has_full_text",
 		"feed_sources.category AS source_category",
+		"feed_items.language_code",
 	}
 	if includeText {
 		columns[2] = "feed_items.title"
@@ -479,12 +485,20 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 		Where("feed_sources.hidden = ?", false).
 		Where("feed_items.deleted_at IS NULL").
 		Where("feed_items.published_at >= ?", publishedAfter).
-		Where(recommendationFeedItemCategorySQL()+" = ?", category).
-		Order("feed_items.published_at DESC, feed_items.id DESC")
+		Where(recommendationFeedItemCategorySQL()+" = ?", category)
+	db = applyRecommendationLanguageFilter(db, "feed_items.language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "feed_items.title", "feed_items.summary", keywords)
+	db = db.Order("feed_items.published_at DESC, feed_items.id DESC")
 	db = db.Limit(limit)
 	err := db.Scan(&items).Error
 	return items, err
+}
+
+func applyRecommendationLanguageFilter(db *gorm.DB, column string, languageCode string) *gorm.DB {
+	if strings.TrimSpace(languageCode) == "" {
+		return db
+	}
+	return db.Where(column+" = ?", languageCode)
 }
 
 func applyRecommendationTextFilter(db *gorm.DB, titleColumn string, summaryColumn string, keywords []string) *gorm.DB {
@@ -517,7 +531,7 @@ func (r *Repo) ListRecommendationPostsByIDs(ids []uuid.UUID) ([]model.Post, erro
 	}
 	var posts []model.Post
 	err := r.db.Model(&model.Post{}).
-		Select("id", "title", "summary", "cover_url").
+		Select("id", "title", "summary", "cover_url", "language_code").
 		Where("id IN ?", ids).
 		Find(&posts).Error
 	return posts, err
@@ -529,7 +543,7 @@ func (r *Repo) ListRecommendationFeedItemsByIDs(ids []uuid.UUID) ([]model.FeedIt
 	}
 	var items []model.FeedItem
 	err := r.db.Model(&model.FeedItem{}).
-		Select("id", "title", "summary", "image_url").
+		Select("id", "title", "summary", "image_url", "language_code").
 		Where("id IN ?", ids).
 		Find(&items).Error
 	return items, err
@@ -545,12 +559,13 @@ type RecommendationChannelRow struct {
 	RecentPostCount       int64
 	AverageViews          float64
 	LatestPublishedAtUnix sql.NullInt64
+	LanguageCode          string
 }
 
-func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) {
+func (r *Repo) ListRecommendationChannels(languageCode string) ([]RecommendationChannelRow, error) {
 	rows := make([]RecommendationChannelRow, 0)
 	latestPublishedExpr := recommendationChannelLatestPublishedExpr(r.db.Dialector.Name())
-	err := r.db.Table("channels").
+	db := r.db.Table("channels").
 		Select(`
 			channels.id AS channel_id,
 			channels.slug AS slug,
@@ -560,10 +575,16 @@ func (r *Repo) ListRecommendationChannels() ([]RecommendationChannelRow, error) 
 			COUNT(posts.id) AS published_count,
 			SUM(CASE WHEN posts.created_at >= ? THEN 1 ELSE 0 END) AS recent_post_count,
 			COALESCE(AVG(posts.view_count), 0) AS average_views,
-			`+latestPublishedExpr+` AS latest_published_at_unix
+			`+latestPublishedExpr+` AS latest_published_at_unix,
+			MAX(posts.language_code) AS language_code
 		`, time.Now().Add(-7*24*time.Hour)).
 		Joins("JOIN posts ON posts.channel_id = channels.id").
-		Where("channels.deleted_at IS NULL AND posts.deleted_at IS NULL AND posts.status = ?", "published").
+		Where("channels.deleted_at IS NULL AND posts.deleted_at IS NULL AND posts.status = ?", "published")
+	db = db.Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"})
+	if languageCode != "" {
+		db = db.Where("posts.language_code = ?", languageCode)
+	}
+	err := db.
 		Group("channels.id").
 		Order("MAX(posts.created_at) DESC").
 		Scan(&rows).Error
@@ -574,6 +595,7 @@ func (r *Repo) ListRecentPublishedPostsByChannelID(channelID uuid.UUID, limit in
 	var posts []model.Post
 	err := r.db.
 		Where("channel_id = ? AND status = ?", channelID, "published").
+		Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
 		Order("created_at DESC").
 		Limit(limit).
 		Find(&posts).Error
@@ -649,6 +671,7 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 		Title             string
 		RSSURL            string
 		Category          string
+		LanguageCode      string
 		SubscriptionCount int64
 		RecentItemCount   int64
 		LastPublishedAt   sql.NullString
@@ -661,6 +684,7 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 			feed_sources.title,
 			feed_sources.rss_url,
 			feed_sources.category,
+			feed_sources.language_code,
 			COUNT(DISTINCT subscriptions.id) AS subscription_count,
 			COUNT(DISTINCT feed_items.id) AS recent_item_count,
 			MAX(feed_items.published_at) AS last_published_at
@@ -688,6 +712,7 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 			Title:             raw.Title,
 			RSSURL:            raw.RSSURL,
 			Category:          raw.Category,
+			LanguageCode:      raw.LanguageCode,
 			SubscriptionCount: raw.SubscriptionCount,
 			RecentItemCount:   raw.RecentItemCount,
 		}
@@ -710,8 +735,15 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 		rows = filterExploreSourceRowsByCategory(rows, normalizedCategory)
 	}
 	queryValue := ""
+	languageValue := ""
 	if len(query) > 0 {
 		queryValue = query[0]
+	}
+	if len(query) > 1 {
+		languageValue = query[1]
+	}
+	if languageValue != "" {
+		db = db.Where("feed_sources.language_code = ?", languageValue)
 	}
 	if normalizedQuery := strings.ToLower(strings.TrimSpace(queryValue)); normalizedQuery != "" {
 		rows = filterExploreSourceRowsByQuery(rows, normalizedQuery)
@@ -793,8 +825,12 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 	return nil
 }
 
-func (r *Repo) CountExploreSources(category string, query string) (int64, error) {
-	rows, err := r.ListExploreSources(100000, 0, category, query)
+func (r *Repo) CountExploreSources(category string, query string, language ...string) (int64, error) {
+	args := []string{query}
+	if len(language) > 0 {
+		args = append(args, language[0])
+	}
+	rows, err := r.ListExploreSources(100000, 0, category, args...)
 	if err != nil {
 		return 0, err
 	}

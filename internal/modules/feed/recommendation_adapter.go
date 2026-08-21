@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"atoman/internal/feedlanguage"
 	"atoman/internal/model"
 	"atoman/internal/modules/recommendation"
 	"atoman/internal/platform/apperr"
@@ -34,7 +35,26 @@ func parseRecommendationMode(raw string) (recommendation.Mode, error) {
 	}
 }
 
-func (s *Service) RecommendArticles(mode recommendation.Mode, category string, theme string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+func rowLanguageCode(value, fallback string) string {
+	if normalized := strings.TrimSpace(value); normalized != "" {
+		return normalized
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func parseRecommendationLanguage(raw string) (string, error) {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	if value == "" || value == "all" {
+		return "", nil
+	}
+	code := feedlanguage.NormalizeCode(value)
+	if code == "" {
+		return "", apperr.BadRequest("validation.invalid_request", "language must be a valid language code")
+	}
+	return code, nil
+}
+
+func (s *Service) RecommendArticles(mode recommendation.Mode, category string, theme string, languageCode string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
 	normalizedCategory := normalizeSourceCategory(category)
 	keywords, validTheme := recommendationThemeKeywords(normalizedCategory, theme)
 	if !validTheme {
@@ -46,13 +66,13 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 	posts := []RecommendationArticlePostRow{}
 	if normalizedCategory == "blog" {
 		var err error
-		posts, err = s.repo.ListRecommendationArticlePosts(includeText, publishedAfter, keywords, recommendationInternalArticleCandidateLimit)
+		posts, err = s.repo.ListRecommendationArticlePosts(includeText, publishedAfter, keywords, languageCode, recommendationInternalArticleCandidateLimit)
 		if err != nil {
 			return nil, 0, err
 		}
 	}
 	feedItemLimit := recommendationArticleCandidateLimit - len(posts)
-	feedItems, err := s.repo.ListRecommendationArticleFeedItems(includeText, normalizedCategory, publishedAfter, keywords, feedItemLimit)
+	feedItems, err := s.repo.ListRecommendationArticleFeedItems(includeText, normalizedCategory, publishedAfter, keywords, languageCode, feedItemLimit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -101,12 +121,13 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 		post, ok := postByID[item.EntityID]
 		if ok {
 			items = append(items, RecommendationItemDTO{
-				ID:          post.ID.String(),
-				Title:       post.Title,
-				Summary:     post.Summary,
-				ContentType: "blog",
-				TargetPath:  "/posts/post/" + post.ID.String(),
-				ScoreLabel:  recommendationScoreLabel(mode, item.FinalScore),
+				ID:           post.ID.String(),
+				Title:        post.Title,
+				Summary:      post.Summary,
+				ContentType:  "blog",
+				LanguageCode: post.LanguageCode,
+				TargetPath:   "/posts/post/" + post.ID.String(),
+				ScoreLabel:   recommendationScoreLabel(mode, item.FinalScore),
 			})
 			continue
 		}
@@ -115,12 +136,13 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 			continue
 		}
 		items = append(items, RecommendationItemDTO{
-			ID:          feedItem.ID.String(),
-			Title:       feedItem.Title,
-			Summary:     feedItem.Summary,
-			ContentType: inferFeedItemRecommendationType(feedItem),
-			TargetPath:  "/feed/item/" + feedItem.ID.String(),
-			ScoreLabel:  recommendationScoreLabel(mode, item.FinalScore),
+			ID:           feedItem.ID.String(),
+			Title:        feedItem.Title,
+			Summary:      feedItem.Summary,
+			ContentType:  inferFeedItemRecommendationType(feedItem),
+			LanguageCode: feedItem.LanguageCode,
+			TargetPath:   "/feed/item/" + feedItem.ID.String(),
+			ScoreLabel:   recommendationScoreLabel(mode, item.FinalScore),
 		})
 	}
 
@@ -135,8 +157,8 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 	return items, total, nil
 }
 
-func (s *Service) RecommendChannels(mode recommendation.Mode, category string, theme string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	rows, err := s.repo.ListRecommendationChannels()
+func (s *Service) RecommendChannels(mode recommendation.Mode, category string, theme string, languageCode string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+	rows, err := s.repo.ListRecommendationChannels(languageCode)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -170,6 +192,9 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 		rowByID[candidate.EntityID] = row
 	}
 	for _, row := range sourceRows {
+		if languageCode != "" && row.LanguageCode != languageCode {
+			continue
+		}
 		publishedAt := time.Now()
 		if row.LastPublishedAt != nil {
 			publishedAt = row.LastPublishedAt.UTC()
@@ -211,6 +236,7 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 				Summary:         row.Description,
 				Description:     strings.TrimSpace(row.Description),
 				ContentType:     "blog",
+				LanguageCode:    rowLanguageCode(row.LanguageCode, languageCode),
 				ImageURL:        row.CoverURL,
 				TargetPath:      targetPath,
 				ScoreLabel:      recommendationScoreLabel(mode, item.FinalScore),
@@ -228,7 +254,7 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 			Summary:         recommendationSourceSummary(source),
 			Description:     recommendationSourceDescription(source),
 			ContentType:     normalizeSourceCategory(source.Category),
-			ImageURL:        "",
+			LanguageCode:    rowLanguageCode(source.LanguageCode, languageCode),
 			TargetPath:      "/feed?source_id=" + source.ID.String(),
 			ScoreLabel:      recommendationScoreLabel(mode, item.FinalScore),
 			BookmarkCount:   source.SubscriptionCount,

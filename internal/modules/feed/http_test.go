@@ -1106,6 +1106,51 @@ func TestFeedRecommendationArticlesReturnsData(t *testing.T) {
 	}
 }
 
+func TestFeedRecommendationArticlesExcludeNonPublicBlogPosts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	var publicPost model.Post
+	if err := db.Where("title = ?", "Post item").First(&publicPost).Error; err != nil {
+		t.Fatalf("find public post: %v", err)
+	}
+	hidden := model.Post{
+		UserID:     publicPost.UserID,
+		ChannelID:  publicPost.ChannelID,
+		Title:      "private recommendation candidate",
+		Content:    "private body",
+		Status:     "published",
+		Visibility: "private",
+	}
+	if err := db.Create(&hidden).Error; err != nil {
+		t.Fatalf("create private post: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/articles?mode=hot", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected recommendation request to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	for _, item := range payload.Data {
+		if item.ID == hidden.ID.String() || item.Title == hidden.Title {
+			t.Fatalf("private post must not appear in recommendations: %s", response.Body.String())
+		}
+	}
+}
+
 func TestFeedRecommendationArticlesFiltersByCategoryAndTheme(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, _ := newFeedTestService(t)

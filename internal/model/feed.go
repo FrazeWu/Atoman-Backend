@@ -124,6 +124,7 @@ type Post struct {
 	Title              string       `json:"title" gorm:"not null"`
 	Content            string       `json:"content" gorm:"type:text;not null"`
 	Summary            string       `json:"summary" gorm:"type:text"`
+	LanguageCode       string       `json:"language_code" gorm:"type:varchar(16);index"`
 	CoverURL           string       `json:"cover_url" gorm:"type:text"`
 	Status             string       `json:"status" gorm:"default:'draft'"` // draft / published
 	Visibility         string       `json:"visibility" gorm:"not null;default:'public'"`
@@ -223,6 +224,7 @@ type FeedSource struct {
 	SourceID                        *uuid.UUID `json:"source_id" gorm:"type:uuid"`                                                 // 站内资源 ID（外部 RSS 时为 null）
 	Provider                        string     `json:"provider" gorm:"not null;default:'rss';index"`
 	Category                        string     `json:"category" gorm:"not null;default:'blog';index"`
+	LanguageCode                    string     `json:"language_code" gorm:"type:varchar(16);index"`
 	RssURL                          string     `json:"rss_url" gorm:"type:text"`
 	CanonicalURL                    string     `json:"canonical_url" gorm:"type:text;index"`
 	SiteURL                         string     `json:"site_url" gorm:"type:text"`
@@ -299,6 +301,7 @@ type FeedItem struct {
 	Title                 string          `json:"title"`
 	Link                  string          `json:"link" gorm:"type:text"`
 	Summary               string          `json:"summary" gorm:"type:text"`
+	LanguageCode          string          `json:"language_code" gorm:"type:varchar(16);index"`
 	Author                string          `json:"author"`
 	PublishedAt           time.Time       `json:"published_at" gorm:"index:idx_feed_items_source_published,priority:2,sort:desc"`
 	FetchedAt             time.Time       `json:"fetched_at"`

@@ -119,6 +119,52 @@ func TestRegisterRoutesUpdateDraftAllowsNoCollection(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesRejectsPublishingInBannedChannel(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	banUntil := time.Now().UTC().Add(time.Hour)
+	channel := model.Channel{
+		UserID:   &user.ID,
+		Name:     "Banned Channel",
+		Slug:     "banned-channel-" + uuid.NewString()[:8],
+		BanUntil: &banUntil,
+	}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	collection := model.Collection{ChannelID: channel.ID, ContentType: "blog", Name: "Articles"}
+	if err := db.Create(&collection).Error; err != nil {
+		t.Fatal(err)
+	}
+	post := model.Post{
+		UserID:       user.ID,
+		ChannelID:    &channel.ID,
+		CollectionID: &collection.ID,
+		Title:        "Draft",
+		Content:      "body",
+		Status:       "draft",
+		Visibility:   "public",
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	router := newBlogHTTPRouter(service, &user)
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/publish", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected banned channel publish to return 403, got %d: %s", response.Code, response.Body.String())
+	}
+	var stored model.Post
+	if err := db.First(&stored, "id = ?", post.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != "draft" {
+		t.Fatalf("expected blocked publish to keep draft status, got %q", stored.Status)
+	}
+}
+
 func TestRegisterRoutesMountsChannelReadEndpointsAndEnsureDefault(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")

@@ -27,9 +27,14 @@ func GetExploreSources(db *gorm.DB) gin.HandlerFunc {
 		}
 		category := c.Query("category")
 		query := c.Query("q")
+		languageCode, err := parseRecommendationLanguage(c.Query("language"))
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid language"})
+			return
+		}
 		offset := (page - 1) * limit
 
-		rows, err := repo.ListExploreSources(limit, offset, category, query)
+		rows, err := repo.ListExploreSources(limit, offset, category, query, languageCode)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch explore sources"})
 			return
@@ -51,7 +56,7 @@ func GetExploreSources(db *gorm.DB) gin.HandlerFunc {
 				}
 			}
 		}
-		total, err := repo.CountExploreSources(category, query)
+		total, err := repo.CountExploreSources(category, query, languageCode)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count explore sources"})
 			return

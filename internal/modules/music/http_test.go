@@ -3620,7 +3620,7 @@ func TestSavePlaybackProgressIgnoresStaleDeviceReport(t *testing.T) {
 	if err := db.Create(&song).Error; err != nil {
 		t.Fatalf("create song: %v", err)
 	}
-	newer := time.Now().UTC().Add(-time.Minute)
+	newer := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	if _, err := service.SavePlaybackProgress(user, SavePlaybackProgressRequest{SongID: song.ID, PositionSeconds: 80, DurationSeconds: 180, ReportedAt: newer}); err != nil {
 		t.Fatalf("save newer progress: %v", err)
 	}
@@ -3643,7 +3643,7 @@ func TestSavePlaybackSessionIgnoresStaleDeviceReport(t *testing.T) {
 	if err := db.Create(&second).Error; err != nil {
 		t.Fatalf("create second song: %v", err)
 	}
-	newer := time.Now().UTC().Add(-time.Minute)
+	newer := time.Now().UTC().Add(-time.Minute).Truncate(time.Microsecond)
 	if _, err := service.SavePlaybackSession(user, SavePlaybackSessionRequest{SongIDs: []uuid.UUID{first.ID, second.ID}, CurrentSongID: second.ID, PositionSeconds: 55, PlaybackMode: "random", ReportedAt: newer}); err != nil {
 		t.Fatalf("save newer session: %v", err)
 	}
@@ -3653,6 +3653,56 @@ func TestSavePlaybackSessionIgnoresStaleDeviceReport(t *testing.T) {
 	}
 	if stored.CurrentSongID != second.ID || stored.PositionSeconds != 55 || stored.PlaybackMode != "random" || len(stored.Queue) != 2 || stored.Queue[0].ID != first.ID {
 		t.Fatalf("stale session overwrote newer state: %#v", stored)
+	}
+}
+
+func TestGetPlaybackSessionDropsUnavailableSongs(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	first := model.Song{Title: "Available Session Song", AudioURL: "/available-session.mp3", Status: "open"}
+	retired := model.Song{Title: "Retired Session Song", AudioURL: "/retired-session.mp3", Status: "open"}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatalf("create first song: %v", err)
+	}
+	if err := db.Create(&retired).Error; err != nil {
+		t.Fatalf("create retired song: %v", err)
+	}
+	if _, err := service.SavePlaybackSession(user, SavePlaybackSessionRequest{
+		SongIDs: []uuid.UUID{first.ID, retired.ID}, CurrentSongID: first.ID, PositionSeconds: 12, PlaybackMode: "loop",
+	}); err != nil {
+		t.Fatalf("save playback session: %v", err)
+	}
+	if err := db.Model(&retired).Update("lifecycle_status", model.MusicLifecycleRetired).Error; err != nil {
+		t.Fatalf("retire song: %v", err)
+	}
+
+	session, err := service.GetPlaybackSession(user)
+	if err != nil {
+		t.Fatalf("get playback session: %v", err)
+	}
+	if session == nil || session.CurrentSongID != first.ID || len(session.Queue) != 1 || session.Queue[0].ID != first.ID {
+		t.Fatalf("expected available session queue, got %#v", session)
+	}
+}
+
+func TestGetPlaybackProgressIgnoresUnavailableSong(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{Title: "Retired Progress Song", AudioURL: "/retired-progress.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	if _, err := service.SavePlaybackProgress(user, SavePlaybackProgressRequest{SongID: song.ID, PositionSeconds: 12, DurationSeconds: 180}); err != nil {
+		t.Fatalf("save playback progress: %v", err)
+	}
+	if err := db.Model(&song).Update("lifecycle_status", model.MusicLifecycleRetired).Error; err != nil {
+		t.Fatalf("retire song: %v", err)
+	}
+
+	progress, err := service.GetPlaybackProgress(user)
+	if err != nil {
+		t.Fatalf("get playback progress: %v", err)
+	}
+	if progress != nil {
+		t.Fatalf("expected no progress for unavailable song, got %#v", progress)
 	}
 }
 

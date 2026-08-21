@@ -600,6 +600,12 @@ func (h *Handler) updatePost(c *gin.Context) {
 		}
 	}
 
+	if effectiveStatus == "published" {
+		if err := h.ensurePublishChannelAllowed(&effectiveChannelID); err != nil {
+			httpx.Error(c, err)
+			return
+		}
+	}
 	if req.Status == "published" && post.PublishedAt == nil {
 		now := time.Now().UTC()
 		updates["published_at"] = now
@@ -711,7 +717,7 @@ func (h *Handler) reorderCollectionPosts(c *gin.Context) {
 	}
 
 	var collection model.Collection
-	if err := h.service.db.Preload("Channel").First(&collection, "id = ?", collectionID).Error; err != nil {
+	if err := h.service.db.Preload("Channel").Where("content_type = ?", "blog").First(&collection, "id = ?", collectionID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.collection_not_found", "Collection not found"))
 			return
@@ -771,6 +777,12 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 	if post.UserID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
 		httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to modify this post"))
 		return
+	}
+	if status == "published" {
+		if err := h.ensurePublishChannelAllowed(post.ChannelID); err != nil {
+			httpx.Error(c, err)
+			return
+		}
 	}
 	wasPublished := post.Status == "published"
 	wasPublic := isPublicPostState(post.Status, post.Visibility)
@@ -837,6 +849,23 @@ func (h *Handler) updatePostPin(c *gin.Context, pinned bool) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
+}
+
+func (h *Handler) ensurePublishChannelAllowed(channelID *uuid.UUID) error {
+	if channelID == nil || *channelID == uuid.Nil {
+		return nil
+	}
+	channel, err := h.service.repo.GetChannel(*channelID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return apperr.NotFound("blog.channel_not_found", "Channel not found")
+	}
+	if err != nil {
+		return err
+	}
+	if isChannelBanned(channel) {
+		return apperr.Forbidden("blog.channel_banned", "Banned channel cannot publish posts")
+	}
+	return nil
 }
 
 func isPublicPostState(status, visibility string) bool {

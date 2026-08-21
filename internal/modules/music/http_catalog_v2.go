@@ -168,9 +168,8 @@ func (h *Handler) search(c *gin.Context) {
 		}
 		result.Meta.Totals["song"] = total
 		if err := songQuery().
-			Distinct("\"Songs\".*").Preload("Album").Preload("Artists").
-			Order(clause.Expr{SQL: `CASE WHEN LOWER("Songs".title) = LOWER(?) THEN 0 WHEN LOWER("Songs".title) LIKE LOWER(?) THEN 1 WHEN LOWER("Albums".title) LIKE LOWER(?) OR LOWER("Artists".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 2 ELSE 3 END`, Vars: []any{query, prefix, prefix, prefix, prefix}}).
-			Order("\"Songs\".play_count DESC, \"Songs\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Songs).Error; err != nil {
+			Distinct(`"Songs".*, CASE WHEN LOWER("Songs".title) = LOWER(?) THEN 0 WHEN LOWER("Songs".title) LIKE LOWER(?) THEN 1 WHEN LOWER("Albums".title) LIKE LOWER(?) OR LOWER("Artists".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 2 ELSE 3 END AS search_rank`, query, prefix, prefix, prefix, prefix).Preload("Album").Preload("Artists").
+			Order(`search_rank ASC, "Songs".play_count DESC, "Songs".title ASC`).Limit(pageSize).Offset(offset).Find(&result.Songs).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -194,9 +193,8 @@ func (h *Handler) search(c *gin.Context) {
 			return
 		}
 		result.Meta.Totals["album"] = total
-		if err := albumQuery().Distinct("\"Albums\".*").Preload("Artists").Preload("Songs", visibleSongPreload(viewerPtr)).
-			Order(clause.Expr{SQL: `CASE WHEN LOWER("Albums".title) = LOWER(?) THEN 0 WHEN LOWER("Albums".title) LIKE LOWER(?) THEN 1 ELSE 2 END`, Vars: []any{query, prefix}}).
-			Order("\"Albums\".hot_score DESC, \"Albums\".title ASC").Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
+		if err := albumQuery().Distinct(`"Albums".*, CASE WHEN LOWER("Albums".title) = LOWER(?) THEN 0 WHEN LOWER("Albums".title) LIKE LOWER(?) THEN 1 ELSE 2 END AS search_rank`, query, prefix).Preload("Artists").Preload("Songs", visibleSongPreload(viewerPtr)).
+			Order(`search_rank ASC, "Albums".hot_score DESC, "Albums".title ASC`).Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -216,9 +214,8 @@ func (h *Handler) search(c *gin.Context) {
 			return
 		}
 		result.Meta.Totals["artist"] = total
-		if err := artistQuery().Distinct("\"Artists\".*").
-			Order(clause.Expr{SQL: `CASE WHEN LOWER("Artists".name) = LOWER(?) THEN 0 WHEN LOWER("Artists".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 1 ELSE 2 END`, Vars: []any{query, prefix, prefix}}).
-			Order("\"Artists\".name ASC").Limit(pageSize).Offset(offset).Find(&result.Artists).Error; err != nil {
+		if err := artistQuery().Distinct(`"Artists".*, CASE WHEN LOWER("Artists".name) = LOWER(?) THEN 0 WHEN LOWER("Artists".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 1 ELSE 2 END AS search_rank`, query, prefix, prefix).
+			Order(`search_rank ASC, "Artists".name ASC`).Limit(pageSize).Offset(offset).Find(&result.Artists).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -240,7 +237,7 @@ func (h *Handler) search(c *gin.Context) {
 			return
 		}
 		result.Meta.Totals["playlist"] = total
-		if err := playlistQuery().Order(clause.Expr{SQL: `CASE WHEN LOWER(name) = LOWER(?) THEN 0 WHEN LOWER(name) LIKE LOWER(?) THEN 1 ELSE 2 END`, Vars: []any{query, prefix}}).Order("updated_at DESC").Limit(pageSize).Offset(offset).Find(&result.Playlists).Error; err != nil {
+		if err := playlistQuery().Order(clause.OrderBy{Expression: clause.Expr{SQL: `CASE WHEN LOWER(name) = LOWER(?) THEN 0 WHEN LOWER(name) LIKE LOWER(?) THEN 1 ELSE 2 END, updated_at DESC`, Vars: []any{query, prefix}, WithoutParentheses: true}}).Limit(pageSize).Offset(offset).Find(&result.Playlists).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}

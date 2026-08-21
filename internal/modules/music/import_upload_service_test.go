@@ -420,6 +420,7 @@ func TestCompleteLastAlbumImportFileQueuesEarlySubmission(t *testing.T) {
 
 func TestCommitAlbumImportQueuesWhenFilesWereAlreadyUploaded(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
+	svc.albumImportMultipart = &fakeAlbumImportMultipartStore{}
 	session, file := registerAlbumImportFilesForTest(t, svc, user, []AlbumImportFileInput{
 		albumImportFileInput("Album/01 - Intro.flac", 1024),
 	})

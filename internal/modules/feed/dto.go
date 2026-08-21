@@ -63,6 +63,7 @@ type RecommendationItemDTO struct {
 	Summary              string                     `json:"summary"`
 	Description          string                     `json:"description"`
 	ContentType          string                     `json:"content_type"`
+	LanguageCode         string                     `json:"language_code,omitempty"`
 	ImageURL             string                     `json:"image_url"`
 	TargetPath           string                     `json:"target_path"`
 	ScoreLabel           string                     `json:"score_label"`

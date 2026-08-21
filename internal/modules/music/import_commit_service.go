@@ -924,6 +924,9 @@ func matchDerivedTrackAudio(rawDerivedTracks []any, track AlbumImportTrackPayloa
 			return derivedTrackAudio{AudioURL: stringValue(trackMap["audio_url"]), FileID: stringValue(trackMap["file_id"])}
 		}
 	}
+	if track.AudioURL != "" {
+		return derivedTrackAudio{AudioURL: strings.TrimSpace(track.AudioURL)}
+	}
 	return derivedTrackAudio{}
 }
 

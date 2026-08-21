@@ -22,6 +22,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
+	"atoman/internal/feedlanguage"
 	"atoman/internal/model"
 )
 
@@ -32,6 +33,8 @@ type ExtRSS struct {
 
 type ExtRSSChannel struct {
 	Title          string               `xml:"title"`
+	Language       string               `xml:"language"`
+	XMLLanguage    string               `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
 	Items          []ExtRSSItem         `xml:"item"`
 	ITunesImage    ExtRSSITunesImageRef `xml:"http://www.itunes.com/dtds/podcast-1.0.dtd image"`
 	Image          ExtRSSImageBlock     `xml:"image"`
@@ -63,6 +66,7 @@ type ExtRSSITunesDuration struct {
 
 type ExtRSSItem struct {
 	Title          string               `xml:"title"`
+	Language       string               `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
 	Link           string               `xml:"link"`
 	Description    string               `xml:"description"`
 	PubDate        string               `xml:"pubDate"`
@@ -80,8 +84,9 @@ type ExtRSSItem struct {
 
 // Atom Structures
 type ExtAtom struct {
-	XMLName xml.Name       `xml:"feed"`
-	Title   string         `xml:"title"`
+	XMLName  xml.Name       `xml:"feed"`
+	Language string         `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
+	Title    string         `xml:"title"`
 	Logo    string         `xml:"logo"`
 	Icon    string         `xml:"icon"`
 	Entries []ExtAtomEntry `xml:"entry"`
@@ -89,6 +94,7 @@ type ExtAtom struct {
 
 type ExtAtomEntry struct {
 	Title     string        `xml:"title"`
+	Language  string        `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
 	Links     []ExtAtomLink `xml:"link"`
 	Summary   string        `xml:"-"`
 	Content   string        `xml:"-"`
@@ -108,6 +114,7 @@ type atomHTMLValue struct {
 func (entry *ExtAtomEntry) UnmarshalXML(decoder *xml.Decoder, start xml.StartElement) error {
 	var decoded struct {
 		Title     string        `xml:"title"`
+		Language  string        `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
 		Links     []ExtAtomLink `xml:"link"`
 		Summary   atomHTMLValue `xml:"summary"`
 		Content   atomHTMLValue `xml:"content"`
@@ -122,6 +129,7 @@ func (entry *ExtAtomEntry) UnmarshalXML(decoder *xml.Decoder, start xml.StartEle
 		return err
 	}
 	entry.Title = decoded.Title
+	entry.Language = decoded.Language
 	entry.Links = decoded.Links
 	entry.Summary = decodeAtomHTMLValue(decoded.Summary)
 	entry.Content = decodeAtomHTMLValue(decoded.Content)
@@ -151,6 +159,7 @@ type ExtAtomLink struct {
 }
 
 type normalizedFeedItem struct {
+	LanguageCode      string
 	Title             string
 	Link              string
 	Identifier        string
@@ -340,6 +349,7 @@ func normalizeRSSItem(item ExtRSSItem, sourceTitle string, channelImageURL strin
 	}
 
 	return normalizedFeedItem{
+		LanguageCode:      firstNonEmpty(feedlanguage.NormalizeCode(item.Language), feedlanguage.Detect(strings.Join([]string{item.Title, item.Description, item.Content}, " "))),
 		Title:             strings.TrimSpace(item.Title),
 		Link:              strings.TrimSpace(item.Link),
 		Identifier:        identifier,
@@ -385,9 +395,10 @@ func normalizeAtomEntry(entry ExtAtomEntry, sourceTitle string, feedImageURL str
 	}
 
 	return normalizedFeedItem{
-		Title:             strings.TrimSpace(entry.Title),
-		Link:              link,
-		Identifier:        identifier,
+		LanguageCode: firstNonEmpty(feedlanguage.NormalizeCode(entry.Language), feedlanguage.Detect(strings.Join([]string{entry.Title, entry.Summary, entry.Content}, " "))),
+		Title:        strings.TrimSpace(entry.Title),
+		Link:         link,
+		Identifier:   identifier,
 		Author:            author,
 		PublishedAt:       publishedAt,
 		ContentHTML:       contentHTML,
@@ -441,8 +452,9 @@ func loadRSSCronConfig() rssCronConfig {
 
 func buildModelFeedItem(src model.FeedSource, normalized normalizedFeedItem, fetchedAt time.Time) model.FeedItem {
 	newFeedItem := model.FeedItem{
-		FeedSourceID:       src.ID,
-		GUID:               normalized.Identifier,
+		FeedSourceID:  src.ID,
+		LanguageCode:  normalized.LanguageCode,
+		GUID:          normalized.Identifier,
 		Title:              normalized.Title,
 		Link:               normalized.Link,
 		Summary:            buildSummaryFromNormalizedContent(normalized.ContentHTML, normalized.SummaryText),
@@ -500,7 +512,8 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		return false, err
 	}
 	updates := map[string]any{
-		"title":             newFeedItem.Title,
+		"language_code": newFeedItem.LanguageCode,
+		"title":         newFeedItem.Title,
 		"link":              newFeedItem.Link,
 		"summary":           newFeedItem.Summary,
 		"author":            newFeedItem.Author,
@@ -590,6 +603,37 @@ func applyFetchedSourceUpdates(db *gorm.DB, src *model.FeedSource, sourceTitle s
 	return db.Model(src).Updates(updates).Error
 }
 
+func applyFetchedSourceLanguage(db *gorm.DB, src *model.FeedSource, items []ExtRSSItem) error {
+	languageCode := dominantFeedLanguage(items)
+	if languageCode == "" {
+		return nil
+	}
+	src.LanguageCode = languageCode
+	return db.Model(src).Update("language_code", languageCode).Error
+}
+
+func dominantFeedLanguage(items []ExtRSSItem) string {
+	counts := make(map[string]int)
+	for _, item := range items {
+		code := feedlanguage.NormalizeCode(item.Language)
+		if code == "" {
+			code = feedlanguage.Detect(strings.Join([]string{item.Title, item.Description, item.Content}, " "))
+		}
+		if code != "" {
+			counts[code]++
+		}
+	}
+	bestCode := ""
+	bestCount := 0
+	for code, count := range counts {
+		if count > bestCount {
+			bestCode = code
+			bestCount = count
+		}
+	}
+	return bestCode
+}
+
 // StartRSSCron starts a background worker that fetches all unique RSS URLs periodically
 func StartRSSCron(ctx context.Context, db *gorm.DB) <-chan struct{} {
 	cfg := loadRSSCronConfig()
@@ -663,6 +707,11 @@ func syncAllRSSFeeds(db *gorm.DB) {
 				urlFailed = true
 				continue
 			}
+			if err := applyFetchedSourceLanguage(db, &src, items); err != nil {
+				log.Printf("failed to update source language for %s: %v", sanitizeRSSLogURL(src.RssURL), err)
+				urlFailed = true
+				continue
+			}
 			if err := applyFetchedSourceUpdates(db, &src, sourceTitle, sourceCoverURL, now); err != nil {
 				log.Printf("failed to update source metadata for %s: %v", sanitizeRSSLogURL(src.RssURL), err)
 				urlFailed = true
@@ -713,6 +762,9 @@ func SyncSingleRSSWithResult(db *gorm.DB, src model.FeedSource) (RSSSyncResult, 
 	if err != nil {
 		return result, err
 	}
+	if err := applyFetchedSourceLanguage(db, &src, items); err != nil {
+		return result, err
+	}
 	if err := applyFetchedSourceUpdates(db, &src, sourceTitle, sourceCoverURL, now); err != nil {
 		return result, err
 	}
@@ -749,8 +801,14 @@ func FetchAndParseRSS(feedURL string) ([]ExtRSSItem, string, string, error) {
 
 	// Try RSS first
 	var parsedRSS ExtRSS
-	if err := xml.Unmarshal([]byte(bodyStr), &parsedRSS); err == nil && parsedRSS.Channel.Title != "" {
-		coverURL := firstNonEmpty(
+		if err := xml.Unmarshal([]byte(bodyStr), &parsedRSS); err == nil && parsedRSS.Channel.Title != "" {
+			feedLanguage := firstNonEmpty(parsedRSS.Channel.Language, parsedRSS.Channel.XMLLanguage)
+			for index := range parsedRSS.Channel.Items {
+				if strings.TrimSpace(parsedRSS.Channel.Items[index].Language) == "" {
+					parsedRSS.Channel.Items[index].Language = feedLanguage
+				}
+			}
+			coverURL := firstNonEmpty(
 			parsedRSS.Channel.ITunesImage.Href,
 			parsedRSS.Channel.MediaContent.URL,
 			parsedRSS.Channel.MediaThumbnail.URL,
@@ -775,6 +833,7 @@ func FetchAndParseRSS(feedURL string) ([]ExtRSSItem, string, string, error) {
 
 			items[i] = ExtRSSItem{
 				Title:       normalized.Title,
+				Language:    firstNonEmpty(entry.Language, parsedAtom.Language),
 				Link:        normalized.Link,
 				Description: normalized.ContentHTML,
 				Content:     normalized.ContentHTML,
