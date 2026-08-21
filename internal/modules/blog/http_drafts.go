@@ -74,6 +74,11 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	contextKey := strings.TrimSpace(req.ContextKey)
+	if contextKey == "" {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "context_key required"))
+		return
+	}
 	sourcePostID, err := parseOptionalUUID(req.SourcePostID)
 	if err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid source_post_id"))
@@ -91,7 +96,7 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 	}
 	draft := model.BlogDraft{
 		UserID:       user.ID,
-		ContextKey:   strings.TrimSpace(req.ContextKey),
+		ContextKey:   contextKey,
 		SourcePostID: sourcePostID,
 		Title:        req.Title,
 		Content:      req.Content,

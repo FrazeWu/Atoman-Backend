@@ -26,14 +26,14 @@ func (r *Repo) GetPost(id uuid.UUID) (model.Post, error) {
 
 func (r *Repo) GetPublicPublishedPost(id uuid.UUID) (model.Post, error) {
 	var post model.Post
-	err := r.db.Preload("User").Where("status = ? AND visibility = ?", "published", "public").First(&post, "id = ?", id).Error
+	err := r.db.Preload("User").Where("status = ? AND (visibility = ? OR visibility = ?)", "published", "", "public").First(&post, "id = ?", id).Error
 	return post, err
 }
 
 func (r *Repo) ListPublicPublishedPosts() ([]model.Post, error) {
 	var posts []model.Post
 	err := r.db.Select("id", "updated_at").
-		Where("status = ? AND visibility = ?", "published", "public").
+		Where("status = ? AND (visibility = ? OR visibility = ?)", "published", "", "public").
 		Order("COALESCE(published_at, created_at) DESC").
 		Order("created_at DESC").
 		Order("id DESC").
@@ -59,13 +59,13 @@ func (r *Repo) GetChannelBySlug(slug string) (model.Channel, error) {
 
 func (r *Repo) ListCollectionsByChannel(channelID uuid.UUID) ([]model.Collection, error) {
 	var collections []model.Collection
-	err := r.db.Where("channel_id = ?", channelID).Find(&collections).Error
+	err := r.db.Where("channel_id = ? AND content_type = ?", channelID, "blog").Find(&collections).Error
 	return collections, err
 }
 
 func (r *Repo) GetCollection(id uuid.UUID) (model.Collection, error) {
 	var collection model.Collection
-	err := r.db.Preload("Channel").First(&collection, "id = ?", id).Error
+	err := r.db.Preload("Channel").Where("content_type = ?", "blog").First(&collection, "id = ?", id).Error
 	return collection, err
 }
 
@@ -98,7 +98,7 @@ func (r *Repo) ListUserCollections(userID uuid.UUID) ([]model.Collection, error)
 		return []model.Collection{}, nil
 	}
 	var collections []model.Collection
-	err := r.db.Where("channel_id IN ?", channelIDs).Order("created_at DESC").Find(&collections).Error
+	err := r.db.Where("channel_id IN ? AND content_type = ?", channelIDs, "blog").Order("created_at DESC").Find(&collections).Error
 	return collections, err
 }
 

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -289,10 +290,11 @@ func buildArticleRSS(ch model.Channel, posts []model.Post, siteURL string) strin
 		}
 		pubDate := publishedAt.Format(time.RFC1123Z)
 		summary := p.Summary
-		if summary == "" && len(p.Content) > 280 {
-			summary = p.Content[:280] + "…"
-		} else if summary == "" {
+		if summary == "" {
 			summary = p.Content
+			if utf8.RuneCountInString(summary) > 280 {
+				summary = string([]rune(summary)[:280]) + "…"
+			}
 		}
 		authorName := ""
 		if p.User != nil {
@@ -303,27 +305,31 @@ func buildArticleRSS(ch model.Channel, posts []model.Post, siteURL string) strin
 		}
 		items.WriteString(fmt.Sprintf(`
     <item>
-      <title><![CDATA[%s]]></title>
+      <title>%s</title>
       <link>%s/posts/post/%s</link>
       <guid isPermaLink="true">%s/posts/post/%s</guid>
       <pubDate>%s</pubDate>
-      <description><![CDATA[%s]]></description>
+      <description>%s</description>
       <author>%s</author>
-    </item>`, p.Title, siteURL, p.ID, siteURL, p.ID, pubDate, summary, authorName))
+    </item>`, rssCDATA(p.Title), siteURL, p.ID, siteURL, p.ID, pubDate, rssCDATA(summary), rssCDATA(authorName)))
 	}
 
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0">
   <channel>
-    <title><![CDATA[%s]]></title>
+    <title>%s</title>
     <link>%s/channel/%s</link>
-    <description><![CDATA[%s]]></description>
+    <description>%s</description>
     <language>zh-cn</language>
     <lastBuildDate>%s</lastBuildDate>
     %s
   </channel>
-</rss>`, ch.Name, siteURL, ch.Slug, ch.Description,
+</rss>`, rssCDATA(ch.Name), siteURL, ch.Slug, rssCDATA(ch.Description),
 		time.Now().Format(time.RFC1123Z), items.String())
+}
+
+func rssCDATA(value string) string {
+	return "<![CDATA[" + strings.ReplaceAll(value, "]]>", "]]]]><![CDATA[>") + "]" + "]>"
 }
 
 func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collection, error) {

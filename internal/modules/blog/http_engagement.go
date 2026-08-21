@@ -1,6 +1,7 @@
 package blog
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func (h *Handler) getPostLikesCount(c *gin.Context) {
@@ -17,6 +19,32 @@ func (h *Handler) getPostLikesCount(c *gin.Context) {
 	if err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
 		return
+	}
+	post, err := h.service.repo.GetPost(postID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
+			return
+		}
+		httpx.Error(c, err)
+		return
+	}
+	viewerID := currentViewerID(c)
+	if post.Status != "published" {
+		if viewerID == nil || post.UserID != *viewerID {
+			httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to view this post"))
+			return
+		}
+	} else {
+		allowed, err := CanViewPublishedPost(h.service.db, viewerID, post)
+		if err != nil {
+			httpx.Error(c, err)
+			return
+		}
+		if !allowed {
+			httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to view this post"))
+			return
+		}
 	}
 	count, err := h.service.CountPostLikes(postID)
 	if err != nil {

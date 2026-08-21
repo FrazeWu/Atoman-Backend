@@ -81,20 +81,34 @@ func (h *Handler) listSEOSitemap(c *gin.Context) {
 func (h *Handler) listPosts(c *gin.Context) {
 	var posts []model.Post
 	page, pageSize := httpx.PageParams(c)
+	userID, err := parseOptionalUUID(c.Query("user_id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "user_id must be a valid uuid"))
+		return
+	}
+	channelID, err := parseOptionalUUID(c.Query("channel_id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "channel_id must be a valid uuid"))
+		return
+	}
+	collectionID, err := parseOptionalUUID(c.Query("collection_id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "collection_id must be a valid uuid"))
+		return
+	}
 	query := h.service.db.Model(&model.Post{}).Preload("User").Preload("Channel").Preload("Collection").Where("status = ?", "published")
 	query = ApplyPublishedPostListVisibility(query, currentViewerID(c))
 
-	if userID := c.Query("user_id"); userID != "" {
-		query = query.Where("user_id = ?", userID)
+	if userID != nil {
+		query = query.Where("user_id = ?", *userID)
 	}
-	channelID := c.Query("channel_id")
-	if channelID != "" {
-		query = query.Where("channel_id = ?", channelID)
+	if channelID != nil {
+		query = query.Where("channel_id = ?", *channelID)
 	}
-	if collectionID := c.Query("collection_id"); collectionID != "" {
-		query = query.Where("posts.collection_id = ?", collectionID)
+	if collectionID != nil {
+		query = query.Where("posts.collection_id = ?", *collectionID)
 		query = query.Order("posts.collection_position ASC")
-	} else if channelID != "" {
+	} else if channelID != nil {
 		query = query.Order("pinned DESC, published_at DESC, posts.id DESC")
 	} else {
 		query = query.Order("published_at DESC, posts.id DESC")

@@ -162,6 +162,7 @@ func (s *Service) CreateCollection(user authctx.CurrentUser, channelID uuid.UUID
 	}
 	collection := model.Collection{
 		ChannelID:   channelID,
+		ContentType: "blog",
 		Name:        name,
 		Description: strings.TrimSpace(description),
 		CoverURL:    strings.TrimSpace(coverURL),

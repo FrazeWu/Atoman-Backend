@@ -34,15 +34,29 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 
 	postIDs := make([]uuid.UUID, 0, len(bookmarks))
 	seen := make(map[uuid.UUID]struct{}, len(bookmarks))
-	for _, bookmark := range bookmarks {
-		if bookmark.Post == nil {
+	for i := range bookmarks {
+		post := bookmarks[i].Post
+		if post == nil {
 			continue
 		}
-		if _, exists := seen[bookmark.PostID]; exists {
+		visible := false
+		if post.Status != "published" {
+			visible = post.UserID == user.ID
+		} else {
+			visible, err = CanViewPublishedPost(s.db, &user.ID, *post)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if !visible {
+			bookmarks[i].Post = nil
 			continue
 		}
-		seen[bookmark.PostID] = struct{}{}
-		postIDs = append(postIDs, bookmark.PostID)
+		if _, exists := seen[bookmarks[i].PostID]; exists {
+			continue
+		}
+		seen[bookmarks[i].PostID] = struct{}{}
+		postIDs = append(postIDs, bookmarks[i].PostID)
 	}
 
 	type engagementCount struct {

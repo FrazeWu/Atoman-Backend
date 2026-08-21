@@ -74,7 +74,7 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		(SELECT COUNT(*) FROM subscriptions JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id
 		 WHERE feed_sources.source_type = 'internal_channel' AND feed_sources.source_id = posts.channel_id
 		 AND subscriptions.deleted_at IS NULL AND feed_sources.deleted_at IS NULL) AS channel_followers_count`).
-		Where("posts.status = ? AND posts.visibility = ?", "published", "public").
+		Where("posts.status = ? AND (posts.visibility = ? OR posts.visibility = ?)", "published", "", "public").
 		Order("COALESCE(posts.published_at, posts.created_at) DESC").
 		Limit(blogRecommendationCandidateLimit).
 		Scan(&rows).Error; err != nil {
