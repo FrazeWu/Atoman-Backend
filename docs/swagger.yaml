@@ -2749,6 +2749,13 @@ definitions:
           $ref: '#/definitions/model.PodcastEpisode'
         type: array
     type: object
+  handlers.SiteVisitStats:
+    properties:
+      today:
+        type: integer
+      total:
+        type: integer
+    type: object
   handlers.SongPublicItem:
     properties:
       album:
@@ -20380,6 +20387,39 @@ paths:
       summary: 上传视频文件
       tags:
       - videos
+  /site/visits:
+    get:
+      description: 返回站点累计访问量和 UTC 当日访问量。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.SiteVisitStats'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 获取站点访问统计
+      tags:
+      - site
+    post:
+      description: 增加当前 UTC 日期的站点页面访问量。
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 记录一次站点访问
+      tags:
+      - site
 schemes:
 - http
 - https

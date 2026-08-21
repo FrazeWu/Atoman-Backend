@@ -157,6 +157,12 @@ func CasbinMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// Public page-view reporting is intentionally anonymous.
+		if role == "anonymous" && method == "POST" && path == "/api/v1/site/visits" {
+			c.Next()
+			return
+		}
+
 		// Enforce
 		allowed, err := Enforcer.Enforce(role, path, method)
 		if err != nil {

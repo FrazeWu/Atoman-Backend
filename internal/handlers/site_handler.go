@@ -13,6 +13,8 @@ import (
 func SetupSiteRoutes(router *gin.Engine, db *gorm.DB) {
 	group := router.Group("/api/v1/site")
 	group.GET("/resolve/:handle", ResolveSiteHandle(db))
+	group.GET("/visits", GetSiteVisitStats(db))
+	group.POST("/visits", RecordSiteVisit(db))
 }
 
 func ResolveSiteHandle(db *gorm.DB) gin.HandlerFunc {

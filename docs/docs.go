@@ -21342,6 +21342,56 @@ const docTemplate = `{
                     }
                 }
             }
+        },
+        "/site/visits": {
+            "get": {
+                "description": "返回站点累计访问量和 UTC 当日访问量。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "site"
+                ],
+                "summary": "获取站点访问统计",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.SiteVisitStats"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "增加当前 UTC 日期的站点页面访问量。",
+                "tags": [
+                    "site"
+                ],
+                "summary": "记录一次站点访问",
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -25470,6 +25520,17 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/model.PodcastEpisode"
                     }
+                }
+            }
+        },
+        "handlers.SiteVisitStats": {
+            "type": "object",
+            "properties": {
+                "today": {
+                    "type": "integer"
+                },
+                "total": {
+                    "type": "integer"
                 }
             }
         },
