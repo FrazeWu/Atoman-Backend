@@ -245,6 +245,26 @@ func (s *Service) DeleteChannel(user authctx.CurrentUser, channelID uuid.UUID) e
 	})
 }
 
+func (s *Service) ListUnifiedContents(user authctx.CurrentUser, channelID uuid.UUID, kind, status string, collectionID uuid.UUID) ([]model.ContentEntry, error) {
+	if err := requireUser(user); err != nil {
+		return nil, err
+	}
+	if _, err := s.ownedChannel(user.ID, channelID); err != nil {
+		return nil, err
+	}
+	return s.repo.ListUnifiedContents(channelID, kind, status, collectionID)
+}
+
+func (s *Service) ListUnifiedCollections(user authctx.CurrentUser, channelID uuid.UUID) ([]model.ContentCollection, error) {
+	if err := requireUser(user); err != nil {
+		return nil, err
+	}
+	if _, err := s.ownedChannel(user.ID, channelID); err != nil {
+		return nil, err
+	}
+	return s.repo.ListUnifiedCollections(channelID)
+}
+
 func (s *Service) ListCollections(user authctx.CurrentUser, channelID uuid.UUID, module Module) ([]model.Collection, error) {
 	if err := requireUser(user); err != nil {
 		return nil, err

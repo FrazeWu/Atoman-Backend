@@ -31,6 +31,12 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/channels", h.createChannel)
 	group.PATCH("/channels/:id", h.updateChannel)
 	group.DELETE("/channels/:id", h.deleteChannel)
+	group.GET("/collections", h.listUnifiedCollections)
+	group.POST("/collections", h.createUnifiedCollection)
+	group.PATCH("/collections/:id", h.updateUnifiedCollection)
+	group.DELETE("/collections/:id", h.deleteUnifiedCollection)
+	group.PUT("/collections/:id/contents/order", h.reorderUnifiedCollectionContents)
+	group.GET("/contents", h.listUnifiedContents)
 	group.GET("/:module/contents", h.listContents)
 	group.POST("/:module/contents/:id/share", h.shareContent)
 	group.GET("/:module/analytics", h.getAnalytics)
@@ -516,6 +522,43 @@ func (h *Handler) deleteChannel(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Channel deleted"})
+}
+
+func (h *Handler) listUnifiedContents(c *gin.Context) {
+	user, ok := currentUser(c)
+	if !ok {
+		return
+	}
+	channelID, err := uuid.Parse(c.Query("channel_id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "channel_id must be a valid uuid"))
+		return
+	}
+	collectionID := uuid.Nil
+	if value := c.Query("collection_id"); value != "" {
+		collectionID, err = uuid.Parse(value)
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "collection_id must be a valid uuid"))
+			return
+		}
+	}
+	entries, serviceErr := h.service.ListUnifiedContents(user, channelID, c.Query("kind"), c.Query("status"), collectionID)
+	respond(c, http.StatusOK, entries, serviceErr)
+}
+
+// listUnifiedCollections returns mixed-content collections for one owned channel.
+func (h *Handler) listUnifiedCollections(c *gin.Context) {
+	user, ok := currentUser(c)
+	if !ok {
+		return
+	}
+	channelID, err := uuid.Parse(c.Query("channel_id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "channel_id must be a valid uuid"))
+		return
+	}
+	collections, serviceErr := h.service.ListUnifiedCollections(user, channelID)
+	respond(c, http.StatusOK, collections, serviceErr)
 }
 
 // listCollections godoc

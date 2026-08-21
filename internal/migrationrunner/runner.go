@@ -80,6 +80,7 @@ func Run(db *gorm.DB) error {
 		{"unified studio migration", migrations.RunUnifiedStudioMigration},
 		{"user default resources migration", backfillUserDefaultResources},
 		{"resource management migration", migrations.RunResourceManagementMigration},
+		{"unified content migration", migrations.RunUnifiedContentMigration},
 	}
 	for _, step := range postSchemaSteps {
 		if err := step.run(db); err != nil {
@@ -229,6 +230,8 @@ func MigrateSchema(db *gorm.DB) error {
 	models := []any{
 		&model.User{}, &model.UserSettings{}, &model.AuthSession{}, &model.LoginEvent{}, &model.EmailVerificationCode{},
 		&model.ExternalIdentity{}, &model.OAuthFlow{}, &model.Follow{}, &model.Channel{}, &model.Collection{},
+		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
+		&model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
 		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.ContentLifecycleEvent{},
 		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{},
 		&model.Post{}, &model.BlogPostVersion{}, &model.PostCollection{}, &model.BlogDraft{}, &model.ShortNote{},
