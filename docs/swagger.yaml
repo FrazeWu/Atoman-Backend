@@ -4543,12 +4543,18 @@ definitions:
         type: string
       created_at:
         type: string
+      description:
+        type: string
       disc_number:
         type: integer
       duration_sec:
         type: integer
       edit_status:
         type: string
+      effective_sources:
+        items:
+          $ref: '#/definitions/model.MusicSource'
+        type: array
       id:
         type: string
       lifecycle_status:
@@ -4573,6 +4579,8 @@ definitions:
         type: string
       release_date_precision:
         type: string
+      release_type:
+        type: string
       source_bit_depth:
         type: integer
       source_bitrate_kbps:
@@ -4593,6 +4601,10 @@ definitions:
         type: integer
       source_size_bytes:
         type: integer
+      sources:
+        items:
+          $ref: '#/definitions/model.MusicSource'
+        type: array
       status:
         type: string
       title:
@@ -4953,6 +4965,17 @@ definitions:
       updated_at:
         type: string
     type: object
+  music.AlbumArtistCreditInput:
+    properties:
+      artist_id:
+        type: string
+      position:
+        type: integer
+      roles:
+        items:
+          $ref: '#/definitions/music.AlbumArtistRoleInput'
+        type: array
+    type: object
   music.AlbumArtistRoleInput:
     properties:
       label:
@@ -5075,6 +5098,8 @@ definitions:
       status:
         type: string
       targetAlbumId:
+        type: string
+      targetSongId:
         type: string
       tracks:
         items:
@@ -5802,6 +5827,27 @@ definitions:
     properties:
       data:
         $ref: '#/definitions/music.MusicLyricsDTO'
+    type: object
+  music.MusicReleaseConversionRequest:
+    properties:
+      artist_credits:
+        items:
+          $ref: '#/definitions/music.AlbumArtistCreditInput'
+        type: array
+      cover_url:
+        type: string
+      description:
+        type: string
+      release_date:
+        type: string
+      release_type:
+        type: string
+      sources:
+        items:
+          $ref: '#/definitions/music.Source'
+        type: array
+      title:
+        type: string
     type: object
   music.MusicSongLyricsVersionDTO:
     properties:
@@ -14053,13 +14099,6 @@ paths:
         in: query
         name: artist_id
         type: string
-      - description: 作品分类
-        enum:
-        - album
-        - song
-        in: query
-        name: release_type
-        type: string
       - description: 排序方式
         in: query
         name: sort
@@ -14085,6 +14124,36 @@ paths:
             additionalProperties: true
             type: object
       summary: 获取音乐专辑列表
+      tags:
+      - music
+  /api/v1/music/albums/{albumId}/convert-to-song:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 专辑 ID
+        in: path
+        name: albumId
+        required: true
+        type: string
+      - description: 歌曲资料
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.MusicReleaseConversionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 将单轨专辑转换为独立歌曲
       tags:
       - music
   /api/v1/music/albums/{albumId}/merge:
@@ -15660,10 +15729,8 @@ paths:
         in: query
         name: artist_id
         type: string
-      - description: 作品分类
-        enum:
-        - album
-        - song
+      - description: 歌曲类型，多个值使用逗号分隔
+        example: single,leak
         in: query
         name: release_type
         type: string
@@ -15748,6 +15815,36 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 排队替换歌曲音频
+      tags:
+      - music
+  /api/v1/music/songs/{songId}/convert-to-album:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 歌曲 ID
+        in: path
+        name: songId
+        required: true
+        type: string
+      - description: 发行资料
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/music.MusicReleaseConversionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 将独立歌曲转换为专辑
       tags:
       - music
   /api/v1/music/songs/{songId}/lyrics:
@@ -16998,9 +17095,10 @@ paths:
         name: artist
         required: true
         type: string
-      - description: 专辑名称
+      - description: 专辑名称；独立歌曲请使用音乐导入接口
         in: formData
         name: album
+        required: true
         type: string
       - description: 发行日期 YYYY-MM-DD
         in: formData

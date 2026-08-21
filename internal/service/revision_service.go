@@ -98,6 +98,11 @@ type albumRevisionSong struct {
 type songRevisionSnapshot struct {
 	ID            string                `json:"id"`
 	Title         string                `json:"title"`
+	Description   string                `json:"description"`
+	ReleaseType   string                `json:"release_type"`
+	ReleaseDate   string                `json:"release_date"`
+	Sources       []model.MusicSource   `json:"sources"`
+	AlbumID       string                `json:"album_id,omitempty"`
 	TrackNumber   int                   `json:"track_number"`
 	DiscNumber    int                   `json:"disc_number"`
 	Lyrics        string                `json:"lyrics"`
@@ -384,8 +389,16 @@ func (s *RevisionService) captureCurrentSnapshot(tx *gorm.DB, contentType string
 			return nil, fmt.Errorf("song not found: %w", err)
 		}
 		return json.Marshal(songRevisionSnapshot{
-			ID: song.ID.String(), Title: song.Title, TrackNumber: song.TrackNumber,
-			DiscNumber: song.DiscNumber, Lyrics: song.Lyrics, AudioURL: song.AudioURL,
+			ID: song.ID.String(), Title: song.Title, Description: song.Description,
+			ReleaseType: songReleaseTypeValue(song.ReleaseType),
+			ReleaseDate: partialdate.Format(song.ReleaseDate, song.ReleaseDatePrecision), Sources: song.Sources,
+			AlbumID: func() string {
+				if song.AlbumID == nil {
+					return ""
+				}
+				return song.AlbumID.String()
+			}(),
+			TrackNumber: song.TrackNumber, DiscNumber: song.DiscNumber, Lyrics: song.Lyrics, AudioURL: song.AudioURL,
 			CoverURL: song.CoverURL, Status: song.Status,
 			ArtistCredits: songCreditsSnapshot(song.ArtistCredits),
 		})
@@ -477,7 +490,7 @@ type albumRevisionTrackInput struct {
 	Title            string                     `json:"title"`
 	TrackNumber      int                        `json:"track_number"`
 	DiscNumber       int                        `json:"disc_number"`
-	Lyrics           string                     `json:"lyrics"`
+	Lyrics           *string                    `json:"lyrics"`
 	AudioAssetID     string                     `json:"audio_asset_id"`
 	ResolvedAudioURL string                     `json:"resolved_audio_url"`
 	CoverURL         string                     `json:"cover_url"`
@@ -487,6 +500,10 @@ type albumRevisionTrackInput struct {
 
 type songRevisionChanges struct {
 	Title         *string                     `json:"title"`
+	Description   *string                     `json:"description"`
+	ReleaseType   *string                     `json:"release_type"`
+	ReleaseDate   *string                     `json:"release_date"`
+	Sources       *[]model.MusicSource        `json:"sources"`
 	TrackNumber   *int                        `json:"track_number"`
 	DiscNumber    *int                        `json:"disc_number"`
 	Lyrics        *string                     `json:"lyrics"`
@@ -623,6 +640,10 @@ func mergeRevisionChanges(contentType string, current []byte, changes map[string
 			}
 			existing, exists := currentSongs[strings.TrimSpace(track.ID)]
 			audioURL := existing.AudioURL
+			lyrics := existing.Lyrics
+			if track.Lyrics != nil {
+				lyrics = *track.Lyrics
+			}
 			if !exists {
 				audioURL = strings.TrimSpace(track.ResolvedAudioURL)
 				if audioURL == "" {
@@ -634,19 +655,27 @@ func mergeRevisionChanges(contentType string, current []byte, changes map[string
 			}
 			songs = append(songs, albumRevisionSong{
 				ID: track.ID, Title: track.Title, TrackNumber: track.TrackNumber,
-				DiscNumber: track.DiscNumber, Lyrics: track.Lyrics, AudioURL: audioURL,
+				DiscNumber: track.DiscNumber, Lyrics: lyrics, AudioURL: audioURL,
 				CoverURL: track.CoverURL, Status: "open",
 				ArtistCredits: revisionCreditsFromInput(track.ArtistCredits),
 			})
 		}
 		snapshot.Songs = songs
 	}
+	albumType := strings.ToLower(strings.TrimSpace(snapshot.Album.AlbumType))
+	if albumType == "single" || albumType == "leak" {
+		if len(snapshot.Songs) != 1 {
+			return nil, errors.New("single and leak types require exactly one song")
+		}
+		return nil, errors.New("single and leak must be converted to a standalone song")
+	}
 	return json.Marshal(snapshot)
 }
 
 func mergeSongRevisionChanges(current []byte, changes map[string]interface{}) ([]byte, error) {
 	allowed := map[string]struct{}{
-		"title": {}, "track_number": {}, "disc_number": {}, "lyrics": {},
+		"title": {}, "description": {}, "release_type": {}, "release_date": {}, "sources": {},
+		"track_number": {}, "disc_number": {}, "lyrics": {},
 		"cover_url": {}, "artist_credits": {},
 	}
 	for key := range changes {
@@ -669,10 +698,35 @@ func mergeSongRevisionChanges(current []byte, changes map[string]interface{}) ([
 	if input.Title != nil {
 		snapshot.Title = strings.TrimSpace(*input.Title)
 	}
+	if input.Description != nil {
+		snapshot.Description = strings.TrimSpace(*input.Description)
+	}
+	if input.ReleaseType != nil {
+		releaseType := strings.ToLower(strings.TrimSpace(*input.ReleaseType))
+		if releaseType != "single" && releaseType != "leak" {
+			return nil, errors.New("release_type must be single or leak")
+		}
+		snapshot.ReleaseType = releaseType
+	}
+	if input.ReleaseDate != nil {
+		if _, _, err := partialdate.Parse(*input.ReleaseDate); err != nil {
+			return nil, fmt.Errorf("failed to parse song release date: %w", err)
+		}
+		snapshot.ReleaseDate = strings.TrimSpace(*input.ReleaseDate)
+	}
+	if input.Sources != nil {
+		snapshot.Sources = append([]model.MusicSource(nil), (*input.Sources)...)
+	}
 	if input.TrackNumber != nil {
+		if snapshot.AlbumID != "" {
+			return nil, errors.New("track order must be edited from the album")
+		}
 		snapshot.TrackNumber = *input.TrackNumber
 	}
 	if input.DiscNumber != nil {
+		if snapshot.AlbumID != "" {
+			return nil, errors.New("track order must be edited from the album")
+		}
 		snapshot.DiscNumber = *input.DiscNumber
 	}
 	if input.Lyrics != nil {
@@ -690,7 +744,23 @@ func mergeSongRevisionChanges(current []byte, changes map[string]interface{}) ([
 	if snapshot.Title == "" {
 		return nil, errors.New("song title is required")
 	}
+	if snapshot.ReleaseType != "" {
+		snapshot.TrackNumber = 1
+		snapshot.DiscNumber = 1
+		if !revisionCreditsContainPrimary(snapshot.ArtistCredits) {
+			return nil, errors.New("standalone songs require a primary artist")
+		}
+	}
 	return json.Marshal(snapshot)
+}
+
+func revisionCreditsContainPrimary(credits []albumRevisionCredit) bool {
+	for _, credit := range credits {
+		if strings.EqualFold(strings.TrimSpace(credit.Role), "primary") {
+			return true
+		}
+	}
+	return false
 }
 
 func revisionCreditsFromInput(input []albumRevisionCreditInput) []albumRevisionCredit {
@@ -745,6 +815,13 @@ func validateRevisionCredits(input []albumRevisionCreditInput, requirePrimary bo
 		return errors.New("at least one primary artist is required")
 	}
 	return nil
+}
+
+func songReleaseTypeValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(*value))
 }
 
 func coverSourceForRevision(url string) string {
@@ -1190,8 +1267,37 @@ func applySongRevisionSnapshot(tx *gorm.DB, songID, actorID uuid.UUID, raw []byt
 	if strings.TrimSpace(snapshot.Title) == "" {
 		return errors.New("song title is required")
 	}
+	var current model.Song
+	if err := tx.Select("id", "album_id").First(&current, "id = ?", songID).Error; err != nil {
+		return err
+	}
+	releaseTypeValue := strings.ToLower(strings.TrimSpace(snapshot.ReleaseType))
+	if releaseTypeValue != "" && releaseTypeValue != "single" && releaseTypeValue != "leak" {
+		return errors.New("release_type must be single or leak")
+	}
+	if current.AlbumID != nil && releaseTypeValue != "" {
+		return errors.New("album tracks cannot define release_type")
+	}
+	var releaseType *string
+	if releaseTypeValue != "" {
+		releaseType = &releaseTypeValue
+	}
+	releaseDate, releaseDatePrecision, err := partialdate.Parse(snapshot.ReleaseDate)
+	if err != nil {
+		return fmt.Errorf("failed to parse song release date: %w", err)
+	}
+	storedReleaseDate := time.Time{}
+	if releaseDate != nil {
+		storedReleaseDate = *releaseDate
+	}
+	sourcesJSON, err := json.Marshal(snapshot.Sources)
+	if err != nil {
+		return fmt.Errorf("failed to encode song sources: %w", err)
+	}
 	updates := map[string]interface{}{
-		"title": strings.TrimSpace(snapshot.Title), "track_number": snapshot.TrackNumber,
+		"title": strings.TrimSpace(snapshot.Title), "description": strings.TrimSpace(snapshot.Description),
+		"release_type": releaseType, "release_date": storedReleaseDate, "release_date_precision": releaseDatePrecision,
+		"sources_json": string(sourcesJSON), "track_number": snapshot.TrackNumber,
 		"disc_number": snapshot.DiscNumber, "lyrics": snapshot.Lyrics,
 		"audio_url": strings.TrimSpace(snapshot.AudioURL), "cover_url": strings.TrimSpace(snapshot.CoverURL),
 	}

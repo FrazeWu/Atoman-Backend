@@ -242,7 +242,7 @@ func GetSongHandler(db *gorm.DB) gin.HandlerFunc {
 // @Produce json
 // @Param title formData string true "歌曲标题"
 // @Param artist formData string true "艺人名称"
-// @Param album formData string false "专辑名称"
+// @Param album formData string true "专辑名称；独立歌曲请使用音乐导入接口"
 // @Param release_date formData string false "发行日期 YYYY-MM-DD"
 // @Param track_number formData int false "曲目序号"
 // @Param lyrics formData string false "歌词"
@@ -262,6 +262,11 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 
 		if err := c.ShouldBind(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		input.Album = strings.TrimSpace(input.Album)
+		if input.Album == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "standalone songs must be created through the music import API"})
 			return
 		}
 

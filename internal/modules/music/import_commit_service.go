@@ -135,8 +135,15 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			return apperr.BadRequest("validation.invalid_request", "album cover, release date and at least one track are required")
 		}
 		albumType := strings.ToLower(strings.TrimSpace(payload.Album.AlbumType))
-		if (albumType == "single" || albumType == "leak") && len(payload.Album.Tracks) != 1 {
+		isStandaloneSong := albumType == "single" || albumType == "leak"
+		if isStandaloneSong && len(payload.Album.Tracks) != 1 {
 			return apperr.BadRequest("validation.invalid_request", "single and leak releases must contain exactly one track")
+		}
+		if isStandaloneSong && session.TargetAlbumID != nil {
+			return apperr.BadRequest("validation.invalid_request", "convert the album from its editor before repairing this import")
+		}
+		if !isStandaloneSong && session.TargetSongID != nil {
+			return apperr.BadRequest("validation.invalid_request", "convert the song from its editor before repairing this import")
 		}
 
 		album := model.Album{
@@ -172,6 +179,20 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				album.Year = album.ReleaseYear
 			}
 		}
+		if isStandaloneSong {
+			standalone, migratedOldKeys, migratedNewKeys, err := s.commitStandaloneSongImport(
+				tx, user, &session, sessionPayload, input, payload, album,
+				albumSources, albumSourcesJSON, resolvedArtists, credits, id,
+			)
+			oldObjectKeys = append(oldObjectKeys, migratedOldKeys...)
+			newObjectKeys = append(newObjectKeys, migratedNewKeys...)
+			if err != nil {
+				return err
+			}
+			out = standalone
+			return nil
+		}
+
 		isRepair := session.TargetAlbumID != nil
 		revisions := revisionservice.NewRevisionService(tx)
 		if isRepair {
@@ -458,9 +479,226 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 	s.deleteAlbumImportObjects(oldObjectKeys)
 	s.updateAlbumImportNotification(out)
 	if out.Status == AlbumImportStatusCommitted {
-		s.notifyIndexNowAlbum(out.TargetAlbumID)
+		if out.TargetSongID != nil {
+			s.notifyIndexNowSong(out.TargetSongID)
+		} else {
+			s.notifyIndexNowAlbum(out.TargetAlbumID)
+		}
 	}
 	return out, nil
+}
+
+func (s *Service) commitStandaloneSongImport(
+	tx *gorm.DB,
+	user authctx.CurrentUser,
+	session *model.AlbumImportSession,
+	sessionPayload map[string]any,
+	input CommitAlbumImportSessionInput,
+	payload AlbumImportPayload,
+	release model.Album,
+	sources []Source,
+	sourcesJSON string,
+	resolvedArtists []resolvedCommitAlbumImportArtist,
+	credits []AlbumArtistCreditInput,
+	importID uuid.UUID,
+) (model.AlbumImportSession, []string, []string, error) {
+	if len(payload.Album.Tracks) != 1 {
+		return model.AlbumImportSession{}, nil, nil, apperr.BadRequest("validation.invalid_request", "single and leak releases must contain exactly one track")
+	}
+	if len(sources) == 0 {
+		return model.AlbumImportSession{}, nil, nil, apperr.BadRequest("validation.invalid_request", "standalone songs require at least one source")
+	}
+	track := payload.Album.Tracks[0]
+	isRepair := session.TargetSongID != nil
+	var song model.Song
+	if isRepair {
+		if err := tx.First(&song, "id = ?", *session.TargetSongID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return model.AlbumImportSession{}, nil, nil, apperr.NotFound("music.song_not_found", "Target song not found")
+			}
+			return model.AlbumImportSession{}, nil, nil, err
+		}
+		if song.AlbumID != nil || song.ReleaseType == nil {
+			return model.AlbumImportSession{}, nil, nil, apperr.BadRequest("validation.invalid_request", "target song is not standalone")
+		}
+		if err := revisionservice.ValidateMusicEntryEdit(tx, "song", song.ID, user.ID); err != nil {
+			return model.AlbumImportSession{}, nil, nil, err
+		}
+	} else {
+		song = model.Song{Base: model.Base{ID: uuid.New()}, UploadedBy: &user.ID}
+	}
+
+	if sessionPayload == nil {
+		sessionPayload = map[string]any{}
+	}
+	rawDerivedTracks, _ := sessionPayload["derived_tracks"].([]any)
+	derived := matchDerivedTrackAudio(rawDerivedTracks, track, 0, map[int]bool{})
+	var importFile model.AlbumImportFile
+	if derived.FileID != "" {
+		fileID, err := uuid.Parse(derived.FileID)
+		if err != nil {
+			return model.AlbumImportSession{}, nil, nil, apperr.BadRequest("validation.invalid_request", "derived audio file id is invalid")
+		}
+		if err := tx.First(&importFile, "id = ? AND import_id = ?", fileID, session.ID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return model.AlbumImportSession{}, nil, nil, apperr.BadRequest("validation.invalid_request", "derived audio file was not found")
+			}
+			return model.AlbumImportSession{}, nil, nil, err
+		}
+	}
+	audioURL := strings.TrimSpace(derived.AudioURL)
+	if audioURL == "" {
+		audioURL = strings.TrimSpace(song.AudioURL)
+	}
+	if audioURL == "" {
+		return model.AlbumImportSession{}, nil, nil, apperr.BadRequest("validation.invalid_request", "standalone songs require processed audio")
+	}
+
+	oldObjectKeys := []string{}
+	newObjectKeys := []string{}
+	promotedCoverURL, oldCoverKey, newCoverKey, err := s.promoteAlbumImportAsset(
+		release.CoverURL,
+		storage.BuildMusicSongCoverVersionKey(song.ID.String(), uuid.NewString(), path.Ext(release.CoverURL)),
+		importID,
+	)
+	if err != nil {
+		return model.AlbumImportSession{}, nil, nil, err
+	}
+	if oldCoverKey != "" {
+		oldObjectKeys = append(oldObjectKeys, oldCoverKey)
+	}
+	if newCoverKey != "" {
+		newObjectKeys = append(newObjectKeys, newCoverKey)
+	}
+	promotedAudioURL, oldAudioKey, newAudioKey, err := s.promoteAlbumImportAsset(
+		audioURL,
+		storage.BuildMusicSongAudioVersionKey(song.ID.String(), uuid.NewString(), path.Ext(audioURL)),
+		importID,
+	)
+	if err != nil {
+		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+	}
+	if oldAudioKey != "" {
+		oldObjectKeys = append(oldObjectKeys, oldAudioKey)
+	}
+	if newAudioKey != "" {
+		newObjectKeys = append(newObjectKeys, newAudioKey)
+	}
+
+	releaseType := strings.ToLower(strings.TrimSpace(release.AlbumType))
+	song.Title = strings.TrimSpace(release.Title)
+	song.Description = strings.TrimSpace(release.Description)
+	song.ReleaseType = &releaseType
+	song.ReleaseDate = release.ReleaseDate
+	song.ReleaseDatePrecision = release.ReleaseDatePrecision
+	song.TrackNumber = 1
+	song.DiscNumber = 1
+	song.CoverURL = promotedCoverURL
+	song.CoverSource = coverSourceFromURL(promotedCoverURL)
+	song.SourcesJSON = sourcesJSON
+	song.Sources = sources
+	song.AlbumID = nil
+	song.AudioURL = promotedAudioURL
+	song.AudioSource = coverSourceFromURL(promotedAudioURL)
+	song.Status = "open"
+	song.LifecycleStatus = model.MusicLifecycleActive
+	song.EditStatus = model.MusicEditDevelopment
+	applySongAudioMetadata(&song, songAudioMetadataFromImportFile(importFile))
+	if isRepair {
+		if err := tx.Save(&song).Error; err != nil {
+			return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+		}
+	} else if err := tx.Create(&song).Error; err != nil {
+		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+	}
+	if err := replaceStandaloneSongArtistCredits(tx, song.ID, credits); err != nil {
+		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+	}
+	if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics); err != nil {
+		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+	}
+	for _, resolved := range resolvedArtists {
+		if resolved.Artist.EntryStatus == artistEntryDraft && hasAlbumArtistRole(resolved.Roles, "primary") {
+			if resolved.Artist.CreatedBy == nil || *resolved.Artist.CreatedBy != user.ID {
+				return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, apperr.NotFound("music.artist_not_found", "Artist not found")
+			}
+			artistSources, artistSourcesJSON, err := normalizeMusicSources(input.ArtistSources, input.ArtistSource)
+			if err != nil {
+				return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+			}
+			if err := tx.Model(resolved.Artist).Updates(map[string]any{
+				"entry_status": artistEntryOpen, "lifecycle_status": model.MusicLifecycleActive, "sources_json": artistSourcesJSON,
+			}).Error; err != nil {
+				return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+			}
+			resolved.Artist.Sources = artistSources
+		}
+	}
+
+	revisions := revisionservice.NewRevisionService(tx)
+	for _, resolved := range resolvedArtists {
+		if _, err := revisions.EnsureInitialRevision("artist", resolved.Artist.ID, user.ID); err != nil {
+			return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+		}
+	}
+	if _, err := revisions.EnsureInitialRevision("song", song.ID, user.ID); err != nil {
+		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+	}
+	if isRepair {
+		if _, err := revisions.CreateCurrentSnapshotRevision("song", song.ID, user.ID, "修复歌曲资料"); err != nil {
+			return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+		}
+	}
+
+	now := time.Now()
+	session.TargetAlbumID = nil
+	session.TargetSongID = &song.ID
+	sessionPayload["artist_source"] = strings.TrimSpace(input.ArtistSource)
+	sessionPayload["album_source"] = strings.TrimSpace(input.AlbumSource)
+	applyAlbumImportSessionState(session, AlbumImportStatusCommitted, sessionPayload)
+	payloadJSON, err := json.Marshal(sessionPayload)
+	if err != nil {
+		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+	}
+	session.PayloadJSON = string(payloadJSON)
+	session.CommittedAt = &now
+	session.CommittedBy = &user.ID
+	if err := tx.Save(session).Error; err != nil {
+		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
+	}
+	return *session, oldObjectKeys, newObjectKeys, nil
+}
+
+func replaceStandaloneSongArtistCredits(tx *gorm.DB, songID uuid.UUID, credits []AlbumArtistCreditInput) error {
+	albumRows, err := normalizeAlbumArtistCredits(tx, uuid.Nil, credits, true)
+	if err != nil {
+		return err
+	}
+	rows := make([]model.SongArtist, 0, len(albumRows))
+	for _, row := range albumRows {
+		rows = append(rows, model.SongArtist{
+			SongID: songID, ArtistID: row.ArtistID, Role: row.Role,
+			CustomRole: row.CustomRole, Position: row.Position,
+		})
+	}
+	if err := tx.Where("song_id = ?", songID).Delete(&model.SongArtist{}).Error; err != nil {
+		return err
+	}
+	return tx.Create(&rows).Error
+}
+
+func (s *Service) notifyIndexNowSong(songID *uuid.UUID) {
+	if songID == nil || *songID == uuid.Nil {
+		return
+	}
+	paths := []string{"/music/song/" + songID.String()}
+	var credits []model.SongArtist
+	if err := s.db.Where("song_id = ?", *songID).Find(&credits).Error; err == nil {
+		for _, credit := range credits {
+			paths = append(paths, "/music/artist/"+credit.ArtistID.String())
+		}
+	}
+	indexnow.NotifyPaths(paths...)
 }
 
 func (s *Service) notifyIndexNowAlbum(albumID *uuid.UUID) {

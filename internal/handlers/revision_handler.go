@@ -236,6 +236,31 @@ func CreateAlbumRevisionHandler(db *gorm.DB, revisionService *service.RevisionSe
 			return
 		}
 
+		if albumType, ok := input.Changes["album_type"].(string); ok {
+			albumType = strings.ToLower(strings.TrimSpace(albumType))
+			if albumType == "single" || albumType == "leak" {
+				trackCount := int64(0)
+				if rawTracks, hasTracks := input.Changes["tracks"].([]interface{}); hasTracks {
+					for _, rawTrack := range rawTracks {
+						track, _ := rawTrack.(map[string]interface{})
+						removed, _ := track["removed"].(bool)
+						if !removed {
+							trackCount++
+						}
+					}
+				} else if err := db.Model(&model.Song{}).Where("album_id = ? AND lifecycle_status = ? AND COALESCE(status, 'open') <> ?", albumID, model.MusicLifecycleActive, "closed").Count(&trackCount).Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to validate album tracks"})
+					return
+				}
+				if trackCount != 1 {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "single and leak types require exactly one song"})
+					return
+				}
+				c.JSON(http.StatusBadRequest, gin.H{"error": "single and leak must be converted through the music conversion API"})
+				return
+			}
+		}
+
 		// Get user info
 		userID := authctx.CurrentUserIDString(c)
 		editorUUID, _ := uuid.Parse(userID)
@@ -494,6 +519,34 @@ func CreateSongRevisionHandler(db *gorm.DB, revisionService *service.RevisionSer
 		if err := c.ShouldBindJSON(&input); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
+		}
+
+		needsOwnershipValidation := input.Changes["release_type"] != nil || input.Changes["release_date"] != nil || input.Changes["track_number"] != nil || input.Changes["disc_number"] != nil
+		if needsOwnershipValidation {
+			var song model.Song
+			if err := db.Select("id", "album_id", "release_type").First(&song, "id = ?", songID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					c.JSON(http.StatusNotFound, gin.H{"error": "Song not found"})
+				} else {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to validate song ownership"})
+				}
+				return
+			}
+			if rawType, ok := input.Changes["release_type"].(string); ok {
+				releaseType := strings.ToLower(strings.TrimSpace(rawType))
+				if releaseType != "single" && releaseType != "leak" {
+					c.JSON(http.StatusBadRequest, gin.H{"error": "release_type must be single or leak"})
+					return
+				}
+			}
+			if song.AlbumID != nil && (input.Changes["release_type"] != nil || input.Changes["release_date"] != nil) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "album track release metadata must be edited from the album"})
+				return
+			}
+			if (song.AlbumID != nil || song.ReleaseType != nil) && (input.Changes["track_number"] != nil || input.Changes["disc_number"] != nil) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "track order must be edited from the album"})
+				return
+			}
 		}
 
 		userID := authctx.CurrentUserIDString(c)

@@ -74,32 +74,50 @@ func (s *Service) RepairAlbumImportSession(user authctx.CurrentUser, sessionID u
 		if err != nil {
 			return err
 		}
-		if session.Status != AlbumImportStatusCommitted || session.TargetAlbumID == nil {
-			return apperr.Unprocessable("music.import_invalid_status", "Committed import with a target album is required")
-		}
-		var album model.Album
-		if err := tx.First(&album, "id = ?", *session.TargetAlbumID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return apperr.NotFound("music.album_not_found", "Target album not found")
-			}
-			return err
+		if session.Status != AlbumImportStatusCommitted || (session.TargetAlbumID == nil && session.TargetSongID == nil) {
+			return apperr.Unprocessable("music.import_invalid_status", "Committed import with a target entry is required")
 		}
 		payload, err := readAlbumImportPayloadMap(session.PayloadJSON)
 		if err != nil {
 			return err
 		}
-		var songs []model.Song
-		if err := tx.Where("album_id = ? AND lifecycle_status = ?", album.ID, model.MusicLifecycleActive).Order("disc_number ASC, track_number ASC, created_at ASC").Find(&songs).Error; err != nil {
-			return err
-		}
-		currentTracks := make([]map[string]any, 0, len(songs))
-		for _, song := range songs {
+		currentTracks := []map[string]any{}
+		if session.TargetSongID != nil {
+			var song model.Song
+			if err := tx.First(&song, "id = ?", *session.TargetSongID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return apperr.NotFound("music.song_not_found", "Target song not found")
+				}
+				return err
+			}
+			if song.AlbumID != nil || song.ReleaseType == nil {
+				return apperr.Unprocessable("music.import_invalid_status", "Target song is not standalone")
+			}
+			payload["cover_url"] = song.CoverURL
 			currentTracks = append(currentTracks, map[string]any{
-				"song_id": song.ID.String(), "title": song.Title, "disc_number": song.DiscNumber, "track_number": song.TrackNumber,
+				"song_id": song.ID.String(), "title": song.Title, "disc_number": 1, "track_number": 1,
 				"audio_url": song.AudioURL,
 			})
+		} else {
+			var album model.Album
+			if err := tx.First(&album, "id = ?", *session.TargetAlbumID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return apperr.NotFound("music.album_not_found", "Target album not found")
+				}
+				return err
+			}
+			var songs []model.Song
+			if err := tx.Where("album_id = ? AND lifecycle_status = ?", album.ID, model.MusicLifecycleActive).Order("disc_number ASC, track_number ASC, created_at ASC").Find(&songs).Error; err != nil {
+				return err
+			}
+			for _, song := range songs {
+				currentTracks = append(currentTracks, map[string]any{
+					"song_id": song.ID.String(), "title": song.Title, "disc_number": song.DiscNumber, "track_number": song.TrackNumber,
+					"audio_url": song.AudioURL,
+				})
+			}
+			payload["cover_url"] = album.CoverURL
 		}
-		payload["cover_url"] = album.CoverURL
 		delete(payload, "cover_key")
 		delete(payload, "derived_cover")
 		payload["derived_tracks"] = currentTracks

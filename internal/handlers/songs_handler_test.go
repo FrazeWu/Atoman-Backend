@@ -42,7 +42,7 @@ func TestLegacySongCreateAndUpdateKeepLyricsWikiInSync(t *testing.T) {
 	r.PUT("/api/v1/songs/:id", UpdateSongHandler(db, nil))
 
 	createBody, createContentType := multipartLegacyMusicAudioBody(t, map[string]string{
-		"title": "Legacy API Song", "artist": "Artist", "lyrics": "first\nsecond",
+		"title": "Legacy API Song", "artist": "Artist", "album": "Legacy Album", "lyrics": "first\nsecond",
 	})
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/songs", createBody)
 	createReq.Header.Set("Content-Type", createContentType)

@@ -21,6 +21,16 @@ type SubmitEditRequest struct {
 	Sources    []Source       `json:"sources"`
 }
 
+type MusicReleaseConversionRequest struct {
+	Title         string                   `json:"title"`
+	Description   string                   `json:"description"`
+	ReleaseDate   string                   `json:"release_date"`
+	ReleaseType   string                   `json:"release_type"`
+	CoverURL      string                   `json:"cover_url"`
+	ArtistCredits []AlbumArtistCreditInput `json:"artist_credits"`
+	Sources       []Source                 `json:"sources"`
+}
+
 type AlbumMergeRequest struct {
 	SourceAlbumID uuid.UUID                  `json:"source_album_id"`
 	Confirmed     bool                       `json:"confirmed"`

@@ -121,6 +121,11 @@ func CreateAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		}
 
 		input.Title = strings.TrimSpace(input.Title)
+		albumType := strings.ToLower(strings.TrimSpace(input.AlbumType))
+		if albumType == "single" || albumType == "leak" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "single and leak must be created as standalone songs"})
+			return
+		}
 		artistNames := splitArtistNames(input.Artist)
 		if input.Title == "" || len(artistNames) == 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "title and artist are required"})
@@ -216,7 +221,6 @@ func CreateAlbumHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			return
 		}
 
-		albumType := strings.TrimSpace(input.AlbumType)
 		if albumType == "" {
 			albumType = "album"
 		}

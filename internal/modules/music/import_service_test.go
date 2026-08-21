@@ -1085,6 +1085,78 @@ func TestCommitAlbumImportSessionReadyCreatesArtistAndAlbum(t *testing.T) {
 	}
 }
 
+func TestCommitAlbumImportSessionReadyCreatesStandaloneSong(t *testing.T) {
+	svc, db, user := newMusicTestService(t)
+	artist := model.Artist{Name: "Standalone Artist", EntryStatus: "open", LifecycleStatus: model.MusicLifecycleActive}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create artist: %v", err)
+	}
+	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{
+		Status: AlbumImportStatusReady,
+		Payload: AlbumImportPayload{Album: AlbumImportAlbumPayload{
+			Title: "Standalone Song", AlbumType: "single", ReleaseDate: "2025-03-04",
+			Tracks: []AlbumImportTrackPayload{{Title: "Different Derived Title", TrackNumber: 1}},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	seedReadyImportMedia(t, db, session.ID, "https://cdn.example.com/standalone.jpg", "Different Derived Title")
+
+	commitInput := CommitAlbumImportSessionInput{
+		ArtistID: artist.ID.String(),
+		Album: AlbumImportAlbumPayload{
+			Title: "Standalone Song", Description: "Optional song description", AlbumType: "single",
+			CoverURL: "https://cdn.example.com/standalone.jpg", ReleaseDate: "2025-03-04", ReleaseYear: 2025,
+			Tracks: []AlbumImportTrackPayload{{Title: "Different Derived Title", TrackNumber: 1}},
+		},
+		AlbumSource: "https://example.com/standalone-song",
+	}
+	committed, err := svc.CommitAlbumImportSession(user, session.ID, commitInput)
+	if err != nil {
+		t.Fatalf("commit standalone song: %v", err)
+	}
+	if committed.TargetAlbumID != nil || committed.TargetSongID == nil {
+		t.Fatalf("unexpected standalone import target: %#v", committed)
+	}
+	var song model.Song
+	if err := db.Preload("ArtistCredits").First(&song, "id = ?", *committed.TargetSongID).Error; err != nil {
+		t.Fatalf("load standalone song: %v", err)
+	}
+	if song.AlbumID != nil || song.ReleaseType == nil || *song.ReleaseType != "single" {
+		t.Fatalf("unexpected song ownership: %#v", song)
+	}
+	if song.Title != "Standalone Song" || song.Description != "Optional song description" || song.CoverURL != "https://cdn.example.com/standalone.jpg" {
+		t.Fatalf("unexpected standalone song metadata: %#v", song)
+	}
+	if len(song.ArtistCredits) != 1 || song.ArtistCredits[0].ArtistID != artist.ID || song.ArtistCredits[0].Role != "primary" {
+		t.Fatalf("unexpected standalone song credits: %#v", song.ArtistCredits)
+	}
+	var albumCount int64
+	if err := db.Model(&model.Album{}).Count(&albumCount).Error; err != nil || albumCount != 0 {
+		t.Fatalf("expected no release wrapper, count=%d err=%v", albumCount, err)
+	}
+
+	reopened, err := svc.RepairAlbumImportSession(user, session.ID)
+	if err != nil {
+		t.Fatalf("reopen standalone import: %v", err)
+	}
+	if reopened.Status != AlbumImportStatusReady || reopened.TargetSongID == nil || *reopened.TargetSongID != song.ID {
+		t.Fatalf("unexpected reopened standalone import: %#v", reopened)
+	}
+	repaired, err := svc.CommitAlbumImportSession(user, session.ID, commitInput)
+	if err != nil {
+		t.Fatalf("repair standalone import: %v", err)
+	}
+	if repaired.TargetSongID == nil || *repaired.TargetSongID != song.ID || repaired.TargetAlbumID != nil {
+		t.Fatalf("unexpected repaired standalone target: %#v", repaired)
+	}
+	var songCount int64
+	if err := db.Model(&model.Song{}).Count(&songCount).Error; err != nil || songCount != 1 {
+		t.Fatalf("expected repair to preserve one song, count=%d err=%v", songCount, err)
+	}
+}
+
 func TestCommitAlbumImportSessionUploadingPersistsCommitRequest(t *testing.T) {
 	svc, db, user := newMusicTestService(t)
 	session, err := svc.CreateAlbumImportSession(user, CreateAlbumImportSessionInput{Status: AlbumImportStatusPendingUpload})

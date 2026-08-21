@@ -11392,16 +11392,6 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "enum": [
-                            "album",
-                            "song"
-                        ],
-                        "type": "string",
-                        "description": "作品分类",
-                        "name": "release_type",
-                        "in": "query"
-                    },
-                    {
                         "type": "string",
                         "description": "排序方式",
                         "name": "sort",
@@ -11424,6 +11414,55 @@ const docTemplate = `{
                         "description": "仅 sort=-created_at 可用；传 cursor= 启动游标分页",
                         "name": "cursor",
                         "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/albums/{albumId}/convert-to-song": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "将单轨专辑转换为独立歌曲",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "专辑 ID",
+                        "name": "albumId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "歌曲资料",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicReleaseConversionRequest"
+                        }
                     }
                 ],
                 "responses": {
@@ -13958,12 +13997,9 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
-                        "enum": [
-                            "album",
-                            "song"
-                        ],
                         "type": "string",
-                        "description": "作品分类",
+                        "example": "single,leak",
+                        "description": "歌曲类型，多个值使用逗号分隔",
                         "name": "release_type",
                         "in": "query"
                     },
@@ -14085,6 +14121,55 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/songs/{songId}/convert-to-album": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "将独立歌曲转换为专辑",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 ID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "发行资料",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.MusicReleaseConversionRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -16095,9 +16180,10 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "专辑名称",
+                        "description": "专辑名称；独立歌曲请使用音乐导入接口",
                         "name": "album",
-                        "in": "formData"
+                        "in": "formData",
+                        "required": true
                     },
                     {
                         "type": "string",
@@ -28063,6 +28149,9 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "description": {
+                    "type": "string"
+                },
                 "disc_number": {
                     "type": "integer"
                 },
@@ -28071,6 +28160,12 @@ const docTemplate = `{
                 },
                 "edit_status": {
                     "type": "string"
+                },
+                "effective_sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.MusicSource"
+                    }
                 },
                 "id": {
                     "type": "string"
@@ -28108,6 +28203,9 @@ const docTemplate = `{
                 "release_date_precision": {
                     "type": "string"
                 },
+                "release_type": {
+                    "type": "string"
+                },
                 "source_bit_depth": {
                     "type": "integer"
                 },
@@ -28137,6 +28235,12 @@ const docTemplate = `{
                 },
                 "source_size_bytes": {
                     "type": "integer"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.MusicSource"
+                    }
                 },
                 "status": {
                     "type": "string"
@@ -28677,6 +28781,23 @@ const docTemplate = `{
                 }
             }
         },
+        "music.AlbumArtistCreditInput": {
+            "type": "object",
+            "properties": {
+                "artist_id": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "roles": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumArtistRoleInput"
+                    }
+                }
+            }
+        },
         "music.AlbumArtistRoleInput": {
             "type": "object",
             "properties": {
@@ -28859,6 +28980,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "targetAlbumId": {
+                    "type": "string"
+                },
+                "targetSongId": {
                     "type": "string"
                 },
                 "tracks": {
@@ -29971,6 +30095,38 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/music.MusicLyricsDTO"
+                }
+            }
+        },
+        "music.MusicReleaseConversionRequest": {
+            "type": "object",
+            "properties": {
+                "artist_credits": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.AlbumArtistCreditInput"
+                    }
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "release_date": {
+                    "type": "string"
+                },
+                "release_type": {
+                    "type": "string"
+                },
+                "sources": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.Source"
+                    }
+                },
+                "title": {
+                    "type": "string"
                 }
             }
         },

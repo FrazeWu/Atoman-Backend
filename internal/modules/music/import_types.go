@@ -193,6 +193,7 @@ type AlbumImportErrorDTO struct {
 type AlbumImportDTO struct {
 	ImportID           string                         `json:"importId"`
 	TargetAlbumID      string                         `json:"targetAlbumId"`
+	TargetSongID       string                         `json:"targetSongId"`
 	ArtistID           string                         `json:"artistId"`
 	ArtistSource       string                         `json:"artistSource"`
 	CommitRequest      *CommitAlbumImportSessionInput `json:"commitRequest,omitempty"`

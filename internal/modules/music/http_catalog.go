@@ -432,7 +432,6 @@ func buildArtistDetailResponse(artist model.Artist) ArtistDetailResponse {
 // @Produce json
 // @Param q query string false "搜索关键词"
 // @Param artist_id query string false "艺术家 ID"
-// @Param release_type query string false "作品分类" Enums(album, song)
 // @Param sort query string false "排序方式"
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
@@ -443,7 +442,6 @@ func (h *Handler) listAlbums(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
 	query := strings.TrimSpace(c.Query("q"))
 	artistIDRaw := strings.TrimSpace(c.Query("artist_id"))
-	releaseType := strings.ToLower(strings.TrimSpace(c.Query("release_type")))
 	sort := strings.TrimSpace(c.Query("sort"))
 
 	cursorRaw, useCursor := c.GetQuery("cursor")
@@ -477,12 +475,6 @@ func (h *Handler) listAlbums(c *gin.Context) {
 		db = db.Joins("JOIN album_artists AS filter_album_artists ON filter_album_artists.album_id = \"Albums\".id").Where("filter_album_artists.artist_id = ?", artistID)
 		joinedArtists = true
 	}
-	if releaseType == "song" {
-		db = db.Where("LOWER(COALESCE(\"Albums\".album_type, 'album')) IN ?", []string{"single", "leak"})
-	} else if releaseType == "album" {
-		db = db.Where("LOWER(COALESCE(\"Albums\".album_type, 'album')) NOT IN ?", []string{"single", "leak"})
-	}
-
 	if cursor != nil {
 		db = db.Where("(\"Albums\".created_at < ? OR (\"Albums\".created_at = ? AND \"Albums\".id < ?))", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
 	}

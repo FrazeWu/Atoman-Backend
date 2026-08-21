@@ -171,6 +171,8 @@ func (AlbumArtist) TableName() string {
 type Song struct {
 	Base
 	Title                string          `json:"title" gorm:"not null"`
+	Description          string          `json:"description" gorm:"type:text"`
+	ReleaseType          *string         `json:"release_type,omitempty" gorm:"type:varchar(16);index"`
 	ReleaseDate          time.Time       `json:"release_date" gorm:"type:date"`
 	ReleaseDatePrecision string          `json:"release_date_precision,omitempty"`
 	TrackNumber          int             `json:"track_number"`
@@ -182,6 +184,9 @@ type Song struct {
 	AudioSource          string          `json:"audio_source" gorm:"default:'local'"`
 	CoverURL             string          `json:"cover_url"`
 	CoverSource          string          `json:"cover_source" gorm:"default:'local'"`
+	SourcesJSON          string          `json:"-" gorm:"type:jsonb;default:'[]'"`
+	Sources              []MusicSource   `json:"sources,omitempty" gorm:"-"`
+	EffectiveSources     []MusicSource   `json:"effective_sources,omitempty" gorm:"-"`
 	BatchID              string          `json:"batch_id" gorm:"index"`
 	Status               string          `json:"status" gorm:"default:'open'"`
 	LifecycleStatus      string          `json:"lifecycle_status" gorm:"not null;default:'active';index;check:chk_songs_lifecycle_status,lifecycle_status IN ('draft','active','retired','merged')"`
@@ -213,6 +218,18 @@ type Song struct {
 
 func (Song) TableName() string {
 	return "Songs"
+}
+
+func (song *Song) AfterFind(_ *gorm.DB) error {
+	if strings.TrimSpace(song.SourcesJSON) != "" {
+		if err := json.Unmarshal([]byte(song.SourcesJSON), &song.Sources); err != nil {
+			song.Sources = nil
+		}
+	}
+	if len(song.Sources) > 0 {
+		song.EffectiveSources = append([]MusicSource(nil), song.Sources...)
+	}
+	return nil
 }
 
 func (song *Song) BeforeCreate(tx *gorm.DB) error {

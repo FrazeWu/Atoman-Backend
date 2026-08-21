@@ -36,7 +36,7 @@ type musicSearchMeta struct {
 // @Tags music
 // @Produce json
 // @Param artist_id query string false "艺术家 ID"
-// @Param release_type query string false "作品分类" Enums(album, song)
+// @Param release_type query string false "歌曲类型，多个值使用逗号分隔" example(single,leak)
 // @Param sort query string false "排序方式" Enums(-release_date,release_date,hot)
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
@@ -62,15 +62,27 @@ func (h *Handler) listSongs(c *gin.Context) {
 		)`, artistID)
 	}
 
-	releaseType := strings.ToLower(strings.TrimSpace(c.Query("release_type")))
-	if releaseType == "song" || releaseType == "album" {
-		albumTypes := h.service.db.Model(&model.Album{}).Select("id")
-		if releaseType == "song" {
-			albumTypes = albumTypes.Where("LOWER(COALESCE(album_type, 'album')) IN ?", []string{"single", "leak"})
+	rawReleaseTypes := strings.ToLower(strings.TrimSpace(c.Query("release_type")))
+	if rawReleaseTypes != "" {
+		releaseTypes := make([]string, 0, 2)
+		if rawReleaseTypes == "song" {
+			// Keep the previous artist drawer working during the staged rollout.
+			releaseTypes = append(releaseTypes, "single", "leak")
 		} else {
-			albumTypes = albumTypes.Where("LOWER(COALESCE(album_type, 'album')) NOT IN ?", []string{"single", "leak"})
+			seenReleaseTypes := map[string]bool{}
+			for _, raw := range strings.Split(rawReleaseTypes, ",") {
+				releaseType := strings.TrimSpace(raw)
+				if releaseType != "single" && releaseType != "leak" {
+					httpx.Error(c, apperr.BadRequest("validation.invalid_request", "release_type must contain only single or leak"))
+					return
+				}
+				if !seenReleaseTypes[releaseType] {
+					releaseTypes = append(releaseTypes, releaseType)
+					seenReleaseTypes[releaseType] = true
+				}
+			}
 		}
-		query = query.Where("\"Songs\".album_id IN (?)", albumTypes)
+		query = query.Where(`"Songs".album_id IS NULL AND LOWER("Songs".release_type) IN ?`, releaseTypes)
 	}
 
 	var total int64
@@ -82,20 +94,20 @@ func (h *Handler) listSongs(c *gin.Context) {
 	order := "\"Songs\".created_at DESC"
 	switch strings.TrimSpace(c.Query("sort")) {
 	case "release_date":
-		order = "\"Albums\".release_date ASC, \"Songs\".track_number ASC"
+		order = "\"Songs\".release_date ASC, \"Songs\".created_at ASC"
 	case "hot":
 		order = "\"Songs\".play_count DESC, \"Songs\".created_at DESC"
 	default:
-		order = "\"Albums\".release_date DESC, \"Songs\".track_number ASC"
+		order = "\"Songs\".release_date DESC, \"Songs\".created_at DESC"
 	}
 
 	var songs []model.Song
-	if err := query.Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
-		Preload("Album").Preload("Artists").Order(order).Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&songs).Error; err != nil {
+	if err := query.Preload("Album").Preload("Artists").Order(order).Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&songs).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
 	for i := range songs {
+		resolveSongEffectiveSources(&songs[i])
 		songs[i].AudioURL = resolveMusicMediaURL(songs[i].AudioURL)
 		songs[i].CoverURL = resolveMusicMediaURL(songs[i].CoverURL)
 		if songs[i].Album != nil {
@@ -168,6 +180,7 @@ func (h *Handler) search(c *gin.Context) {
 			return
 		}
 		for i := range result.Songs {
+			resolveSongEffectiveSources(&result.Songs[i])
 			result.Songs[i].AudioURL = resolveMusicMediaURL(result.Songs[i].AudioURL)
 			result.Songs[i].CoverURL = resolveMusicMediaURL(result.Songs[i].CoverURL)
 		}
@@ -418,6 +431,7 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		})
 	}
 	result := songDetailResponse{Song: song, Artists: artists, Playable: strings.TrimSpace(song.AudioURL) != ""}
+	resolveSongEffectiveSources(&result.Song)
 	if song.AlbumID != nil {
 		previous, next := loadAdjacentAlbumSongs(h.service.db, song)
 		if previous.ID != uuid.Nil {
@@ -435,6 +449,16 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		resolveAlbumMediaURLs(result.Song.Album)
 	}
 	httpx.OK(c, http.StatusOK, result)
+}
+
+func resolveSongEffectiveSources(song *model.Song) {
+	if len(song.Sources) > 0 {
+		song.EffectiveSources = append([]model.MusicSource(nil), song.Sources...)
+		return
+	}
+	if song.Album != nil && len(song.Album.Sources) > 0 {
+		song.EffectiveSources = append([]model.MusicSource(nil), song.Album.Sources...)
+	}
 }
 
 func loadAdjacentAlbumSongs(db *gorm.DB, song model.Song) (model.Song, model.Song) {

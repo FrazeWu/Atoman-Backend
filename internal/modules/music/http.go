@@ -69,6 +69,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/albums/:albumId", h.getAlbum)
 	group.GET("/songs/:songId", h.getSongDetail)
 	group.POST("/songs/:songId/audio-replacements", h.createSongAudioReplacement)
+	group.POST("/songs/:songId/convert-to-album", h.convertSongToAlbum)
+	group.POST("/albums/:albumId/convert-to-song", h.convertAlbumToSong)
 	group.POST("/albums/:albumId/merge", h.submitAlbumMerge)
 	group.POST("/albums/:albumId/merge/preview", h.previewAlbumMerge)
 	group.GET("/bookmarks/artists", h.listArtistBookmarks)

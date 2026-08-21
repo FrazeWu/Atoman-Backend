@@ -1,7 +1,9 @@
 package migrationrunner
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"atoman/internal/migrations"
 	"atoman/internal/model"
@@ -28,6 +30,7 @@ func Run(db *gorm.DB) error {
 		{"auth oauth migration", migrations.RunAuthOAuthMigration},
 		{"unified reading list migration", migrations.RunUnifiedReadingListMigration},
 		{"debate wiki migration", migrations.RunDebateWikiMigration},
+		{"music standalone songs pre-schema migration", migrations.RunMusicStandaloneSongsPreSchemaMigration},
 	}
 	for _, step := range steps {
 		if err := step.run(db); err != nil {
@@ -72,6 +75,7 @@ func Run(db *gorm.DB) error {
 		{"music catalog indexes migration", migrations.RunMusicCatalogIndexesMigration},
 		{"music partial dates migration", migrations.RunMusicPartialDatesMigration},
 		{"music artist drafts migration", migrations.RunMusicArtistDraftsMigration},
+		{"music standalone songs constraints migration", migrations.RunMusicStandaloneSongsConstraintsMigration},
 		{"music revision baselines migration", runMusicRevisionBaselinesMigration},
 		{"unified studio migration", migrations.RunUnifiedStudioMigration},
 		{"user default resources migration", backfillUserDefaultResources},
@@ -169,6 +173,24 @@ func runMusicRevisionBaselinesMigration(db *gorm.DB) error {
 			}
 			if _, err := revisions.EnsureInitialRevision("song", song.ID, editorID); err != nil {
 				return fmt.Errorf("create song %s revision baseline: %w", song.ID, err)
+			}
+			if song.ReleaseType != nil {
+				var current model.Revision
+				if err := tx.Where("content_type = ? AND content_id = ? AND is_current = ?", "song", song.ID, true).
+					Order("version_number DESC").First(&current).Error; err != nil {
+					return fmt.Errorf("load standalone song %s revision: %w", song.ID, err)
+				}
+				var snapshot map[string]any
+				if err := json.Unmarshal(current.ContentSnapshot, &snapshot); err != nil {
+					return fmt.Errorf("parse standalone song %s revision: %w", song.ID, err)
+				}
+				currentType, _ := snapshot["release_type"].(string)
+				currentAlbumID, _ := snapshot["album_id"].(string)
+				if !strings.EqualFold(strings.TrimSpace(currentType), strings.TrimSpace(*song.ReleaseType)) || strings.TrimSpace(currentAlbumID) != "" {
+					if _, err := revisions.CreateCurrentSnapshotRevision("song", song.ID, editorID, "迁移为独立歌曲"); err != nil {
+						return fmt.Errorf("refresh standalone song %s revision: %w", song.ID, err)
+					}
+				}
 			}
 		}
 		return nil

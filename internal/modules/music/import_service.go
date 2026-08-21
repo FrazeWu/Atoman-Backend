@@ -58,6 +58,12 @@ func buildAlbumImportDTO(session model.AlbumImportSession) AlbumImportDTO {
 			}
 			return session.TargetAlbumID.String()
 		}(),
+		TargetSongID: func() string {
+			if session.TargetSongID == nil {
+				return ""
+			}
+			return session.TargetSongID.String()
+		}(),
 		ArtistID:      stringValue(payload["artist_id"]),
 		ArtistSource:  artistSource,
 		CommitRequest: commitRequest,

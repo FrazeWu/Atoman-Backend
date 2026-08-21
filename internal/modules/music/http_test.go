@@ -181,7 +181,7 @@ func TestRegisterRoutesAlbumDetailReturnsSongAudioSpecification(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesAlbumListFiltersReleaseType(t *testing.T) {
+func TestRegisterRoutesAlbumListReturnsOnlyAlbumEntities(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Release Type Artist", EntryStatus: "open"}
 	if err := db.Create(&artist).Error; err != nil {
@@ -190,8 +190,7 @@ func TestRegisterRoutesAlbumListFiltersReleaseType(t *testing.T) {
 
 	albums := []model.Album{
 		{Title: "Studio Album", AlbumType: "album", EntryStatus: "open", Status: "open"},
-		{Title: "Artist Single", AlbumType: "single", EntryStatus: "open", Status: "open"},
-		{Title: "Artist Leak", AlbumType: "leak", EntryStatus: "open", Status: "open"},
+		{Title: "Artist EP", AlbumType: "ep", EntryStatus: "open", Status: "open"},
 	}
 	for index := range albums {
 		if err := db.Create(&albums[index]).Error; err != nil {
@@ -202,45 +201,34 @@ func TestRegisterRoutesAlbumListFiltersReleaseType(t *testing.T) {
 		}
 	}
 
-	router := newMusicHTTPRouter(service, &user)
-	for _, test := range []struct {
-		releaseType string
-		wantTitles  []string
-	}{
-		{releaseType: "album", wantTitles: []string{"Studio Album"}},
-		{releaseType: "song", wantTitles: []string{"Artist Single", "Artist Leak"}},
-	} {
-		response := httptest.NewRecorder()
-		path := "/api/v1/music/albums?artist_id=" + artist.ID.String() + "&release_type=" + test.releaseType
-		router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
-		if response.Code != http.StatusOK {
-			t.Fatalf("expected %s filter to return 200, got %d: %s", test.releaseType, response.Code, response.Body.String())
-		}
-
-		var payload struct {
-			Data []struct {
-				Title string `json:"title"`
-			} `json:"data"`
-			Meta struct {
-				Total int64 `json:"total"`
-			} `json:"meta"`
-		}
-		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-			t.Fatalf("decode %s response: %v", test.releaseType, err)
-		}
-		gotTitles := make([]string, 0, len(payload.Data))
-		for _, album := range payload.Data {
-			gotTitles = append(gotTitles, album.Title)
-		}
-		slices.Sort(gotTitles)
-		slices.Sort(test.wantTitles)
-		if !slices.Equal(gotTitles, test.wantTitles) || payload.Meta.Total != int64(len(test.wantTitles)) {
-			t.Fatalf("unexpected %s releases: titles=%v total=%d", test.releaseType, gotTitles, payload.Meta.Total)
-		}
+	response := httptest.NewRecorder()
+	path := "/api/v1/music/albums?artist_id=" + artist.ID.String()
+	newMusicHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected album list to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			Title string `json:"title"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode albums: %v", err)
+	}
+	gotTitles := make([]string, 0, len(payload.Data))
+	for _, album := range payload.Data {
+		gotTitles = append(gotTitles, album.Title)
+	}
+	slices.Sort(gotTitles)
+	if !slices.Equal(gotTitles, []string{"Artist EP", "Studio Album"}) || payload.Meta.Total != 2 {
+		t.Fatalf("unexpected albums: titles=%v total=%d", gotTitles, payload.Meta.Total)
 	}
 }
 
-func TestRegisterRoutesSongListFiltersArtistReleaseTypeAndSortsByAlbumReleaseDate(t *testing.T) {
+func TestRegisterRoutesSongListFiltersArtistAndStandaloneReleaseTypes(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Song List Artist", EntryStatus: "open"}
 	otherArtist := model.Artist{Name: "Other Song Artist", EntryStatus: "open"}
@@ -251,23 +239,20 @@ func TestRegisterRoutesSongListFiltersArtistReleaseTypeAndSortsByAlbumReleaseDat
 		t.Fatalf("create other artist: %v", err)
 	}
 
-	olderAlbum := model.Album{Title: "Older Leak", AlbumType: "leak", ReleaseDate: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC), EntryStatus: "open", Status: "open"}
-	newerAlbum := model.Album{Title: "Newer Single", AlbumType: "single", ReleaseDate: time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC), EntryStatus: "open", Status: "open"}
-	studioAlbum := model.Album{Title: "Studio Album", AlbumType: "album", ReleaseDate: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC), EntryStatus: "open", Status: "open"}
-	if err := db.Create(&olderAlbum).Error; err != nil {
-		t.Fatalf("create older album: %v", err)
-	}
-	if err := db.Create(&newerAlbum).Error; err != nil {
-		t.Fatalf("create newer album: %v", err)
+	studioAlbum := model.Album{
+		Title: "Studio Album", AlbumType: "album", ReleaseDate: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		SourcesJSON: `[{"type":"url","url":"https://example.test/studio"}]`, EntryStatus: "open", Status: "open",
 	}
 	if err := db.Create(&studioAlbum).Error; err != nil {
 		t.Fatalf("create studio album: %v", err)
 	}
 
-	olderSong := model.Song{Title: "Older Song", AlbumID: &olderAlbum.ID, AudioURL: "/audio/older.mp3", Status: "open"}
-	newerSong := model.Song{Title: "Newer Song", AlbumID: &newerAlbum.ID, AudioURL: "/audio/newer.mp3", Status: "open"}
-	studioSong := model.Song{Title: "Studio Album Track", AlbumID: &studioAlbum.ID, AudioURL: "/audio/studio.mp3", Status: "open"}
-	otherSong := model.Song{Title: "Other Song", AlbumID: &newerAlbum.ID, AudioURL: "/audio/other.mp3", Status: "open"}
+	olderType := "leak"
+	newerType := "single"
+	olderSong := model.Song{Title: "Older Song", ReleaseType: &olderType, ReleaseDate: time.Date(2024, time.January, 1, 0, 0, 0, 0, time.UTC), AudioURL: "/audio/older.mp3", Status: "open"}
+	newerSong := model.Song{Title: "Newer Song", ReleaseType: &newerType, ReleaseDate: time.Date(2025, time.January, 1, 0, 0, 0, 0, time.UTC), AudioURL: "/audio/newer.mp3", Status: "open"}
+	studioSong := model.Song{Title: "Studio Album Track", AlbumID: &studioAlbum.ID, ReleaseDate: studioAlbum.ReleaseDate, AudioURL: "/audio/studio.mp3", Status: "open"}
+	otherSong := model.Song{Title: "Other Song", ReleaseType: &newerType, ReleaseDate: newerSong.ReleaseDate, AudioURL: "/audio/other.mp3", Status: "open"}
 	for _, song := range []*model.Song{&olderSong, &newerSong, &studioSong, &otherSong} {
 		if err := db.Create(song).Error; err != nil {
 			t.Fatalf("create song: %v", err)
@@ -287,7 +272,7 @@ func TestRegisterRoutesSongListFiltersArtistReleaseTypeAndSortsByAlbumReleaseDat
 	}
 
 	response := httptest.NewRecorder()
-	path := "/api/v1/music/songs?artist_id=" + artist.ID.String() + "&release_type=song&sort=-release_date"
+	path := "/api/v1/music/songs?artist_id=" + artist.ID.String() + "&release_type=single,leak&sort=-release_date"
 	newMusicHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected artist song list to return 200, got %d: %s", response.Code, response.Body.String())
@@ -309,6 +294,34 @@ func TestRegisterRoutesSongListFiltersArtistReleaseTypeAndSortsByAlbumReleaseDat
 	}
 	if payload.Data[0].Title != newerSong.Title || payload.Data[1].Title != olderSong.Title {
 		t.Fatalf("unexpected release date order: %#v", payload.Data)
+	}
+
+	legacyResponse := httptest.NewRecorder()
+	legacyPath := "/api/v1/music/songs?artist_id=" + artist.ID.String() + "&release_type=song"
+	newMusicHTTPRouter(service, &user).ServeHTTP(legacyResponse, httptest.NewRequest(http.MethodGet, legacyPath, nil))
+	if legacyResponse.Code != http.StatusOK {
+		t.Fatalf("expected temporary release_type=song compatibility to return 200, got %d: %s", legacyResponse.Code, legacyResponse.Body.String())
+	}
+
+	detailResponse := httptest.NewRecorder()
+	detailPath := "/api/v1/music/songs/" + studioSong.ID.String()
+	newMusicHTTPRouter(service, &user).ServeHTTP(detailResponse, httptest.NewRequest(http.MethodGet, detailPath, nil))
+	if detailResponse.Code != http.StatusOK {
+		t.Fatalf("expected album track detail 200, got %d: %s", detailResponse.Code, detailResponse.Body.String())
+	}
+	var detailPayload struct {
+		Data struct {
+			Song struct {
+				Sources          []model.MusicSource `json:"sources"`
+				EffectiveSources []model.MusicSource `json:"effective_sources"`
+			} `json:"song"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(detailResponse.Body.Bytes(), &detailPayload); err != nil {
+		t.Fatalf("decode album track detail: %v", err)
+	}
+	if len(detailPayload.Data.Song.Sources) != 0 || len(detailPayload.Data.Song.EffectiveSources) != 1 || detailPayload.Data.Song.EffectiveSources[0].URL != "https://example.test/studio" {
+		t.Fatalf("unexpected effective song sources: %#v", detailPayload.Data.Song)
 	}
 }
 
