@@ -40,7 +40,7 @@ func (s *Service) Home(user *authctx.CurrentUser) (HomeResponse, error) {
 		return response, nil
 	}
 
-	history, _, err := s.ListListeningHistory(*user, 1, musicHomeAffinityHistoryLimit)
+	history, err := s.repo.ListRecentListeningHistory(user.ID, musicHomeAffinityHistoryLimit)
 	if err != nil {
 		return response, err
 	}
@@ -162,13 +162,11 @@ func (s *Service) homeAffinity(userID uuid.UUID, history []model.MusicListeningH
 	}
 
 	var interactions []model.MusicSearchInteraction
-	if s.db.Migrator().HasTable(&model.MusicSearchInteraction{}) {
-		if err := s.db.Where("user_id = ?", userID).
-			Order("created_at DESC").
-			Limit(musicHomeSearchLimit).
-			Find(&interactions).Error; err != nil {
-			return nil, nil, nil, err
-		}
+	if err := s.db.Where("user_id = ?", userID).
+		Order("created_at DESC").
+		Limit(musicHomeSearchLimit).
+		Find(&interactions).Error; err != nil {
+		return nil, nil, nil, err
 	}
 	searchAlbumWeights := make(map[uuid.UUID]float64)
 	searchSongWeights := make(map[uuid.UUID]float64)

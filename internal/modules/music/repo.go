@@ -494,6 +494,22 @@ func (r *Repo) RecordListeningHistory(userID, songID uuid.UUID, playedAt time.Ti
 	}).Create(&history).Error
 }
 
+func (r *Repo) ListRecentListeningHistory(userID uuid.UUID, limit int) ([]model.MusicListeningHistory, error) {
+	if limit < 1 {
+		return []model.MusicListeningHistory{}, nil
+	}
+	var rows []model.MusicListeningHistory
+	err := r.db.Model(&model.MusicListeningHistory{}).
+		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_listening_histories.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
+		Where("music_listening_histories.user_id = ?", userID).
+		Preload("Song.Artists").
+		Preload("Song.Album").
+		Order("music_listening_histories.last_played_at DESC").
+		Limit(limit).
+		Find(&rows).Error
+	return rows, err
+}
+
 func (r *Repo) ListListeningHistory(userID uuid.UUID, page, pageSize int) ([]model.MusicListeningHistory, int64, error) {
 	base := r.db.Model(&model.MusicListeningHistory{}).
 		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_listening_histories.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
