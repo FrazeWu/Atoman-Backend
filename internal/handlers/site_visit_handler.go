@@ -40,7 +40,7 @@ func GetSiteVisitStats(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		stats.Total += siteVisitBaseline
-		if err := db.Model(&model.User{}).Count(&stats.Users).Error; err != nil {
+		if err := db.Unscoped().Model(&model.User{}).Count(&stats.Users).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load user stats"})
 			return
 		}
