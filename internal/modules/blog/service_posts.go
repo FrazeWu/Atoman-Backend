@@ -3,6 +3,7 @@ package blog
 import (
 	"errors"
 	stdhtml "html"
+	"math"
 	"regexp"
 	"strings"
 	"time"
@@ -79,7 +80,61 @@ func (s *Service) postDTOs(db *gorm.DB, posts []model.Post, viewerID *uuid.UUID)
 			dtos[index].References = items
 		}
 	}
+	if err := s.populatePostRatings(db, dtos, viewerID); err != nil {
+		return nil, err
+	}
 	return dtos, nil
+}
+
+func (s *Service) populatePostRatings(db *gorm.DB, dtos []PostDTO, viewerID *uuid.UUID) error {
+	if len(dtos) == 0 || !db.Migrator().HasTable(&model.PostRating{}) {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(dtos))
+	for _, dto := range dtos {
+		ids = append(ids, dto.ID)
+	}
+
+	type ratingAggregate struct {
+		PostID      uuid.UUID `gorm:"column:post_id"`
+		RatingScore float64   `gorm:"column:rating_score"`
+		RatingCount int64     `gorm:"column:rating_count"`
+	}
+	var aggregates []ratingAggregate
+	if err := db.Model(&model.PostRating{}).
+		Select("post_id, AVG(score) AS rating_score, COUNT(*) AS rating_count").
+		Where("post_id IN ?", ids).
+		Group("post_id").
+		Scan(&aggregates).Error; err != nil {
+		return err
+	}
+	aggregatesByPostID := make(map[uuid.UUID]ratingAggregate, len(aggregates))
+	for _, aggregate := range aggregates {
+		aggregatesByPostID[aggregate.PostID] = aggregate
+	}
+
+	viewerRatings := make(map[uuid.UUID]int, 0)
+	if viewerID != nil {
+		var ratings []model.PostRating
+		if err := db.Where("user_id = ? AND post_id IN ?", *viewerID, ids).Find(&ratings).Error; err != nil {
+			return err
+		}
+		viewerRatings = make(map[uuid.UUID]int, len(ratings))
+		for _, rating := range ratings {
+			viewerRatings[rating.PostID] = rating.Score
+		}
+	}
+
+	for index := range dtos {
+		aggregate := aggregatesByPostID[dtos[index].ID]
+		dtos[index].Post.RatingScore = math.Round(aggregate.RatingScore*10) / 10
+		dtos[index].Post.RatingCount = aggregate.RatingCount
+		if score, ok := viewerRatings[dtos[index].ID]; ok {
+			value := score
+			dtos[index].Post.ViewerRating = &value
+		}
+	}
+	return nil
 }
 
 func (s *Service) postDTO(db *gorm.DB, post model.Post, viewerID *uuid.UUID) (PostDTO, error) {

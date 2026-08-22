@@ -2,6 +2,7 @@ package blog
 
 import (
 	"errors"
+	"math"
 	"strings"
 
 	"atoman/internal/model"
@@ -17,6 +18,111 @@ func (s *Service) CountPostLikes(postID uuid.UUID) (int64, error) {
 		return 0, apperr.BadRequest("validation.invalid_request", "post_id is required")
 	}
 	return s.repo.CountPostLikes(postID)
+}
+
+type PostRatingSummary struct {
+	RatingScore  float64 `json:"rating_score"`
+	RatingCount  int64   `json:"rating_count"`
+	ViewerRating *int    `json:"viewer_rating,omitempty"`
+}
+
+func (s *Service) SetPostRating(user authctx.CurrentUser, postID uuid.UUID, score int) (PostRatingSummary, error) {
+	if user.ID == uuid.Nil {
+		return PostRatingSummary{}, apperr.Unauthorized("Login required")
+	}
+	if score < 1 || score > 10 {
+		return PostRatingSummary{}, apperr.BadRequest("validation.invalid_request", "score must be between 1 and 10")
+	}
+	if err := s.ensurePostRatingAccess(user.ID, postID); err != nil {
+		return PostRatingSummary{}, err
+	}
+
+	var rating model.PostRating
+	err := s.db.Where("user_id = ? AND post_id = ?", user.ID, postID).First(&rating).Error
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		rating = model.PostRating{UserID: user.ID, PostID: postID, Score: score}
+		if err := s.db.Create(&rating).Error; err != nil {
+			return PostRatingSummary{}, err
+		}
+	case err != nil:
+		return PostRatingSummary{}, err
+	default:
+		if err := s.db.Model(&rating).Update("score", score).Error; err != nil {
+			return PostRatingSummary{}, err
+		}
+	}
+	return s.PostRatingSummary(postID, &user.ID)
+}
+
+func (s *Service) DeletePostRating(user authctx.CurrentUser, postID uuid.UUID) error {
+	if user.ID == uuid.Nil {
+		return apperr.Unauthorized("Login required")
+	}
+	if err := s.ensurePostRatingAccess(user.ID, postID); err != nil {
+		return err
+	}
+	return s.db.Where("user_id = ? AND post_id = ?", user.ID, postID).Delete(&model.PostRating{}).Error
+}
+
+func (s *Service) PostRatingSummary(postID uuid.UUID, viewerID *uuid.UUID) (PostRatingSummary, error) {
+	if postID == uuid.Nil {
+		return PostRatingSummary{}, apperr.BadRequest("validation.invalid_request", "post_id is required")
+	}
+	if !s.db.Migrator().HasTable(&model.PostRating{}) {
+		return PostRatingSummary{}, nil
+	}
+	var aggregate struct {
+		RatingScore float64 `gorm:"column:rating_score"`
+		RatingCount int64   `gorm:"column:rating_count"`
+	}
+	if err := s.db.Model(&model.PostRating{}).
+		Select("COALESCE(AVG(score), 0) AS rating_score, COUNT(*) AS rating_count").
+		Where("post_id = ?", postID).
+		Scan(&aggregate).Error; err != nil {
+		return PostRatingSummary{}, err
+	}
+	summary := PostRatingSummary{
+		RatingScore: math.Round(aggregate.RatingScore*10) / 10,
+		RatingCount: aggregate.RatingCount,
+	}
+	if viewerID != nil {
+		var rating model.PostRating
+		if err := s.db.Where("user_id = ? AND post_id = ?", *viewerID, postID).First(&rating).Error; err == nil {
+			score := rating.Score
+			summary.ViewerRating = &score
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return PostRatingSummary{}, err
+		}
+	}
+	return summary, nil
+}
+
+func (s *Service) ensurePostRatingAccess(userID, postID uuid.UUID) error {
+	if postID == uuid.Nil {
+		return apperr.BadRequest("validation.invalid_request", "post_id is required")
+	}
+	post, err := s.repo.GetPost(postID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.NotFound("blog.post_not_found", "Post not found")
+		}
+		return err
+	}
+	if post.Status != "published" {
+		if post.UserID != userID {
+			return apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this unpublished post")
+		}
+		return nil
+	}
+	allowed, err := CanViewPublishedPost(s.db, &userID, post)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this post")
+	}
+	return nil
 }
 
 func (s *Service) ListBookmarks(user authctx.CurrentUser, folderID *uuid.UUID, sort string) ([]model.Bookmark, error) {

@@ -46,6 +46,10 @@ type postInput struct {
 	CollectionIDs []string `json:"collection_ids" swaggerignore:"true"`
 }
 
+type postRatingInput struct {
+	Score int `json:"score" binding:"required,min=1,max=10"`
+}
+
 type reorderCollectionPostsInput struct {
 	PostIDs []string `json:"post_ids"`
 }
@@ -102,6 +106,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/posts/:id/likes/count", h.getPostLikesCount)
 	group.POST("/likes", h.createLike)
 	group.DELETE("/likes", h.deleteLike)
+	group.PUT("/posts/:id/rating", h.setPostRating)
+	group.DELETE("/posts/:id/rating", h.deletePostRating)
 	group.GET("/bookmarks", h.listBookmarks)
 	group.POST("/bookmarks", h.createBookmark)
 	group.DELETE("/bookmarks/:id", h.deleteBookmark)

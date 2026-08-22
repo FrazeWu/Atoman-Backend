@@ -57,6 +57,10 @@ definitions:
         type: boolean
       published_at:
         type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
       references:
         items:
           $ref: '#/definitions/reference.ResolvedReference'
@@ -77,6 +81,8 @@ definitions:
       user_id:
         type: string
       view_count:
+        type: integer
+      viewer_rating:
         type: integer
       visibility:
         type: string
@@ -101,6 +107,15 @@ definitions:
         type: string
       visibility:
         type: string
+    type: object
+  blog.PostRatingSummary:
+    properties:
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
+      viewer_rating:
+        type: integer
     type: object
   blog.RecommendationItemDTO:
     properties:
@@ -176,6 +191,15 @@ definitions:
         type: string
     required:
     - post_id
+    type: object
+  blog.postRatingInput:
+    properties:
+      score:
+        maximum: 10
+        minimum: 1
+        type: integer
+    required:
+    - score
     type: object
   comment.ActionResponse:
     properties:
@@ -1541,6 +1565,10 @@ definitions:
         type: boolean
       published_at:
         type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
       scheduled_at:
         type: string
       status:
@@ -1557,6 +1585,8 @@ definitions:
       user_id:
         type: string
       view_count:
+        type: integer
+      viewer_rating:
         type: integer
       visibility:
         type: string
@@ -4451,6 +4481,10 @@ definitions:
         type: boolean
       published_at:
         type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
       scheduled_at:
         type: string
       status:
@@ -4467,6 +4501,8 @@ definitions:
       user_id:
         type: string
       view_count:
+        type: integer
+      viewer_rating:
         type: integer
       visibility:
         type: string
@@ -9720,6 +9756,84 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 获取文章详情
+      tags:
+      - blog
+  /api/v1/blog/posts/{id}/rating:
+    delete:
+      parameters:
+      - description: 文章 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/blog.PostRatingSummary'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 清除文章评分
+      tags:
+      - blog
+    put:
+      consumes:
+      - application/json
+      description: 创建或更新当前用户对文章的 1-10 分评分，每半颗星对应 1 分。
+      parameters:
+      - description: 文章 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 文章评分
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/blog.postRatingInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/blog.PostRatingSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 设置文章评分
       tags:
       - blog
   /api/v1/blog/posts/{id}/versions:

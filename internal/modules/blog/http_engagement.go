@@ -88,6 +88,81 @@ func (h *Handler) toggleLike(c *gin.Context, isLike bool) {
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
 }
 
+// setPostRating godoc
+// @Summary 设置文章评分
+// @Description 创建或更新当前用户对文章的 1-10 分评分，每半颗星对应 1 分。
+// @Tags blog
+// @Accept json
+// @Produce json
+// @Param id path string true "文章 UUID"
+// @Param input body postRatingInput true "文章评分"
+// @Success 200 {object} PostRatingSummary
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/posts/{id}/rating [put]
+func (h *Handler) setPostRating(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	postID, err := parsePostID(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	var req postRatingInput
+	if err := bindJSON(c, &req); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	summary, err := h.service.SetPostRating(user, postID, req.Score)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, summary)
+}
+
+// deletePostRating godoc
+// @Summary 清除文章评分
+// @Tags blog
+// @Produce json
+// @Param id path string true "文章 UUID"
+// @Success 200 {object} PostRatingSummary
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/blog/posts/{id}/rating [delete]
+func (h *Handler) deletePostRating(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok || user.ID == uuid.Nil {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	postID, err := parsePostID(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	if err := h.service.DeletePostRating(user, postID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	summary, err := h.service.PostRatingSummary(postID, &user.ID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, summary)
+}
+
 // listBookmarks godoc
 // @Summary 获取文章收藏
 // @Tags blog

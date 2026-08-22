@@ -132,6 +132,9 @@ type Post struct {
 	ScheduledAt        *time.Time   `json:"scheduled_at,omitempty" gorm:"index"`
 	PublishedAt        *time.Time   `json:"published_at,omitempty" gorm:"index"`
 	ViewCount          int64        `json:"view_count" gorm:"not null;default:0"`
+	RatingScore        float64      `json:"rating_score" gorm:"-"`
+	RatingCount        int64        `json:"rating_count" gorm:"-"`
+	ViewerRating       *int         `json:"viewer_rating,omitempty" gorm:"-"`
 }
 
 func (Post) TableName() string { return "posts" }
@@ -186,6 +189,17 @@ type Like struct {
 }
 
 func (Like) TableName() string { return "likes" }
+
+type PostRating struct {
+	Base
+	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_post_ratings_user_post,priority:1,where:deleted_at IS NULL"`
+	User   *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	PostID uuid.UUID `json:"post_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_post_ratings_user_post,priority:2,where:deleted_at IS NULL"`
+	Post   *Post     `json:"post,omitempty" gorm:"foreignKey:PostID"`
+	Score  int       `json:"score" gorm:"not null"`
+}
+
+func (PostRating) TableName() string { return "post_ratings" }
 
 type BookmarkFolder struct {
 	Base

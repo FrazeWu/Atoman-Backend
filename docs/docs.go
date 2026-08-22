@@ -4425,6 +4425,131 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/blog/posts/{id}/rating": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "创建或更新当前用户对文章的 1-10 分评分，每半颗星对应 1 分。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "设置文章评分",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文章 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "文章评分",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.postRatingInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.PostRatingSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "清除文章评分",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文章 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.PostRatingSummary"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/blog/posts/{id}/versions": {
             "get": {
                 "security": [
@@ -21598,6 +21723,12 @@ const docTemplate = `{
                 "published_at": {
                     "type": "string"
                 },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
                 "references": {
                     "type": "array",
                     "items": {
@@ -21627,6 +21758,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "view_count": {
+                    "type": "integer"
+                },
+                "viewer_rating": {
                     "type": "integer"
                 },
                 "visibility": {
@@ -21663,6 +21797,20 @@ const docTemplate = `{
                 },
                 "visibility": {
                     "type": "string"
+                }
+            }
+        },
+        "blog.PostRatingSummary": {
+            "type": "object",
+            "properties": {
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "viewer_rating": {
+                    "type": "integer"
                 }
             }
         },
@@ -21779,6 +21927,19 @@ const docTemplate = `{
                 },
                 "post_id": {
                     "type": "string"
+                }
+            }
+        },
+        "blog.postRatingInput": {
+            "type": "object",
+            "required": [
+                "score"
+            ],
+            "properties": {
+                "score": {
+                    "type": "integer",
+                    "maximum": 10,
+                    "minimum": 1
                 }
             }
         },
@@ -23856,6 +24017,12 @@ const docTemplate = `{
                 "published_at": {
                     "type": "string"
                 },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
                 "scheduled_at": {
                     "type": "string"
                 },
@@ -23879,6 +24046,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "view_count": {
+                    "type": "integer"
+                },
+                "viewer_rating": {
                     "type": "integer"
                 },
                 "visibility": {
@@ -28181,6 +28351,12 @@ const docTemplate = `{
                 "published_at": {
                     "type": "string"
                 },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
                 "scheduled_at": {
                     "type": "string"
                 },
@@ -28204,6 +28380,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "view_count": {
+                    "type": "integer"
+                },
+                "viewer_rating": {
                     "type": "integer"
                 },
                 "visibility": {

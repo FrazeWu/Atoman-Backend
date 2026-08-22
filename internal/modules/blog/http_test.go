@@ -45,6 +45,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.BlogDraft{},
 		&model.DiscussionTarget{},
 		&model.Like{},
+		&model.PostRating{},
 		&model.Bookmark{},
 		&model.BookmarkFolder{},
 		&model.AuditLog{},
@@ -892,24 +893,6 @@ func TestRegisterRoutesCreatePostRejectsInvalidJSON(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "validation.invalid_request") {
 		t.Fatalf("expected validation.invalid_request, got %s", w.Body.String())
-	}
-}
-
-func TestRegisterRoutesDoesNotMountPostRating(t *testing.T) {
-	service, _, user := newBlogHTTPTestService(t)
-	r := newBlogHTTPRouter(service, &user)
-
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/blog/posts/"+uuid.NewString()+"/rating", bytes.NewBufferString(`{"score":8}`))
-	req.Header.Set("Content-Type", "application/json")
-
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected rating route to be absent, got %d: %s", w.Code, w.Body.String())
-	}
-	if strings.TrimSpace(w.Body.String()) != "404 page not found" {
-		t.Fatalf("expected router 404, got %s", w.Body.String())
 	}
 }
 
