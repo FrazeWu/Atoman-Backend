@@ -385,12 +385,33 @@ func (r *Repo) ListExplorePosts(limit int, offset int) ([]model.Post, error) {
 	return posts, err
 }
 
-func (r *Repo) ListExplorePostsAll() ([]model.Post, error) {
+func (r *Repo) ListExplorePostsAll(query FeedQuery) ([]model.Post, error) {
 	var posts []model.Post
-	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
-		Where("status = ?", "published").
-		Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
-		Order("created_at DESC, id DESC").
+	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
+		Where("posts.status = ?", "published").
+		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"})
+
+	needsChannelJoin := strings.TrimSpace(query.Search) != ""
+	if needsChannelJoin {
+		db = db.Joins("LEFT JOIN channels ON channels.id = posts.channel_id")
+	}
+	if query.Category != "" && query.Category != "blog" {
+		db = db.Where("1 = 0")
+	}
+	if query.LanguageCode != "" {
+		db = db.Where("posts.language_code = ?", query.LanguageCode)
+	}
+	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
+		like := "%" + search + "%"
+		db = db.Where(
+			"LOWER(COALESCE(posts.title, '')) LIKE ? OR LOWER(COALESCE(posts.summary, '')) LIKE ? OR LOWER(COALESCE(channels.name, '')) LIKE ? OR LOWER(COALESCE(channels.slug, '')) LIKE ?",
+			like, like, like, like,
+		)
+	}
+
+	err := db.
+		Order("COALESCE(posts.published_at, posts.created_at) DESC").
+		Order("posts.created_at DESC, posts.id DESC").
 		Find(&posts).Error
 	return posts, err
 }
@@ -625,11 +646,24 @@ func (r *Repo) ListExploreFeedItems(sort string, limit int, offset int) ([]model
 	return items, err
 }
 
-func (r *Repo) ListExploreFeedItemsAll(sort string) ([]model.FeedItem, error) {
+func (r *Repo) ListExploreFeedItemsAll(sort string, query FeedQuery) ([]model.FeedItem, error) {
 	var items []model.FeedItem
 	db := r.db.Preload("FeedSource").
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
 		Where("feed_sources.hidden = ?", false)
+	if query.Category != "" {
+		db = db.Where(recommendationFeedItemCategorySQL()+" = ?", query.Category)
+	}
+	if query.LanguageCode != "" {
+		db = db.Where("COALESCE(NULLIF(feed_items.language_code, ''), NULLIF(feed_sources.language_code, '')) = ?", query.LanguageCode)
+	}
+	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
+		like := "%" + search + "%"
+		db = db.Where(
+			"LOWER(COALESCE(feed_items.title, '')) LIKE ? OR LOWER(COALESCE(feed_items.summary, '')) LIKE ? OR LOWER(COALESCE(feed_items.reader_html, '')) LIKE ? OR LOWER(COALESCE(feed_items.full_text_html, '')) LIKE ? OR LOWER(COALESCE(feed_sources.title, '')) LIKE ? OR LOWER(COALESCE(feed_sources.rss_url, '')) LIKE ?",
+			like, like, like, like, like, like,
+		)
+	}
 	db = applyExploreFeedSort(db, sort)
 	err := db.Find(&items).Error
 	return items, err
@@ -679,6 +713,15 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 		LastPublishedAt   sql.NullString
 	}
 
+	queryValue := ""
+	languageValue := ""
+	if len(query) > 0 {
+		queryValue = query[0]
+	}
+	if len(query) > 1 {
+		languageValue = query[1]
+	}
+
 	var rawRows []exploreSourceRowRaw
 	db := r.db.Table("feed_sources").
 		Select(`
@@ -695,6 +738,9 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
 		Where("feed_sources.source_type = ?", "external_rss").
 		Where("feed_sources.hidden = ?", false)
+	if languageValue != "" {
+		db = db.Where("feed_sources.language_code = ?", languageValue)
+	}
 	err := db.
 		Group("feed_sources.id").
 		Having("COUNT(DISTINCT feed_items.id) > 0").
@@ -735,17 +781,6 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 
 	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
 		rows = filterExploreSourceRowsByCategory(rows, normalizedCategory)
-	}
-	queryValue := ""
-	languageValue := ""
-	if len(query) > 0 {
-		queryValue = query[0]
-	}
-	if len(query) > 1 {
-		languageValue = query[1]
-	}
-	if languageValue != "" {
-		db = db.Where("feed_sources.language_code = ?", languageValue)
 	}
 	if normalizedQuery := strings.ToLower(strings.TrimSpace(queryValue)); normalizedQuery != "" {
 		rows = filterExploreSourceRowsByQuery(rows, normalizedQuery)

@@ -7143,7 +7143,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "分页返回推荐条目，支持按最近 (recent)、随机 (random) 或热门 (popular) 排序。",
+                "description": "分页返回公开文章与 RSS 条目，支持搜索、来源类型、语言和排序筛选。",
                 "produces": [
                     "application/json"
                 ],
@@ -7161,6 +7161,33 @@ const docTemplate = `{
                         "type": "string",
                         "description": "排序方式",
                         "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "搜索标题、摘要和来源",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "blog",
+                            "news",
+                            "social",
+                            "video",
+                            "forum",
+                            "podcast",
+                            "all"
+                        ],
+                        "type": "string",
+                        "description": "来源类型",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "语言代码或 all",
+                        "name": "language",
                         "in": "query"
                     },
                     {
@@ -7183,10 +7210,100 @@ const docTemplate = `{
                             "$ref": "#/definitions/feed.TimelineResponse"
                         }
                     },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
                             "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/explore/sources": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "分页返回有内容的公开 RSS 订阅源，支持关键词、来源类型和语言筛选。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取公开订阅源探索列表",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "搜索订阅源标题或地址",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "blog",
+                            "news",
+                            "social",
+                            "video",
+                            "forum",
+                            "podcast",
+                            "all"
+                        ],
+                        "type": "string",
+                        "description": "来源类型",
+                        "name": "category",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "语言代码或 all",
+                        "name": "language",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -21469,6 +21586,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "language_code": {
+                    "type": "string"
+                },
                 "likes_count": {
                     "type": "integer"
                 },
@@ -23724,6 +23844,9 @@ const docTemplate = `{
                 "id": {
                     "type": "string"
                 },
+                "language_code": {
+                    "type": "string"
+                },
                 "likes_count": {
                     "type": "integer"
                 },
@@ -25531,6 +25654,9 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer"
+                },
+                "users": {
+                    "type": "integer"
                 }
             }
         },
@@ -27180,6 +27306,9 @@ const docTemplate = `{
                 "is_duplicate": {
                     "type": "boolean"
                 },
+                "language_code": {
+                    "type": "string"
+                },
                 "last_full_text_attempt_at": {
                     "type": "string"
                 },
@@ -27265,6 +27394,9 @@ const docTemplate = `{
                     "type": "boolean"
                 },
                 "id": {
+                    "type": "string"
+                },
+                "language_code": {
                     "type": "string"
                 },
                 "last_error": {
@@ -28038,6 +28170,9 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "id": {
+                    "type": "string"
+                },
+                "language_code": {
                     "type": "string"
                 },
                 "pinned": {

@@ -13,13 +13,17 @@ import (
 
 // GetExploreFeed godoc
 // @Summary 探索订阅条目
-// @Description 分页返回推荐条目，支持按最近 (recent)、随机 (random) 或热门 (popular) 排序。
+// @Description 分页返回公开文章与 RSS 条目，支持搜索、来源类型、语言和排序筛选。
 // @Tags feed
 // @Produce json
 // @Param sort query string false "排序方式" Enums(recent,random,popular)
+// @Param q query string false "搜索标题、摘要和来源"
+// @Param category query string false "来源类型" Enums(blog,news,social,video,forum,podcast,all)
+// @Param language query string false "语言代码或 all"
 // @Param page query int false "页码"
 // @Param limit query int false "每页数量"
 // @Success 200 {object} TimelineResponse
+// @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth
 // @Security CookieAuth

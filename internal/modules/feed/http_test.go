@@ -356,6 +356,75 @@ func TestGetExploreSourcesHandlerFiltersBySearchQuery(t *testing.T) {
 	}
 }
 
+func TestGetExploreSourcesHandlerFiltersByLanguage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+	now := time.Now().UTC()
+	for _, source := range []model.FeedSource{
+		{
+			SourceType:   "external_rss",
+			RssURL:       "https://language-en.example.com/feed.xml",
+			Hash:         "language-en-source-hash",
+			Title:        "English Language Source",
+			Category:     "blog",
+			LanguageCode: "en",
+			HealthStatus: "healthy",
+		},
+		{
+			SourceType:   "external_rss",
+			RssURL:       "https://language-zh.example.com/feed.xml",
+			Hash:         "language-zh-source-hash",
+			Title:        "中文语言来源",
+			Category:     "blog",
+			LanguageCode: "zh",
+			HealthStatus: "healthy",
+		},
+	} {
+		if err := db.Create(&source).Error; err != nil {
+			t.Fatalf("create language source: %v", err)
+		}
+		if err := db.Create(&model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         source.Hash + "-item",
+			Title:        source.Title + " item",
+			Link:         source.RssURL + "/item",
+			PublishedAt:  now,
+			FetchedAt:    now,
+		}).Error; err != nil {
+			t.Fatalf("create language item: %v", err)
+		}
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/explore/sources?page=1&limit=20&language=en", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected language source explore to return 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			Title        string `json:"title"`
+			LanguageCode string `json:"language_code"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	for _, row := range payload.Data {
+		if row.LanguageCode != "en" {
+			t.Fatalf("expected only English sources, got %s", rr.Body.String())
+		}
+	}
+	if payload.Meta.Total == 0 || len(payload.Data) == 0 {
+		t.Fatalf("expected English source results, got %s", rr.Body.String())
+	}
+}
 func TestFeedPreferencesPersistPerUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newFeedHandlerTestDB(t)

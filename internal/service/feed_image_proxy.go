@@ -53,11 +53,29 @@ func MaybeProxyFeedImageURL(remoteURL string) string {
 	if err != nil || (parsed.Scheme != "" && parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return remoteURL
 	}
+	if isFeedImageProxyURL(remoteURL, parsed) {
+		return remoteURL
+	}
 	query := parsed.Query()
 	query.Set("url", remoteURL)
 	query.Set("sig", signFeedImageProxyURL(remoteURL, secret))
 	parsed.RawQuery = query.Encode()
 	return parsed.String()
+}
+
+func isFeedImageProxyURL(candidateURL string, proxyURL *url.URL) bool {
+	candidate, err := url.Parse(candidateURL)
+	if err != nil || candidate.Path != proxyURL.Path {
+		return false
+	}
+	if proxyURL.IsAbs() {
+		if candidate.Scheme != proxyURL.Scheme || candidate.Host != proxyURL.Host {
+			return false
+		}
+	} else if candidate.IsAbs() {
+		return false
+	}
+	return candidate.Query().Get("url") != "" && candidate.Query().Get("sig") != ""
 }
 
 func FetchFeedImageProxy(remoteURL, signature string) ([]byte, string, error) {

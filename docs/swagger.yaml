@@ -49,6 +49,8 @@ definitions:
         type: string
       id:
         type: string
+      language_code:
+        type: string
       likes_count:
         type: integer
       pinned:
@@ -1531,6 +1533,8 @@ definitions:
         type: string
       id:
         type: string
+      language_code:
+        type: string
       likes_count:
         type: integer
       pinned:
@@ -2755,6 +2759,8 @@ definitions:
         type: integer
       total:
         type: integer
+      users:
+        type: integer
     type: object
   handlers.SongPublicItem:
     properties:
@@ -3863,6 +3869,8 @@ definitions:
         type: string
       is_duplicate:
         type: boolean
+      language_code:
+        type: string
       last_full_text_attempt_at:
         type: string
       link:
@@ -3920,6 +3928,8 @@ definitions:
       hidden:
         type: boolean
       id:
+        type: string
+      language_code:
         type: string
       last_error:
         type: string
@@ -4434,6 +4444,8 @@ definitions:
       created_at:
         type: string
       id:
+        type: string
+      language_code:
         type: string
       pinned:
         type: boolean
@@ -11461,7 +11473,7 @@ paths:
       - dm
   /api/v1/feed/explore:
     get:
-      description: 分页返回推荐条目，支持按最近 (recent)、随机 (random) 或热门 (popular) 排序。
+      description: 分页返回公开文章与 RSS 条目，支持搜索、来源类型、语言和排序筛选。
       parameters:
       - description: 排序方式
         enum:
@@ -11470,6 +11482,26 @@ paths:
         - popular
         in: query
         name: sort
+        type: string
+      - description: 搜索标题、摘要和来源
+        in: query
+        name: q
+        type: string
+      - description: 来源类型
+        enum:
+        - blog
+        - news
+        - social
+        - video
+        - forum
+        - podcast
+        - all
+        in: query
+        name: category
+        type: string
+      - description: 语言代码或 all
+        in: query
+        name: language
         type: string
       - description: 页码
         in: query
@@ -11486,6 +11518,10 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/feed.TimelineResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
         "500":
           description: Internal Server Error
           schema:
@@ -11494,6 +11530,62 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 探索订阅条目
+      tags:
+      - feed
+  /api/v1/feed/explore/sources:
+    get:
+      description: 分页返回有内容的公开 RSS 订阅源，支持关键词、来源类型和语言筛选。
+      parameters:
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: limit
+        type: integer
+      - description: 搜索订阅源标题或地址
+        in: query
+        name: q
+        type: string
+      - description: 来源类型
+        enum:
+        - blog
+        - news
+        - social
+        - video
+        - forum
+        - podcast
+        - all
+        in: query
+        name: category
+        type: string
+      - description: 语言代码或 all
+        in: query
+        name: language
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取公开订阅源探索列表
       tags:
       - feed
   /api/v1/feed/groups:

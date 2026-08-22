@@ -11,6 +11,22 @@ import (
 	"gorm.io/gorm"
 )
 
+// GetExploreSources godoc
+// @Summary 获取公开订阅源探索列表
+// @Description 分页返回有内容的公开 RSS 订阅源，支持关键词、来源类型和语言筛选。
+// @Tags feed
+// @Produce json
+// @Param page query int false "页码"
+// @Param limit query int false "每页数量"
+// @Param q query string false "搜索订阅源标题或地址"
+// @Param category query string false "来源类型" Enums(blog,news,social,video,forum,podcast,all)
+// @Param language query string false "语言代码或 all"
+// @Success 200 {object} map[string]interface{}
+// @Failure 400 {object} map[string]interface{}
+// @Failure 500 {object} map[string]interface{}
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/explore/sources [get]
 func GetExploreSources(db *gorm.DB) gin.HandlerFunc {
 	repo := NewRepo(db)
 	return func(c *gin.Context) {

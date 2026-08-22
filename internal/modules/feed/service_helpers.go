@@ -27,6 +27,12 @@ func filterTimeline(items []TimelineItemDTO, query FeedQuery) []TimelineItemDTO 
 
 	filtered := items[:0]
 	for _, item := range items {
+		if query.Category != "" && timelineItemCategory(item) != query.Category {
+			continue
+		}
+		if query.LanguageCode != "" && timelineItemLanguageCode(item) != query.LanguageCode {
+			continue
+		}
 		if query.IsRead != nil && item.IsRead != *query.IsRead {
 			continue
 		}
@@ -43,6 +49,41 @@ func filterTimeline(items []TimelineItemDTO, query FeedQuery) []TimelineItemDTO 
 		filtered = append(filtered, item)
 	}
 	return filtered
+}
+
+func timelineItemCategory(item TimelineItemDTO) string {
+	if item.Post != nil {
+		return "blog"
+	}
+	if item.FeedItem != nil {
+		enclosureType := strings.ToLower(strings.TrimSpace(item.FeedItem.EnclosureType))
+		if strings.HasPrefix(enclosureType, "video/") {
+			return "video"
+		}
+		if strings.HasPrefix(enclosureType, "audio/") {
+			return "podcast"
+		}
+		if item.FeedItem.FeedSource != nil {
+			return defaultFeedSourceCategory(item.FeedItem.FeedSource.Category)
+		}
+	}
+	return ""
+}
+
+func timelineItemLanguageCode(item TimelineItemDTO) string {
+	if item.Post != nil {
+		return strings.TrimSpace(item.Post.LanguageCode)
+	}
+	if item.FeedItem != nil {
+		language := strings.TrimSpace(item.FeedItem.LanguageCode)
+		if language != "" {
+			return language
+		}
+		if item.FeedItem.FeedSource != nil {
+			return strings.TrimSpace(item.FeedItem.FeedSource.LanguageCode)
+		}
+	}
+	return ""
 }
 
 func matchesTimelineSearch(item TimelineItemDTO, search string) bool {

@@ -58,6 +58,17 @@ func TestFeedImageProxySignsAndFetchesOnlyValidImages(t *testing.T) {
 	}
 }
 
+func TestMaybeProxyFeedImageURLIsIdempotent(t *testing.T) {
+	t.Setenv("FEED_IMAGE_PROXY_PUBLIC_URL", "https://api.example.com/api/v1/feed/media/image")
+	t.Setenv("FEED_IMAGE_PROXY_SECRET", "image-proxy-secret-for-tests-32bytes")
+	remoteURL := "https://cdn.example.com/article.webp"
+
+	proxied := MaybeProxyFeedImageURL(remoteURL)
+	if nested := MaybeProxyFeedImageURL(proxied); nested != proxied {
+		t.Fatalf("nested proxy URL=%q, original=%q", nested, proxied)
+	}
+}
+
 func TestFeedImageProxyRejectsWeakSecret(t *testing.T) {
 	t.Setenv("FEED_IMAGE_PROXY_PUBLIC_URL", "/api/v1/feed/media/image")
 	t.Setenv("FEED_IMAGE_PROXY_SECRET", "weak")

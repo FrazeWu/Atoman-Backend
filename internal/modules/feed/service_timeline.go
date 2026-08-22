@@ -457,11 +457,11 @@ func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]T
 	page := normalizedPage(query.Page)
 	limit := normalizedPageSize(query.PageSize)
 	sortMode := normalizeExploreSort(strings.TrimSpace(query.Sort))
-	posts, err := s.repo.ListExplorePostsAll()
+	posts, err := s.repo.ListExplorePostsAll(query)
 	if err != nil {
 		return nil, 0, err
 	}
-	feedItems, err := s.repo.ListExploreFeedItemsAll(sortMode)
+	feedItems, err := s.repo.ListExploreFeedItemsAll(sortMode, query)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -631,10 +631,22 @@ func queryFromContext(c *gin.Context) (FeedQuery, error) {
 			return FeedQuery{}, err
 		}
 	}
+	category := strings.TrimSpace(strings.ToLower(c.Query("category")))
+	if category == "all" {
+		category = ""
+	} else if category != "" && normalizeFeedSourceCategory(category) == "" {
+		return FeedQuery{}, apperr.BadRequest("validation.invalid_request", "category must be a valid feed source category")
+	}
+	languageCode, err := parseRecommendationLanguage(c.Query("language"))
+	if err != nil {
+		return FeedQuery{}, err
+	}
 	query := FeedQuery{
 		Page:           normalizedPageFromQuery(c),
 		PageSize:       normalizedPageSizeFromQuery(c),
 		ContentType:    contentType,
+		Category:       category,
+		LanguageCode:   languageCode,
 		SourceType:     c.Query("source_type"),
 		HideDuplicates: c.Query("hide_duplicates") == "true",
 		Sort:           c.DefaultQuery("sort", "recent"),
