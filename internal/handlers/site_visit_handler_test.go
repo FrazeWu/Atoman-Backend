@@ -13,14 +13,19 @@ import (
 
 func TestSiteVisitStatsRecordAndReadAggregates(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.SiteVisitDaily{})
+	testdb.Migrate(t, db, &model.SiteVisitDaily{}, &model.SiteVisitor{})
 	router := gin.New()
 	router.GET("/visits", GetSiteVisitStats(db))
 	router.POST("/visits", RecordSiteVisit(db))
 
 	request := func(method, path string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
-		router.ServeHTTP(w, httptest.NewRequest(method, path, nil))
+		req := httptest.NewRequest(method, path, nil)
+		if method == http.MethodPost {
+			req.Header.Set("Content-Type", "application/json")
+			req.Body = http.NoBody
+		}
+		router.ServeHTTP(w, req)
 		return w
 	}
 
