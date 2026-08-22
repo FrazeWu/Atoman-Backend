@@ -26,6 +26,31 @@ func newBlogScopeTest(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, mo
 	return NewService(db), db, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: user.Role}, channel
 }
 
+func TestBlogChannelSlugsAreNormalizedAndDisambiguated(t *testing.T) {
+	service, _, user, _ := newBlogScopeTest(t)
+	first, err := service.CreateChannel(user, "First", "shared studio", "", "")
+	if err != nil {
+		t.Fatalf("create first channel: %v", err)
+	}
+	if first.Slug != "shared-studio-2" {
+		t.Fatalf("expected normalized disambiguated slug, got %q", first.Slug)
+	}
+	second, err := service.CreateChannel(user, "Second", "shared studio", "", "")
+	if err != nil {
+		t.Fatalf("create second channel: %v", err)
+	}
+	if second.Slug != "shared-studio-3" {
+		t.Fatalf("expected second disambiguated slug, got %q", second.Slug)
+	}
+	updated, err := service.UpdateChannel(user, second.ID, second.Name, "shared studio", second.Description, second.CoverURL)
+	if err != nil {
+		t.Fatalf("update channel slug: %v", err)
+	}
+	if updated.Slug != second.Slug {
+		t.Fatalf("expected update to retain the current available slug, got %q", updated.Slug)
+	}
+}
+
 func TestDraftAllowsNoCollectionAndPublishUsesSystemDefault(t *testing.T) {
 	service, db, user, channel := newBlogScopeTest(t)
 	draft, err := service.CreatePost(user, CreatePostRequest{

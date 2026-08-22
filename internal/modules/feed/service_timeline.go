@@ -120,6 +120,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	}
 	posts = append(posts, collectionPosts...)
 	posts = dedupePosts(posts)
+	posts = filterVisibleSubscribedPosts(posts, user.ID, userIDs, channelIDs, collectionIDs)
 	postIDs := make([]uuid.UUID, 0, len(posts))
 	for i := range posts {
 		postIDs = append(postIDs, posts[i].ID)
@@ -267,6 +268,36 @@ func (s *Service) getSubscribedBlogFeed(
 		})
 	}
 	return items, total, nil
+}
+
+func filterVisibleSubscribedPosts(posts []model.Post, viewerID uuid.UUID, userIDs, channelIDs, collectionIDs []uuid.UUID) []model.Post {
+	visible := make([]model.Post, 0, len(posts))
+	for _, post := range posts {
+		switch post.Visibility {
+		case "", "public":
+			visible = append(visible, post)
+		case "followers":
+			if post.UserID == viewerID || containsUUID(userIDs, post.UserID) ||
+				(post.ChannelID != nil && containsUUID(channelIDs, *post.ChannelID)) ||
+				(post.CollectionID != nil && containsUUID(collectionIDs, *post.CollectionID)) {
+				visible = append(visible, post)
+			}
+		case "private":
+			if post.UserID == viewerID {
+				visible = append(visible, post)
+			}
+		}
+	}
+	return visible
+}
+
+func containsUUID(values []uuid.UUID, target uuid.UUID) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
 
 func postTimelinePublishedAt(post model.Post) time.Time {

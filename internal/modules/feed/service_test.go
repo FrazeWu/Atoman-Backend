@@ -271,6 +271,55 @@ func assertUnifiedUpdates(t *testing.T, items []TimelineItemDTO, blogPostID, epi
 	}
 }
 
+func TestGetSubscribedFeedFiltersPrivateAndAllowsSubscribedFollowerPosts(t *testing.T) {
+	service, db, viewer, creator, channel := newUnifiedSubscriptionFixture(t)
+	source := model.FeedSource{
+		SourceType: "internal_channel",
+		SourceID:   &channel.ID,
+		Hash:       "visibility-channel-source",
+		Title:      channel.Name,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.Subscription{UserID: viewer.ID, FeedSourceID: source.ID, Title: source.Title}).Error; err != nil {
+		t.Fatal(err)
+	}
+	followerPost := model.Post{
+		UserID: creator.UUID, ChannelID: &channel.ID, Title: "Follower post", Content: "body",
+		Status: "published", Visibility: "followers",
+	}
+	privatePost := model.Post{
+		UserID: creator.UUID, ChannelID: &channel.ID, Title: "Private post", Content: "body",
+		Status: "published", Visibility: "private",
+	}
+	if err := db.Create(&followerPost).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&privatePost).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, _, err := service.GetSubscribedFeed(viewer, FeedQuery{Page: 1, PageSize: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundFollower, foundPrivate := false, false
+	for _, item := range items {
+		if item.Post == nil {
+			continue
+		}
+		foundFollower = foundFollower || item.Post.ID == followerPost.ID
+		foundPrivate = foundPrivate || item.Post.ID == privatePost.ID
+	}
+	if !foundFollower {
+		t.Fatal("expected a subscribed follower-visible post in the timeline")
+	}
+	if foundPrivate {
+		t.Fatal("private post must not appear in the subscribed timeline")
+	}
+}
+
 func TestGetSubscribedFeedReturnsMixedTimelineItems(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	items, total, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 20})

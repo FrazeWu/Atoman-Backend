@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"atoman/internal/feedlanguage"
 	"atoman/internal/model"
 	"atoman/internal/modules/lifecycle"
 	studioapi "atoman/internal/modules/studio"
@@ -528,12 +529,17 @@ func (h *Handler) updatePost(c *gin.Context) {
 	wasPublished := post.Status == "published"
 	wasPublic := isPublicPostState(post.Status, post.Visibility)
 
+	languageCode := feedlanguage.Detect(strings.Join([]string{req.Title, req.Summary, req.Content}, " "))
 	updates := map[string]any{
 		"title":      req.Title,
 		"content":    req.Content,
 		"summary":    req.Summary,
 		"cover_url":  req.CoverURL,
 		"visibility": normalizeBlogVisibility(req.Visibility),
+	}
+
+	if languageCode != "" {
+		updates["language_code"] = languageCode
 	}
 
 	if len(req.CollectionIDs) > 0 {

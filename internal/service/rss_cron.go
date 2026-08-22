@@ -87,9 +87,9 @@ type ExtAtom struct {
 	XMLName  xml.Name       `xml:"feed"`
 	Language string         `xml:"http://www.w3.org/XML/1998/namespace lang,attr"`
 	Title    string         `xml:"title"`
-	Logo    string         `xml:"logo"`
-	Icon    string         `xml:"icon"`
-	Entries []ExtAtomEntry `xml:"entry"`
+	Logo     string         `xml:"logo"`
+	Icon     string         `xml:"icon"`
+	Entries  []ExtAtomEntry `xml:"entry"`
 }
 
 type ExtAtomEntry struct {
@@ -159,17 +159,17 @@ type ExtAtomLink struct {
 }
 
 type normalizedFeedItem struct {
-	LanguageCode      string
-	Title             string
-	Link              string
-	Identifier        string
-	Author            string
-	PublishedAt       time.Time
-	ContentHTML       string
-	SummaryText       string
-	ImageURL          string
-	EnclosureURL      string
-	EnclosureType     string
+	LanguageCode  string
+	Title         string
+	Link          string
+	Identifier    string
+	Author        string
+	PublishedAt   time.Time
+	ContentHTML   string
+	SummaryText   string
+	ImageURL      string
+	EnclosureURL  string
+	EnclosureType string
 	Duration      string
 }
 
@@ -349,16 +349,16 @@ func normalizeRSSItem(item ExtRSSItem, sourceTitle string, channelImageURL strin
 	}
 
 	return normalizedFeedItem{
-		LanguageCode:      firstNonEmpty(feedlanguage.NormalizeCode(item.Language), feedlanguage.Detect(strings.Join([]string{item.Title, item.Description, item.Content}, " "))),
-		Title:             strings.TrimSpace(item.Title),
-		Link:              strings.TrimSpace(item.Link),
-		Identifier:        identifier,
-		Author:            author,
-		PublishedAt:       publishedAt,
-		ContentHTML:       contentHTML,
-		SummaryText:       summaryText,
-		ImageURL:          imageURL,
-		EnclosureURL:      strings.TrimSpace(item.Enclosure.URL),
+		LanguageCode:  firstNonEmpty(feedlanguage.NormalizeCode(item.Language), feedlanguage.Detect(strings.Join([]string{item.Title, item.Description, item.Content}, " "))),
+		Title:         strings.TrimSpace(item.Title),
+		Link:          strings.TrimSpace(item.Link),
+		Identifier:    identifier,
+		Author:        author,
+		PublishedAt:   publishedAt,
+		ContentHTML:   contentHTML,
+		SummaryText:   summaryText,
+		ImageURL:      imageURL,
+		EnclosureURL:  strings.TrimSpace(item.Enclosure.URL),
 		EnclosureType: strings.TrimSpace(item.Enclosure.Type),
 		Duration:      strings.TrimSpace(item.ITunesDur),
 	}
@@ -399,11 +399,11 @@ func normalizeAtomEntry(entry ExtAtomEntry, sourceTitle string, feedImageURL str
 		Title:        strings.TrimSpace(entry.Title),
 		Link:         link,
 		Identifier:   identifier,
-		Author:            author,
-		PublishedAt:       publishedAt,
-		ContentHTML:       contentHTML,
-		SummaryText: summaryText,
-		ImageURL:    imageURL,
+		Author:       author,
+		PublishedAt:  publishedAt,
+		ContentHTML:  contentHTML,
+		SummaryText:  summaryText,
+		ImageURL:     imageURL,
 	}
 }
 
@@ -452,9 +452,9 @@ func loadRSSCronConfig() rssCronConfig {
 
 func buildModelFeedItem(src model.FeedSource, normalized normalizedFeedItem, fetchedAt time.Time) model.FeedItem {
 	newFeedItem := model.FeedItem{
-		FeedSourceID:  src.ID,
-		LanguageCode:  normalized.LanguageCode,
-		GUID:          normalized.Identifier,
+		FeedSourceID:       src.ID,
+		LanguageCode:       normalized.LanguageCode,
+		GUID:               normalized.Identifier,
 		Title:              normalized.Title,
 		Link:               normalized.Link,
 		Summary:            buildSummaryFromNormalizedContent(normalized.ContentHTML, normalized.SummaryText),
@@ -512,8 +512,7 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		return false, err
 	}
 	updates := map[string]any{
-		"language_code": newFeedItem.LanguageCode,
-		"title":         newFeedItem.Title,
+		"title":             newFeedItem.Title,
 		"link":              newFeedItem.Link,
 		"summary":           newFeedItem.Summary,
 		"author":            newFeedItem.Author,
@@ -524,6 +523,9 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		"duration":          newFeedItem.Duration,
 		"image_url":         newFeedItem.ImageURL,
 		"feed_content_html": newFeedItem.FeedContentHTML,
+	}
+	if newFeedItem.LanguageCode != "" {
+		updates["language_code"] = newFeedItem.LanguageCode
 	}
 	if newFeedItem.ReaderHTML != "" && (existing.ReaderSource != ReaderSourcePage || newFeedItem.ReaderQualityScore > existing.ReaderQualityScore) {
 		updates["reader_html"] = newFeedItem.ReaderHTML
@@ -801,14 +803,14 @@ func FetchAndParseRSS(feedURL string) ([]ExtRSSItem, string, string, error) {
 
 	// Try RSS first
 	var parsedRSS ExtRSS
-		if err := xml.Unmarshal([]byte(bodyStr), &parsedRSS); err == nil && parsedRSS.Channel.Title != "" {
-			feedLanguage := firstNonEmpty(parsedRSS.Channel.Language, parsedRSS.Channel.XMLLanguage)
-			for index := range parsedRSS.Channel.Items {
-				if strings.TrimSpace(parsedRSS.Channel.Items[index].Language) == "" {
-					parsedRSS.Channel.Items[index].Language = feedLanguage
-				}
+	if err := xml.Unmarshal([]byte(bodyStr), &parsedRSS); err == nil && parsedRSS.Channel.Title != "" {
+		feedLanguage := firstNonEmpty(parsedRSS.Channel.Language, parsedRSS.Channel.XMLLanguage)
+		for index := range parsedRSS.Channel.Items {
+			if strings.TrimSpace(parsedRSS.Channel.Items[index].Language) == "" {
+				parsedRSS.Channel.Items[index].Language = feedLanguage
 			}
-			coverURL := firstNonEmpty(
+		}
+		coverURL := firstNonEmpty(
 			parsedRSS.Channel.ITunesImage.Href,
 			parsedRSS.Channel.MediaContent.URL,
 			parsedRSS.Channel.MediaThumbnail.URL,

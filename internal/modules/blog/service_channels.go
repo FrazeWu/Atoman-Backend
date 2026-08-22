@@ -88,17 +88,18 @@ func (s *Service) CreateChannel(user authctx.CurrentUser, name string, slug stri
 	if name == "" {
 		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "name is required")
 	}
-	if slug = strings.TrimSpace(slug); slug == "" {
-		var err error
-		slug, err = s.uniqueChannelSlug(name)
-		if err != nil {
-			return model.Channel{}, err
-		}
+	requestedSlug := strings.TrimSpace(slug)
+	if requestedSlug == "" {
+		requestedSlug = name
+	}
+	resolvedSlug, err := s.uniqueChannelSlug(requestedSlug)
+	if err != nil {
+		return model.Channel{}, err
 	}
 	channel := model.Channel{
 		UserID:      &user.ID,
 		Name:        name,
-		Slug:        slug,
+		Slug:        resolvedSlug,
 		Description: strings.TrimSpace(description),
 		CoverURL:    strings.TrimSpace(coverURL),
 	}
@@ -126,8 +127,12 @@ func (s *Service) UpdateChannel(user authctx.CurrentUser, channelID uuid.UUID, n
 		return model.Channel{}, apperr.BadRequest("validation.invalid_request", "name is required")
 	}
 	channel.Name = name
-	if strings.TrimSpace(slug) != "" {
-		channel.Slug = strings.TrimSpace(slug)
+	if requestedSlug := strings.TrimSpace(slug); requestedSlug != "" && requestedSlug != channel.Slug {
+		resolvedSlug, err := s.uniqueChannelSlug(requestedSlug, &channel.ID)
+		if err != nil {
+			return model.Channel{}, err
+		}
+		channel.Slug = resolvedSlug
 	}
 	channel.Description = strings.TrimSpace(description)
 	channel.CoverURL = strings.TrimSpace(coverURL)
@@ -335,15 +340,25 @@ func slugify(value string) string {
 	return slug
 }
 
-func (s *Service) uniqueChannelSlug(base string) (string, error) {
+func (s *Service) uniqueChannelSlug(base string, excludeID ...*uuid.UUID) (string, error) {
 	baseSlug := slugify(base)
+	if _, err := sitehandle.Normalize(baseSlug); err != nil {
+		baseSlug = "channel"
+	}
 	candidate := baseSlug
 	counter := 2
 	namespace := sitehandle.NewService(s.db)
+	var excluded *uuid.UUID
+	if len(excludeID) > 0 {
+		excluded = excludeID[0]
+	}
 	for {
-		err := namespace.ValidateChannelSlugAvailable(context.Background(), candidate, nil)
+		err := namespace.ValidateChannelSlugAvailable(context.Background(), candidate, excluded)
 		if err == nil {
 			return candidate, nil
+		}
+		if errors.Is(err, sitehandle.ErrInvalid) {
+			return "", apperr.BadRequest("validation.invalid_request", "slug is invalid")
 		}
 		if !errors.Is(err, sitehandle.ErrReserved) && !errors.Is(err, sitehandle.ErrTaken) {
 			return "", err

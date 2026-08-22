@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"atoman/internal/feedlanguage"
 	"atoman/internal/model"
 	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/reference"
@@ -260,14 +261,15 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	}
 
 	post := model.Post{
-		UserID:     user.ID,
-		ChannelID:  &channel.ID,
-		Title:      strings.TrimSpace(req.Title),
-		Content:    strings.TrimSpace(req.Content),
-		Summary:    summary,
-		CoverURL:   strings.TrimSpace(req.CoverURL),
-		Visibility: visibility,
-		Status:     status,
+		UserID:       user.ID,
+		ChannelID:    &channel.ID,
+		Title:        strings.TrimSpace(req.Title),
+		Content:      strings.TrimSpace(req.Content),
+		Summary:      summary,
+		LanguageCode: feedlanguage.Detect(strings.Join([]string{req.Title, summary, req.Content}, " ")),
+		CoverURL:     strings.TrimSpace(req.CoverURL),
+		Visibility:   visibility,
+		Status:       status,
 	}
 	if collection != nil {
 		post.CollectionID = &collection.ID
