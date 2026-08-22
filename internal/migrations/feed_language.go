@@ -31,30 +31,28 @@ func RunFeedLanguageMigration(db *gorm.DB) error {
 }
 
 type feedItemLanguageRow struct {
-	ID            uuid.UUID
-	Title         string
-	Summary       string
+	ID              uuid.UUID
+	Title           string
+	Summary         string
 	FeedContentHTML string
-	ReaderHTML    string
-	FullTextHTML  string
+	ReaderHTML      string
+	FullTextHTML    string
 }
 
 func backfillFeedItemLanguages(db *gorm.DB) error {
-	return db.Model(&model.FeedItem{}).
+	rows := make([]feedItemLanguageRow, 0, 500)
+	return db.Table("feed_items").
 		Select("id, title, summary, feed_content_html, reader_html, full_text_html").
-		Where("language_code = '' OR language_code IS NULL").
-		FindInBatches(&[]feedItemLanguageRow{}, 500, func(tx *gorm.DB, _ int) error {
-			rows := tx.Statement.Dest.(*[]feedItemLanguageRow)
-			for _, row := range *rows {
+		Where("(language_code = '' OR language_code IS NULL) AND deleted_at IS NULL").
+		FindInBatches(&rows, 500, func(_ *gorm.DB, _ int) error {
+			updates := make(map[uuid.UUID]string, len(rows))
+			for _, row := range rows {
 				code := feedlanguage.Detect(strings.Join([]string{row.Title, row.Summary, row.FeedContentHTML, row.ReaderHTML, row.FullTextHTML}, " "))
-				if code == "" {
-					continue
-				}
-				if err := db.Model(&model.FeedItem{}).Where("id = ?", row.ID).Update("language_code", code).Error; err != nil {
-					return err
+				if code != "" {
+					updates[row.ID] = code
 				}
 			}
-			return nil
+			return updateLanguageCodes(db, &model.FeedItem{}, updates)
 		}).Error
 }
 
@@ -66,20 +64,38 @@ type postLanguageRow struct {
 }
 
 func backfillPostLanguages(db *gorm.DB) error {
-	return db.Model(&model.Post{}).
+	rows := make([]postLanguageRow, 0, 500)
+	return db.Table("posts").
 		Select("id, title, summary, content").
-		Where("language_code = '' OR language_code IS NULL").
-		FindInBatches(&[]postLanguageRow{}, 500, func(tx *gorm.DB, _ int) error {
-			rows := tx.Statement.Dest.(*[]postLanguageRow)
-			for _, row := range *rows {
+		Where("(language_code = '' OR language_code IS NULL) AND deleted_at IS NULL").
+		FindInBatches(&rows, 500, func(_ *gorm.DB, _ int) error {
+			updates := make(map[uuid.UUID]string, len(rows))
+			for _, row := range rows {
 				code := feedlanguage.Detect(strings.Join([]string{row.Title, row.Summary, row.Content}, " "))
-				if code == "" {
-					continue
-				}
-				if err := db.Model(&model.Post{}).Where("id = ?", row.ID).Update("language_code", code).Error; err != nil {
-					return err
+				if code != "" {
+					updates[row.ID] = code
 				}
 			}
-			return nil
+			return updateLanguageCodes(db, &model.Post{}, updates)
 		}).Error
+}
+
+func updateLanguageCodes(db *gorm.DB, destination any, updates map[uuid.UUID]string) error {
+	if len(updates) == 0 {
+		return nil
+	}
+
+	ids := make([]uuid.UUID, 0, len(updates))
+	args := make([]any, 0, len(updates)*2)
+	caseSQL := "CASE id"
+	for id, code := range updates {
+		ids = append(ids, id)
+		caseSQL += " WHEN ? THEN ?"
+		args = append(args, id, code)
+	}
+	caseSQL += " END"
+
+	return db.Model(destination).
+		Where("id IN ?", ids).
+		UpdateColumn("language_code", gorm.Expr(caseSQL, args...)).Error
 }
