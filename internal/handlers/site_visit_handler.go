@@ -1,10 +1,7 @@
 package handlers
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
-	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -14,19 +11,12 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const (
-	siteVisitorBaseline int64 = 15_040
-	siteVisitBaseline   int64 = 640_050
-)
+const siteVisitBaseline int64 = 640_050
 
 type SiteVisitStats struct {
 	Users int64 `json:"users"`
 	Total int64 `json:"total"`
 	Today int64 `json:"today"`
-}
-
-type recordSiteVisitRequest struct {
-	VisitorID string `json:"visitor_id"`
 }
 
 // GetSiteVisitStats godoc
@@ -50,13 +40,10 @@ func GetSiteVisitStats(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		stats.Total += siteVisitBaseline
-		stats.Users = siteVisitorBaseline
-		var visitors int64
-		if err := db.Model(&model.SiteVisitor{}).Count(&visitors).Error; err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load site visitor stats"})
+		if err := db.Model(&model.User{}).Where("is_active = ?", true).Count(&stats.Users).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load user stats"})
 			return
 		}
-		stats.Users += visitors
 		c.JSON(http.StatusOK, gin.H{"data": stats, "message": "ok"})
 	}
 }
@@ -70,40 +57,15 @@ func GetSiteVisitStats(db *gorm.DB) gin.HandlerFunc {
 // @Router /site/visits [post]
 func RecordSiteVisit(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		var input recordSiteVisitRequest
-		if c.Request.ContentLength > 0 {
-			if err := c.ShouldBindJSON(&input); err != nil {
-				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid site visit payload"})
-				return
-			}
-		}
-		visitorID := strings.TrimSpace(input.VisitorID)
-		visitorHash := ""
-		if visitorID != "" {
-			digest := sha256.Sum256([]byte(visitorID))
-			visitorHash = hex.EncodeToString(digest[:])
-		}
 		date := time.Now().UTC().Format("2006-01-02")
-		err := db.Transaction(func(tx *gorm.DB) error {
-			entry := model.SiteVisitDaily{Date: date, ViewCount: 1}
-			result := tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "date"}},
-				DoUpdates: clause.Assignments(map[string]any{
-					"view_count": gorm.Expr("site_visit_daily.view_count + 1"),
-				}),
-			}).Create(&entry)
-			if result.Error != nil {
-				return result.Error
-			}
-			if visitorHash != "" {
-				visitor := model.SiteVisitor{ID: visitorHash, FirstSeenAt: time.Now().UTC()}
-				if result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&visitor); result.Error != nil {
-					return result.Error
-				}
-			}
-			return nil
-		})
-		if err != nil {
+		entry := model.SiteVisitDaily{Date: date, ViewCount: 1}
+		result := db.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "date"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				"view_count": gorm.Expr("site_visit_daily.view_count + 1"),
+			}),
+		}).Create(&entry)
+		if result.Error != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record site visit"})
 			return
 		}

@@ -13,7 +13,7 @@ import (
 
 func TestSiteVisitStatsRecordAndReadAggregates(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.SiteVisitDaily{}, &model.SiteVisitor{})
+	testdb.Migrate(t, db, &model.User{}, &model.SiteVisitDaily{})
 	router := gin.New()
 	router.GET("/visits", GetSiteVisitStats(db))
 	router.POST("/visits", RecordSiteVisit(db))
