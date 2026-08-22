@@ -74,6 +74,11 @@ type RecommendationItemDTO struct {
 	ReadCount            int64                      `json:"read_count"`
 	UpdateFrequencyLabel string                     `json:"update_frequency_label"`
 	LastPublishedAt      *time.Time                 `json:"last_published_at,omitempty"`
+	SourceID             string                     `json:"source_id,omitempty"`
+	SourceTitle          string                     `json:"source_title,omitempty"`
+	SourceType           string                     `json:"source_type,omitempty"`
+	SourceCategory       string                     `json:"source_category,omitempty"`
+	SourcePath           string                     `json:"source_path,omitempty"`
 	RecentItems          []RecommendationPreviewDTO `json:"recent_items,omitempty"`
 }
 

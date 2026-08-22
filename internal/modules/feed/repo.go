@@ -531,7 +531,8 @@ func (r *Repo) ListRecommendationPostsByIDs(ids []uuid.UUID) ([]model.Post, erro
 	}
 	var posts []model.Post
 	err := r.db.Model(&model.Post{}).
-		Select("id", "title", "summary", "cover_url", "language_code").
+		Preload("Channel").
+		Select("id", "title", "summary", "cover_url", "language_code", "channel_id").
 		Where("id IN ?", ids).
 		Find(&posts).Error
 	return posts, err
@@ -543,7 +544,8 @@ func (r *Repo) ListRecommendationFeedItemsByIDs(ids []uuid.UUID) ([]model.FeedIt
 	}
 	var items []model.FeedItem
 	err := r.db.Model(&model.FeedItem{}).
-		Select("id", "title", "summary", "image_url", "language_code").
+		Preload("FeedSource").
+		Select("id", "title", "summary", "image_url", "language_code", "feed_source_id").
 		Where("id IN ?", ids).
 		Find(&items).Error
 	return items, err

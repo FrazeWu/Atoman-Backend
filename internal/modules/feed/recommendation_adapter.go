@@ -310,12 +310,30 @@ func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) e
 			items[i].Title = post.Title
 			items[i].Summary = post.Summary
 			items[i].ImageURL = post.CoverURL
+			if post.Channel != nil {
+				items[i].SourceID = post.Channel.ID.String()
+				items[i].SourceTitle = post.Channel.Name
+				items[i].SourceType = "internal_channel"
+				items[i].SourceCategory = "blog"
+				if strings.TrimSpace(post.Channel.Slug) != "" {
+					items[i].SourcePath = "/channels/" + post.Channel.Slug
+				} else {
+					items[i].SourcePath = "/channels/" + post.Channel.ID.String()
+				}
+			}
 			continue
 		}
 		if feedItem, ok := feedItemByID[items[i].ID]; ok {
 			items[i].Title = feedItem.Title
 			items[i].Summary = feedItem.Summary
 			items[i].ImageURL = feedItem.ImageURL
+			if feedItem.FeedSource != nil {
+				items[i].SourceID = feedItem.FeedSource.ID.String()
+				items[i].SourceTitle = feedItem.FeedSource.Title
+				items[i].SourceType = feedItem.FeedSource.SourceType
+				items[i].SourceCategory = normalizeSourceCategory(feedItem.FeedSource.Category)
+				items[i].SourcePath = "/feed?source_id=" + feedItem.FeedSource.ID.String()
+			}
 		}
 	}
 	return nil
