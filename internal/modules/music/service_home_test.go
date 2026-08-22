@@ -21,6 +21,51 @@ func TestHomeReturnsEmptyPersonalizationForAnonymousListeners(t *testing.T) {
 	}
 }
 
+func TestRecommendHomeAlbumsFillsWithPopularAlbumsWhenAffinityIsSparse(t *testing.T) {
+	service, db, _ := newMusicTestService(t)
+	createAlbum := func(title string, artistName string) (model.Album, uuid.UUID) {
+		t.Helper()
+		artist := model.Artist{Name: artistName, EntryStatus: "open"}
+		if err := db.Create(&artist).Error; err != nil {
+			t.Fatal(err)
+		}
+		album := model.Album{Title: title, CoverURL: "/" + title + ".jpg", Status: "open", EntryStatus: "open"}
+		if err := db.Create(&album).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&model.Song{Title: title + " song", AlbumID: &album.ID, AudioURL: "/" + title + ".mp3", Status: "open"}).Error; err != nil {
+			t.Fatal(err)
+		}
+		return album, artist.ID
+	}
+
+	related, relatedArtistID := createAlbum("Related", "Affinity Artist")
+	for _, name := range []string{"Fallback One", "Fallback Two", "Fallback Three", "Fallback Four", "Fallback Five", "Fallback Six", "Fallback Seven"} {
+		createAlbum(name, name+" Artist")
+	}
+
+	recommendations, err := service.recommendHomeAlbums(
+		map[uuid.UUID]float64{relatedArtistID: 1},
+		map[uuid.UUID]struct{}{},
+		map[uuid.UUID]struct{}{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recommendations) != musicHomeForYouLimit {
+		t.Fatalf("expected %d recommendations after hot fallback, got %d: %#v", musicHomeForYouLimit, len(recommendations), recommendations)
+	}
+	if recommendations[0].ID != related.ID {
+		t.Fatalf("expected personalized recommendation first, got %#v", recommendations[0])
+	}
+	if recommendations[1].Reason != "热门音乐推荐" {
+		t.Fatalf("expected fallback recommendation reason, got %q", recommendations[1].Reason)
+	}
+}
+
 func TestRecommendHomeAlbumsExcludesAlbumsContainingSeenSongs(t *testing.T) {
 	service, db, _ := newMusicTestService(t)
 	artist := model.Artist{Name: "Affinity Artist", EntryStatus: "open"}
