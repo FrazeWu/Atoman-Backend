@@ -484,6 +484,11 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 					return
 				}
 			}
+			if err := service.PromoteArtistsWithAlbums(tx, artist.ID); err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish artist"})
+				return
+			}
 		}
 
 		if coverURL != "" && album.CoverURL == "" {
@@ -719,6 +724,11 @@ func UpdateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to link album to artist"})
 					return
 				}
+			}
+			if err := service.PromoteArtistsWithAlbums(tx, artist.ID); err != nil {
+				tx.Rollback()
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to publish artist"})
+				return
 			}
 		}
 

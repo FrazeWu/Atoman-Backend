@@ -5,6 +5,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
+	revisionservice "atoman/internal/service"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -50,7 +51,19 @@ func replaceAlbumArtistCredits(tx *gorm.DB, albumID uuid.UUID, credits []AlbumAr
 	if err := tx.Where("album_id = ?", albumID).Delete(&model.AlbumArtist{}).Error; err != nil {
 		return err
 	}
-	return tx.Create(&rows).Error
+	if err := tx.Create(&rows).Error; err != nil {
+		return err
+	}
+	artistIDs := make([]uuid.UUID, 0, len(rows))
+	seenArtistIDs := make(map[uuid.UUID]struct{}, len(rows))
+	for _, row := range rows {
+		if _, seen := seenArtistIDs[row.ArtistID]; seen {
+			continue
+		}
+		seenArtistIDs[row.ArtistID] = struct{}{}
+		artistIDs = append(artistIDs, row.ArtistID)
+	}
+	return revisionservice.PromoteArtistsWithAlbums(tx, artistIDs...)
 }
 
 func normalizeAlbumArtistCredits(tx *gorm.DB, albumID uuid.UUID, credits []AlbumArtistCreditInput, defaultMissingRoles bool) ([]model.AlbumArtist, error) {

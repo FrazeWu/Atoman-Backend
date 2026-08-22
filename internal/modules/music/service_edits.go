@@ -72,6 +72,9 @@ func (s *Service) MergeArtists(user authctx.CurrentUser, sourceArtistID uuid.UUI
 		`, targetArtistID, sourceArtistID, targetArtistID).Error; err != nil {
 			return err
 		}
+		if err := revisionservice.PromoteArtistsWithAlbums(tx, targetArtistID); err != nil {
+			return err
+		}
 		if err := tx.Where("artist_id = ?", sourceArtistID).Delete(&model.AlbumArtist{}).Error; err != nil {
 			return err
 		}

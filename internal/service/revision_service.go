@@ -1428,6 +1428,18 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 			if err := tx.Create(&rows).Error; err != nil {
 				return err
 			}
+			artistIDs := make([]uuid.UUID, 0, len(rows))
+			seenArtistIDs := make(map[uuid.UUID]struct{}, len(rows))
+			for _, row := range rows {
+				if _, seen := seenArtistIDs[row.ArtistID]; seen {
+					continue
+				}
+				seenArtistIDs[row.ArtistID] = struct{}{}
+				artistIDs = append(artistIDs, row.ArtistID)
+			}
+			if err := PromoteArtistsWithAlbums(tx, artistIDs...); err != nil {
+				return err
+			}
 		}
 	}
 

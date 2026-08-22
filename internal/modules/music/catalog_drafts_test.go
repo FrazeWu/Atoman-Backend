@@ -40,7 +40,7 @@ func TestCreateArtistCreatesOwnedDraftsWithSameName(t *testing.T) {
 	}
 }
 
-func TestCommitFirstAlbumPublishesOnlyPrimaryOwnedDraft(t *testing.T) {
+func TestCommitFirstAlbumPublishesReferencedOwnedDrafts(t *testing.T) {
 	service, db, user := newMusicTestService(t)
 	primary, err := service.CreateArtist(user, completeArtistDraftRequest("Primary Draft"))
 	if err != nil {
@@ -77,7 +77,7 @@ func TestCommitFirstAlbumPublishesOnlyPrimaryOwnedDraft(t *testing.T) {
 	if err := db.First(&featured, "id = ?", featured.ID).Error; err != nil {
 		t.Fatalf("reload featured: %v", err)
 	}
-	if primary.EntryStatus != artistEntryOpen || featured.EntryStatus != artistEntryDraft {
+	if primary.EntryStatus != artistEntryOpen || featured.EntryStatus != artistEntryOpen {
 		t.Fatalf("unexpected artist states: primary=%s featured=%s", primary.EntryStatus, featured.EntryStatus)
 	}
 }

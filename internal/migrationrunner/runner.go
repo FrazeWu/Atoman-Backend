@@ -76,6 +76,8 @@ func Run(db *gorm.DB) error {
 		{"music catalog indexes migration", migrations.RunMusicCatalogIndexesMigration},
 		{"music partial dates migration", migrations.RunMusicPartialDatesMigration},
 		{"music artist drafts migration", migrations.RunMusicArtistDraftsMigration},
+		{"music artist album visibility migration", migrations.RunMusicArtistAlbumVisibilityMigration},
+		{"music Brainz match migration", migrations.RunMusicBrainzMatchMigration},
 		{"music standalone songs constraints migration", migrations.RunMusicStandaloneSongsConstraintsMigration},
 		{"music revision baselines migration", runMusicRevisionBaselinesMigration},
 		{"unified studio migration", migrations.RunUnifiedStudioMigration},
