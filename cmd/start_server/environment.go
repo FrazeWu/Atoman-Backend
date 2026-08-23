@@ -55,13 +55,21 @@ func initializeStorageClient() *s3.S3 {
 	return s3Client
 }
 
+func canonicalFrontendOrigins() []string {
+	return []string{
+		"https://www.atoman.org",
+		"https://atoman.org",
+	}
+}
+
 func configuredAllowedOrigins() []string {
-	allowedOrigins := []string{
+	allowedOrigins := canonicalFrontendOrigins()
+	allowedOrigins = append(allowedOrigins,
 		"http://localhost:5173",
 		"http://localhost:3000",
 		"http://127.0.0.1:5173",
 		"http://127.0.0.1:3000",
-	}
+	)
 	for _, origin := range strings.Split(os.Getenv("ALLOWED_ORIGINS"), ",") {
 		origin = strings.TrimSpace(origin)
 		if origin != "" {

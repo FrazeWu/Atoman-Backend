@@ -81,16 +81,17 @@ type ContentBlogDraft struct {
 func (ContentBlogDraft) TableName() string { return "content_blog_drafts" }
 
 type ContentEpisodeExtension struct {
-	ContentID       uuid.UUID `json:"content_id" gorm:"type:uuid;primaryKey"`
-	EpisodeID       uuid.UUID `json:"episode_id" gorm:"type:uuid;not null;uniqueIndex"` // legacy resource identity during API transition
-	LegacyPostID    uuid.UUID `json:"legacy_post_id" gorm:"type:uuid;not null;uniqueIndex"`
-	AudioURL        string    `json:"audio_url" gorm:"type:text;not null"`
-	DurationSec     int       `json:"duration_sec" gorm:"not null;default:0"`
-	EpisodeCoverURL string    `json:"episode_cover_url" gorm:"type:text"`
-	SeasonNumber    int       `json:"season_number" gorm:"not null;default:1"`
-	EpisodeNumber   int       `json:"episode_number" gorm:"not null;default:0"`
-	Shownotes       string    `json:"shownotes" gorm:"type:text;not null"`
-	ViewCount       int64     `json:"view_count" gorm:"not null;default:0"`
+	ContentID          uuid.UUID `json:"content_id" gorm:"type:uuid;primaryKey"`
+	EpisodeID          uuid.UUID `json:"episode_id" gorm:"type:uuid;not null;uniqueIndex"` // legacy resource identity during API transition
+	LegacyPostID       uuid.UUID `json:"legacy_post_id" gorm:"type:uuid;not null;uniqueIndex"`
+	AudioURL           string    `json:"audio_url" gorm:"type:text;not null"`
+	DurationSec        int       `json:"duration_sec" gorm:"not null;default:0"`
+	EpisodeCoverURL    string    `json:"episode_cover_url" gorm:"type:text"`
+	SeasonNumber       int       `json:"season_number" gorm:"not null;default:1"`
+	EpisodeNumber      int       `json:"episode_number" gorm:"not null;default:0"`
+	Shownotes          string    `json:"shownotes" gorm:"type:text;not null"`
+	ViewCount          int64     `json:"view_count" gorm:"not null;default:0"`
+	CollectionConflict bool      `json:"collection_conflict" gorm:"not null;default:false;index"`
 }
 
 func (ContentEpisodeExtension) TableName() string { return "content_episode_extensions" }

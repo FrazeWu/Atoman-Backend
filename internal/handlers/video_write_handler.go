@@ -9,8 +9,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/modules/lifecycle"
 	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
@@ -114,22 +116,19 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 	if status == "" {
 		status = "draft"
 	}
-
-	if input.ChannelID != nil {
-		var channel model.Channel
-		if err := db.First(&channel, "id = ?", *input.ChannelID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return model.Video{}, http.StatusNotFound, apperr.NotFound("video.channel_not_found", "Channel not found")
-			}
-			return model.Video{}, http.StatusInternalServerError, err
-		}
-		if !ownsChannel(channel.UserID, userID) {
-			return model.Video{}, http.StatusForbidden, apperr.Forbidden("video.channel_forbidden", "Forbidden")
-		}
+	if input.ChannelID == nil || *input.ChannelID == uuid.Nil {
+		return model.Video{}, http.StatusBadRequest, apperr.BadRequest("validation.invalid_request", "channel_id is required")
 	}
-	var channelID uuid.UUID
-	if input.ChannelID != nil {
-		channelID = *input.ChannelID
+	channelID := *input.ChannelID
+	var channel model.Channel
+	if err := db.First(&channel, "id = ?", channelID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Video{}, http.StatusNotFound, apperr.NotFound("video.channel_not_found", "Channel not found")
+		}
+		return model.Video{}, http.StatusInternalServerError, err
+	}
+	if !ownsChannel(channel.UserID, userID) {
+		return model.Video{}, http.StatusForbidden, apperr.Forbidden("video.channel_forbidden", "Forbidden")
 	}
 	collectionID, err := studioapi.NewService(db).ResolveContentCollection(
 		userID, channelID, studioapi.ModuleVideo, input.CollectionID, input.CollectionIDs, status == "published",
@@ -137,16 +136,36 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 	if err != nil {
 		return model.Video{}, http.StatusBadRequest, err
 	}
-
+	videoID, err := uuid.NewV7()
+	if err != nil {
+		return model.Video{}, http.StatusInternalServerError, err
+	}
+	contentID, err := uuid.NewV7()
+	if err != nil {
+		return model.Video{}, http.StatusInternalServerError, err
+	}
 	video := model.Video{
-		UserID: userID, ChannelID: input.ChannelID, CollectionID: collectionID, Title: strings.TrimSpace(input.Title),
-		Description: input.Description, StorageType: storageType, VideoURL: input.VideoURL,
-		ThumbnailURL: input.ThumbnailURL, DurationSec: input.DurationSec,
+		Base: model.Base{ID: videoID}, UserID: userID, ChannelID: &channelID, CollectionID: collectionID,
+		Title: strings.TrimSpace(input.Title), Description: input.Description, StorageType: storageType,
+		VideoURL: input.VideoURL, ThumbnailURL: input.ThumbnailURL, DurationSec: input.DurationSec,
 		Visibility: visibility, Status: status,
 	}
 	statusCode := http.StatusInternalServerError
 	err = db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Create(&video).Error; err != nil {
+		entry := model.ContentEntry{
+			Base: model.Base{ID: contentID}, AuthorID: &userID, ChannelID: channelID,
+			Kind: "video", Title: video.Title, Summary: video.Description, CoverURL: video.ThumbnailURL,
+			Status: video.Status, Visibility: video.Visibility,
+		}
+		if err := tx.Create(&entry).Error; err != nil {
+			return err
+		}
+		extension := model.ContentVideoExtension{
+			ContentID: contentID, VideoID: video.ID, StorageType: video.StorageType,
+			VideoURL: video.VideoURL, ThumbnailURL: video.ThumbnailURL, DurationSec: video.DurationSec,
+			ProcessingStatus: "none",
+		}
+		if err := tx.Create(&extension).Error; err != nil {
 			return err
 		}
 		if err := service.EnsureVideoPreviewJob(tx, &video); err != nil {
@@ -158,7 +177,7 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 			}
 		}
 		if collectionID != nil {
-			if err := syncVideoCollection(tx, &video, collectionID); err != nil {
+			if err := tx.Create(&model.ContentCollectionMembership{ContentID: contentID, CollectionID: *collectionID}).Error; err != nil {
 				statusCode = http.StatusBadRequest
 				return err
 			}
@@ -175,7 +194,8 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 	if err != nil {
 		return model.Video{}, statusCode, err
 	}
-	if err := db.Preload("Channel").Preload("Tags").Preload("Collection").Preload("Collections").First(&video, "id = ?", video.ID).Error; err != nil {
+	video, err = contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", video.ID))
+	if err != nil {
 		return model.Video{}, http.StatusInternalServerError, err
 	}
 	return video, http.StatusCreated, nil
@@ -201,15 +221,23 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
-		id := c.Param("id")
-
-		var video model.Video
-		if err := db.Preload("Collection").Preload("Collections").First(&video, "id = ?", id).Error; err != nil {
+		videoID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		video, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", videoID))
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
 		if video.UserID != userID {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		contentID, err := contentmodule.VideoContentID(db, videoID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
 		wasPublic := video.Status == "published" && video.Visibility == "public"
@@ -229,7 +257,6 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
-
 		if input.ChannelID != nil {
 			var channel model.Channel
 			if err := db.First(&channel, "id = ?", *input.ChannelID).Error; err != nil {
@@ -257,10 +284,10 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 			effectiveChannelID = *input.ChannelID
 		}
 		effectiveStatus := video.Status
-		wasPublished := video.Status == "published"
 		if input.Status != nil {
 			effectiveStatus = *input.Status
 		}
+		wasPublished := video.Status == "published"
 		collectionChanged := input.CollectionID.Set || input.CollectionIDs != nil
 		shouldResolveCollection := collectionChanged || (!wasPublished && effectiveStatus == "published")
 		resolvedCollectionID := video.CollectionID
@@ -278,74 +305,83 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 				}
 				legacyCollectionIDs = input.CollectionIDs
 			}
-			resolved, resolveErr := studioapi.NewService(db).ResolveContentCollection(
+			resolvedCollectionID, err = studioapi.NewService(db).ResolveContentCollection(
 				userID, effectiveChannelID, studioapi.ModuleVideo, requestedCollectionID, legacyCollectionIDs, effectiveStatus == "published",
 			)
-			if resolveErr != nil {
-				httpx.Error(c, resolveErr)
+			if err != nil {
+				httpx.Error(c, err)
 				return
 			}
-			resolvedCollectionID = resolved
 		}
 
-		updates := map[string]interface{}{}
+		entryUpdates := map[string]any{}
 		if input.ChannelID != nil {
-			updates["channel_id"] = *input.ChannelID
+			entryUpdates["channel_id"] = *input.ChannelID
 		}
 		if input.Title != nil {
-			updates["title"] = strings.TrimSpace(*input.Title)
+			entryUpdates["title"] = strings.TrimSpace(*input.Title)
 		}
 		if input.Description != nil {
-			updates["description"] = *input.Description
+			entryUpdates["summary"] = *input.Description
 		}
 		if input.ThumbnailURL != nil {
-			updates["thumbnail_url"] = *input.ThumbnailURL
+			entryUpdates["cover_url"] = *input.ThumbnailURL
 		}
 		if input.Visibility != nil {
-			updates["visibility"] = *input.Visibility
+			if *input.Visibility != "public" && *input.Visibility != "followers" && *input.Visibility != "private" {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid visibility"})
+				return
+			}
+			entryUpdates["visibility"] = *input.Visibility
 		}
 		if input.Status != nil {
-			updates["status"] = *input.Status
+			entryUpdates["status"] = *input.Status
+		}
+		extensionUpdates := map[string]any{}
+		if input.ThumbnailURL != nil {
+			extensionUpdates["thumbnail_url"] = *input.ThumbnailURL
 		}
 		if shouldResolveCollection {
-			updates["collection_id"] = resolvedCollectionID
-			updates["collection_conflict"] = false
+			extensionUpdates["collection_conflict"] = false
 		}
 
 		statusCode := http.StatusInternalServerError
 		if err := db.Transaction(func(tx *gorm.DB) error {
-			if len(updates) > 0 {
-				if err := tx.Model(&video).Updates(updates).Error; err != nil {
+			if len(entryUpdates) > 0 {
+				if err := tx.Model(&model.ContentEntry{}).Where("id = ?", contentID).Updates(entryUpdates).Error; err != nil {
 					return err
-				}
-				if input.ChannelID != nil {
-					video.ChannelID = input.ChannelID
 				}
 			}
-
-			if input.Tags != nil {
-				if err := tx.Model(&video).Association("Tags").Unscoped().Clear(); err != nil {
+			if len(extensionUpdates) > 0 {
+				if err := tx.Model(&model.ContentVideoExtension{}).Where("content_id = ?", contentID).Updates(extensionUpdates).Error; err != nil {
 					return err
 				}
-				if len(input.Tags) > 0 {
-					if err := attachVideoTags(tx, &video, input.Tags); err != nil {
+			}
+			if input.Tags != nil {
+				if err := tx.Where("video_id = ?", videoID).Delete(&model.VideoTagRelation{}).Error; err != nil {
+					return err
+				}
+				if err := attachVideoTags(tx, &video, input.Tags); err != nil {
+					return err
+				}
+			}
+			if shouldResolveCollection {
+				if err := tx.Where("content_id = ?", contentID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
+					return err
+				}
+				if resolvedCollectionID != nil {
+					if err := tx.Create(&model.ContentCollectionMembership{ContentID: contentID, CollectionID: *resolvedCollectionID}).Error; err != nil {
+						statusCode = http.StatusBadRequest
 						return err
 					}
 				}
 			}
-
-			if shouldResolveCollection {
-				if err := syncVideoCollection(tx, &video, resolvedCollectionID); err != nil {
-					statusCode = http.StatusBadRequest
-					return err
-				}
-			}
 			if effectiveStatus == "published" && !wasPublished {
 				lifecycleService := lifecycle.NewService(tx)
-				if err := lifecycleService.ValidatePublishable("video", video.ID); err != nil {
+				if err := lifecycleService.ValidatePublishable("video", videoID); err != nil {
 					return err
 				}
-				return lifecycleService.EnqueuePublication("video", video.ID)
+				return lifecycleService.EnqueuePublication("video", videoID)
 			}
 			return nil
 		}); err != nil {
@@ -356,8 +392,11 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(statusCode, gin.H{"error": err.Error()})
 			return
 		}
-
-		db.Preload("Channel").Preload("Tags").Preload("Collection").Preload("Collections").First(&video, "id = ?", video.ID)
+		video, err = contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", videoID))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
 		if wasPublic || (video.Status == "published" && video.Visibility == "public") {
 			indexnow.NotifyPaths("/videos/watch/" + video.ID.String())
 		}
@@ -381,10 +420,13 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 func DeleteVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
-		id := c.Param("id")
-
-		var video model.Video
-		if err := db.First(&video, "id = ?", id).Error; err != nil {
+		videoID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		video, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", videoID))
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
@@ -392,9 +434,18 @@ func DeleteVideo(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
-
 		wasPublic := video.Status == "published" && video.Visibility == "public"
-		if err := db.Delete(&video).Error; err != nil {
+		contentID, err := contentmodule.VideoContentID(db, videoID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Where("content_id = ?", contentID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
+				return err
+			}
+			return tx.Delete(&model.ContentEntry{}, "id = ?", contentID).Error
+		}); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -406,17 +457,20 @@ func DeleteVideo(db *gorm.DB) gin.HandlerFunc {
 }
 
 func attachVideoTags(db *gorm.DB, video *model.Video, names []string) error {
-	var tags []model.VideoTag
 	for _, name := range names {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			continue
 		}
 		var tag model.VideoTag
-		db.Where("name = ?", name).FirstOrCreate(&tag, model.VideoTag{Name: name})
-		tags = append(tags, tag)
+		if err := db.Where("name = ?", name).FirstOrCreate(&tag, model.VideoTag{Name: name}).Error; err != nil {
+			return err
+		}
+		if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.VideoTagRelation{VideoID: video.ID, TagID: tag.ID}).Error; err != nil {
+			return err
+		}
 	}
-	return db.Model(video).Association("Tags").Append(tags)
+	return nil
 }
 
 func syncVideoCollection(db *gorm.DB, video *model.Video, collectionID *uuid.UUID) error {

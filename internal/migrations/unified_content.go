@@ -420,7 +420,7 @@ func ensureEpisodeExtension(tx *gorm.DB, contentID, episodeID uuid.UUID, post mo
 	extension := model.ContentEpisodeExtension{
 		ContentID: contentID, EpisodeID: episodeID, LegacyPostID: post.ID,
 		AudioURL: "", DurationSec: 0, EpisodeCoverURL: "", SeasonNumber: 1,
-		EpisodeNumber: 0, Shownotes: post.Content, ViewCount: post.ViewCount,
+		EpisodeNumber: 0, Shownotes: post.Content, ViewCount: post.ViewCount, CollectionConflict: post.CollectionConflict,
 	}
 	var episode model.PodcastEpisode
 	if err := tx.First(&episode, "id = ?", episodeID).Error; err != nil {
@@ -440,15 +440,16 @@ func ensureEpisodeExtension(tx *gorm.DB, contentID, episodeID uuid.UUID, post mo
 		return err
 	}
 	return tx.Model(&existing).Updates(map[string]any{
-		"content_id":        existing.ContentID,
-		"legacy_post_id":    extension.LegacyPostID,
-		"audio_url":         extension.AudioURL,
-		"duration_sec":      extension.DurationSec,
-		"episode_cover_url": extension.EpisodeCoverURL,
-		"season_number":     extension.SeasonNumber,
-		"episode_number":    extension.EpisodeNumber,
-		"shownotes":         extension.Shownotes,
-		"view_count":        extension.ViewCount,
+		"content_id":          existing.ContentID,
+		"legacy_post_id":      extension.LegacyPostID,
+		"audio_url":           extension.AudioURL,
+		"duration_sec":        extension.DurationSec,
+		"episode_cover_url":   extension.EpisodeCoverURL,
+		"season_number":       extension.SeasonNumber,
+		"episode_number":      extension.EpisodeNumber,
+		"shownotes":           extension.Shownotes,
+		"view_count":          extension.ViewCount,
+		"collection_conflict": extension.CollectionConflict,
 	}).Error
 }
 

@@ -114,6 +114,9 @@ func IsTrustedWebOrigin(rawOrigin string) bool {
 	if configured != "" && rawOrigin == configured {
 		return true
 	}
+	if rawOrigin == "https://www.atoman.org" || rawOrigin == "https://atoman.org" {
+		return true
+	}
 	if os.Getenv("ENV") == "production" {
 		return false
 	}

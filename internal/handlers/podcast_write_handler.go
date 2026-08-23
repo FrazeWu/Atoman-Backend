@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/modules/lifecycle"
 	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
@@ -98,34 +99,39 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		var ep model.PodcastEpisode
+		var episodeID uuid.UUID
 		txErr := db.Transaction(func(tx *gorm.DB) error {
-			post := model.Post{
-				UserID: userID, ChannelID: &chID, CollectionID: collectionID,
-				Title: strings.TrimSpace(input.Title), Content: input.Shownotes,
-				Status: status, Visibility: visibility,
-			}
-			if err := tx.Create(&post).Error; err != nil {
+			contentID, err := uuid.NewV7()
+			if err != nil {
 				return err
 			}
-			ep = model.PodcastEpisode{
-				PostID:          post.ID,
-				ChannelID:       chID,
-				AudioURL:        input.AudioURL,
-				DurationSec:     input.DurationSec,
-				EpisodeCoverURL: input.EpisodeCoverURL,
-				SeasonNumber:    seasonNum,
-				EpisodeNumber:   input.EpisodeNumber,
+			episodeID, err = uuid.NewV7()
+			if err != nil {
+				return err
+			}
+			entry := model.ContentEntry{
+				Base: model.Base{ID: contentID}, AuthorID: &userID, ChannelID: chID,
+				Kind: "podcast", Title: strings.TrimSpace(input.Title), Summary: "", Status: status,
+				Visibility: visibility,
+			}
+			if err := tx.Create(&entry).Error; err != nil {
+				return err
+			}
+			extension := model.ContentEpisodeExtension{
+				ContentID: contentID, EpisodeID: episodeID, LegacyPostID: contentID,
+				AudioURL: input.AudioURL, DurationSec: input.DurationSec, EpisodeCoverURL: input.EpisodeCoverURL,
+				SeasonNumber: seasonNum, EpisodeNumber: input.EpisodeNumber, Shownotes: input.Shownotes,
+			}
+			if err := tx.Create(&extension).Error; err != nil {
+				return err
 			}
 			if collectionID != nil {
-				if err := syncPodcastPostCollection(tx, &post, chID, collectionID); err != nil {
+				if err := tx.Create(&model.ContentCollectionMembership{ContentID: contentID, CollectionID: *collectionID}).Error; err != nil {
 					return err
 				}
 			}
-			if err := tx.Create(&ep).Error; err != nil {
-				return err
-			}
 			if status == "published" {
-				return lifecycle.NewService(tx).EnqueuePublication("podcast", ep.ID)
+				return lifecycle.NewService(tx).EnqueuePublication("podcast", episodeID)
 			}
 			return nil
 		})
@@ -134,7 +140,11 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		db.Preload("Post.Collection").Preload("Post.Collections").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID)
+		ep, txErr = contentmodule.LoadPodcastEpisode(db, contentmodule.PodcastQuery(db).Where("episodes.episode_id = ?", episodeID))
+		if txErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": txErr.Error()})
+			return
+		}
 		c.JSON(http.StatusCreated, ep)
 	}
 }
@@ -164,15 +174,24 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		userID := idVal.(uuid.UUID)
-		id := c.Param("id")
+		episodeID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
+			return
+		}
 
-		var ep model.PodcastEpisode
-		if err := db.Preload("Post").Preload("Post.Collection").Preload("Post.Collections").First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
+		ep, err := contentmodule.LoadPodcastEpisode(db, contentmodule.PodcastQuery(db).Where("episodes.episode_id = ?", episodeID))
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
 			return
 		}
 		if ep.Post == nil || ep.Post.UserID != userID {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		contentID, err := contentmodule.PodcastContentID(db, episodeID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
 			return
 		}
 		wasPublic := ep.Post.Status == "published" && (ep.Post.Visibility == "" || ep.Post.Visibility == "public")
@@ -195,10 +214,10 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		effectiveStatus := ep.Post.Status
-		wasPublished := ep.Post.Status == "published"
 		if input.Status != nil {
 			effectiveStatus = *input.Status
 		}
+		wasPublished := ep.Post.Status == "published"
 		collectionChanged := input.CollectionID.Set || input.CollectionIDs != nil
 		shouldResolveCollection := collectionChanged || (!wasPublished && effectiveStatus == "published")
 		resolvedCollectionID := ep.Post.CollectionID
@@ -216,85 +235,90 @@ func UpdatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 				}
 				legacyCollectionIDs = input.CollectionIDs
 			}
-			resolved, resolveErr := studioapi.NewService(db).ResolveContentCollection(
+			resolvedCollectionID, err = studioapi.NewService(db).ResolveContentCollection(
 				userID, ep.ChannelID, studioapi.ModulePodcast, requestedCollectionID, legacyCollectionIDs, effectiveStatus == "published",
 			)
-			if resolveErr != nil {
-				httpx.Error(c, resolveErr)
+			if err != nil {
+				httpx.Error(c, err)
 				return
 			}
-			resolvedCollectionID = resolved
 		}
 
-		postUpdates := map[string]interface{}{}
+		entryUpdates := map[string]any{}
 		if input.Title != nil {
-			postUpdates["title"] = strings.TrimSpace(*input.Title)
-		}
-		if input.Shownotes != nil {
-			postUpdates["content"] = *input.Shownotes
+			entryUpdates["title"] = strings.TrimSpace(*input.Title)
 		}
 		if input.Status != nil {
-			postUpdates["status"] = *input.Status
+			entryUpdates["status"] = *input.Status
 		}
 		if input.Visibility != nil {
 			if *input.Visibility != "public" && *input.Visibility != "followers" && *input.Visibility != "private" {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid visibility"})
 				return
 			}
-			postUpdates["visibility"] = *input.Visibility
+			entryUpdates["visibility"] = *input.Visibility
 		}
-		if shouldResolveCollection {
-			postUpdates["collection_id"] = resolvedCollectionID
-			postUpdates["collection_conflict"] = false
+		extensionUpdates := map[string]any{}
+		if input.Shownotes != nil {
+			extensionUpdates["shownotes"] = *input.Shownotes
 		}
-		epUpdates := map[string]interface{}{}
 		if input.AudioURL != nil {
-			epUpdates["audio_url"] = strings.TrimSpace(*input.AudioURL)
+			extensionUpdates["audio_url"] = strings.TrimSpace(*input.AudioURL)
 		}
 		if input.EpisodeCoverURL != nil {
-			epUpdates["episode_cover_url"] = *input.EpisodeCoverURL
+			extensionUpdates["episode_cover_url"] = *input.EpisodeCoverURL
 		}
 		if input.DurationSec != nil {
-			epUpdates["duration_sec"] = *input.DurationSec
+			extensionUpdates["duration_sec"] = *input.DurationSec
 		}
 		if input.SeasonNumber != nil {
-			epUpdates["season_number"] = *input.SeasonNumber
+			extensionUpdates["season_number"] = *input.SeasonNumber
 		}
 		if input.EpisodeNumber != nil {
-			epUpdates["episode_number"] = *input.EpisodeNumber
+			extensionUpdates["episode_number"] = *input.EpisodeNumber
+		}
+		if shouldResolveCollection {
+			extensionUpdates["collection_conflict"] = false
 		}
 
-		statusCode := http.StatusInternalServerError
 		if err := db.Transaction(func(tx *gorm.DB) error {
-			if len(postUpdates) > 0 {
-				if err := tx.Model(ep.Post).Updates(postUpdates).Error; err != nil {
+			if len(entryUpdates) > 0 {
+				if err := tx.Model(&model.ContentEntry{}).Where("id = ?", contentID).Updates(entryUpdates).Error; err != nil {
 					return err
 				}
 			}
-			if len(epUpdates) > 0 {
-				if err := tx.Model(&ep).Updates(epUpdates).Error; err != nil {
+			if len(extensionUpdates) > 0 {
+				if err := tx.Model(&model.ContentEpisodeExtension{}).Where("content_id = ?", contentID).Updates(extensionUpdates).Error; err != nil {
 					return err
 				}
 			}
 			if shouldResolveCollection {
-				if err := syncPodcastPostCollection(tx, ep.Post, ep.ChannelID, resolvedCollectionID); err != nil {
+				if err := tx.Where("content_id = ?", contentID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
+					return err
+				}
+				if resolvedCollectionID != nil {
+					if err := tx.Create(&model.ContentCollectionMembership{ContentID: contentID, CollectionID: *resolvedCollectionID}).Error; err != nil {
+						return err
+					}
+				}
+			}
+			if effectiveStatus == "published" && !wasPublished {
+				if err := lifecycle.NewService(tx).EnqueuePublication("podcast", episodeID); err != nil {
 					return err
 				}
 			}
-
-			if err := tx.Preload("Post.Collection").Preload("Channel").First(&ep, "podcast_episodes.id = ?", ep.ID).Error; err != nil {
-				return err
-			}
-			if effectiveStatus == "published" && !wasPublished {
-				return lifecycle.NewService(tx).EnqueuePublication("podcast", ep.ID)
-			}
 			return nil
 		}); err != nil {
-			c.JSON(statusCode, gin.H{"error": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
 
-		if ep.Post != nil && (wasPublic || (ep.Post.Status == "published" && (ep.Post.Visibility == "" || ep.Post.Visibility == "public"))) {
+		ep, err = contentmodule.LoadPodcastEpisode(db, contentmodule.PodcastQuery(db).Where("episodes.episode_id = ?", episodeID))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if wasPublic || (ep.Post != nil && ep.Post.Status == "published" && (ep.Post.Visibility == "" || ep.Post.Visibility == "public")) {
 			indexnow.NotifyPaths("/podcasts/episode/" + ep.ID.String())
 		}
 		c.JSON(http.StatusOK, ep)
@@ -323,10 +347,13 @@ func DeletePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		userID := idVal.(uuid.UUID)
-		id := c.Param("id")
-
-		var ep model.PodcastEpisode
-		if err := db.Preload("Post").First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
+		episodeID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
+			return
+		}
+		ep, err := contentmodule.LoadPodcastEpisode(db, contentmodule.PodcastQuery(db).Where("episodes.episode_id = ?", episodeID))
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
 			return
 		}
@@ -334,13 +361,17 @@ func DeletePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
-
 		wasPublic := ep.Post.Status == "published" && (ep.Post.Visibility == "" || ep.Post.Visibility == "public")
+		contentID, err := contentmodule.PodcastContentID(db, episodeID)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
+			return
+		}
 		if err := db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Delete(&ep).Error; err != nil {
+			if err := tx.Where("content_id = ?", contentID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
 				return err
 			}
-			return tx.Delete(ep.Post).Error
+			return tx.Delete(&model.ContentEntry{}, "id = ?", contentID).Error
 		}); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -350,18 +381,6 @@ func DeletePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 	}
-}
-
-func syncPodcastPostCollection(db *gorm.DB, post *model.Post, channelID uuid.UUID, collectionID *uuid.UUID) error {
-	if collectionID == nil {
-		return db.Model(post).Association("Collections").Clear()
-	}
-	var collection model.Collection
-	if err := db.Where("id = ? AND channel_id = ? AND content_type = ?", *collectionID, channelID, studioapi.ModulePodcast).
-		First(&collection).Error; err != nil {
-		return err
-	}
-	return db.Model(post).Association("Collections").Replace(&collection)
 }
 
 // GetPodcastRSS returns a standards-compliant podcast RSS with <enclosure> tags.

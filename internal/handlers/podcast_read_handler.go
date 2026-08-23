@@ -11,8 +11,8 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
-	contentmodule "atoman/internal/modules/content"
 	blog "atoman/internal/modules/blog"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/modules/recommendation"
 	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
@@ -214,19 +214,18 @@ func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		var episodes []model.PodcastEpisode
-		q := db.Preload("Post.Collection").Preload("Channel").
-			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL")
+		q := contentmodule.PodcastQuery(db)
 		q = blog.ApplyPublishedPostListVisibility(q, currentPodcastViewerID(c))
 		if channelID != "" {
-			q = q.Where("podcast_episodes.channel_id = ?", channelID)
+			q = q.Where("episodes.channel_id = ?", channelID)
 		}
 		if sort == "random" {
 			q = q.Order("RANDOM()")
 		} else {
-			q = q.Order("podcast_episodes.created_at DESC, podcast_episodes.id DESC")
+			q = q.Order("posts.created_at DESC, episodes.episode_id DESC")
 		}
-		if err := q.Offset(httpx.Offset(page, limit)).Limit(limit).Find(&episodes).Error; err != nil {
+		episodes, err := contentmodule.LoadPodcastEpisodes(db, q.Offset(httpx.Offset(page, limit)).Limit(limit))
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load podcast episodes"})
 			return
 		}
@@ -252,14 +251,10 @@ func GetShowEpisodes(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "show not found"})
 			return
 		}
-		var episodes []model.PodcastEpisode
-		q := db.Where("podcast_episodes.channel_id = ?", channel.ID).
-			Preload("Post.Collection").Preload("Channel").
-			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL")
+		q := contentmodule.PodcastQuery(db).Where("episodes.channel_id = ? AND posts.status = ?", channel.ID, "published")
 		q = blog.ApplyPublishedPostListVisibility(q, currentPodcastViewerID(c))
-		err := q.
-			Order("podcast_episodes.season_number ASC, podcast_episodes.episode_number ASC").
-			Find(&episodes).Error
+		episodes, err := contentmodule.LoadPodcastEpisodes(db, q.
+			Order("episodes.season_number ASC, episodes.episode_number ASC"))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load show episodes"})
 			return
@@ -281,15 +276,14 @@ func GetShowEpisodes(db *gorm.DB) gin.HandlerFunc {
 func GetPodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		id := c.Param("id")
-		var ep model.PodcastEpisode
-		query := db.Preload("Post.Collection").Preload("Channel")
+		q := contentmodule.PodcastQuery(db).Where("episodes.episode_id = ?", id)
 		if viewer, ok := authctx.Current(c); ok {
-			query = query.Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL AND (posts.status = 'published' OR (posts.status = 'draft' AND posts.user_id = ?))", viewer.ID)
+			q = q.Where("posts.status = ? OR (posts.status = ? AND posts.author_id = ?)", "published", "draft", viewer.ID)
 		} else {
-			query = query.Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL")
+			q = q.Where("posts.status = ?", "published")
 		}
-		if err := query.
-			First(&ep, "podcast_episodes.id = ?", id).Error; err != nil {
+		ep, err := contentmodule.LoadPodcastEpisode(db, q)
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
 			return
 		}

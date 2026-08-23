@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/modules/recommendation"
 	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/httpx"
@@ -27,11 +28,10 @@ func GetRecommendedVideoItems(db *gorm.DB) gin.HandlerFunc {
 		}
 		page, pageSize := httpx.PageParams(c)
 
-		var videos []model.Video
-		if err := db.Preload("Channel").Preload("Tags").Preload("Collections").
-			Where("status = ? AND visibility = ?", "published", "public").
-			Order("created_at DESC").
-			Find(&videos).Error; err != nil {
+		videos, err := contentmodule.LoadVideos(db, contentmodule.VideoQuery(db).
+			Where("posts.status = ? AND posts.visibility = ?", "published", "public").
+			Order("posts.created_at DESC"))
+		if err != nil {
 			httpx.Error(c, err)
 			return
 		}
@@ -160,17 +160,9 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		q := db.Model(&model.Video{}).
-			Preload("Channel").
-			Preload("Tags")
-
-		// If viewing a specific collection or channel, and we are the owner, we can see non-public videos
-		// For general browsing, we only see published and public
+		q := contentmodule.VideoQuery(db)
 		isOwnerView := false
 		if (channelID != "" || collectionID != "") && viewerID != nil {
-			// Check if user owns the channel or collection
-			// Simplified: if we have a viewerID, we allow filtering by user_id in the query
-			// or we check ownership. For now, let's just add logic to include private/drafts if it's the owner's request.
 			if userID := c.Query("user_id"); userID != "" && userID == viewerID.String() {
 				isOwnerView = true
 			} else if channelID != "" {
@@ -179,7 +171,7 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 					isOwnerView = true
 				}
 			} else if collectionID != "" {
-				var collection model.Collection
+				var collection model.ContentCollection
 				if err := db.Preload("Channel").First(&collection, "id = ?", collectionID).Error; err == nil && collection.Channel != nil && collection.Channel.UserID != nil && *collection.Channel.UserID == *viewerID {
 					isOwnerView = true
 				}
@@ -188,7 +180,7 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 
 		if !isOwnerView {
 			if viewerID == nil {
-				q = q.Where("videos.status = ? AND videos.visibility = ?", "published", "public")
+				q = q.Where("posts.status = ? AND posts.visibility = ?", "published", "public")
 			} else {
 				subscribedChannelIDs := db.Model(&model.FeedSource{}).
 					Select("feed_sources.source_id").
@@ -196,20 +188,17 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 					Where("subscriptions.user_id = ?", viewerID).
 					Where("subscriptions.deleted_at IS NULL").
 					Where("feed_sources.source_type = ?", "internal_channel")
-				q = q.Where("videos.status = ? AND (videos.visibility = ? OR (videos.visibility = ? AND videos.channel_id IN (?)))",
+				q = q.Where("posts.status = ? AND (posts.visibility = ? OR (posts.visibility = ? AND posts.channel_id IN (?)))",
 					"published", "public", "followers", subscribedChannelIDs)
 			}
 		} else {
-			// In owner view, we might still want to filter by user_id explicitly if not already implied
-			q = q.Where("videos.user_id = ?", viewerID)
+			q = q.Where("posts.author_id = ?", viewerID)
 		}
-
 		if channelID != "" {
-			q = q.Where("videos.channel_id = ?", channelID)
+			q = q.Where("posts.channel_id = ?", channelID)
 		}
 		if collectionID != "" {
-			q = q.Joins("JOIN video_collections vc ON vc.video_id = videos.id").
-				Where("vc.collection_id = ?", collectionID)
+			q = q.Where("EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id AND memberships.collection_id = ?)", collectionID)
 		}
 		if subscribedOnly {
 			subscribedChannelIDs := db.Model(&model.FeedSource{}).
@@ -218,20 +207,20 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 				Where("subscriptions.user_id = ?", viewerID).
 				Where("subscriptions.deleted_at IS NULL").
 				Where("feed_sources.source_type = ?", "internal_channel")
-			q = q.Where("videos.channel_id IN (?)", subscribedChannelIDs)
+			q = q.Where("posts.channel_id IN (?)", subscribedChannelIDs)
 		}
 		if tag != "" {
-			q = q.Joins("JOIN video_tag_relations vtr ON vtr.video_id = videos.id").
+			q = q.Joins("JOIN video_tag_relations vtr ON vtr.video_id = videos.video_id").
 				Joins("JOIN video_tags vt ON vt.id = vtr.tag_id AND vt.name = ?", tag)
 		}
 		if sort == "popular" {
-			q = q.Order("videos.view_count DESC, videos.id DESC")
+			q = q.Order("videos.view_count DESC, videos.video_id DESC")
 		} else {
-			q = q.Order("videos.created_at DESC, videos.id DESC")
+			q = q.Order("posts.created_at DESC, videos.video_id DESC")
 		}
 
-		var videos []model.Video
-		if err := q.Offset(httpx.Offset(page, limit)).Limit(limit).Find(&videos).Error; err != nil {
+		videos, err := contentmodule.LoadVideos(db, q.Offset(httpx.Offset(page, limit)).Limit(limit))
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -251,11 +240,14 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 // @Router /api/v1/videos/{id} [get]
 func GetVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
-		var video model.Video
-		query := db.Preload("Channel").Preload("Tags").Preload("Collections")
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
 		viewerID := currentBlogViewerID(c)
-		if err := query.First(&video, "id = ?", id).Error; err != nil {
+		video, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", id))
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
@@ -313,11 +305,6 @@ func canViewVideo(db *gorm.DB, viewerID *uuid.UUID, video model.Video) (bool, er
 	}
 }
 
-func firstPublicVideo(db *gorm.DB, id uuid.UUID, video *model.Video) error {
-	return db.Where("status = ? AND visibility = ?", "published", "public").
-		First(video, "id = ?", id).Error
-}
-
 type VideoViewCountResponse struct {
 	OK        bool `json:"ok"`
 	ViewCount int  `json:"view_count"`
@@ -336,12 +323,24 @@ type VideoViewCountResponse struct {
 // @Router /api/v1/videos/{id}/view [post]
 func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
-		publicVideo := func() *gorm.DB {
-			return db.Model(&model.Video{}).
-				Where("id = ? AND status = ? AND visibility = ?", id, "published", "public")
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
 		}
-		result := publicVideo().UpdateColumn("view_count", gorm.Expr("view_count + 1"))
+		video, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).
+			Where("videos.video_id = ? AND posts.status = ? AND posts.visibility = ?", id, "published", "public"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		contentID, err := contentmodule.VideoContentID(db, id)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		result := db.Model(&model.ContentVideoExtension{}).Where("content_id = ?", contentID).
+			UpdateColumn("view_count", gorm.Expr("view_count + 1"))
 		if result.Error != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to increment view count"})
 			return
@@ -350,17 +349,7 @@ func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
-
-		var video model.Video
-		readResult := publicVideo().Select("id", "channel_id", "view_count").First(&video)
-		if readResult.Error != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load view count"})
-			return
-		}
-		if readResult.RowsAffected == 0 {
-			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
-			return
-		}
+		video.ViewCount++
 		if video.ChannelID != nil {
 			if err := studioapi.NewService(db).RecordMetricEvent(*video.ChannelID, studioapi.ModuleVideo, video.ID, "play"); err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to record video play"})
@@ -383,50 +372,50 @@ func IncrementVideoView(db *gorm.DB) gin.HandlerFunc {
 // @Router /api/v1/videos/{id}/recommended [get]
 func GetRecommendedVideos(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		id := c.Param("id")
-		var source model.Video
-		if err := db.Preload("Tags").First(&source, "id = ?", id).Error; err != nil {
+		id, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		source, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", id))
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
 
 		var tagIDs []uuid.UUID
-		for _, t := range source.Tags {
-			tagIDs = append(tagIDs, t.ID)
+		for _, tag := range source.Tags {
+			tagIDs = append(tagIDs, tag.ID)
 		}
-
 		var channelCandidates, tagCandidates []model.Video
 		if source.ChannelID != nil {
-			db.Model(&model.Video{}).
-				Where("channel_id = ? AND id <> ? AND status = ? AND visibility = ?",
-					source.ChannelID, id, "published", "public").
-				Preload("Tags").Preload("Channel").Limit(20).Find(&channelCandidates)
+			channelCandidates, _ = contentmodule.LoadVideos(db, contentmodule.VideoQuery(db).
+				Where("posts.channel_id = ? AND videos.video_id <> ? AND posts.status = ? AND posts.visibility = ?", *source.ChannelID, id, "published", "public").
+				Order("posts.created_at DESC").Limit(20))
 		}
 		if len(tagIDs) > 0 {
-			db.Model(&model.Video{}).
-				Joins("JOIN video_tag_relations vtr ON vtr.video_id = videos.id").
-				Where("vtr.tag_id IN ? AND videos.id <> ? AND videos.status = ? AND videos.visibility = ?",
-					tagIDs, id, "published", "public").
-				Preload("Tags").Preload("Channel").Limit(20).Find(&tagCandidates)
+			tagCandidates, _ = contentmodule.LoadVideos(db, contentmodule.VideoQuery(db).
+				Joins("JOIN video_tag_relations vtr ON vtr.video_id = videos.video_id").
+				Where("vtr.tag_id IN ? AND videos.video_id <> ? AND posts.status = ? AND posts.visibility = ?", tagIDs, id, "published", "public").
+				Order("posts.created_at DESC").Limit(20))
 		}
 
 		scores := map[uuid.UUID]int{}
 		seen := map[uuid.UUID]model.Video{}
-		for _, v := range channelCandidates {
-			scores[v.ID] += 60
-			seen[v.ID] = v
+		for _, video := range channelCandidates {
+			scores[video.ID] += 60
+			seen[video.ID] = video
 		}
-		for _, v := range tagCandidates {
-			scores[v.ID] += 40
-			seen[v.ID] = v
+		for _, video := range tagCandidates {
+			scores[video.ID] += 40
+			seen[video.ID] = video
 		}
 
 		var results []model.Video
 		if len(seen) == 0 {
-			// Fallback: latest public videos
-			db.Model(&model.Video{}).
-				Where("id <> ? AND status = ? AND visibility = ?", id, "published", "public").
-				Order("created_at DESC").Preload("Channel").Preload("Tags").Limit(8).Find(&results)
+			results, _ = contentmodule.LoadVideos(db, contentmodule.VideoQuery(db).
+				Where("videos.video_id <> ? AND posts.status = ? AND posts.visibility = ?", id, "published", "public").
+				Order("posts.created_at DESC").Limit(8))
 			c.JSON(http.StatusOK, results)
 			return
 		}
@@ -435,9 +424,9 @@ func GetRecommendedVideos(db *gorm.DB) gin.HandlerFunc {
 			id    uuid.UUID
 			score int
 		}
-		var ranked []scoredID
-		for vid, score := range scores {
-			ranked = append(ranked, scoredID{vid, score})
+		ranked := make([]scoredID, 0, len(scores))
+		for videoID, score := range scores {
+			ranked = append(ranked, scoredID{videoID, score})
 		}
 		for i := 1; i < len(ranked); i++ {
 			for j := i; j > 0 && ranked[j].score > ranked[j-1].score; j-- {
@@ -447,10 +436,9 @@ func GetRecommendedVideos(db *gorm.DB) gin.HandlerFunc {
 		if len(ranked) > 8 {
 			ranked = ranked[:8]
 		}
-		for _, r := range ranked {
-			results = append(results, seen[r.id])
+		for _, rankedVideo := range ranked {
+			results = append(results, seen[rankedVideo.id])
 		}
-
 		c.JSON(http.StatusOK, results)
 	}
 }

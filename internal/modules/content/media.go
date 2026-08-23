@@ -10,27 +10,28 @@ import (
 )
 
 type podcastRow struct {
-	ContentID       uuid.UUID  `gorm:"column:content_id"`
-	EpisodeID       uuid.UUID  `gorm:"column:episode_id"`
-	LegacyPostID    uuid.UUID  `gorm:"column:legacy_post_id"`
-	AuthorID        uuid.UUID  `gorm:"column:author_id"`
-	ChannelID       uuid.UUID  `gorm:"column:channel_id"`
-	CreatedAt       model.Base `gorm:"embedded"`
-	EntryCreatedAt  modelTime  `gorm:"column:entry_created_at"`
-	EntryUpdatedAt  modelTime  `gorm:"column:entry_updated_at"`
-	Title           string     `gorm:"column:title"`
-	Summary         string     `gorm:"column:summary"`
-	Status          string     `gorm:"column:status"`
-	Visibility      string     `gorm:"column:visibility"`
-	PublishedAt     *modelTime `gorm:"column:published_at"`
-	ScheduledAt     *modelTime `gorm:"column:scheduled_at"`
-	Shownotes       string     `gorm:"column:shownotes"`
-	AudioURL        string     `gorm:"column:audio_url"`
-	DurationSec     int        `gorm:"column:duration_sec"`
-	EpisodeCoverURL string     `gorm:"column:episode_cover_url"`
-	SeasonNumber    int        `gorm:"column:season_number"`
-	EpisodeNumber   int        `gorm:"column:episode_number"`
-	ViewCount       int64      `gorm:"column:view_count"`
+	ContentID          uuid.UUID  `gorm:"column:content_id"`
+	EpisodeID          uuid.UUID  `gorm:"column:episode_id"`
+	LegacyPostID       uuid.UUID  `gorm:"column:legacy_post_id"`
+	AuthorID           uuid.UUID  `gorm:"column:author_id"`
+	ChannelID          uuid.UUID  `gorm:"column:channel_id"`
+	CreatedAt          model.Base `gorm:"embedded"`
+	EntryCreatedAt     modelTime  `gorm:"column:entry_created_at"`
+	EntryUpdatedAt     modelTime  `gorm:"column:entry_updated_at"`
+	Title              string     `gorm:"column:title"`
+	Summary            string     `gorm:"column:summary"`
+	Status             string     `gorm:"column:status"`
+	Visibility         string     `gorm:"column:visibility"`
+	PublishedAt        *modelTime `gorm:"column:published_at"`
+	ScheduledAt        *modelTime `gorm:"column:scheduled_at"`
+	Shownotes          string     `gorm:"column:shownotes"`
+	AudioURL           string     `gorm:"column:audio_url"`
+	DurationSec        int        `gorm:"column:duration_sec"`
+	EpisodeCoverURL    string     `gorm:"column:episode_cover_url"`
+	SeasonNumber       int        `gorm:"column:season_number"`
+	EpisodeNumber      int        `gorm:"column:episode_number"`
+	ViewCount          int64      `gorm:"column:view_count"`
+	CollectionConflict bool       `gorm:"column:collection_conflict"`
 }
 
 type videoRow struct {
@@ -69,7 +70,7 @@ func PodcastQuery(db *gorm.DB) *gorm.DB {
 			posts.status, posts.visibility, posts.published_at, posts.scheduled_at,
 			episodes.shownotes, episodes.audio_url, episodes.duration_sec,
 			episodes.episode_cover_url, episodes.season_number, episodes.episode_number,
-			episodes.view_count`).
+			episodes.view_count, episodes.collection_conflict`).
 		Where("posts.kind = ? AND posts.deleted_at IS NULL", "podcast")
 }
 
@@ -92,6 +93,26 @@ func LoadPodcastEpisodes(db *gorm.DB, query *gorm.DB) ([]model.PodcastEpisode, e
 		return nil, err
 	}
 	return hydratePodcastEpisodes(db, rows)
+}
+
+func PodcastContentID(db *gorm.DB, episodeID uuid.UUID) (uuid.UUID, error) {
+	var row struct {
+		ContentID uuid.UUID `gorm:"column:content_id"`
+	}
+	if err := db.Table("content_episode_extensions").Select("content_id").Where("episode_id = ?", episodeID).First(&row).Error; err != nil {
+		return uuid.Nil, err
+	}
+	return row.ContentID, nil
+}
+
+func VideoContentID(db *gorm.DB, videoID uuid.UUID) (uuid.UUID, error) {
+	var row struct {
+		ContentID uuid.UUID `gorm:"column:content_id"`
+	}
+	if err := db.Table("content_video_extensions").Select("content_id").Where("video_id = ?", videoID).First(&row).Error; err != nil {
+		return uuid.Nil, err
+	}
+	return row.ContentID, nil
 }
 
 func LoadPodcastEpisode(db *gorm.DB, query *gorm.DB) (model.PodcastEpisode, error) {
@@ -194,6 +215,7 @@ func hydratePodcastEpisodes(db *gorm.DB, rows []podcastRow) ([]model.PodcastEpis
 			Content: row.Shownotes, Summary: row.Summary, Status: row.Status,
 			Visibility: row.Visibility, PublishedAt: timePtr(row.PublishedAt), ScheduledAt: timePtr(row.ScheduledAt),
 			ViewCount: row.ViewCount, CollectionPosition: positions[row.ContentID],
+			CollectionConflict: row.CollectionConflict,
 		}
 		post.Channel = channels[row.ChannelID]
 		post.Collections = collections[row.ContentID]

@@ -10,7 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
-	blog "atoman/internal/modules/blog"
+	contentmodule "atoman/internal/modules/content"
 )
 
 // GetPodcastRSS godoc
@@ -31,14 +31,9 @@ func GetPodcastRSS(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		var episodes []model.PodcastEpisode
-		q := db.Where("podcast_episodes.channel_id = ?", channel.ID).
-			Preload("Post.Collection").
-			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL")
-		q = blog.ApplyPublishedPostListVisibility(q, nil)
-		err := q.
-			Order("podcast_episodes.season_number ASC, podcast_episodes.episode_number ASC").
-			Limit(100).Find(&episodes).Error
+		episodes, err := contentmodule.LoadPodcastEpisodes(db, contentmodule.PodcastQuery(db).
+			Where("episodes.channel_id = ? AND posts.status = ? AND posts.visibility IN ?", channel.ID, "published", []string{"", "public"}).
+			Order("episodes.season_number ASC, episodes.episode_number ASC"))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load podcast episodes"})
 			return

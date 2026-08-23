@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 )
 
 type podcastEpisodeBookmarkInput struct {
@@ -39,20 +40,24 @@ func GetPodcastEpisodeBookmarks(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		var bookmarks []model.PodcastEpisodeBookmark
-		query := db.Preload("Episode").Preload("Episode.Post").Preload("Episode.Channel").Where("podcast_episode_bookmarks.user_id = ?", userID)
+		query := db.Where("podcast_episode_bookmarks.user_id = ?", userID)
+
 		if c.Query("kind") != "" {
 			query = query.Where("podcast_episode_bookmarks.kind = ?", kind)
 		}
 		if sort == "popular" {
 			query = query.
-				Joins("JOIN podcast_episodes ON podcast_episodes.id = podcast_episode_bookmarks.episode_id").
-				Joins("JOIN posts ON posts.id = podcast_episodes.post_id").
-				Order("COALESCE(posts.view_count, 0) DESC").
+				Joins("JOIN content_episode_extensions AS episodes ON episodes.episode_id = podcast_episode_bookmarks.episode_id").
+				Order("episodes.view_count DESC").
 				Order("podcast_episode_bookmarks.created_at DESC")
 		} else {
 			query = query.Order("podcast_episode_bookmarks.created_at DESC")
 		}
 		if err := query.Find(&bookmarks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch podcast bookmarks"})
+			return
+		}
+		if err := hydratePodcastBookmarks(db, bookmarks); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch podcast bookmarks"})
 			return
 		}
@@ -75,8 +80,7 @@ func CreatePodcastEpisodeBookmark(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		var episode model.PodcastEpisode
-		if err := db.First(&episode, "id = ?", input.EpisodeID).Error; err != nil {
+		if _, err := contentmodule.LoadPodcastEpisode(db, contentmodule.PodcastQuery(db).Where("episodes.episode_id = ?", input.EpisodeID)); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "episode not found"})
 			return
 		}
@@ -86,10 +90,16 @@ func CreatePodcastEpisodeBookmark(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create podcast bookmark"})
 			return
 		}
-		if err := db.Preload("Episode").Preload("Episode.Post").Preload("Episode.Channel").First(&bookmark, "id = ?", bookmark.ID).Error; err != nil {
+		if err := db.First(&bookmark, "id = ?", bookmark.ID).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create podcast bookmark"})
 			return
 		}
+		hydrated := []model.PodcastEpisodeBookmark{bookmark}
+		if err := hydratePodcastBookmarks(db, hydrated); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create podcast bookmark"})
+			return
+		}
+		bookmark = hydrated[0]
 		c.JSON(http.StatusCreated, gin.H{"data": bookmark, "message": "ok"})
 	}
 }
@@ -109,6 +119,29 @@ func DeletePodcastEpisodeBookmark(db *gorm.DB) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "ok"})
 	}
+}
+
+func hydratePodcastBookmarks(db *gorm.DB, bookmarks []model.PodcastEpisodeBookmark) error {
+	if len(bookmarks) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(bookmarks))
+	for _, bookmark := range bookmarks {
+		ids = append(ids, bookmark.EpisodeID)
+	}
+	episodes, err := contentmodule.LoadPodcastEpisodes(db, contentmodule.PodcastQuery(db).Where("episodes.episode_id IN ?", ids))
+	if err != nil {
+		return err
+	}
+	byID := make(map[uuid.UUID]*model.PodcastEpisode, len(episodes))
+	for index := range episodes {
+		episode := episodes[index]
+		byID[episode.ID] = &episode
+	}
+	for index := range bookmarks {
+		bookmarks[index].Episode = byID[bookmarks[index].EpisodeID]
+	}
+	return nil
 }
 
 func GetPodcastShowBookmarks(db *gorm.DB) gin.HandlerFunc {
