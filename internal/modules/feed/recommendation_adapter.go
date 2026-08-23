@@ -318,21 +318,29 @@ func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) e
 		if s.db.Migrator().HasTable(&model.Bookmark{}) {
 			bookmarkSQL = "COALESCE((SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL), 0) AS bookmark_count"
 		}
+		hasCanonical := hasCanonicalBlogExtensions(s.db)
+		var statsQuery *gorm.DB
+		viewColumn := "posts.view_count"
+		if hasCanonical {
+			statsQuery = s.db.Table("content_entries AS posts").
+				Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
+				Where("posts.kind = ? AND posts.id IN ?", "blog", postIDs)
+			viewColumn = "blog_extensions.view_count"
+		} else {
+			statsQuery = s.db.Table("posts AS posts").Where("posts.id IN ?", postIDs)
+		}
 		selectSQL := `posts.id AS post_id,
-			blog_extensions.view_count, ` + bookmarkSQL + `,
+			` + viewColumn + `, ` + bookmarkSQL + `,
 			0 AS rating_score,
 			0 AS rating_count`
 		if s.db.Migrator().HasTable(&model.PostRating{}) {
 			selectSQL = `posts.id AS post_id,
-				blog_extensions.view_count, ` + bookmarkSQL + `,
+				` + viewColumn + `, ` + bookmarkSQL + `,
 				COALESCE((SELECT AVG(score) FROM post_ratings WHERE post_ratings.post_id = posts.id AND post_ratings.deleted_at IS NULL), 0) AS rating_score,
 				COALESCE((SELECT COUNT(*) FROM post_ratings WHERE post_ratings.post_id = posts.id AND post_ratings.deleted_at IS NULL), 0) AS rating_count`
 		}
 		var stats []postRecommendationStats
-		if err := s.db.Table("content_entries AS posts").
-			Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
-			Where("posts.kind = ? AND posts.id IN ?", "blog", postIDs).
-			Select(selectSQL).Scan(&stats).Error; err != nil {
+		if err := statsQuery.Select(selectSQL).Scan(&stats).Error; err != nil {
 			return err
 		}
 		for _, stat := range stats {

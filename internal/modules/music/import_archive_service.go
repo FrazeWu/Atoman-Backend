@@ -192,8 +192,14 @@ func (s *Service) deriveAlbumImportPayloadFromZipFile(user authctx.CurrentUser, 
 			return nil, apperr.BadRequest("validation.invalid_request", "archive contains duplicate entries")
 		}
 		seenPaths[cleanPath] = struct{}{}
-		if file.FileInfo().Mode()&os.ModeSymlink != 0 {
-			return nil, apperr.BadRequest("validation.invalid_request", "archive contains an unsafe entry")
+		if file.FileInfo().Mode()&os.ModeSymlink != 0 || file.Flags&0x1 != 0 {
+			return nil, apperr.BadRequest("validation.invalid_request", "archive contains an unsafe or encrypted entry")
+		}
+		if file.CompressedSize64 == 0 && file.UncompressedSize64 > 0 {
+			return nil, apperr.BadRequest("validation.invalid_request", "archive compression ratio is too high")
+		}
+		if file.CompressedSize64 > 0 && file.CompressedSize64 <= ^uint64(0)/uint64(mediaArchiveMaxRatio) && file.UncompressedSize64 > file.CompressedSize64*uint64(mediaArchiveMaxRatio) {
+			return nil, apperr.BadRequest("validation.invalid_request", "archive compression ratio is too high")
 		}
 		if file.UncompressedSize64 > uint64(mediaArchiveMaxBytes) || expandedBytes > uint64(mediaArchiveMaxBytes)-file.UncompressedSize64 {
 			return nil, apperr.BadRequest("validation.invalid_request", "archive expands beyond size limit")

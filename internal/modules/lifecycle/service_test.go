@@ -49,6 +49,7 @@ func newLifecycleFixture(t *testing.T) lifecycleFixture {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
+		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
 		&model.ContentLifecycleEvent{}, &model.ContentProgress{}, &model.ContentNotificationPreference{},
 		&model.ContentPublicationEvent{}, &model.FeedSource{}, &model.Subscription{}, &model.Follow{}, &model.Notification{},
 	)
@@ -71,6 +72,10 @@ func newLifecycleFixture(t *testing.T) lifecycleFixture {
 	if err := db.Create(&collection).Error; err != nil {
 		t.Fatal(err)
 	}
+	canonicalCollection := model.ContentCollection{Base: collection.Base, ChannelID: channel.ID, CreatedBy: &ownerModel.UUID, Name: collection.Name}
+	if err := db.Create(&canonicalCollection).Error; err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 	post := model.Post{
 		UserID: ownerModel.UUID, ChannelID: &channel.ID, CollectionID: &collection.ID,
@@ -79,10 +84,34 @@ func newLifecycleFixture(t *testing.T) lifecycleFixture {
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatal(err)
 	}
+	seedLifecycleCanonicalBlog(t, db, post, canonicalCollection.ID)
 	return lifecycleFixture{
 		db: db, service: NewService(db), channel: channel, post: post,
 		owner:  authctx.CurrentUser{ID: ownerModel.UUID, Username: ownerModel.Username, Role: authctx.RoleUser},
 		viewer: authctx.CurrentUser{ID: viewerModel.UUID, Username: viewerModel.Username, Role: authctx.RoleUser},
+	}
+}
+
+func seedLifecycleCanonicalBlog(t *testing.T, db *gorm.DB, post model.Post, collectionID uuid.UUID) {
+	t.Helper()
+	if post.ChannelID == nil {
+		t.Fatal("lifecycle blog post must have a channel")
+	}
+	entry := model.ContentEntry{
+		Base: post.Base, AuthorID: &post.UserID, ChannelID: *post.ChannelID, Kind: "blog",
+		Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL,
+		Status: post.Status, Visibility: post.Visibility, PublishedAt: post.PublishedAt, ScheduledAt: post.ScheduledAt,
+	}
+	if err := db.Create(&entry).Error; err != nil {
+		t.Fatalf("create canonical lifecycle entry: %v", err)
+	}
+	if err := db.Create(&model.ContentBlogExtension{ContentID: entry.ID, Content: post.Content, ViewCount: post.ViewCount}).Error; err != nil {
+		t.Fatalf("create canonical lifecycle extension: %v", err)
+	}
+	if collectionID != uuid.Nil {
+		if err := db.Create(&model.ContentCollectionMembership{ContentID: entry.ID, CollectionID: collectionID, Position: post.CollectionPosition}).Error; err != nil {
+			t.Fatalf("create canonical lifecycle membership: %v", err)
+		}
 	}
 }
 
@@ -105,29 +134,29 @@ func TestRecordEventDeduplicatesClientEventID(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("expected one deduplicated event, got %d", count)
 	}
-	var post model.Post
-	if err := fixture.db.First(&post, "id = ?", fixture.post.ID).Error; err != nil {
+	var extension model.ContentBlogExtension
+	if err := fixture.db.First(&extension, "content_id = ?", fixture.post.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if post.ViewCount != 1 {
-		t.Fatalf("expected the deduplicated open event to increment one view, got %d", post.ViewCount)
+	if extension.ViewCount != 1 {
+		t.Fatalf("expected the deduplicated open event to increment one view, got %d", extension.ViewCount)
 	}
 	if err := fixture.service.RecordEvent(fixture.owner, EventInput{
 		Module: "blog", ContentID: fixture.post.ID, Event: "open", ClientEventID: "owner-open",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.db.First(&post, "id = ?", fixture.post.ID).Error; err != nil {
+	if err := fixture.db.First(&extension, "content_id = ?", fixture.post.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if post.ViewCount != 1 {
-		t.Fatalf("expected owner open not to increment views, got %d", post.ViewCount)
+	if extension.ViewCount != 1 {
+		t.Fatalf("expected owner open not to increment views, got %d", extension.ViewCount)
 	}
 }
 
 func TestRecordEventRequiresFollowerAccess(t *testing.T) {
 	fixture := newLifecycleFixture(t)
-	if err := fixture.db.Model(&model.Post{}).Where("id = ?", fixture.post.ID).Update("visibility", "followers").Error; err != nil {
+	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", fixture.post.ID).Update("visibility", "followers").Error; err != nil {
 		t.Fatal(err)
 	}
 	input := EventInput{Module: "blog", ContentID: fixture.post.ID, Event: "open", ClientEventID: "followers-open"}
@@ -381,6 +410,7 @@ func TestDispatchPendingPublicationsScansPastContendedCandidates(t *testing.T) {
 		if err := fixture.db.Create(&post).Error; err != nil {
 			t.Fatal(err)
 		}
+		seedLifecycleCanonicalBlog(t, fixture.db, post, uuid.Nil)
 		posts = append(posts, post)
 	}
 	for index, post := range posts {
@@ -919,7 +949,7 @@ func TestDispatchPendingPublicationsRetriesRecoverableDispatchError(t *testing.T
 
 func TestSchedulePublishesDueContentAndEnqueuesPublication(t *testing.T) {
 	fixture := newLifecycleFixture(t)
-	if err := fixture.db.Model(&fixture.post).Updates(map[string]any{"status": "draft", "published_at": nil}).Error; err != nil {
+	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", fixture.post.ID).Updates(map[string]any{"status": "draft", "published_at": nil}).Error; err != nil {
 		t.Fatal(err)
 	}
 	due := time.Now().UTC().Add(time.Hour)
@@ -933,7 +963,7 @@ func TestSchedulePublishesDueContentAndEnqueuesPublication(t *testing.T) {
 	if err := fixture.service.PublishDue(due.Add(-time.Second), 10); err != nil {
 		t.Fatal(err)
 	}
-	var before model.Post
+	var before model.ContentEntry
 	if err := fixture.db.First(&before, "id = ?", fixture.post.ID).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -943,7 +973,7 @@ func TestSchedulePublishesDueContentAndEnqueuesPublication(t *testing.T) {
 	if err := fixture.service.PublishDue(due.Add(time.Second), 10); err != nil {
 		t.Fatal(err)
 	}
-	var after model.Post
+	var after model.ContentEntry
 	if err := fixture.db.First(&after, "id = ?", fixture.post.ID).Error; err != nil {
 		t.Fatal(err)
 	}
