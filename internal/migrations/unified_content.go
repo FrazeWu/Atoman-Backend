@@ -14,9 +14,9 @@ import (
 // RunUnifiedContentMigration backfills canonical entries without changing legacy
 // resources. Extension rows make the operation safe to run on every startup.
 func RunUnifiedContentMigration(db *gorm.DB) error {
-	return db.Transaction(func(tx *gorm.DB) error {
+	if err := db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(
-			&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
+			&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{}, &model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
 			&model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
 		); err != nil {
 			return err
@@ -27,8 +27,17 @@ func RunUnifiedContentMigration(db *gorm.DB) error {
 		if err := backfillVideoContentEntries(tx); err != nil {
 			return err
 		}
-		return backfillContentCollections(tx)
-	})
+		if err := backfillContentCollections(tx); err != nil {
+			return err
+		}
+		if err := backfillContentBlogVersions(tx); err != nil {
+			return err
+		}
+		return backfillContentBlogDrafts(tx)
+	}); err != nil {
+		return fmt.Errorf("unified content migration: %w", err)
+	}
+	return nil
 }
 
 func backfillPostContentEntries(tx *gorm.DB) error {
@@ -58,8 +67,13 @@ func backfillPostContentEntries(tx *gorm.DB) error {
 			if err := ensureEpisodeExtension(tx, entry.ID, episode.ID); err != nil {
 				return err
 			}
-		} else if err := ensurePostExtension(tx, entry.ID, post.ID); err != nil {
-			return err
+		} else {
+			if err := ensurePostExtension(tx, entry.ID, post.ID); err != nil {
+				return err
+			}
+			if err := ensureBlogExtension(tx, entry.ID, post); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -91,12 +105,16 @@ func ensurePostContentEntry(tx *gorm.DB, post model.Post, kind string) (model.Co
 		if err := tx.First(&entry, "id = ?", extensionContentID).Error; err != nil {
 			return model.ContentEntry{}, err
 		}
+		if err := syncContentEntryFromPost(tx, &entry, post, kind); err != nil {
+			return model.ContentEntry{}, err
+		}
 		return entry, nil
 	}
 	if post.ChannelID == nil {
 		return model.ContentEntry{}, fmt.Errorf("post %s has no channel", post.ID)
 	}
-	entry := model.ContentEntry{ChannelID: *post.ChannelID, Kind: kind, Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL, Status: post.Status, Visibility: post.Visibility, PublishedAt: post.PublishedAt, ScheduledAt: post.ScheduledAt}
+	authorID := post.UserID
+	entry := model.ContentEntry{Base: post.Base, AuthorID: &authorID, ChannelID: *post.ChannelID, Kind: kind, Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL, Status: post.Status, Visibility: post.Visibility, PublishedAt: post.PublishedAt, ScheduledAt: post.ScheduledAt}
 	return entry, tx.Create(&entry).Error
 }
 
@@ -129,7 +147,10 @@ func backfillContentCollections(tx *gorm.DB) error {
 			return err
 		}
 	}
-	return backfillContentCollectionMemberships(tx)
+	if err := backfillContentCollectionMemberships(tx); err != nil {
+		return fmt.Errorf("backfill content collection memberships: %w", err)
+	}
+	return nil
 }
 
 func backfillContentCollectionMemberships(tx *gorm.DB) error {
@@ -211,12 +232,210 @@ func createContentCollectionMembership(tx *gorm.DB, contentID, collectionID uuid
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&membership).Error
 }
 
+func backfillContentBlogVersions(tx *gorm.DB) error {
+	contentByPostID, err := contentIDsByPost(tx)
+	if err != nil {
+		return err
+	}
+	collectionByLegacyID, err := legacyContentCollectionIDs(tx)
+	if err != nil {
+		return err
+	}
+	var versions []model.BlogPostVersion
+	if err := tx.Find(&versions).Error; err != nil {
+		return err
+	}
+	for _, version := range versions {
+		contentID, ok := contentByPostID[version.PostID]
+		if !ok {
+			return fmt.Errorf("blog version %s references post %s without a content entry", version.ID, version.PostID)
+		}
+		collectionID, ok := collectionByLegacyID[version.CollectionID]
+		if !ok {
+			return fmt.Errorf("blog version %s references collection %s without a content collection", version.ID, version.CollectionID)
+		}
+		canonical := model.ContentBlogVersion{
+			Base:         version.Base,
+			ContentID:    contentID,
+			Version:      version.Version,
+			EditorID:     version.EditorID,
+			Title:        version.Title,
+			Content:      version.Content,
+			Summary:      version.Summary,
+			CoverURL:     version.CoverURL,
+			Visibility:   version.Visibility,
+			CollectionID: collectionID,
+			PublishedAt:  version.PublishedAt,
+		}
+		var existing model.ContentBlogVersion
+		result := tx.First(&existing, "id = ?", version.ID)
+		switch {
+		case errors.Is(result.Error, gorm.ErrRecordNotFound):
+			if err := tx.Create(&canonical).Error; err != nil {
+				return err
+			}
+		case result.Error != nil:
+			return result.Error
+		default:
+			if err := tx.Model(&existing).Updates(map[string]any{
+				"content_id": contentID, "version": version.Version, "editor_id": version.EditorID,
+				"title": version.Title, "content": version.Content, "summary": version.Summary,
+				"cover_url": version.CoverURL, "visibility": version.Visibility,
+				"collection_id": collectionID, "published_at": version.PublishedAt,
+			}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func backfillContentBlogDrafts(tx *gorm.DB) error {
+	contentByPostID, err := contentIDsByPost(tx)
+	if err != nil {
+		return err
+	}
+	collectionByLegacyID, err := legacyContentCollectionIDs(tx)
+	if err != nil {
+		return err
+	}
+	var drafts []model.BlogDraft
+	if err := tx.Find(&drafts).Error; err != nil {
+		return err
+	}
+	for _, draft := range drafts {
+		var contentID *uuid.UUID
+		if draft.SourcePostID != nil {
+			id, ok := contentByPostID[*draft.SourcePostID]
+			if !ok {
+				return fmt.Errorf("blog draft %s references post %s without a content entry", draft.ID, *draft.SourcePostID)
+			}
+			contentID = &id
+		}
+		var collectionID *uuid.UUID
+		if draft.CollectionID != nil {
+			id, ok := collectionByLegacyID[*draft.CollectionID]
+			if !ok {
+				return fmt.Errorf("blog draft %s references collection %s without a content collection", draft.ID, *draft.CollectionID)
+			}
+			collectionID = &id
+		}
+		canonical := model.ContentBlogDraft{
+			Base:         draft.Base,
+			UserID:       draft.UserID,
+			ContentID:    contentID,
+			ContextKey:   draft.ContextKey,
+			Title:        draft.Title,
+			Content:      draft.Content,
+			Summary:      draft.Summary,
+			CoverURL:     draft.CoverURL,
+			Visibility:   draft.Visibility,
+			ChannelID:    draft.ChannelID,
+			CollectionID: collectionID,
+		}
+		var existing model.ContentBlogDraft
+		result := tx.First(&existing, "id = ?", draft.ID)
+		switch {
+		case errors.Is(result.Error, gorm.ErrRecordNotFound):
+			if err := tx.Create(&canonical).Error; err != nil {
+				return err
+			}
+		case result.Error != nil:
+			return result.Error
+		default:
+			if err := tx.Model(&existing).Updates(map[string]any{
+				"user_id": draft.UserID, "content_id": contentID, "context_key": draft.ContextKey,
+				"title": draft.Title, "content": draft.Content, "summary": draft.Summary,
+				"cover_url": draft.CoverURL, "visibility": draft.Visibility,
+				"channel_id": draft.ChannelID, "collection_id": collectionID,
+			}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func legacyContentCollectionIDs(tx *gorm.DB) (map[uuid.UUID]uuid.UUID, error) {
+	var mappings []model.LegacyCollectionMapping
+	if err := tx.Find(&mappings).Error; err != nil {
+		return nil, err
+	}
+	result := make(map[uuid.UUID]uuid.UUID, len(mappings))
+	for _, mapping := range mappings {
+		result[mapping.LegacyCollectionID] = mapping.ContentCollectionID
+	}
+	return result, nil
+}
+
+func syncContentEntryFromPost(tx *gorm.DB, entry *model.ContentEntry, post model.Post, kind string) error {
+	if post.ChannelID == nil {
+		return fmt.Errorf("post %s has no channel", post.ID)
+	}
+	updates := map[string]any{
+		"author_id":    post.UserID,
+		"channel_id":   *post.ChannelID,
+		"kind":         kind,
+		"title":        post.Title,
+		"summary":      post.Summary,
+		"cover_url":    post.CoverURL,
+		"status":       post.Status,
+		"visibility":   post.Visibility,
+		"published_at": post.PublishedAt,
+		"scheduled_at": post.ScheduledAt,
+	}
+	return tx.Model(entry).Updates(updates).Error
+}
+
+func ensureBlogExtension(tx *gorm.DB, contentID uuid.UUID, post model.Post) error {
+	var extension model.ContentBlogExtension
+	result := tx.Where("content_id = ?", contentID).First(&extension)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		return tx.Create(&model.ContentBlogExtension{
+			ContentID:          contentID,
+			Content:            post.Content,
+			LanguageCode:       post.LanguageCode,
+			Pinned:             post.Pinned,
+			ViewCount:          post.ViewCount,
+			CollectionConflict: post.CollectionConflict,
+		}).Error
+	}
+	if result.Error != nil {
+		return result.Error
+	}
+	return tx.Model(&extension).Updates(map[string]any{
+		"content":             post.Content,
+		"language_code":       post.LanguageCode,
+		"pinned":              post.Pinned,
+		"view_count":          post.ViewCount,
+		"collection_conflict": post.CollectionConflict,
+	}).Error
+}
+
 func ensurePostExtension(tx *gorm.DB, contentID, postID uuid.UUID) error {
 	return tx.Where(model.ContentPostExtension{PostID: postID}).FirstOrCreate(&model.ContentPostExtension{ContentID: contentID, PostID: postID}).Error
 }
 
 func ensureEpisodeExtension(tx *gorm.DB, contentID, episodeID uuid.UUID) error {
 	return tx.Where(model.ContentEpisodeExtension{EpisodeID: episodeID}).FirstOrCreate(&model.ContentEpisodeExtension{ContentID: contentID, EpisodeID: episodeID}).Error
+}
+
+func syncContentEntryFromVideo(tx *gorm.DB, entry *model.ContentEntry, video model.Video) error {
+	if video.ChannelID == nil {
+		return fmt.Errorf("video %s has no channel", video.ID)
+	}
+	return tx.Model(entry).Updates(map[string]any{
+		"author_id":    video.UserID,
+		"channel_id":   *video.ChannelID,
+		"kind":         "video",
+		"title":        video.Title,
+		"summary":      video.Description,
+		"cover_url":    video.ThumbnailURL,
+		"status":       video.Status,
+		"visibility":   video.Visibility,
+		"published_at": video.PublishedAt,
+		"scheduled_at": video.ScheduledAt,
+	}).Error
 }
 
 func backfillVideoContentEntries(tx *gorm.DB) error {
@@ -233,9 +452,17 @@ func backfillVideoContentEntries(tx *gorm.DB) error {
 			return err
 		}
 		if contentID != uuid.Nil {
+			var entry model.ContentEntry
+			if err := tx.First(&entry, "id = ?", contentID).Error; err != nil {
+				return err
+			}
+			if err := syncContentEntryFromVideo(tx, &entry, video); err != nil {
+				return err
+			}
 			continue
 		}
-		entry := model.ContentEntry{ChannelID: *video.ChannelID, Kind: "video", Title: video.Title, Summary: video.Description, CoverURL: video.ThumbnailURL, Status: video.Status, Visibility: video.Visibility, PublishedAt: video.PublishedAt, ScheduledAt: video.ScheduledAt}
+		authorID := video.UserID
+		entry := model.ContentEntry{AuthorID: &authorID, ChannelID: *video.ChannelID, Kind: "video", Title: video.Title, Summary: video.Description, CoverURL: video.ThumbnailURL, Status: video.Status, Visibility: video.Visibility, PublishedAt: video.PublishedAt, ScheduledAt: video.ScheduledAt}
 		if err := tx.Create(&entry).Error; err != nil {
 			return err
 		}

@@ -19,15 +19,16 @@ import (
 )
 
 type CatalogMetadataBackfillResult struct {
-	AlbumID        uuid.UUID
-	AlbumTitle     string
-	MatchedTitle   string
-	SourceURL      string
-	Matched        bool
-	Applied        bool
-	LyricsAdded    int
-	MissingArtists []string
-	Reason         string
+	AlbumID              uuid.UUID
+	AlbumTitle           string
+	MatchedTitle         string
+	SourceURL            string
+	MusicBrainzReleaseID string
+	Matched              bool
+	Applied              bool
+	LyricsAdded          int
+	MissingArtists       []string
+	Reason               string
 }
 
 func StripCatalogSongArtistPrefixes(ctx context.Context, db *gorm.DB) (int64, error) {
@@ -128,6 +129,14 @@ func StripCatalogSongTitlePrefix(ctx context.Context, db *gorm.DB, prefix string
 }
 
 func BackfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent string, apply bool, options ...string) ([]CatalogMetadataBackfillResult, error) {
+	return backfillCatalogMetadata(ctx, db, userAgent, apply, false, options...)
+}
+
+func BackfillUnmatchedCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent string, apply bool, options ...string) ([]CatalogMetadataBackfillResult, error) {
+	return backfillCatalogMetadata(ctx, db, userAgent, apply, true, options...)
+}
+
+func backfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent string, apply, unmatchedOnly bool, options ...string) ([]CatalogMetadataBackfillResult, error) {
 	var albums []model.Album
 	query := db.WithContext(ctx).
 		Preload("Artists").
@@ -135,6 +144,9 @@ func BackfillCatalogMetadata(ctx context.Context, db *gorm.DB, userAgent string,
 		Preload("ArtistCredits.Artist").
 		Preload("ArtistCredits.Artist.Aliases").
 		Preload("Songs").Where("redirect_to IS NULL")
+	if unmatchedOnly {
+		query = query.Where("musicbrainz_matched = ?", false)
+	}
 	if len(options) > 0 && strings.TrimSpace(options[0]) != "" {
 		query = query.Where("id = ?", strings.TrimSpace(options[0]))
 	}
@@ -174,11 +186,11 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 	}
 	tracks := make([]AlbumImportMetadataTrack, 0, len(album.Songs))
 	for _, song := range album.Songs {
-		title := existingSongSourceTitle(song, artist)
+		title := catalogSongSourceTitle(song, artist, artists)
 		duration := float64(song.DurationSec)
 		if duration <= 0 {
 			duration = probeExistingSongDuration(ctx, song.AudioURL)
-			if duration > 0 {
+			if duration > 0 && apply {
 				_ = db.WithContext(ctx).Model(&model.Song{}).Where("id = ?", song.ID).Update("duration_sec", int(duration+0.5)).Error
 			}
 		}
@@ -194,7 +206,7 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 	if album.ID.String() == "019fa2ca-a4b3-7288-82c2-7b2384c40b80" {
 		preferredReleaseID = "da13b81f-7b09-3fb6-b5c9-8551f22c797e"
 	}
-	enriched, err := enricher.Enrich(ctx, AlbumImportMetadataInput{AlbumTitle: album.Title, Artist: artist, Artists: artists, PreferredReleaseID: preferredReleaseID, Tracks: tracks})
+	enriched, err := enricher.Enrich(ctx, AlbumImportMetadataInput{AlbumTitle: album.Title, Artist: artist, Artists: artists, PreferredReleaseID: preferredReleaseID, Tracks: tracks, SkipLyrics: true})
 	if err != nil || enriched.SourceURL == "" {
 		if err != nil {
 			result.Reason = err.Error()
@@ -208,6 +220,7 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 	result.Matched = true
 	result.MatchedTitle = enriched.AlbumTitle
 	result.SourceURL = enriched.SourceURL
+	result.MusicBrainzReleaseID = enriched.MusicBrainzReleaseID
 	result.MissingArtists = enriched.MissingArtists
 	if !apply {
 		return result
@@ -230,7 +243,10 @@ func backfillCatalogAlbum(ctx context.Context, db *gorm.DB, enricher *ExternalAl
 		if err != nil {
 			return err
 		}
-		updates := map[string]any{"title": enriched.AlbumTitle, "album_type": enriched.AlbumType, "sources_json": string(sourcesJSON)}
+		updates := map[string]any{
+			"title": enriched.AlbumTitle, "album_type": enriched.AlbumType, "sources_json": string(sourcesJSON),
+			"musicbrainz_matched": true, "musicbrainz_release_id": enriched.MusicBrainzReleaseID, "musicbrainz_matched_at": time.Now().UTC(),
+		}
 		if date, precision, ok := parseBackfillReleaseDate(enriched.ReleaseDate); ok {
 			updates["release_date"] = date
 			updates["release_date_precision"] = precision
@@ -347,5 +363,5 @@ func FormatCatalogMetadataBackfillResult(result CatalogMetadataBackfillResult) s
 	if result.Applied {
 		status = "APPLIED"
 	}
-	return fmt.Sprintf("%s\t%s\t%s => %s\tlyrics=%d\tsource=%s\tmissing_artists=%s\t%s", status, result.AlbumID, result.AlbumTitle, result.MatchedTitle, result.LyricsAdded, result.SourceURL, strings.Join(result.MissingArtists, ","), result.Reason)
+	return fmt.Sprintf("%s\t%s\t%s => %s\trelease=%s\tlyrics=%d\tsource=%s\tmissing_artists=%s\t%s", status, result.AlbumID, result.AlbumTitle, result.MatchedTitle, result.MusicBrainzReleaseID, result.LyricsAdded, result.SourceURL, strings.Join(result.MissingArtists, ","), result.Reason)
 }

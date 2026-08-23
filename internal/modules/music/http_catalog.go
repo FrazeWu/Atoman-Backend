@@ -304,11 +304,11 @@ func (h *Handler) getArtist(c *gin.Context) {
 		Preload("Albums", func(db *gorm.DB) *gorm.DB {
 			return scopeVisibleMusicEntries(db, "\"Albums\"", "uploaded_by", viewerPtr, false)
 		}).
-		Preload("Albums.Artists").Preload("Albums.ArtistCredits", func(db *gorm.DB) *gorm.DB {
-		return db.Order("position ASC, role ASC, custom_role ASC")
-	}).Preload("Albums.ArtistCredits.Artist").Preload("Albums.Songs", visibleSongPreload(viewerPtr))
+		Preload("Albums.Artists", visibleArtistPreload(viewerPtr)).Preload("Albums.ArtistCredits", func(db *gorm.DB) *gorm.DB {
+			return db.Order("position ASC, role ASC, custom_role ASC")
+		}).Preload("Albums.ArtistCredits.Artist", visibleArtistPreload(viewerPtr)).Preload("Albums.Songs", visibleSongPreload(viewerPtr))
 	if h.service.db.Migrator().HasTable(&model.ArtistMember{}) {
-		query = query.Preload("MemberRelations.MemberArtist")
+		query = query.Preload("MemberRelations.MemberArtist", visibleArtistPreload(viewerPtr))
 	}
 	if err := query.First(&artist, "\"Artists\".id = ?", artistID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -456,13 +456,15 @@ func (h *Handler) listAlbums(c *gin.Context) {
 	}
 
 	viewer, hasViewer := currentMusicUser(c)
-	db := scopeVisibleMusicEntries(h.service.db.Model(&model.Album{}), "\"Albums\"", "uploaded_by", musicViewer(viewer, hasViewer), false)
+	viewerPtr := musicViewer(viewer, hasViewer)
+	db := scopeVisibleMusicEntries(h.service.db.Model(&model.Album{}), "\"Albums\"", "uploaded_by", viewerPtr, false)
 	joinedArtists := false
 	if query != "" {
 		like := "%" + strings.ToLower(query) + "%"
+		artistVisibility, artistArgs := musicEntryVisibilityCondition("search_artists", "created_by", viewerPtr, true)
 		db = db.
 			Joins("LEFT JOIN album_artists AS search_album_artists ON search_album_artists.album_id = \"Albums\".id").
-			Joins("LEFT JOIN \"Artists\" AS search_artists ON search_artists.id = search_album_artists.artist_id")
+			Joins("LEFT JOIN \"Artists\" AS search_artists ON search_artists.id = search_album_artists.artist_id AND "+artistVisibility, artistArgs...)
 		joinedArtists = true
 		db = db.Where("LOWER(\"Albums\".title) LIKE ? OR LOWER(search_artists.name) LIKE ?", like, like)
 	}
@@ -472,7 +474,10 @@ func (h *Handler) listAlbums(c *gin.Context) {
 			httpx.Error(c, err)
 			return
 		}
-		db = db.Joins("JOIN album_artists AS filter_album_artists ON filter_album_artists.album_id = \"Albums\".id").Where("filter_album_artists.artist_id = ?", artistID)
+		artistVisibility, artistArgs := musicEntryVisibilityCondition("filter_artists", "created_by", viewerPtr, true)
+		db = db.Joins("JOIN album_artists AS filter_album_artists ON filter_album_artists.album_id = \"Albums\".id").
+			Joins("JOIN \"Artists\" AS filter_artists ON filter_artists.id = filter_album_artists.artist_id AND "+artistVisibility, artistArgs...).
+			Where("filter_album_artists.artist_id = ?", artistID)
 		joinedArtists = true
 	}
 	if cursor != nil {
@@ -492,9 +497,9 @@ func (h *Handler) listAlbums(c *gin.Context) {
 	}
 
 	var albums []model.Album
-	findDB := db.Preload("Artists").Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
+	findDB := db.Preload("Artists", visibleArtistPreload(viewerPtr)).Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
 		return db.Order("position ASC, role ASC, custom_role ASC")
-	}).Preload("ArtistCredits.Artist")
+	}).Preload("ArtistCredits.Artist", visibleArtistPreload(viewerPtr))
 	if joinedArtists {
 		findDB = findDB.Distinct("\"Albums\".*")
 	}
@@ -549,11 +554,11 @@ func (h *Handler) getAlbum(c *gin.Context) {
 	viewerPtr := musicViewer(viewer, hasViewer)
 	var album model.Album
 	query := scopeVisibleMusicEntries(h.service.db, "\"Albums\"", "uploaded_by", viewerPtr, true)
-	if err := query.Preload("Artists").Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
+	if err := query.Preload("Artists", visibleArtistPreload(viewerPtr)).Preload("ArtistCredits", func(db *gorm.DB) *gorm.DB {
 		return db.Order("position ASC, role ASC, custom_role ASC")
-	}).Preload("ArtistCredits.Artist").Preload("Songs", visibleSongPreload(viewerPtr)).Preload("Songs.ArtistCredits", func(db *gorm.DB) *gorm.DB {
+	}).Preload("ArtistCredits.Artist", visibleArtistPreload(viewerPtr)).Preload("Songs", visibleSongPreload(viewerPtr)).Preload("Songs.ArtistCredits", func(db *gorm.DB) *gorm.DB {
 		return db.Order("position ASC, role ASC, custom_role ASC")
-	}).Preload("Songs.ArtistCredits.Artist").First(&album, "\"Albums\".id = ?", albumID).Error; err != nil {
+	}).Preload("Songs.ArtistCredits.Artist", visibleArtistPreload(viewerPtr)).First(&album, "\"Albums\".id = ?", albumID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("music.album_not_found", "Album not found"))
 			return

@@ -12,8 +12,13 @@ import (
 
 func TestPostRatingCanBeCreatedUpdatedAndDeleted(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
 	post := model.Post{
 		UserID:     user.ID,
+		ChannelID:  &channel.ID,
 		Title:      "Rated post",
 		Content:    "Content",
 		Status:     "published",
@@ -22,6 +27,7 @@ func TestPostRatingCanBeCreatedUpdatedAndDeleted(t *testing.T) {
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
+	canonicalizeBlogTestPost(t, db, post)
 	r := newBlogHTTPRouter(service, &user)
 
 	requestRating := func(method string, score string) *httptest.ResponseRecorder {
@@ -101,10 +107,15 @@ func TestPostRatingRejectsScoresOutsideOneToTen(t *testing.T) {
 
 func TestPostListIncludesRatingSummary(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
-	post := model.Post{UserID: user.ID, Title: "Rated post", Content: "Content", Status: "published", Visibility: "public"}
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Rated post", Content: "Content", Status: "published", Visibility: "public"}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
+	canonicalizeBlogTestPost(t, db, post)
 	other := model.User{Username: "bob", Email: "bob@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&other).Error; err != nil {
 		t.Fatalf("create other user: %v", err)

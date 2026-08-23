@@ -30,13 +30,15 @@ func TestPublishedPostReferencesAndMentionNotificationsPostgres(t *testing.T) {
 
 	channel := model.Channel{UserID: &author.UUID, Name: "Reference Channel", Slug: "reference-channel"}
 	require.NoError(t, db.Create(&channel).Error)
-	collection := model.Collection{ChannelID: channel.ID, ContentType: "blog", CreatedBy: &author.UUID, Name: "Articles"}
+	collection := model.ContentCollection{ChannelID: channel.ID, CreatedBy: &author.UUID, Name: "Articles"}
 	require.NoError(t, db.Create(&collection).Error)
-	target := model.Post{
-		UserID: author.UUID, ChannelID: &channel.ID, CollectionID: &collection.ID,
-		Title: "Referenced post", Content: "body", Status: "published", Visibility: "public",
+	target := model.ContentEntry{
+		AuthorID: &author.UUID, ChannelID: channel.ID, Kind: "blog", Title: "Referenced post",
+		Status: "published", Visibility: "public",
 	}
 	require.NoError(t, db.Create(&target).Error)
+	require.NoError(t, db.Create(&model.ContentBlogExtension{ContentID: target.ID, Content: "body"}).Error)
+	require.NoError(t, db.Create(&model.ContentCollectionMembership{ContentID: target.ID, CollectionID: collection.ID}).Error)
 
 	authorContext := authctx.CurrentUser{ID: author.UUID, Username: author.Username, Role: author.Role}
 	content := fmt.Sprintf("@mentioned @post:%s @author @mentioned", target.ID)
@@ -128,7 +130,10 @@ func newBlogReferencePostgresDB(t *testing.T) *gorm.DB {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{},
-		&model.PodcastEpisode{}, &model.BlogPostVersion{}, &model.ContentPublicationEvent{}, &model.ContentReference{},
+		&model.PodcastEpisode{}, &model.ContentEntry{}, &model.ContentPostExtension{},
+		&model.ContentBlogExtension{}, &model.ContentBlogVersion{}, &model.ContentBlogDraft{},
+		&model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
+		&model.ContentPublicationEvent{}, &model.ContentReference{},
 		&model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{},
 	))
 	require.NoError(t, migrations.RunNotificationDMIndexes(db))

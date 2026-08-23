@@ -56,7 +56,7 @@ func TestValidateContentScopeRejectsCollectionFromAnotherModule(t *testing.T) {
 
 func TestDeleteChannelRejectsActiveVideoProcessingJob(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.Video{}, &model.VideoProcessingJob{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.Video{}, &model.VideoProcessingJob{}, &model.ContentEntry{})
 	user := model.User{Username: "channel-delete-owner", Email: "channel-delete-owner@example.com", Password: "hash", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)

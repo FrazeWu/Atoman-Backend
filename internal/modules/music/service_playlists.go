@@ -189,7 +189,7 @@ func (s *Service) ListPlaylistSongs(user authctx.CurrentUser, playlistID uuid.UU
 		return nil, 0, apperr.NotFound("music.playlist_not_found", "Playlist not found")
 	}
 	page, pageSize = normalizeMusicRecommendationPage(page, pageSize)
-	return s.repo.ListPlaylistSongs(playlistID, page, pageSize)
+	return s.repo.ListPlaylistSongs(playlistID, page, pageSize, &user)
 }
 
 func (s *Service) PlaylistSongIDs(user authctx.CurrentUser, playlistID uuid.UUID, songIDs []uuid.UUID) ([]uuid.UUID, error) {

@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"atoman/internal/model"
-	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/testdb"
 
@@ -14,7 +13,13 @@ import (
 func newBlogScopeTest(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, model.Channel) {
 	t.Helper()
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.ContentPublicationEvent{}, &model.BlogPostVersion{}, &model.ContentReference{})
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{},
+		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{},
+		&model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.ContentCollection{},
+		&model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
+		&model.ContentPublicationEvent{}, &model.ContentReference{},
+	)
 	user := model.User{Username: "blog-scope", Email: "blog-scope@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
@@ -72,26 +77,29 @@ func TestDraftAllowsNoCollectionAndPublishUsesSystemDefault(t *testing.T) {
 	if published.CollectionID == nil {
 		t.Fatal("expected system default collection to be assigned")
 	}
-	var collection model.Collection
+	var collection model.ContentCollection
 	if err := db.First(&collection, "id = ?", *published.CollectionID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if !collection.IsDefault || collection.ContentType != "blog" {
-		t.Fatalf("expected blog system default collection, got %#v", collection)
+	if !collection.IsDefault {
+		t.Fatalf("expected system default collection, got %#v", collection)
 	}
 }
 
-func TestBlogPublishRejectsCollectionFromAnotherModule(t *testing.T) {
+func TestBlogPublishUsesCanonicalCollection(t *testing.T) {
 	service, db, user, channel := newBlogScopeTest(t)
-	videoCollection := model.Collection{ChannelID: channel.ID, ContentType: "video", Name: "Videos"}
-	if err := db.Create(&videoCollection).Error; err != nil {
+	collection := model.ContentCollection{ChannelID: channel.ID, Name: "Videos"}
+	if err := db.Create(&collection).Error; err != nil {
 		t.Fatal(err)
 	}
-	_, err := service.CreatePost(user, CreatePostRequest{
-		ChannelID: channel.ID, CollectionID: videoCollection.ID,
-		Title: "Wrong module", Content: "body", Status: "published",
+	post, err := service.CreatePost(user, CreatePostRequest{
+		ChannelID: channel.ID, CollectionID: collection.ID,
+		Title: "Canonical collection", Content: "body", Status: "published",
 	})
-	if app := apperr.FromError(err); app == nil || app.HTTPStatus != 400 {
-		t.Fatalf("expected wrong module collection to return 400, got %v", err)
+	if err != nil {
+		t.Fatalf("publish with canonical collection: %v", err)
+	}
+	if post.CollectionID == nil || *post.CollectionID != collection.ID {
+		t.Fatalf("expected canonical collection %s, got %#v", collection.ID, post.CollectionID)
 	}
 }

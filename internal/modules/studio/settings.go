@@ -42,18 +42,34 @@ func (s *Service) SaveSettings(user authctx.CurrentUser, module Module, input Se
 		return SettingsResponse{}, err
 	}
 	if input.DefaultCollectionID != nil {
-		collection, err := s.repo.GetCollection(*input.DefaultCollectionID)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return SettingsResponse{}, apperr.NotFound("studio.collection_not_found", "Collection not found")
-		}
-		if err != nil {
-			return SettingsResponse{}, err
-		}
-		if _, err := s.ownedChannel(user.ID, collection.ChannelID); err != nil {
-			return SettingsResponse{}, err
-		}
-		if collection.ChannelID != channel.ID || collection.ContentType != string(module) {
-			return SettingsResponse{}, apperr.BadRequest("studio.invalid_collection_scope", "Default collection must belong to the selected channel and module")
+		if module == ModuleBlog {
+			var collection model.ContentCollection
+			if err := s.db.First(&collection, "id = ?", *input.DefaultCollectionID).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					return SettingsResponse{}, apperr.NotFound("studio.collection_not_found", "Collection not found")
+				}
+				return SettingsResponse{}, err
+			}
+			if _, err := s.ownedChannel(user.ID, collection.ChannelID); err != nil {
+				return SettingsResponse{}, err
+			}
+			if collection.ChannelID != channel.ID {
+				return SettingsResponse{}, apperr.BadRequest("studio.invalid_collection_scope", "Default collection must belong to the selected channel")
+			}
+		} else {
+			collection, err := s.repo.GetCollection(*input.DefaultCollectionID)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return SettingsResponse{}, apperr.NotFound("studio.collection_not_found", "Collection not found")
+			}
+			if err != nil {
+				return SettingsResponse{}, err
+			}
+			if _, err := s.ownedChannel(user.ID, collection.ChannelID); err != nil {
+				return SettingsResponse{}, err
+			}
+			if collection.ChannelID != channel.ID || collection.ContentType != string(module) {
+				return SettingsResponse{}, apperr.BadRequest("studio.invalid_collection_scope", "Default collection must belong to the selected channel and module")
+			}
 		}
 	}
 	settings, err := s.settingsRecord(user.ID, channel.ID, module)

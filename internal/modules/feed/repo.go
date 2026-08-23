@@ -3,9 +3,11 @@ package feed
 import (
 	"atoman/internal/feedclass"
 	"atoman/internal/model"
+	blogmodule "atoman/internal/modules/blog"
 	"atoman/internal/platform/apperr"
 	"database/sql"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -18,9 +20,12 @@ type Repo struct{ db *gorm.DB }
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
 type PostEngagementCount struct {
-	PostID        uuid.UUID `gorm:"column:post_id"`
-	LikesCount    int64     `gorm:"column:likes_count"`
-	CommentsCount int64     `gorm:"column:comments_count"`
+	PostID         uuid.UUID `gorm:"column:post_id"`
+	LikesCount     int64     `gorm:"column:likes_count"`
+	CommentsCount  int64     `gorm:"column:comments_count"`
+	BookmarksCount int64     `gorm:"column:bookmarks_count"`
+	RatingScore    float64   `gorm:"column:rating_score"`
+	RatingCount    int64     `gorm:"column:rating_count"`
 }
 
 type ExploreSourceRow struct {
@@ -86,43 +91,101 @@ func (r *Repo) ListVisibleFeedSources(query FeedQuery) ([]model.FeedSource, erro
 	return sources, err
 }
 
+func (r *Repo) listPublishedCanonicalBlogPosts(scope string, ids []uuid.UUID) ([]model.Post, error) {
+	if len(ids) == 0 {
+		return []model.Post{}, nil
+	}
+	query := blogmodule.CanonicalBlogPostsQuery(r.db).
+		Where("posts.status = ?", "published")
+	switch scope {
+	case "user_id":
+		query = query.Where("posts.author_id IN ?", ids)
+	case "channel_id":
+		query = query.Where("posts.channel_id IN ?", ids)
+	case "collection_id":
+		query = query.Where("EXISTS (SELECT 1 FROM content_collection_memberships links WHERE links.content_id = posts.id AND links.collection_id IN ?)", ids)
+	default:
+		return nil, fmt.Errorf("unsupported canonical blog scope %q", scope)
+	}
+	return blogmodule.LoadCanonicalBlogPosts(r.db, query)
+}
+
 func (r *Repo) ListPublishedPostsByUserIDs(userIDs []uuid.UUID, contentType string) ([]model.Post, error) {
 	if len(userIDs) == 0 {
 		return []model.Post{}, nil
+	}
+	if contentType == "blog" {
+		return r.listPublishedCanonicalBlogPosts("user_id", userIDs)
 	}
 	var posts []model.Post
 	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("posts.status = ?", "published").
 		Where("posts.user_id IN ?", userIDs)
-	db = filterPostContentType(db, contentType)
-	err := db.Find(&posts).Error
-	return posts, err
+	if contentType == "" {
+		db = filterPostContentType(db, "podcast")
+	} else {
+		db = filterPostContentType(db, contentType)
+	}
+	if err := db.Find(&posts).Error; err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		return posts, nil
+	}
+	blogPosts, err := r.listPublishedCanonicalBlogPosts("user_id", userIDs)
+	return append(posts, blogPosts...), err
 }
 
 func (r *Repo) ListPublishedPostsByChannelIDs(channelIDs []uuid.UUID, contentType string) ([]model.Post, error) {
 	if len(channelIDs) == 0 {
 		return []model.Post{}, nil
 	}
+	if contentType == "blog" {
+		return r.listPublishedCanonicalBlogPosts("channel_id", channelIDs)
+	}
 	var posts []model.Post
 	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("posts.status = ?", "published").
 		Where("posts.channel_id IN ?", channelIDs)
-	db = filterPostContentType(db, contentType)
-	err := db.Find(&posts).Error
-	return posts, err
+	if contentType == "" {
+		db = filterPostContentType(db, "podcast")
+	} else {
+		db = filterPostContentType(db, contentType)
+	}
+	if err := db.Find(&posts).Error; err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		return posts, nil
+	}
+	blogPosts, err := r.listPublishedCanonicalBlogPosts("channel_id", channelIDs)
+	return append(posts, blogPosts...), err
 }
 
 func (r *Repo) ListPublishedPostsByCollectionIDs(collectionIDs []uuid.UUID, contentType string) ([]model.Post, error) {
 	if len(collectionIDs) == 0 {
 		return []model.Post{}, nil
 	}
+	if contentType == "blog" {
+		return r.listPublishedCanonicalBlogPosts("collection_id", collectionIDs)
+	}
 	var posts []model.Post
 	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
 		Where("posts.status = ?", "published").
 		Where("posts.collection_id IN ? OR EXISTS (SELECT 1 FROM post_collections links WHERE links.post_id = posts.id AND links.collection_id IN ?)", collectionIDs, collectionIDs)
-	db = filterPostContentType(db, contentType)
-	err := db.Find(&posts).Error
-	return posts, err
+	if contentType == "" {
+		db = filterPostContentType(db, "podcast")
+	} else {
+		db = filterPostContentType(db, contentType)
+	}
+	if err := db.Find(&posts).Error; err != nil {
+		return nil, err
+	}
+	if contentType != "" {
+		return posts, nil
+	}
+	blogPosts, err := r.listPublishedCanonicalBlogPosts("collection_id", collectionIDs)
+	return append(posts, blogPosts...), err
 }
 
 func filterPostContentType(db *gorm.DB, contentType string) *gorm.DB {
@@ -177,16 +240,82 @@ func (r *Repo) ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs []u
 }
 
 func (r *Repo) ListPostEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCount, error) {
+	legacy, err := r.listEngagementCounts(postIDs, "posts")
+	if err != nil {
+		return nil, err
+	}
+	canonical, err := r.listEngagementCounts(postIDs, "content_entries")
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[uuid.UUID]PostEngagementCount, len(legacy)+len(canonical))
+	for _, count := range legacy {
+		byID[count.PostID] = count
+	}
+	for _, count := range canonical {
+		byID[count.PostID] = count
+	}
+	result := make([]PostEngagementCount, 0, len(byID))
+	for _, postID := range postIDs {
+		if count, ok := byID[postID]; ok {
+			result = append(result, count)
+		}
+	}
+	return result, nil
+}
+
+func (r *Repo) ListCanonicalBlogEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCount, error) {
+	return r.listEngagementCounts(postIDs, "content_entries")
+}
+
+func (r *Repo) listEngagementCounts(postIDs []uuid.UUID, table string) ([]PostEngagementCount, error) {
 	if len(postIDs) == 0 {
 		return []PostEngagementCount{}, nil
 	}
-	var counts []PostEngagementCount
-	err := r.db.Model(&model.Post{}).Select(`posts.id AS post_id,
+	selectSQL := `posts.id AS post_id,
 		(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
-		COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count`).
-		Where("posts.id IN ?", postIDs).
-		Scan(&counts).Error
-	return counts, err
+		COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count`
+	if r.db.Migrator().HasTable(&model.Bookmark{}) {
+		selectSQL += `,
+			(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count`
+	} else {
+		selectSQL += `, 0 AS bookmarks_count`
+	}
+	var counts []PostEngagementCount
+	var query *gorm.DB
+	if table == "content_entries" {
+		query = r.db.Table("content_entries AS posts")
+	} else {
+		query = r.db.Model(&model.Post{})
+	}
+	if err := query.Select(selectSQL).Where("posts.id IN ?", postIDs).Scan(&counts).Error; err != nil {
+		return nil, err
+	}
+	if r.db.Migrator().HasTable(&model.PostRating{}) {
+		type ratingAggregate struct {
+			PostID      uuid.UUID `gorm:"column:post_id"`
+			RatingScore float64   `gorm:"column:rating_score"`
+			RatingCount int64     `gorm:"column:rating_count"`
+		}
+		var ratings []ratingAggregate
+		if err := r.db.Model(&model.PostRating{}).
+			Select("post_id, AVG(score) AS rating_score, COUNT(*) AS rating_count").
+			Where("post_id IN ?", postIDs).
+			Group("post_id").Scan(&ratings).Error; err != nil {
+			return nil, err
+		}
+		countsByPostID := make(map[uuid.UUID]*PostEngagementCount, len(counts))
+		for index := range counts {
+			countsByPostID[counts[index].PostID] = &counts[index]
+		}
+		for _, rating := range ratings {
+			if count := countsByPostID[rating.PostID]; count != nil {
+				count.RatingScore = math.Round(rating.RatingScore*10) / 10
+				count.RatingCount = rating.RatingCount
+			}
+		}
+	}
+	return counts, nil
 }
 
 func (r *Repo) ListSubscribedBlogPosts(
@@ -202,15 +331,14 @@ func (r *Repo) ListSubscribedBlogPosts(
 	}
 
 	buildQuery := func() *gorm.DB {
-		db := r.db.Model(&model.Post{}).
+		db := blogmodule.CanonicalBlogPostsQuery(r.db).
 			Joins("JOIN channels ON channels.id = posts.channel_id").
-			Where("posts.status = ? AND channels.deleted_at IS NULL", "published").
-			Where("NOT EXISTS (SELECT 1 FROM podcast_episodes WHERE podcast_episodes.post_id = posts.id AND podcast_episodes.deleted_at IS NULL)")
+			Where("posts.status = ? AND channels.deleted_at IS NULL", "published")
 
 		sourceConditions := make([]string, 0, 3)
 		sourceArgs := make([]interface{}, 0, 3)
 		if len(userIDs) > 0 {
-			sourceConditions = append(sourceConditions, "posts.user_id IN ?")
+			sourceConditions = append(sourceConditions, "posts.author_id IN ?")
 			sourceArgs = append(sourceArgs, userIDs)
 		}
 		if len(channelIDs) > 0 {
@@ -218,7 +346,7 @@ func (r *Repo) ListSubscribedBlogPosts(
 			sourceArgs = append(sourceArgs, channelIDs)
 		}
 		if len(collectionIDs) > 0 {
-			sourceConditions = append(sourceConditions, "posts.collection_id IN ?")
+			sourceConditions = append(sourceConditions, "EXISTS (SELECT 1 FROM content_collection_memberships links WHERE links.content_id = posts.id AND links.collection_id IN ?)")
 			sourceArgs = append(sourceArgs, collectionIDs)
 		}
 		db = db.Where("("+strings.Join(sourceConditions, " OR ")+")", sourceArgs...)
@@ -227,7 +355,7 @@ func (r *Repo) ListSubscribedBlogPosts(
 		visibilityArgs := []interface{}{[]string{"", "public"}}
 		followerConditions := make([]string, 0, 2)
 		if len(followedUserIDs) > 0 {
-			followerConditions = append(followerConditions, "posts.user_id IN ?")
+			followerConditions = append(followerConditions, "posts.author_id IN ?")
 			visibilityArgs = append(visibilityArgs, followedUserIDs)
 		}
 		if len(followedChannelIDs) > 0 {
@@ -256,16 +384,12 @@ func (r *Repo) ListSubscribedBlogPosts(
 	}
 	page := normalizedPage(query.Page)
 	pageSize := normalizedPageSize(query.PageSize)
-	var posts []model.Post
-	err := buildQuery().
-		Select("posts.*").
-		Preload("User").Preload("Channel").Preload("Collection").
+	posts, err := blogmodule.LoadCanonicalBlogPosts(r.db, buildQuery().
 		Order("COALESCE(posts.published_at, posts.created_at) DESC").
 		Order("posts.created_at DESC").
 		Order("posts.id DESC").
-		Offset((page - 1) * pageSize).
-		Limit(pageSize).
-		Find(&posts).Error
+		Offset((page-1)*pageSize).
+		Limit(pageSize))
 	return posts, total, err
 }
 
@@ -295,6 +419,59 @@ func (r *Repo) ListFeedItemsBySourceIDsPaged(feedSourceIDs []uuid.UUID, limit in
 		Limit(limit).
 		Find(&items).Error
 	return items, err
+}
+
+func (r *Repo) ListFeedItemsBySourceIDsFiltered(feedSourceIDs []uuid.UUID, query FeedQuery) ([]model.FeedItem, error) {
+	if len(feedSourceIDs) == 0 {
+		return []model.FeedItem{}, nil
+	}
+	var items []model.FeedItem
+	db := r.buildFeedItemsBySourceIDsQuery(feedSourceIDs, query).
+		Preload("FeedSource").
+		Order("feed_items.published_at DESC, feed_items.id DESC").
+		Offset((normalizedPage(query.Page) - 1) * normalizedPageSize(query.PageSize)).
+		Limit(normalizedPageSize(query.PageSize))
+	return items, db.Find(&items).Error
+}
+
+func (r *Repo) CountFeedItemsBySourceIDsFiltered(feedSourceIDs []uuid.UUID, query FeedQuery) (int64, error) {
+	if len(feedSourceIDs) == 0 {
+		return 0, nil
+	}
+	var count int64
+	return count, r.buildFeedItemsBySourceIDsQuery(feedSourceIDs, query).Count(&count).Error
+}
+
+func (r *Repo) buildFeedItemsBySourceIDsQuery(feedSourceIDs []uuid.UUID, query FeedQuery) *gorm.DB {
+	db := r.db.Model(&model.FeedItem{}).
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
+		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false)
+	if query.Category != "" {
+		db = db.Where(recommendationFeedItemCategorySQL()+" = ?", query.Category)
+	}
+	if query.LanguageCode != "" {
+		db = db.Where("COALESCE(NULLIF(feed_items.language_code, ''), NULLIF(feed_sources.language_code, '')) = ?", query.LanguageCode)
+	}
+	if query.IsRead != nil {
+		readClause := "EXISTS"
+		if !*query.IsRead {
+			readClause = "NOT EXISTS"
+		}
+		db = db.Where(readClause+" (SELECT 1 FROM feed_item_reads WHERE feed_item_reads.feed_item_id = feed_items.id AND feed_item_reads.user_id = ?)", query.viewerID)
+	}
+	if search := strings.TrimSpace(query.Search); search != "" {
+		like := escapedContainsPattern(search)
+		db = db.Where(
+			`(LOWER(feed_items.title) LIKE ? ESCAPE '\' OR
+			 LOWER(feed_items.summary) LIKE ? ESCAPE '\' OR
+			 LOWER(feed_items.reader_html) LIKE ? ESCAPE '\' OR
+			 LOWER(feed_items.full_text_html) LIKE ? ESCAPE '\' OR
+			 LOWER(feed_sources.title) LIKE ? ESCAPE '\' OR
+			 LOWER(feed_sources.rss_url) LIKE ? ESCAPE '\')`,
+			like, like, like, like, like, like,
+		)
+	}
+	return db
 }
 
 func (r *Repo) ListFeedItemsBySourceID(feedSourceID uuid.UUID, limit int, offset int) ([]model.FeedItem, error) {
@@ -373,65 +550,75 @@ func (r *Repo) DeleteReads(userID uuid.UUID, ids []uuid.UUID) error {
 	return r.db.Where("user_id = ? AND feed_item_id IN ?", userID, ids).Delete(&model.FeedItemRead{}).Error
 }
 
+func escapedContainsPattern(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(value)
+	return "%" + value + "%"
+}
+
 func (r *Repo) ListExplorePosts(limit int, offset int) ([]model.Post, error) {
-	var posts []model.Post
-	err := r.db.Preload("User").Preload("Channel").Preload("Collection").
-		Where("status = ?", "published").
-		Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
-		Order("created_at DESC, id DESC").
-		Offset(offset).
-		Limit(limit).
-		Find(&posts).Error
-	return posts, err
+	return r.ListExplorePostsPage(FeedQuery{}, limit, offset)
+}
+
+func (r *Repo) buildExplorePostsQuery(query FeedQuery) *gorm.DB {
+	db := blogmodule.CanonicalBlogPostsQuery(r.db).
+		Where("posts.status = ?", "published").
+		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"})
+	if query.Category != "" && query.Category != "blog" {
+		return db.Where("1 = 0")
+	}
+	if query.LanguageCode != "" {
+		db = db.Where("blog_extensions.language_code = ?", query.LanguageCode)
+	}
+	if query.IsRead != nil && *query.IsRead {
+		return db.Where("1 = 0")
+	}
+	if search := strings.TrimSpace(query.Search); search != "" {
+		like := escapedContainsPattern(search)
+		db = db.Joins("LEFT JOIN channels ON channels.id = posts.channel_id").Where(
+			`(LOWER(posts.title) LIKE ? ESCAPE '\' OR
+			 LOWER(posts.summary) LIKE ? ESCAPE '\' OR
+			 LOWER(blog_extensions.content) LIKE ? ESCAPE '\' OR
+			 LOWER(channels.name) LIKE ? ESCAPE '\' OR
+			 LOWER(channels.slug) LIKE ? ESCAPE '\')`,
+			like, like, like, like, like,
+		)
+	}
+	return db
+}
+
+func (r *Repo) ListExplorePostsPage(query FeedQuery, limit int, offset int) ([]model.Post, error) {
+	dbQuery := r.buildExplorePostsQuery(query).
+		Order("COALESCE(posts.published_at, posts.created_at) DESC").
+		Order("posts.created_at DESC, posts.id DESC").
+		Offset(offset)
+	if limit > 0 {
+		dbQuery = dbQuery.Limit(limit)
+	}
+	posts, err := blogmodule.LoadCanonicalBlogPosts(r.db, dbQuery)
+	if err != nil {
+		return nil, err
+	}
+	return posts, nil
+}
+
+func (r *Repo) CountExplorePostsMatching(query FeedQuery) (int64, error) {
+	var count int64
+	return count, r.buildExplorePostsQuery(query).Count(&count).Error
 }
 
 func (r *Repo) ListExplorePostsAll(query FeedQuery) ([]model.Post, error) {
-	var posts []model.Post
-	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
-		Where("posts.status = ?", "published").
-		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"})
-
-	needsChannelJoin := strings.TrimSpace(query.Search) != ""
-	if needsChannelJoin {
-		db = db.Joins("LEFT JOIN channels ON channels.id = posts.channel_id")
-	}
-	if query.Category != "" && query.Category != "blog" {
-		db = db.Where("1 = 0")
-	}
-	if query.LanguageCode != "" {
-		db = db.Where("posts.language_code = ?", query.LanguageCode)
-	}
-	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
-		like := "%" + search + "%"
-		db = db.Where(
-			"LOWER(COALESCE(posts.title, '')) LIKE ? OR LOWER(COALESCE(posts.summary, '')) LIKE ? OR LOWER(COALESCE(channels.name, '')) LIKE ? OR LOWER(COALESCE(channels.slug, '')) LIKE ?",
-			like, like, like, like,
-		)
-	}
-
-	err := db.
-		Order("COALESCE(posts.published_at, posts.created_at) DESC").
-		Order("posts.created_at DESC, posts.id DESC").
-		Find(&posts).Error
-	return posts, err
+	return r.ListExplorePostsPage(query, 0, 0)
 }
 
 func (r *Repo) CountExplorePosts() (int64, error) {
-	var count int64
-	err := r.db.Model(&model.Post{}).
-		Where("status = ?", "published").
-		Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
-		Count(&count).Error
-	return count, err
+	return r.CountExplorePostsMatching(FeedQuery{})
 }
 
 func (r *Repo) ListRecommendationPosts() ([]model.Post, error) {
-	var posts []model.Post
-	err := r.db.Preload("Channel").
-		Where("status = ?", "published").
-		Order("created_at ASC, id ASC").
-		Find(&posts).Error
-	return posts, err
+	return blogmodule.LoadCanonicalBlogPosts(r.db, blogmodule.CanonicalBlogPostsQuery(r.db).
+		Where("posts.status = ?", "published").
+		Order("posts.created_at ASC, posts.id ASC"))
 }
 
 type RecommendationArticlePostRow struct {
@@ -459,28 +646,30 @@ type RecommendationArticleFeedItemRow struct {
 	LanguageCode   string
 }
 
-func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, languageCode string, limit int) ([]RecommendationArticlePostRow, error) {
-	columns := []string{"id", "user_id", "channel_id", "view_count", "created_at", "'' AS title", "'' AS summary", "language_code"}
+func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, languageCode string, search string, limit int) ([]RecommendationArticlePostRow, error) {
+	columns := []string{"posts.id", "posts.author_id AS user_id", "posts.channel_id", "blog_extensions.view_count", "posts.created_at", "'' AS title", "'' AS summary", "blog_extensions.language_code"}
 	if includeText {
-		columns[5] = "title"
-		columns[6] = "summary"
+		columns[5] = "posts.title"
+		columns[6] = "posts.summary"
 	}
 
 	var posts []RecommendationArticlePostRow
-	db := r.db.Model(&model.Post{}).
+	db := r.db.Table("content_entries AS posts").
+		Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
 		Select(columns).
-		Where("status = ?", "published").
-		Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
-		Where("created_at >= ?", publishedAfter).
-		Order("created_at DESC, id DESC").
+		Where("posts.kind = ? AND posts.status = ?", "blog", "published").
+		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).
+		Where("posts.created_at >= ?", publishedAfter).
+		Order("posts.created_at DESC, posts.id DESC").
 		Limit(limit)
-	db = applyRecommendationLanguageFilter(db, "language_code", languageCode)
-	db = applyRecommendationTextFilter(db, "title", "summary", keywords)
+	db = applyRecommendationLanguageFilter(db, "blog_extensions.language_code", languageCode)
+	db = applyRecommendationTextFilter(db, "posts.title", "posts.summary", keywords)
+	db = applyRecommendationSearchFilter(db, []string{"posts.title", "posts.summary"}, search)
 	err := db.Scan(&posts).Error
 	return posts, err
 }
 
-func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category string, publishedAfter time.Time, keywords []string, languageCode string, limit int) ([]RecommendationArticleFeedItemRow, error) {
+func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category string, publishedAfter time.Time, keywords []string, languageCode string, search string, limit int) ([]RecommendationArticleFeedItemRow, error) {
 	columns := []string{
 		"feed_items.id",
 		"feed_items.feed_source_id",
@@ -509,6 +698,7 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 		Where(recommendationFeedItemCategorySQL()+" = ?", category)
 	db = applyRecommendationLanguageFilter(db, "feed_items.language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "feed_items.title", "feed_items.summary", keywords)
+	db = applyRecommendationFeedItemSearchFilter(db, search)
 	db = db.Order("feed_items.published_at DESC, feed_items.id DESC")
 	db = db.Limit(limit)
 	err := db.Scan(&items).Error
@@ -520,6 +710,42 @@ func applyRecommendationLanguageFilter(db *gorm.DB, column string, languageCode 
 		return db
 	}
 	return db.Where(column+" = ?", languageCode)
+}
+
+func applyRecommendationSearchFilter(db *gorm.DB, columns []string, search string) *gorm.DB {
+	if strings.TrimSpace(search) == "" || len(columns) == 0 {
+		return db
+	}
+	like := escapedContainsPattern(search)
+	clauses := make([]string, 0, len(columns))
+	args := make([]any, 0, len(columns))
+	for _, column := range columns {
+		clauses = append(clauses, "LOWER("+column+") LIKE ? ESCAPE '\\'")
+		args = append(args, like)
+	}
+	return db.Where("("+strings.Join(clauses, " OR ")+")", args...)
+}
+
+func applyRecommendationFeedItemSearchFilter(db *gorm.DB, search string) *gorm.DB {
+	if strings.TrimSpace(search) == "" {
+		return db
+	}
+	like := escapedContainsPattern(search)
+	return db.Where(`feed_items.id IN (
+		SELECT matched_items.id
+		FROM feed_items AS matched_items
+		JOIN feed_sources AS matched_sources ON matched_sources.id = matched_items.feed_source_id
+		WHERE matched_sources.hidden = false
+		  AND matched_items.deleted_at IS NULL
+		  AND (LOWER(matched_items.title) LIKE ? ESCAPE '\' OR LOWER(matched_items.summary) LIKE ? ESCAPE '\')
+		UNION
+		SELECT matched_items.id
+		FROM feed_items AS matched_items
+		JOIN feed_sources AS matched_sources ON matched_sources.id = matched_items.feed_source_id
+		WHERE matched_sources.hidden = false
+		  AND matched_items.deleted_at IS NULL
+		  AND (LOWER(matched_sources.title) LIKE ? ESCAPE '\' OR LOWER(matched_sources.rss_url) LIKE ? ESCAPE '\')
+	)`, like, like, like, like)
 }
 
 func applyRecommendationTextFilter(db *gorm.DB, titleColumn string, summaryColumn string, keywords []string) *gorm.DB {
@@ -550,13 +776,7 @@ func (r *Repo) ListRecommendationPostsByIDs(ids []uuid.UUID) ([]model.Post, erro
 	if len(ids) == 0 {
 		return []model.Post{}, nil
 	}
-	var posts []model.Post
-	err := r.db.Model(&model.Post{}).
-		Preload("Channel").
-		Select("id", "title", "summary", "cover_url", "language_code", "channel_id").
-		Where("id IN ?", ids).
-		Find(&posts).Error
-	return posts, err
+	return blogmodule.LoadCanonicalBlogPosts(r.db, blogmodule.CanonicalBlogPostsQuery(r.db).Where("posts.id IN ?", ids))
 }
 
 func (r *Repo) ListRecommendationFeedItemsByIDs(ids []uuid.UUID) ([]model.FeedItem, error) {
@@ -597,15 +817,16 @@ func (r *Repo) ListRecommendationChannels(languageCode string) ([]Recommendation
 			channels.cover_url AS cover_url,
 			COUNT(posts.id) AS published_count,
 			SUM(CASE WHEN posts.created_at >= ? THEN 1 ELSE 0 END) AS recent_post_count,
-			COALESCE(AVG(posts.view_count), 0) AS average_views,
+			COALESCE(AVG(blog_extensions.view_count), 0) AS average_views,
 			`+latestPublishedExpr+` AS latest_published_at_unix,
-			MAX(posts.language_code) AS language_code
+			MAX(blog_extensions.language_code) AS language_code
 		`, time.Now().Add(-7*24*time.Hour)).
-		Joins("JOIN posts ON posts.channel_id = channels.id").
-		Where("channels.deleted_at IS NULL AND posts.deleted_at IS NULL AND posts.status = ?", "published")
+		Joins("JOIN content_entries AS posts ON posts.channel_id = channels.id").
+		Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
+		Where("channels.deleted_at IS NULL AND posts.deleted_at IS NULL AND posts.kind = ? AND posts.status = ?", "blog", "published")
 	db = db.Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"})
 	if languageCode != "" {
-		db = db.Where("posts.language_code = ?", languageCode)
+		db = db.Where("blog_extensions.language_code = ?", languageCode)
 	}
 	err := db.
 		Group("channels.id").
@@ -615,14 +836,12 @@ func (r *Repo) ListRecommendationChannels(languageCode string) ([]Recommendation
 }
 
 func (r *Repo) ListRecentPublishedPostsByChannelID(channelID uuid.UUID, limit int) ([]model.Post, error) {
-	var posts []model.Post
-	err := r.db.
-		Where("channel_id = ? AND status = ?", channelID, "published").
-		Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
-		Order("created_at DESC").
-		Limit(limit).
-		Find(&posts).Error
-	return posts, err
+	query := blogmodule.CanonicalBlogPostsQuery(r.db).
+		Where("posts.channel_id = ? AND posts.status = ?", channelID, "published").
+		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).
+		Order("posts.created_at DESC").
+		Limit(limit)
+	return blogmodule.LoadCanonicalBlogPosts(r.db, query)
 }
 
 func recommendationChannelLatestPublishedExpr(dialect string) string {
@@ -635,38 +854,68 @@ func recommendationChannelLatestPublishedExpr(dialect string) string {
 }
 
 func (r *Repo) ListExploreFeedItems(sort string, limit int, offset int) ([]model.FeedItem, error) {
-	var items []model.FeedItem
-	db := r.db.Preload("FeedSource").
-		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
-		Where("feed_sources.hidden = ?", false).
-		Offset(offset).
-		Limit(limit)
-	db = applyExploreFeedSort(db, sort)
-	err := db.Find(&items).Error
-	return items, err
+	return r.ListExploreFeedItemsPage(sort, FeedQuery{}, limit, offset)
 }
 
-func (r *Repo) ListExploreFeedItemsAll(sort string, query FeedQuery) ([]model.FeedItem, error) {
-	var items []model.FeedItem
-	db := r.db.Preload("FeedSource").
+func (r *Repo) buildExploreFeedItemsQuery(query FeedQuery) *gorm.DB {
+	db := r.db.Model(&model.FeedItem{}).
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
 		Where("feed_sources.hidden = ?", false)
+	if query.SourceType != "" {
+		db = db.Where("feed_sources.source_type = ?", query.SourceType)
+	}
+	if query.SourceID != uuid.Nil {
+		db = db.Where("feed_sources.id = ?", query.SourceID)
+	}
 	if query.Category != "" {
 		db = db.Where(recommendationFeedItemCategorySQL()+" = ?", query.Category)
 	}
 	if query.LanguageCode != "" {
 		db = db.Where("COALESCE(NULLIF(feed_items.language_code, ''), NULLIF(feed_sources.language_code, '')) = ?", query.LanguageCode)
 	}
-	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
-		like := "%" + search + "%"
-		db = db.Where(
-			"LOWER(COALESCE(feed_items.title, '')) LIKE ? OR LOWER(COALESCE(feed_items.summary, '')) LIKE ? OR LOWER(COALESCE(feed_items.reader_html, '')) LIKE ? OR LOWER(COALESCE(feed_items.full_text_html, '')) LIKE ? OR LOWER(COALESCE(feed_sources.title, '')) LIKE ? OR LOWER(COALESCE(feed_sources.rss_url, '')) LIKE ?",
-			like, like, like, like, like, like,
-		)
+	if query.IsRead != nil {
+		readClause := "EXISTS"
+		if !*query.IsRead {
+			readClause = "NOT EXISTS"
+		}
+		db = db.Where(readClause+" (SELECT 1 FROM feed_item_reads WHERE feed_item_reads.feed_item_id = feed_items.id AND feed_item_reads.user_id = ?)", query.viewerID)
+	}
+	if search := strings.TrimSpace(query.Search); search != "" {
+		like := escapedContainsPattern(search)
+		db = db.Where(`feed_items.id IN (
+			SELECT matched_items.id
+			FROM feed_items AS matched_items
+			JOIN feed_sources AS matched_sources ON matched_sources.id = matched_items.feed_source_id
+			WHERE matched_sources.hidden = false
+			  AND matched_items.deleted_at IS NULL
+			  AND (LOWER(matched_items.title) LIKE ? ESCAPE '\' OR LOWER(matched_items.summary) LIKE ? ESCAPE '\')
+			UNION
+			SELECT matched_items.id
+			FROM feed_items AS matched_items
+			JOIN feed_sources AS matched_sources ON matched_sources.id = matched_items.feed_source_id
+			WHERE matched_sources.hidden = false
+			  AND matched_items.deleted_at IS NULL
+			  AND (LOWER(matched_sources.title) LIKE ? ESCAPE '\' OR LOWER(matched_sources.rss_url) LIKE ? ESCAPE '\')
+		)`, like, like, like, like)
+	}
+	return db
+}
+
+func (r *Repo) ListExploreFeedItemsPage(sort string, query FeedQuery, limit int, offset int) ([]model.FeedItem, error) {
+	var items []model.FeedItem
+	db := r.buildExploreFeedItemsQuery(query).
+		Preload("FeedSource").
+		Select("feed_items.*").
+		Offset(offset)
+	if limit > 0 {
+		db = db.Limit(limit)
 	}
 	db = applyExploreFeedSort(db, sort)
-	err := db.Find(&items).Error
-	return items, err
+	return items, db.Find(&items).Error
+}
+
+func (r *Repo) ListExploreFeedItemsAll(sort string, query FeedQuery) ([]model.FeedItem, error) {
+	return r.ListExploreFeedItemsPage(sort, query, 0, 0)
 }
 
 func applyExploreFeedSort(db *gorm.DB, sort string) *gorm.DB {
@@ -692,13 +941,39 @@ func normalizeExploreSort(sort string) string {
 	}
 }
 
-func (r *Repo) CountExploreFeedItems() (int64, error) {
+func (r *Repo) countExploreFeedItemsSearch(search string) (int64, error) {
+	pattern := escapedContainsPattern(search)
 	var count int64
-	err := r.db.Model(&model.FeedItem{}).
-		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
-		Where("feed_sources.hidden = ?", false).
-		Count(&count).Error
+	err := r.db.Raw(`
+		SELECT COUNT(*)
+		FROM (
+			SELECT feed_items.id
+			FROM feed_items
+			JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id
+			WHERE feed_sources.hidden = false
+			  AND feed_items.deleted_at IS NULL
+			  AND (LOWER(feed_items.title) LIKE ? ESCAPE '\' OR LOWER(feed_items.summary) LIKE ? ESCAPE '\')
+			UNION
+			SELECT feed_items.id
+			FROM feed_items
+			JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id
+			WHERE feed_sources.hidden = false
+			  AND feed_items.deleted_at IS NULL
+			  AND (LOWER(feed_sources.title) LIKE ? ESCAPE '\' OR LOWER(feed_sources.rss_url) LIKE ? ESCAPE '\')
+		) AS matched_feed_items`, pattern, pattern, pattern, pattern).Scan(&count).Error
 	return count, err
+}
+
+func (r *Repo) CountExploreFeedItemsMatching(query FeedQuery) (int64, error) {
+	if strings.TrimSpace(query.Search) != "" && query.Category == "" && query.LanguageCode == "" && query.SourceType == "" && query.SourceID == uuid.Nil && query.IsRead == nil {
+		return r.countExploreFeedItemsSearch(query.Search)
+	}
+	var count int64
+	return count, r.buildExploreFeedItemsQuery(query).Count(&count).Error
+}
+
+func (r *Repo) CountExploreFeedItems() (int64, error) {
+	return r.CountExploreFeedItemsMatching(FeedQuery{})
 }
 
 func (r *Repo) ListExploreSources(limit int, offset int, category string, query ...string) ([]ExploreSourceRow, error) {
@@ -741,14 +1016,36 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 	if languageValue != "" {
 		db = db.Where("feed_sources.language_code = ?", languageValue)
 	}
-	err := db.
+	if strings.TrimSpace(queryValue) != "" {
+		like := escapedContainsPattern(queryValue)
+		db = db.Where(`
+			(LOWER(feed_sources.title) LIKE ? ESCAPE '\' OR
+			LOWER(feed_sources.rss_url) LIKE ? ESCAPE '\')`, like, like)
+	}
+	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
+		storedCategory := "LOWER(COALESCE(feed_sources.category, '')) = ?"
+		if normalizedCategory == "blog" {
+			nonBlogCategories := []string{"news", "social", "video", "forum", "podcast"}
+			inferred := make([]string, 0, len(nonBlogCategories))
+			for _, value := range nonBlogCategories {
+				inferred = append(inferred, "("+exploreSourceInferredCategorySQL(value)+")")
+			}
+			db = db.Where("("+storedCategory+" OR (COALESCE(feed_sources.category, '') = '' AND NOT ("+strings.Join(inferred, " OR ")+")))", normalizedCategory)
+		} else {
+			inferredCategory := exploreSourceInferredCategorySQL(normalizedCategory)
+			db = db.Where("("+storedCategory+" OR ("+inferredCategory+"))", normalizedCategory)
+		}
+	}
+	queryDB := db.
 		Group("feed_sources.id").
 		Having("COUNT(DISTINCT feed_items.id) > 0").
 		Order("subscription_count DESC").
 		Order("last_published_at DESC NULLS LAST").
-		Order("feed_sources.created_at DESC").
-		Scan(&rawRows).Error
-	if err != nil {
+		Order("feed_sources.created_at DESC")
+	if normalizeFeedSourceCategory(category) == "" {
+		queryDB = queryDB.Offset(offset).Limit(limit)
+	}
+	if err := queryDB.Scan(&rawRows).Error; err != nil {
 		return nil, err
 	}
 
@@ -779,11 +1076,16 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 		return nil, err
 	}
 
-	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
+	normalizedCategory := normalizeFeedSourceCategory(category)
+	normalizedQuery := strings.ToLower(strings.TrimSpace(queryValue))
+	if normalizedCategory != "" {
 		rows = filterExploreSourceRowsByCategory(rows, normalizedCategory)
 	}
-	if normalizedQuery := strings.ToLower(strings.TrimSpace(queryValue)); normalizedQuery != "" {
+	if normalizedQuery != "" {
 		rows = filterExploreSourceRowsByQuery(rows, normalizedQuery)
+	}
+	if normalizedCategory == "" {
+		return rows, nil
 	}
 	if offset >= len(rows) {
 		return []ExploreSourceRow{}, nil
@@ -792,7 +1094,6 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 	if end > len(rows) {
 		end = len(rows)
 	}
-
 	return rows[offset:end], nil
 }
 
@@ -863,15 +1164,39 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 }
 
 func (r *Repo) CountExploreSources(category string, query string, language ...string) (int64, error) {
-	args := []string{query}
+	if normalizeFeedSourceCategory(category) != "" {
+		args := []string{query}
+		if len(language) > 0 {
+			args = append(args, language[0])
+		}
+		rows, err := r.ListExploreSources(100000, 0, category, args...)
+		if err != nil {
+			return 0, err
+		}
+		return int64(len(rows)), nil
+	}
+
+	languageValue := ""
 	if len(language) > 0 {
-		args = append(args, language[0])
+		languageValue = language[0]
 	}
-	rows, err := r.ListExploreSources(100000, 0, category, args...)
-	if err != nil {
-		return 0, err
+	db := r.db.Table("feed_sources").
+		Select("feed_sources.id").
+		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
+		Where("feed_sources.source_type = ? AND feed_sources.hidden = ?", "external_rss", false)
+	if languageValue != "" {
+		db = db.Where("feed_sources.language_code = ?", languageValue)
 	}
-	return int64(len(rows)), nil
+	if strings.TrimSpace(query) != "" {
+		like := escapedContainsPattern(query)
+		db = db.Where(`
+			(LOWER(feed_sources.title) LIKE ? ESCAPE '\' OR
+			LOWER(feed_sources.rss_url) LIKE ? ESCAPE '\')`, like, like)
+	}
+	subquery := db.Group("feed_sources.id").Having("COUNT(DISTINCT feed_items.id) > 0")
+	var count int64
+	err := r.db.Table("(?) AS explore_sources", subquery).Count(&count).Error
+	return count, err
 }
 
 func (r *Repo) CountSubscriptionsByFeedSourceID(feedSourceID uuid.UUID) (int64, error) {

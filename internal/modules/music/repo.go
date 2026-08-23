@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -98,10 +99,10 @@ func (r *Repo) UpsertArtistBookmark(userID uuid.UUID, artistID uuid.UUID) (model
 }
 
 func (r *Repo) ListArtistBookmarks(userID uuid.UUID, page int, pageSize int, sort string) ([]model.ArtistBookmark, int64, error) {
-	return r.ListArtistBookmarksFiltered(userID, page, pageSize, sort, "")
+	return r.ListArtistBookmarksFiltered(userID, page, pageSize, sort, "", nil)
 }
 
-func (r *Repo) ListArtistBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.ArtistBookmark, int64, error) {
+func (r *Repo) ListArtistBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string, viewer *authctx.CurrentUser) ([]model.ArtistBookmark, int64, error) {
 	var total int64
 	db := r.db.Model(&model.ArtistBookmark{}).
 		Joins("JOIN \"Artists\" ON \"Artists\".id = music_artist_bookmarks.artist_id AND \"Artists\".lifecycle_status = 'active'").
@@ -129,7 +130,7 @@ func (r *Repo) ListArtistBookmarksFiltered(userID uuid.UUID, page int, pageSize 
 	default:
 		db = db.Order("music_artist_bookmarks.created_at DESC")
 	}
-	err := db.Preload("Artist").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
+	err := db.Preload("Artist", visibleArtistPreload(viewer)).Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
 	return bookmarks, total, err
 }
 
@@ -144,10 +145,10 @@ func (r *Repo) UpsertAlbumBookmark(userID uuid.UUID, albumID uuid.UUID) (model.A
 }
 
 func (r *Repo) ListAlbumBookmarks(userID uuid.UUID, page int, pageSize int, sort string) ([]model.AlbumBookmark, int64, error) {
-	return r.ListAlbumBookmarksFiltered(userID, page, pageSize, sort, "")
+	return r.ListAlbumBookmarksFiltered(userID, page, pageSize, sort, "", nil)
 }
 
-func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.AlbumBookmark, int64, error) {
+func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string, viewer *authctx.CurrentUser) ([]model.AlbumBookmark, int64, error) {
 	var total int64
 	db := r.db.Model(&model.AlbumBookmark{}).
 		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".lifecycle_status = 'active'").
@@ -169,11 +170,11 @@ func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize i
 	default:
 		db = db.Order("music_album_bookmarks.created_at DESC")
 	}
-	err := db.Preload("Album.Artists").Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
+	err := db.Preload("Album.Artists", visibleArtistPreload(viewer)).Limit(pageSize).Offset((page - 1) * pageSize).Find(&bookmarks).Error
 	return bookmarks, total, err
 }
 
-func (r *Repo) ListLatestAlbumBookmarksAfter(userID uuid.UUID, pageSize int, cursor *musicCreatedAtCursor) ([]model.AlbumBookmark, bool, error) {
+func (r *Repo) ListLatestAlbumBookmarksAfter(userID uuid.UUID, pageSize int, cursor *musicCreatedAtCursor, viewer *authctx.CurrentUser) ([]model.AlbumBookmark, bool, error) {
 	db := r.db.Model(&model.AlbumBookmark{}).
 		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".lifecycle_status = 'active'").
 		Where("music_album_bookmarks.user_id = ?", userID).
@@ -183,7 +184,7 @@ func (r *Repo) ListLatestAlbumBookmarksAfter(userID uuid.UUID, pageSize int, cur
 		db = db.Where("(music_album_bookmarks.created_at < ? OR (music_album_bookmarks.created_at = ? AND music_album_bookmarks.id < ?))", cursor.CreatedAt, cursor.CreatedAt, cursor.ID)
 	}
 	var bookmarks []model.AlbumBookmark
-	if err := db.Preload("Album.Artists").Limit(pageSize + 1).Find(&bookmarks).Error; err != nil {
+	if err := db.Preload("Album.Artists", visibleArtistPreload(viewer)).Limit(pageSize + 1).Find(&bookmarks).Error; err != nil {
 		return nil, false, err
 	}
 	hasMore := len(bookmarks) > pageSize
@@ -263,7 +264,7 @@ func (r *Repo) ListPlaylistBookmarksFiltered(userID uuid.UUID, page int, pageSiz
 	return bookmarks, total, nil
 }
 
-func (r *Repo) ListPlaylistSongsFiltered(playlistID uuid.UUID, page int, pageSize int, sort string, query string) ([]model.PlaylistSong, int64, error) {
+func (r *Repo) ListPlaylistSongsFiltered(playlistID uuid.UUID, page int, pageSize int, sort string, query string, viewer *authctx.CurrentUser) ([]model.PlaylistSong, int64, error) {
 	var total int64
 	db := r.db.Model(&model.PlaylistSong{}).
 		Joins("JOIN \"Songs\" ON \"Songs\".id = music_playlist_songs.song_id AND \"Songs\".lifecycle_status = 'active'").
@@ -283,7 +284,7 @@ func (r *Repo) ListPlaylistSongsFiltered(playlistID uuid.UUID, page int, pageSiz
 		db = db.Order("music_playlist_songs.created_at DESC")
 	}
 	var songs []model.PlaylistSong
-	err := db.Preload("Song.Artists").Preload("Song.Album").Limit(pageSize).Offset((page - 1) * pageSize).Find(&songs).Error
+	err := db.Preload("Song.Artists", visibleArtistPreload(viewer)).Preload("Song.Album", visibleAlbumPreload(viewer)).Limit(pageSize).Offset((page - 1) * pageSize).Find(&songs).Error
 	return songs, total, err
 }
 
@@ -438,7 +439,7 @@ func (r *Repo) UpsertPlaylistSong(playlistID uuid.UUID, songID uuid.UUID) (model
 	return playlistSong, err
 }
 
-func (r *Repo) ListPlaylistSongs(playlistID uuid.UUID, page int, pageSize int) ([]model.PlaylistSong, int64, error) {
+func (r *Repo) ListPlaylistSongs(playlistID uuid.UUID, page int, pageSize int, viewer *authctx.CurrentUser) ([]model.PlaylistSong, int64, error) {
 	base := r.db.Model(&model.PlaylistSong{}).
 		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_playlist_songs.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
 		Where("music_playlist_songs.playlist_id = ?", playlistID)
@@ -447,7 +448,7 @@ func (r *Repo) ListPlaylistSongs(playlistID uuid.UUID, page int, pageSize int) (
 		return nil, 0, err
 	}
 	var songs []model.PlaylistSong
-	err := base.Preload("Song.Artists").Preload("Song.Album").Order("music_playlist_songs.position ASC, music_playlist_songs.created_at ASC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&songs).Error
+	err := base.Preload("Song.Artists", visibleArtistPreload(viewer)).Preload("Song.Album", visibleAlbumPreload(viewer)).Order("music_playlist_songs.position ASC, music_playlist_songs.created_at ASC").Limit(pageSize).Offset((page - 1) * pageSize).Find(&songs).Error
 	return songs, total, err
 }
 
@@ -494,7 +495,7 @@ func (r *Repo) RecordListeningHistory(userID, songID uuid.UUID, playedAt time.Ti
 	}).Create(&history).Error
 }
 
-func (r *Repo) ListRecentListeningHistory(userID uuid.UUID, limit int) ([]model.MusicListeningHistory, error) {
+func (r *Repo) ListRecentListeningHistory(userID uuid.UUID, limit int, viewer *authctx.CurrentUser) ([]model.MusicListeningHistory, error) {
 	if limit < 1 {
 		return []model.MusicListeningHistory{}, nil
 	}
@@ -502,15 +503,15 @@ func (r *Repo) ListRecentListeningHistory(userID uuid.UUID, limit int) ([]model.
 	err := r.db.Model(&model.MusicListeningHistory{}).
 		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_listening_histories.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
 		Where("music_listening_histories.user_id = ?", userID).
-		Preload("Song.Artists").
-		Preload("Song.Album").
+		Preload("Song.Artists", visibleArtistPreload(viewer)).
+		Preload("Song.Album", visibleAlbumPreload(viewer)).
 		Order("music_listening_histories.last_played_at DESC").
 		Limit(limit).
 		Find(&rows).Error
 	return rows, err
 }
 
-func (r *Repo) ListListeningHistory(userID uuid.UUID, page, pageSize int) ([]model.MusicListeningHistory, int64, error) {
+func (r *Repo) ListListeningHistory(userID uuid.UUID, page, pageSize int, viewer *authctx.CurrentUser) ([]model.MusicListeningHistory, int64, error) {
 	base := r.db.Model(&model.MusicListeningHistory{}).
 		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_listening_histories.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
 		Where("music_listening_histories.user_id = ?", userID)
@@ -519,7 +520,7 @@ func (r *Repo) ListListeningHistory(userID uuid.UUID, page, pageSize int) ([]mod
 		return nil, 0, err
 	}
 	var rows []model.MusicListeningHistory
-	err := base.Preload("Song.Artists").Preload("Song.Album").
+	err := base.Preload("Song.Artists", visibleArtistPreload(viewer)).Preload("Song.Album", visibleAlbumPreload(viewer)).
 		Order("music_listening_histories.last_played_at DESC").
 		Limit(pageSize).Offset((page - 1) * pageSize).
 		Find(&rows).Error

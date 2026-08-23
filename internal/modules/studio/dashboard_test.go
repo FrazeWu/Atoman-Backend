@@ -49,7 +49,13 @@ func newStudioQueryFixture(t *testing.T) studioQueryFixture {
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
 		&model.CommentTimeAnchor{},
+		&model.ContentEntry{},
+		&model.ContentBlogExtension{},
+		&model.ContentCollection{},
+		&model.ContentCollectionMembership{},
+		&model.ContentEpisodeExtension{},
 	)
+	registerStudioCanonicalTestSeeds(t, db)
 	owner := model.User{Username: "studio-query-owner", Email: "studio-query-owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	foreign := model.User{Username: "studio-query-foreign", Email: "studio-query-foreign@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&owner).Error; err != nil {
@@ -231,6 +237,9 @@ func TestDashboardDoesNotReportBlogWithManyToManyCollectionAsMissing(t *testing.
 		t.Fatal(err)
 	}
 	if err := fixture.db.Model(&post).Association("Collections").Replace([]model.Collection{fixture.collections[ModuleBlog]}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.ContentCollectionMembership{ContentID: post.ID, CollectionID: fixture.collections[ModuleBlog].ID}).Error; err != nil {
 		t.Fatal(err)
 	}
 

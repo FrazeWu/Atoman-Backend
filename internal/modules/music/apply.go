@@ -163,7 +163,7 @@ func applyEdit(tx *gorm.DB, edit *model.MusicEdit) error {
 		if err := tx.Create(&album).Error; err != nil {
 			return err
 		}
-		if err := replaceAlbumArtistCredits(tx, album.ID, credits, defaultMissingRoles); err != nil {
+		if err := replaceAlbumArtistCredits(tx, album.ID, credits, defaultMissingRoles, edit.SubmittedBy); err != nil {
 			return err
 		}
 		if _, err := revisionservice.NewRevisionService(tx).EnsureInitialRevision("album", album.ID, edit.SubmittedBy); err != nil {

@@ -25,8 +25,9 @@ func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UU
 	}
 
 	fileName := strings.TrimSpace(input.FileName)
-	if fileName == "" || strings.ToLower(filepath.Ext(fileName)) != ".zip" {
-		return AlbumImportMultipartDTO{}, apperr.BadRequest("validation.invalid_request", "archive must be a zip file")
+	role, format, formatErr := detectAlbumImportFileRole(fileName)
+	if fileName == "" || formatErr != nil || role != AlbumImportFileRoleArchive {
+		return AlbumImportMultipartDTO{}, apperr.BadRequest("validation.invalid_request", "archive format is not supported")
 	}
 	limits := albumImportUploadLimitsFromEnv()
 	if input.FileSize <= 0 || input.FileSize > limits.MaxFileBytes || input.FileSize > limits.MaxTotalBytes {
@@ -65,10 +66,10 @@ func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UU
 		if preflightArchive != nil {
 			preparedArchiveID = preflightArchive.ID
 		}
-		preparedObjectKey = albumImportSourceKey(user.ID, id, preparedArchiveID, "zip")
+		preparedObjectKey = albumImportSourceKey(user.ID, id, preparedArchiveID, format)
 		preparedContentType = strings.TrimSpace(input.ContentType)
 		if preparedContentType == "" {
-			preparedContentType = "application/zip"
+			preparedContentType = archiveContentType(format)
 		}
 		preparedUploadID, err = s.albumImportMultipart.CreateMultipartUpload(preparedObjectKey, preparedContentType)
 		if err != nil {
@@ -129,7 +130,7 @@ func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UU
 			FileSize:       input.FileSize,
 			ObjectKey:      preparedObjectKey,
 			UploadID:       preparedUploadID,
-			PartSize:       albumImportMultipartPartSize,
+			Format:          format,
 			CompletedParts: []AlbumImportMultipartPartDTO{},
 		}
 		writeAlbumImportMultipartState(payload, state)

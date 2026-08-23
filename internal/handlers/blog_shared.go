@@ -12,19 +12,19 @@ import (
 )
 
 type BlogDraftResponse struct {
-	ID            uuid.UUID `json:"id"`
-	UserID        uuid.UUID `json:"user_id"`
-	ContextKey    string    `json:"context_key"`
-	SourcePostID  *string   `json:"source_post_id,omitempty"`
-	Title         string    `json:"title"`
-	Content       string    `json:"content"`
-	Summary       string    `json:"summary"`
-	CoverURL      string    `json:"cover_url"`
-	Visibility    string    `json:"visibility"`
-	ChannelID     *string   `json:"channel_id,omitempty"`
-	CollectionIDs []string  `json:"collection_ids"`
-	CreatedAt     any       `json:"created_at"`
-	UpdatedAt     any       `json:"updated_at"`
+	ID           uuid.UUID `json:"id"`
+	UserID       uuid.UUID `json:"user_id"`
+	ContextKey   string    `json:"context_key"`
+	SourcePostID *string   `json:"source_post_id,omitempty"`
+	Title        string    `json:"title"`
+	Content      string    `json:"content"`
+	Summary      string    `json:"summary"`
+	CoverURL     string    `json:"cover_url"`
+	Visibility   string    `json:"visibility"`
+	ChannelID    *string   `json:"channel_id,omitempty"`
+	CollectionID *string   `json:"collection_id,omitempty"`
+	CreatedAt    any       `json:"created_at"`
+	UpdatedAt    any       `json:"updated_at"`
 }
 
 func currentBlogViewerID(c *gin.Context) *uuid.UUID {
@@ -61,8 +61,8 @@ func RequireBlogPostEditAccess(db *gorm.DB, h gin.HandlerFunc) gin.HandlerFunc {
 			return
 		}
 
-		var post model.Post
-		if err := db.Select("id", "user_id").First(&post, "id = ?", postID).Error; err != nil {
+		var entry model.ContentEntry
+		if err := db.Select("id", "author_id").First(&entry, "id = ?", postID).Error; err != nil {
 			if err == gorm.ErrRecordNotFound {
 				c.JSON(404, gin.H{"error": "Post not found"})
 				return
@@ -70,7 +70,7 @@ func RequireBlogPostEditAccess(db *gorm.DB, h gin.HandlerFunc) gin.HandlerFunc {
 			c.JSON(500, gin.H{"error": "Failed to load post"})
 			return
 		}
-		if post.UserID != userID {
+		if entry.AuthorID == nil || *entry.AuthorID != userID {
 			c.JSON(403, gin.H{"error": "You don't have permission to edit this post"})
 			return
 		}

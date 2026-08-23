@@ -1309,9 +1309,7 @@ func TestFeedRecommendationArticlesIncludesExternalFeedItems(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, _ := newFeedTestService(t)
 
-	if err := db.Exec("DELETE FROM posts").Error; err != nil {
-		t.Fatalf("delete posts: %v", err)
-	}
+	clearFeedCanonicalBlogContent(t, db)
 
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)
@@ -1731,9 +1729,7 @@ func TestFeedRecommendationChannelsIncludesExternalSources(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, _ := newFeedTestService(t)
 
-	if err := db.Exec("DELETE FROM posts").Error; err != nil {
-		t.Fatalf("delete posts: %v", err)
-	}
+	clearFeedCanonicalBlogContent(t, db)
 
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/feed"), service)

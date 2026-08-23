@@ -16,6 +16,9 @@ func (s *Service) ReorderCollectionContents(user authctx.CurrentUser, module Mod
 	if len(orderedIDs) == 0 {
 		return apperr.BadRequest("validation.invalid_request", "content_ids is required")
 	}
+	if module == ModuleBlog {
+		return s.ReorderUnifiedCollectionContents(user, collectionID, orderedIDs)
+	}
 	collection, err := s.collectionInModule(collectionID, module)
 	if err != nil {
 		return err
@@ -35,19 +38,6 @@ func (s *Service) ReorderCollectionContents(user authctx.CurrentUser, module Mod
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		switch module {
-		case ModuleBlog:
-			var posts []model.Post
-			if err := tx.Where("user_id = ? AND collection_id = ? AND collection_conflict = ?", user.ID, collection.ID, false).Where("NOT EXISTS (SELECT 1 FROM podcast_episodes WHERE podcast_episodes.post_id = posts.id AND podcast_episodes.deleted_at IS NULL)").Find(&posts).Error; err != nil {
-				return err
-			}
-			if err := requireExactOrder(posts, orderedIDs, func(post model.Post) uuid.UUID { return post.ID }); err != nil {
-				return err
-			}
-			for position, id := range orderedIDs {
-				if err := tx.Model(&model.Post{}).Where("id = ?", id).Update("collection_position", position).Error; err != nil {
-					return err
-				}
-			}
 		case ModulePodcast:
 			var episodes []model.PodcastEpisode
 			if err := tx.Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL").Where("posts.user_id = ? AND posts.collection_id = ? AND posts.collection_conflict = ?", user.ID, collection.ID, false).Find(&episodes).Error; err != nil {

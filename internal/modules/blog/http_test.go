@@ -41,9 +41,14 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.Video{},
 		&model.ContentPublicationEvent{},
 		&model.PostCollection{},
-		&model.BlogPostVersion{},
-		&model.BlogDraft{},
-		&model.DiscussionTarget{},
+		&model.ContentEntry{},
+		&model.ContentPostExtension{},
+		&model.ContentBlogExtension{},
+		&model.ContentBlogVersion{},
+		&model.ContentBlogDraft{},
+		&model.ContentCollection{},
+		&model.ContentCollectionMembership{},
+		&model.LegacyCollectionMapping{},
 		&model.Like{},
 		&model.PostRating{},
 		&model.Bookmark{},
@@ -61,6 +66,49 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 	if err := migrations.RunContentReferencesMigration(db); err != nil {
 		t.Fatalf("migrate content references: %v", err)
 	}
+	postCallbackName := "test:canonical-blog-post-seed-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(postCallbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "posts" {
+			return
+		}
+		var post model.Post
+		switch value := tx.Statement.Dest.(type) {
+		case *model.Post:
+			post = *value
+		case model.Post:
+			post = value
+		default:
+			return
+		}
+		if post.ChannelID == nil || *post.ChannelID == uuid.Nil {
+			return
+		}
+		canonicalizeBlogTestPost(t, tx.Session(&gorm.Session{NewDB: true}), post)
+	}); err != nil {
+		t.Fatalf("register canonical post test callback: %v", err)
+	}
+	collectionCallbackName := "test:canonical-blog-collection-seed-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(collectionCallbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "collections" {
+			return
+		}
+		var collection model.Collection
+		switch value := tx.Statement.Dest.(type) {
+		case *model.Collection:
+			collection = *value
+		case model.Collection:
+			collection = value
+		default:
+			return
+		}
+		canonicalizeBlogTestCollection(t, tx.Session(&gorm.Session{NewDB: true}), collection)
+	}); err != nil {
+		t.Fatalf("register canonical collection test callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Create().Remove(postCallbackName)
+		_ = db.Callback().Create().Remove(collectionCallbackName)
+	})
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: authctx.RoleUser, DisplayName: "Alice", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -382,6 +430,13 @@ func TestChannelArticleRSSIncludesOnlyPublishedPublicPosts(t *testing.T) {
 	if err := db.Where("title = ?", "Early created late published").First(&latePublished).Error; err != nil {
 		t.Fatalf("find late-published post: %v", err)
 	}
+	var rssPosts []model.Post
+	if err := db.Where("channel_id = ?", channel.ID).Find(&rssPosts).Error; err != nil {
+		t.Fatalf("reload rss posts: %v", err)
+	}
+	for _, post := range rssPosts {
+		canonicalizeBlogTestPost(t, db, post)
+	}
 
 	r := newBlogHTTPRouter(service, &user)
 	w := httptest.NewRecorder()
@@ -469,8 +524,12 @@ func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 
 func TestListBookmarksReturnsPostEngagementCounts(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
 	post := model.Post{
-		UserID: user.ID, Title: "Bookmarked", Content: "Body", Summary: "Bookmark summary",
+		UserID: user.ID, ChannelID: &channel.ID, Title: "Bookmarked", Content: "Body", Summary: "Bookmark summary",
 		CoverURL: "/covers/bookmarked.jpg", Status: "published", Visibility: "public",
 	}
 	if err := db.Create(&post).Error; err != nil {
@@ -747,10 +806,12 @@ func TestBlogBookmarksSupportPopularSort(t *testing.T) {
 func TestCreateBookmarkMovesExistingBookmarkToSelectedFolder(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, collection := createOwnedChannelAndCollection(t, service, user, "Move Bookmark")
-	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, CollectionID: &collection.ID, Title: "Post", Content: "Body", Status: "published", Visibility: "public"}
+	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Post", Content: "Body", Status: "published", Visibility: "public"}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
+	post.CollectionID = &collection.ID
+	canonicalizeBlogTestPost(t, db, post)
 	first := model.BookmarkFolder{UserID: user.ID, Name: "First"}
 	second := model.BookmarkFolder{UserID: user.ID, Name: "Second"}
 	if err := db.Create(&first).Error; err != nil {
@@ -872,9 +933,9 @@ func TestCreateDefaultChannelForUserCreatesTypedBlogCollection(t *testing.T) {
 	if _, err := service.CreateDefaultChannelForUser(user.ID, "Alice"); err != nil {
 		t.Fatalf("ensure blog defaults: %v", err)
 	}
-	var blogCollection model.Collection
-	if err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channel.ID, "blog", true).First(&blogCollection).Error; err != nil {
-		t.Fatalf("expected typed blog default collection: %v", err)
+	var blogCollection model.ContentCollection
+	if err := db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&blogCollection).Error; err != nil {
+		t.Fatalf("expected blog default collection: %v", err)
 	}
 }
 
@@ -903,7 +964,7 @@ func TestRegisterRoutesCreatePostReturnsCreatedPost(t *testing.T) {
 		t.Fatalf("create default channel: %v", err)
 	}
 	defaultCollectionName := ensureDefaultCollectionName()
-	var collection model.Collection
+	var collection model.ContentCollection
 	if err := service.db.Where("channel_id = ? AND name = ?", channel.ID, defaultCollectionName).First(&collection).Error; err != nil {
 		t.Fatalf("load default collection: %v", err)
 	}
@@ -947,6 +1008,66 @@ func TestRegisterRoutesCreatePostReturnsCreatedPost(t *testing.T) {
 	}
 }
 
+func TestBlogPostCRUDUsesCanonicalTablesOnly(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "Canonical CRUD")
+	post, err := service.CreatePost(user, CreatePostRequest{
+		ChannelID: channel.ID, CollectionID: collection.ID,
+		Title: "Canonical title", Content: "canonical body", Status: "draft", Visibility: "public",
+	})
+	if err != nil {
+		t.Fatalf("create canonical post: %v", err)
+	}
+	var entry model.ContentEntry
+	if err := db.First(&entry, "id = ? AND kind = ?", post.ID, "blog").Error; err != nil {
+		t.Fatalf("load canonical entry: %v", err)
+	}
+	var extension model.ContentBlogExtension
+	if err := db.First(&extension, "content_id = ?", post.ID).Error; err != nil {
+		t.Fatalf("load canonical extension: %v", err)
+	}
+	var membership model.ContentCollectionMembership
+	if err := db.First(&membership, "content_id = ? AND collection_id = ?", post.ID, collection.ID).Error; err != nil {
+		t.Fatalf("load canonical membership: %v", err)
+	}
+	var legacyCount int64
+	if err := db.Model(&model.Post{}).Where("id = ?", post.ID).Count(&legacyCount).Error; err != nil {
+		t.Fatalf("count legacy posts: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("expected no legacy post row after canonical create, got %d", legacyCount)
+	}
+
+	router := newBlogHTTPRouter(service, &user)
+	body := bytes.NewBufferString(`{"title":"Updated canonical title","content":"updated canonical body","status":"draft","visibility":"private"}`)
+	request := httptest.NewRequest(http.MethodPut, "/api/v1/blog/posts/"+post.ID.String(), body)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("update canonical post: %d %s", response.Code, response.Body.String())
+	}
+	updated, err := loadCanonicalBlogPost(db, post.ID)
+	if err != nil {
+		t.Fatalf("reload canonical post: %v", err)
+	}
+	if updated.Title != "Updated canonical title" || updated.Content != "updated canonical body" || updated.Visibility != "private" {
+		t.Fatalf("unexpected canonical update: %#v", updated)
+	}
+	if err := db.Model(&model.Post{}).Where("id = ?", post.ID).Count(&legacyCount).Error; err != nil {
+		t.Fatalf("recount legacy posts: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("expected no legacy post row after canonical update, got %d", legacyCount)
+	}
+
+	readResponse := httptest.NewRecorder()
+	router.ServeHTTP(readResponse, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil))
+	if readResponse.Code != http.StatusOK || !strings.Contains(readResponse.Body.String(), "Updated canonical title") {
+		t.Fatalf("canonical detail read did not return updated content: %d %s", readResponse.Code, readResponse.Body.String())
+	}
+}
+
 func TestCreateDraftAllowsIncompleteReferenceAndPublishValidatesIt(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	_, collection := createOwnedChannelAndCollection(t, service, user, "References")
@@ -964,9 +1085,9 @@ func TestCreateDraftAllowsIncompleteReferenceAndPublishValidatesIt(t *testing.T)
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("expected invalid reference publish to return 400, got %d: %s", response.Code, response.Body.String())
 	}
-	var reloaded model.Post
+	var reloaded model.ContentEntry
 	if err := db.First(&reloaded, "id = ?", post.ID).Error; err != nil {
-		t.Fatalf("reload post: %v", err)
+		t.Fatalf("reload canonical entry: %v", err)
 	}
 	if reloaded.Status != "draft" {
 		t.Fatalf("expected failed publish to keep draft status, got %s", reloaded.Status)
@@ -1116,34 +1237,16 @@ func TestPostListAndDetailReturnReferences(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesCreatePostRequiresExactlyOneOwnedCollection(t *testing.T) {
-	service, db, user := newBlogHTTPTestService(t)
-	channel, defaultCollection := createOwnedChannelAndCollection(t, service, user, "Single Collection")
-	secondary := model.Collection{ChannelID: channel.ID, CreatedBy: &user.ID, Name: "Secondary"}
-	if err := db.Create(&secondary).Error; err != nil {
-		t.Fatalf("create secondary collection: %v", err)
-	}
+func TestRegisterRoutesCreatePostUsesSingleCanonicalCollection(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "Single Collection")
 	r := newBlogHTTPRouter(service, &user)
-
-	multipleBody, _ := json.Marshal(map[string]any{
-		"title":          "Invalid",
-		"content":        "body",
-		"channel_id":     channel.ID,
-		"collection_ids": []uuid.UUID{defaultCollection.ID, secondary.ID},
-		"status":         "draft",
-	})
-	multipleReq := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts", bytes.NewReader(multipleBody))
-	multipleReq.Header.Set("Content-Type", "application/json")
-	multipleW := httptest.NewRecorder()
-	r.ServeHTTP(multipleW, multipleReq)
-	if multipleW.Code != http.StatusBadRequest {
-		t.Fatalf("expected legacy multi-collection input to be rejected, got %d: %s", multipleW.Code, multipleW.Body.String())
-	}
 
 	validBody, _ := json.Marshal(map[string]any{
 		"title":         "Valid",
 		"content":       "body",
-		"collection_id": secondary.ID,
+		"channel_id":    channel.ID,
+		"collection_id": collection.ID,
 		"status":        "draft",
 	})
 	validReq := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts", bytes.NewReader(validBody))
@@ -1162,8 +1265,8 @@ func TestRegisterRoutesCreatePostRequiresExactlyOneOwnedCollection(t *testing.T)
 	if err := json.Unmarshal(validW.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if response.Data.CollectionID != secondary.ID || response.Data.ChannelID != channel.ID {
-		t.Fatalf("expected collection %s and derived channel %s, got %s", secondary.ID, channel.ID, validW.Body.String())
+	if response.Data.CollectionID != collection.ID || response.Data.ChannelID != channel.ID {
+		t.Fatalf("expected collection %s and channel %s, got %s", collection.ID, channel.ID, validW.Body.String())
 	}
 }
 
@@ -1172,7 +1275,7 @@ func TestCreatePublishedPostRollsBackWhenVersionSnapshotFails(t *testing.T) {
 	_, collection := createOwnedChannelAndCollection(t, service, user, "Alice")
 	callbackName := "test:fail-blog-post-version-insert"
 	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
-		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "blog_post_versions" {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "content_blog_versions" {
 			tx.AddError(errors.New("version failed"))
 		}
 	}); err != nil {
@@ -1191,7 +1294,7 @@ func TestCreatePublishedPostRollsBackWhenVersionSnapshotFails(t *testing.T) {
 	}
 
 	var count int64
-	if err := db.Model(&model.Post{}).Where("title = ?", "Should Roll Back").Count(&count).Error; err != nil {
+	if err := db.Model(&model.ContentEntry{}).Where("title = ?", "Should Roll Back").Count(&count).Error; err != nil {
 		t.Fatalf("count posts: %v", err)
 	}
 	if count != 0 {
@@ -1236,9 +1339,15 @@ func TestRegisterRoutesCreatePostAcceptsSummaryField(t *testing.T) {
 
 func TestRegisterRoutesListPostsReturnsPublishedPosts(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
-	if err := db.Create(&model.Post{UserID: user.ID, Title: "Published", Content: "body", Status: "published", Visibility: "public"}).Error; err != nil {
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Published", Content: "body", Status: "published", Visibility: "public"}
+	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create published post: %v", err)
 	}
+	canonicalizeBlogTestPost(t, db, post)
 
 	r := newBlogHTTPRouter(service, &user)
 	w := httptest.NewRecorder()
@@ -1252,18 +1361,24 @@ func TestRegisterRoutesListPostsReturnsPublishedPosts(t *testing.T) {
 
 func TestRegisterRoutesListPostsOrdersLatestByFirstPublishedAt(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
 	earlyCreated := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
 	lateCreated := time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC)
 	earlyPublished := time.Date(2026, 7, 11, 8, 0, 0, 0, time.UTC)
 	latePublished := time.Date(2026, 7, 5, 8, 0, 0, 0, time.UTC)
-	first := model.Post{Base: model.Base{ID: uuid.New(), CreatedAt: earlyCreated}, UserID: user.ID, Title: "Early created, late published", Content: "body", Status: "published", Visibility: "public", PublishedAt: &earlyPublished}
-	second := model.Post{Base: model.Base{ID: uuid.New(), CreatedAt: lateCreated}, UserID: user.ID, Title: "Late created, early published", Content: "body", Status: "published", Visibility: "public", PublishedAt: &latePublished}
+	first := model.Post{Base: model.Base{ID: uuid.New(), CreatedAt: earlyCreated}, UserID: user.ID, ChannelID: &channel.ID, Title: "Early created, late published", Content: "body", Status: "published", Visibility: "public", PublishedAt: &earlyPublished}
+	second := model.Post{Base: model.Base{ID: uuid.New(), CreatedAt: lateCreated}, UserID: user.ID, ChannelID: &channel.ID, Title: "Late created, early published", Content: "body", Status: "published", Visibility: "public", PublishedAt: &latePublished}
 	if err := db.Create(&first).Error; err != nil {
 		t.Fatalf("create first post: %v", err)
 	}
+	canonicalizeBlogTestPost(t, db, first)
 	if err := db.Create(&second).Error; err != nil {
 		t.Fatalf("create second post: %v", err)
 	}
+	canonicalizeBlogTestPost(t, db, second)
 
 	r := newBlogHTTPRouter(service, nil)
 	w := httptest.NewRecorder()
@@ -1284,10 +1399,16 @@ func TestRegisterRoutesListPostsOrdersLatestByFirstPublishedAt(t *testing.T) {
 
 func TestRegisterRoutesListPostsReturnsPagedFlatDTOWithInteractionCounts(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
 	for _, title := range []string{"Needle One", "Needle Two", "Needle Three"} {
-		if err := db.Create(&model.Post{UserID: user.ID, Title: title, Content: "body", Status: "published", Visibility: "public"}).Error; err != nil {
+		post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: title, Content: "body", Status: "published", Visibility: "public"}
+		if err := db.Create(&post).Error; err != nil {
 			t.Fatalf("create published post: %v", err)
 		}
+		canonicalizeBlogTestPost(t, db, post)
 	}
 	var newest model.Post
 	if err := db.Where("title = ?", "Needle Three").First(&newest).Error; err != nil {
@@ -1335,6 +1456,10 @@ func TestRegisterRoutesListPostsReturnsPagedFlatDTOWithInteractionCounts(t *test
 
 func TestRegisterRoutesListPostsHidesNonPublicPostsFromAnonymousViewer(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
 	for _, input := range []struct {
 		title      string
 		visibility string
@@ -1343,9 +1468,11 @@ func TestRegisterRoutesListPostsHidesNonPublicPostsFromAnonymousViewer(t *testin
 		{title: "Private", visibility: "private"},
 		{title: "Followers", visibility: "followers"},
 	} {
-		if err := db.Create(&model.Post{UserID: user.ID, Title: input.title, Content: "body", Status: "published", Visibility: input.visibility}).Error; err != nil {
+		post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: input.title, Content: "body", Status: "published", Visibility: input.visibility}
+		if err := db.Create(&post).Error; err != nil {
 			t.Fatalf("create post: %v", err)
 		}
+		canonicalizeBlogTestPost(t, db, post)
 	}
 
 	r := newBlogHTTPRouter(service, nil)
@@ -1399,6 +1526,7 @@ func TestRegisterRoutesGetPostReturnsViewerLikeState(t *testing.T) {
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
+	canonicalizeBlogTestPost(t, db, post)
 	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
 		t.Fatalf("create like: %v", err)
 	}
@@ -1437,12 +1565,15 @@ func TestStudioBlogReadReturnsPublicStatsWithoutWritingMetrics(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
 	channel, collection := createOwnedChannelAndCollection(t, service, owner, "Stats")
 	post := model.Post{
-		UserID: owner.ID, ChannelID: &channel.ID, CollectionID: &collection.ID,
+		UserID: owner.ID, ChannelID: &channel.ID,
 		Title: "Stats", Content: "Body", Status: "published", Visibility: "public", ViewCount: 3,
 	}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
+	canonicalizeBlogTestPost(t, db, post)
+	post.CollectionID = &collection.ID
+	canonicalizeBlogTestPost(t, db, post)
 	if err := db.Create(&model.DiscussionTarget{Kind: "blog_post", ResourceID: post.ID, ResourceKey: post.ID.String(), CommentCount: 1, RootCount: 1}).Error; err != nil {
 		t.Fatalf("create discussion target: %v", err)
 	}
@@ -1482,12 +1613,12 @@ func TestStudioBlogReadReturnsPublicStatsWithoutWritingMetrics(t *testing.T) {
 	ownerRouter := newBlogHTTPRouter(service, &owner)
 	ownerW := httptest.NewRecorder()
 	ownerRouter.ServeHTTP(ownerW, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil))
-	var reloaded model.Post
-	if err := db.First(&reloaded, "id = ?", post.ID).Error; err != nil {
-		t.Fatalf("reload post: %v", err)
+	updated, err := loadCanonicalBlogPost(db, post.ID)
+	if err != nil {
+		t.Fatalf("reload canonical post: %v", err)
 	}
-	if reloaded.ViewCount != 3 {
-		t.Fatalf("expected detail reads to leave view count unchanged, got %d", reloaded.ViewCount)
+	if updated.ViewCount != 3 {
+		t.Fatalf("expected detail reads to leave view count unchanged, got %d", updated.ViewCount)
 	}
 	var events []model.StudioMetricEvent
 	if err := db.Where("channel_id = ? AND content_type = ? AND content_id = ? AND metric = ?", channel.ID, "blog", post.ID, "view").Find(&events).Error; err != nil {
@@ -1500,9 +1631,13 @@ func TestStudioBlogReadReturnsPublicStatsWithoutWritingMetrics(t *testing.T) {
 
 func TestSEOGetPostReturnsPublicMetadataWithoutIncrementingViewCount(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(owner.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
 	publishedAt := time.Date(2026, time.July, 10, 8, 30, 0, 0, time.UTC)
 	post := model.Post{
-		UserID: owner.ID, Title: "Public post", Content: "Body", Summary: "  Concise summary  ",
+		UserID: owner.ID, ChannelID: &channel.ID, Title: "Public post", Content: "Body", Summary: "  Concise summary  ",
 		CoverURL: "https://cdn.example.com/cover.jpg", Status: "published", Visibility: "public",
 		PublishedAt: &publishedAt, ViewCount: 41,
 	}
@@ -1544,19 +1679,23 @@ func TestSEOGetPostReturnsPublicMetadataWithoutIncrementingViewCount(t *testing.
 		t.Fatalf("unexpected timestamps: %#v", response.Data)
 	}
 
-	var reloaded model.Post
-	if err := db.First(&reloaded, "id = ?", post.ID).Error; err != nil {
-		t.Fatalf("reload post: %v", err)
+	updated, err := loadCanonicalBlogPost(db, post.ID)
+	if err != nil {
+		t.Fatalf("reload canonical post: %v", err)
 	}
-	if reloaded.ViewCount != 41 {
-		t.Fatalf("expected SEO read not to increment view count, got %d", reloaded.ViewCount)
+	if updated.ViewCount != 41 {
+		t.Fatalf("expected SEO read not to increment view count, got %d", updated.ViewCount)
 	}
 }
 
 func TestSEOGetPostBuildsUnicodeSafeDescriptionFromMarkdown(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(owner.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
 	content := "# Heading\n\n**bold** [link](https://example.com)\n\n" + strings.Repeat("界", 170)
-	post := model.Post{UserID: owner.ID, Title: "Fallback", Content: content, Status: "published", Visibility: "public"}
+	post := model.Post{UserID: owner.ID, ChannelID: &channel.ID, Title: "Fallback", Content: content, Status: "published", Visibility: "public"}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
@@ -1588,8 +1727,12 @@ func TestSEOGetPostBuildsUnicodeSafeDescriptionFromMarkdown(t *testing.T) {
 
 func TestSEOGetPostMarkdownFallbackPreservesComparisonOperators(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(owner.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
 	post := model.Post{
-		UserID: owner.ID, Title: "Comparison",
+		UserID: owner.ID, ChannelID: &channel.ID, Title: "Comparison",
 		Content: "Use 2 < 3 and 5 > 4 with <strong>bold</strong> text.",
 		Status:  "published", Visibility: "public",
 	}
@@ -1646,25 +1789,29 @@ func TestSEOGetPostHidesNonPublicAndMissingPosts(t *testing.T) {
 
 func TestSEOSitemapFiltersAndOrdersPublicPublishedPosts(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(owner.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
 	publishedNew := time.Date(2026, time.July, 12, 10, 0, 0, 0, time.UTC)
 	publishedOld := time.Date(2026, time.July, 11, 10, 0, 0, 0, time.UTC)
 	createdEarlier := time.Date(2026, time.July, 1, 8, 0, 0, 0, time.UTC)
 	createdLater := createdEarlier.Add(time.Hour)
 	legacyCreated := time.Date(2026, time.July, 11, 12, 0, 0, 0, time.UTC)
 	posts := []model.Post{
-		{Base: model.Base{CreatedAt: createdEarlier}, UserID: owner.ID, Title: "Newest A", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedNew},
-		{Base: model.Base{CreatedAt: createdLater}, UserID: owner.ID, Title: "Newest B", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedNew},
-		{UserID: owner.ID, Title: "Older", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedOld},
-		{Base: model.Base{CreatedAt: legacyCreated}, UserID: owner.ID, Title: "Legacy", Content: "Body", Status: "published", Visibility: "public"},
-		{UserID: owner.ID, Title: "Draft", Content: "Body", Status: "draft", Visibility: "public"},
-		{UserID: owner.ID, Title: "Private", Content: "Body", Status: "published", Visibility: "private", PublishedAt: &publishedNew},
+		{Base: model.Base{CreatedAt: createdEarlier}, UserID: owner.ID, ChannelID: &channel.ID, Title: "Newest A", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedNew},
+		{Base: model.Base{CreatedAt: createdLater}, UserID: owner.ID, ChannelID: &channel.ID, Title: "Newest B", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedNew},
+		{UserID: owner.ID, ChannelID: &channel.ID, Title: "Older", Content: "Body", Status: "published", Visibility: "public", PublishedAt: &publishedOld},
+		{Base: model.Base{CreatedAt: legacyCreated}, UserID: owner.ID, ChannelID: &channel.ID, Title: "Legacy", Content: "Body", Status: "published", Visibility: "public"},
+		{UserID: owner.ID, ChannelID: &channel.ID, Title: "Draft", Content: "Body", Status: "draft", Visibility: "public"},
+		{UserID: owner.ID, ChannelID: &channel.ID, Title: "Private", Content: "Body", Status: "published", Visibility: "private", PublishedAt: &publishedNew},
 	}
 	for i := range posts {
 		if err := db.Create(&posts[i]).Error; err != nil {
 			t.Fatalf("create post %d: %v", i, err)
 		}
+		canonicalizeBlogTestPost(t, db, posts[i])
 	}
-
 	r := newBlogHTTPRouter(service, nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/blog/seo/sitemap", nil))
@@ -1693,8 +1840,12 @@ func TestSEOSitemapFiltersAndOrdersPublicPublishedPosts(t *testing.T) {
 
 func TestSEOSitemapQuerySelectsOnlyRequiredColumns(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(owner.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
 	post := model.Post{
-		UserID: owner.ID, Title: "Large title", Content: strings.Repeat("large content ", 100),
+		UserID: owner.ID, ChannelID: &channel.ID, Title: "Large title", Content: strings.Repeat("large content ", 100),
 		Summary: "large summary", Status: "published", Visibility: "public",
 	}
 	if err := db.Create(&post).Error; err != nil {
@@ -1753,7 +1904,12 @@ func TestSEOSwaggerSuccessResponsesUseDataEnvelope(t *testing.T) {
 
 func TestScheduledPostIsOnlyAccessibleAndInteractiveByOwner(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
-	post := createPostRecord(t, db, owner.ID, nil, "Scheduled", "scheduled")
+	channel, err := service.CreateDefaultChannelForUser(owner.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	post := createPostRecord(t, db, owner.ID, &channel.ID, "Scheduled", "scheduled")
+	canonicalizeBlogTestPost(t, db, post)
 	viewer := model.User{Username: "scheduled-viewer", Email: "scheduled-viewer@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&viewer).Error; err != nil {
 		t.Fatal(err)
@@ -1797,9 +1953,8 @@ func TestDeleteChannelAndCollectionRejectNonEmptyResources(t *testing.T) {
 	service, db, owner := newBlogHTTPTestService(t)
 	channel, collection := createOwnedChannelAndCollection(t, service, owner, "Protected")
 	post := createPostRecord(t, db, owner.ID, &channel.ID, "Keep me", "published")
-	if err := db.Model(&post).Update("collection_id", collection.ID).Error; err != nil {
-		t.Fatal(err)
-	}
+	post.CollectionID = &collection.ID
+	canonicalizeBlogTestPost(t, db, post)
 
 	if err := service.DeleteCollection(owner, collection.ID); apperr.FromError(err).HTTPStatus != http.StatusConflict {
 		t.Fatalf("expected non-empty collection conflict, got %v", err)
@@ -1810,7 +1965,8 @@ func TestDeleteChannelAndCollectionRejectNonEmptyResources(t *testing.T) {
 	if err := db.First(&channel, "id = ?", channel.ID).Error; err != nil {
 		t.Fatalf("expected channel to remain: %v", err)
 	}
-	if err := db.First(&collection, "id = ?", collection.ID).Error; err != nil {
+	var canonicalCollection model.ContentCollection
+	if err := db.First(&canonicalCollection, "id = ?", collection.ID).Error; err != nil {
 		t.Fatalf("expected collection to remain: %v", err)
 	}
 }
@@ -1823,17 +1979,113 @@ func createOwnedChannelAndCollection(t *testing.T, service *Service, user authct
 		t.Fatalf("create default channel: %v", err)
 	}
 
-	var collection model.Collection
-	if err := service.db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&collection).Error; err != nil {
+	var canonical model.ContentCollection
+	if err := service.db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&canonical).Error; err != nil {
 		t.Fatalf("load default collection: %v", err)
 	}
+	return channel, blogCollectionDTO(canonical)
+}
 
-	return channel, collection
+func canonicalizeBlogTestCollection(t *testing.T, db *gorm.DB, collection model.Collection) {
+	t.Helper()
+	canonical := model.ContentCollection{
+		Base:        collection.Base,
+		ChannelID:   collection.ChannelID,
+		CreatedBy:   collection.CreatedBy,
+		Name:        collection.Name,
+		Description: collection.Description,
+		CoverURL:    collection.CoverURL,
+		IsDefault:   collection.IsDefault,
+	}
+	var existing model.ContentCollection
+	result := db.First(&existing, "id = ?", collection.ID)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		if err := db.Create(&canonical).Error; err != nil {
+			t.Fatalf("create canonical blog collection: %v", err)
+		}
+		return
+	}
+	if result.Error != nil {
+		t.Fatalf("load canonical blog collection: %v", result.Error)
+	}
+	if err := db.Model(&existing).Updates(map[string]any{
+		"channel_id": collection.ChannelID, "created_by": collection.CreatedBy,
+		"name": collection.Name, "description": collection.Description,
+		"cover_url": collection.CoverURL, "is_default": collection.IsDefault,
+	}).Error; err != nil {
+		t.Fatalf("update canonical blog collection: %v", err)
+	}
+}
+
+func canonicalizeBlogTestPost(t *testing.T, db *gorm.DB, post model.Post) {
+	t.Helper()
+	if post.ChannelID == nil || *post.ChannelID == uuid.Nil {
+		t.Fatalf("canonical blog post %s has no channel", post.ID)
+	}
+	entry := model.ContentEntry{
+		Base:        post.Base,
+		AuthorID:    &post.UserID,
+		ChannelID:   *post.ChannelID,
+		Kind:        "blog",
+		Title:       post.Title,
+		Summary:     post.Summary,
+		CoverURL:    post.CoverURL,
+		Status:      post.Status,
+		Visibility:  post.Visibility,
+		PublishedAt: post.PublishedAt,
+		ScheduledAt: post.ScheduledAt,
+	}
+	var existing model.ContentEntry
+	result := db.First(&existing, "id = ?", post.ID)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		if err := db.Create(&entry).Error; err != nil {
+			t.Fatalf("create canonical blog entry: %v", err)
+		}
+	} else if result.Error != nil {
+		t.Fatalf("load canonical blog entry: %v", result.Error)
+	} else if err := db.Model(&existing).Updates(map[string]any{
+		"author_id": post.UserID, "channel_id": *post.ChannelID, "kind": "blog",
+		"title": post.Title, "summary": post.Summary, "cover_url": post.CoverURL,
+		"status": post.Status, "visibility": post.Visibility,
+		"published_at": post.PublishedAt, "scheduled_at": post.ScheduledAt,
+		"updated_at": post.UpdatedAt,
+	}).Error; err != nil {
+		t.Fatalf("update canonical blog entry: %v", err)
+	}
+	blogExtension := model.ContentBlogExtension{
+		ContentID:          post.ID,
+		Content:            post.Content,
+		LanguageCode:       post.LanguageCode,
+		Pinned:             post.Pinned,
+		ViewCount:          post.ViewCount,
+		CollectionConflict: post.CollectionConflict,
+	}
+	var existingExtension model.ContentBlogExtension
+	result = db.First(&existingExtension, "content_id = ?", post.ID)
+	if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+		if err := db.Create(&blogExtension).Error; err != nil {
+			t.Fatalf("create canonical blog extension: %v", err)
+		}
+	} else if result.Error != nil {
+		t.Fatalf("load canonical blog extension: %v", result.Error)
+	} else if err := db.Model(&existingExtension).Updates(map[string]any{
+		"content": post.Content, "language_code": post.LanguageCode,
+		"pinned": post.Pinned, "view_count": post.ViewCount,
+		"collection_conflict": post.CollectionConflict,
+	}).Error; err != nil {
+		t.Fatalf("update canonical blog extension: %v", err)
+	}
+	if err := db.Where("content_id = ?", post.ID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
+		t.Fatalf("clear canonical blog memberships: %v", err)
+	}
+	if post.CollectionID != nil && *post.CollectionID != uuid.Nil {
+		if err := db.Create(&model.ContentCollectionMembership{ContentID: post.ID, CollectionID: *post.CollectionID, Position: post.CollectionPosition}).Error; err != nil {
+			t.Fatalf("create canonical blog membership: %v", err)
+		}
+	}
 }
 
 func createPostRecord(t *testing.T, db *gorm.DB, userID uuid.UUID, channelID *uuid.UUID, title, status string) model.Post {
-	t.Helper()
-
 	post := model.Post{UserID: userID, ChannelID: channelID, Title: title, Content: "content", Status: status, Visibility: "public"}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
@@ -1864,9 +2116,7 @@ func TestRegisterRoutesUpdatePostUpdatesOwnedPost(t *testing.T) {
 	channel, defaultCollection := createOwnedChannelAndCollection(t, service, user, "Alice")
 	post := createPostRecord(t, db, user.ID, &channel.ID, "Before", "draft")
 	post.CollectionID = &defaultCollection.ID
-	if err := db.Save(&post).Error; err != nil {
-		t.Fatalf("assign default collection: %v", err)
-	}
+	canonicalizeBlogTestPost(t, db, post)
 
 	secondary := model.Collection{ChannelID: channel.ID, Name: "Featured", Description: "featured"}
 	if err := db.Create(&secondary).Error; err != nil {
@@ -1907,9 +2157,7 @@ func TestRegisterRoutesUpdatePostRejectsInvalidVisibilityWithoutChangingPrivateP
 	channel, _ := createOwnedChannelAndCollection(t, service, user, "Alice")
 	post := createPostRecord(t, db, user.ID, &channel.ID, "Private", "draft")
 	post.Visibility = "private"
-	if err := db.Save(&post).Error; err != nil {
-		t.Fatalf("make post private: %v", err)
-	}
+	canonicalizeBlogTestPost(t, db, post)
 
 	r := newBlogHTTPRouter(service, &user)
 	w := httptest.NewRecorder()
@@ -1920,12 +2168,12 @@ func TestRegisterRoutesUpdatePostRejectsInvalidVisibilityWithoutChangingPrivateP
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
-	var reloaded model.Post
-	if err := db.First(&reloaded, "id = ?", post.ID).Error; err != nil {
-		t.Fatalf("reload post: %v", err)
+	updated, err := loadCanonicalBlogPost(db, post.ID)
+	if err != nil {
+		t.Fatalf("reload canonical post: %v", err)
 	}
-	if reloaded.Visibility != "private" || reloaded.Title != "Private" || reloaded.Content != post.Content {
-		t.Fatalf("expected private post to remain unchanged, got %#v", reloaded)
+	if updated.Visibility != "private" || updated.Title != "Private" || updated.Content != post.Content {
+		t.Fatalf("expected private post to remain unchanged, got %#v", updated)
 	}
 }
 
@@ -1945,9 +2193,7 @@ func TestRegisterRoutesUpdatePostVisibilityContract(t *testing.T) {
 			channel, _ := createOwnedChannelAndCollection(t, service, user, "Alice")
 			post := createPostRecord(t, db, user.ID, &channel.ID, "Before", "draft")
 			post.Visibility = "private"
-			if err := db.Save(&post).Error; err != nil {
-				t.Fatalf("make post private: %v", err)
-			}
+			canonicalizeBlogTestPost(t, db, post)
 
 			r := newBlogHTTPRouter(service, &user)
 			w := httptest.NewRecorder()
@@ -1975,9 +2221,7 @@ func TestRegisterRoutesUpdatePostRejectsOutOfScopeCollectionWithoutChangingPost(
 	channel, defaultCollection := createOwnedChannelAndCollection(t, service, user, "Alice")
 	post := createPostRecord(t, db, user.ID, &channel.ID, "Before", "draft")
 	post.CollectionID = &defaultCollection.ID
-	if err := db.Save(&post).Error; err != nil {
-		t.Fatalf("assign default collection: %v", err)
-	}
+	canonicalizeBlogTestPost(t, db, post)
 	other := model.User{Username: "other-collection-owner", Email: "other-collection@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&other).Error; err != nil {
 		t.Fatalf("create other owner: %v", err)
@@ -1995,12 +2239,12 @@ func TestRegisterRoutesUpdatePostRejectsOutOfScopeCollectionWithoutChangingPost(
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected out-of-scope collection update to return 400, got %d: %s", w.Code, w.Body.String())
 	}
-	var reloaded model.Post
-	if err := db.First(&reloaded, "id = ?", post.ID).Error; err != nil {
-		t.Fatalf("reload post: %v", err)
+	updated, err := loadCanonicalBlogPost(db, post.ID)
+	if err != nil {
+		t.Fatalf("reload canonical post: %v", err)
 	}
-	if reloaded.Title != "Before" || reloaded.CollectionID == nil || *reloaded.CollectionID != defaultCollection.ID {
-		t.Fatalf("expected post unchanged, got %#v", reloaded)
+	if updated.Title != "Before" || updated.CollectionID == nil || *updated.CollectionID != defaultCollection.ID {
+		t.Fatalf("expected post unchanged, got %#v", updated)
 	}
 }
 
@@ -2039,7 +2283,7 @@ func TestRegisterRoutesDeletePostDeletesOwnedPost(t *testing.T) {
 	}
 
 	var count int64
-	if err := db.Model(&model.Post{}).Where("id = ?", post.ID).Count(&count).Error; err != nil {
+	if err := db.Model(&model.ContentEntry{}).Where("id = ?", post.ID).Count(&count).Error; err != nil {
 		t.Fatalf("count posts: %v", err)
 	}
 	if count != 0 {
@@ -2083,15 +2327,15 @@ func TestRegisterRoutesPublishPostUpdatesStatus(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var updated model.Post
-	if err := db.First(&updated, "id = ?", post.ID).Error; err != nil {
-		t.Fatalf("reload post: %v", err)
+	updated, err := loadCanonicalBlogPost(db, post.ID)
+	if err != nil {
+		t.Fatalf("reload canonical post: %v", err)
 	}
 	if updated.Status != "published" || updated.PublishedAt == nil {
 		t.Fatalf("expected published with published_at, got %#v", updated)
 	}
 	var versionCount int64
-	if err := db.Model(&model.BlogPostVersion{}).Where("post_id = ?", post.ID).Count(&versionCount).Error; err != nil {
+	if err := db.Model(&model.ContentBlogVersion{}).Where("content_id = ?", post.ID).Count(&versionCount).Error; err != nil {
 		t.Fatalf("count versions: %v", err)
 	}
 	if versionCount != 1 {
@@ -2120,9 +2364,9 @@ func TestRegisterRoutesUnpublishPostUpdatesStatus(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var updated model.Post
-	if err := db.First(&updated, "id = ?", post.ID).Error; err != nil {
-		t.Fatalf("reload post: %v", err)
+	updated, err := loadCanonicalBlogPost(db, post.ID)
+	if err != nil {
+		t.Fatalf("reload canonical post: %v", err)
 	}
 	if updated.Status != "draft" {
 		t.Fatalf("expected draft, got %s", updated.Status)
@@ -2146,9 +2390,9 @@ func TestRegisterRoutesAdminCanUnpublishAnotherUsersPost(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var updated model.Post
-	if err := db.First(&updated, "id = ?", post.ID).Error; err != nil {
-		t.Fatalf("reload post: %v", err)
+	updated, err := loadCanonicalBlogPost(db, post.ID)
+	if err != nil {
+		t.Fatalf("reload canonical post: %v", err)
 	}
 	if updated.Status != "draft" {
 		t.Fatalf("expected draft, got %s", updated.Status)
@@ -2169,9 +2413,9 @@ func TestRegisterRoutesPinPostUpdatesPinnedState(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var updated model.Post
-	if err := db.First(&updated, "id = ?", post.ID).Error; err != nil {
-		t.Fatalf("reload post: %v", err)
+	updated, err := loadCanonicalBlogPost(db, post.ID)
+	if err != nil {
+		t.Fatalf("reload canonical post: %v", err)
 	}
 	if !updated.Pinned {
 		t.Fatal("expected post pinned")
@@ -2182,9 +2426,8 @@ func TestRegisterRoutesUnpinPostUpdatesPinnedState(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, _ := createOwnedChannelAndCollection(t, service, user, "Alice")
 	post := createPostRecord(t, db, user.ID, &channel.ID, "Unpin me", "published")
-	if err := db.Model(&post).Update("pinned", true).Error; err != nil {
-		t.Fatalf("preset pinned: %v", err)
-	}
+	post.Pinned = true
+	canonicalizeBlogTestPost(t, db, post)
 
 	r := newBlogHTTPRouter(service, &user)
 	w := httptest.NewRecorder()
@@ -2195,9 +2438,9 @@ func TestRegisterRoutesUnpinPostUpdatesPinnedState(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var updated model.Post
-	if err := db.First(&updated, "id = ?", post.ID).Error; err != nil {
-		t.Fatalf("reload post: %v", err)
+	updated, err := loadCanonicalBlogPost(db, post.ID)
+	if err != nil {
+		t.Fatalf("reload canonical post: %v", err)
 	}
 	if updated.Pinned {
 		t.Fatal("expected post unpinned")
@@ -2261,7 +2504,7 @@ func TestPublishedPostVersionsPreservePublishedAtAndRestore(t *testing.T) {
 		t.Fatalf("unexpected restored post: %#v", restored)
 	}
 	var versionCount int64
-	if err := db.Model(&model.BlogPostVersion{}).Where("post_id = ?", post.ID).Count(&versionCount).Error; err != nil {
+	if err := db.Model(&model.ContentBlogVersion{}).Where("content_id = ?", post.ID).Count(&versionCount).Error; err != nil {
 		t.Fatalf("count versions: %v", err)
 	}
 	if versionCount != 3 {
@@ -2300,7 +2543,7 @@ func TestRegisterRoutesGetDraftsReturnsUserDrafts(t *testing.T) {
 
 func TestRegisterRoutesGetBlogDraftReturnsSavedDraft(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
-	draft := model.BlogDraft{UserID: user.ID, ContextKey: "editor:1", Title: "Saved", Content: "body", Visibility: "followers"}
+	draft := model.ContentBlogDraft{UserID: user.ID, ContextKey: "editor:1", Title: "Saved", Content: "body", Visibility: "followers"}
 	if err := db.Create(&draft).Error; err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
@@ -2327,9 +2570,9 @@ func TestRegisterRoutesGetBlogDraftReturnsSavedDraft(t *testing.T) {
 
 func TestRegisterRoutesPutBlogDraftPersistsFollowersVisibility(t *testing.T) {
 	service, _, user := newBlogHTTPTestService(t)
+	_, collection := createOwnedChannelAndCollection(t, service, user, "Drafts")
 	r := newBlogHTTPRouter(service, &user)
-	collectionID := uuid.New()
-	body := `{"context_key":"editor:2","title":"Draft","content":"body","visibility":"followers","allow_comments":false,"collection_id":"` + collectionID.String() + `"}`
+	body := `{"context_key":"editor:2","title":"Draft","content":"body","visibility":"followers","allow_comments":false,"collection_id":"` + collection.ID.String() + `"}`
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/blog/drafts", bytes.NewBufferString(body))
@@ -2346,14 +2589,14 @@ func TestRegisterRoutesPutBlogDraftPersistsFollowersVisibility(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if resp.Data.Visibility != "followers" || resp.Data.CollectionID == nil || *resp.Data.CollectionID != collectionID.String() {
+	if resp.Data.Visibility != "followers" || resp.Data.CollectionID == nil || *resp.Data.CollectionID != collection.ID.String() {
 		t.Fatalf("unexpected saved draft: %#v", resp.Data)
 	}
 }
 
 func TestRegisterRoutesDeleteBlogDraftRemovesSavedDraft(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
-	draft := model.BlogDraft{UserID: user.ID, ContextKey: "editor:3", Title: "Saved", Content: "body"}
+	draft := model.ContentBlogDraft{UserID: user.ID, ContextKey: "editor:3", Title: "Saved", Content: "body"}
 	if err := db.Create(&draft).Error; err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
@@ -2368,7 +2611,7 @@ func TestRegisterRoutesDeleteBlogDraftRemovesSavedDraft(t *testing.T) {
 	}
 
 	var count int64
-	if err := db.Model(&model.BlogDraft{}).Where("user_id = ? AND context_key = ?", user.ID, "editor:3").Count(&count).Error; err != nil {
+	if err := db.Model(&model.ContentBlogDraft{}).Where("user_id = ? AND context_key = ?", user.ID, "editor:3").Count(&count).Error; err != nil {
 		t.Fatalf("count drafts: %v", err)
 	}
 	if count != 0 {
@@ -2408,9 +2651,7 @@ func TestRegisterRoutesReorderCollectionPostsPersistsPosition(t *testing.T) {
 	for position, post := range []*model.Post{&postA, &postB, &postC} {
 		post.CollectionID = &defaultCollection.ID
 		post.CollectionPosition = position
-		if err := db.Save(post).Error; err != nil {
-			t.Fatalf("assign post to collection: %v", err)
-		}
+		canonicalizeBlogTestPost(t, db, *post)
 	}
 
 	r := newBlogHTTPRouter(service, &user)
@@ -2427,21 +2668,21 @@ func TestRegisterRoutesReorderCollectionPostsPersistsPosition(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	var posts []model.Post
-	if err := db.Where("collection_id = ?", defaultCollection.ID).Order("collection_position ASC").Find(&posts).Error; err != nil {
+	var memberships []model.ContentCollectionMembership
+	if err := db.Where("collection_id = ?", defaultCollection.ID).Order("position ASC").Find(&memberships).Error; err != nil {
 		t.Fatalf("reload positions: %v", err)
 	}
-	if len(posts) != 3 {
-		t.Fatalf("expected 3 posts, got %d", len(posts))
+	if len(memberships) != 3 {
+		t.Fatalf("expected 3 posts, got %d", len(memberships))
 	}
-	got := []uuid.UUID{posts[0].ID, posts[1].ID, posts[2].ID}
+	got := []uuid.UUID{memberships[0].ContentID, memberships[1].ContentID, memberships[2].ContentID}
 	want := []uuid.UUID{postC.ID, postA.ID, postB.ID}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("expected order %v, got %v", want, got)
 		}
-		if posts[i].CollectionPosition != i {
-			t.Fatalf("expected position %d at index %d, got %d", i, i, posts[i].CollectionPosition)
+		if memberships[i].Position != i {
+			t.Fatalf("expected position %d at index %d, got %d", i, i, memberships[i].Position)
 		}
 	}
 }

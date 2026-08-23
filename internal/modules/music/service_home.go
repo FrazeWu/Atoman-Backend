@@ -40,7 +40,7 @@ func (s *Service) Home(user *authctx.CurrentUser) (HomeResponse, error) {
 		return response, nil
 	}
 
-	history, err := s.repo.ListRecentListeningHistory(user.ID, musicHomeAffinityHistoryLimit)
+	history, err := s.repo.ListRecentListeningHistory(user.ID, musicHomeAffinityHistoryLimit, user)
 	if err != nil {
 		return response, err
 	}

@@ -66,7 +66,7 @@ func TestLoadAdjacentAlbumSongsUsesDiscThenTrackOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	previous, next := loadAdjacentAlbumSongs(db, songs[2])
+	previous, next := loadAdjacentAlbumSongs(db, songs[2], nil)
 	if previous.Title != "D1T2" || next.Title != "D2T2" {
 		t.Fatalf("unexpected adjacent tracks: previous=%q next=%q", previous.Title, next.Title)
 	}

@@ -13,7 +13,6 @@ import (
 	"atoman/internal/feedlanguage"
 	"atoman/internal/model"
 	"atoman/internal/modules/lifecycle"
-	studioapi "atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -97,26 +96,39 @@ func (h *Handler) listPosts(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "collection_id must be a valid uuid"))
 		return
 	}
-	query := h.service.db.Model(&model.Post{}).Preload("User").Preload("Channel").Preload("Collection").Where("status = ?", "published")
+	var canonicalCollectionID *uuid.UUID
+	if collectionID != nil {
+		resolved, err := canonicalBlogCollectionID(h.service.db, *collectionID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				httpx.List(c, []PostListItemDTO{}, page, pageSize, 0)
+				return
+			}
+			httpx.Error(c, err)
+			return
+		}
+		canonicalCollectionID = &resolved
+	}
+	query := canonicalBlogPostsQuery(h.service.db).Where("posts.status = ?", "published")
 	query = ApplyPublishedPostListVisibility(query, currentViewerID(c))
 
 	if userID != nil {
-		query = query.Where("user_id = ?", *userID)
+		query = query.Where("posts.author_id = ?", *userID)
 	}
 	if channelID != nil {
-		query = query.Where("channel_id = ?", *channelID)
+		query = query.Where("posts.channel_id = ?", *channelID)
 	}
-	if collectionID != nil {
-		query = query.Where("posts.collection_id = ?", *collectionID)
-		query = query.Order("posts.collection_position ASC")
+	if canonicalCollectionID != nil {
+		query = query.Where("memberships.collection_id = ?", *canonicalCollectionID)
+		query = query.Order("memberships.position ASC")
 	} else if channelID != nil {
-		query = query.Order("pinned DESC, published_at DESC, posts.id DESC")
+		query = query.Order("blog_extensions.pinned DESC, posts.published_at DESC, posts.id DESC")
 	} else {
-		query = query.Order("published_at DESC, posts.id DESC")
+		query = query.Order("posts.published_at DESC, posts.id DESC")
 	}
 	if q := strings.TrimSpace(c.Query("q")); q != "" {
 		searchLike := "%" + q + "%"
-		query = query.Where("(LOWER(title) LIKE LOWER(?) OR LOWER(summary) LIKE LOWER(?) OR LOWER(content) LIKE LOWER(?))", searchLike, searchLike, searchLike)
+		query = query.Where("(LOWER(posts.title) LIKE LOWER(?) OR LOWER(posts.summary) LIKE LOWER(?) OR LOWER(blog_extensions.content) LIKE LOWER(?))", searchLike, searchLike, searchLike)
 	}
 
 	var total int64
@@ -124,7 +136,13 @@ func (h *Handler) listPosts(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	if err := query.Offset(httpx.Offset(page, pageSize)).Limit(pageSize).Find(&posts).Error; err != nil {
+	var canonicalRows []canonicalBlogPostRow
+	if err := query.Offset(httpx.Offset(page, pageSize)).Limit(pageSize).Find(&canonicalRows).Error; err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	posts, err = hydrateCanonicalBlogPosts(h.service.db, canonicalRows)
+	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -147,7 +165,7 @@ func (h *Handler) listPosts(c *gin.Context) {
 	countsByPostID := make(map[uuid.UUID]postEngagementCount, len(postIDs))
 	if len(postIDs) > 0 {
 		var counts []postEngagementCount
-		if err := h.service.db.Model(&model.Post{}).Select(`posts.id AS post_id,
+		if err := h.service.db.Table("content_entries AS posts").Select(`posts.id AS post_id,
 			(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
 			COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count,
 			(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count`).
@@ -185,7 +203,7 @@ func ApplyPublishedPostListVisibility(query *gorm.DB, viewerID *uuid.UUID) *gorm
 		Where("feed_sources.deleted_at IS NULL AND subscriptions.deleted_at IS NULL")
 
 	return query.Where(
-		"(posts.visibility = ? OR posts.visibility = ? OR posts.user_id = ? OR (posts.visibility = ? AND posts.channel_id IN (?)))",
+		"(posts.visibility = ? OR posts.visibility = ? OR posts.author_id = ? OR (posts.visibility = ? AND posts.channel_id IN (?)))",
 		"", "public", *viewerID, "followers", subscribedChannelIDs,
 	)
 }
@@ -232,7 +250,7 @@ func (h *Handler) getPost(c *gin.Context) {
 	}
 
 	var post model.Post
-	if err := h.service.db.Preload("User").Preload("Channel").Preload("Collection").First(&post, "id = ?", postID).Error; err != nil {
+	if post, err = loadCanonicalBlogPost(h.service.db, postID); err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
 			return
@@ -500,7 +518,6 @@ func (h *Handler) updatePost(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-
 	var req postInput
 	if err := bindJSON(c, &req); err != nil {
 		httpx.Error(c, err)
@@ -512,9 +529,8 @@ func (h *Handler) updatePost(c *gin.Context) {
 			return
 		}
 	}
-
-	var post model.Post
-	if err := h.service.db.First(&post, "id = ?", postID).Error; err != nil {
+	post, err := loadCanonicalBlogPost(h.service.db, postID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
 			return
@@ -528,29 +544,9 @@ func (h *Handler) updatePost(c *gin.Context) {
 	}
 	wasPublished := post.Status == "published"
 	wasPublic := isPublicPostState(post.Status, post.Visibility)
-
-	languageCode := feedlanguage.Detect(strings.Join([]string{req.Title, req.Summary, req.Content}, " "))
-	updates := map[string]any{
-		"title":      req.Title,
-		"content":    req.Content,
-		"summary":    req.Summary,
-		"cover_url":  req.CoverURL,
-		"visibility": normalizeBlogVisibility(req.Visibility),
-	}
-
-	if languageCode != "" {
-		updates["language_code"] = languageCode
-	}
-
-	if len(req.CollectionIDs) > 0 {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "collection_ids is no longer supported"))
-		return
-	}
 	effectiveStatus := post.Status
 	if req.Status == "published" || req.Status == "draft" {
 		effectiveStatus = req.Status
-		updates["status"] = req.Status
-		updates["scheduled_at"] = nil
 	}
 	effectiveChannelID := uuid.Nil
 	if post.ChannelID != nil {
@@ -562,12 +558,11 @@ func (h *Handler) updatePost(c *gin.Context) {
 			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid channel UUID"))
 			return
 		}
-		if post.ChannelID != nil && channelID != *post.ChannelID {
+		if effectiveChannelID != uuid.Nil && channelID != effectiveChannelID {
 			httpx.Error(c, apperr.BadRequest("studio.cross_channel_move_not_supported", "Content cannot be moved between channels"))
 			return
 		}
 		effectiveChannelID = channelID
-		updates["channel_id"] = channelID
 	}
 	requestedCollectionID := post.CollectionID
 	collectionChanged := false
@@ -581,61 +576,98 @@ func (h *Handler) updatePost(c *gin.Context) {
 		collectionChanged = post.CollectionID == nil || *post.CollectionID != collectionID
 	}
 	shouldResolveCollection := req.CollectionID != nil || (!wasPublished && effectiveStatus == "published")
+	if shouldResolveCollection && post.CollectionConflict && req.CollectionID == nil {
+		httpx.Error(c, apperr.Conflict("studio.collection_conflict", "Choose one collection before publishing"))
+		return
+	}
+	var collection *model.ContentCollection
 	if shouldResolveCollection {
-		if post.CollectionConflict && req.CollectionID == nil {
-			httpx.Error(c, apperr.Conflict("studio.collection_conflict", "Choose one collection before publishing"))
-			return
-		}
-		resolvedCollectionID, err := studioapi.NewService(h.service.db).ResolveContentCollection(
-			user.ID, effectiveChannelID, studioapi.ModuleBlog, requestedCollectionID, nil, effectiveStatus == "published",
-		)
+		collection, err = resolveBlogCollection(h.service.db, user.ID, effectiveChannelID, requestedCollectionID, effectiveStatus == "published")
 		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				httpx.Error(c, apperr.BadRequest("studio.invalid_collection_scope", "Collection must belong to the selected channel"))
+				return
+			}
 			httpx.Error(c, err)
 			return
 		}
-		updates["collection_id"] = resolvedCollectionID
-		updates["collection_conflict"] = false
-		if resolvedCollectionID != nil && (collectionChanged || post.CollectionID == nil) {
-			var maxPosition int
-			if err := h.service.db.Model(&model.Post{}).Where("collection_id = ?", *resolvedCollectionID).
-				Select("COALESCE(MAX(collection_position), -1)").Scan(&maxPosition).Error; err != nil {
-				httpx.Error(c, err)
-				return
-			}
-			updates["collection_position"] = maxPosition + 1
-		}
 	}
-
 	if effectiveStatus == "published" {
 		if err := h.ensurePublishChannelAllowed(&effectiveChannelID); err != nil {
 			httpx.Error(c, err)
 			return
 		}
 	}
-	if req.Status == "published" && post.PublishedAt == nil {
-		now := time.Now().UTC()
-		updates["published_at"] = now
+
+	entryUpdates := map[string]any{
+		"title": strings.TrimSpace(req.Title), "summary": strings.TrimSpace(req.Summary),
+		"cover_url": strings.TrimSpace(req.CoverURL), "visibility": normalizeBlogVisibility(req.Visibility),
+		"status": effectiveStatus, "scheduled_at": nil,
 	}
+	if req.Status != "published" && req.Status != "draft" {
+		delete(entryUpdates, "status")
+		delete(entryUpdates, "scheduled_at")
+	}
+	if effectiveStatus == "published" && post.PublishedAt == nil {
+		entryUpdates["published_at"] = time.Now().UTC()
+	}
+	if req.Status == "draft" {
+		entryUpdates["published_at"] = post.PublishedAt
+	}
+	languageCode := feedlanguage.Detect(strings.Join([]string{req.Title, req.Summary, req.Content}, " "))
+	extensionUpdates := map[string]any{"content": req.Content}
+	if languageCode != "" {
+		extensionUpdates["language_code"] = languageCode
+	}
+
 	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&post).Updates(updates).Error; err != nil {
+		if err := tx.Model(&model.ContentEntry{}).Where("id = ?", postID).Updates(entryUpdates).Error; err != nil {
 			return err
 		}
-		if err := tx.Preload("Channel").Preload("Collection").First(&post, "id = ?", post.ID).Error; err != nil {
+		if err := tx.Model(&model.ContentBlogExtension{}).Where("content_id = ?", postID).Updates(extensionUpdates).Error; err != nil {
 			return err
 		}
-		if _, err := h.service.syncPostReferences(tx, post); err != nil {
+		if shouldResolveCollection {
+			if err := tx.Where("content_id = ?", postID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
+				return err
+			}
+			if collection != nil {
+				var maxPosition int
+				if collectionChanged || post.CollectionID == nil {
+					if err := tx.Model(&model.ContentCollectionMembership{}).Where("collection_id = ?", collection.ID).
+						Select("COALESCE(MAX(position), -1)").Scan(&maxPosition).Error; err != nil {
+						return err
+					}
+				} else {
+					maxPosition = post.CollectionPosition - 1
+				}
+				if err := tx.Create(&model.ContentCollectionMembership{ContentID: postID, CollectionID: collection.ID, Position: maxPosition + 1}).Error; err != nil {
+					return err
+				}
+			}
+		}
+		updated, err := loadCanonicalBlogPost(tx, postID)
+		if err != nil {
 			return err
 		}
-		if post.Status == "published" {
-			if err := saveBlogPostVersion(tx, post, user.ID); err != nil {
+		if _, err := h.service.syncPostReferences(tx, updated); err != nil {
+			return err
+		}
+		if updated.Status == "published" {
+			if err := saveBlogPostVersion(tx, updated, user.ID); err != nil {
 				return err
 			}
 			if !wasPublished {
-				return lifecycle.NewService(tx).EnqueuePublication("blog", post.ID)
+				return lifecycle.NewService(tx).EnqueuePublication("blog", postID)
 			}
 		}
 		return nil
 	}); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	post, err = loadCanonicalBlogPost(h.service.db, postID)
+	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -663,8 +695,8 @@ func (h *Handler) deletePost(c *gin.Context) {
 		return
 	}
 
-	var post model.Post
-	if err := h.service.db.First(&post, "id = ?", postID).Error; err != nil {
+	post, err := loadCanonicalBlogPost(h.service.db, postID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
 			return
@@ -680,7 +712,13 @@ func (h *Handler) deletePost(c *gin.Context) {
 		if err := h.service.references.RemoveSource(tx, "post", post.ID); err != nil {
 			return err
 		}
-		return tx.Delete(&post).Error
+		if err := tx.Where("content_id = ?", post.ID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Delete(&model.ContentBlogExtension{}, "content_id = ?", post.ID).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.ContentEntry{}, "id = ?", post.ID).Error
 	}); err != nil {
 		httpx.Error(c, err)
 		return
@@ -722,8 +760,8 @@ func (h *Handler) reorderCollectionPosts(c *gin.Context) {
 		return
 	}
 
-	var collection model.Collection
-	if err := h.service.db.Preload("Channel").Where("content_type = ?", "blog").First(&collection, "id = ?", collectionID).Error; err != nil {
+	collection, err := h.service.repo.GetCollection(collectionID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.collection_not_found", "Collection not found"))
 			return
@@ -771,8 +809,8 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 		httpx.Error(c, err)
 		return
 	}
-	var post model.Post
-	if err := h.service.db.First(&post, "id = ?", postID).Error; err != nil {
+	post, err := loadCanonicalBlogPost(h.service.db, postID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
 			return
@@ -784,7 +822,7 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 		httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to modify this post"))
 		return
 	}
-	if status == "published" {
+	if status == "published" && post.ChannelID != nil {
 		if err := h.ensurePublishChannelAllowed(post.ChannelID); err != nil {
 			httpx.Error(c, err)
 			return
@@ -797,26 +835,29 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 		if status == "published" && post.PublishedAt == nil {
 			updates["published_at"] = time.Now().UTC()
 		}
-		if err := tx.Model(&post).Updates(updates).Error; err != nil {
+		if err := tx.Model(&model.ContentEntry{}).Where("id = ?", postID).Updates(updates).Error; err != nil {
 			return err
 		}
-		if err := tx.First(&post, "id = ?", post.ID).Error; err != nil {
+		updated, err := loadCanonicalBlogPost(tx, postID)
+		if err != nil {
 			return err
 		}
-		if _, err := h.service.syncPostReferences(tx, post); err != nil {
+		if _, err := h.service.syncPostReferences(tx, updated); err != nil {
 			return err
 		}
-		if status != "published" || wasPublished {
-			return nil
+		if status == "published" && !wasPublished {
+			if err := saveBlogPostVersion(tx, updated, user.ID); err != nil {
+				return err
+			}
+			return lifecycle.NewService(tx).EnqueuePublication("blog", postID)
 		}
-		if err := tx.Preload("Channel").Preload("Collection").First(&post, "id = ?", post.ID).Error; err != nil {
-			return err
-		}
-		if err := saveBlogPostVersion(tx, post, user.ID); err != nil {
-			return err
-		}
-		return lifecycle.NewService(tx).EnqueuePublication("blog", post.ID)
+		return nil
 	}); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	post, err = loadCanonicalBlogPost(h.service.db, postID)
+	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -837,8 +878,8 @@ func (h *Handler) updatePostPin(c *gin.Context, pinned bool) {
 		httpx.Error(c, err)
 		return
 	}
-	var post model.Post
-	if err := h.service.db.First(&post, "id = ?", postID).Error; err != nil {
+	post, err := loadCanonicalBlogPost(h.service.db, postID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
 			return
@@ -850,7 +891,7 @@ func (h *Handler) updatePostPin(c *gin.Context, pinned bool) {
 		httpx.Error(c, apperr.Forbidden("blog.post_forbidden", "You don't have permission to modify this post"))
 		return
 	}
-	if err := h.service.db.Model(&post).Update("pinned", pinned).Error; err != nil {
+	if err := h.service.db.Model(&model.ContentBlogExtension{}).Where("content_id = ?", postID).Update("pinned", pinned).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}

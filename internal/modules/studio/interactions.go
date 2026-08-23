@@ -79,9 +79,9 @@ func (s *Service) interactionContentTitles(userID, channelID uuid.UUID, module M
 			ID    uuid.UUID
 			Title string
 		}
-		err := s.db.Model(&model.Post{}).Select("posts.id, posts.title").
-			Where("posts.user_id = ? AND posts.channel_id = ?", userID, channelID).
-			Where("NOT EXISTS (SELECT 1 FROM podcast_episodes WHERE podcast_episodes.post_id = posts.id AND podcast_episodes.deleted_at IS NULL)").
+		err := s.db.Table("content_entries AS posts").
+			Select("posts.id, posts.title").
+			Where("posts.kind = ? AND posts.author_id = ? AND posts.channel_id = ? AND posts.deleted_at IS NULL", "blog", userID, channelID).
 			Scan(&rows).Error
 		for _, row := range rows {
 			titles[row.ID] = row.Title

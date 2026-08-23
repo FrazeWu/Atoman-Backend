@@ -100,6 +100,7 @@ type archiveListEntry struct {
 // validateArchiveListing accepts only ordinary, bounded relative archive entries.
 func validateArchiveListing(raw []byte) error {
 	entries := []archiveListEntry{}
+	seenPaths := make(map[string]struct{})
 	entry := archiveListEntry{}
 	flush := func() error {
 		if entry.path == "" {
@@ -126,6 +127,10 @@ func validateArchiveListing(raw []byte) error {
 		if entry.encrypted {
 			return errors.New("压缩包已加密，请上传无密码压缩包或直接上传音频文件")
 		}
+		if _, exists := seenPaths[clean]; exists {
+			return fmt.Errorf("duplicate archive entry %q", entry.path)
+		}
+		seenPaths[clean] = struct{}{}
 		entries = append(entries, entry)
 		entry = archiveListEntry{}
 		return nil
@@ -637,6 +642,9 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 	if err != nil {
 		return err
 	}
+	if len(audios) > albumImportUploadLimitsFromEnv().MaxTracks {
+		return errors.New("archive contains too many audio tracks")
+	}
 	sort.SliceStable(audios, func(i, j int) bool {
 		return albumImportTrackPathLess(audios[i].relative, audios[j].relative)
 	})
@@ -645,6 +653,7 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 		_ = p.processCover(ctx, sessionID, cover)
 	}
 	processed := 0
+	scheduled := 0
 	used := map[string]bool{}
 	nextTrackByDisc := map[int]int{}
 	for _, cuePath := range cues {
@@ -665,6 +674,10 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 			if len(matching) == 0 || used[audio.path] {
 				continue
 			}
+			if scheduled+len(matching) > albumImportUploadLimitsFromEnv().MaxTracks {
+				return errors.New("archive contains too many audio tracks")
+			}
+			scheduled += len(matching)
 			used[audio.path] = true
 			count, _ := p.processCUEAudio(ctx, sessionID, audio.path, audio.relative, matching)
 			processed += count
@@ -680,6 +693,10 @@ func (p *MediaImportProcessor) processExtractedTree(ctx context.Context, session
 		if used[audio.path] {
 			continue
 		}
+		if scheduled >= albumImportUploadLimitsFromEnv().MaxTracks {
+			return errors.New("archive contains too many audio tracks")
+		}
+		scheduled++
 		if cover == "" && p.processEmbeddedCover(ctx, sessionID, audio.path) == nil {
 			cover = audio.path
 		}
@@ -962,6 +979,10 @@ func (p *MediaImportProcessor) persistDerivedTracksWithLyrics(ctx context.Contex
 	}
 	if result.SourceURL != "" {
 		payload["metadata_source_url"] = result.SourceURL
+		payload["musicbrainz_release_id"] = result.MusicBrainzReleaseID
+	} else {
+		delete(payload, "metadata_source_url")
+		delete(payload, "musicbrainz_release_id")
 	}
 	if len(result.MissingArtists) > 0 {
 		payload["missing_artists"] = result.MissingArtists

@@ -132,6 +132,7 @@ type Post struct {
 	ScheduledAt        *time.Time   `json:"scheduled_at,omitempty" gorm:"index"`
 	PublishedAt        *time.Time   `json:"published_at,omitempty" gorm:"index"`
 	ViewCount          int64        `json:"view_count" gorm:"not null;default:0"`
+	BookmarksCount     int64        `json:"bookmarks_count" gorm:"-"`
 	RatingScore        float64      `json:"rating_score" gorm:"-"`
 	RatingCount        int64        `json:"rating_count" gorm:"-"`
 	ViewerRating       *int         `json:"viewer_rating,omitempty" gorm:"-"`

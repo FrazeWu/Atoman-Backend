@@ -153,7 +153,7 @@ func (s *Service) SavePlaybackSession(user authctx.CurrentUser, input SavePlayba
 		return PlaybackSessionResponse{}, apperr.BadRequest("validation.invalid_request", "current_song_id must be in song_ids")
 	}
 
-	queue, err := s.loadPlaybackSessionQueue(input.SongIDs)
+	queue, err := s.loadPlaybackSessionQueue(input.SongIDs, &user)
 	if err != nil {
 		return PlaybackSessionResponse{}, err
 	}
@@ -203,7 +203,7 @@ func (s *Service) SavePlaybackSession(user authctx.CurrentUser, input SavePlayba
 		return PlaybackSessionResponse{}, txErr
 	}
 	if stored.ReportedAt.After(reportedAt) {
-		queue, err = s.loadPlaybackSessionQueueFromStored(stored)
+		queue, err = s.loadPlaybackSessionQueueFromStored(stored, &user)
 		if err != nil {
 			return PlaybackSessionResponse{}, err
 		}
@@ -229,7 +229,7 @@ func (s *Service) GetPlaybackSession(user authctx.CurrentUser) (*PlaybackSession
 	if err := json.Unmarshal(session.QueueJSON, &songIDs); err != nil || len(songIDs) == 0 || session.CurrentSongID == nil {
 		return nil, nil
 	}
-	queue, err := s.loadAvailablePlaybackSessionQueue(songIDs)
+	queue, err := s.loadAvailablePlaybackSessionQueue(songIDs, &user)
 	if err != nil {
 		return nil, err
 	}
@@ -242,17 +242,17 @@ func (s *Service) GetPlaybackSession(user authctx.CurrentUser) (*PlaybackSession
 	return &PlaybackSessionResponse{Queue: queue, CurrentSongID: *session.CurrentSongID, PositionSeconds: session.PositionSeconds, PlaybackMode: session.PlaybackMode, UpdatedAt: session.UpdatedAt}, nil
 }
 
-func (s *Service) loadPlaybackSessionQueueFromStored(session model.MusicPlaybackSession) ([]model.Song, error) {
+func (s *Service) loadPlaybackSessionQueueFromStored(session model.MusicPlaybackSession, viewer *authctx.CurrentUser) ([]model.Song, error) {
 	var songIDs []uuid.UUID
 	if err := json.Unmarshal(session.QueueJSON, &songIDs); err != nil || len(songIDs) == 0 {
 		return nil, apperr.NotFound("music.song_not_found", "Song not found")
 	}
-	return s.loadAvailablePlaybackSessionQueue(songIDs)
+	return s.loadAvailablePlaybackSessionQueue(songIDs, viewer)
 }
 
-func (s *Service) loadAvailablePlaybackSessionQueue(songIDs []uuid.UUID) ([]model.Song, error) {
+func (s *Service) loadAvailablePlaybackSessionQueue(songIDs []uuid.UUID, viewer *authctx.CurrentUser) ([]model.Song, error) {
 	var songs []model.Song
-	if err := s.db.Preload("Album").Preload("Artists").
+	if err := s.db.Preload("Album", visibleAlbumPreload(viewer)).Preload("Artists", visibleArtistPreload(viewer)).
 		Where("id IN ? AND lifecycle_status = ? AND audio_url <> ?", songIDs, model.MusicLifecycleActive, "").
 		Find(&songs).Error; err != nil {
 		return nil, err
@@ -270,8 +270,8 @@ func (s *Service) loadAvailablePlaybackSessionQueue(songIDs []uuid.UUID) ([]mode
 	return ordered, nil
 }
 
-func (s *Service) loadPlaybackSessionQueue(songIDs []uuid.UUID) ([]model.Song, error) {
-	ordered, err := s.loadAvailablePlaybackSessionQueue(songIDs)
+func (s *Service) loadPlaybackSessionQueue(songIDs []uuid.UUID, viewer *authctx.CurrentUser) ([]model.Song, error) {
+	ordered, err := s.loadAvailablePlaybackSessionQueue(songIDs, viewer)
 	if err != nil {
 		return nil, err
 	}
@@ -296,7 +296,7 @@ func (s *Service) GetPlaybackProgress(user authctx.CurrentUser) (*model.MusicPla
 	}
 	var progress model.MusicPlaybackProgress
 	err := s.db.Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_playback_progresses.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ? AND visible_song.audio_url <> ?", model.MusicLifecycleActive, "").
-		Preload("Song.Album").Preload("Song.Artists").
+		Preload("Song.Album", visibleAlbumPreload(&user)).Preload("Song.Artists", visibleArtistPreload(&user)).
 		Where("music_playback_progresses.user_id = ? AND music_playback_progresses.completed = ?", user.ID, false).
 		Order("music_playback_progresses.updated_at DESC").First(&progress).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -312,7 +312,7 @@ func (s *Service) ListListeningHistory(user authctx.CurrentUser, page, pageSize 
 	if user.ID == uuid.Nil {
 		return nil, 0, apperr.Unauthorized("Login required")
 	}
-	return s.repo.ListListeningHistory(user.ID, page, pageSize)
+	return s.repo.ListListeningHistory(user.ID, page, pageSize, &user)
 }
 
 func (s *Service) ClearListeningHistory(user authctx.CurrentUser) error {

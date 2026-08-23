@@ -3,6 +3,7 @@ package studio
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -54,7 +55,13 @@ func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 		&model.DiscussionTarget{},
 		&model.CommentEntry{},
 		&model.CommentTimeAnchor{},
+		&model.ContentEntry{},
+		&model.ContentBlogExtension{},
+		&model.ContentCollection{},
+		&model.ContentCollectionMembership{},
+		&model.ContentEpisodeExtension{},
 	)
+	registerStudioCanonicalTestSeeds(t, db)
 	middleware.SetAuthDB(db)
 	t.Cleanup(func() { middleware.SetAuthDB(nil) })
 
@@ -70,6 +77,126 @@ func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 	router := gin.New()
 	RegisterRoutes(router.Group("/api/v1/studio"), NewService(db))
 	return studioHTTPFixture{db: db, router: router, owner: owner, foreign: foreign}
+}
+
+func registerStudioCanonicalTestSeeds(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	collectionCallback := "test:studio-canonical-collection-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(collectionCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "collections" {
+			return
+		}
+		var collection model.Collection
+		switch value := tx.Statement.Dest.(type) {
+		case *model.Collection:
+			collection = *value
+		case model.Collection:
+			collection = value
+		default:
+			return
+		}
+		canonical := model.ContentCollection{
+			Base: collection.Base, ChannelID: collection.ChannelID, CreatedBy: collection.CreatedBy,
+			Name: collection.Name, Description: collection.Description, CoverURL: collection.CoverURL,
+			IsDefault: collection.IsDefault,
+		}
+		var existing model.ContentCollection
+		result := tx.Session(&gorm.Session{NewDB: true}).First(&existing, "id = ?", collection.ID)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			if err := tx.Session(&gorm.Session{NewDB: true}).Create(&canonical).Error; err != nil {
+				t.Fatalf("create canonical studio collection: %v", err)
+			}
+		} else if result.Error != nil {
+			t.Fatalf("load canonical studio collection: %v", result.Error)
+		}
+	}); err != nil {
+		t.Fatalf("register canonical studio collection callback: %v", err)
+	}
+	postCallback := "test:studio-canonical-post-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(postCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "posts" {
+			return
+		}
+		var post model.Post
+		switch value := tx.Statement.Dest.(type) {
+		case *model.Post:
+			post = *value
+		case model.Post:
+			post = value
+		default:
+			return
+		}
+		if post.ChannelID == nil || *post.ChannelID == uuid.Nil {
+			return
+		}
+		entry := model.ContentEntry{
+			Base: post.Base, AuthorID: &post.UserID, ChannelID: *post.ChannelID, Kind: "blog",
+			Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL,
+			Status: post.Status, Visibility: post.Visibility, PublishedAt: post.PublishedAt, ScheduledAt: post.ScheduledAt,
+		}
+		var existing model.ContentEntry
+		result := tx.Session(&gorm.Session{NewDB: true}).First(&existing, "id = ?", post.ID)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			if err := tx.Session(&gorm.Session{NewDB: true}).Create(&entry).Error; err != nil {
+				t.Fatalf("create canonical studio entry: %v", err)
+			}
+		}
+		extension := model.ContentBlogExtension{ContentID: post.ID, Content: post.Content, LanguageCode: post.LanguageCode, Pinned: post.Pinned, ViewCount: post.ViewCount, CollectionConflict: post.CollectionConflict}
+		var existingExtension model.ContentBlogExtension
+		result = tx.Session(&gorm.Session{NewDB: true}).First(&existingExtension, "content_id = ?", post.ID)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			if err := tx.Session(&gorm.Session{NewDB: true}).Create(&extension).Error; err != nil {
+				t.Fatalf("create canonical studio extension: %v", err)
+			}
+		}
+		if post.CollectionID != nil {
+			_ = tx.Session(&gorm.Session{NewDB: true}).Where("content_id = ?", post.ID).Delete(&model.ContentCollectionMembership{}).Error
+			if err := tx.Session(&gorm.Session{NewDB: true}).Create(&model.ContentCollectionMembership{ContentID: post.ID, CollectionID: *post.CollectionID, Position: post.CollectionPosition}).Error; err != nil {
+				t.Fatalf("create canonical studio membership: %v", err)
+			}
+		}
+	}); err != nil {
+		t.Fatalf("register canonical studio post callback: %v", err)
+	}
+	postCollectionCallback := "test:studio-canonical-post-collection-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(postCollectionCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "post_collections" {
+			return
+		}
+		link, ok := tx.Statement.Dest.(*model.PostCollection)
+		if !ok {
+			return
+		}
+		if err := tx.Session(&gorm.Session{NewDB: true}).Create(&model.ContentCollectionMembership{ContentID: link.PostID, CollectionID: link.CollectionID}).Error; err != nil {
+			t.Fatalf("create canonical studio post membership: %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("register canonical studio post collection callback: %v", err)
+	}
+	episodeCallback := "test:studio-canonical-episode-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(episodeCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "podcast_episodes" {
+			return
+		}
+		var episode model.PodcastEpisode
+		switch value := tx.Statement.Dest.(type) {
+		case *model.PodcastEpisode:
+			episode = *value
+		case model.PodcastEpisode:
+			episode = value
+		default:
+			return
+		}
+		_ = tx.Session(&gorm.Session{NewDB: true}).Model(&model.ContentEntry{}).Where("id = ?", episode.PostID).Update("kind", "podcast").Error
+	}); err != nil {
+		t.Fatalf("register canonical studio episode callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Create().Remove(collectionCallback)
+		_ = db.Callback().Create().Remove(postCallback)
+		_ = db.Callback().Create().Remove(episodeCallback)
+		_ = db.Callback().Create().Remove(postCollectionCallback)
+	})
 }
 
 func studioToken(t *testing.T, db *gorm.DB, user model.User) string {
@@ -185,7 +312,7 @@ func TestStudioChannelDeleteRejectsNonEmptyChannel(t *testing.T) {
 	}
 }
 
-func TestStudioCollectionsAreScopedByChannelAndModule(t *testing.T) {
+func TestStudioCollectionsAreScopedByChannelAndUseUnifiedCollections(t *testing.T) {
 	fixture := newStudioHTTPFixture(t)
 	channel := createStudioChannel(t, fixture.db, fixture.owner, "Mixed")
 	blogCollection := model.Collection{ChannelID: channel.ID, ContentType: string(ModuleBlog), Name: "Articles"}
@@ -207,8 +334,8 @@ func TestStudioCollectionsAreScopedByChannelAndModule(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(payload.Data) != 1 || payload.Data[0].ID != blogCollection.ID {
-		t.Fatalf("expected only blog collection, got %#v", payload.Data)
+	if len(payload.Data) != 2 || payload.Data[0].ID != blogCollection.ID || payload.Data[1].ID != videoCollection.ID {
+		t.Fatalf("expected all unified collections in channel order, got %#v", payload.Data)
 	}
 }
 

@@ -717,7 +717,7 @@ func TestCreateRevisionBootstrapsAndAppliesAlbumEditorChanges(t *testing.T) {
 				{"artist_id": primary.ID.String(), "position": 1, "roles": []map[string]interface{}{{"role": "primary"}}},
 				{"artist_id": featured.ID.String(), "position": 2, "roles": []map[string]interface{}{{"role": "featured"}}},
 			},
-			"tracks": []map[string]interface{}{{"title": "Track", "track_number": 1, "audio_url": "https://example.com/track.mp3"}},
+			"tracks": []map[string]interface{}{{"title": "Track", "track_number": 1, "resolved_audio_url": "https://example.com/track.mp3"}},
 		},
 		"编辑专辑", 0, true,
 	)

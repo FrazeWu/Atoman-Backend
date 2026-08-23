@@ -194,7 +194,7 @@ func (s *Service) DeleteChannel(user authctx.CurrentUser, channelID uuid.UUID) e
 		return err
 	}
 	var contentCount int64
-	if err := s.db.Model(&model.Post{}).Where("channel_id = ?", channel.ID).Count(&contentCount).Error; err != nil {
+	if err := s.db.Model(&model.ContentEntry{}).Where("channel_id = ?", channel.ID).Count(&contentCount).Error; err != nil {
 		return err
 	}
 	if contentCount == 0 {
@@ -221,7 +221,7 @@ func (s *Service) DeleteChannel(user authctx.CurrentUser, channelID uuid.UUID) e
 		if err := tx.Delete(&channel).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("channel_id = ?", channel.ID).Delete(&model.Collection{}).Error; err != nil {
+		if err := tx.Where("channel_id = ?", channel.ID).Delete(&model.ContentCollection{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("channel_id = ?", channel.ID).Delete(&model.StudioModuleSettings{}).Error; err != nil {
@@ -272,10 +272,31 @@ func (s *Service) ListCollections(user authctx.CurrentUser, channelID uuid.UUID,
 	if _, err := s.ownedChannel(user.ID, channelID); err != nil {
 		return nil, err
 	}
+	if module == ModuleBlog {
+		collections, err := s.repo.ListUnifiedCollections(channelID)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]model.Collection, 0, len(collections))
+		for _, collection := range collections {
+			result = append(result, studioCollectionFromContentCollection(collection, module))
+		}
+		return result, nil
+	}
 	return s.repo.ListCollections(channelID, module)
 }
 
 func (s *Service) CreateCollection(user authctx.CurrentUser, module Module, input CreateCollectionInput) (model.Collection, error) {
+	if module == ModuleBlog {
+		if err := s.ensureCollectionNameAvailable(input.ChannelID, module, strings.TrimSpace(input.Name), nil); err != nil {
+			return model.Collection{}, err
+		}
+		collection, err := s.CreateUnifiedCollection(user, input)
+		if err != nil {
+			return model.Collection{}, err
+		}
+		return studioCollectionFromContentCollection(collection, module), nil
+	}
 	if err := requireUser(user); err != nil {
 		return model.Collection{}, err
 	}
@@ -309,6 +330,22 @@ func (s *Service) CreateCollection(user authctx.CurrentUser, module Module, inpu
 }
 
 func (s *Service) UpdateCollection(user authctx.CurrentUser, module Module, collectionID uuid.UUID, input UpdateCollectionInput) (model.Collection, error) {
+	if module == ModuleBlog {
+		if input.Name != nil {
+			var existing model.ContentCollection
+			if err := s.db.First(&existing, "id = ?", collectionID).Error; err != nil {
+				return model.Collection{}, err
+			}
+			if err := s.ensureCollectionNameAvailable(existing.ChannelID, module, strings.TrimSpace(*input.Name), &collectionID); err != nil {
+				return model.Collection{}, err
+			}
+		}
+		collection, err := s.UpdateUnifiedCollection(user, collectionID, input)
+		if err != nil {
+			return model.Collection{}, err
+		}
+		return studioCollectionFromContentCollection(collection, module), nil
+	}
 	if err := requireUser(user); err != nil {
 		return model.Collection{}, err
 	}
@@ -346,6 +383,9 @@ func (s *Service) UpdateCollection(user authctx.CurrentUser, module Module, coll
 }
 
 func (s *Service) DeleteCollection(user authctx.CurrentUser, module Module, collectionID uuid.UUID) error {
+	if module == ModuleBlog {
+		return s.DeleteUnifiedCollection(user, collectionID)
+	}
 	if err := requireUser(user); err != nil {
 		return err
 	}
@@ -365,7 +405,7 @@ func (s *Service) DeleteCollection(user authctx.CurrentUser, module Module, coll
 		where string
 	}{
 		{&model.Post{}, "collection_id = ?"},
-		{&model.BlogDraft{}, "collection_id = ?"},
+		{&model.ContentBlogDraft{}, "collection_id = ?"},
 		{&model.Video{}, "collection_id = ?"},
 		{&model.PostCollection{}, "collection_id = ?"},
 		{&model.VideoCollection{}, "collection_id = ?"},
@@ -486,6 +526,16 @@ func (s *Service) collectionInModule(collectionID uuid.UUID, module Module) (mod
 	if collectionID == uuid.Nil {
 		return model.Collection{}, apperr.BadRequest("validation.invalid_request", "collection_id is required")
 	}
+	if module == ModuleBlog {
+		var collection model.ContentCollection
+		if err := s.db.First(&collection, "id = ?", collectionID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return model.Collection{}, apperr.NotFound("studio.collection_not_found", "Collection not found")
+			}
+			return model.Collection{}, err
+		}
+		return studioCollectionFromContentCollection(collection, module), nil
+	}
 	collection, err := s.repo.GetCollection(collectionID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return model.Collection{}, apperr.NotFound("studio.collection_not_found", "Collection not found")
@@ -500,6 +550,21 @@ func (s *Service) collectionInModule(collectionID uuid.UUID, module Module) (mod
 }
 
 func (s *Service) ensureSystemDefaultCollection(channelID uuid.UUID, module Module, ownerID uuid.UUID) (model.Collection, error) {
+	if module == ModuleBlog {
+		var collection model.ContentCollection
+		err := s.db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			collection = model.ContentCollection{ChannelID: channelID, CreatedBy: &ownerID, Name: "未分类文章", IsDefault: true}
+			if err := s.db.Create(&collection).Error; err != nil {
+				return model.Collection{}, err
+			}
+			return studioCollectionFromContentCollection(collection, module), nil
+		}
+		if err != nil {
+			return model.Collection{}, err
+		}
+		return studioCollectionFromContentCollection(collection, module), nil
+	}
 	var collection model.Collection
 	err := s.db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channelID, module, true).First(&collection).Error
 	if err == nil {
@@ -533,11 +598,14 @@ func (s *Service) ensureSystemDefaultCollection(channelID uuid.UUID, module Modu
 
 func createSystemDefaultCollections(tx *gorm.DB, channelID, ownerID uuid.UUID) error {
 	names := map[Module]string{
-		ModuleBlog:    "未分类文章",
 		ModulePodcast: "未分类单集",
 		ModuleVideo:   "未分类视频",
 	}
-	for _, module := range []Module{ModuleBlog, ModulePodcast, ModuleVideo} {
+	blogCollection := model.ContentCollection{ChannelID: channelID, CreatedBy: &ownerID, Name: "未分类文章", IsDefault: true}
+	if err := tx.Create(&blogCollection).Error; err != nil {
+		return fmt.Errorf("create %s system default collection: %w", ModuleBlog, err)
+	}
+	for _, module := range []Module{ModulePodcast, ModuleVideo} {
 		collection := model.Collection{
 			ChannelID: channelID, ContentType: string(module), CreatedBy: &ownerID,
 			Name: names[module], IsDefault: true,
@@ -565,8 +633,12 @@ func (s *Service) ensureChannelNameAvailable(name string, excludeID *uuid.UUID) 
 }
 
 func (s *Service) ensureCollectionNameAvailable(channelID uuid.UUID, module Module, name string, excludeID *uuid.UUID) error {
-	query := s.db.Model(&model.Collection{}).
-		Where("channel_id = ? AND content_type = ? AND LOWER(name) = LOWER(?)", channelID, module, strings.TrimSpace(name))
+	var query *gorm.DB
+	if module == ModuleBlog {
+		query = s.db.Model(&model.ContentCollection{}).Where("channel_id = ? AND LOWER(name) = LOWER(?)", channelID, strings.TrimSpace(name))
+	} else {
+		query = s.db.Model(&model.Collection{}).Where("channel_id = ? AND content_type = ? AND LOWER(name) = LOWER(?)", channelID, module, strings.TrimSpace(name))
+	}
 	if excludeID != nil {
 		query = query.Where("id <> ?", *excludeID)
 	}
@@ -582,7 +654,7 @@ func (s *Service) ensureCollectionNameAvailable(channelID uuid.UUID, module Modu
 
 func (s *Service) channelSlugLocked(channelID uuid.UUID) (bool, error) {
 	var count int64
-	if err := s.db.Model(&model.Post{}).Where("channel_id = ? AND status = ?", channelID, "published").Count(&count).Error; err != nil {
+	if err := s.db.Model(&model.ContentEntry{}).Where("channel_id = ? AND kind = ? AND status = ?", channelID, "blog", "published").Count(&count).Error; err != nil {
 		return false, err
 	}
 	if count == 0 {

@@ -173,7 +173,7 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 	countsByPostID := make(map[uuid.UUID]engagementCount, len(postIDs))
 	if len(postIDs) > 0 {
 		var counts []engagementCount
-		if err := s.db.Model(&model.Post{}).Select(`posts.id AS post_id,
+		if err := s.db.Table("content_entries AS posts").Select(`posts.id AS post_id,
 			(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
 			COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count`).
 			Where("posts.id IN ?", postIDs).

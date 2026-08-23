@@ -319,17 +319,20 @@ func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) e
 			bookmarkSQL = "COALESCE((SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL), 0) AS bookmark_count"
 		}
 		selectSQL := `posts.id AS post_id,
-			posts.view_count, ` + bookmarkSQL + `,
+			blog_extensions.view_count, ` + bookmarkSQL + `,
 			0 AS rating_score,
 			0 AS rating_count`
 		if s.db.Migrator().HasTable(&model.PostRating{}) {
 			selectSQL = `posts.id AS post_id,
-				posts.view_count, ` + bookmarkSQL + `,
+				blog_extensions.view_count, ` + bookmarkSQL + `,
 				COALESCE((SELECT AVG(score) FROM post_ratings WHERE post_ratings.post_id = posts.id AND post_ratings.deleted_at IS NULL), 0) AS rating_score,
 				COALESCE((SELECT COUNT(*) FROM post_ratings WHERE post_ratings.post_id = posts.id AND post_ratings.deleted_at IS NULL), 0) AS rating_count`
 		}
 		var stats []postRecommendationStats
-		if err := s.db.Model(&model.Post{}).Select(selectSQL).Where("posts.id IN ?", postIDs).Scan(&stats).Error; err != nil {
+		if err := s.db.Table("content_entries AS posts").
+			Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
+			Where("posts.kind = ? AND posts.id IN ?", "blog", postIDs).
+			Select(selectSQL).Scan(&stats).Error; err != nil {
 			return err
 		}
 		for _, stat := range stats {

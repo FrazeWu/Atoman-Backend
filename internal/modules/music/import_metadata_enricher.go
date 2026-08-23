@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,17 +37,19 @@ type AlbumImportMetadataInput struct {
 	PreferredReleaseID string
 	Tracks             []AlbumImportMetadataTrack
 	LocalLyrics        map[string]AlbumImportTrackLyricsPayload
+	SkipLyrics         bool
 }
 
 type AlbumImportMetadataResult struct {
-	AlbumTitle     string
-	ReleaseDate    string
-	AlbumType      string
-	CoverURL       string
-	SourceURL      string
-	MissingArtists []string
-	MetadataError  string
-	Tracks         []AlbumImportDTOTrack
+	AlbumTitle           string
+	ReleaseDate          string
+	AlbumType            string
+	CoverURL             string
+	SourceURL            string
+	MusicBrainzReleaseID string
+	MissingArtists       []string
+	MetadataError        string
+	Tracks               []AlbumImportDTOTrack
 }
 
 type AlbumImportMetadataEnricher interface {
@@ -150,11 +153,16 @@ func (e *ExternalAlbumMetadataEnricher) Enrich(ctx context.Context, input AlbumI
 		result.ReleaseDate = release.Date
 		result.AlbumType = normalizeMusicBrainzAlbumType(release.ReleaseGroup.PrimaryType)
 		result.SourceURL = e.musicBrainzBase + "/release/" + release.ID
+		result.MusicBrainzReleaseID = release.ID
 		result.MissingArtists = missingMusicBrainzArtists(release.ArtistCredit, uniqueMusicArtists(append([]string{input.Artist}, input.Artists...)))
 		if e.coverArtBase != "" {
 			result.CoverURL = e.coverArtBase + "/release/" + release.ID + "/front-500"
 		}
 		result.Tracks = applyMusicBrainzTracks(result.Tracks, release, trackMapping)
+	}
+
+	if input.SkipLyrics {
+		return result, nil
 	}
 
 	missingLyrics := make([]int, 0, len(result.Tracks))
@@ -415,6 +423,9 @@ func bestMusicBrainzRelease(candidates []musicBrainzRelease, albumTitle string, 
 		if !ok {
 			continue
 		}
+		if len(flattenMusicBrainzTracks(candidate)) == len(uploaded) && musicBrainzMatchedTrackCount(mapping) != len(uploaded) {
+			continue
+		}
 		matchedTracks := musicBrainzMatchedTrackCount(mapping)
 		difference := musicBrainzDurationDifference(candidate, uploaded, mapping)
 		if bestIndex < 0 || matchedTracks > bestMatchedTracks ||
@@ -460,6 +471,9 @@ func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMe
 		return nil, false
 	}
 	if len(remote) == len(uploaded) {
+		if mapping, ok := matchMusicBrainzTracksBySignals(remote, uploaded); ok {
+			return mapping, true
+		}
 		if mapping, ok := matchMusicBrainzTracksByPosition(remote, uploaded); ok {
 			return mapping, true
 		}
@@ -477,7 +491,7 @@ func matchMusicBrainzTracks(release musicBrainzRelease, uploaded []AlbumImportMe
 	// and spacing variants such as "God's Gift" and "Gods Gift".
 	for remoteIndex := range remote {
 		candidates := unmatchedTrackCandidates(uploaded, used, func(track AlbumImportMetadataTrack) bool {
-			return comparableMusicTitle(remote[remoteIndex].Title) == comparableMusicTitle(track.Title)
+			return comparableMusicBrainzTrackTitle(remote[remoteIndex].Title) == comparableMusicBrainzTrackTitle(track.Title)
 		})
 		if len(candidates) == 1 {
 			mapping[remoteIndex] = candidates[0]
@@ -549,7 +563,7 @@ func matchMusicBrainzTracksByDurationMajority(remote []flattenedMusicBrainzTrack
 			continue
 		}
 		candidates := unmatchedTrackCandidates(uploaded, used, func(track AlbumImportMetadataTrack) bool {
-			return comparableMusicTitle(remote[remoteIndex].Title) == comparableMusicTitle(track.Title)
+			return comparableMusicBrainzTrackTitle(remote[remoteIndex].Title) == comparableMusicBrainzTrackTitle(track.Title)
 		})
 		if len(candidates) != 1 {
 			return nil, false
@@ -614,6 +628,124 @@ func musicBrainzLookupAlbumTitle(value string) string {
 
 func musicBrainzAlbumTitlesMatch(left, right string) bool {
 	return compactMusicText(musicBrainzLookupAlbumTitle(left)) == compactMusicText(musicBrainzLookupAlbumTitle(right))
+}
+
+func comparableMusicBrainzTrackTitle(value string) string {
+	trimmed := strings.TrimSpace(value)
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "skit #") {
+		if index := strings.Index(trimmed, "("); index > 0 && strings.HasSuffix(trimmed, ")") {
+			trimmed = strings.TrimSpace(trimmed[:index])
+		}
+	}
+	return comparableMusicTitle(trimmed)
+}
+
+type musicBrainzTrackCandidate struct {
+	index int
+	score int
+}
+
+func matchMusicBrainzTracksBySignals(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
+	if len(remote) == 0 || len(remote) != len(uploaded) {
+		return nil, false
+	}
+	candidates := make([][]musicBrainzTrackCandidate, len(remote))
+	for remoteIndex, remoteTrack := range remote {
+		for uploadedIndex, uploadedTrack := range uploaded {
+			score := 0
+			if comparableMusicBrainzTrackTitle(remoteTrack.Title) == comparableMusicBrainzTrackTitle(uploadedTrack.Title) {
+				score = 100
+			} else if trackDurationsMatch(remoteTrack, uploadedTrack) {
+				difference := absFloat(float64(remoteTrack.DurationMS)/1000 - uploadedTrack.DurationSeconds)
+				score = 10 - int(difference)
+				if score < 1 {
+					score = 1
+				}
+			}
+			if score > 0 {
+				candidates[remoteIndex] = append(candidates[remoteIndex], musicBrainzTrackCandidate{index: uploadedIndex, score: score})
+			}
+		}
+		if len(candidates[remoteIndex]) == 0 || len(candidates[remoteIndex]) > 8 {
+			return nil, false
+		}
+		sort.SliceStable(candidates[remoteIndex], func(left, right int) bool {
+			return candidates[remoteIndex][left].score > candidates[remoteIndex][right].score
+		})
+	}
+
+	order := make([]int, len(remote))
+	for index := range order {
+		order[index] = index
+	}
+	sort.SliceStable(order, func(left, right int) bool {
+		leftCandidates := candidates[order[left]]
+		rightCandidates := candidates[order[right]]
+		if len(leftCandidates) != len(rightCandidates) {
+			return len(leftCandidates) < len(rightCandidates)
+		}
+		return leftCandidates[0].score > rightCandidates[0].score
+	})
+
+	mapping := make([]int, len(remote))
+	for index := range mapping {
+		mapping[index] = -1
+	}
+	used := make([]bool, len(uploaded))
+	bestScore := -1
+	bestCount := 0
+	var bestMapping []int
+	maxRemainingScore := make([]int, len(order)+1)
+	for index := len(order) - 1; index >= 0; index-- {
+		maxRemainingScore[index] = maxRemainingScore[index+1] + candidates[order[index]][0].score
+	}
+	const maxSearchNodes = 100_000
+	searchNodes := 0
+	searchAborted := false
+	var assign func(int, int)
+	assign = func(orderIndex, score int) {
+		if searchAborted {
+			return
+		}
+		searchNodes++
+		if searchNodes > maxSearchNodes {
+			searchAborted = true
+			return
+		}
+		if score+maxRemainingScore[orderIndex] < bestScore {
+			return
+		}
+		if orderIndex == len(order) {
+			if score > bestScore {
+				bestScore = score
+				bestCount = 1
+				bestMapping = append([]int(nil), mapping...)
+			} else if score == bestScore && bestCount < 2 {
+				bestCount++
+			}
+			return
+		}
+		remoteIndex := order[orderIndex]
+		for _, candidate := range candidates[remoteIndex] {
+			if used[candidate.index] {
+				continue
+			}
+			used[candidate.index] = true
+			mapping[remoteIndex] = candidate.index
+			assign(orderIndex+1, score+candidate.score)
+			used[candidate.index] = false
+			mapping[remoteIndex] = -1
+			if searchAborted {
+				return
+			}
+		}
+	}
+	assign(0, 0)
+	if searchAborted || bestScore < 0 || bestCount != 1 {
+		return nil, false
+	}
+	return bestMapping, true
 }
 
 func matchMusicBrainzTracksByPosition(remote []flattenedMusicBrainzTrack, uploaded []AlbumImportMetadataTrack) ([]int, bool) {
@@ -743,17 +875,40 @@ func minInt(left, right int) int {
 func (e *ExternalAlbumMetadataEnricher) musicBrainzJSON(ctx context.Context, endpoint string, target any) error {
 	e.requestMu.Lock()
 	defer e.requestMu.Unlock()
-	if wait := e.musicBrainzWait - time.Since(e.lastMBRequest); wait > 0 && !e.lastMBRequest.IsZero() {
-		timer := time.NewTimer(wait)
-		defer timer.Stop()
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		if wait := e.musicBrainzWait - time.Since(e.lastMBRequest); wait > 0 && !e.lastMBRequest.IsZero() {
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+		err = e.getJSON(ctx, endpoint, target, e.userAgent)
+		e.lastMBRequest = time.Now()
+		if err == nil {
+			return nil
+		}
+		var serviceErr metadataServiceHTTPError
+		transientHTTP := errors.As(err, &serviceErr) && (serviceErr.statusCode == http.StatusTooManyRequests || serviceErr.statusCode >= 500)
+		transientTimeout := errors.Is(err, context.DeadlineExceeded)
+		if !transientHTTP && !transientTimeout {
+			return err
+		}
+		delay := serviceErr.retryAfter
+		if delay <= 0 {
+			delay = time.Duration(attempt+1) * 2 * time.Second
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
 		case <-timer.C:
 		}
 	}
-	err := e.getJSON(ctx, endpoint, target, e.userAgent)
-	e.lastMBRequest = time.Now()
 	return err
 }
 

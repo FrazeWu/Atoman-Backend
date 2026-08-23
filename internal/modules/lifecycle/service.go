@@ -127,7 +127,7 @@ func (s *Service) RecordEvent(user authctx.CurrentUser, input EventInput) error 
 		if result.Error != nil || result.RowsAffected == 0 || input.Event != "open" || input.Module != "blog" || user.ID == content.OwnerID {
 			return result.Error
 		}
-		return tx.Model(&model.Post{}).Where("id = ?", input.ContentID).
+		return tx.Model(&model.ContentBlogExtension{}).Where("content_id = ?", input.ContentID).
 			UpdateColumn("view_count", gorm.Expr("view_count + ?", 1)).Error
 	})
 }
@@ -339,7 +339,7 @@ func (s *Service) ScheduleContent(user authctx.CurrentUser, input ScheduleInput)
 	}
 	switch input.Module {
 	case "blog":
-		if err := s.db.Model(&model.Post{}).Where("id = ? AND user_id = ?", input.ContentID, user.ID).Updates(map[string]any{"status": "scheduled", "scheduled_at": publishAt}).Error; err != nil {
+		if err := s.db.Model(&model.ContentEntry{}).Where("id = ? AND author_id = ?", input.ContentID, user.ID).Updates(map[string]any{"status": "scheduled", "scheduled_at": publishAt}).Error; err != nil {
 			return ScheduleResult{}, err
 		}
 	case "podcast":
@@ -372,7 +372,7 @@ func (s *Service) CancelSchedule(user authctx.CurrentUser, module string, conten
 	}
 	switch module {
 	case "blog":
-		return s.db.Model(&model.Post{}).Where("id = ? AND status = ?", contentID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error
+		return s.db.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", contentID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error
 	case "podcast":
 		var episode model.PodcastEpisode
 		if err := s.db.First(&episode, "id = ?", contentID).Error; err != nil {
@@ -391,36 +391,56 @@ func (s *Service) PublishDue(now time.Time, limit int) error {
 		limit = 20
 	}
 	now = now.UTC()
+	var entries []model.ContentEntry
+	if err := s.db.Where("kind = ? AND status = ? AND scheduled_at IS NOT NULL AND scheduled_at <= ?", "blog", "scheduled", now).
+		Order("scheduled_at ASC").Limit(limit).Find(&entries).Error; err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := s.validatePublishable("blog", entry.ID, true); err != nil {
+			continue
+		}
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", entry.ID, "scheduled").Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil}).Error; err != nil {
+				return err
+			}
+			if entry.AuthorID == nil {
+				return fmt.Errorf("blog content %s has no author", entry.ID)
+			}
+			return enqueuePublication(tx, "blog", entry.ID, entry.ChannelID, *entry.AuthorID)
+		}); err != nil {
+			return err
+		}
+	}
+	remaining := limit - len(entries)
+	if remaining <= 0 {
+		return nil
+	}
 	var posts []model.Post
-	if err := s.db.Where("status = ? AND scheduled_at IS NOT NULL AND scheduled_at <= ?", "scheduled", now).Order("scheduled_at ASC").Limit(limit).Find(&posts).Error; err != nil {
+	if err := s.db.Where("status = ? AND scheduled_at IS NOT NULL AND scheduled_at <= ?", "scheduled", now).
+		Where("EXISTS (SELECT 1 FROM podcast_episodes WHERE podcast_episodes.post_id = posts.id AND podcast_episodes.deleted_at IS NULL)").
+		Order("scheduled_at ASC").Limit(remaining).Find(&posts).Error; err != nil {
 		return err
 	}
 	for _, post := range posts {
-		module := "blog"
-		contentID := post.ID
 		var episode model.PodcastEpisode
-		err := s.db.First(&episode, "post_id = ?", post.ID).Error
-		if err == nil {
-			module = "podcast"
-			contentID = episode.ID
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		if err := s.db.First(&episode, "post_id = ?", post.ID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				continue
+			}
 			return err
 		}
-		if err := s.validatePublishable(module, contentID, true); err != nil {
+		if err := s.validatePublishable("podcast", episode.ID, true); err != nil {
 			continue
 		}
 		if err := s.db.Transaction(func(tx *gorm.DB) error {
 			if err := tx.Model(&model.Post{}).Where("id = ? AND status = ?", post.ID, "scheduled").Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil}).Error; err != nil {
 				return err
 			}
-			return enqueuePublication(tx, module, contentID, *post.ChannelID, post.UserID)
+			return enqueuePublication(tx, "podcast", episode.ID, *post.ChannelID, post.UserID)
 		}); err != nil {
 			return err
 		}
-	}
-	remaining := limit - len(posts)
-	if remaining <= 0 {
-		return nil
 	}
 	var videos []model.Video
 	if err := s.db.Where("status = ? AND scheduled_at IS NOT NULL AND scheduled_at <= ?", "scheduled", now).Order("scheduled_at ASC").Limit(remaining).Find(&videos).Error; err != nil {
@@ -448,11 +468,19 @@ func (s *Service) PublishDue(now time.Time, limit int) error {
 func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool) error {
 	switch module {
 	case "blog":
-		var post model.Post
-		if err := s.db.First(&post, "id = ?", contentID).Error; err != nil {
+		var entry model.ContentEntry
+		if err := s.db.Where("id = ? AND kind = ?", contentID, "blog").First(&entry).Error; err != nil {
 			return contentError(err)
 		}
-		if strings.TrimSpace(post.Title) == "" || strings.TrimSpace(post.Content) == "" || !postHasResolvedCollection(post) {
+		var extension model.ContentBlogExtension
+		if err := s.db.First(&extension, "content_id = ?", contentID).Error; err != nil {
+			return contentError(err)
+		}
+		var membershipCount int64
+		if err := s.db.Model(&model.ContentCollectionMembership{}).Where("content_id = ?", contentID).Count(&membershipCount).Error; err != nil {
+			return err
+		}
+		if strings.TrimSpace(entry.Title) == "" || strings.TrimSpace(extension.Content) == "" || membershipCount == 0 {
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Blog title, content, and collection are required")
 		}
 	case "podcast":
@@ -660,21 +688,15 @@ func (s *Service) resolveContent(module string, id uuid.UUID) (contentSummary, e
 	}
 	switch normalizeModule(module) {
 	case "blog":
-		var post model.Post
-		if err := s.db.First(&post, "id = ?", id).Error; err != nil {
+		var entry model.ContentEntry
+		if err := s.db.Where("id = ? AND kind = ?", id, "blog").First(&entry).Error; err != nil {
 			return contentSummary{}, contentError(err)
 		}
-		if post.ChannelID == nil {
-			return contentSummary{}, apperr.NotFound("lifecycle.content_not_found", "Content not found")
+		var extension model.ContentBlogExtension
+		if err := s.db.First(&extension, "content_id = ?", entry.ID).Error; err != nil {
+			return contentSummary{}, contentError(err)
 		}
-		var episodes int64
-		if err := s.db.Model(&model.PodcastEpisode{}).Where("post_id = ?", post.ID).Count(&episodes).Error; err != nil {
-			return contentSummary{}, err
-		}
-		if episodes > 0 {
-			return contentSummary{}, apperr.NotFound("lifecycle.content_not_found", "Content not found")
-		}
-		return contentSummary{Module: "blog", ContentID: id, ChannelID: *post.ChannelID, OwnerID: post.UserID, Title: post.Title, Path: "/posts/post/" + id.String(), CoverURL: post.CoverURL, Status: post.Status, Visibility: post.Visibility}, nil
+		return contentSummary{Module: "blog", ContentID: id, ChannelID: entry.ChannelID, OwnerID: *entry.AuthorID, Title: entry.Title, Path: "/posts/post/" + id.String(), CoverURL: entry.CoverURL, Status: entry.Status, Visibility: entry.Visibility}, nil
 	case "podcast":
 		var episode model.PodcastEpisode
 		if err := s.db.Preload("Post").First(&episode, "id = ?", id).Error; err != nil {

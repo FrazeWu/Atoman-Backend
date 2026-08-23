@@ -235,7 +235,7 @@ func MigrateSchema(db *gorm.DB) error {
 	models := []any{
 		&model.User{}, &model.UserSettings{}, &model.AuthSession{}, &model.LoginEvent{}, &model.EmailVerificationCode{},
 		&model.ExternalIdentity{}, &model.OAuthFlow{}, &model.Follow{}, &model.Channel{}, &model.Collection{},
-		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
+		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{}, &model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
 		&model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
 		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.ContentLifecycleEvent{},
 		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{},

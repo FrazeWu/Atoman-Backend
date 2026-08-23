@@ -34,16 +34,15 @@ type SEOSitemapResponse struct {
 }
 
 type CreatePostRequest struct {
-	Title         string      `json:"title"`
-	Content       string      `json:"content"`
-	Excerpt       string      `json:"excerpt"`
-	Summary       string      `json:"summary"`
-	CoverURL      string      `json:"cover_url"`
-	ChannelID     uuid.UUID   `json:"channel_id"`
-	CollectionID  uuid.UUID   `json:"collection_id"`
-	CollectionIDs []uuid.UUID `json:"collection_ids" swaggerignore:"true"`
-	Visibility    string      `json:"visibility"`
-	Status        string      `json:"status"`
+	Title        string    `json:"title"`
+	Content      string    `json:"content"`
+	Excerpt      string    `json:"excerpt"`
+	Summary      string    `json:"summary"`
+	CoverURL     string    `json:"cover_url"`
+	ChannelID    uuid.UUID `json:"channel_id"`
+	CollectionID uuid.UUID `json:"collection_id"`
+	Visibility   string    `json:"visibility"`
+	Status       string    `json:"status"`
 }
 
 type RecommendationItemDTO struct {

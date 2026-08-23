@@ -18487,6 +18487,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "标题、描述或正文搜索",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "分类",
                         "name": "category",
                         "in": "query"
@@ -21672,6 +21678,9 @@ const docTemplate = `{
         "blog.BookmarkPostDTO": {
             "type": "object",
             "properties": {
+                "bookmarks_count": {
+                    "type": "integer"
+                },
                 "channel": {
                     "$ref": "#/definitions/model.Channel"
                 },
@@ -23966,6 +23975,9 @@ const docTemplate = `{
         "feed.TimelinePostDTO": {
             "type": "object",
             "properties": {
+                "bookmarks_count": {
+                    "type": "integer"
+                },
                 "channel": {
                     "$ref": "#/definitions/model.Channel"
                 },
@@ -28306,6 +28318,9 @@ const docTemplate = `{
         "model.Post": {
             "type": "object",
             "properties": {
+                "bookmarks_count": {
+                    "type": "integer"
+                },
                 "channel": {
                     "$ref": "#/definitions/model.Channel"
                 },

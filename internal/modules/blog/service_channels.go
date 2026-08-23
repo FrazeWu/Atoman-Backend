@@ -165,9 +165,9 @@ func (s *Service) CreateCollection(user authctx.CurrentUser, channelID uuid.UUID
 	if name == "" {
 		return model.Collection{}, apperr.BadRequest("validation.invalid_request", "name is required")
 	}
-	collection := model.Collection{
+	collection := model.ContentCollection{
 		ChannelID:   channelID,
-		ContentType: "blog",
+		CreatedBy:   &user.ID,
 		Name:        name,
 		Description: strings.TrimSpace(description),
 		CoverURL:    strings.TrimSpace(coverURL),
@@ -179,7 +179,10 @@ func (s *Service) CreateCollection(user authctx.CurrentUser, channelID uuid.UUID
 }
 
 func (s *Service) UpdateCollection(user authctx.CurrentUser, collectionID uuid.UUID, name string, description string, coverURL string) (model.Collection, error) {
-	collection, err := s.GetCollection(collectionID)
+	collection, err := s.repo.GetCollection(collectionID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.Collection{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
+	}
 	if err != nil {
 		return model.Collection{}, err
 	}
@@ -194,17 +197,18 @@ func (s *Service) UpdateCollection(user authctx.CurrentUser, collectionID uuid.U
 	if name == "" {
 		return model.Collection{}, apperr.BadRequest("validation.invalid_request", "name is required")
 	}
-	collection.Name = name
-	collection.Description = strings.TrimSpace(description)
-	collection.CoverURL = strings.TrimSpace(coverURL)
-	if err := s.repo.SaveCollection(&collection); err != nil {
+	updates := map[string]any{"name": name, "description": strings.TrimSpace(description), "cover_url": strings.TrimSpace(coverURL)}
+	if err := s.db.Model(&model.ContentCollection{}).Where("id = ?", collectionID).Updates(updates).Error; err != nil {
 		return model.Collection{}, err
 	}
-	return s.repo.GetCollection(collection.ID)
+	return s.repo.GetCollection(collectionID)
 }
 
 func (s *Service) DeleteCollection(user authctx.CurrentUser, collectionID uuid.UUID) error {
-	collection, err := s.GetCollection(collectionID)
+	collection, err := s.repo.GetCollection(collectionID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return apperr.NotFound("blog.collection_not_found", "Collection not found")
+	}
 	if err != nil {
 		return err
 	}
@@ -215,7 +219,28 @@ func (s *Service) DeleteCollection(user authctx.CurrentUser, collectionID uuid.U
 	if channel.UserID == nil || *channel.UserID != user.ID {
 		return apperr.Forbidden("blog.collection_forbidden", "You do not have permission to delete this collection")
 	}
-	return studioapi.NewService(s.db).DeleteCollection(user, studioapi.ModuleBlog, collection.ID)
+	if collection.IsDefault {
+		return apperr.Conflict("studio.default_collection_protected", "default collection cannot be deleted")
+	}
+	var count int64
+	if err := s.db.Model(&model.ContentCollectionMembership{}).Where("collection_id = ?", collectionID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return apperr.Conflict("studio.collection_not_empty", "Collection content must be moved before deletion")
+	}
+	if err := s.db.Model(&model.ContentBlogDraft{}).Where("collection_id = ?", collectionID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return apperr.Conflict("studio.collection_not_empty", "Collection content must be moved before deletion")
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&model.StudioModuleSettings{}).Where("default_collection_id = ?", collectionID).Update("default_collection_id", nil).Error; err != nil {
+			return err
+		}
+		return tx.Delete(&model.ContentCollection{}, "id = ?", collectionID).Error
+	})
 }
 
 func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName string) (model.Channel, error) {
@@ -292,34 +317,17 @@ func (s *Service) ensureDefaultCollectionForChannel(channelID uuid.UUID) error {
 }
 
 func (s *Service) ensureDefaultCollectionForChannelDB(db *gorm.DB, channelID uuid.UUID) error {
-	var collection model.Collection
-	err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channelID, "blog", true).First(&collection).Error
+	var collection model.ContentCollection
+	err := db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
 	if err == nil {
 		return nil
 	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-
-	name := ensureDefaultCollectionName()
-	var softDeleted model.Collection
-	softErr := db.Unscoped().Where("channel_id = ? AND content_type = ? AND name = ?", channelID, "blog", name).First(&softDeleted).Error
-	if softErr == nil && softDeleted.DeletedAt.Valid {
-		return db.Unscoped().Model(&softDeleted).Updates(map[string]any{
-			"deleted_at":   nil,
-			"content_type": "blog",
-			"is_default":   true,
-			"name":         name,
-		}).Error
-	}
-	if softErr != nil && !errors.Is(softErr, gorm.ErrRecordNotFound) {
-		return softErr
-	}
-
-	collection = model.Collection{
+	collection = model.ContentCollection{
 		ChannelID:   channelID,
-		ContentType: "blog",
-		Name:        name,
+		Name:        ensureDefaultCollectionName(),
 		Description: "默认合集",
 		IsDefault:   true,
 	}

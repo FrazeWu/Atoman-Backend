@@ -81,10 +81,10 @@ func (s *Service) ConvertStandaloneSongToAlbum(user authctx.CurrentUser, songID 
 		if err := tx.Create(&album).Error; err != nil {
 			return err
 		}
-		if err := replaceAlbumArtistCredits(tx, album.ID, input.ArtistCredits, false); err != nil {
+		if err := replaceAlbumArtistCredits(tx, album.ID, input.ArtistCredits, false, user.ID); err != nil {
 			return err
 		}
-		if err := replaceStandaloneSongArtistCredits(tx, song.ID, input.ArtistCredits); err != nil {
+		if err := replaceStandaloneSongArtistCredits(tx, song.ID, input.ArtistCredits, user.ID); err != nil {
 			return err
 		}
 		updates := map[string]any{
@@ -178,7 +178,7 @@ func (s *Service) ConvertAlbumToStandaloneSong(user authctx.CurrentUser, albumID
 		if _, err := revisions.EnsureInitialRevision("song", song.ID, user.ID); err != nil {
 			return err
 		}
-		if err := replaceStandaloneSongArtistCredits(tx, song.ID, input.ArtistCredits); err != nil {
+		if err := replaceStandaloneSongArtistCredits(tx, song.ID, input.ArtistCredits, user.ID); err != nil {
 			return err
 		}
 		updates := map[string]any{

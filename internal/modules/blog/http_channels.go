@@ -103,15 +103,14 @@ func (h *Handler) getChannelArticleRSS(c *gin.Context) {
 		return
 	}
 
-	var posts []model.Post
-	if err := h.service.db.Where("channel_id = ? AND status = ?", channel.ID, "published").
-		Where("visibility = ? OR visibility = ?", "", "public").
-		Preload("User").
-		Order("COALESCE(published_at, created_at) DESC").
-		Order("created_at DESC").
-		Order("id DESC").
-		Limit(50).
-		Find(&posts).Error; err != nil {
+	posts, err := loadCanonicalBlogPosts(h.service.db, canonicalBlogPostsQuery(h.service.db).
+		Where("posts.channel_id = ? AND posts.status = ?", channel.ID, "published").
+		Where("posts.visibility = ? OR posts.visibility = ?", "", "public").
+		Order("COALESCE(posts.published_at, posts.created_at) DESC").
+		Order("posts.created_at DESC").
+		Order("posts.id DESC").
+		Limit(50))
+	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -333,18 +332,17 @@ func rssCDATA(value string) string {
 }
 
 func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collection, error) {
-	var collection model.Collection
-	err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channelID, "blog", true).First(&collection).Error
+	var collection model.ContentCollection
+	err := db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
 	if err == nil {
-		return &collection, nil
+		result := blogCollectionDTO(collection)
+		return &result, nil
 	}
 	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
 	}
-
-	collection = model.Collection{
+	collection = model.ContentCollection{
 		ChannelID:   channelID,
-		ContentType: "blog",
 		Name:        ensureDefaultCollectionName(),
 		Description: "默认合集",
 		IsDefault:   true,
@@ -352,5 +350,6 @@ func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collectio
 	if err := db.Create(&collection).Error; err != nil {
 		return nil, err
 	}
-	return &collection, nil
+	result := blogCollectionDTO(collection)
+	return &result, nil
 }

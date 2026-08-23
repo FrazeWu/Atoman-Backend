@@ -184,15 +184,15 @@ func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, modul
 	var err error
 	switch module {
 	case ModuleBlog:
-		err = s.db.Model(&model.Post{}).
+		err = s.db.Table("content_entries AS posts").
+			Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
 			Select(`COUNT(*) AS contents,
 				COALESCE(SUM(CASE WHEN posts.status = 'published' THEN 1 ELSE 0 END), 0) AS published,
 				COALESCE(SUM(CASE WHEN posts.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
-				COALESCE(SUM(posts.view_count), 0) AS views,
+				COALESCE(SUM(blog_extensions.view_count), 0) AS views,
 				COALESCE(SUM(CASE WHEN TRIM(COALESCE(posts.cover_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
-				COALESCE(SUM(CASE WHEN posts.collection_id IS NULL AND NOT EXISTS (SELECT 1 FROM post_collections WHERE post_collections.post_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection`).
-			Where("posts.user_id = ? AND posts.channel_id = ?", userID, channel.ID).
-			Where("NOT EXISTS (SELECT 1 FROM podcast_episodes WHERE podcast_episodes.post_id = posts.id AND podcast_episodes.deleted_at IS NULL)").
+				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM content_collection_memberships WHERE content_collection_memberships.content_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection`).
+			Where("posts.kind = ? AND posts.deleted_at IS NULL AND posts.author_id = ? AND posts.channel_id = ?", "blog", userID, channel.ID).
 			Scan(&counts).Error
 	case ModulePodcast:
 		err = s.db.Model(&model.PodcastEpisode{}).

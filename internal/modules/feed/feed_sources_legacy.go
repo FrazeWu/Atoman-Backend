@@ -67,9 +67,14 @@ func populateFeedSourceTitle(db *gorm.DB, source *model.FeedSource, fallbackTitl
 		if source.SourceID == nil {
 			break
 		}
-		var collection model.Collection
-		if err := db.First(&collection, source.SourceID).Error; err == nil {
+		var collection model.ContentCollection
+		if err := db.First(&collection, "id = ?", *source.SourceID).Error; err == nil {
 			source.Title = collection.Name
+			break
+		}
+		var legacyCollection model.Collection
+		if err := db.First(&legacyCollection, "id = ?", *source.SourceID).Error; err == nil {
+			source.Title = legacyCollection.Name
 		}
 	case "external_rss":
 		if source.RssURL == "" {

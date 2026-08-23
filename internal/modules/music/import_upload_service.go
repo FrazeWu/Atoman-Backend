@@ -62,6 +62,27 @@ func positiveInt64Env(key string, fallback int64) int64 {
 	return value
 }
 
+func archiveContentType(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "zip":
+		return "application/zip"
+	case "rar":
+		return "application/vnd.rar"
+	case "7z":
+		return "application/x-7z-compressed"
+	case "tar":
+		return "application/x-tar"
+	case "tar.gz", "tgz":
+		return "application/gzip"
+	case "tar.bz2":
+		return "application/x-bzip2"
+	case "tar.xz":
+		return "application/x-xz"
+	default:
+		return "application/octet-stream"
+	}
+}
+
 func detectAlbumImportFileRole(fileName string) (string, string, error) {
 	lower := strings.ToLower(strings.TrimSpace(fileName))
 	archives := []string{"tar.bz2", "tar.gz", "tar.xz", "tgz", "zip", "rar", "7z", "tar"}

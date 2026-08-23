@@ -66,8 +66,36 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		pageSize = 100
 	}
 
-	var rows []blogRecommendationRow
-	if err := s.db.Model(&model.Post{}).Select(`posts.*,
+	type candidateRow struct {
+		ID                    uuid.UUID  `gorm:"column:id"`
+		CreatedAt             time.Time  `gorm:"column:created_at"`
+		UpdatedAt             time.Time  `gorm:"column:updated_at"`
+		AuthorID              *uuid.UUID `gorm:"column:author_id"`
+		ChannelID             uuid.UUID  `gorm:"column:channel_id"`
+		Title                 string     `gorm:"column:title"`
+		Summary               string     `gorm:"column:summary"`
+		CoverURL              string     `gorm:"column:cover_url"`
+		Status                string     `gorm:"column:status"`
+		Visibility            string     `gorm:"column:visibility"`
+		PublishedAt           *time.Time `gorm:"column:published_at"`
+		ScheduledAt           *time.Time `gorm:"column:scheduled_at"`
+		Content               string     `gorm:"column:content"`
+		LanguageCode          string     `gorm:"column:language_code"`
+		Pinned                bool       `gorm:"column:pinned"`
+		ViewCount             int64      `gorm:"column:view_count"`
+		CollectionConflict    bool       `gorm:"column:collection_conflict"`
+		CollectionID          *uuid.UUID `gorm:"column:collection_id"`
+		CollectionPosition    int        `gorm:"column:collection_position"`
+		LikesCount            int64      `gorm:"column:likes_count"`
+		CommentsCount         int64      `gorm:"column:comments_count"`
+		BookmarksCount        int64      `gorm:"column:bookmarks_count"`
+		ChannelFollowersCount int64      `gorm:"column:channel_followers_count"`
+	}
+	var candidates []candidateRow
+	if err := canonicalBlogPostsQuery(s.db).Select(`posts.id, posts.created_at, posts.updated_at, posts.author_id, posts.channel_id,
+		posts.title, posts.summary, posts.cover_url, posts.status, posts.visibility, posts.published_at, posts.scheduled_at,
+		blog_extensions.content, blog_extensions.language_code, blog_extensions.pinned, blog_extensions.view_count,
+		blog_extensions.collection_conflict, memberships.collection_id, memberships.position AS collection_position,
 		(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
 		COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count,
 		(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count,
@@ -77,8 +105,39 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		Where("posts.status = ? AND (posts.visibility = ? OR posts.visibility = ?)", "published", "", "public").
 		Order("COALESCE(posts.published_at, posts.created_at) DESC").
 		Limit(blogRecommendationCandidateLimit).
-		Scan(&rows).Error; err != nil {
+		Scan(&candidates).Error; err != nil {
 		return nil, 0, err
+	}
+	canonicalRows := make([]canonicalBlogPostRow, 0, len(candidates))
+	for _, candidate := range candidates {
+		canonicalRows = append(canonicalRows, canonicalBlogPostRow{
+			ID: candidate.ID, CreatedAt: candidate.CreatedAt, UpdatedAt: candidate.UpdatedAt,
+			AuthorID: candidate.AuthorID, ChannelID: candidate.ChannelID, Title: candidate.Title,
+			Summary: candidate.Summary, CoverURL: candidate.CoverURL, Status: candidate.Status,
+			Visibility: candidate.Visibility, PublishedAt: candidate.PublishedAt, ScheduledAt: candidate.ScheduledAt,
+			Content: candidate.Content, LanguageCode: candidate.LanguageCode, Pinned: candidate.Pinned,
+			ViewCount: candidate.ViewCount, CollectionConflict: candidate.CollectionConflict,
+			CollectionID: candidate.CollectionID, CollectionPosition: candidate.CollectionPosition,
+		})
+	}
+	posts, err := hydrateCanonicalBlogPosts(s.db, canonicalRows)
+	if err != nil {
+		return nil, 0, err
+	}
+	postsByID := make(map[uuid.UUID]model.Post, len(posts))
+	for _, post := range posts {
+		postsByID[post.ID] = post
+	}
+	rows := make([]blogRecommendationRow, 0, len(candidates))
+	for _, candidate := range candidates {
+		post, ok := postsByID[candidate.ID]
+		if !ok {
+			continue
+		}
+		rows = append(rows, blogRecommendationRow{
+			Post: post, LikesCount: candidate.LikesCount, CommentsCount: candidate.CommentsCount,
+			BookmarksCount: candidate.BookmarksCount, ChannelFollowersCount: candidate.ChannelFollowersCount,
+		})
 	}
 
 	subscribedChannels := map[uuid.UUID]struct{}{}

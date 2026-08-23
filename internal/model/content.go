@@ -10,6 +10,8 @@ import (
 // Type-specific data remains in the existing resource tables during the incremental migration.
 type ContentEntry struct {
 	Base
+	AuthorID    *uuid.UUID `json:"author_id,omitempty" gorm:"type:uuid;index"`
+	Author      *User      `json:"author,omitempty" gorm:"foreignKey:AuthorID;references:UUID"`
 	ChannelID   uuid.UUID  `json:"channel_id" gorm:"type:uuid;not null;index"`
 	Channel     *Channel   `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
 	Kind        string     `json:"kind" gorm:"type:varchar(16);not null;index"` // blog | podcast | video
@@ -30,6 +32,52 @@ type ContentPostExtension struct {
 }
 
 func (ContentPostExtension) TableName() string { return "content_post_extensions" }
+
+// ContentBlogExtension stores blog-specific data while ContentEntry owns the canonical identity and shared metadata.
+type ContentBlogExtension struct {
+	ContentID          uuid.UUID `json:"content_id" gorm:"type:uuid;primaryKey"`
+	Content            string    `json:"content" gorm:"type:text;not null"`
+	LanguageCode       string    `json:"language_code" gorm:"type:varchar(16);index"`
+	Pinned             bool      `json:"pinned" gorm:"not null;default:false"`
+	ViewCount          int64     `json:"view_count" gorm:"not null;default:0"`
+	CollectionConflict bool      `json:"collection_conflict" gorm:"not null;default:false;index"`
+}
+
+func (ContentBlogExtension) TableName() string { return "content_blog_extensions" }
+
+type ContentBlogVersion struct {
+	Base
+	ContentID    uuid.UUID  `json:"content_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_content_blog_version,priority:1"`
+	Version      int        `json:"version" gorm:"not null;uniqueIndex:idx_content_blog_version,priority:2"`
+	EditorID     uuid.UUID  `json:"editor_id" gorm:"type:uuid;not null;index"`
+	Title        string     `json:"title" gorm:"not null"`
+	Content      string     `json:"content" gorm:"type:text;not null"`
+	Summary      string     `json:"summary" gorm:"type:text"`
+	CoverURL     string     `json:"cover_url" gorm:"type:text"`
+	LanguageCode string     `json:"language_code" gorm:"type:varchar(16);index"`
+	Pinned       bool       `json:"pinned" gorm:"not null;default:false"`
+	Visibility   string     `json:"visibility" gorm:"not null"`
+	CollectionID uuid.UUID  `json:"collection_id" gorm:"type:uuid;not null;index"`
+	PublishedAt  *time.Time `json:"published_at,omitempty"`
+}
+
+func (ContentBlogVersion) TableName() string { return "content_blog_versions" }
+
+type ContentBlogDraft struct {
+	Base
+	UserID       uuid.UUID  `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_content_blog_drafts_user_context,priority:1"`
+	ContentID    *uuid.UUID `json:"content_id,omitempty" gorm:"type:uuid;index"`
+	ContextKey   string     `json:"context_key" gorm:"not null;uniqueIndex:idx_content_blog_drafts_user_context,priority:2"`
+	Title        string     `json:"title"`
+	Content      string     `json:"content" gorm:"type:text"`
+	Summary      string     `json:"summary" gorm:"type:text"`
+	CoverURL     string     `json:"cover_url" gorm:"type:text"`
+	Visibility   string     `json:"visibility" gorm:"not null;default:'public'"`
+	ChannelID    *uuid.UUID `json:"channel_id,omitempty" gorm:"type:uuid;index"`
+	CollectionID *uuid.UUID `json:"collection_id,omitempty" gorm:"type:uuid;index"`
+}
+
+func (ContentBlogDraft) TableName() string { return "content_blog_drafts" }
 
 type ContentEpisodeExtension struct {
 	ContentID uuid.UUID `json:"content_id" gorm:"type:uuid;primaryKey"`

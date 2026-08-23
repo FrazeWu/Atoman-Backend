@@ -15,15 +15,22 @@ import (
 func TestRequireBlogPostEditAccessAllowsAuthctxCurrentUser(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Post{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Post{}, &model.ContentEntry{})
 
 	user := model.User{Username: "author", Email: "author@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	post := model.Post{UserID: user.UUID, Title: "Post", Content: "Body", Status: "draft", Visibility: "private"}
+	channel := model.Channel{UserID: &user.UUID, Name: "Author Channel", Slug: "author-channel"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	post := model.Post{UserID: user.UUID, ChannelID: &channel.ID, Title: "Post", Content: "Body", Status: "draft", Visibility: "private"}
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
+	}
+	if err := db.Create(&model.ContentEntry{Base: post.Base, AuthorID: &user.UUID, ChannelID: channel.ID, Kind: "blog", Title: post.Title, Status: post.Status, Visibility: post.Visibility}).Error; err != nil {
+		t.Fatalf("create canonical entry: %v", err)
 	}
 
 	r := gin.New()

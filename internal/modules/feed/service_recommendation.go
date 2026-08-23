@@ -6,8 +6,8 @@ func (s *Service) ListRecommendationThemes(category string) []RecommendationThem
 	return listRecommendationThemes(category)
 }
 
-func (s *Service) RecommendArticlesByMode(mode recommendation.Mode, category string, theme string, languageCode string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
-	return s.RecommendArticles(mode, category, theme, languageCode, page, pageSize)
+func (s *Service) RecommendArticlesByMode(mode recommendation.Mode, category string, theme string, languageCode string, search string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+	return s.RecommendArticles(mode, category, theme, languageCode, search, page, pageSize)
 }
 
 func (s *Service) RecommendChannelsByMode(mode recommendation.Mode, category string, theme string, languageCode string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {

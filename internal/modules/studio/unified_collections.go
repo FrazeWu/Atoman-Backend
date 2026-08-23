@@ -11,6 +11,14 @@ import (
 	"gorm.io/gorm"
 )
 
+func studioCollectionFromContentCollection(collection model.ContentCollection, module Module) model.Collection {
+	return model.Collection{
+		Base: collection.Base, ChannelID: collection.ChannelID, Channel: collection.Channel,
+		ContentType: string(module), CreatedBy: collection.CreatedBy, Name: collection.Name,
+		Description: collection.Description, CoverURL: collection.CoverURL, IsDefault: collection.IsDefault,
+	}
+}
+
 func (s *Service) CreateUnifiedCollection(user authctx.CurrentUser, input CreateCollectionInput) (model.ContentCollection, error) {
 	if err := requireUser(user); err != nil {
 		return model.ContentCollection{}, err
@@ -46,13 +54,16 @@ func (s *Service) UpdateUnifiedCollection(user authctx.CurrentUser, id uuid.UUID
 			return model.ContentCollection{}, apperr.BadRequest("validation.invalid_request", "name is required")
 		} else {
 			updates["name"] = name
+			collection.Name = name
 		}
 	}
 	if input.Description != nil {
 		updates["description"] = strings.TrimSpace(*input.Description)
+		collection.Description = strings.TrimSpace(*input.Description)
 	}
 	if input.CoverURL != nil {
 		updates["cover_url"] = strings.TrimSpace(*input.CoverURL)
+		collection.CoverURL = strings.TrimSpace(*input.CoverURL)
 	}
 	if len(updates) > 0 {
 		if err := s.db.Model(&collection).Updates(updates).Error; err != nil {

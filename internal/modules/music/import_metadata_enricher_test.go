@@ -2,6 +2,7 @@ package music
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -199,7 +200,7 @@ func TestExternalAlbumMetadataEnricherAppliesMatchingMusicBrainzRelease(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.AlbumTitle != "Canonical Album" || result.ReleaseDate != "2020-02-03" || result.AlbumType != "album" || result.SourceURL != server.URL+"/release/release-id" || result.CoverURL != "https://cover.example/release/release-id/front-500" {
+	if result.AlbumTitle != "Canonical Album" || result.ReleaseDate != "2020-02-03" || result.AlbumType != "album" || result.SourceURL != server.URL+"/release/release-id" || result.MusicBrainzReleaseID != "release-id" || result.CoverURL != "https://cover.example/release/release-id/front-500" {
 		t.Fatalf("unexpected release metadata: %#v", result)
 	}
 	if len(result.Tracks) != 2 || result.Tracks[0].Title != "First Song" || result.Tracks[0].TrackNumber != 1 || result.Tracks[0].AudioKey != "first" {
@@ -740,4 +741,45 @@ func testMusicBrainzRelease(tracks ...flattenedMusicBrainzTrack) musicBrainzRele
 		release.Media[0].Tracks = append(release.Media[0].Tracks, item)
 	}
 	return release
+}
+
+func TestMatchMusicBrainzTracksMatchesLateRegistrationByDuration(t *testing.T) {
+	remoteTitles := []string{
+		"Wake Up Mr. West", "Heard ’Em Say", "Touch the Sky", "Gold Digger", "Skit #1",
+		"Drive Slow", "My Way Home", "Crack Music", "Roses", "Bring Me Down", "Addiction",
+		"Skit #2", "Diamonds From Sierra Leone (remix)", "We Major", "Skit #3", "Hey Mama",
+		"Celebration", "Skit #4", "Gone", "Diamonds From Sierra Leone", "Late",
+	}
+	remoteDurations := []int{41, 204, 237, 208, 34, 273, 104, 271, 246, 199, 267, 31, 233, 449, 24, 305, 198, 79, 363, 239, 230}
+	remote := make([]flattenedMusicBrainzTrack, len(remoteTitles))
+	for index := range remote {
+		remote[index] = flattenedMusicBrainzTrack{Title: remoteTitles[index], Position: index + 1, DurationMS: remoteDurations[index] * 1000}
+	}
+	uploadedTitles := []string{
+		"Addiction", "Celebration", "Crack Music", "Drive Slow", "Gold Digger", "Gone", "Hey Mama", "Late",
+		"My Way Home", "Roses", "Skit #1 (Kanye West-Late Registration)", "Skit #2 (Kanye West-Late Registration)",
+		"Skit #3 (Kanye West-Late Registration)", "Skit #4 (Kanye West-Late Registration)", "Touch The Sky", "Wake Up Mr. West",
+		"We Major", "Diamonds From Sierra Leone (bonus track)", "Heard 'Em Say", "Bring Me Down", "Diamonds From Sierra Leone",
+	}
+	uploadedDurations := []int{267, 198, 271, 272, 208, 333, 305, 230, 103, 246, 34, 31, 24, 79, 237, 41, 448, 238, 204, 199, 233}
+	uploaded := make([]AlbumImportMetadataTrack, len(uploadedTitles))
+	for index := range uploaded {
+		uploaded[index] = AlbumImportMetadataTrack{Title: uploadedTitles[index], DurationSeconds: float64(uploadedDurations[index]), AudioKey: fmt.Sprintf("song-%d", index+1)}
+	}
+	signalMapping, signalOK := matchMusicBrainzTracksBySignals(remote, uploaded)
+	if !signalOK {
+		t.Fatalf("signal matching failed, mapping=%v", signalMapping)
+	}
+	mapping, ok := matchMusicBrainzTracks(testMusicBrainzRelease(remote...), uploaded)
+	if !ok || len(mapping) != len(remote) {
+		t.Fatalf("Late Registration should match all tracks, mapping=%v, ok=%v", mapping, ok)
+	}
+	for remoteIndex, uploadedIndex := range mapping {
+		if uploadedIndex < 0 || uploadedIndex >= len(uploaded) {
+			t.Fatalf("remote track %d has invalid upload mapping %d; mapping=%v", remoteIndex+1, uploadedIndex, mapping)
+		}
+		if uploaded[uploadedIndex].Title != uploadedTitles[uploadedIndex] {
+			t.Fatalf("remote track %d mapped to unexpected upload %d", remoteIndex+1, uploadedIndex+1)
+		}
+	}
 }

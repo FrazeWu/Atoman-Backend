@@ -134,6 +134,12 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		if coverURL == "" || strings.TrimSpace(payload.Album.ReleaseDate) == "" || len(payload.Album.Tracks) == 0 {
 			return apperr.BadRequest("validation.invalid_request", "album cover, release date and at least one track are required")
 		}
+		musicBrainzReleaseID := strings.TrimSpace(stringValue(sessionPayload["musicbrainz_release_id"]))
+		var musicBrainzMatchedAt *time.Time
+		if musicBrainzReleaseID != "" {
+			matchedAt := time.Now().UTC()
+			musicBrainzMatchedAt = &matchedAt
+		}
 		albumType := strings.ToLower(strings.TrimSpace(payload.Album.AlbumType))
 		isStandaloneSong := albumType == "single" || albumType == "leak"
 		if isStandaloneSong && len(payload.Album.Tracks) != 1 {
@@ -147,20 +153,23 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 		}
 
 		album := model.Album{
-			Title:           strings.TrimSpace(payload.Album.Title),
-			Description:     strings.TrimSpace(payload.Album.Description),
-			ReleaseYear:     payload.Album.ReleaseYear,
-			Year:            payload.Album.ReleaseYear,
-			CoverURL:        coverURL,
-			CoverSource:     coverSourceFromURL(coverURL),
-			Status:          "open",
-			EntryStatus:     "open",
-			LifecycleStatus: model.MusicLifecycleActive,
-			EditStatus:      model.MusicEditDevelopment,
-			AlbumType:       strings.TrimSpace(payload.Album.AlbumType),
-			UploadedBy:      &user.ID,
-			SourcesJSON:     albumSourcesJSON,
-			Sources:         albumSources,
+			Title:                strings.TrimSpace(payload.Album.Title),
+			Description:          strings.TrimSpace(payload.Album.Description),
+			ReleaseYear:          payload.Album.ReleaseYear,
+			Year:                 payload.Album.ReleaseYear,
+			CoverURL:             coverURL,
+			CoverSource:          coverSourceFromURL(coverURL),
+			Status:               "open",
+			EntryStatus:          "open",
+			LifecycleStatus:      model.MusicLifecycleActive,
+			EditStatus:           model.MusicEditDevelopment,
+			AlbumType:            strings.TrimSpace(payload.Album.AlbumType),
+			UploadedBy:           &user.ID,
+			SourcesJSON:          albumSourcesJSON,
+			Sources:              albumSources,
+			MusicBrainzMatched:   musicBrainzReleaseID != "",
+			MusicBrainzReleaseID: musicBrainzReleaseID,
+			MusicBrainzMatchedAt: musicBrainzMatchedAt,
 		}
 		if album.AlbumType == "" {
 			album.AlbumType = "album"
@@ -220,6 +229,9 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 			existing.AlbumType = album.AlbumType
 			existing.SourcesJSON = album.SourcesJSON
 			existing.Sources = album.Sources
+			existing.MusicBrainzMatched = album.MusicBrainzMatched
+			existing.MusicBrainzReleaseID = album.MusicBrainzReleaseID
+			existing.MusicBrainzMatchedAt = album.MusicBrainzMatchedAt
 			album = existing
 			if err := tx.Save(&album).Error; err != nil {
 				return err
@@ -250,7 +262,7 @@ func (s *Service) CommitAlbumImportSession(user authctx.CurrentUser, id uuid.UUI
 				return err
 			}
 		}
-		if err := replaceAlbumArtistCredits(tx, album.ID, credits, true); err != nil {
+		if err := replaceAlbumArtistCredits(tx, album.ID, credits, true, user.ID); err != nil {
 			return err
 		}
 		for _, resolved := range resolvedArtists {
@@ -611,7 +623,7 @@ func (s *Service) commitStandaloneSongImport(
 	} else if err := tx.Create(&song).Error; err != nil {
 		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
 	}
-	if err := replaceStandaloneSongArtistCredits(tx, song.ID, credits); err != nil {
+	if err := replaceStandaloneSongArtistCredits(tx, song.ID, credits, user.ID); err != nil {
 		return model.AlbumImportSession{}, oldObjectKeys, newObjectKeys, err
 	}
 	if err := persistAlbumImportTrackLyrics(tx, user.ID, song.ID, track.Lyrics); err != nil {
@@ -669,8 +681,8 @@ func (s *Service) commitStandaloneSongImport(
 	return *session, oldObjectKeys, newObjectKeys, nil
 }
 
-func replaceStandaloneSongArtistCredits(tx *gorm.DB, songID uuid.UUID, credits []AlbumArtistCreditInput) error {
-	albumRows, err := normalizeAlbumArtistCredits(tx, uuid.Nil, credits, true)
+func replaceStandaloneSongArtistCredits(tx *gorm.DB, songID uuid.UUID, credits []AlbumArtistCreditInput, actorID uuid.UUID) error {
+	albumRows, err := normalizeAlbumArtistCredits(tx, uuid.Nil, credits, true, actorID)
 	if err != nil {
 		return err
 	}

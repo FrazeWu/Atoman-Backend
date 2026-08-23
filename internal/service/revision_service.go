@@ -16,6 +16,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/musiclyrics"
 	"atoman/internal/platform/partialdate"
+	"atoman/internal/platform/authctx"
 )
 
 // RevisionService handles revision-related operations
@@ -780,6 +781,38 @@ func revisionCreditsFromInput(input []albumRevisionCreditInput) []albumRevisionC
 	return credits
 }
 
+func validateAppliedArtistCredits(tx *gorm.DB, credits []albumRevisionCredit, actorID uuid.UUID) error {
+	admin := false
+	if actorID != uuid.Nil {
+		var user model.User
+		if err := tx.Select("role").First(&user, "uuid = ?", actorID).Error; err == nil {
+			admin = authctx.RoleAtLeast(user.Role, authctx.RoleAdmin)
+		}
+	}
+	for _, credit := range credits {
+		artistID, err := uuid.Parse(strings.TrimSpace(credit.ArtistID))
+		if err != nil {
+			return errors.New("artist snapshot contains an invalid artist id")
+		}
+		var artist model.Artist
+		if err := tx.Select("id", "lifecycle_status", "created_by").First(&artist, "id = ?", artistID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("artist snapshot references an unavailable artist")
+			}
+			return err
+		}
+		switch artist.LifecycleStatus {
+		case model.MusicLifecycleActive, model.MusicLifecycleMerged:
+		case model.MusicLifecycleDraft:
+			if !admin && (artist.CreatedBy == nil || *artist.CreatedBy != actorID) {
+				return errors.New("artist snapshot references an unavailable artist")
+			}
+		default:
+			return errors.New("artist snapshot references an unavailable artist")
+		}
+	}
+	return nil
+}
 func validateRevisionCredits(input []albumRevisionCreditInput, requirePrimary bool) error {
 	if requirePrimary && len(input) == 0 {
 		return errors.New("artist_credits are required")
@@ -1315,6 +1348,9 @@ func applySongRevisionSnapshot(tx *gorm.DB, songID, actorID uuid.UUID, raw []byt
 		return errors.New("song not found")
 	}
 	if snapshot.ArtistCredits != nil {
+		if err := validateAppliedArtistCredits(tx, snapshot.ArtistCredits, actorID); err != nil {
+			return err
+		}
 		if err := replaceSongArtistCredits(tx, songID, snapshot.ArtistCredits); err != nil {
 			return err
 		}
@@ -1401,6 +1437,9 @@ func (s *RevisionService) applyAlbumRevisionSnapshot(tx *gorm.DB, albumID, actor
 		return err
 	}
 	if snapshot.ArtistCredits != nil {
+		if err := validateAppliedArtistCredits(tx, snapshot.ArtistCredits, actorID); err != nil {
+			return err
+		}
 		rows := make([]model.AlbumArtist, 0, len(snapshot.ArtistCredits))
 		hasPrimary := false
 		for _, credit := range snapshot.ArtistCredits {

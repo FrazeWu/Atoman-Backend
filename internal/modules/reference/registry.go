@@ -58,11 +58,13 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 		}
 		query := r.db.Table("content_entries").Where("kind = ? AND status = ? AND deleted_at IS NULL", "blog", "published")
 		if viewer.UserID == uuid.Nil {
-			query = query.Where("visibility = ?", "public")
+			query = query.Where("content_entries.visibility = ?", "public")
 		} else {
-			query = query.Where("visibility = ? OR author_id = ?", "public", viewer.UserID)
+			query = query.
+				Joins("LEFT JOIN posts AS legacy_posts ON legacy_posts.id = content_entries.id AND legacy_posts.deleted_at IS NULL").
+				Where("content_entries.visibility = ? OR legacy_posts.user_id = ?", "public", viewer.UserID)
 		}
-		if err := query.Select("id, title, author_id, status, visibility").First(&row, "id = ?", id).Error; err != nil {
+		if err := query.Select("content_entries.id, content_entries.title, content_entries.status, content_entries.visibility").First(&row, "content_entries.id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
 		return target(targetType, row.ID, row.Title, "blog", "/post/"+row.ID.String()), nil
@@ -253,7 +255,9 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 		if viewer.UserID == uuid.Nil {
 			query = query.Where("posts.visibility = ?", "public")
 		} else {
-			query = query.Where("posts.visibility = ? OR posts.author_id = ?", "public", viewer.UserID)
+			query = query.
+				Joins("LEFT JOIN posts AS legacy_posts ON legacy_posts.id = posts.id AND legacy_posts.deleted_at IS NULL").
+				Where("posts.visibility = ? OR legacy_posts.user_id = ?", "public", viewer.UserID)
 		}
 	case "short_note":
 		query = r.db.Model(&model.ShortNote{}).
@@ -407,7 +411,9 @@ func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, l
 		if viewer.UserID == uuid.Nil {
 			query = query.Where("visibility = ?", "public")
 		} else {
-			query = query.Where("visibility = ? OR author_id = ?", "public", viewer.UserID)
+			query = query.
+				Joins("LEFT JOIN posts AS legacy_posts ON legacy_posts.id = content_entries.id AND legacy_posts.deleted_at IS NULL").
+				Where("content_entries.visibility = ? OR legacy_posts.user_id = ?", "public", viewer.UserID)
 		}
 		idColumn = "content_entries.id"
 		createdAtColumn = "content_entries.created_at"

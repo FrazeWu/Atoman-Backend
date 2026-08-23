@@ -21,6 +21,7 @@ func main() {
 	stripTitlePrefix := flag.String("strip-title-prefix", "", "remove an exact prefix from existing song titles")
 	stripArtistPrefixes := flag.Bool("strip-artist-prefixes", false, "remove artist credits before the last title separator")
 	preferredReleaseID := flag.String("release-id", "", "validate one MusicBrainz release for the selected album")
+	unmatchedOnly := flag.Bool("unmatched-only", false, "only process albums not yet matched to MusicBrainz")
 	repairTimedLyrics := flag.Bool("repair-timed-lyrics", false, "upgrade existing plain lyrics containing LRC timestamps")
 	lyricsOnly := flag.Bool("lyrics-only", false, "match lyrics for songs that do not have lyrics")
 	flag.Parse()
@@ -67,7 +68,12 @@ func main() {
 		}
 		return
 	}
-	results, err := music.BackfillCatalogMetadata(context.Background(), db, os.Getenv("MUSICBRAINZ_USER_AGENT"), *apply, *albumID, *preferredReleaseID)
+	var results []music.CatalogMetadataBackfillResult
+	if *unmatchedOnly {
+		results, err = music.BackfillUnmatchedCatalogMetadata(context.Background(), db, os.Getenv("MUSICBRAINZ_USER_AGENT"), *apply, *albumID, *preferredReleaseID)
+	} else {
+		results, err = music.BackfillCatalogMetadata(context.Background(), db, os.Getenv("MUSICBRAINZ_USER_AGENT"), *apply, *albumID, *preferredReleaseID)
+	}
 	if err != nil {
 		log.Fatal(err)
 	}

@@ -251,7 +251,7 @@ func (s *Service) getSubscribedBlogFeed(
 	for i := range posts {
 		postIDs = append(postIDs, posts[i].ID)
 	}
-	engagementCounts, err := s.repo.ListPostEngagementCounts(postIDs)
+	engagementCounts, err := s.repo.ListCanonicalBlogEngagementCounts(postIDs)
 	if err != nil {
 		return nil, 0, err
 	}

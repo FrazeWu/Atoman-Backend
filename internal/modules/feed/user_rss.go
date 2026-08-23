@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	blogmodule "atoman/internal/modules/blog"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -53,8 +54,12 @@ func GetUserRSS(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		var posts []model.Post
-		if err := db.Where("user_id = ? AND status = ?", user.UUID, "published").Order("created_at DESC").Limit(50).Find(&posts).Error; err != nil {
+		posts, err := blogmodule.LoadCanonicalBlogPosts(db, blogmodule.CanonicalBlogPostsQuery(db).
+			Where("posts.author_id = ? AND posts.status = ?", user.UUID, "published").
+			Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).
+			Order("COALESCE(posts.published_at, posts.created_at) DESC").
+			Limit(50))
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch posts"})
 			return
 		}

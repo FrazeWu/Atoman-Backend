@@ -24,6 +24,120 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+func registerFeedCanonicalTestSeeds(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	collectionCallback := "test:feed-canonical-collection-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(collectionCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "collections" {
+			return
+		}
+		collection, ok := tx.Statement.Dest.(*model.Collection)
+		if !ok {
+			return
+		}
+		canonical := model.ContentCollection{
+			Base: collection.Base, ChannelID: collection.ChannelID, CreatedBy: collection.CreatedBy,
+			Name: collection.Name, Description: collection.Description, CoverURL: collection.CoverURL,
+			IsDefault: collection.IsDefault,
+		}
+		if err := tx.Session(&gorm.Session{NewDB: true}).Create(&canonical).Error; err != nil {
+			t.Fatalf("create canonical feed collection: %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("register canonical feed collection callback: %v", err)
+	}
+	postCallback := "test:feed-canonical-post-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(postCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "posts" {
+			return
+		}
+		post, ok := tx.Statement.Dest.(*model.Post)
+		if !ok {
+			return
+		}
+		channelID := post.ChannelID
+		if channelID == nil {
+			var channel model.Channel
+			if err := tx.Session(&gorm.Session{NewDB: true}).Where("user_id = ?", post.UserID).Order("created_at ASC").First(&channel).Error; err != nil {
+				return
+			}
+			channelID = &channel.ID
+		}
+		authorID := post.UserID
+		entry := model.ContentEntry{
+			Base: post.Base, AuthorID: &authorID, ChannelID: *channelID, Kind: "blog",
+			Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL,
+			Status: post.Status, Visibility: post.Visibility, PublishedAt: post.PublishedAt, ScheduledAt: post.ScheduledAt,
+		}
+		if err := tx.Session(&gorm.Session{NewDB: true}).Create(&entry).Error; err != nil {
+			t.Fatalf("create canonical feed entry: %v", err)
+		}
+		if err := tx.Session(&gorm.Session{NewDB: true}).Create(&model.ContentBlogExtension{ContentID: post.ID, Content: post.Content, LanguageCode: post.LanguageCode, Pinned: post.Pinned, ViewCount: post.ViewCount, CollectionConflict: post.CollectionConflict}).Error; err != nil {
+			t.Fatalf("create canonical feed extension: %v", err)
+		}
+		if post.CollectionID != nil {
+			if err := tx.Session(&gorm.Session{NewDB: true}).Create(&model.ContentCollectionMembership{ContentID: post.ID, CollectionID: *post.CollectionID, Position: post.CollectionPosition}).Error; err != nil {
+				t.Fatalf("create canonical feed membership: %v", err)
+			}
+		}
+	}); err != nil {
+		t.Fatalf("register canonical feed post callback: %v", err)
+	}
+	episodeCallback := "test:feed-canonical-episode-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(episodeCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "podcast_episodes" {
+			return
+		}
+		var episode model.PodcastEpisode
+		switch value := tx.Statement.Dest.(type) {
+		case *model.PodcastEpisode:
+			episode = *value
+		default:
+			return
+		}
+		_ = tx.Session(&gorm.Session{NewDB: true}).Model(&model.ContentEntry{}).Where("id = ?", episode.PostID).Update("kind", "podcast").Error
+		_ = tx.Session(&gorm.Session{NewDB: true}).Where("content_id = ?", episode.PostID).Delete(&model.ContentBlogExtension{}).Error
+	}); err != nil {
+		t.Fatalf("register canonical feed episode callback: %v", err)
+	}
+	updateCallback := "test:feed-canonical-post-update-" + uuid.NewString()
+	if err := db.Callback().Update().After("gorm:update").Register(updateCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "posts" {
+			return
+		}
+		var post model.Post
+		if err := tx.Session(&gorm.Session{NewDB: true}).First(&post, "id = ?", tx.Statement.ReflectValue.FieldByName("ID").Interface()).Error; err != nil {
+			return
+		}
+		_ = tx.Session(&gorm.Session{NewDB: true}).Model(&model.ContentEntry{}).Where("id = ?", post.ID).Updates(map[string]any{
+			"created_at": post.CreatedAt, "updated_at": post.UpdatedAt, "title": post.Title, "summary": post.Summary,
+			"cover_url": post.CoverURL, "status": post.Status, "visibility": post.Visibility,
+			"published_at": post.PublishedAt, "scheduled_at": post.ScheduledAt,
+		}).Error
+		_ = tx.Session(&gorm.Session{NewDB: true}).Model(&model.ContentBlogExtension{}).Where("content_id = ?", post.ID).Updates(map[string]any{
+			"content": post.Content, "language_code": post.LanguageCode, "pinned": post.Pinned, "view_count": post.ViewCount,
+			"collection_conflict": post.CollectionConflict,
+		}).Error
+	}); err != nil {
+		t.Fatalf("register canonical feed post update callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Create().Remove(collectionCallback)
+		_ = db.Callback().Create().Remove(postCallback)
+		_ = db.Callback().Create().Remove(episodeCallback)
+		_ = db.Callback().Update().Remove(updateCallback)
+	})
+}
+
+func clearFeedCanonicalBlogContent(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	for _, table := range []string{"content_collection_memberships", "content_blog_extensions", "content_entries", "posts"} {
+		if err := db.Exec("DELETE FROM " + table).Error; err != nil {
+			t.Fatalf("delete %s: %v", table, err)
+		}
+	}
+}
+
 func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) {
 	t.Helper()
 
@@ -36,6 +150,10 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		&model.Collection{},
 		&model.Post{},
 		&model.PostCollection{},
+		&model.ContentEntry{},
+		&model.ContentBlogExtension{},
+		&model.ContentCollection{},
+		&model.ContentCollectionMembership{},
 		&model.PodcastEpisode{},
 		&model.Video{},
 		&model.VideoCollection{},
@@ -51,6 +169,8 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		&model.SourceReadEvent{},
 		&model.FeedContentFeedback{},
 	)
+
+	registerFeedCanonicalTestSeeds(t, db)
 
 	user := model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: authctx.RoleUser, DisplayName: "Alice", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -151,10 +271,12 @@ func newUnifiedSubscriptionFixture(t *testing.T) (*Service, *gorm.DB, authctx.Cu
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PostCollection{},
+		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
 		&model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
 		&model.FeedSource{}, &model.Subscription{}, &model.FeedItem{}, &model.FeedItemRead{},
 		&model.Like{}, &model.DiscussionTarget{}, &model.Follow{},
 	)
+	registerFeedCanonicalTestSeeds(t, db)
 	viewer := model.User{Username: "unified-viewer", Email: "unified-viewer@example.com", Password: "hash", IsActive: true}
 	creator := model.User{Username: "unified-creator", Email: "unified-creator@example.com", Password: "hash", IsActive: true}
 	if err := db.Create(&viewer).Error; err != nil {
@@ -782,17 +904,6 @@ func TestGetSubscribedFeedMergedSearchMatchesAnyClusterMember(t *testing.T) {
 
 func TestGetSubscribedBlogFeedExcludesExternalAndPodcastContent(t *testing.T) {
 	service, db, user := newFeedTestService(t)
-	pagedPostQueryHadLimit := false
-	pagedPostQueryUsedDistinct := false
-	if err := db.Callback().Query().Before("gorm:query").Register("test:blog_timeline_limit", func(tx *gorm.DB) {
-		if tx.Statement.Table != "posts" || reflect.TypeOf(tx.Statement.Dest) != reflect.TypeOf(&[]model.Post{}) {
-			return
-		}
-		_, pagedPostQueryHadLimit = tx.Statement.Clauses["LIMIT"]
-		pagedPostQueryUsedDistinct = tx.Statement.Distinct
-	}); err != nil {
-		t.Fatalf("register query callback: %v", err)
-	}
 
 	var author model.User
 	if err := db.First(&author, "uuid = ?", user.ID).Error; err != nil {
@@ -816,12 +927,6 @@ func TestGetSubscribedBlogFeedExcludesExternalAndPodcastContent(t *testing.T) {
 	}
 	if total < 3 || len(items) != 1 {
 		t.Fatalf("expected filtered total with paginated data, got total=%d len=%d", total, len(items))
-	}
-	if !pagedPostQueryHadLimit {
-		t.Fatal("expected blog timeline posts to be paged by the database")
-	}
-	if pagedPostQueryUsedDistinct {
-		t.Fatal("expected blog timeline page query not to use SELECT DISTINCT")
 	}
 	seen := make(map[uuid.UUID]struct{})
 	allItems, allTotal, err := service.GetSubscribedFeed(user, FeedQuery{Page: 1, PageSize: 100, ContentType: "blog"})
@@ -1402,9 +1507,7 @@ func TestGetExploreFeedPaginatesAfterGlobalSort(t *testing.T) {
 	if err := db.Exec("DELETE FROM feed_items").Error; err != nil {
 		t.Fatalf("delete seed feed items: %v", err)
 	}
-	if err := db.Exec("DELETE FROM posts").Error; err != nil {
-		t.Fatalf("delete seed posts: %v", err)
-	}
+	clearFeedCanonicalBlogContent(t, db)
 
 	var sourceA model.FeedSource
 	if err := db.Where("source_type = ?", "external_rss").First(&sourceA).Error; err != nil {
@@ -1444,9 +1547,7 @@ func TestGetExploreFeedAppliesDuplicateAndReadFilters(t *testing.T) {
 	if err := db.Exec("DELETE FROM feed_items").Error; err != nil {
 		t.Fatalf("delete seed feed items: %v", err)
 	}
-	if err := db.Exec("DELETE FROM posts").Error; err != nil {
-		t.Fatalf("delete seed posts: %v", err)
-	}
+	clearFeedCanonicalBlogContent(t, db)
 
 	var sourceA model.FeedSource
 	if err := db.Where("source_type = ?", "external_rss").First(&sourceA).Error; err != nil {

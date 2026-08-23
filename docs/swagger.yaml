@@ -23,6 +23,8 @@ definitions:
     type: object
   blog.BookmarkPostDTO:
     properties:
+      bookmarks_count:
+        type: integer
       channel:
         $ref: '#/definitions/model.Channel'
       channel_id:
@@ -1531,6 +1533,8 @@ definitions:
     type: object
   feed.TimelinePostDTO:
     properties:
+      bookmarks_count:
+        type: integer
       channel:
         $ref: '#/definitions/model.Channel'
       channel_id:
@@ -4451,6 +4455,8 @@ definitions:
     type: object
   model.Post:
     properties:
+      bookmarks_count:
+        type: integer
       channel:
         $ref: '#/definitions/model.Channel'
       channel_id:
@@ -18645,6 +18651,10 @@ paths:
         in: query
         name: limit
         type: integer
+      - description: 标题、描述或正文搜索
+        in: query
+        name: search
+        type: string
       - description: 分类
         in: query
         name: category

@@ -18484,6 +18484,12 @@
                     },
                     {
                         "type": "string",
+                        "description": "标题、描述或正文搜索",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "分类",
                         "name": "category",
                         "in": "query"
@@ -21669,6 +21675,9 @@
         "blog.BookmarkPostDTO": {
             "type": "object",
             "properties": {
+                "bookmarks_count": {
+                    "type": "integer"
+                },
                 "channel": {
                     "$ref": "#/definitions/model.Channel"
                 },
@@ -23963,6 +23972,9 @@
         "feed.TimelinePostDTO": {
             "type": "object",
             "properties": {
+                "bookmarks_count": {
+                    "type": "integer"
+                },
                 "channel": {
                     "$ref": "#/definitions/model.Channel"
                 },
@@ -28303,6 +28315,9 @@
         "model.Post": {
             "type": "object",
             "properties": {
+                "bookmarks_count": {
+                    "type": "integer"
+                },
                 "channel": {
                     "$ref": "#/definitions/model.Channel"
                 },

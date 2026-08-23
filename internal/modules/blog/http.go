@@ -34,16 +34,15 @@ type bookmarkFolderInput struct {
 }
 
 type postInput struct {
-	Title         string   `json:"title" binding:"required"`
-	Content       string   `json:"content" binding:"required"`
-	Summary       string   `json:"summary"`
-	CoverURL      string   `json:"cover_url"`
-	Visibility    string   `json:"visibility"`
-	AllowComments *bool    `json:"allow_comments"`
-	Status        string   `json:"status"`
-	ChannelID     *string  `json:"channel_id"`
-	CollectionID  *string  `json:"collection_id"`
-	CollectionIDs []string `json:"collection_ids" swaggerignore:"true"`
+	Title         string  `json:"title" binding:"required"`
+	Content       string  `json:"content" binding:"required"`
+	Summary       string  `json:"summary"`
+	CoverURL      string  `json:"cover_url"`
+	Visibility    string  `json:"visibility"`
+	AllowComments *bool   `json:"allow_comments"`
+	Status        string  `json:"status"`
+	ChannelID     *string `json:"channel_id"`
+	CollectionID  *string `json:"collection_id"`
 }
 
 type postRatingInput struct {

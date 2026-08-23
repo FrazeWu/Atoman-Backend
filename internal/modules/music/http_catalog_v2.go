@@ -7,6 +7,7 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
 	revisionservice "atoman/internal/service"
 
@@ -54,12 +55,18 @@ func (h *Handler) listSongs(c *gin.Context) {
 			httpx.Error(c, err)
 			return
 		}
+		artistVisibility, artistArgs := musicEntryVisibilityCondition(`"Artists"`, "created_by", viewerPtr, true)
+		whereArgs := append([]any{artistID}, artistArgs...)
 		query = query.Where(`EXISTS (
 			SELECT 1
 			FROM song_artists AS filter_song_artists
 			WHERE filter_song_artists.song_id = "Songs".id
 				AND filter_song_artists.artist_id = ?
-		)`, artistID)
+				AND EXISTS (
+					SELECT 1 FROM "Artists"
+					WHERE "Artists".id = filter_song_artists.artist_id AND `+artistVisibility+`
+				)
+		)`, whereArgs...)
 	}
 
 	rawReleaseTypes := strings.ToLower(strings.TrimSpace(c.Query("release_type")))
@@ -97,7 +104,7 @@ func (h *Handler) listSongs(c *gin.Context) {
 	}
 
 	var songs []model.Song
-	if err := query.Preload("Album").Preload("Artists").Order(order).Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&songs).Error; err != nil {
+	if err := query.Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).Order(order).Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&songs).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
@@ -154,13 +161,14 @@ func (h *Handler) search(c *gin.Context) {
 	if include("song") {
 		var total int64
 		songQuery := func() *gorm.DB {
-			return scopeVisibleMusicEntries(h.service.db.Model(&model.Song{}), "\"Songs\"", "uploaded_by", viewerPtr, false).
+			artistVisibility, artistArgs := musicEntryVisibilityCondition("search_artists", "created_by", viewerPtr, true)
+			return scopeVisibleMusicEntries(h.service.db.Model(&model.Song{}), `"Songs"`, "uploaded_by", viewerPtr, false).
 				Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
 				Joins("LEFT JOIN song_artists ON song_artists.song_id = \"Songs\".id").
-				Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = song_artists.artist_id").
-				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
+				Joins("LEFT JOIN \"Artists\" AS search_artists ON search_artists.id = song_artists.artist_id AND "+artistVisibility, artistArgs...).
+				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = search_artists.id").
 				Joins("LEFT JOIN music_song_lyrics ON music_song_lyrics.song_id = \"Songs\".id AND music_song_lyrics.deleted_at IS NULL").
-				Where("LOWER(\"Songs\".title) LIKE LOWER(?) OR LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) OR LOWER(music_song_lyrics.content) LIKE LOWER(?) OR LOWER(music_song_lyrics.translation) LIKE LOWER(?)", pattern, pattern, pattern, pattern, pattern, pattern)
+				Where("LOWER(\"Songs\".title) LIKE LOWER(?) OR LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(search_artists.name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) OR LOWER(music_song_lyrics.content) LIKE LOWER(?) OR LOWER(music_song_lyrics.translation) LIKE LOWER(?)", pattern, pattern, pattern, pattern, pattern, pattern)
 		}
 		if err := songQuery().Distinct("\"Songs\".id").Count(&total).Error; err != nil {
 			httpx.Error(c, err)
@@ -168,7 +176,7 @@ func (h *Handler) search(c *gin.Context) {
 		}
 		result.Meta.Totals["song"] = total
 		if err := songQuery().
-			Distinct(`"Songs".*, CASE WHEN LOWER("Songs".title) = LOWER(?) THEN 0 WHEN LOWER("Songs".title) LIKE LOWER(?) THEN 1 WHEN LOWER("Albums".title) LIKE LOWER(?) OR LOWER("Artists".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 2 ELSE 3 END AS search_rank`, query, prefix, prefix, prefix, prefix).Preload("Album").Preload("Artists").
+			Distinct(`"Songs".*, CASE WHEN LOWER("Songs".title) = LOWER(?) THEN 0 WHEN LOWER("Songs".title) LIKE LOWER(?) THEN 1 WHEN LOWER("Albums".title) LIKE LOWER(?) OR LOWER(search_artists.name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) THEN 2 ELSE 3 END AS search_rank`, query, prefix, prefix, prefix, prefix).Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).
 			Order(`search_rank ASC, "Songs".play_count DESC, "Songs".title ASC`).Limit(pageSize).Offset(offset).Find(&result.Songs).Error; err != nil {
 			httpx.Error(c, err)
 			return
@@ -182,18 +190,19 @@ func (h *Handler) search(c *gin.Context) {
 	if include("album") {
 		var total int64
 		albumQuery := func() *gorm.DB {
-			return scopeVisibleMusicEntries(h.service.db.Model(&model.Album{}), "\"Albums\"", "uploaded_by", viewerPtr, false).
+			artistVisibility, artistArgs := musicEntryVisibilityCondition("search_artists", "created_by", viewerPtr, true)
+			return scopeVisibleMusicEntries(h.service.db.Model(&model.Album{}), `"Albums"`, "uploaded_by", viewerPtr, false).
 				Joins("LEFT JOIN album_artists ON album_artists.album_id = \"Albums\".id").
-				Joins("LEFT JOIN \"Artists\" ON \"Artists\".id = album_artists.artist_id").
-				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
-				Where("LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(\"Artists\".name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?)", pattern, pattern, pattern)
+				Joins("LEFT JOIN \"Artists\" AS search_artists ON search_artists.id = album_artists.artist_id AND "+artistVisibility, artistArgs...).
+				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = search_artists.id").
+				Where("LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(search_artists.name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?)", pattern, pattern, pattern)
 		}
 		if err := albumQuery().Distinct("\"Albums\".id").Count(&total).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}
 		result.Meta.Totals["album"] = total
-		if err := albumQuery().Distinct(`"Albums".*, CASE WHEN LOWER("Albums".title) = LOWER(?) THEN 0 WHEN LOWER("Albums".title) LIKE LOWER(?) THEN 1 ELSE 2 END AS search_rank`, query, prefix).Preload("Artists").Preload("Songs", visibleSongPreload(viewerPtr)).
+		if err := albumQuery().Distinct(`"Albums".*, CASE WHEN LOWER("Albums".title) = LOWER(?) THEN 0 WHEN LOWER("Albums".title) LIKE LOWER(?) THEN 1 ELSE 2 END AS search_rank`, query, prefix).Preload("Artists", visibleArtistPreload(viewerPtr)).Preload("Songs", visibleSongPreload(viewerPtr)).
 			Order(`search_rank ASC, "Albums".hot_score DESC, "Albums".title ASC`).Limit(pageSize).Offset(offset).Find(&result.Albums).Error; err != nil {
 			httpx.Error(c, err)
 			return
@@ -398,7 +407,7 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 	viewerPtr := musicViewer(viewer, hasViewer)
 	var song model.Song
 	query := scopeVisibleMusicEntries(h.service.db, "\"Songs\"", "uploaded_by", viewerPtr, false)
-	if err := query.Preload("Album.Artists").Preload("Artists").First(&song, "\"Songs\".id = ?", songID).Error; err != nil {
+	if err := query.Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Album.Artists", visibleArtistPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).First(&song, "\"Songs\".id = ?", songID).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			httpx.Error(c, apperr.NotFound("music.song_not_found", "Song not found"))
 		} else {
@@ -407,16 +416,16 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		return
 	}
 	var links []model.SongArtist
-	if err := h.service.db.Preload("Artist").Where("song_id = ?", song.ID).Order("position ASC, created_at ASC").Find(&links).Error; err != nil {
+	if err := h.service.db.Preload("Artist", visibleArtistPreload(viewerPtr)).Where("song_id = ?", song.ID).Order("position ASC, created_at ASC").Find(&links).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
 	artists := make([]songArtistRoleResponse, 0, len(links))
 	for _, link := range links {
-		name := ""
-		if link.Artist != nil {
-			name = link.Artist.Name
+		if link.Artist == nil {
+			continue
 		}
+		name := link.Artist.Name
 		artists = append(artists, songArtistRoleResponse{
 			ID: link.ArtistID, Name: name, Role: link.Role,
 			CustomRole: link.CustomRole, Position: link.Position,
@@ -425,7 +434,7 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 	result := songDetailResponse{Song: song, Artists: artists, Playable: strings.TrimSpace(song.AudioURL) != ""}
 	resolveSongEffectiveSources(&result.Song)
 	if song.AlbumID != nil {
-		previous, next := loadAdjacentAlbumSongs(h.service.db, song)
+		previous, next := loadAdjacentAlbumSongs(h.service.db, song, viewerPtr)
 		if previous.ID != uuid.Nil {
 			previous.AudioURL = resolveMusicMediaURL(previous.AudioURL)
 			result.Previous = &previous
@@ -453,21 +462,20 @@ func resolveSongEffectiveSources(song *model.Song) {
 	}
 }
 
-func loadAdjacentAlbumSongs(db *gorm.DB, song model.Song) (model.Song, model.Song) {
+func loadAdjacentAlbumSongs(db *gorm.DB, song model.Song, viewer *authctx.CurrentUser) (model.Song, model.Song) {
 	if song.AlbumID == nil {
 		return model.Song{}, model.Song{}
 	}
 	var previous, next model.Song
+	base := scopeVisibleMusicEntries(db.Model(&model.Song{}), `"Songs"`, "uploaded_by", viewer, false).
+		Where("album_id = ?", *song.AlbumID)
 	discNumber := normalizedDiscNumber(song.DiscNumber)
-	visibleStatus := model.MusicLifecycleActive
-	db.Where(
-		"album_id = ? AND lifecycle_status = ? AND (COALESCE(NULLIF(disc_number, 0), 1) < ? OR (COALESCE(NULLIF(disc_number, 0), 1) = ? AND track_number < ?))",
-		*song.AlbumID, visibleStatus, discNumber, discNumber, song.TrackNumber,
-	).Order("COALESCE(NULLIF(disc_number, 0), 1) DESC, track_number DESC, created_at DESC").First(&previous)
-	db.Where(
-		"album_id = ? AND lifecycle_status = ? AND (COALESCE(NULLIF(disc_number, 0), 1) > ? OR (COALESCE(NULLIF(disc_number, 0), 1) = ? AND track_number > ?))",
-		*song.AlbumID, visibleStatus, discNumber, discNumber, song.TrackNumber,
-	).Order("COALESCE(NULLIF(disc_number, 0), 1) ASC, track_number ASC, created_at ASC").First(&next)
+	base.Where("(COALESCE(NULLIF(disc_number, 0), 1) < ? OR (COALESCE(NULLIF(disc_number, 0), 1) = ? AND track_number < ?))", discNumber, discNumber, song.TrackNumber).
+		Order("COALESCE(NULLIF(disc_number, 0), 1) DESC, track_number DESC, created_at DESC").First(&previous)
+	base = scopeVisibleMusicEntries(db.Model(&model.Song{}), `"Songs"`, "uploaded_by", viewer, false).
+		Where("album_id = ?", *song.AlbumID)
+	base.Where("(COALESCE(NULLIF(disc_number, 0), 1) > ? OR (COALESCE(NULLIF(disc_number, 0), 1) = ? AND track_number > ?))", discNumber, discNumber, song.TrackNumber).
+		Order("COALESCE(NULLIF(disc_number, 0), 1) ASC, track_number ASC, created_at ASC").First(&next)
 	return previous, next
 }
 

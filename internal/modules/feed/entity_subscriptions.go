@@ -158,7 +158,20 @@ func UnsubscribeChannel(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
-// SubscribeCollection subscribes the current user to a collection
+func resolveCollectionSubscriptionName(db *gorm.DB, collectionID uuid.UUID) (string, error) {
+	var collection model.ContentCollection
+	if err := db.First(&collection, "id = ?", collectionID).Error; err == nil {
+		return collection.Name, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", err
+	}
+	var legacyCollection model.Collection
+	if err := db.First(&legacyCollection, "id = ?", collectionID).Error; err != nil {
+		return "", err
+	}
+	return legacyCollection.Name, nil
+}
+
 // SubscribeCollection godoc
 // @Summary 订阅合集
 // @Description 将当前用户订阅到指定合集。
@@ -185,10 +198,13 @@ func SubscribeCollection(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// Verify collection exists
-		var collection model.Collection
-		if err := db.First(&collection, "id = ?", collectionID).Error; err != nil {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+		collectionName, err := resolveCollectionSubscriptionName(db, collectionID)
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "Collection not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to resolve collection"})
 			return
 		}
 
@@ -202,7 +218,7 @@ func SubscribeCollection(db *gorm.DB) gin.HandlerFunc {
 			feedSource = model.FeedSource{
 				SourceType: "internal_collection",
 				SourceID:   &collectionID,
-				Title:      collection.Name,
+				Title:      collectionName,
 				Hash:       hash,
 			}
 			if err := db.Create(&feedSource).Error; err != nil {
@@ -222,7 +238,7 @@ func SubscribeCollection(db *gorm.DB) gin.HandlerFunc {
 		subscription := model.Subscription{
 			UserID:       userID,
 			FeedSourceID: feedSource.ID,
-			Title:        collection.Name,
+			Title:        collectionName,
 		}
 		if err := db.Create(&subscription).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create subscription"})

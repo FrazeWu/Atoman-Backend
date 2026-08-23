@@ -1,10 +1,12 @@
 package music
 
 import (
+	"errors"
 	"strings"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
+	"atoman/internal/platform/authctx"
 	revisionservice "atoman/internal/service"
 
 	"github.com/google/uuid"
@@ -43,8 +45,8 @@ func legacyAlbumArtistCredits(artistIDs []string) []AlbumArtistCreditInput {
 	return credits
 }
 
-func replaceAlbumArtistCredits(tx *gorm.DB, albumID uuid.UUID, credits []AlbumArtistCreditInput, defaultMissingRoles bool) error {
-	rows, err := normalizeAlbumArtistCredits(tx, albumID, credits, defaultMissingRoles)
+func replaceAlbumArtistCredits(tx *gorm.DB, albumID uuid.UUID, credits []AlbumArtistCreditInput, defaultMissingRoles bool, actorID uuid.UUID) error {
+	rows, err := normalizeAlbumArtistCredits(tx, albumID, credits, defaultMissingRoles, actorID)
 	if err != nil {
 		return err
 	}
@@ -66,7 +68,7 @@ func replaceAlbumArtistCredits(tx *gorm.DB, albumID uuid.UUID, credits []AlbumAr
 	return revisionservice.PromoteArtistsWithAlbums(tx, artistIDs...)
 }
 
-func normalizeAlbumArtistCredits(tx *gorm.DB, albumID uuid.UUID, credits []AlbumArtistCreditInput, defaultMissingRoles bool) ([]model.AlbumArtist, error) {
+func normalizeAlbumArtistCredits(tx *gorm.DB, albumID uuid.UUID, credits []AlbumArtistCreditInput, defaultMissingRoles bool, actorID uuid.UUID) ([]model.AlbumArtist, error) {
 	if len(credits) == 0 {
 		return nil, apperr.BadRequest("validation.invalid_request", "artist_credits are required")
 	}
@@ -79,11 +81,17 @@ func normalizeAlbumArtistCredits(tx *gorm.DB, albumID uuid.UUID, credits []Album
 		if err != nil {
 			return nil, apperr.BadRequest("validation.invalid_request", "artist_credits must contain valid artist_id values")
 		}
-		var count int64
-		if err := tx.Model(&model.Artist{}).Where("id = ? AND lifecycle_status IN ?", artistID, []string{model.MusicLifecycleActive, model.MusicLifecycleDraft}).Count(&count).Error; err != nil {
+		var artist model.Artist
+		if err := tx.Select("id", "lifecycle_status", "created_by").First(&artist, "id = ?", artistID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, apperr.NotFound("music.artist_not_found", "Artist not found")
+			}
 			return nil, err
 		}
-		if count == 0 {
+		if artist.LifecycleStatus != model.MusicLifecycleActive && artist.LifecycleStatus != model.MusicLifecycleDraft {
+			return nil, apperr.NotFound("music.artist_not_found", "Artist not found")
+		}
+		if artist.LifecycleStatus == model.MusicLifecycleDraft && !canUseArtistDraftForCredit(tx, artist, actorID) {
 			return nil, apperr.NotFound("music.artist_not_found", "Artist not found")
 		}
 
@@ -124,4 +132,15 @@ func normalizeAlbumArtistCredits(tx *gorm.DB, albumID uuid.UUID, credits []Album
 		return nil, apperr.BadRequest("validation.invalid_request", "at least one primary artist is required")
 	}
 	return rows, nil
+}
+
+func canUseArtistDraftForCredit(tx *gorm.DB, artist model.Artist, actorID uuid.UUID) bool {
+	if actorID == uuid.Nil {
+		return false
+	}
+	var user model.User
+	if err := tx.Select("role").First(&user, "uuid = ?", actorID).Error; err == nil && authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		return true
+	}
+	return artist.CreatedBy != nil && *artist.CreatedBy == actorID
 }

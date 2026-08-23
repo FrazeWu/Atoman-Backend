@@ -12,7 +12,6 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/reference"
-	"atoman/internal/modules/studio"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -246,9 +245,6 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Content) == "" {
 		return model.Post{}, apperr.BadRequest("validation.invalid_request", "title and content are required")
 	}
-	if len(req.CollectionIDs) > 0 {
-		return model.Post{}, apperr.BadRequest("validation.invalid_request", "collection_ids is no longer supported")
-	}
 	status := strings.TrimSpace(req.Status)
 	if status == "" {
 		status = "draft"
@@ -258,36 +254,19 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	}
 
 	channelID := req.ChannelID
-	var collection *model.Collection
+	var requestedCollectionID *uuid.UUID
 	if req.CollectionID != uuid.Nil {
-		var loaded model.Collection
-		if err := s.db.First(&loaded, "id = ?", req.CollectionID).Error; err != nil {
+		requestedCollectionID = &req.CollectionID
+	}
+	if requestedCollectionID != nil && channelID == uuid.Nil {
+		var collection model.ContentCollection
+		if err := s.db.First(&collection, "id = ?", *requestedCollectionID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return model.Post{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
 			}
 			return model.Post{}, err
 		}
-		collection = &loaded
-		if channelID == uuid.Nil {
-			channelID = loaded.ChannelID
-		}
-	}
-	var requestedCollectionID *uuid.UUID
-	if req.CollectionID != uuid.Nil {
-		requestedCollectionID = &req.CollectionID
-	}
-	resolvedCollectionID, err := studio.NewService(s.db).ResolveContentCollection(
-		user.ID, channelID, studio.ModuleBlog, requestedCollectionID, nil, status == "published",
-	)
-	if err != nil {
-		return model.Post{}, err
-	}
-	if resolvedCollectionID != nil && (collection == nil || collection.ID != *resolvedCollectionID) {
-		var loaded model.Collection
-		if err := s.db.First(&loaded, "id = ?", *resolvedCollectionID).Error; err != nil {
-			return model.Post{}, err
-		}
-		collection = &loaded
+		channelID = collection.ChannelID
 	}
 	channel, err := s.repo.GetChannel(channelID)
 	if err != nil {
@@ -302,6 +281,13 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	if isChannelBanned(channel) && status == "published" {
 		return model.Post{}, apperr.Forbidden("blog.channel_banned", "Banned channel cannot publish posts")
 	}
+	collection, err := resolveBlogCollection(s.db, user.ID, channel.ID, requestedCollectionID, status == "published")
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return model.Post{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
+		}
+		return model.Post{}, err
+	}
 
 	visibility := strings.TrimSpace(req.Visibility)
 	if visibility == "" {
@@ -314,53 +300,62 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 	if summary == "" {
 		summary = strings.TrimSpace(req.Excerpt)
 	}
-
-	post := model.Post{
-		UserID:       user.ID,
-		ChannelID:    &channel.ID,
-		Title:        strings.TrimSpace(req.Title),
-		Content:      strings.TrimSpace(req.Content),
-		Summary:      summary,
-		LanguageCode: feedlanguage.Detect(strings.Join([]string{req.Title, summary, req.Content}, " ")),
-		CoverURL:     strings.TrimSpace(req.CoverURL),
-		Visibility:   visibility,
-		Status:       status,
-	}
-	if collection != nil {
-		post.CollectionID = &collection.ID
+	languageCode := feedlanguage.Detect(strings.Join([]string{req.Title, summary, req.Content}, " "))
+	entry := model.ContentEntry{
+		AuthorID:   &user.ID,
+		ChannelID:  channel.ID,
+		Kind:       "blog",
+		Title:      strings.TrimSpace(req.Title),
+		Summary:    summary,
+		CoverURL:   strings.TrimSpace(req.CoverURL),
+		Visibility: visibility,
+		Status:     status,
 	}
 	if status == "published" {
 		now := time.Now().UTC()
-		post.PublishedAt = &now
+		entry.PublishedAt = &now
+	}
+	blogExtension := model.ContentBlogExtension{
+		Content:      strings.TrimSpace(req.Content),
+		LanguageCode: languageCode,
 	}
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
-		if collection != nil {
-			var maxPosition int
-			if err := tx.Model(&model.Post{}).Where("collection_id = ?", collection.ID).Select("COALESCE(MAX(collection_position), -1)").Scan(&maxPosition).Error; err != nil {
-				return err
-			}
-			post.CollectionPosition = maxPosition + 1
-		}
-		if err := tx.Create(&post).Error; err != nil {
+		if err := tx.Create(&entry).Error; err != nil {
 			return err
 		}
-		if post.Status == "published" {
-			if _, err := s.syncPostReferences(tx, post); err != nil {
-				return err
-			}
-			if err := saveBlogPostVersion(tx, post, user.ID); err != nil {
-				return err
-			}
-			return lifecycle.NewService(tx).EnqueuePublication("blog", post.ID)
+		blogExtension.ContentID = entry.ID
+		if err := tx.Create(&blogExtension).Error; err != nil {
+			return err
 		}
-		return nil
+		if collection != nil {
+			var maxPosition int
+			if err := tx.Model(&model.ContentCollectionMembership{}).Where("collection_id = ?", collection.ID).
+				Select("COALESCE(MAX(position), -1)").Scan(&maxPosition).Error; err != nil {
+				return err
+			}
+			if err := tx.Create(&model.ContentCollectionMembership{ContentID: entry.ID, CollectionID: collection.ID, Position: maxPosition + 1}).Error; err != nil {
+				return err
+			}
+		}
+		if status != "published" {
+			return nil
+		}
+		post, err := loadCanonicalBlogPost(tx, entry.ID)
+		if err != nil {
+			return err
+		}
+		if _, err := s.syncPostReferences(tx, post); err != nil {
+			return err
+		}
+		if err := saveBlogPostVersion(tx, post, user.ID); err != nil {
+			return err
+		}
+		return lifecycle.NewService(tx).EnqueuePublication("blog", entry.ID)
 	}); err != nil {
 		return model.Post{}, err
 	}
-	post.Channel = &channel
-	post.Collection = collection
-	return post, nil
+	return loadCanonicalBlogPost(s.db, entry.ID)
 }
 
 func saveBlogPostVersion(tx *gorm.DB, post model.Post, editorID uuid.UUID) error {
@@ -368,17 +363,20 @@ func saveBlogPostVersion(tx *gorm.DB, post model.Post, editorID uuid.UUID) error
 		return apperr.BadRequest("validation.invalid_request", "collection_id is required")
 	}
 	var maxVersion int
-	if err := tx.Model(&model.BlogPostVersion{}).Where("post_id = ?", post.ID).Select("COALESCE(MAX(version), 0)").Scan(&maxVersion).Error; err != nil {
+	if err := tx.Model(&model.ContentBlogVersion{}).Where("content_id = ?", post.ID).
+		Select("COALESCE(MAX(version), 0)").Scan(&maxVersion).Error; err != nil {
 		return err
 	}
-	version := model.BlogPostVersion{
-		PostID:       post.ID,
+	version := model.ContentBlogVersion{
+		ContentID:    post.ID,
 		Version:      maxVersion + 1,
 		EditorID:     editorID,
 		Title:        post.Title,
 		Content:      post.Content,
 		Summary:      post.Summary,
 		CoverURL:     post.CoverURL,
+		LanguageCode: post.LanguageCode,
+		Pinned:       post.Pinned,
 		Visibility:   post.Visibility,
 		CollectionID: *post.CollectionID,
 		PublishedAt:  post.PublishedAt,
@@ -387,8 +385,8 @@ func saveBlogPostVersion(tx *gorm.DB, post model.Post, editorID uuid.UUID) error
 }
 
 func (s *Service) ListPostVersions(user authctx.CurrentUser, postID uuid.UUID) ([]model.BlogPostVersion, error) {
-	var post model.Post
-	if err := s.db.First(&post, "id = ?", postID).Error; err != nil {
+	post, err := s.repo.GetPost(postID)
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperr.NotFound("blog.post_not_found", "Post not found")
 		}
@@ -397,18 +395,22 @@ func (s *Service) ListPostVersions(user authctx.CurrentUser, postID uuid.UUID) (
 	if post.UserID != user.ID {
 		return nil, apperr.Forbidden("blog.post_forbidden", "You don't have permission to view post versions")
 	}
-	var versions []model.BlogPostVersion
-	if err := s.db.Where("post_id = ?", postID).Order("version DESC").Find(&versions).Error; err != nil {
+	var versions []model.ContentBlogVersion
+	if err := s.db.Where("content_id = ?", postID).Order("version DESC").Find(&versions).Error; err != nil {
 		return nil, err
 	}
-	return versions, nil
+	result := make([]model.BlogPostVersion, 0, len(versions))
+	for _, version := range versions {
+		result = append(result, buildBlogVersionResponse(version))
+	}
+	return result, nil
 }
 
 func (s *Service) RestorePostVersion(user authctx.CurrentUser, postID uuid.UUID, versionNumber int) (model.Post, error) {
 	var restored model.Post
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		var post model.Post
-		if err := tx.First(&post, "id = ?", postID).Error; err != nil {
+		post, err := loadCanonicalBlogPost(tx, postID)
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return apperr.NotFound("blog.post_not_found", "Post not found")
 			}
@@ -417,27 +419,32 @@ func (s *Service) RestorePostVersion(user authctx.CurrentUser, postID uuid.UUID,
 		if post.UserID != user.ID {
 			return apperr.Forbidden("blog.post_forbidden", "You don't have permission to restore this post")
 		}
-		var version model.BlogPostVersion
-		if err := tx.Where("post_id = ? AND version = ?", postID, versionNumber).First(&version).Error; err != nil {
+		var version model.ContentBlogVersion
+		if err := tx.Where("content_id = ? AND version = ?", postID, versionNumber).First(&version).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return apperr.NotFound("blog.version_not_found", "Post version not found")
 			}
 			return err
 		}
-		var collection model.Collection
-		if err := tx.First(&collection, "id = ?", version.CollectionID).Error; err != nil {
+		if err := tx.Model(&model.ContentEntry{}).Where("id = ?", postID).Updates(map[string]any{
+			"title": version.Title, "summary": version.Summary, "cover_url": version.CoverURL,
+			"visibility": version.Visibility,
+		}).Error; err != nil {
 			return err
 		}
-		updates := map[string]any{
-			"title": version.Title, "content": version.Content, "summary": version.Summary,
-			"cover_url": version.CoverURL, "visibility": version.Visibility,
-			"collection_id": version.CollectionID,
-			"channel_id":    collection.ChannelID,
-		}
-		if err := tx.Model(&post).Updates(updates).Error; err != nil {
+		if err := tx.Model(&model.ContentBlogExtension{}).Where("content_id = ?", postID).Updates(map[string]any{
+			"content": version.Content, "language_code": version.LanguageCode, "pinned": version.Pinned,
+		}).Error; err != nil {
 			return err
 		}
-		if err := tx.Preload("Channel").Preload("Collection").First(&restored, "id = ?", postID).Error; err != nil {
+		if err := tx.Where("content_id = ?", postID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Create(&model.ContentCollectionMembership{ContentID: postID, CollectionID: version.CollectionID}).Error; err != nil {
+			return err
+		}
+		restored, err = loadCanonicalBlogPost(tx, postID)
+		if err != nil {
 			return err
 		}
 		if _, err := s.syncPostReferences(tx, restored); err != nil {
@@ -450,8 +457,8 @@ func (s *Service) RestorePostVersion(user authctx.CurrentUser, postID uuid.UUID,
 
 func (s *Service) reorderCollectionPosts(collection model.Collection, orderedPostIDs []uuid.UUID, userID uuid.UUID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		var posts []model.Post
-		if err := tx.Where("collection_id = ?", collection.ID).Find(&posts).Error; err != nil {
+		posts, err := loadCanonicalBlogPosts(tx, canonicalBlogPostsQuery(tx).Where("memberships.collection_id = ?", collection.ID))
+		if err != nil {
 			return err
 		}
 		if len(posts) != len(orderedPostIDs) {
@@ -462,7 +469,6 @@ func (s *Service) reorderCollectionPosts(collection model.Collection, orderedPos
 		for _, post := range posts {
 			postSet[post.ID] = post
 		}
-
 		for _, postID := range orderedPostIDs {
 			post, exists := postSet[postID]
 			if !exists {
@@ -475,15 +481,13 @@ func (s *Service) reorderCollectionPosts(collection model.Collection, orderedPos
 				return apperr.BadRequest("validation.invalid_request", "post_ids contains a post outside this collection channel")
 			}
 		}
-
 		for position, postID := range orderedPostIDs {
-			if err := tx.Model(&model.Post{}).
-				Where("collection_id = ? AND id = ?", collection.ID, postID).
-				Update("collection_position", position).Error; err != nil {
+			if err := tx.Model(&model.ContentCollectionMembership{}).
+				Where("collection_id = ? AND content_id = ?", collection.ID, postID).
+				Update("position", position).Error; err != nil {
 				return err
 			}
 		}
-
 		return nil
 	})
 }
