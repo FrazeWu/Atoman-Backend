@@ -318,17 +318,10 @@ func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) e
 		if s.db.Migrator().HasTable(&model.Bookmark{}) {
 			bookmarkSQL = "COALESCE((SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL), 0) AS bookmark_count"
 		}
-		hasCanonical := hasCanonicalBlogExtensions(s.db)
-		var statsQuery *gorm.DB
-		viewColumn := "posts.view_count"
-		if hasCanonical {
-			statsQuery = s.db.Table("content_entries AS posts").
-				Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
-				Where("posts.kind = ? AND posts.id IN ?", "blog", postIDs)
-			viewColumn = "blog_extensions.view_count"
-		} else {
-			statsQuery = s.db.Table("posts AS posts").Where("posts.id IN ?", postIDs)
-		}
+		statsQuery := s.db.Table("content_entries AS posts").
+			Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
+			Where("posts.kind = ? AND posts.id IN ?", "blog", postIDs)
+		viewColumn := "blog_extensions.view_count"
 		selectSQL := `posts.id AS post_id,
 			` + viewColumn + `, ` + bookmarkSQL + `,
 			0 AS rating_score,

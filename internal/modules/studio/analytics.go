@@ -164,21 +164,14 @@ func (s *Service) ShareContent(user authctx.CurrentUser, module Module, channelI
 func (s *Service) shareableContent(userID, channelID uuid.UUID, module Module, contentID uuid.UUID) (string, string, string, error) {
 	switch module {
 	case ModuleBlog:
-		var post model.Post
-		if err := s.db.First(&post, "id = ?", contentID).Error; err != nil {
+		var entry model.ContentEntry
+		if err := s.db.First(&entry, "id = ? AND kind = ?", contentID, "blog").Error; err != nil {
 			return "", "", "", contentLookupError(err)
 		}
-		if post.UserID != userID || post.ChannelID == nil || *post.ChannelID != channelID {
+		if entry.AuthorID == nil || *entry.AuthorID != userID || entry.ChannelID != channelID {
 			return "", "", "", apperr.Forbidden("studio.content_forbidden", "You do not have permission to share this content")
 		}
-		var episodeCount int64
-		if err := s.db.Model(&model.PodcastEpisode{}).Where("post_id = ?", post.ID).Count(&episodeCount).Error; err != nil {
-			return "", "", "", err
-		}
-		if episodeCount > 0 {
-			return "", "", "", apperr.BadRequest("studio.content_module_mismatch", "Content does not belong to this module")
-		}
-		return post.Visibility, post.Status, "/posts/post/" + post.ID.String(), nil
+		return entry.Visibility, entry.Status, "/posts/post/" + entry.ID.String(), nil
 	case ModulePodcast:
 		var episode model.PodcastEpisode
 		if err := s.db.Preload("Post").First(&episode, "id = ?", contentID).Error; err != nil {

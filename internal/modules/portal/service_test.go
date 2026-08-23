@@ -12,9 +12,20 @@ import (
 	"gorm.io/gorm"
 )
 
+func migratePortalHotContentTables(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Channel{}, &model.Post{},
+		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentCollectionMembership{},
+		&model.Video{}, &model.Artist{}, &model.Album{}, &model.AlbumArtist{},
+		&model.ForumCategory{}, &model.ForumTopic{}, &model.ForumGroup{}, &model.ForumCategoryPermission{},
+		&model.Debate{}, &model.PodcastEpisode{}, &model.FeedSource{}, &model.FeedItem{}, &model.TimelineEvent{},
+	)
+}
+
 func TestHotContentCachesRepeatedRequests(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Post{})
+	migratePortalHotContentTables(t, db)
 
 	var queries atomic.Int64
 	if err := db.Callback().Query().Before("gorm:query").Register("portal:count_queries", func(*gorm.DB) {
@@ -41,12 +52,8 @@ func TestHotContentCachesRepeatedRequests(t *testing.T) {
 
 func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db,
-		&model.User{},
-		&model.Post{},
-		&model.Like{},
-		&model.DiscussionTarget{},
-	)
+	migratePortalHotContentTables(t, db)
+	testdb.Migrate(t, db, &model.Like{}, &model.DiscussionTarget{})
 
 	userID := uuid.Must(uuid.NewV7())
 	if err := db.Create(&model.User{
@@ -59,6 +66,10 @@ func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 		t.Fatalf("create user: %v", err)
 	}
 
+	channel := model.Channel{UserID: &userID, Name: "Portal blog channel", Slug: "portal-blog-channel"}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatalf("create blog channel: %v", err)
+	}
 	quiet := model.Post{
 		UserID:     userID,
 		Title:      "Quiet note",
@@ -80,6 +91,15 @@ func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 	}
 	if err := db.Create(&lively).Error; err != nil {
 		t.Fatalf("create lively post: %v", err)
+	}
+	for _, post := range []model.Post{quiet, lively} {
+		entry := model.ContentEntry{Base: post.Base, AuthorID: &userID, ChannelID: channel.ID, Kind: "blog", Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL, Status: post.Status, Visibility: post.Visibility}
+		if err := db.Create(&entry).Error; err != nil {
+			t.Fatalf("create canonical portal entry: %v", err)
+		}
+		if err := db.Create(&model.ContentBlogExtension{ContentID: entry.ID, Content: post.Content}).Error; err != nil {
+			t.Fatalf("create canonical portal extension: %v", err)
+		}
 	}
 
 	if err := db.Create(&model.Like{UserID: userID, TargetType: "post", TargetID: lively.ID}).Error; err != nil {
@@ -114,7 +134,7 @@ func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 
 func TestHotContentReturnsEmptyResponseWhenNoContentExists(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Post{})
+	migratePortalHotContentTables(t, db)
 
 	response, err := NewService(db).HotContent(4)
 	if err != nil {
@@ -270,6 +290,9 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 		&model.User{},
 		&model.Channel{},
 		&model.Post{},
+		&model.ContentEntry{},
+		&model.ContentBlogExtension{},
+		&model.ContentCollectionMembership{},
 		&model.Video{},
 		&model.FeedSource{},
 		&model.FeedItem{},

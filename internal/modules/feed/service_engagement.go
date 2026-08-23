@@ -150,14 +150,17 @@ func (s *Service) ensureReadingListTarget(user authctx.CurrentUser, targetType s
 	case "feed_item":
 		return s.ensureFeedItemExists(targetID)
 	case "post":
-		var post model.Post
-		if err := s.db.First(&post, "id = ?", targetID).Error; err != nil {
+		var entry model.ContentEntry
+		if err := s.db.Where("id = ? AND kind = ?", targetID, "blog").First(&entry).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return apperr.NotFound("blog.post_not_found", "Post not found")
 			}
 			return err
 		}
-		if post.Status != "published" || (post.Visibility != "public" && post.UserID != user.ID) {
+		if entry.AuthorID == nil {
+			return apperr.NotFound("blog.post_not_found", "Post not found")
+		}
+		if entry.Status != "published" || (entry.Visibility != "public" && entry.Visibility != "" && *entry.AuthorID != user.ID) {
 			return apperr.Forbidden("blog.post_forbidden", "You don't have permission to save this post")
 		}
 		return nil

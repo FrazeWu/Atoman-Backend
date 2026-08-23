@@ -130,7 +130,7 @@ func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 		var followersCount, followingCount, postsCount int64
 		db.Model(&model.Follow{}).Where("following_id = ?", user.UUID).Count(&followersCount)
 		db.Model(&model.Follow{}).Where("follower_id = ?", user.UUID).Count(&followingCount)
-		db.Model(&model.Post{}).Where("user_id = ? AND status = ?", user.UUID, "published").Count(&postsCount)
+		db.Model(&model.ContentEntry{}).Where("author_id = ? AND kind = ? AND status = ?", user.UUID, "blog", "published").Count(&postsCount)
 
 		c.JSON(http.StatusOK, gin.H{
 			"data": gin.H{
@@ -180,7 +180,7 @@ func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 
 		db.Model(&model.Follow{}).Where("following_id = ?", user.UUID).Count(&followersCount)
 		db.Model(&model.Follow{}).Where("follower_id = ?", user.UUID).Count(&followingCount)
-		db.Model(&model.Post{}).Where("user_id = ? AND status = ?", user.UUID, "published").Count(&postsCount)
+		db.Model(&model.ContentEntry{}).Where("author_id = ? AND kind = ? AND status = ?", user.UUID, "blog", "published").Count(&postsCount)
 
 		// Get user's channels
 		var channels []model.Channel

@@ -646,15 +646,7 @@ type RecommendationArticleFeedItemRow struct {
 	LanguageCode   string
 }
 
-func hasCanonicalBlogExtensions(db *gorm.DB) bool {
-	return db.Migrator().HasTable("content_blog_extensions")
-}
-
 func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, languageCode string, search string, limit int) ([]RecommendationArticlePostRow, error) {
-	if !hasCanonicalBlogExtensions(r.db) {
-		return r.listLegacyRecommendationArticlePosts(includeText, publishedAfter, keywords, languageCode, search, limit)
-	}
-
 	columns := []string{"posts.id", "posts.author_id AS user_id", "posts.channel_id", "blog_extensions.view_count", "posts.created_at", "'' AS title", "'' AS summary", "blog_extensions.language_code"}
 	if includeText {
 		columns[5] = "posts.title"
@@ -671,28 +663,6 @@ func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter t
 		Order("posts.created_at DESC, posts.id DESC").
 		Limit(limit)
 	db = applyRecommendationLanguageFilter(db, "blog_extensions.language_code", languageCode)
-	db = applyRecommendationTextFilter(db, "posts.title", "posts.summary", keywords)
-	db = applyRecommendationSearchFilter(db, []string{"posts.title", "posts.summary"}, search)
-	err := db.Scan(&posts).Error
-	return posts, err
-}
-
-func (r *Repo) listLegacyRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, languageCode string, search string, limit int) ([]RecommendationArticlePostRow, error) {
-	columns := []string{"posts.id", "posts.user_id", "posts.channel_id", "posts.view_count", "posts.created_at", "'' AS title", "'' AS summary", "posts.language_code"}
-	if includeText {
-		columns[5] = "posts.title"
-		columns[6] = "posts.summary"
-	}
-
-	var posts []RecommendationArticlePostRow
-	db := r.db.Table("posts").
-		Select(columns).
-		Where("posts.deleted_at IS NULL AND posts.status = ?", "published").
-		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).
-		Where("posts.created_at >= ?", publishedAfter).
-		Order("posts.created_at DESC, posts.id DESC").
-		Limit(limit)
-	db = applyRecommendationLanguageFilter(db, "posts.language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "posts.title", "posts.summary", keywords)
 	db = applyRecommendationSearchFilter(db, []string{"posts.title", "posts.summary"}, search)
 	err := db.Scan(&posts).Error
@@ -805,15 +775,6 @@ func recommendationFeedItemCategorySQL() string {
 func (r *Repo) ListRecommendationPostsByIDs(ids []uuid.UUID) ([]model.Post, error) {
 	if len(ids) == 0 {
 		return []model.Post{}, nil
-	}
-	if !hasCanonicalBlogExtensions(r.db) {
-		var posts []model.Post
-		err := r.db.Model(&model.Post{}).
-			Preload("Channel").
-			Select("id", "title", "summary", "cover_url", "language_code", "channel_id").
-			Where("id IN ?", ids).
-			Find(&posts).Error
-		return posts, err
 	}
 	return blogmodule.LoadCanonicalBlogPosts(r.db, blogmodule.CanonicalBlogPostsQuery(r.db).Where("posts.id IN ?", ids))
 }
@@ -1374,13 +1335,39 @@ func (r *Repo) CreateReadingListItem(item *model.ReadingListItem) error {
 
 func (r *Repo) ListReadingListItems(userID uuid.UUID, limit int, offset int) ([]model.ReadingListItem, error) {
 	var items []model.ReadingListItem
-	err := r.db.Preload("FeedItem").Preload("FeedItem.FeedSource").Preload("Post").Preload("Post.User").Preload("Post.Channel").Preload("Post.Collection").
+	err := r.db.Preload("FeedItem").Preload("FeedItem.FeedSource").
 		Where("user_id = ?", userID).
 		Order("created_at DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&items).Error
-	return items, err
+	if err != nil || len(items) == 0 {
+		return items, err
+	}
+	postIDs := make([]uuid.UUID, 0)
+	for _, item := range items {
+		if item.TargetType == "post" {
+			postIDs = append(postIDs, item.TargetID)
+		}
+	}
+	if len(postIDs) == 0 {
+		return items, nil
+	}
+	posts, err := blogmodule.LoadCanonicalBlogPosts(r.db, blogmodule.CanonicalBlogPostsQuery(r.db).Where("posts.id IN ?", postIDs))
+	if err != nil {
+		return nil, err
+	}
+	postsByID := make(map[uuid.UUID]*model.Post, len(posts))
+	for index := range posts {
+		post := posts[index]
+		postsByID[post.ID] = &post
+	}
+	for index := range items {
+		if items[index].TargetType == "post" {
+			items[index].Post = postsByID[items[index].TargetID]
+		}
+	}
+	return items, nil
 }
 
 func (r *Repo) CountReadingListItems(userID uuid.UUID) (int64, error) {

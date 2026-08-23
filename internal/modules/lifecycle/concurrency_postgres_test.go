@@ -304,6 +304,7 @@ func newLifecyclePostgresFixture(t *testing.T) lifecyclePostgresFixture {
 	t.Cleanup(func() { _ = sqlDB.Close() })
 	require.NoError(t, db.AutoMigrate(
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.Video{},
+		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
 		&model.ContentLifecycleEvent{}, &model.ContentProgress{}, &model.ContentNotificationPreference{},
 		&model.ContentPublicationEvent{}, &model.FeedSource{}, &model.Subscription{}, &model.Follow{}, &model.Notification{},
 	))
@@ -318,9 +319,12 @@ func newLifecyclePostgresFixture(t *testing.T) lifecyclePostgresFixture {
 	require.NoError(t, db.Create(&channel).Error)
 	collection := model.Collection{ChannelID: channel.ID, ContentType: "blog", Name: "Articles"}
 	require.NoError(t, db.Create(&collection).Error)
+	canonicalCollection := model.ContentCollection{Base: collection.Base, ChannelID: channel.ID, CreatedBy: &owner.UUID, Name: collection.Name}
+	require.NoError(t, db.Create(&canonicalCollection).Error)
 	now := time.Now().UTC()
 	post := model.Post{UserID: owner.UUID, ChannelID: &channel.ID, CollectionID: &collection.ID, Title: "Lifecycle PostgreSQL article", Content: "body", Status: "published", Visibility: "public", PublishedAt: &now}
 	require.NoError(t, db.Create(&post).Error)
+	seedLifecycleCanonicalBlog(t, db, post, canonicalCollection.ID)
 	return lifecyclePostgresFixture{lifecycleFixture: lifecycleFixture{db: db, service: NewService(db), channel: channel, post: post, owner: authctx.CurrentUser{ID: owner.UUID, Username: owner.Username, Role: authctx.RoleUser}, viewer: authctx.CurrentUser{ID: viewer.UUID, Username: viewer.Username, Role: authctx.RoleUser}}, dsn: parsed.String()}
 }
 

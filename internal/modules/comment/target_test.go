@@ -21,6 +21,7 @@ func newTargetTestRegistry(t *testing.T) (*TargetRegistry, *gorm.DB) {
 		&model.User{},
 		&model.Channel{},
 		&model.Post{},
+		&model.ContentEntry{},
 		&model.ShortNote{},
 		&model.Video{},
 		&model.PodcastEpisode{},
@@ -36,6 +37,31 @@ func newTargetTestRegistry(t *testing.T) (*TargetRegistry, *gorm.DB) {
 		&model.TimelineEvent{},
 		&model.TimelinePerson{},
 	)
+	callback := "test:comment-canonical-post-" + uuid.NewString()
+	require.NoError(t, db.Callback().Create().After("gorm:create").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "posts" {
+			return
+		}
+		post, ok := tx.Statement.Dest.(*model.Post)
+		if !ok {
+			return
+		}
+		channelID := uuid.Nil
+		if post.ChannelID != nil {
+			channelID = *post.ChannelID
+		} else {
+			channel := model.Channel{UserID: &post.UserID, Name: "Comment Test Channel", Slug: "comment-test-" + uuid.NewString()}
+			if err := tx.Session(&gorm.Session{NewDB: true}).Create(&channel).Error; err != nil {
+				t.Fatalf("create comment test channel: %v", err)
+			}
+			channelID = channel.ID
+		}
+		entry := model.ContentEntry{Base: post.Base, AuthorID: &post.UserID, ChannelID: channelID, Kind: "blog", Title: post.Title, Status: post.Status, Visibility: post.Visibility}
+		if err := tx.Session(&gorm.Session{NewDB: true}).Create(&entry).Error; err != nil {
+			t.Fatalf("create comment canonical entry: %v", err)
+		}
+	}))
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callback) })
 	return NewTargetRegistry(db), db
 }
 

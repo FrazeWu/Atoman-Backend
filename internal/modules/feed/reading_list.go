@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	blogmodule "atoman/internal/modules/blog"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -108,7 +109,7 @@ func GetReadingListItems(db *gorm.DB) gin.HandlerFunc {
 		db.Model(&model.ReadingListItem{}).Where("user_id = ?", userID).Count(&total)
 
 		var listItems []model.ReadingListItem
-		if err := db.Preload("FeedItem").Preload("FeedItem.FeedSource").Preload("Post").
+		if err := db.Preload("FeedItem").Preload("FeedItem.FeedSource").
 			Where("user_id = ?", userID).
 			Order("created_at DESC").
 			Offset(offset).
@@ -116,6 +117,29 @@ func GetReadingListItems(db *gorm.DB) gin.HandlerFunc {
 			Find(&listItems).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch reading list"})
 			return
+		}
+		postIDs := make([]uuid.UUID, 0)
+		for _, item := range listItems {
+			if item.TargetType == "post" {
+				postIDs = append(postIDs, item.TargetID)
+			}
+		}
+		if len(postIDs) > 0 {
+			posts, err := blogmodule.LoadCanonicalBlogPosts(db, blogmodule.CanonicalBlogPostsQuery(db).Where("posts.id IN ?", postIDs))
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch reading list"})
+				return
+			}
+			postsByID := make(map[uuid.UUID]*model.Post, len(posts))
+			for index := range posts {
+				post := posts[index]
+				postsByID[post.ID] = &post
+			}
+			for index := range listItems {
+				if listItems[index].TargetType == "post" {
+					listItems[index].Post = postsByID[listItems[index].TargetID]
+				}
+			}
 		}
 
 		c.JSON(http.StatusOK, gin.H{

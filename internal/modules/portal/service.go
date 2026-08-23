@@ -8,6 +8,9 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	blogmodule "atoman/internal/modules/blog"
+
+	"github.com/google/uuid"
 
 	"gorm.io/gorm"
 )
@@ -95,23 +98,31 @@ func (s *Service) HotContent(limit int) (HotResponse, error) {
 }
 
 type blogHotRow struct {
-	model.Post
+	ID            uuid.UUID `gorm:"column:id"`
+	Title         string
+	Summary       string
+	Content       string `gorm:"column:content"`
+	CoverURL      string `gorm:"column:cover_url"`
+	UpdatedAt     time.Time
 	LikesCount    int64
 	CommentsCount int64
 }
 
 func (s *Service) hotBlogPosts(limit int) ([]HotItem, error) {
 	var rows []blogHotRow
-	err := s.db.Model(&model.Post{}).
-		Select("posts.*, COUNT(DISTINCT likes.id) AS likes_count, COALESCE(MAX(discussion_targets.comment_count), 0) AS comments_count").
-		Joins("LEFT JOIN likes ON likes.target_id = posts.id AND likes.target_type = ?", "post").
-		Joins("LEFT JOIN discussion_targets ON discussion_targets.resource_id = posts.id AND discussion_targets.kind = ?", "blog_post").
-		Where("posts.status = ? AND posts.visibility = ?", "published", "public").
-		Group("posts.id").
+	err := blogmodule.CanonicalBlogPostsQuery(s.db).
+		Select(`posts.id, posts.title, posts.summary, posts.cover_url, posts.updated_at,
+			blog_extensions.content,
+			COUNT(DISTINCT likes.id) AS likes_count,
+			COALESCE(MAX(discussion_targets.comment_count), 0) AS comments_count`).
+		Joins("LEFT JOIN likes ON likes.target_id = posts.id AND likes.target_type = ? AND likes.deleted_at IS NULL", "post").
+		Joins("LEFT JOIN discussion_targets ON discussion_targets.resource_id = posts.id AND discussion_targets.kind = ? AND discussion_targets.deleted_at IS NULL", "blog_post").
+		Where("posts.status = ? AND COALESCE(posts.visibility, '') IN ?", "published", []string{"", "public"}).
+		Group("posts.id, blog_extensions.content").
 		Order("(COUNT(DISTINCT likes.id) * 3 + COALESCE(MAX(discussion_targets.comment_count), 0) * 2) DESC").
 		Order("posts.updated_at DESC").
 		Limit(limit).
-		Find(&rows).Error
+		Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -120,16 +131,10 @@ func (s *Service) hotBlogPosts(limit int) ([]HotItem, error) {
 	for _, row := range rows {
 		score := float64(row.LikesCount*3 + row.CommentsCount*2)
 		items = append(items, HotItem{
-			ID:          row.ID.String(),
-			Module:      "blog",
-			Kind:        "post",
-			Title:       row.Title,
-			Summary:     excerpt(row.Summary, row.Content),
-			ImageURL:    row.CoverURL,
-			TargetPath:  "/posts/post/" + row.ID.String(),
-			Score:       score,
-			ScoreLabel:  countLabel(row.LikesCount, "赞", row.CommentsCount, "评论"),
-			PublishedAt: timePtr(row.UpdatedAt),
+			ID: row.ID.String(), Module: "blog", Kind: "post", Title: row.Title,
+			Summary: excerpt(row.Summary, row.Content), ImageURL: row.CoverURL,
+			TargetPath: "/posts/post/" + row.ID.String(), Score: score,
+			ScoreLabel: countLabel(row.LikesCount, "赞", row.CommentsCount, "评论"), PublishedAt: timePtr(row.UpdatedAt),
 		})
 	}
 	return items, nil

@@ -51,15 +51,18 @@ func (r *databaseTargetResolvers) resolveShortNote(_ Viewer, resourceID uuid.UUI
 }
 
 func (r *databaseTargetResolvers) resolveBlogPost(viewer Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
-	var post model.Post
-	if err := r.db.First(&post, "id = ?", resourceID).Error; err != nil {
+	var entry model.ContentEntry
+	if err := r.db.Where("id = ? AND kind = ?", resourceID, "blog").First(&entry).Error; err != nil {
 		return ResolvedTarget{}, targetLookupError(TargetKindBlogPost, resourceID, err)
 	}
-	visible, err := r.canViewPublishedContent(viewer, post.UserID, post.ChannelID, post.Status, post.Visibility)
+	if entry.AuthorID == nil {
+		return ResolvedTarget{}, fmt.Errorf("%w: blog post %s has no author", ErrInvalidTargetResource, resourceID)
+	}
+	visible, err := r.canViewPublishedContent(viewer, *entry.AuthorID, &entry.ChannelID, entry.Status, entry.Visibility)
 	if err != nil {
 		return ResolvedTarget{}, err
 	}
-	return ownedTarget(TargetKindBlogPost, post.ID, post.UserID, visible, 0, markLabelPinned), nil
+	return ownedTarget(TargetKindBlogPost, entry.ID, *entry.AuthorID, visible, 0, markLabelPinned), nil
 }
 
 func (r *databaseTargetResolvers) resolveVideo(viewer Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {

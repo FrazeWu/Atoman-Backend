@@ -120,6 +120,31 @@ func (s *UserBootstrapService) saveStudioState(userID, channelID uuid.UUID) erro
 }
 
 func (s *UserBootstrapService) ensureDefaultCollectionForChannel(userID, channelID uuid.UUID, contentType string) error {
+	if contentType == "blog" {
+		var collection model.ContentCollection
+		err := s.db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		var softDeleted model.ContentCollection
+		softErr := s.db.Unscoped().Where("channel_id = ? AND name = ?", channelID, defaultCollectionName).First(&softDeleted).Error
+		if softErr == nil && softDeleted.DeletedAt.Valid {
+			return s.db.Unscoped().Model(&softDeleted).Updates(map[string]any{
+				"deleted_at": nil, "is_default": true, "name": defaultCollectionName, "created_by": userID,
+			}).Error
+		}
+		if softErr != nil && !errors.Is(softErr, gorm.ErrRecordNotFound) {
+			return softErr
+		}
+		collection = model.ContentCollection{
+			ChannelID: channelID, CreatedBy: &userID, Name: defaultCollectionName,
+			Description: defaultChannelDescription, IsDefault: true,
+		}
+		return s.db.Create(&collection).Error
+	}
 	var collection model.Collection
 	err := s.db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channelID, contentType, true).First(&collection).Error
 	if err == nil {

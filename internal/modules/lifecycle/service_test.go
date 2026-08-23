@@ -917,9 +917,16 @@ func TestDispatchPendingPublicationsRetriesRecoverableDispatchError(t *testing.T
 	if err := fixture.service.EnqueuePublication("blog", fixture.post.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.db.Migrator().DropTable(&model.Subscription{}); err != nil {
+	want := errors.New("subscriptions unavailable")
+	callback := "test:fail_publication_recipients_query"
+	if err := fixture.db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == (model.Subscription{}).TableName() {
+			tx.AddError(want)
+		}
+	}); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = fixture.db.Callback().Query().Remove(callback) })
 
 	if err := fixture.service.DispatchPendingPublications(10); err != nil {
 		t.Fatal(err)
@@ -933,7 +940,7 @@ func TestDispatchPendingPublicationsRetriesRecoverableDispatchError(t *testing.T
 		t.Fatalf("expected recoverable failure to remain pending after one attempt, got %#v", event)
 	}
 
-	if err := fixture.db.AutoMigrate(&model.Subscription{}); err != nil {
+	if err := fixture.db.Callback().Query().Remove(callback); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.service.DispatchPendingPublications(10); err != nil {

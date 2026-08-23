@@ -55,23 +55,34 @@ func (s *Service) ResolveCollectionConflict(user authctx.CurrentUser, module Mod
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		switch module {
 		case ModuleBlog:
-			var post model.Post
-			if err := tx.Preload("Collections").First(&post, "id = ? AND user_id = ?", contentID, user.ID).Error; err != nil {
+			var entry model.ContentEntry
+			if err := tx.First(&entry, "id = ? AND author_id = ? AND kind = ?", contentID, user.ID, "blog").Error; err != nil {
 				return contentNotFound(err)
 			}
-			if !post.CollectionConflict {
+			var extension model.ContentBlogExtension
+			if err := tx.First(&extension, "content_id = ?", contentID).Error; err != nil {
+				return err
+			}
+			if !extension.CollectionConflict {
 				return apperr.Conflict("studio.collection_not_conflicted", "content has no collection conflict")
 			}
-			if !containsCollection(post.Collections, collectionID) {
+			var candidateCount int64
+			if err := tx.Model(&model.ContentCollectionMembership{}).Where("content_id = ? AND collection_id = ?", contentID, collectionID).Count(&candidateCount).Error; err != nil {
+				return err
+			}
+			if candidateCount != 1 {
 				return apperr.BadRequest("studio.invalid_collection", "collection is not a conflict candidate")
 			}
-			if err := tx.Model(&post).Updates(map[string]any{"collection_id": collectionID, "collection_conflict": false}).Error; err != nil {
+			if err := tx.Model(&model.ContentBlogExtension{}).Where("content_id = ?", contentID).Update("collection_conflict", false).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&post).Association("Collections").Replace([]model.Collection{collection}); err != nil {
+			if err := tx.Where("content_id = ?", contentID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
 				return err
 			}
-			return recordStudioAudit(tx, user.ID, "studio.collection_conflict_resolved", "post", post.ID, map[string]any{"module": module, "collection_id": collectionID.String()})
+			if err := tx.Create(&model.ContentCollectionMembership{ContentID: contentID, CollectionID: collectionID}).Error; err != nil {
+				return err
+			}
+			return recordStudioAudit(tx, user.ID, "studio.collection_conflict_resolved", "content_entry", entry.ID, map[string]any{"module": module, "collection_id": collectionID.String()})
 		case ModulePodcast:
 			var episode model.PodcastEpisode
 			if err := tx.Preload("Post.Collections").First(&episode, "id = ?", contentID).Error; err != nil {

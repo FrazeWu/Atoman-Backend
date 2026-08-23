@@ -2,6 +2,7 @@ package debate
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"unicode/utf8"
 
@@ -20,15 +21,11 @@ func NewResourceRegistry(db *gorm.DB) *resourceref.Registry {
 		}
 	}
 	register(resourceref.KindPost, func(_ context.Context, _ resourceref.Viewer, id uuid.UUID) (resourceref.Resolved, error) {
-		var item model.Post
-		if err := db.First(&item, "id = ?", id).Error; err != nil {
+		var item model.ContentEntry
+		if err := db.Where("id = ? AND kind = ?", id, "blog").First(&item).Error; err != nil {
 			return resolved(kindTitle(resourceref.KindPost, id, item.Title), false), err
 		}
-		var episodeCount int64
-		if err := db.Model(&model.PodcastEpisode{}).Where("post_id = ?", item.ID).Count(&episodeCount).Error; err != nil {
-			return resourceref.Resolved{}, err
-		}
-		return resolved(kindTitle(resourceref.KindPost, id, item.Title), isPublicPublishedPost(item) && episodeCount == 0), nil
+		return resolved(kindTitle(resourceref.KindPost, id, item.Title), isPublicPublishedContentEntry(item)), nil
 	})
 	register(resourceref.KindThread, func(_ context.Context, _ resourceref.Viewer, id uuid.UUID) (resourceref.Resolved, error) {
 		var item model.ForumTopic
@@ -113,9 +110,15 @@ func NewResourceRegistry(db *gorm.DB) *resourceref.Registry {
 		return resolved(kindTitle(resourceref.KindChannel, id, item.Name), err == nil), err
 	})
 	register(resourceref.KindCollection, func(_ context.Context, _ resourceref.Viewer, id uuid.UUID) (resourceref.Resolved, error) {
-		var item model.Collection
-		err := db.First(&item, "id = ?", id).Error
-		return resolved(kindTitle(resourceref.KindCollection, id, item.Name), err == nil), err
+		var item model.ContentCollection
+		if err := db.First(&item, "id = ?", id).Error; err == nil {
+			return resolved(kindTitle(resourceref.KindCollection, id, item.Name), true), nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return resourceref.Resolved{}, err
+		}
+		var legacy model.Collection
+		err := db.First(&legacy, "id = ?", id).Error
+		return resolved(kindTitle(resourceref.KindCollection, id, legacy.Name), err == nil), err
 	})
 	register(resourceref.KindComment, func(_ context.Context, _ resourceref.Viewer, id uuid.UUID) (resourceref.Resolved, error) {
 		var item model.CommentEntry
@@ -144,6 +147,10 @@ func kindTitle(kind string, id uuid.UUID, title string) resourceref.Resolved {
 	return resourceref.Resolved{Kind: kind, ID: id, Title: strings.TrimSpace(title)}
 }
 
+func isPublicPublishedContentEntry(item model.ContentEntry) bool {
+	return item.Kind == "blog" && item.Status == "published" && (item.Visibility == "" || item.Visibility == "public")
+}
+
 func isPublicPublishedPost(item model.Post) bool {
 	return item.Status == "published" && (item.Visibility == "" || item.Visibility == "public")
 }
@@ -151,9 +158,9 @@ func isPublicPublishedPost(item model.Post) bool {
 func publicCommentTargetVisible(db *gorm.DB, target model.DiscussionTarget) (bool, error) {
 	switch target.Kind {
 	case "blog_post":
-		var item model.Post
-		err := db.First(&item, "id = ?", target.ResourceID).Error
-		return err == nil && isPublicPublishedPost(item), err
+		var item model.ContentEntry
+		err := db.Where("id = ? AND kind = ?", target.ResourceID, "blog").First(&item).Error
+		return err == nil && isPublicPublishedContentEntry(item), err
 	case "video":
 		var item model.Video
 		err := db.First(&item, "id = ?", target.ResourceID).Error
