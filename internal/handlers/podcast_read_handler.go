@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	blog "atoman/internal/modules/blog"
 	"atoman/internal/modules/recommendation"
 	studioapi "atoman/internal/modules/studio"
@@ -46,9 +47,9 @@ func RecordPodcastPlayback(db *gorm.DB) gin.HandlerFunc {
 			httpx.Error(c, apperr.BadRequest("studio.invalid_metric", "event must be play or complete"))
 			return
 		}
-		var episode model.PodcastEpisode
-		if err := db.Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
-			First(&episode, "podcast_episodes.id = ?", id).Error; err != nil {
+		episode, err := contentmodule.LoadPodcastEpisode(db, contentmodule.PodcastQuery(db).
+			Where("posts.status = ? AND posts.deleted_at IS NULL AND episodes.episode_id = ?", "published", id))
+		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				httpx.Error(c, apperr.NotFound("podcast.episode_not_found", "Episode not found"))
 				return
@@ -73,12 +74,10 @@ func GetRecommendedPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 		}
 		page, pageSize := httpx.PageParams(c)
 
-		var episodes []model.PodcastEpisode
-		if err := db.Preload("Post.Collection").Preload("Channel").
-			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.status = 'published' AND posts.deleted_at IS NULL").
-			Where("posts.visibility = ?", "public").
-			Order("podcast_episodes.created_at DESC").
-			Find(&episodes).Error; err != nil {
+		episodes, err := contentmodule.LoadPodcastEpisodes(db, contentmodule.PodcastQuery(db).
+			Where("posts.status = ? AND posts.visibility = ?", "published", "public").
+			Order("posts.created_at DESC"))
+		if err != nil {
 			httpx.Error(c, err)
 			return
 		}

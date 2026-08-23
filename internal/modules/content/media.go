@@ -61,29 +61,29 @@ type videoRow struct {
 type modelTime = time.Time
 
 func PodcastQuery(db *gorm.DB) *gorm.DB {
-	return db.Table("content_entries AS entries").
-		Joins("JOIN content_episode_extensions AS episodes ON episodes.content_id = entries.id").
-		Select(`entries.id AS content_id, episodes.episode_id, episodes.legacy_post_id,
-			entries.author_id, entries.channel_id, entries.created_at AS entry_created_at,
-			entries.updated_at AS entry_updated_at, entries.title, entries.summary,
-			entries.status, entries.visibility, entries.published_at, entries.scheduled_at,
+	return db.Table("content_entries AS posts").
+		Joins("JOIN content_episode_extensions AS episodes ON episodes.content_id = posts.id").
+		Select(`posts.id AS content_id, episodes.episode_id, episodes.legacy_post_id,
+			posts.author_id, posts.channel_id, posts.created_at AS entry_created_at,
+			posts.updated_at AS entry_updated_at, posts.title, posts.summary,
+			posts.status, posts.visibility, posts.published_at, posts.scheduled_at,
 			episodes.shownotes, episodes.audio_url, episodes.duration_sec,
 			episodes.episode_cover_url, episodes.season_number, episodes.episode_number,
 			episodes.view_count`).
-		Where("entries.kind = ? AND entries.deleted_at IS NULL", "podcast")
+		Where("posts.kind = ? AND posts.deleted_at IS NULL", "podcast")
 }
 
 func VideoQuery(db *gorm.DB) *gorm.DB {
-	return db.Table("content_entries AS entries").
-		Joins("JOIN content_video_extensions AS videos ON videos.content_id = entries.id").
-		Select(`entries.id AS content_id, videos.video_id, entries.author_id, entries.channel_id,
-			entries.created_at AS entry_created_at, entries.updated_at AS entry_updated_at,
-			entries.title, entries.summary, entries.status, entries.visibility,
-			entries.published_at, entries.scheduled_at, videos.storage_type, videos.video_url,
+	return db.Table("content_entries AS posts").
+		Joins("JOIN content_video_extensions AS videos ON videos.content_id = posts.id").
+		Select(`posts.id AS content_id, videos.video_id, posts.author_id, posts.channel_id,
+			posts.created_at AS entry_created_at, posts.updated_at AS entry_updated_at,
+			posts.title, posts.summary, posts.status, posts.visibility,
+			posts.published_at, posts.scheduled_at, videos.storage_type, videos.video_url,
 			videos.thumbnail_url, videos.duration_sec, videos.processing_status,
 			videos.processing_error, videos.preview_thumbnails, videos.view_count,
 			videos.collection_conflict`).
-		Where("entries.kind = ? AND entries.deleted_at IS NULL", "video")
+		Where("posts.kind = ? AND posts.deleted_at IS NULL", "video")
 }
 
 func LoadPodcastEpisodes(db *gorm.DB, query *gorm.DB) ([]model.PodcastEpisode, error) {
