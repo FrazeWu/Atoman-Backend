@@ -115,3 +115,57 @@ func TestRecommendArticlesFallsBackWithoutCanonicalBlogExtensions(t *testing.T) 
 		t.Fatalf("unexpected recommendation: %+v", items[0])
 	}
 }
+
+func TestRecommendChannelsFallsBackWithoutCanonicalBlogExtensions(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{},
+		&model.Channel{},
+		&model.Post{},
+	)
+
+	user := model.User{
+		Username: "legacy-channel-recommendation-user-" + uuid.NewString()[:8],
+		Email:    "legacy-channel-recommendation-" + uuid.NewString()[:8] + "@example.com",
+		Password: "hash",
+	}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	channel := model.Channel{
+		UserID:      &user.UUID,
+		Name:        "Legacy Recommendation Channel",
+		Slug:        "legacy-recommendation-channel-" + uuid.NewString()[:8],
+		Description: "Channel description",
+	}
+	if err := db.Create(&channel).Error; err != nil {
+		t.Fatal(err)
+	}
+	post := model.Post{
+		Base:       model.Base{CreatedAt: time.Now().Add(-time.Hour)},
+		UserID:     user.UUID,
+		ChannelID:  &channel.ID,
+		Title:      "Recent legacy article",
+		Content:    "Article content",
+		Status:     "published",
+		Visibility: "public",
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := NewRepo(db).ListRecommendationChannels("")
+	if err != nil {
+		t.Fatalf("legacy channel recommendation should work without canonical extensions: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ChannelID != channel.ID || rows[0].Name != channel.Name {
+		t.Fatalf("unexpected legacy channel rows: %+v", rows)
+	}
+	recentPosts, err := NewRepo(db).ListRecentPublishedPostsByChannelID(channel.ID, 3)
+	if err != nil {
+		t.Fatalf("legacy channel recent posts should load without canonical extensions: %v", err)
+	}
+	if len(recentPosts) != 1 || recentPosts[0].ID != post.ID {
+		t.Fatalf("unexpected legacy recent posts: %+v", recentPosts)
+	}
+}
