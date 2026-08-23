@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -49,16 +50,59 @@ func (s *Service) SearchMany(ctx context.Context, viewer Viewer, targetTypes []s
 		uniqueTypes = append(uniqueTypes, targetType)
 	}
 
-	items := make([]Target, 0)
+	itemsByType := make([][]Target, len(uniqueTypes))
 	registry := NewRegistry(s.db.WithContext(ctx))
-	for _, targetType := range uniqueTypes {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		matches, err := registry.Search(viewer, targetType, query, limit)
-		if err != nil {
-			return nil, err
-		}
+	jobs := make(chan int)
+	workerCount := 4
+	if len(uniqueTypes) < workerCount {
+		workerCount = len(uniqueTypes)
+	}
+	var workers sync.WaitGroup
+	var firstErr error
+	var errMu sync.Mutex
+	for worker := 0; worker < workerCount; worker++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				if err := ctx.Err(); err != nil {
+					errMu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					errMu.Unlock()
+					continue
+				}
+				matches, err := registry.Search(viewer, uniqueTypes[index], query, limit)
+				if err != nil {
+					errMu.Lock()
+					if firstErr == nil {
+						firstErr = err
+					}
+					errMu.Unlock()
+					continue
+				}
+				itemsByType[index] = matches
+			}
+		}()
+	}
+	for index := range uniqueTypes {
+		jobs <- index
+	}
+	close(jobs)
+	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	errMu.Lock()
+	err := firstErr
+	errMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]Target, 0)
+	for _, matches := range itemsByType {
 		items = append(items, matches...)
 	}
 	return items, nil

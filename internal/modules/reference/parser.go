@@ -26,20 +26,39 @@ func parse(content string, strict bool) ([]ParsedReference, error) {
 	source := []byte(content)
 	document := goldmark.DefaultParser().Parse(text.NewReader(source))
 	result := make([]ParsedReference, 0)
+	pendingStart, pendingStop := -1, -1
+	flush := func() error {
+		if pendingStart < 0 {
+			return nil
+		}
+		parsed, err := parseTextSegment(source, pendingStart, pendingStop, strict)
+		if err != nil {
+			return err
+		}
+		result = append(result, parsed...)
+		pendingStart, pendingStop = -1, -1
+		return nil
+	}
 
 	err := ast.Walk(document, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
 		if !entering || node.Kind() != ast.KindText || insideCode(node) {
 			return ast.WalkContinue, nil
 		}
 		segment := node.(*ast.Text).Segment
-		parsed, err := parseTextSegment(source, segment.Start, segment.Stop, strict)
-		if err != nil {
+		if pendingStop == segment.Start {
+			pendingStop = segment.Stop
+			return ast.WalkContinue, nil
+		}
+		if err := flush(); err != nil {
 			return ast.WalkStop, err
 		}
-		result = append(result, parsed...)
+		pendingStart, pendingStop = segment.Start, segment.Stop
 		return ast.WalkContinue, nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := flush(); err != nil {
 		return nil, err
 	}
 	return result, nil

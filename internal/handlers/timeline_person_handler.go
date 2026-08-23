@@ -34,7 +34,8 @@ func GetTimelinePersons(db *gorm.DB) gin.HandlerFunc {
 		query := db.Model(&model.TimelinePerson{}).Preload("User").Where("is_public = ?", true)
 
 		if search != "" {
-			query = query.Where("name ILIKE ?", "%"+search+"%")
+			pattern := handlerContainsPattern(search)
+			query = query.Where("LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(bio) LIKE ? ESCAPE '\\'", pattern, pattern)
 		}
 
 		var total int64

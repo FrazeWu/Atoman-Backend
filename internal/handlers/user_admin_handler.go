@@ -58,8 +58,8 @@ func SearchUsers(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		query := db.Model(&model.User{}).
-			Select("Users.uuid, Users.username, Users.display_name, Users.avatar_url, Users.role").
-			Where("Users.is_active = ?", true)
+			Select(`"Users".uuid, "Users".username, "Users".display_name, "Users".avatar_url, "Users".role`).
+			Where(`"Users".is_active = ?`, true)
 
 		if scope == "mention" {
 			if current, ok := authctx.Current(c); !ok || current.ID == uuid.Nil {
@@ -70,10 +70,10 @@ func SearchUsers(db *gorm.DB) gin.HandlerFunc {
 
 		if q != "" {
 			like := "%" + q + "%"
-			query = query.Where("LOWER(Users.username) LIKE LOWER(?) OR LOWER(Users.display_name) LIKE LOWER(?)", like, like)
-			query = query.Order(clause.Expr{SQL: "CASE WHEN LOWER(Users.username) LIKE LOWER(?) THEN 0 ELSE 1 END", Vars: []any{q + "%"}, WithoutParentheses: true})
+			query = query.Where(`LOWER("Users".username) LIKE LOWER(?) OR LOWER("Users".display_name) LIKE LOWER(?)`, like, like)
+			query = query.Order(clause.Expr{SQL: `CASE WHEN LOWER("Users".username) LIKE LOWER(?) THEN 0 ELSE 1 END`, Vars: []any{q + "%"}, WithoutParentheses: true})
 		}
-		query = query.Order("LOWER(Users.username) ASC").Order("Users.uuid ASC")
+		query = query.Order(`LOWER("Users".username) ASC`).Order(`"Users".uuid ASC`)
 
 		var results []UserResult
 		if err := query.Limit(limit).Scan(&results).Error; err != nil {

@@ -23,6 +23,7 @@ import (
 // @Produce json
 // @Param page query int false "页码"
 // @Param limit query int false "每页数量"
+// @Param search query string false "标题、描述或正文搜索"
 // @Param category query string false "分类"
 // @Param year_start query int false "起始年份"
 // @Param year_end query int false "结束年份"
@@ -35,11 +36,16 @@ func GetTimelineEvents(db *gorm.DB) gin.HandlerFunc {
 		offset := httpx.Offset(page, limit)
 
 		category := c.Query("category")
+		search := c.Query("search")
 		yearStart := c.Query("year_start")
 		yearEnd := c.Query("year_end")
 
 		query := db.Model(&model.TimelineEvent{}).Preload("User").Where("is_public = ?", true)
 
+		if search != "" {
+			pattern := handlerContainsPattern(search)
+			query = query.Where("LOWER(title) LIKE ? ESCAPE '\\' OR LOWER(description) LIKE ? ESCAPE '\\' OR LOWER(content) LIKE ? ESCAPE '\\'", pattern, pattern, pattern)
+		}
 		if category != "" {
 			query = query.Where("category = ?", category)
 		}

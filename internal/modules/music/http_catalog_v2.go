@@ -209,7 +209,7 @@ func (h *Handler) search(c *gin.Context) {
 				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
 				Where("LOWER(\"Artists\".name) LIKE LOWER(?) OR LOWER("+artistDisambiguationSearchExpression+") LIKE LOWER(?) OR LOWER(\"Artists\".legal_name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?)", pattern, pattern, pattern, pattern)
 		}
-		if err := artistQuery().Count(&total).Error; err != nil {
+		if err := artistQuery().Distinct(`"Artists".id`).Count(&total).Error; err != nil {
 			httpx.Error(c, err)
 			return
 		}

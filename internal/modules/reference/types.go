@@ -22,6 +22,7 @@ var (
 
 var SupportedResourceTypes = []string{
 	"post",
+	"short_note",
 	"thread",
 	"debate",
 	"feed",

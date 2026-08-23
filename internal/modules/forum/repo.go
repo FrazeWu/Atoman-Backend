@@ -66,7 +66,12 @@ func (r *Repo) ListTopics(user authctx.CurrentUser, query ListTopicsQuery) ([]mo
 		db = db.Where("category_id = ?", query.CategoryID)
 	}
 	if search := strings.TrimSpace(query.Search); search != "" {
-		db = db.Where("(title LIKE ? OR content LIKE ?)", "%"+search+"%", "%"+search+"%")
+		switch r.db.Dialector.Name() {
+		case "postgres", "pgx":
+			db = applyPostgresTopicSearch(db, search)
+		default:
+			db = applySQLiteTopicSearch(db, search)
+		}
 	}
 	if tag := strings.TrimSpace(query.Tag); tag != "" {
 		encoded, _ := json.Marshal(tag)

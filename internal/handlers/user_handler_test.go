@@ -500,6 +500,31 @@ func TestUpdateUserProfileOnlyChangesProvidedFields(t *testing.T) {
 	}
 }
 
+func TestSearchUsersPublicQueryReturnsMatchingUsers(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{})
+	user := model.User{Username: "alice-public", Email: "alice-public@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	r := gin.New()
+	r.GET("/users/search", SearchUsers(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/search?q=alice&limit=5", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response searchUsersTestResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data) != 1 || response.Data[0].Username != user.Username {
+		t.Fatalf("unexpected users: %#v", response.Data)
+	}
+}
+
 func TestSearchUsersMentionScopeReturnsAllActiveUsersWithPrefixFirst(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)

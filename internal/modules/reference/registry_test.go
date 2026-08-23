@@ -20,7 +20,7 @@ func TestRegistryResolvesEveryResourceType(t *testing.T) {
 		label  string
 		module string
 	}{
-		"post": {"Blog Post", "blog"}, "thread": {"Forum Thread", "forum"}, "debate": {"Debate Topic", "debate"},
+		"post": {"Blog Post", "blog"}, "short_note": {"Short note content", "blog"}, "thread": {"Forum Thread", "forum"}, "debate": {"Debate Topic", "debate"},
 		"feed": {"External Feed", "feed"}, "article": {"Feed Article", "feed"},
 		"artist": {"Artist Name", "music"}, "album": {"Album Title", "music"}, "song": {"Song Title", "music"},
 		"playlist": {"Playlist Name", "music"}, "podcast": {"Podcast Show", "podcast"}, "episode": {"Podcast Episode", "podcast"},
@@ -83,6 +83,16 @@ func TestRegistrySearchesVisibleFeedArticlesWithQualifiedColumns(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, items, 1)
 	require.Equal(t, ids["article"], items[0].ID)
+
+	notes, err := NewRegistry(db).Search(Viewer{}, "short_note", "Short note", 10)
+	require.NoError(t, err)
+	require.Len(t, notes, 1)
+	require.Equal(t, ids["short_note"], notes[0].ID)
+
+	songs, err := NewRegistry(db).Search(Viewer{}, "song", "Song Title", 10)
+	require.NoError(t, err)
+	require.Len(t, songs, 1)
+	require.Equal(t, ids["song"], songs[0].ID)
 }
 
 func TestRegistryThreadResolutionHonorsForumCategoryVisibility(t *testing.T) {
@@ -185,7 +195,7 @@ func seedReferenceRegistry(t *testing.T) (*gorm.DB, map[string]uuid.UUID) {
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{},
 		&model.ForumCategory{}, &model.ForumTopic{}, &model.Debate{}, &model.FeedSource{}, &model.FeedItem{},
 		&model.ForumGroup{}, &model.ForumGroupMember{}, &model.ForumCategoryPermission{},
-		&model.Artist{}, &model.Album{}, &model.Song{}, &model.Playlist{}, &model.Video{},
+		&model.Artist{}, &model.Album{}, &model.Song{}, &model.Playlist{}, &model.Video{}, &model.ShortNote{},
 		&model.TimelinePerson{}, &model.TimelineEvent{}, &model.DiscussionTarget{}, &model.CommentEntry{},
 	)
 	user := model.User{Username: "alice", DisplayName: "Alice", Email: "alice@example.com", Password: "hash", IsActive: true}
@@ -196,6 +206,8 @@ func seedReferenceRegistry(t *testing.T) (*gorm.DB, map[string]uuid.UUID) {
 	require.NoError(t, db.Create(&collection).Error)
 	post := model.Post{UserID: user.UUID, ChannelID: &channel.ID, CollectionID: &collection.ID, Title: "Blog Post", Content: "body", Status: "published", Visibility: "public"}
 	require.NoError(t, db.Create(&post).Error)
+	shortNote := model.ShortNote{UserID: user.UUID, Content: "Short note content"}
+	require.NoError(t, db.Create(&shortNote).Error)
 	category := model.ForumCategory{Name: "General"}
 	require.NoError(t, db.Create(&category).Error)
 	thread := model.ForumTopic{UserID: user.UUID, CategoryID: category.ID, Title: "Forum Thread", Content: "body"}
@@ -230,7 +242,7 @@ func seedReferenceRegistry(t *testing.T) (*gorm.DB, map[string]uuid.UUID) {
 	require.NoError(t, db.Create(&comment).Error)
 
 	return db, map[string]uuid.UUID{
-		"post": post.ID, "thread": thread.ID, "debate": debate.ID, "feed": feed.ID, "article": article.ID,
+		"post": post.ID, "short_note": shortNote.ID, "thread": thread.ID, "debate": debate.ID, "feed": feed.ID, "article": article.ID,
 		"artist": artist.ID, "album": album.ID, "song": song.ID, "playlist": playlist.ID,
 		"podcast": channel.ID, "episode": episode.ID, "video": video.ID, "person": person.ID, "event": event.ID,
 		"channel": channel.ID, "collection": collection.ID, "comment": comment.ID,

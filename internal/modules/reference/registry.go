@@ -49,13 +49,29 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 	}
 	switch targetType {
 	case "post":
-		var row model.Post
-		query := visibleOwned(r.db.Where("status = ?", "published"), viewer, "user_id", "visibility")
-		query = query.Where("NOT EXISTS (SELECT 1 FROM podcast_episodes WHERE podcast_episodes.post_id = posts.id AND podcast_episodes.deleted_at IS NULL)")
-		if err := query.First(&row, "id = ?", id).Error; err != nil {
+		var row struct {
+			ID      uuid.UUID `gorm:"column:id"`
+			Title   string    `gorm:"column:title"`
+			Author  uuid.UUID `gorm:"column:author_id"`
+			Status  string    `gorm:"column:status"`
+			Visible string    `gorm:"column:visibility"`
+		}
+		query := r.db.Table("content_entries").Where("kind = ? AND status = ? AND deleted_at IS NULL", "blog", "published")
+		if viewer.UserID == uuid.Nil {
+			query = query.Where("visibility = ?", "public")
+		} else {
+			query = query.Where("visibility = ? OR author_id = ?", "public", viewer.UserID)
+		}
+		if err := query.Select("id, title, author_id, status, visibility").First(&row, "id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
 		return target(targetType, row.ID, row.Title, "blog", "/post/"+row.ID.String()), nil
+	case "short_note":
+		var row model.ShortNote
+		if err := r.db.First(&row, "short_notes.id = ?", id).Error; err != nil {
+			return Target{}, targetError(err)
+		}
+		return target(targetType, row.ID, row.Content, "blog", "/posts/notes/"+row.ID.String()), nil
 	case "thread":
 		var row model.ForumTopic
 		if err := r.visibleForumTopics(r.db.Model(&model.ForumTopic{}), viewer).First(&row, "forum_topics.id = ?", id).Error; err != nil {
@@ -154,12 +170,11 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 		}
 		return target(targetType, row.ID, row.Name, "blog", "/channel/"+row.Slug), nil
 	case "collection":
-		var row model.Collection
+		var row model.ContentCollection
 		if err := r.db.First(&row, "id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
-		module, path := collectionTarget(row)
-		return target(targetType, row.ID, row.Name, module, path), nil
+		return target(targetType, row.ID, row.Name, "blog", "/collection/"+row.ID.String()), nil
 	case "comment":
 		return r.resolveComment(viewer, id)
 	default:
@@ -175,36 +190,203 @@ func (r *Registry) Search(viewer Viewer, targetType, query string, limit int) ([
 		limit = 20
 	}
 	if targetType == TargetTypeUser {
-		var users []model.User
-		like := "%" + strings.ToLower(strings.TrimSpace(query)) + "%"
-		if err := r.db.Where("is_active = ? AND (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?)", true, like, like).Order("LOWER(username) ASC").Limit(limit).Find(&users).Error; err != nil {
+		return r.searchUserTargets(query, limit)
+	}
+	if !IsSupportedResourceType(targetType) {
+		return nil, ErrTargetUnavailable
+	}
+	if targetType == "comment" {
+		ids, err := r.searchResourceIDs(viewer, targetType, strings.TrimSpace(query), limit)
+		if err != nil {
 			return nil, err
 		}
-		items := make([]Target, 0, len(users))
-		for _, user := range users {
-			resolved, err := r.ResolveUsername(viewer, user.Username)
+		items := make([]Target, 0, len(ids))
+		for _, id := range ids {
+			resolved, err := r.Resolve(viewer, targetType, id)
 			if err == nil {
 				items = append(items, resolved)
 			}
 		}
 		return items, nil
 	}
-	if !IsSupportedResourceType(targetType) {
+	return r.searchResourceTargets(viewer, targetType, strings.TrimSpace(query), limit)
+}
+
+type searchTargetRow struct {
+	ID          uuid.UUID  `gorm:"column:id"`
+	Label       string     `gorm:"column:label"`
+	Username    string     `gorm:"column:username"`
+	Slug        string     `gorm:"column:slug"`
+	ContentType string     `gorm:"column:content_type"`
+	AlbumID     *uuid.UUID `gorm:"column:album_id"`
+}
+
+func (r *Registry) searchUserTargets(query string, limit int) ([]Target, error) {
+	like := "%" + strings.ToLower(strings.TrimSpace(query)) + "%"
+	var rows []searchTargetRow
+	if err := r.db.Model(&model.User{}).
+		Select("uuid AS id, display_name AS label, username").
+		Where("is_active = ? AND (LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?)", true, like, like).
+		Order("LOWER(username) ASC").Limit(limit).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	items := make([]Target, 0, len(rows))
+	for _, row := range rows {
+		label := strings.TrimSpace(row.Label)
+		if label == "" {
+			label = row.Username
+		}
+		items = append(items, target(TargetTypeUser, row.ID, label, "blog", "/users/"+row.Username))
+		items[len(items)-1].Subtitle = "@" + row.Username
+	}
+	return items, nil
+}
+
+func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search string, limit int) ([]Target, error) {
+	like := "%" + strings.ToLower(search) + "%"
+	var query *gorm.DB
+	switch targetType {
+	case "post":
+		query = r.db.Table("content_entries AS posts").
+			Where("posts.kind = ? AND posts.status = ? AND posts.deleted_at IS NULL AND LOWER(posts.title) LIKE ?", "blog", "published", like).
+			Select("posts.id, posts.title AS label")
+		if viewer.UserID == uuid.Nil {
+			query = query.Where("posts.visibility = ?", "public")
+		} else {
+			query = query.Where("posts.visibility = ? OR posts.author_id = ?", "public", viewer.UserID)
+		}
+	case "short_note":
+		query = r.db.Model(&model.ShortNote{}).
+			Where("LOWER(short_notes.content) LIKE ?", like).
+			Select("short_notes.id, short_notes.content AS label")
+	case "thread":
+		query = r.visibleForumTopics(r.db.Model(&model.ForumTopic{}), viewer).
+			Where("LOWER(forum_topics.title) LIKE ?", like).
+			Select("forum_topics.id, forum_topics.title AS label")
+	case "debate":
+		query = r.db.Model(&model.Debate{}).
+			Where("LOWER(debates.title) LIKE ?", like).
+			Select("debates.id, debates.title AS label")
+	case "feed":
+		query = r.db.Model(&model.FeedSource{}).
+			Where("feed_sources.hidden = ? AND LOWER(feed_sources.title) LIKE ?", false, like).
+			Select("feed_sources.id, feed_sources.title AS label")
+	case "article":
+		query = r.db.Model(&model.FeedItem{}).
+			Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id AND feed_sources.deleted_at IS NULL AND feed_sources.hidden = ?", false).
+			Where("LOWER(feed_items.title) LIKE ?", like).
+			Select("feed_items.id, feed_items.title AS label")
+	case "artist":
+		query = visibleMusicWikiEntries(r.db.Model(&model.Artist{}), viewer, "created_by").
+			Where("redirect_to IS NULL AND LOWER(name) LIKE ?", like).
+			Select("id, name AS label")
+	case "album":
+		query = visibleMusicWikiEntries(r.db.Model(&model.Album{}), viewer, "uploaded_by").
+			Where("LOWER(title) LIKE ?", like).
+			Select("id, title AS label")
+	case "song":
+		query = visibleMusicWikiEntries(r.db.Model(&model.Song{}), viewer, "uploaded_by").
+			Where("LOWER(title) LIKE ?", like).
+			Select("id, title AS label, album_id")
+	case "playlist":
+		query = r.db.Model(&model.Playlist{}).
+			Where("LOWER(music_playlists.name) LIKE ?", like)
+		if viewer.UserID == uuid.Nil {
+			query = query.Where("music_playlists.is_public = ?", true)
+		} else {
+			query = query.Where("music_playlists.is_public = ? OR music_playlists.user_id = ?", true, viewer.UserID)
+		}
+		query = query.Select("music_playlists.id, music_playlists.name AS label")
+	case "podcast":
+		query = visiblePodcastChannels(r.db.Model(&model.Channel{}).Where("LOWER(channels.name) LIKE ?", like), viewer).
+			Select("channels.id, channels.name AS label, channels.slug")
+	case "episode":
+		query = visiblePodcastEpisodes(r.db.Model(&model.PodcastEpisode{}), viewer).
+			Where("LOWER(posts.title) LIKE ?", like).
+			Select("podcast_episodes.id, posts.title AS label")
+	case "video":
+		query = visibleOwned(r.db.Model(&model.Video{}).Where("videos.status = ? AND LOWER(videos.title) LIKE ?", "published", like), viewer, "videos.user_id", "videos.visibility").
+			Select("videos.id, videos.title AS label")
+	case "person":
+		query = visiblePublicOwned(r.db.Model(&model.TimelinePerson{}).Where("LOWER(timeline_persons.name) LIKE ?", like), viewer).
+			Select("timeline_persons.id, timeline_persons.name AS label")
+	case "event":
+		query = visiblePublicOwned(r.db.Model(&model.TimelineEvent{}).Where("LOWER(timeline_events.title) LIKE ?", like), viewer).
+			Select("timeline_events.id, timeline_events.title AS label")
+	case "channel":
+		query = r.db.Model(&model.Channel{}).
+			Where("LOWER(channels.name) LIKE ? OR LOWER(channels.slug) LIKE ?", like, like).
+			Select("channels.id, channels.name AS label, channels.slug")
+	case "collection":
+		query = r.db.Model(&model.ContentCollection{}).
+			Where("LOWER(content_collections.name) LIKE ?", like).
+			Select("content_collections.id, content_collections.name AS label")
+	default:
 		return nil, ErrTargetUnavailable
 	}
 
-	ids, err := r.searchResourceIDs(viewer, targetType, strings.TrimSpace(query), limit)
-	if err != nil {
+	var orderColumn string
+	switch targetType {
+	case "article":
+		orderColumn = "feed_items.created_at"
+	case "episode":
+		orderColumn = "podcast_episodes.created_at"
+	default:
+		orderColumn = "created_at"
+	}
+	var rows []searchTargetRow
+	if err := query.Order(orderColumn + " DESC").Limit(limit).Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	items := make([]Target, 0, len(ids))
-	for _, id := range ids {
-		resolved, err := r.Resolve(viewer, targetType, id)
-		if err == nil {
-			items = append(items, resolved)
-		}
+	items := make([]Target, 0, len(rows))
+	for _, row := range rows {
+		module, path := searchTargetLocation(targetType, row)
+		items = append(items, target(targetType, row.ID, row.Label, module, path))
 	}
 	return items, nil
+}
+
+func searchTargetLocation(targetType string, row searchTargetRow) (string, string) {
+	switch targetType {
+	case "post":
+		return "blog", "/post/" + row.ID.String()
+	case "short_note":
+		return "blog", "/posts/notes/" + row.ID.String()
+	case "thread":
+		return "forum", "/topic/" + row.ID.String()
+	case "debate":
+		return "debate", "/" + row.ID.String()
+	case "feed":
+		return "feed", "/?source_id=" + row.ID.String()
+	case "article":
+		return "feed", "/item/" + row.ID.String()
+	case "artist", "album", "song", "playlist":
+		module := "music"
+		path := "/" + targetType + "/" + row.ID.String()
+		if targetType == "song" {
+			path = "/?song_id=" + row.ID.String()
+			if row.AlbumID != nil {
+				path = "/album/" + row.AlbumID.String() + "?song_id=" + row.ID.String()
+			}
+		}
+		return module, path
+	case "podcast":
+		return "podcast", "/show/" + row.Slug
+	case "episode":
+		return "podcast", "/episode/" + row.ID.String()
+	case "video":
+		return "video", "/videos/watch/" + row.ID.String()
+	case "person":
+		return "timeline", "/person/" + row.ID.String()
+	case "event":
+		return "timeline", "/?event=" + row.ID.String()
+	case "channel":
+		return "blog", "/channel/" + row.Slug
+	case "collection":
+		return collectionTarget(model.Collection{Base: model.Base{ID: row.ID}, ContentType: row.ContentType})
+	default:
+		return "", ""
+	}
 }
 
 func visibleMusicWikiEntries(db *gorm.DB, viewer Viewer, ownerColumn string) *gorm.DB {
@@ -221,8 +403,16 @@ func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, l
 	createdAtColumn := "created_at"
 	switch targetType {
 	case "post":
-		query = visibleOwned(r.db.Model(&model.Post{}).Where("status = ? AND LOWER(title) LIKE ?", "published", like), viewer, "user_id", "visibility").
-			Where("NOT EXISTS (SELECT 1 FROM podcast_episodes WHERE podcast_episodes.post_id = posts.id AND podcast_episodes.deleted_at IS NULL)")
+		query = r.db.Table("content_entries").Where("kind = ? AND status = ? AND deleted_at IS NULL AND LOWER(title) LIKE ?", "blog", "published", like)
+		if viewer.UserID == uuid.Nil {
+			query = query.Where("visibility = ?", "public")
+		} else {
+			query = query.Where("visibility = ? OR author_id = ?", "public", viewer.UserID)
+		}
+		idColumn = "content_entries.id"
+		createdAtColumn = "content_entries.created_at"
+	case "short_note":
+		query = r.db.Model(&model.ShortNote{}).Where("LOWER(content) LIKE ?", like)
 	case "thread":
 		query = r.visibleForumTopics(r.db.Model(&model.ForumTopic{}), viewer).Where("LOWER(title) LIKE ?", like)
 	case "debate":
@@ -259,7 +449,9 @@ func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, l
 	case "channel":
 		query = r.db.Model(&model.Channel{}).Where("LOWER(name) LIKE ? OR LOWER(slug) LIKE ?", like, like)
 	case "collection":
-		query = r.db.Model(&model.Collection{}).Where("LOWER(name) LIKE ?", like)
+		query = r.db.Model(&model.ContentCollection{}).Where("LOWER(name) LIKE ?", like)
+		idColumn = "content_collections.id"
+		createdAtColumn = "content_collections.created_at"
 	case "comment":
 		query = r.db.Model(&model.CommentEntry{}).Where("status = ? AND LOWER(content) LIKE ?", "active", like)
 	}
@@ -307,6 +499,8 @@ func referenceTypeForDiscussionKind(kind string) (string, bool) {
 	switch kind {
 	case "blog_post":
 		return "post", true
+	case "short_note":
+		return "short_note", true
 	case "forum_topic":
 		return "thread", true
 	case "debate":
