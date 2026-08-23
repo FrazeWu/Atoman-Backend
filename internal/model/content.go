@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,15 +81,32 @@ type ContentBlogDraft struct {
 func (ContentBlogDraft) TableName() string { return "content_blog_drafts" }
 
 type ContentEpisodeExtension struct {
-	ContentID uuid.UUID `json:"content_id" gorm:"type:uuid;primaryKey"`
-	EpisodeID uuid.UUID `json:"episode_id" gorm:"type:uuid;not null;uniqueIndex"`
+	ContentID       uuid.UUID `json:"content_id" gorm:"type:uuid;primaryKey"`
+	EpisodeID       uuid.UUID `json:"episode_id" gorm:"type:uuid;not null;uniqueIndex"` // legacy resource identity during API transition
+	LegacyPostID    uuid.UUID `json:"legacy_post_id" gorm:"type:uuid;not null;uniqueIndex"`
+	AudioURL        string    `json:"audio_url" gorm:"type:text;not null"`
+	DurationSec     int       `json:"duration_sec" gorm:"not null;default:0"`
+	EpisodeCoverURL string    `json:"episode_cover_url" gorm:"type:text"`
+	SeasonNumber    int       `json:"season_number" gorm:"not null;default:1"`
+	EpisodeNumber   int       `json:"episode_number" gorm:"not null;default:0"`
+	Shownotes       string    `json:"shownotes" gorm:"type:text;not null"`
+	ViewCount       int64     `json:"view_count" gorm:"not null;default:0"`
 }
 
 func (ContentEpisodeExtension) TableName() string { return "content_episode_extensions" }
 
 type ContentVideoExtension struct {
-	ContentID uuid.UUID `json:"content_id" gorm:"type:uuid;primaryKey"`
-	VideoID   uuid.UUID `json:"video_id" gorm:"type:uuid;not null;uniqueIndex"`
+	ContentID          uuid.UUID       `json:"content_id" gorm:"type:uuid;primaryKey"`
+	VideoID            uuid.UUID       `json:"video_id" gorm:"type:uuid;not null;uniqueIndex"` // legacy resource identity during API transition
+	StorageType        string          `json:"storage_type" gorm:"not null;default:'external'"`
+	VideoURL           string          `json:"video_url" gorm:"type:text;not null"`
+	ThumbnailURL       string          `json:"thumbnail_url" gorm:"type:text"`
+	DurationSec        int             `json:"duration_sec" gorm:"not null;default:0"`
+	ProcessingStatus   string          `json:"processing_status" gorm:"not null;default:'none'"`
+	ProcessingError    string          `json:"processing_error" gorm:"type:text"`
+	PreviewThumbnails  json.RawMessage `json:"preview_thumbnails" gorm:"type:jsonb"`
+	ViewCount          int             `json:"view_count" gorm:"not null;default:0"`
+	CollectionConflict bool            `json:"collection_conflict" gorm:"not null;default:false;index"`
 }
 
 func (ContentVideoExtension) TableName() string { return "content_video_extensions" }

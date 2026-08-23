@@ -183,6 +183,21 @@ func (s *Service) hotMusicAlbums(limit int) ([]HotItem, error) {
 
 	items := make([]HotItem, 0, len(albums))
 	for _, album := range albums {
+		var publishedAt *time.Time
+		if !album.ReleaseDate.IsZero() {
+			publishedAt = &album.ReleaseDate
+		} else if album.ReleaseYear > 0 {
+			t := time.Date(album.ReleaseYear, 1, 1, 0, 0, 0, 0, time.UTC)
+			publishedAt = &t
+		} else if album.Year > 0 {
+			t := time.Date(album.Year, 1, 1, 0, 0, 0, 0, time.UTC)
+			publishedAt = &t
+		} else if !album.CreatedAt.IsZero() {
+			publishedAt = &album.CreatedAt
+		} else {
+			publishedAt = timePtr(album.UpdatedAt)
+		}
+
 		items = append(items, HotItem{
 			ID:          album.ID.String(),
 			Module:      "music",
@@ -193,7 +208,7 @@ func (s *Service) hotMusicAlbums(limit int) ([]HotItem, error) {
 			TargetPath:  "/music/album/" + album.ID.String(),
 			Score:       album.HotScore,
 			ScoreLabel:  fmt.Sprintf("热度 %.0f", album.HotScore),
-			PublishedAt: timePtr(album.UpdatedAt),
+			PublishedAt: publishedAt,
 		})
 	}
 	return items, nil

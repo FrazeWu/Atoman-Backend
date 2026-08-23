@@ -64,7 +64,7 @@ func backfillPostContentEntries(tx *gorm.DB) error {
 		}
 		if kind == "podcast" {
 			episode := episodeByPost[post.ID]
-			if err := ensureEpisodeExtension(tx, entry.ID, episode.ID); err != nil {
+			if err := ensureEpisodeExtension(tx, entry.ID, episode.ID, post); err != nil {
 				return err
 			}
 		} else {
@@ -416,8 +416,40 @@ func ensurePostExtension(tx *gorm.DB, contentID, postID uuid.UUID) error {
 	return tx.Where(model.ContentPostExtension{PostID: postID}).FirstOrCreate(&model.ContentPostExtension{ContentID: contentID, PostID: postID}).Error
 }
 
-func ensureEpisodeExtension(tx *gorm.DB, contentID, episodeID uuid.UUID) error {
-	return tx.Where(model.ContentEpisodeExtension{EpisodeID: episodeID}).FirstOrCreate(&model.ContentEpisodeExtension{ContentID: contentID, EpisodeID: episodeID}).Error
+func ensureEpisodeExtension(tx *gorm.DB, contentID, episodeID uuid.UUID, post model.Post) error {
+	extension := model.ContentEpisodeExtension{
+		ContentID: contentID, EpisodeID: episodeID, LegacyPostID: post.ID,
+		AudioURL: "", DurationSec: 0, EpisodeCoverURL: "", SeasonNumber: 1,
+		EpisodeNumber: 0, Shownotes: post.Content, ViewCount: post.ViewCount,
+	}
+	var episode model.PodcastEpisode
+	if err := tx.First(&episode, "id = ?", episodeID).Error; err != nil {
+		return err
+	}
+	extension.AudioURL = episode.AudioURL
+	extension.DurationSec = episode.DurationSec
+	extension.EpisodeCoverURL = episode.EpisodeCoverURL
+	extension.SeasonNumber = episode.SeasonNumber
+	extension.EpisodeNumber = episode.EpisodeNumber
+	var existing model.ContentEpisodeExtension
+	err := tx.Where("episode_id = ?", episodeID).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return tx.Create(&extension).Error
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Model(&existing).Updates(map[string]any{
+		"content_id":        existing.ContentID,
+		"legacy_post_id":    extension.LegacyPostID,
+		"audio_url":         extension.AudioURL,
+		"duration_sec":      extension.DurationSec,
+		"episode_cover_url": extension.EpisodeCoverURL,
+		"season_number":     extension.SeasonNumber,
+		"episode_number":    extension.EpisodeNumber,
+		"shownotes":         extension.Shownotes,
+		"view_count":        extension.ViewCount,
+	}).Error
 }
 
 func syncContentEntryFromVideo(tx *gorm.DB, entry *model.ContentEntry, video model.Video) error {
@@ -435,6 +467,36 @@ func syncContentEntryFromVideo(tx *gorm.DB, entry *model.ContentEntry, video mod
 		"visibility":   video.Visibility,
 		"published_at": video.PublishedAt,
 		"scheduled_at": video.ScheduledAt,
+	}).Error
+}
+
+func syncContentVideoExtension(tx *gorm.DB, contentID uuid.UUID, video model.Video) error {
+	extension := model.ContentVideoExtension{
+		ContentID: contentID, VideoID: video.ID, StorageType: video.StorageType,
+		VideoURL: video.VideoURL, ThumbnailURL: video.ThumbnailURL, DurationSec: video.DurationSec,
+		ProcessingStatus: video.ProcessingStatus, ProcessingError: video.ProcessingError,
+		PreviewThumbnails: video.PreviewThumbnails, ViewCount: video.ViewCount,
+		CollectionConflict: video.CollectionConflict,
+	}
+	var existing model.ContentVideoExtension
+	err := tx.Where("video_id = ?", video.ID).First(&existing).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return tx.Create(&extension).Error
+	}
+	if err != nil {
+		return err
+	}
+	return tx.Model(&existing).Updates(map[string]any{
+		"content_id":          existing.ContentID,
+		"storage_type":        extension.StorageType,
+		"video_url":           extension.VideoURL,
+		"thumbnail_url":       extension.ThumbnailURL,
+		"duration_sec":        extension.DurationSec,
+		"processing_status":   extension.ProcessingStatus,
+		"processing_error":    extension.ProcessingError,
+		"preview_thumbnails":  extension.PreviewThumbnails,
+		"view_count":          extension.ViewCount,
+		"collection_conflict": extension.CollectionConflict,
 	}).Error
 }
 
@@ -459,6 +521,9 @@ func backfillVideoContentEntries(tx *gorm.DB) error {
 			if err := syncContentEntryFromVideo(tx, &entry, video); err != nil {
 				return err
 			}
+			if err := syncContentVideoExtension(tx, entry.ID, video); err != nil {
+				return err
+			}
 			continue
 		}
 		authorID := video.UserID
@@ -467,6 +532,9 @@ func backfillVideoContentEntries(tx *gorm.DB) error {
 			return err
 		}
 		if err := tx.Create(&model.ContentVideoExtension{ContentID: entry.ID, VideoID: video.ID}).Error; err != nil {
+			return err
+		}
+		if err := syncContentVideoExtension(tx, entry.ID, video); err != nil {
 			return err
 		}
 	}

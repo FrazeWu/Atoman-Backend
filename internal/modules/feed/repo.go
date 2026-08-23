@@ -845,6 +845,10 @@ type RecommendationChannelRow struct {
 }
 
 func (r *Repo) ListRecommendationChannels(languageCode string) ([]RecommendationChannelRow, error) {
+	if !hasCanonicalBlogExtensions(r.db) {
+		return r.listLegacyRecommendationChannels(languageCode)
+	}
+
 	rows := make([]RecommendationChannelRow, 0)
 	latestPublishedExpr := recommendationChannelLatestPublishedExpr(r.db.Dialector.Name())
 	db := r.db.Table("channels").
@@ -874,7 +878,47 @@ func (r *Repo) ListRecommendationChannels(languageCode string) ([]Recommendation
 	return rows, err
 }
 
+func (r *Repo) listLegacyRecommendationChannels(languageCode string) ([]RecommendationChannelRow, error) {
+	rows := make([]RecommendationChannelRow, 0)
+	latestPublishedExpr := recommendationChannelLatestPublishedExpr(r.db.Dialector.Name())
+	db := r.db.Table("channels").
+		Select(`
+			channels.id AS channel_id,
+			channels.slug AS slug,
+			channels.name AS name,
+			channels.description AS description,
+			channels.cover_url AS cover_url,
+			COUNT(posts.id) AS published_count,
+			SUM(CASE WHEN posts.created_at >= ? THEN 1 ELSE 0 END) AS recent_post_count,
+			COALESCE(AVG(posts.view_count), 0) AS average_views,
+			`+latestPublishedExpr+` AS latest_published_at_unix,
+			MAX(posts.language_code) AS language_code
+		`, time.Now().Add(-7*24*time.Hour)).
+		Joins("JOIN posts AS posts ON posts.channel_id = channels.id").
+		Where("channels.deleted_at IS NULL AND posts.deleted_at IS NULL AND posts.status = ?", "published").
+		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"})
+	if languageCode != "" {
+		db = db.Where("posts.language_code = ?", languageCode)
+	}
+	err := db.
+		Group("channels.id").
+		Order("MAX(posts.created_at) DESC").
+		Scan(&rows).Error
+	return rows, err
+}
+
 func (r *Repo) ListRecentPublishedPostsByChannelID(channelID uuid.UUID, limit int) ([]model.Post, error) {
+	if !hasCanonicalBlogExtensions(r.db) {
+		var posts []model.Post
+		db := r.db.Model(&model.Post{}).
+			Preload("Channel").
+			Where("channel_id = ? AND status = ?", channelID, "published").
+			Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
+			Order("created_at DESC").
+			Limit(limit)
+		return posts, db.Find(&posts).Error
+	}
+
 	query := blogmodule.CanonicalBlogPostsQuery(r.db).
 		Where("posts.channel_id = ? AND posts.status = ?", channelID, "published").
 		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).
