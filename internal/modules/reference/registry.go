@@ -331,6 +331,8 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 
 	var orderColumn string
 	switch targetType {
+	case "post":
+		orderColumn = "posts.created_at"
 	case "article":
 		orderColumn = "feed_items.created_at"
 	case "episode":
