@@ -2027,12 +2027,12 @@ func TestUploadAlbumImportArchiveRejectsActualStreamSizeOverLimit(t *testing.T) 
 	}
 }
 
-func TestUploadAlbumImportArchiveRejectsNonZipAndEmptyStreamsBeforeQueuing(t *testing.T) {
+func TestUploadAlbumImportArchiveRejectsUnsupportedAndEmptyStreamsBeforeQueuing(t *testing.T) {
 	for _, test := range []struct {
 		name, archive string
 		body          io.Reader
 	}{
-		{"non zip", "album.rar", strings.NewReader("data")},
+		{"unsupported", "album.exe", strings.NewReader("data")},
 		{"empty", "album.zip", strings.NewReader("")},
 	} {
 		t.Run(test.name, func(t *testing.T) {

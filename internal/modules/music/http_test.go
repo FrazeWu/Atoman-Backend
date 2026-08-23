@@ -453,6 +453,34 @@ func TestRegisterRoutesMusicSearchAndSongDetailHideNonPublicSongs(t *testing.T) 
 	assertMusicHTTPError(t, detail, http.StatusNotFound, "music.song_not_found")
 }
 
+func TestRegisterRoutesMusicSongDetailHidesInvisibleArtistCredits(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	foreignOwner := uuid.New()
+	artist := model.Artist{
+		Name:            "Private Artist",
+		EntryStatus:     "draft",
+		LifecycleStatus: model.MusicLifecycleDraft,
+		CreatedBy:       &foreignOwner,
+	}
+	if err := db.Create(&artist).Error; err != nil {
+		t.Fatalf("create private artist: %v", err)
+	}
+	song := model.Song{Title: "Public Song With Private Credit", AudioURL: "/public.mp3", Status: "open", LifecycleStatus: model.MusicLifecycleActive, UploadedBy: &user.ID}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create public song: %v", err)
+	}
+	if err := db.Model(&song).Association("Artists").Append(&artist); err != nil {
+		t.Fatalf("link private artist: %v", err)
+	}
+
+	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodGet, "/api/v1/music/songs/"+song.ID.String(), "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected public song detail 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if strings.Contains(response.Body.String(), artist.ID.String()) || strings.Contains(response.Body.String(), artist.Name) {
+		t.Fatalf("song detail exposed invisible artist: %s", response.Body.String())
+	}
+}
 func TestRegisterRoutesMusicSearchMatchesLyricsAndArtistAliases(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Primary Artist", EntryStatus: "open"}
