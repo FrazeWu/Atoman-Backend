@@ -499,11 +499,15 @@ func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]T
 }
 
 func (s *Service) getExploreFeedWithDuplicateFilter(user authctx.CurrentUser, query FeedQuery, page int, limit int, sortMode string) ([]TimelineItemDTO, int64, error) {
-	posts, err := s.repo.ListExplorePostsAll(query)
+	duplicateQuery := query
+	// Read filtering must happen after duplicate clusters are formed so a read
+	// mirror cannot hide the unread canonical item, or vice versa.
+	duplicateQuery.IsRead = nil
+	posts, err := s.repo.ListExplorePostsAll(duplicateQuery)
 	if err != nil {
 		return nil, 0, err
 	}
-	feedItems, err := s.repo.ListExploreFeedItemsAll(sortMode, query)
+	feedItems, err := s.repo.ListExploreFeedItemsAll(sortMode, duplicateQuery)
 	if err != nil {
 		return nil, 0, err
 	}

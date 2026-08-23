@@ -1,7 +1,6 @@
 package blog
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,7 +14,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 )
 
 func (h *Handler) listChannels(c *gin.Context) {
@@ -329,27 +327,4 @@ func buildArticleRSS(ch model.Channel, posts []model.Post, siteURL string) strin
 
 func rssCDATA(value string) string {
 	return "<![CDATA[" + strings.ReplaceAll(value, "]]>", "]]]]><![CDATA[>") + "]" + "]>"
-}
-
-func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collection, error) {
-	var collection model.ContentCollection
-	err := db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
-	if err == nil {
-		result := blogCollectionDTO(collection)
-		return &result, nil
-	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, err
-	}
-	collection = model.ContentCollection{
-		ChannelID:   channelID,
-		Name:        ensureDefaultCollectionName(),
-		Description: "默认合集",
-		IsDefault:   true,
-	}
-	if err := db.Create(&collection).Error; err != nil {
-		return nil, err
-	}
-	result := blogCollectionDTO(collection)
-	return &result, nil
 }

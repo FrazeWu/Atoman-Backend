@@ -255,14 +255,21 @@ func saveLegacyAlbumImportFile(tx *gorm.DB, file *model.AlbumImportFile, session
 	if err != nil {
 		return err
 	}
+	format := strings.TrimSpace(state.Format)
+	if format == "" {
+		_, format, _ = detectAlbumImportFileRole(state.FileName)
+	}
+	if format == "" {
+		format = "zip"
+	}
 	if strings.TrimSpace(contentType) == "" {
-		contentType = "application/zip"
+		contentType = archiveContentType(format)
 	}
 	file.ImportID = sessionID
 	file.RelativePath = state.FileName
 	file.FileName = state.FileName
 	file.Role = AlbumImportFileRoleArchive
-	file.DetectedFormat = "zip"
+	file.DetectedFormat = format
 	file.ContentType = contentType
 	file.Size = state.FileSize
 	file.SourceKey = state.ObjectKey

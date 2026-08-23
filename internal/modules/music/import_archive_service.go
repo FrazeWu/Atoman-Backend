@@ -22,15 +22,34 @@ import (
 	"gorm.io/gorm"
 )
 
+func archiveContentType(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case "zip":
+		return "application/zip"
+	case "rar":
+		return "application/vnd.rar"
+	case "7z":
+		return "application/x-7z-compressed"
+	case "tar":
+		return "application/x-tar"
+	case "tar.gz", "tgz":
+		return "application/gzip"
+	case "tar.bz2":
+		return "application/x-bzip2"
+	case "tar.xz":
+		return "application/x-xz"
+	default:
+		return "application/octet-stream"
+	}
+}
 func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUID, archiveName string, reader io.Reader) (model.AlbumImportSession, error) {
 	if user.ID == uuid.Nil {
 		return model.AlbumImportSession{}, apperr.Unauthorized("Login required")
 	}
-	if strings.TrimSpace(archiveName) == "" {
-		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive file name is required")
-	}
-	if strings.ToLower(filepath.Ext(strings.TrimSpace(archiveName))) != ".zip" {
-		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive must be a zip file")
+	archiveName = strings.TrimSpace(archiveName)
+	role, format, formatErr := detectAlbumImportFileRole(archiveName)
+	if archiveName == "" || formatErr != nil || role != AlbumImportFileRoleArchive {
+		return model.AlbumImportSession{}, apperr.BadRequest("validation.invalid_request", "archive format is not supported")
 	}
 	if _, err := s.GetAlbumImportSessionForUser(user, id); err != nil {
 		return model.AlbumImportSession{}, err
@@ -40,9 +59,10 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 		return model.AlbumImportSession{}, err
 	}
 	archiveID := uuid.New()
-	objectKey := albumImportSourceKey(user.ID, id, archiveID, "zip")
+	objectKey := albumImportSourceKey(user.ID, id, archiveID, format)
 	limited := &albumImportLimitedReader{reader: reader, limit: albumImportUploadLimitsFromEnv().MaxFileBytes}
-	err := s.albumImportMultipart.PutObject(objectKey, "application/zip", limited)
+	contentType := archiveContentType(format)
+	err := s.albumImportMultipart.PutObject(objectKey, contentType, limited)
 	if err != nil {
 		if cleanupErr := s.deleteAlbumImportSessionObjectOrRecord(id, objectKey); cleanupErr != nil {
 			return model.AlbumImportSession{}, cleanupErr
@@ -72,7 +92,7 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 			return apperr.Unprocessable("music.import_invalid_status", "Import session is not pending upload")
 		}
 
-		file := model.AlbumImportFile{Base: model.Base{ID: archiveID}, ImportID: session.ID, RelativePath: strings.TrimSpace(archiveName), FileName: strings.TrimSpace(archiveName), Role: AlbumImportFileRoleArchive, DetectedFormat: "zip", ContentType: "application/zip", SourceKey: objectKey, Size: limited.count, UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending, CompletedPartsJSON: "[]", CleanupJSON: "[]", MetadataJSON: "{}"}
+		file := model.AlbumImportFile{Base: model.Base{ID: archiveID}, ImportID: session.ID, RelativePath: archiveName, FileName: archiveName, Role: AlbumImportFileRoleArchive, DetectedFormat: format, ContentType: contentType, SourceKey: objectKey, Size: limited.count, UploadStatus: AlbumImportFileUploadStatusUploaded, ProcessingStatus: AlbumImportFileProcessingStatusPending, CompletedPartsJSON: "[]", CleanupJSON: "[]", MetadataJSON: "{}"}
 		if err := tx.Create(&file).Error; err != nil {
 			return err
 		}
@@ -80,7 +100,7 @@ func (s *Service) UploadAlbumImportArchive(user authctx.CurrentUser, id uuid.UUI
 		if err != nil {
 			return err
 		}
-		payload["archive_name"] = strings.TrimSpace(archiveName)
+		payload["archive_name"] = archiveName
 		payloadJSON, err := json.Marshal(payload)
 		if err != nil {
 			return err
@@ -160,6 +180,32 @@ func (s *Service) deriveAlbumImportPayloadFromZipFile(user authctx.CurrentUser, 
 
 	derivedTracks := make([]map[string]any, 0)
 	var coverURL string
+	seenPaths := make(map[string]struct{})
+	var expandedBytes uint64
+	archiveTrackCount := 0
+	for _, file := range reader.File {
+		cleanPath, pathErr := safeArchiveEntryPath(file.Name)
+		if pathErr != nil {
+			return nil, apperr.BadRequest("validation.invalid_request", "archive contains an unsafe path")
+		}
+		if _, exists := seenPaths[cleanPath]; exists {
+			return nil, apperr.BadRequest("validation.invalid_request", "archive contains duplicate entries")
+		}
+		seenPaths[cleanPath] = struct{}{}
+		if file.FileInfo().Mode()&os.ModeSymlink != 0 {
+			return nil, apperr.BadRequest("validation.invalid_request", "archive contains an unsafe entry")
+		}
+		if file.UncompressedSize64 > uint64(mediaArchiveMaxBytes) || expandedBytes > uint64(mediaArchiveMaxBytes)-file.UncompressedSize64 {
+			return nil, apperr.BadRequest("validation.invalid_request", "archive expands beyond size limit")
+		}
+		expandedBytes += file.UncompressedSize64
+		if _, _, ok := deriveTrackFromArchiveEntry(file.Name); ok {
+			archiveTrackCount++
+			if archiveTrackCount > albumImportUploadLimitsFromEnv().MaxTracks {
+				return nil, apperr.BadRequest("validation.invalid_request", "archive contains too many audio tracks")
+			}
+		}
+	}
 
 	for _, file := range reader.File {
 		if file.FileInfo().IsDir() {
@@ -176,16 +222,13 @@ func (s *Service) deriveAlbumImportPayloadFromZipFile(user authctx.CurrentUser, 
 		if trackTitle, trackNumber, ok := deriveTrackFromArchiveEntry(file.Name); ok {
 			audioKey := ""
 			audioURL := ""
-			if rc, err := file.Open(); err == nil {
-				audioBytes, readErr := io.ReadAll(rc)
-				rc.Close()
-				if readErr == nil {
-					filename := uuid.NewString() + ext
-					uploadedURL, uploadedKey, uploadErr := s.storeImportedAudio(user, filename, ext, audioBytes)
-					if uploadErr == nil {
-						audioURL = uploadedURL
-						audioKey = uploadedKey
-					}
+			if rc, openErr := file.Open(); openErr == nil {
+				filename := uuid.NewString() + ext
+				uploadedURL, uploadedKey, uploadErr := s.storeImportedAudioReader(user, filename, ext, rc)
+				_ = rc.Close()
+				if uploadErr == nil {
+					audioURL = uploadedURL
+					audioKey = uploadedKey
 				}
 			}
 			derivedTracks = append(derivedTracks, map[string]any{
@@ -207,9 +250,9 @@ func (s *Service) deriveAlbumImportPayloadFromZipFile(user authctx.CurrentUser, 
 				if err != nil {
 					continue
 				}
-				imgBytes, err := io.ReadAll(rc)
-				rc.Close()
-				if err != nil {
+				imgBytes, readErr := readArchiveEntryLimited(rc, 20*1024*1024)
+				_ = rc.Close()
+				if readErr != nil {
 					continue
 				}
 
@@ -230,6 +273,75 @@ func (s *Service) deriveAlbumImportPayloadFromZipFile(user authctx.CurrentUser, 
 		"upload_progress":     100,
 		"upload_speed":        0,
 	}, nil
+}
+
+func readArchiveEntryLimited(reader io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		return nil, errors.New("archive entry size limit is invalid")
+	}
+	content, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(content)) > limit {
+		return nil, errors.New("archive entry is too large")
+	}
+	return content, nil
+}
+
+func (s *Service) storeImportedAudioReader(user authctx.CurrentUser, filename string, ext string, reader io.Reader) (string, string, error) {
+	tmp, err := os.CreateTemp("", "atoman-import-audio-*")
+	if err != nil {
+		return "", "", err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	written, copyErr := io.Copy(tmp, io.LimitReader(reader, mediaArchiveMaxBytes+1))
+	if copyErr != nil {
+		_ = tmp.Close()
+		return "", "", copyErr
+	}
+	if written > mediaArchiveMaxBytes {
+		_ = tmp.Close()
+		return "", "", errors.New("archive audio entry is too large")
+	}
+	if err := tmp.Close(); err != nil {
+		return "", "", err
+	}
+	if s.s3 == nil || !strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_TYPE")), "s3") {
+		return "", "", nil
+	}
+	bucket := strings.TrimSpace(os.Getenv("S3_BUCKET"))
+	urlPrefix := strings.TrimRight(strings.TrimSpace(os.Getenv("S3_URL_PREFIX")), "/")
+	if bucket == "" || urlPrefix == "" {
+		return "", "", nil
+	}
+	body, err := os.Open(tmpPath)
+	if err != nil {
+		return "", "", err
+	}
+	defer body.Close()
+	key := storage.BuildMusicUploadKey("audio", user.ID.String(), filename, time.Now())
+	contentType := "audio/mpeg"
+	switch strings.ToLower(ext) {
+	case ".flac":
+		contentType = "audio/flac"
+	case ".wav":
+		contentType = "audio/wav"
+	case ".m4a":
+		contentType = "audio/x-m4a"
+	case ".aac":
+		contentType = "audio/aac"
+	case ".ogg":
+		contentType = "audio/ogg"
+	}
+	if _, err := s.s3.PutObject(&s3.PutObjectInput{
+		Bucket: aws.String(bucket), Key: aws.String(key), Body: body,
+		ContentType: aws.String(contentType), ACL: aws.String("public-read"),
+	}); err != nil {
+		return "", "", nil
+	}
+	return urlPrefix + "/" + key, key, nil
 }
 
 func (s *Service) storeImportedAudio(user authctx.CurrentUser, filename string, ext string, content []byte) (string, string, error) {

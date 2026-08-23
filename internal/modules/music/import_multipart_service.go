@@ -3,7 +3,6 @@ package music
 import (
 	"encoding/json"
 	"errors"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -130,7 +129,7 @@ func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UU
 			FileSize:       input.FileSize,
 			ObjectKey:      preparedObjectKey,
 			UploadID:       preparedUploadID,
-			Format:          format,
+			Format:         format,
 			CompletedParts: []AlbumImportMultipartPartDTO{},
 		}
 		writeAlbumImportMultipartState(payload, state)
@@ -455,6 +454,7 @@ func albumImportDerivedTrackCount(value any) int64 {
 type albumImportMultipartState struct {
 	FileName       string
 	FileSize       int64
+	Format         string
 	ObjectKey      string
 	UploadID       string
 	PartSize       int64
@@ -465,6 +465,7 @@ func albumImportMultipartStateFromPayload(payload map[string]any) albumImportMul
 	state := albumImportMultipartState{
 		FileName:       stringValue(payload["multipart_file_name"]),
 		FileSize:       int64Value(payload["multipart_file_size"]),
+		Format:         stringValue(payload["multipart_format"]),
 		ObjectKey:      stringValue(payload["multipart_object_key"]),
 		UploadID:       stringValue(payload["multipart_upload_id"]),
 		PartSize:       int64Value(payload["multipart_part_size"]),
@@ -501,6 +502,7 @@ func writeAlbumImportMultipartState(payload map[string]any, state albumImportMul
 	payload["archive_name"] = state.FileName
 	payload["multipart_file_name"] = state.FileName
 	payload["multipart_file_size"] = state.FileSize
+	payload["multipart_format"] = state.Format
 	payload["multipart_object_key"] = state.ObjectKey
 	payload["multipart_upload_id"] = state.UploadID
 	payload["multipart_part_size"] = state.PartSize

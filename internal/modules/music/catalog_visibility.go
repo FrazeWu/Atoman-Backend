@@ -50,6 +50,22 @@ func visibleSongPreload(user *authctx.CurrentUser) func(*gorm.DB) *gorm.DB {
 	}
 }
 
+func visibleAlbumArtistCreditsPreload(user *authctx.CurrentUser) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		condition, args := musicEntryVisibilityCondition("visible_credit_artists", "created_by", user, true)
+		return db.Joins("JOIN \"Artists\" AS visible_credit_artists ON visible_credit_artists.id = album_artists.artist_id AND "+condition, args...).
+			Order("album_artists.position ASC, album_artists.role ASC, album_artists.custom_role ASC")
+	}
+}
+
+func visibleSongArtistCreditsPreload(user *authctx.CurrentUser) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		condition, args := musicEntryVisibilityCondition("visible_credit_artists", "created_by", user, true)
+		return db.Joins("JOIN \"Artists\" AS visible_credit_artists ON visible_credit_artists.id = song_artists.artist_id AND "+condition, args...).
+			Order("song_artists.position ASC, song_artists.role ASC, song_artists.custom_role ASC")
+	}
+}
+
 func canViewMusicLifecycle(lifecycle string, ownerID *uuid.UUID, user *authctx.CurrentUser, includeMerged bool) bool {
 	if user != nil && (user.Role == authctx.RoleAdmin || user.Role == authctx.RoleOwner) {
 		return true

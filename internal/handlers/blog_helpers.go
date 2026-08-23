@@ -81,7 +81,7 @@ func channelNameExists(db *gorm.DB, name string, excludeID *uuid.UUID) (bool, er
 }
 
 func collectionNameExists(db *gorm.DB, channelID uuid.UUID, name string, excludeID *uuid.UUID) (bool, error) {
-	query := db.Model(&model.Collection{}).
+	query := db.Model(&model.ContentCollection{}).
 		Where("channel_id = ?", channelID).
 		Where("name = ?", normalizeName(name))
 	if excludeID != nil {
@@ -96,10 +96,10 @@ func collectionNameExists(db *gorm.DB, channelID uuid.UUID, name string, exclude
 	return count > 0, nil
 }
 
-func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collection, error) {
-	var collection model.Collection
+func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.ContentCollection, error) {
+	var collection model.ContentCollection
 
-	err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channelID, "blog", true).First(&collection).Error
+	err := db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
 	if err == nil {
 		if strings.TrimSpace(collection.Name) == "" {
 			collection.Name = defaultCollectionName
@@ -114,7 +114,7 @@ func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collectio
 		return nil, err
 	}
 
-	err = db.Where("channel_id = ? AND content_type = ? AND name = ?", channelID, "blog", defaultCollectionName).First(&collection).Error
+	err = db.Where("channel_id = ? AND name = ?", channelID, defaultCollectionName).First(&collection).Error
 	if err == nil {
 		if !collection.IsDefault {
 			if saveErr := db.Model(&collection).Update("is_default", true).Error; saveErr != nil {
@@ -129,17 +129,11 @@ func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collectio
 		return nil, err
 	}
 
-	// Check for soft-deleted record that would block the unique index
-	var softDeleted model.Collection
-	softErr := db.Unscoped().
-		Where("channel_id = ? AND content_type = ? AND (is_default = ? OR name = ?)", channelID, "blog", true, defaultCollectionName).
-		First(&softDeleted).Error
+	var softDeleted model.ContentCollection
+	softErr := db.Unscoped().Where("channel_id = ? AND (is_default = ? OR name = ?)", channelID, true, defaultCollectionName).First(&softDeleted).Error
 	if softErr == nil && softDeleted.DeletedAt.Valid {
 		if restoreErr := db.Unscoped().Model(&softDeleted).Updates(map[string]interface{}{
-			"deleted_at":   nil,
-			"content_type": "blog",
-			"is_default":   true,
-			"name":         defaultCollectionName,
+			"deleted_at": nil, "is_default": true, "name": defaultCollectionName,
 		}).Error; restoreErr != nil {
 			return nil, restoreErr
 		}
@@ -149,18 +143,15 @@ func ensureDefaultCollection(db *gorm.DB, channelID uuid.UUID) (*model.Collectio
 		return &softDeleted, nil
 	}
 
-	collection = model.Collection{
+	collection = model.ContentCollection{
 		ChannelID:   channelID,
-		ContentType: "blog",
 		Name:        defaultCollectionName,
 		Description: "合集默认子合集",
 		IsDefault:   true,
 	}
-
 	if err := db.Create(&collection).Error; err != nil {
 		return nil, err
 	}
-
 	return &collection, nil
 }
 
