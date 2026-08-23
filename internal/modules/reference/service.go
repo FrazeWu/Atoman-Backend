@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"sync"
 
@@ -59,6 +60,7 @@ func (s *Service) SearchMany(ctx context.Context, viewer Viewer, targetTypes []s
 	}
 	var workers sync.WaitGroup
 	var firstErr error
+	var successfulTypes int
 	var errMu sync.Mutex
 	for worker := 0; worker < workerCount; worker++ {
 		workers.Add(1)
@@ -77,12 +79,16 @@ func (s *Service) SearchMany(ctx context.Context, viewer Viewer, targetTypes []s
 				if err != nil {
 					errMu.Lock()
 					if firstErr == nil {
-						firstErr = err
+						firstErr = fmt.Errorf("reference search type %q: %w", uniqueTypes[index], err)
 					}
 					errMu.Unlock()
+					log.Printf("reference search type %q failed: %v", uniqueTypes[index], err)
 					continue
 				}
 				itemsByType[index] = matches
+				errMu.Lock()
+				successfulTypes++
+				errMu.Unlock()
 			}
 		}()
 	}
@@ -96,8 +102,9 @@ func (s *Service) SearchMany(ctx context.Context, viewer Viewer, targetTypes []s
 	}
 	errMu.Lock()
 	err := firstErr
+	successes := successfulTypes
 	errMu.Unlock()
-	if err != nil {
+	if successes == 0 && err != nil {
 		return nil, err
 	}
 

@@ -56,7 +56,7 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 			Status  string    `gorm:"column:status"`
 			Visible string    `gorm:"column:visibility"`
 		}
-		query := r.db.Table("content_entries").Where("kind = ? AND status = ? AND deleted_at IS NULL", "blog", "published")
+		query := r.db.Table("content_entries").Where("content_entries.kind = ? AND content_entries.status = ? AND content_entries.deleted_at IS NULL", "blog", "published")
 		if viewer.UserID == uuid.Nil {
 			query = query.Where("content_entries.visibility = ?", "public")
 		} else {
@@ -409,9 +409,9 @@ func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, l
 	createdAtColumn := "created_at"
 	switch targetType {
 	case "post":
-		query = r.db.Table("content_entries").Where("kind = ? AND status = ? AND deleted_at IS NULL AND LOWER(title) LIKE ?", "blog", "published", like)
+		query = r.db.Table("content_entries").Where("content_entries.kind = ? AND content_entries.status = ? AND content_entries.deleted_at IS NULL AND LOWER(content_entries.title) LIKE ?", "blog", "published", like)
 		if viewer.UserID == uuid.Nil {
-			query = query.Where("visibility = ?", "public")
+			query = query.Where("content_entries.visibility = ?", "public")
 		} else {
 			query = query.
 				Joins("LEFT JOIN posts AS legacy_posts ON legacy_posts.id = content_entries.id AND legacy_posts.deleted_at IS NULL").
