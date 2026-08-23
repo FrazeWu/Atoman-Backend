@@ -48,6 +48,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 		}
 		return s.GetPublicFeed(query)
 	}
+	query.viewerID = user.ID
 
 	subscriptions, err := s.repo.ListSubscriptionsWithSources(user.ID, query)
 	if err != nil {
@@ -343,7 +344,7 @@ func (s *Service) getSubscribedExternalFeed(userID uuid.UUID, feedSourceIDs []uu
 }
 
 func (s *Service) getSubscribedExternalFeedWithReadFilter(userID uuid.UUID, feedSourceIDs []uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {
-	feedItems, err := s.repo.ListFeedItemsBySourceIDs(feedSourceIDs)
+	feedItems, err := s.repo.ListFeedItemsBySourceIDsFiltered(feedSourceIDs, query)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -360,9 +361,11 @@ func (s *Service) getSubscribedExternalFeedWithReadFilter(userID uuid.UUID, feed
 			IsRead:      readMap[feedItems[i].ID],
 		})
 	}
-	items = filterTimeline(items, query)
-	paged, total := paginateTimeline(items, normalizedPage(query.Page), normalizedPageSize(query.PageSize))
-	return paged, total, nil
+	total, err := s.repo.CountFeedItemsBySourceIDsFiltered(feedSourceIDs, query)
+	if err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }
 
 func (s *Service) GetPublicFeed(query FeedQuery) ([]TimelineItemDTO, int64, error) {
@@ -378,20 +381,11 @@ func (s *Service) GetPublicFeed(query FeedQuery) ([]TimelineItemDTO, int64, erro
 	}
 
 	candidateLimit := offset + limit
-	posts, err := s.repo.ListExplorePosts(candidateLimit, 0)
+	posts, err := s.repo.ListExplorePostsPage(query, candidateLimit, 0)
 	if err != nil {
 		return nil, 0, err
 	}
-	sources, err := s.repo.ListVisibleFeedSources(query)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	feedSourceIDs := make([]uuid.UUID, 0, len(sources))
-	for _, source := range sources {
-		feedSourceIDs = append(feedSourceIDs, source.ID)
-	}
-	feedItems, err := s.repo.ListFeedItemsBySourceIDsPaged(dedupeUUIDs(feedSourceIDs), candidateLimit, 0)
+	feedItems, err := s.repo.ListExploreFeedItemsPage("recent", query, candidateLimit, 0)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -407,11 +401,11 @@ func (s *Service) GetPublicFeed(query FeedQuery) ([]TimelineItemDTO, int64, erro
 	items = filterTimeline(items, query)
 	sortTimeline(items)
 	paged, _ := paginateTimeline(items, page, limit)
-	postTotal, err := s.repo.CountExplorePosts()
+	postTotal, err := s.repo.CountExplorePostsMatching(query)
 	if err != nil {
 		return nil, 0, err
 	}
-	feedTotal, err := s.repo.CountFeedItemsBySourceIDs(dedupeUUIDs(feedSourceIDs))
+	feedTotal, err := s.repo.CountExploreFeedItemsMatching(query)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -457,6 +451,54 @@ func (s *Service) GetExploreFeed(user authctx.CurrentUser, query FeedQuery) ([]T
 	page := normalizedPage(query.Page)
 	limit := normalizedPageSize(query.PageSize)
 	sortMode := normalizeExploreSort(strings.TrimSpace(query.Sort))
+	query.viewerID = user.ID
+	if query.HideDuplicates {
+		return s.getExploreFeedWithDuplicateFilter(user, query, page, limit, sortMode)
+	}
+
+	candidateLimit := (page-1)*limit + limit
+	posts, err := s.repo.ListExplorePostsPage(query, candidateLimit, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	feedItems, err := s.repo.ListExploreFeedItemsPage("recent", query, candidateLimit, 0)
+	if err != nil {
+		return nil, 0, err
+	}
+	readMap := map[uuid.UUID]bool{}
+	if user.ID != uuid.Nil {
+		readMap, err = s.readMap(user.ID, feedItems)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+
+	items := make([]TimelineItemDTO, 0, len(posts)+len(feedItems))
+	for i := range posts {
+		items = append(items, TimelineItemDTO{Type: "post", Post: timelinePostDTO(posts[i], PostEngagementCount{}), PublishedAt: posts[i].CreatedAt})
+	}
+	for i := range feedItems {
+		items = append(items, TimelineItemDTO{
+			Type: "feed_item", FeedItem: &feedItems[i], PublishedAt: feedItems[i].PublishedAt,
+			IsRead: readMap[feedItems[i].ID],
+		})
+	}
+
+	sortTimeline(items)
+	items = filterTimeline(items, query)
+	paged, _ := paginateTimeline(items, page, limit)
+	postTotal, err := s.repo.CountExplorePostsMatching(query)
+	if err != nil {
+		return nil, 0, err
+	}
+	feedTotal, err := s.repo.CountExploreFeedItemsMatching(query)
+	if err != nil {
+		return nil, 0, err
+	}
+	return paged, postTotal + feedTotal, nil
+}
+
+func (s *Service) getExploreFeedWithDuplicateFilter(user authctx.CurrentUser, query FeedQuery, page int, limit int, sortMode string) ([]TimelineItemDTO, int64, error) {
 	posts, err := s.repo.ListExplorePostsAll(query)
 	if err != nil {
 		return nil, 0, err
@@ -506,6 +548,9 @@ func feedItemClusterRead(item model.FeedItem, readMap map[uuid.UUID]bool) bool {
 }
 
 func timelinePostDTO(post model.Post, engagement PostEngagementCount) *TimelinePostDTO {
+	post.BookmarksCount = engagement.BookmarksCount
+	post.RatingScore = engagement.RatingScore
+	post.RatingCount = engagement.RatingCount
 	return &TimelinePostDTO{
 		Post:          post,
 		LikesCount:    engagement.LikesCount,

@@ -54,25 +54,25 @@ func parseRecommendationLanguage(raw string) (string, error) {
 	return code, nil
 }
 
-func (s *Service) RecommendArticles(mode recommendation.Mode, category string, theme string, languageCode string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+func (s *Service) RecommendArticles(mode recommendation.Mode, category string, theme string, languageCode string, search string, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
 	normalizedCategory := normalizeSourceCategory(category)
 	keywords, validTheme := recommendationThemeKeywords(normalizedCategory, theme)
 	if !validTheme {
 		return []RecommendationItemDTO{}, 0, nil
 	}
-	includeText := len(keywords) > 0
+	includeText := len(keywords) > 0 || strings.TrimSpace(search) != ""
 	publishedAfter := time.Now().Add(-recommendationArticleCandidateWindow(mode))
 
 	posts := []RecommendationArticlePostRow{}
 	if normalizedCategory == "blog" {
 		var err error
-		posts, err = s.repo.ListRecommendationArticlePosts(includeText, publishedAfter, keywords, languageCode, recommendationInternalArticleCandidateLimit)
+		posts, err = s.repo.ListRecommendationArticlePosts(includeText, publishedAfter, keywords, languageCode, search, recommendationInternalArticleCandidateLimit)
 		if err != nil {
 			return nil, 0, err
 		}
 	}
 	feedItemLimit := recommendationArticleCandidateLimit - len(posts)
-	feedItems, err := s.repo.ListRecommendationArticleFeedItems(includeText, normalizedCategory, publishedAfter, keywords, languageCode, feedItemLimit)
+	feedItems, err := s.repo.ListRecommendationArticleFeedItems(includeText, normalizedCategory, publishedAfter, keywords, languageCode, search, feedItemLimit)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -303,6 +303,78 @@ func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) e
 	feedItemByID := make(map[string]model.FeedItem, len(feedItems))
 	for _, feedItem := range feedItems {
 		feedItemByID[feedItem.ID.String()] = feedItem
+	}
+
+	type postRecommendationStats struct {
+		PostID        uuid.UUID `gorm:"column:post_id"`
+		ViewCount     int64     `gorm:"column:view_count"`
+		BookmarkCount int64     `gorm:"column:bookmark_count"`
+		RatingScore   float64   `gorm:"column:rating_score"`
+		RatingCount   int64     `gorm:"column:rating_count"`
+	}
+	postStatsByID := make(map[string]postRecommendationStats, len(postIDs))
+	if len(postIDs) > 0 {
+		bookmarkSQL := "0 AS bookmark_count"
+		if s.db.Migrator().HasTable(&model.Bookmark{}) {
+			bookmarkSQL = "COALESCE((SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL), 0) AS bookmark_count"
+		}
+		selectSQL := `posts.id AS post_id,
+			posts.view_count, ` + bookmarkSQL + `,
+			0 AS rating_score,
+			0 AS rating_count`
+		if s.db.Migrator().HasTable(&model.PostRating{}) {
+			selectSQL = `posts.id AS post_id,
+				posts.view_count, ` + bookmarkSQL + `,
+				COALESCE((SELECT AVG(score) FROM post_ratings WHERE post_ratings.post_id = posts.id AND post_ratings.deleted_at IS NULL), 0) AS rating_score,
+				COALESCE((SELECT COUNT(*) FROM post_ratings WHERE post_ratings.post_id = posts.id AND post_ratings.deleted_at IS NULL), 0) AS rating_count`
+		}
+		var stats []postRecommendationStats
+		if err := s.db.Model(&model.Post{}).Select(selectSQL).Where("posts.id IN ?", postIDs).Scan(&stats).Error; err != nil {
+			return err
+		}
+		for _, stat := range stats {
+			postStatsByID[stat.PostID.String()] = stat
+		}
+	}
+
+	type feedRecommendationStats struct {
+		FeedItemID    uuid.UUID `gorm:"column:feed_item_id"`
+		ReadCount     int64     `gorm:"column:read_count"`
+		BookmarkCount int64     `gorm:"column:bookmark_count"`
+	}
+	feedStatsByID := make(map[string]feedRecommendationStats, len(feedItemIDs))
+	if len(feedItemIDs) > 0 {
+		readSQL := "0 AS read_count"
+		if s.db.Migrator().HasTable(&model.FeedItemRead{}) {
+			readSQL = "COALESCE((SELECT COUNT(*) FROM feed_item_reads WHERE feed_item_reads.feed_item_id = feed_items.id), 0) AS read_count"
+		}
+		starSQL := "0 AS bookmark_count"
+		if s.db.Migrator().HasTable(&model.FeedItemStar{}) {
+			starSQL = "COALESCE((SELECT COUNT(*) FROM feed_item_stars WHERE feed_item_stars.feed_item_id = feed_items.id), 0) AS bookmark_count"
+		}
+		var stats []feedRecommendationStats
+		if err := s.db.Table("feed_items").Select("feed_items.id AS feed_item_id, "+readSQL+", "+starSQL).Where("feed_items.id IN ?", feedItemIDs).Scan(&stats).Error; err != nil {
+			return err
+		}
+		for _, stat := range stats {
+			feedStatsByID[stat.FeedItemID.String()] = stat
+		}
+	}
+
+	for i := range items {
+		if _, ok := postByID[items[i].ID]; ok {
+			stat := postStatsByID[items[i].ID]
+			items[i].ViewCount = stat.ViewCount
+			items[i].BookmarkCount = stat.BookmarkCount
+			items[i].RatingScore = math.Round(stat.RatingScore*10) / 10
+			items[i].RatingCount = stat.RatingCount
+			continue
+		}
+		if _, ok := feedItemByID[items[i].ID]; ok {
+			stat := feedStatsByID[items[i].ID]
+			items[i].ReadCount = stat.ReadCount
+			items[i].BookmarkCount = stat.BookmarkCount
+		}
 	}
 
 	for i := range items {

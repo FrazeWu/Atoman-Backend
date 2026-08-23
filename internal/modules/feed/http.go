@@ -293,8 +293,9 @@ func (h *Handler) getRecommendedArticles(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	search := strings.TrimSpace(c.Query("q"))
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.RecommendArticlesByMode(mode, category, theme, languageCode, page, pageSize)
+	items, total, err := h.service.RecommendArticlesByMode(mode, category, theme, languageCode, search, page, pageSize)
 	if err != nil {
 		httpx.Error(c, err)
 		return

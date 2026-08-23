@@ -22,6 +22,7 @@ type FeedQuery struct {
 	HideDuplicates bool      `json:"hide_duplicates" form:"hide_duplicates"`
 	Sort           string    `json:"sort" form:"sort"`
 	Search         string    `json:"q" form:"q"`
+	viewerID       uuid.UUID
 }
 
 type TimelineItemDTO struct {
@@ -36,8 +37,9 @@ type TimelineItemDTO struct {
 
 type TimelinePostDTO struct {
 	model.Post
-	LikesCount    int64 `json:"likes_count,omitempty"`
-	CommentsCount int64 `json:"comments_count,omitempty"`
+	LikesCount     int64 `json:"likes_count,omitempty"`
+	CommentsCount  int64 `json:"comments_count,omitempty"`
+	BookmarksCount int64 `json:"bookmarks_count,omitempty"`
 }
 
 type TimelineListResponseDTO struct {
@@ -74,6 +76,9 @@ type RecommendationItemDTO struct {
 	BirthYear            int                        `json:"birth_year,omitempty"`
 	BirthDate            *time.Time                 `json:"birth_date,omitempty"`
 	ReadCount            int64                      `json:"read_count"`
+	ViewCount            int64                      `json:"view_count"`
+	RatingScore          float64                    `json:"rating_score"`
+	RatingCount          int64                      `json:"rating_count"`
 	UpdateFrequencyLabel string                     `json:"update_frequency_label"`
 	LastPublishedAt      *time.Time                 `json:"last_published_at,omitempty"`
 	SourceID             string                     `json:"source_id,omitempty"`
