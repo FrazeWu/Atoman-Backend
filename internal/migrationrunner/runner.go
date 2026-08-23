@@ -21,6 +21,7 @@ func Run(db *gorm.DB) error {
 		name string
 		run  func(*gorm.DB) error
 	}{
+		{"feed source fetch state migration", migrations.RunFeedSourceFetchStateMigration},
 		{"deduplicate subscriptions", migrations.DeduplicateSubscriptions},
 		{"deduplicate subscription groups", migrations.DeduplicateSubscriptionGroups},
 		{"feed source management mvp migration", migrations.Migrate20260603FeedSourceManagementMVP},

@@ -86,6 +86,74 @@ func TestFetchAndParseRSSParsesPodcastImages(t *testing.T) {
 	}
 }
 
+func TestFetchAndParseRSSUsesConditionalHeadersAndHandlesNotModified(t *testing.T) {
+	allowRSSFetchTestHosts(t, "feeds.example.com")
+
+	originalClient := rssFetchHTTPClient
+	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Header.Get("If-None-Match") != `"feed-v1"` {
+			return nil, fmt.Errorf("etag=%q", req.Header.Get("If-None-Match"))
+		}
+		if req.Header.Get("If-Modified-Since") != "Wed, 01 Jul 2026 00:00:00 GMT" {
+			return nil, fmt.Errorf("last-modified=%q", req.Header.Get("If-Modified-Since"))
+		}
+		return &http.Response{
+			StatusCode: http.StatusNotModified,
+			Header: http.Header{
+				"ETag":          []string{`"feed-v1"`},
+				"Last-Modified": []string{"Wed, 01 Jul 2026 00:00:00 GMT"},
+			},
+			Body: io.NopCloser(strings.NewReader("")),
+		}, nil
+	})}
+	defer func() { rssFetchHTTPClient = originalClient }()
+
+	result, err := fetchAndParseRSS("https://feeds.example.com/feed.xml", RSSFetchConditions{
+		ETag:         `"feed-v1"`,
+		LastModified: "Wed, 01 Jul 2026 00:00:00 GMT",
+	})
+	if err != nil {
+		t.Fatalf("fetchAndParseRSS returned error: %v", err)
+	}
+	if !result.NotModified || result.HTTPStatus != http.StatusNotModified {
+		t.Fatalf("unexpected 304 result: %#v", result)
+	}
+}
+
+func TestFetchAndParseRSSRejectsOversizedResponse(t *testing.T) {
+	allowRSSFetchTestHosts(t, "feeds.example.com")
+
+	originalClient := rssFetchHTTPClient
+	rssFetchHTTPClient = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/rss+xml"}},
+			Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", rssFetchMaxResponseBytes+1))),
+		}, nil
+	})}
+	defer func() { rssFetchHTTPClient = originalClient }()
+
+	_, err := fetchAndParseRSS("https://feeds.example.com/feed.xml", RSSFetchConditions{})
+	var fetchErr *rssFetchError
+	if !errors.As(err, &fetchErr) || fetchErr.Code != "response_too_large" {
+		t.Fatalf("expected response_too_large, got %v", err)
+	}
+}
+
+func TestFeedFetchRetryDelayBacksOffAndQuarantinesBlockedSources(t *testing.T) {
+	if got := feedFetchRetryDelay("request_failed", 1); got != 5*time.Minute {
+		t.Fatalf("attempt 1 delay=%s", got)
+	}
+	if got := feedFetchRetryDelay("request_failed", 4); got != 6*time.Hour {
+		t.Fatalf("attempt 4 delay=%s", got)
+	}
+	if got := feedFetchRetryDelay("http_403", 1); got != 6*time.Hour {
+		t.Fatalf("first forbidden delay=%s", got)
+	}
+	if got := feedFetchRetryDelay("http_403", 3); got != 24*time.Hour {
+		t.Fatalf("repeated forbidden delay=%s", got)
+	}
+}
 func TestFetchAndParseRSSBlocksPrivateNetworkURLBeforeRequest(t *testing.T) {
 	called := false
 	originalClient := rssFetchHTTPClient

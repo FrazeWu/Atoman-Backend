@@ -250,6 +250,18 @@ type FeedSource struct {
 	HealthStatus                    string     `json:"health_status" gorm:"not null;default:'healthy';index"`
 	LastError                       string     `json:"last_error" gorm:"type:text"`
 	LastFetchedAt                   *time.Time `json:"last_fetched_at"`
+	FetchStatus                     string     `json:"fetch_status" gorm:"type:varchar(24);not null;default:'idle';index"`
+	FetchProvider                   string     `json:"fetch_provider" gorm:"type:varchar(32)"`
+	FetchHTTPStatus                 int        `json:"fetch_http_status"`
+	FetchETag                       string     `json:"-" gorm:"column:fetch_etag;type:text"`
+	FetchLastModified               string     `json:"-" gorm:"type:text"`
+	FetchLastSuccessAt              *time.Time `json:"fetch_last_success_at" gorm:"index"`
+	FetchNextAt                     *time.Time `json:"fetch_next_at" gorm:"index"`
+	FetchConsecutiveFailures        int        `json:"fetch_consecutive_failures" gorm:"not null;default:0"`
+	FetchLastErrorCode              string     `json:"fetch_last_error_code" gorm:"type:varchar(64)"`
+	FetchLastError                  string     `json:"fetch_last_error" gorm:"type:text"`
+	FetchLastDurationMs             int64      `json:"fetch_last_duration_ms" gorm:"not null;default:0"`
+	FetchLastItemCount              int        `json:"fetch_last_item_count" gorm:"not null;default:0"`
 	FullTextEnabled                 bool       `json:"full_text_enabled" gorm:"not null;default:false;index:idx_feed_sources_type_enabled,priority:2"`
 	FullTextSuccessCount            int        `json:"full_text_success_count" gorm:"not null;default:0"`
 	FullTextFailureCount            int        `json:"full_text_failure_count" gorm:"not null;default:0"`

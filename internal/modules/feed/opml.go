@@ -280,7 +280,7 @@ func ImportOPML(db *gorm.DB) gin.HandlerFunc {
 
 // ImportGlobalOPML godoc
 // @Summary 导入全局 OPML 订阅源
-// @Description 管理员上传 OPML 文件，批量创建或复用全局 RSS 源，不创建用户订阅。
+// @Description 管理员上传 OPML 文件，批量创建或复用全局 RSS 源；导入后由定时抓取器按源状态调度，不创建用户订阅。
 // @Tags feed
 // @Accept mpfd
 // @Produce json
@@ -338,9 +338,6 @@ func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
 				imported++
 			} else {
 				reused++
-			}
-			if result.Source != nil {
-				go syncFeedSource(db, *result.Source)
 			}
 		}
 
