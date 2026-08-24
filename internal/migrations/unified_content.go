@@ -72,7 +72,7 @@ func backfillPostContentEntries(tx *gorm.DB) error {
 		episodeByPost[episode.PostID] = episode
 	}
 	var posts []model.Post
-	if err := tx.Where("channel_id IS NOT NULL").Find(&posts).Error; err != nil {
+	if err := tx.Unscoped().Where("channel_id IS NOT NULL").Find(&posts).Error; err != nil {
 		return err
 	}
 	for _, post := range posts {
