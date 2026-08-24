@@ -340,6 +340,22 @@ func TestAdminUserPasswordEndpointRejectsShortPassword(t *testing.T) {
 	}
 }
 
+func TestLoginEventLocationResolvesLegacyRecordsWithoutLocation(t *testing.T) {
+	location := loginEventLocation(model.LoginEvent{IPAddress: "10.0.4.21"})
+	if location != "本地网络" {
+		t.Fatalf("expected legacy record location to resolve, got %q", location)
+	}
+}
+
+func TestLoginEventLocationPreservesRecordedLocation(t *testing.T) {
+	location := loginEventLocation(model.LoginEvent{
+		IPAddress: "10.0.4.21", CountryCode: "US", Region: "California", City: "Los Angeles",
+	})
+	if location != "Los Angeles · California · US" {
+		t.Fatalf("expected recorded location to be preserved, got %q", location)
+	}
+}
+
 func TestAdminCanInspectLoginHistoryAndRevokeSessionWithAudit(t *testing.T) {
 	env := newAdminUserTestEnv(t, authctx.RoleAdmin)
 	member := seedManagedUser(t, env.db, "security-member", authctx.RoleUser, true)

@@ -487,5 +487,18 @@ func adminLoginEventDTO(event model.LoginEvent) AdminLoginEventDTO {
 }
 
 func loginEventLocation(event model.LoginEvent) string {
-	return (requestmeta.Info{CountryCode: event.CountryCode, Region: event.Region, City: event.City}).Location()
+	location := requestmeta.Info{CountryCode: event.CountryCode, Region: event.Region, City: event.City}
+	if location.CountryCode == "" || location.Region == "" || location.City == "" {
+		resolved := requestmeta.FromIPAddress(event.IPAddress)
+		if location.CountryCode == "" {
+			location.CountryCode = resolved.CountryCode
+		}
+		if location.Region == "" {
+			location.Region = resolved.Region
+		}
+		if location.City == "" {
+			location.City = resolved.City
+		}
+	}
+	return location.Location()
 }

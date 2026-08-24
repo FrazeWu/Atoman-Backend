@@ -45,6 +45,16 @@ go run cmd/create_admin/main.go
 
 开发环境读取 `.env.dev`，生产环境读取 `.env.prod`。
 
+## IP 归属地
+
+登录记录的城市级归属地使用 MaxMind GeoLite2 City 数据库。生产环境将可读的 `.mmdb` 文件保存到稳定路径，并在 `.env.prod` 设置绝对路径：
+
+```dotenv
+GEOIP_DB_PATH=/var/lib/atoman/geoip/GeoLite2-City.mmdb
+```
+
+数据库文件更新后无需重启服务，后续请求会自动重新加载。Cloudflare 可用时会在城市库不可用的情况下保留国家代码；要显示城市和地区仍必须配置 GeoLite2 City 数据库。历史登录记录缺少位置时，管理端会按保存的 IP 重新解析。
+
 ## 部署
 
 生产环境采用主机进程部署：

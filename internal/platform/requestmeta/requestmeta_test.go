@@ -47,3 +47,26 @@ func TestFromGinLabelsPrivateAddressesAsLocalNetwork(t *testing.T) {
 		t.Fatalf("unexpected local metadata: %#v", info)
 	}
 }
+
+func TestFromGinUsesCloudflareCountryWhenGeoIPDatabaseIsUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("GEOIP_DB_PATH", "")
+	request := httptest.NewRequest("GET", "/", nil)
+	request.RemoteAddr = "127.0.0.1:42000"
+	request.Header.Set("CF-Connecting-IP", "216.167.7.4")
+	request.Header.Set("CF-IPCountry", "US")
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	context.Request = request
+
+	info := FromGin(context)
+	if info.IPAddress != "216.167.7.4" || info.CountryCode != "US" || info.Location() != "US" {
+		t.Fatalf("unexpected request metadata: %#v", info)
+	}
+}
+
+func TestFromIPAddressLabelsPrivateAddressesAsLocalNetwork(t *testing.T) {
+	info := FromIPAddress("10.0.4.21")
+	if info.IPPrefix != "10.0.4.0/24" || info.Location() != "本地网络" {
+		t.Fatalf("unexpected IP metadata: %#v", info)
+	}
+}

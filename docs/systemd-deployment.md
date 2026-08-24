@@ -38,6 +38,26 @@ cd /home/fa/Atoman-Backend
 
 Do not restart the backend or worker when this command fails.
 
+## GeoIP 数据库
+
+登录记录的城市级归属地依赖 MaxMind GeoLite2 City。先创建 MaxMind 账户和许可证密钥，再将数据库下载到服务账号可读的固定路径：
+
+```bash
+sudo install -d -o fa -g fa /var/lib/atoman/geoip
+curl --fail --location --user "$MAXMIND_ACCOUNT_ID:$MAXMIND_LICENSE_KEY" \
+  'https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz' \
+  | sudo tar -xz --wildcards --strip-components=1 -C /var/lib/atoman/geoip '*/GeoLite2-City.mmdb'
+sudo chown fa:fa /var/lib/atoman/geoip/GeoLite2-City.mmdb
+```
+
+在 `/home/fa/Atoman-Backend/.env.prod` 设置：
+
+```dotenv
+GEOIP_DB_PATH=/var/lib/atoman/geoip/GeoLite2-City.mmdb
+```
+
+定期以原子替换方式更新同一路径的数据库文件。服务会在下一次查询时自动加载新版文件；无需重启。Cloudflare 的 `CF-IPCountry` 仅在数据库不可用时提供国家级降级，不能替代城市库。
+
 ## Install systemd unit
 
 ```bash
