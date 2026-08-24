@@ -120,10 +120,10 @@ func TestPostListIncludesRatingSummary(t *testing.T) {
 	if err := db.Create(&other).Error; err != nil {
 		t.Fatalf("create other user: %v", err)
 	}
-	if err := db.Create(&model.PostRating{UserID: user.ID, PostID: post.ID, Score: 8}).Error; err != nil {
+	if err := db.Create(&model.PostRating{UserID: user.ID, ContentID: post.ID, Score: 8}).Error; err != nil {
 		t.Fatalf("create first rating: %v", err)
 	}
-	if err := db.Create(&model.PostRating{UserID: other.UUID, PostID: post.ID, Score: 9}).Error; err != nil {
+	if err := db.Create(&model.PostRating{UserID: other.UUID, ContentID: post.ID, Score: 9}).Error; err != nil {
 		t.Fatalf("create second rating: %v", err)
 	}
 

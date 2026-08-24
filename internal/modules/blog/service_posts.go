@@ -51,11 +51,11 @@ func (s *Service) syncPostReferences(tx *gorm.DB, post model.Post) ([]reference.
 	}, []reference.Field{{Name: "content", Content: post.Content}})
 }
 
-func (s *Service) postDTOs(db *gorm.DB, posts []model.Post, viewerID *uuid.UUID) ([]PostDTO, error) {
-	dtos := make([]PostDTO, len(posts))
+func (s *Service) postDTOs(db *gorm.DB, posts []model.Post, viewerID *uuid.UUID) ([]BlogContentDTO, error) {
+	dtos := make([]BlogContentDTO, len(posts))
 	ids := make([]uuid.UUID, 0, len(posts))
 	for index, post := range posts {
-		dtos[index] = newPostDTO(post)
+		dtos[index] = newBlogContentDTO(post)
 		ids = append(ids, post.ID)
 	}
 	if len(ids) == 0 {
@@ -85,7 +85,7 @@ func (s *Service) postDTOs(db *gorm.DB, posts []model.Post, viewerID *uuid.UUID)
 	return dtos, nil
 }
 
-func (s *Service) populatePostRatings(db *gorm.DB, dtos []PostDTO, viewerID *uuid.UUID) error {
+func (s *Service) populatePostRatings(db *gorm.DB, dtos []BlogContentDTO, viewerID *uuid.UUID) error {
 	if len(dtos) == 0 || !db.Migrator().HasTable(&model.PostRating{}) {
 		return nil
 	}
@@ -95,37 +95,37 @@ func (s *Service) populatePostRatings(db *gorm.DB, dtos []PostDTO, viewerID *uui
 	}
 
 	type ratingAggregate struct {
-		PostID      uuid.UUID `gorm:"column:post_id"`
+		ContentID   uuid.UUID `gorm:"column:content_id"`
 		RatingScore float64   `gorm:"column:rating_score"`
 		RatingCount int64     `gorm:"column:rating_count"`
 	}
 	var aggregates []ratingAggregate
 	if err := db.Model(&model.PostRating{}).
-		Select("post_id, AVG(score) AS rating_score, COUNT(*) AS rating_count").
-		Where("post_id IN ?", ids).
-		Group("post_id").
+		Select("content_id, AVG(score) AS rating_score, COUNT(*) AS rating_count").
+		Where("content_id IN ?", ids).
+		Group("content_id").
 		Scan(&aggregates).Error; err != nil {
 		return err
 	}
-	aggregatesByPostID := make(map[uuid.UUID]ratingAggregate, len(aggregates))
+	aggregatesByContentID := make(map[uuid.UUID]ratingAggregate, len(aggregates))
 	for _, aggregate := range aggregates {
-		aggregatesByPostID[aggregate.PostID] = aggregate
+		aggregatesByContentID[aggregate.ContentID] = aggregate
 	}
 
 	viewerRatings := make(map[uuid.UUID]int, 0)
 	if viewerID != nil {
 		var ratings []model.PostRating
-		if err := db.Where("user_id = ? AND post_id IN ?", *viewerID, ids).Find(&ratings).Error; err != nil {
+		if err := db.Where("user_id = ? AND content_id IN ?", *viewerID, ids).Find(&ratings).Error; err != nil {
 			return err
 		}
 		viewerRatings = make(map[uuid.UUID]int, len(ratings))
 		for _, rating := range ratings {
-			viewerRatings[rating.PostID] = rating.Score
+			viewerRatings[rating.ContentID] = rating.Score
 		}
 	}
 
 	for index := range dtos {
-		aggregate := aggregatesByPostID[dtos[index].ID]
+		aggregate := aggregatesByContentID[dtos[index].ID]
 		dtos[index].RatingScore = math.Round(aggregate.RatingScore*10) / 10
 		dtos[index].RatingCount = aggregate.RatingCount
 		if score, ok := viewerRatings[dtos[index].ID]; ok {
@@ -136,10 +136,10 @@ func (s *Service) populatePostRatings(db *gorm.DB, dtos []PostDTO, viewerID *uui
 	return nil
 }
 
-func (s *Service) postDTO(db *gorm.DB, post model.Post, viewerID *uuid.UUID) (PostDTO, error) {
+func (s *Service) postDTO(db *gorm.DB, post model.Post, viewerID *uuid.UUID) (BlogContentDTO, error) {
 	items, err := s.postDTOs(db, []model.Post{post}, viewerID)
 	if err != nil {
-		return PostDTO{}, err
+		return BlogContentDTO{}, err
 	}
 	return items[0], nil
 }
@@ -384,7 +384,7 @@ func saveBlogPostVersion(tx *gorm.DB, post model.Post, editorID uuid.UUID) error
 	return tx.Create(&version).Error
 }
 
-func (s *Service) ListPostVersions(user authctx.CurrentUser, postID uuid.UUID) ([]model.BlogPostVersion, error) {
+func (s *Service) ListPostVersions(user authctx.CurrentUser, postID uuid.UUID) ([]BlogContentVersionDTO, error) {
 	post, err := s.repo.GetPost(postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -399,9 +399,9 @@ func (s *Service) ListPostVersions(user authctx.CurrentUser, postID uuid.UUID) (
 	if err := s.db.Where("content_id = ?", postID).Order("version DESC").Find(&versions).Error; err != nil {
 		return nil, err
 	}
-	result := make([]model.BlogPostVersion, 0, len(versions))
+	result := make([]BlogContentVersionDTO, 0, len(versions))
 	for _, version := range versions {
-		result = append(result, buildBlogVersionResponse(version))
+		result = append(result, newBlogContentVersionDTO(version))
 	}
 	return result, nil
 }
