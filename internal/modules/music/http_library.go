@@ -12,6 +12,25 @@ import (
 	"github.com/google/uuid"
 )
 
+func (h *Handler) enrichPlaylistCovers(playlists ...*model.Playlist) error {
+	ids := make([]uuid.UUID, 0, len(playlists))
+	for _, playlist := range playlists {
+		if playlist != nil && strings.TrimSpace(playlist.CoverURL) == "" {
+			ids = append(ids, playlist.ID)
+		}
+	}
+	fallbacks, err := h.service.repo.PlaylistFirstSongCovers(ids)
+	if err != nil {
+		return err
+	}
+	for _, playlist := range playlists {
+		if playlist != nil && strings.TrimSpace(playlist.CoverURL) == "" {
+			playlist.CoverURL = fallbacks[playlist.ID]
+		}
+	}
+	return nil
+}
+
 func (h *Handler) listArtistBookmarks(c *gin.Context) {
 	user, ok := currentMusicUser(c)
 	if !ok {
@@ -178,6 +197,14 @@ func (h *Handler) listPlaylistBookmarks(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	playlistRows := make([]*model.Playlist, 0, len(bookmarks))
+	for index := range bookmarks {
+		playlistRows = append(playlistRows, bookmarks[index].Playlist)
+	}
+	if err := h.enrichPlaylistCovers(playlistRows...); err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	for index := range bookmarks {
 		if bookmarks[index].Playlist != nil {
 			bookmarks[index].Playlist.CoverURL = resolveMusicMediaURL(bookmarks[index].Playlist.CoverURL)
@@ -260,6 +287,14 @@ func (h *Handler) listPlaylists(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	playlistRows := make([]*model.Playlist, 0, len(playlists))
+	for index := range playlists {
+		playlistRows = append(playlistRows, &playlists[index])
+	}
+	if err := h.enrichPlaylistCovers(playlistRows...); err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	playlistIDs := make([]uuid.UUID, 0, len(playlists))
 	for _, playlist := range playlists {
 		playlistIDs = append(playlistIDs, playlist.ID)
@@ -297,6 +332,14 @@ func (h *Handler) listPublicPlaylists(c *gin.Context) {
 	page, pageSize := httpx.PageParams(c)
 	playlists, songCounts, total, err := h.service.ListPublicPlaylists(page, pageSize)
 	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	playlistRows := make([]*model.Playlist, 0, len(playlists))
+	for index := range playlists {
+		playlistRows = append(playlistRows, &playlists[index])
+	}
+	if err := h.enrichPlaylistCovers(playlistRows...); err != nil {
 		httpx.Error(c, err)
 		return
 	}

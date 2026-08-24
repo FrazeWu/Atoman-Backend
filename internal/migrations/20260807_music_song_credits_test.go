@@ -18,8 +18,8 @@ func TestRunMusicSongCreditsMigrationPreservesLegacyCreditAndAllowsMultipleRoles
 		artist_id uuid NOT NULL,
 		role text,
 		position integer,
-		created_at datetime,
-		updated_at datetime,
+		created_at timestamp with time zone,
+		updated_at timestamp with time zone,
 		PRIMARY KEY (song_id, artist_id)
 	)`).Error; err != nil {
 		t.Fatalf("create legacy song artists: %v", err)

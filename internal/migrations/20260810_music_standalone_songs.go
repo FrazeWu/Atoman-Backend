@@ -56,8 +56,14 @@ func migrateStandaloneSongRelease(tx *gorm.DB, release model.Album) error {
 		Order("disc_number ASC, track_number ASC, created_at ASC").Find(&songs).Error; err != nil {
 		return fmt.Errorf("find songs for release %s: %w", release.ID, err)
 	}
-	if len(songs) != 1 {
-		return fmt.Errorf("single/leak release %s must contain exactly one active song, found %d", release.ID, len(songs))
+	if len(songs) > 1 {
+		if err := tx.Model(&model.Album{}).Where("id = ?", release.ID).Update("album_type", "album").Error; err != nil {
+			return fmt.Errorf("reclassify multi-track standalone release %s: %w", release.ID, err)
+		}
+		return nil
+	}
+	if len(songs) == 0 {
+		return fmt.Errorf("single/leak release %s must contain exactly one active song, found 0", release.ID)
 	}
 
 	song := songs[0]

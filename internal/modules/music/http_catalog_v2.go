@@ -162,11 +162,12 @@ func (h *Handler) search(c *gin.Context) {
 		var total int64
 		songQuery := func() *gorm.DB {
 			artistVisibility, artistArgs := musicEntryVisibilityCondition("search_artists", "created_by", viewerPtr, true)
+			albumVisibility, albumArgs := musicEntryVisibilityCondition(`"Albums"`, "uploaded_by", viewerPtr, true)
 			return scopeVisibleMusicEntries(h.service.db.Model(&model.Song{}), `"Songs"`, "uploaded_by", viewerPtr, false).
-				Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id").
+				Joins("LEFT JOIN \"Albums\" ON \"Albums\".id = \"Songs\".album_id AND "+albumVisibility, albumArgs...).
 				Joins("LEFT JOIN song_artists ON song_artists.song_id = \"Songs\".id").
 				Joins("LEFT JOIN \"Artists\" AS search_artists ON search_artists.id = song_artists.artist_id AND "+artistVisibility, artistArgs...).
-				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = search_artists.id").
+				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = search_artists.id AND artist_aliases.deleted_at IS NULL").
 				Joins("LEFT JOIN music_song_lyrics ON music_song_lyrics.song_id = \"Songs\".id AND music_song_lyrics.deleted_at IS NULL").
 				Where("LOWER(\"Songs\".title) LIKE LOWER(?) OR LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(search_artists.name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?) OR LOWER(music_song_lyrics.content) LIKE LOWER(?) OR LOWER(music_song_lyrics.translation) LIKE LOWER(?)", pattern, pattern, pattern, pattern, pattern, pattern)
 		}
@@ -194,7 +195,7 @@ func (h *Handler) search(c *gin.Context) {
 			return scopeVisibleMusicEntries(h.service.db.Model(&model.Album{}), `"Albums"`, "uploaded_by", viewerPtr, false).
 				Joins("LEFT JOIN album_artists ON album_artists.album_id = \"Albums\".id").
 				Joins("LEFT JOIN \"Artists\" AS search_artists ON search_artists.id = album_artists.artist_id AND "+artistVisibility, artistArgs...).
-				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = search_artists.id").
+				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = search_artists.id AND artist_aliases.deleted_at IS NULL").
 				Where("LOWER(\"Albums\".title) LIKE LOWER(?) OR LOWER(search_artists.name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?)", pattern, pattern, pattern)
 		}
 		if err := albumQuery().Distinct("\"Albums\".id").Count(&total).Error; err != nil {
@@ -215,7 +216,7 @@ func (h *Handler) search(c *gin.Context) {
 		var total int64
 		artistQuery := func() *gorm.DB {
 			return scopeVisibleMusicEntries(h.service.db.Model(&model.Artist{}), "\"Artists\"", "created_by", viewerPtr, false).
-				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id").
+				Joins("LEFT JOIN artist_aliases ON artist_aliases.artist_id = \"Artists\".id AND artist_aliases.deleted_at IS NULL").
 				Where("LOWER(\"Artists\".name) LIKE LOWER(?) OR LOWER("+artistDisambiguationSearchExpression+") LIKE LOWER(?) OR LOWER(\"Artists\".legal_name) LIKE LOWER(?) OR LOWER(artist_aliases.alias) LIKE LOWER(?)", pattern, pattern, pattern, pattern)
 		}
 		if err := artistQuery().Distinct(`"Artists".id`).Count(&total).Error; err != nil {

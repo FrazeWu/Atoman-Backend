@@ -30503,6 +30503,9 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "reason": {
+                    "type": "string"
+                },
                 "release_date": {
                     "type": "string"
                 },

@@ -105,7 +105,7 @@ func (r *Repo) ListArtistBookmarks(userID uuid.UUID, page int, pageSize int, sor
 func (r *Repo) ListArtistBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string, viewer *authctx.CurrentUser) ([]model.ArtistBookmark, int64, error) {
 	var total int64
 	db := r.db.Model(&model.ArtistBookmark{}).
-		Joins("JOIN \"Artists\" ON \"Artists\".id = music_artist_bookmarks.artist_id AND \"Artists\".lifecycle_status = 'active'").
+		Joins("JOIN \"Artists\" ON \"Artists\".id = music_artist_bookmarks.artist_id AND \"Artists\".deleted_at IS NULL AND \"Artists\".lifecycle_status = 'active'").
 		Where("music_artist_bookmarks.user_id = ?", userID)
 	if query = strings.TrimSpace(query); query != "" {
 		pattern := "%" + strings.ToLower(query) + "%"
@@ -120,7 +120,7 @@ func (r *Repo) ListArtistBookmarksFiltered(userID uuid.UUID, page int, pageSize 
 		playCountSubquery := r.db.
 			Table("song_artists").
 			Select("song_artists.artist_id AS artist_id, COALESCE(SUM(\"Songs\".play_count), 0) AS play_count").
-			Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id AND \"Songs\".lifecycle_status = 'active'").
+			Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id AND \"Songs\".deleted_at IS NULL AND \"Songs\".lifecycle_status = 'active'").
 			Group("song_artists.artist_id")
 		db = db.Joins("LEFT JOIN (?) AS artist_popularity ON artist_popularity.artist_id = music_artist_bookmarks.artist_id", playCountSubquery).
 			Order("COALESCE(artist_popularity.play_count, 0) DESC").
@@ -151,7 +151,7 @@ func (r *Repo) ListAlbumBookmarks(userID uuid.UUID, page int, pageSize int, sort
 func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize int, sort string, query string, viewer *authctx.CurrentUser) ([]model.AlbumBookmark, int64, error) {
 	var total int64
 	db := r.db.Model(&model.AlbumBookmark{}).
-		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".lifecycle_status = 'active'").
+		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".deleted_at IS NULL AND \"Albums\".lifecycle_status = 'active'").
 		Where("music_album_bookmarks.user_id = ?", userID)
 	if query = strings.TrimSpace(query); query != "" {
 		db = db.Where("LOWER(\"Albums\".title) LIKE ?", "%"+strings.ToLower(query)+"%")
@@ -176,7 +176,7 @@ func (r *Repo) ListAlbumBookmarksFiltered(userID uuid.UUID, page int, pageSize i
 
 func (r *Repo) ListLatestAlbumBookmarksAfter(userID uuid.UUID, pageSize int, cursor *musicCreatedAtCursor, viewer *authctx.CurrentUser) ([]model.AlbumBookmark, bool, error) {
 	db := r.db.Model(&model.AlbumBookmark{}).
-		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".lifecycle_status = 'active'").
+		Joins("JOIN \"Albums\" ON \"Albums\".id = music_album_bookmarks.album_id AND \"Albums\".deleted_at IS NULL AND \"Albums\".lifecycle_status = 'active'").
 		Where("music_album_bookmarks.user_id = ?", userID).
 		Order("music_album_bookmarks.created_at DESC").
 		Order("music_album_bookmarks.id DESC")
@@ -267,7 +267,7 @@ func (r *Repo) ListPlaylistBookmarksFiltered(userID uuid.UUID, page int, pageSiz
 func (r *Repo) ListPlaylistSongsFiltered(playlistID uuid.UUID, page int, pageSize int, sort string, query string, viewer *authctx.CurrentUser) ([]model.PlaylistSong, int64, error) {
 	var total int64
 	db := r.db.Model(&model.PlaylistSong{}).
-		Joins("JOIN \"Songs\" ON \"Songs\".id = music_playlist_songs.song_id AND \"Songs\".lifecycle_status = 'active'").
+		Joins("JOIN \"Songs\" ON \"Songs\".id = music_playlist_songs.song_id AND \"Songs\".deleted_at IS NULL AND \"Songs\".lifecycle_status = 'active'").
 		Where("music_playlist_songs.playlist_id = ?", playlistID)
 	if query = strings.TrimSpace(query); query != "" {
 		db = db.Where("LOWER(\"Songs\".title) LIKE ?", "%"+strings.ToLower(query)+"%")
@@ -386,6 +386,33 @@ func (r *Repo) CountPlaylistSongs(playlistIDs []uuid.UUID) (map[uuid.UUID]int64,
 		counts[row.PlaylistID] = row.Count
 	}
 	return counts, nil
+}
+
+func (r *Repo) PlaylistFirstSongCovers(playlistIDs []uuid.UUID) (map[uuid.UUID]string, error) {
+	covers := make(map[uuid.UUID]string, len(playlistIDs))
+	if len(playlistIDs) == 0 {
+		return covers, nil
+	}
+
+	var rows []struct {
+		PlaylistID uuid.UUID `gorm:"column:playlist_id"`
+		CoverURL   string    `gorm:"column:cover_url"`
+	}
+	if err := r.db.Table("music_playlist_songs AS playlist_song").
+		Select("playlist_song.playlist_id, COALESCE(NULLIF(visible_song.cover_url, ''), NULLIF(album.cover_url, '')) AS cover_url").
+		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = playlist_song.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
+		Joins("LEFT JOIN \"Albums\" AS album ON album.id = visible_song.album_id AND album.deleted_at IS NULL").
+		Where("playlist_song.playlist_id IN ?", playlistIDs).
+		Order("playlist_song.playlist_id, playlist_song.position ASC, playlist_song.created_at ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if _, exists := covers[row.PlaylistID]; !exists && strings.TrimSpace(row.CoverURL) != "" {
+			covers[row.PlaylistID] = row.CoverURL
+		}
+	}
+	return covers, nil
 }
 
 func (r *Repo) DeletePlaylist(userID uuid.UUID, playlistID uuid.UUID) error {

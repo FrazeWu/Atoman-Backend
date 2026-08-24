@@ -119,8 +119,8 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 	if err := s.db.Table("Artists").
 		Select("\"Artists\".*, COALESCE(MAX(a.hot_score), 0) as max_hot_score, COUNT(a.id) as album_count").
 		Joins("LEFT JOIN album_artists aa ON aa.artist_id = \"Artists\".id").
-		Joins("LEFT JOIN \"Albums\" a ON a.id = aa.album_id AND a.lifecycle_status = 'active'").
-		Where("\"Artists\".lifecycle_status = ?", model.MusicLifecycleActive).
+		Joins("LEFT JOIN \"Albums\" a ON a.id = aa.album_id AND a.deleted_at IS NULL AND a.lifecycle_status = 'active'").
+		Where("\"Artists\".deleted_at IS NULL AND \"Artists\".lifecycle_status = ?", model.MusicLifecycleActive).
 		Group("\"Artists\".id").
 		Order("max_hot_score DESC, \"Artists\".created_at DESC").
 		Limit(musicRecommendationCandidateLimit).
@@ -167,7 +167,7 @@ func (s *Service) RecommendArtistsByMode(mode recommendation.Mode, page int, pag
 		}
 		if err := s.db.Table("song_artists").
 			Select("song_artists.artist_id AS artist_id, COALESCE(SUM(\"Songs\".play_count), 0) AS play_count").
-			Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id AND \"Songs\".lifecycle_status = 'active'").
+			Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id AND \"Songs\".deleted_at IS NULL AND \"Songs\".lifecycle_status = 'active'").
 			Where("song_artists.artist_id IN ?", artistIDs).
 			Group("song_artists.artist_id").
 			Scan(&playRows).Error; err != nil {

@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/authctx"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -18,6 +20,22 @@ func completeArtistDraftRequest(name string) CreateArtistRequest {
 		Nationality: "CN",
 		BirthDate:   "1990-01-01",
 		Sources:     []Source{{Title: "artist source"}},
+	}
+}
+
+func TestCanUseArtistDraftAllowsCreatorAndAdmin(t *testing.T) {
+	ownerID := uuid.New()
+	otherID := uuid.New()
+	artist := model.Artist{EntryStatus: artistEntryDraft, CreatedBy: &ownerID}
+
+	if canUseArtistDraft(artist, authctx.CurrentUser{ID: otherID, Role: authctx.RoleUser}) {
+		t.Fatal("draft must not be usable by another regular user")
+	}
+	if !canUseArtistDraft(artist, authctx.CurrentUser{ID: ownerID, Role: authctx.RoleUser}) {
+		t.Fatal("draft creator should be able to use the draft")
+	}
+	if !canUseArtistDraft(artist, authctx.CurrentUser{ID: otherID, Role: authctx.RoleAdmin}) {
+		t.Fatal("admin should be able to use another user's draft")
 	}
 }
 

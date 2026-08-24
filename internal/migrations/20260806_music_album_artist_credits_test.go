@@ -20,8 +20,8 @@ func TestRunMusicAlbumArtistCreditsMigrationPreservesLegacyLinksAndAllowsMultipl
 		artist_id uuid NOT NULL,
 		role text DEFAULT 'primary',
 		position integer DEFAULT 0,
-		created_at datetime,
-		updated_at datetime,
+		created_at timestamp with time zone,
+		updated_at timestamp with time zone,
 		PRIMARY KEY (album_id, artist_id)
 	)`).Error; err != nil {
 		t.Fatalf("create legacy album artists: %v", err)

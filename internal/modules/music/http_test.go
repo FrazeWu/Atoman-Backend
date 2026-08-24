@@ -952,6 +952,26 @@ func TestRegisterRoutesMusicLyricsVersionsAndRevert(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesMusicLyricsVersionsRejectsHiddenDraftSongs(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	song := model.Song{
+		Title: "Draft Version HTTP", AudioURL: "/draft-versions.mp3", Status: "open",
+		LifecycleStatus: model.MusicLifecycleDraft, EditStatus: model.MusicEditDevelopment, UploadedBy: &user.ID,
+	}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SaveSongLyrics(user, song.ID, SaveLyricsInput{Content: "draft lyrics", Format: "plain"}); err != nil {
+		t.Fatalf("save draft lyrics: %v", err)
+	}
+	path := "/api/v1/music/songs/" + song.ID.String() + "/lyrics/versions"
+	assertMusicHTTPError(t, performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodGet, path, ""), http.StatusNotFound, "music.song_not_found")
+	ownerList := performMusicJSONRequest(t, newMusicHTTPRouter(service, &user), http.MethodGet, path, "")
+	if ownerList.Code != http.StatusOK {
+		t.Fatalf("owner list: %d %s", ownerList.Code, ownerList.Body.String())
+	}
+}
+
 func TestRegisterRoutesMusicLyricsVoteRequiresVoteField(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	song := model.Song{Title: "Vote HTTP", AudioURL: "/vote.mp3", Status: "open"}
@@ -3203,6 +3223,58 @@ func TestRegisterRoutesProtectsSystemPlaylists(t *testing.T) {
 		if deleteRecorder.Code != http.StatusConflict {
 			t.Fatalf("expected %s delete 409, got %d: %s", playlist.Kind, deleteRecorder.Code, deleteRecorder.Body.String())
 		}
+	}
+}
+
+func TestRegisterRoutesResolvesPlaylistCoverFromFirstSong(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	playlist := model.Playlist{
+		Base:   model.Base{ID: uuid.New()},
+		UserID: user.ID,
+		Name:   "最爱",
+		Kind:   "favorite",
+	}
+	if err := db.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
+	}
+	song := model.Song{
+		Base:            model.Base{ID: uuid.New()},
+		Title:           "Cover Song",
+		AudioURL:        "/audio/cover-song.mp3",
+		CoverURL:        "https://cdn.test/favorite-cover.jpg",
+		Status:          "open",
+		LifecycleStatus: model.MusicLifecycleActive,
+	}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	playlistSong := model.PlaylistSong{
+		Base:       model.Base{ID: uuid.New()},
+		PlaylistID: playlist.ID,
+		SongID:     song.ID,
+		Position:   0,
+	}
+	if err := db.Create(&playlistSong).Error; err != nil {
+		t.Fatalf("create playlist song: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	newMusicHTTPRouter(service, &user).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/music/playlists", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected playlist list 200, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+
+	var response struct {
+		Data []struct {
+			ID       string `json:"id"`
+			CoverURL string `json:"cover_url"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode playlist list: %v", err)
+	}
+	if len(response.Data) != 1 || response.Data[0].ID != playlist.ID.String() || response.Data[0].CoverURL != song.CoverURL {
+		t.Fatalf("expected first song cover in playlist list, got %#v", response.Data)
 	}
 }
 

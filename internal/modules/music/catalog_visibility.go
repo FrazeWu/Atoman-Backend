@@ -12,18 +12,19 @@ import (
 
 func musicEntryVisibilityCondition(table, ownerColumn string, user *authctx.CurrentUser, includeMerged bool) (string, []any) {
 	if user != nil && (user.Role == authctx.RoleAdmin || user.Role == authctx.RoleOwner) {
-		return "1 = 1", nil
+		return table + ".deleted_at IS NULL", nil
 	}
 	lifecycleColumn := fmt.Sprintf("%s.lifecycle_status", table)
+	deletedColumn := fmt.Sprintf("%s.deleted_at", table)
 	visible := []string{model.MusicLifecycleActive}
 	if includeMerged {
 		visible = append(visible, model.MusicLifecycleMerged)
 	}
 	if user != nil && user.ID != uuid.Nil && ownerColumn != "" {
 		owner := fmt.Sprintf("%s.%s", table, ownerColumn)
-		return fmt.Sprintf("(%s IN ? OR (%s = ? AND %s = ?))", lifecycleColumn, lifecycleColumn, owner), []any{visible, model.MusicLifecycleDraft, user.ID}
+		return fmt.Sprintf("(%s IS NULL AND %s IN ? OR (%s IS NULL AND %s = ? AND %s = ?))", deletedColumn, lifecycleColumn, deletedColumn, lifecycleColumn, owner), []any{visible, model.MusicLifecycleDraft, user.ID}
 	}
-	return lifecycleColumn + " IN ?", []any{visible}
+	return fmt.Sprintf("%s IS NULL AND %s IN ?", deletedColumn, lifecycleColumn), []any{visible}
 }
 
 func scopeVisibleMusicEntries(db *gorm.DB, table, ownerColumn string, user *authctx.CurrentUser, includeMerged bool) *gorm.DB {

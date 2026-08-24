@@ -61,7 +61,8 @@ func (s *Service) ListPendingLyricAnnotations(user authctx.CurrentUser) ([]Pendi
 	var rows []row
 	if err := s.db.Table("music_lyric_annotations AS a").
 		Select("a.id AS annotation_id, a.song_id, s.album_id").
-		Joins(`JOIN "Songs" AS s ON s.id = a.song_id AND s.lifecycle_status = 'active'`).
+		Joins(`JOIN "Songs" AS s ON s.id = a.song_id AND s.deleted_at IS NULL AND s.lifecycle_status = 'active'`).
+		Joins(`JOIN "Albums" AS al ON al.id = s.album_id AND al.deleted_at IS NULL AND al.lifecycle_status = 'active'`).
 		Where("a.created_by = ? AND a.status = ? AND a.deleted_at IS NULL AND s.album_id IS NOT NULL", user.ID, "needs_rebind").
 		Order("a.updated_at DESC").Scan(&rows).Error; err != nil {
 		return nil, err

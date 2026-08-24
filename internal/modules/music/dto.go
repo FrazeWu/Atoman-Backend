@@ -29,6 +29,7 @@ type MusicReleaseConversionRequest struct {
 	CoverURL      string                   `json:"cover_url"`
 	ArtistCredits []AlbumArtistCreditInput `json:"artist_credits"`
 	Sources       []Source                 `json:"sources"`
+	Reason        string                   `json:"reason"`
 }
 
 type AlbumMergeRequest struct {

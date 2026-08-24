@@ -65,6 +65,9 @@ func artistDisplayName(name, disambiguation string) string {
 }
 
 func canUseArtistDraft(artist model.Artist, user authctx.CurrentUser) bool {
+	if authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		return true
+	}
 	return artist.EntryStatus != artistEntryDraft || (artist.CreatedBy != nil && *artist.CreatedBy == user.ID)
 }
 

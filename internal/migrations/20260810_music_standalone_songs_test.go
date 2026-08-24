@@ -74,6 +74,19 @@ func TestRunMusicStandaloneSongsMigrationPreservesSongAndRemovesReleaseWrapper(t
 		}
 	}
 
+	multiTrackRelease := model.Album{
+		Title: "Misclassified Multi Track", AlbumType: "single", Status: "open", EntryStatus: "open", LifecycleStatus: model.MusicLifecycleActive,
+	}
+	if err := db.Create(&multiTrackRelease).Error; err != nil {
+		t.Fatalf("create multi-track release: %v", err)
+	}
+	for _, title := range []string{"Multi One", "Multi Two"} {
+		row := model.Song{Title: title, AlbumID: &multiTrackRelease.ID, AudioURL: "/" + title + ".mp3", Status: "open", LifecycleStatus: model.MusicLifecycleActive}
+		if err := db.Create(&row).Error; err != nil {
+			t.Fatalf("create multi-track song: %v", err)
+		}
+	}
+
 	if err := RunMusicStandaloneSongsPreSchemaMigration(db); err != nil {
 		t.Fatalf("run standalone migration: %v", err)
 	}

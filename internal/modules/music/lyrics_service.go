@@ -160,6 +160,10 @@ func (s *Service) SaveSongLyrics(user authctx.CurrentUser, songID uuid.UUID, inp
 }
 
 func (s *Service) ListSongLyricVersions(songID uuid.UUID) ([]MusicSongLyricsVersionDTO, error) {
+	return s.listSongLyricVersions(songID)
+}
+
+func (s *Service) listSongLyricVersions(songID uuid.UUID) ([]MusicSongLyricsVersionDTO, error) {
 	var song model.Song
 	if err := s.db.First(&song, "id = ?", songID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -196,7 +200,7 @@ func (s *Service) ListVisibleSongLyricVersions(user authctx.CurrentUser, songID 
 		}
 		return nil, err
 	}
-	return s.ListSongLyricVersions(songID)
+	return s.listSongLyricVersions(songID)
 }
 
 func (s *Service) RevertSongLyrics(user authctx.CurrentUser, songID uuid.UUID, version int, editSummary string) (MusicLyricsDTO, error) {

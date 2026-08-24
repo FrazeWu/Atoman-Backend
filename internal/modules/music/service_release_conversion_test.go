@@ -41,6 +41,7 @@ func TestConvertStandaloneSongToAlbumMovesOwnership(t *testing.T) {
 		ReleaseType: "ep", CoverURL: "https://cdn.test/album.jpg",
 		ArtistCredits: []AlbumArtistCreditInput{{ArtistID: artist.ID.String(), Roles: []AlbumArtistRoleInput{{Role: "primary"}}, Position: 1}},
 		Sources:       []Source{{URL: "https://example.test/album"}},
+		Reason:        "转换为专辑",
 	})
 	if err != nil {
 		t.Fatalf("convert song to album: %v", err)
@@ -102,6 +103,7 @@ func TestConvertAlbumToStandaloneSongRequiresOneTrackAndRemovesAlbum(t *testing.
 		ReleaseType: "leak", CoverURL: "https://cdn.test/single.jpg",
 		ArtistCredits: []AlbumArtistCreditInput{{ArtistID: artist.ID.String(), Roles: []AlbumArtistRoleInput{{Role: "primary"}}, Position: 1}},
 		Sources:       []Source{{URL: "https://example.test/single"}},
+		Reason:        "转换为独立歌曲",
 	})
 	if err != nil {
 		t.Fatalf("convert album to song: %v", err)
@@ -146,6 +148,7 @@ func TestConvertAlbumToStandaloneSongRejectsMultipleTracks(t *testing.T) {
 	_, err := service.ConvertAlbumToStandaloneSong(user, album.ID, MusicReleaseConversionRequest{
 		Title: "Multi", ReleaseDate: "2025-01-01", ReleaseType: "single", CoverURL: "/cover.jpg",
 		Sources: []Source{{URL: "https://example.test/source"}},
+		Reason:  "修正发行类型",
 	})
 	if err == nil || !strings.Contains(err.Error(), "exactly one song") {
 		t.Fatalf("expected one-track validation, got %v", err)

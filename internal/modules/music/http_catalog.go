@@ -156,7 +156,7 @@ func hydrateArtistStats(db *gorm.DB, artists []model.Artist) error {
 	}
 	if err := db.Table("song_artists").
 		Select("song_artists.artist_id AS artist_id, COALESCE(SUM(\"Songs\".play_count), 0) AS play_count").
-		Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id AND \"Songs\".lifecycle_status = 'active'").
+		Joins("JOIN \"Songs\" ON \"Songs\".id = song_artists.song_id AND \"Songs\".deleted_at IS NULL AND \"Songs\".lifecycle_status = 'active'").
 		Where("song_artists.artist_id IN ?", artistIDs).
 		Group("song_artists.artist_id").
 		Scan(&playRows).Error; err != nil {
@@ -192,6 +192,7 @@ func hydrateArtistDisplayImages(db *gorm.DB, artists []model.Artist) error {
 		Select("album_artists.artist_id AS artist_id, \"Albums\".cover_url AS cover_url").
 		Joins("JOIN \"Albums\" ON \"Albums\".id = album_artists.album_id").
 		Where("album_artists.artist_id IN ?", missingImageIDs).
+		Where("\"Albums\".deleted_at IS NULL").
 		Where("TRIM(COALESCE(\"Albums\".cover_url, '')) <> ''").
 		Where("\"Albums\".lifecycle_status = ?", model.MusicLifecycleActive).
 		Order("album_artists.artist_id ASC").

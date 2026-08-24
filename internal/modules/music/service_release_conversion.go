@@ -19,6 +19,10 @@ func (s *Service) ConvertStandaloneSongToAlbum(user authctx.CurrentUser, songID 
 	if user.ID == uuid.Nil {
 		return uuid.Nil, apperr.Unauthorized("Login required")
 	}
+	reason := strings.TrimSpace(input.Reason)
+	if reason == "" {
+		return uuid.Nil, apperr.BadRequest("validation.invalid_request", "reason is required")
+	}
 	albumType := strings.ToLower(strings.TrimSpace(input.ReleaseType))
 	if albumType == "" || albumType == "single" || albumType == "leak" {
 		return uuid.Nil, apperr.BadRequest("validation.invalid_request", "target album type is required")
@@ -104,7 +108,7 @@ func (s *Service) ConvertStandaloneSongToAlbum(user authctx.CurrentUser, songID 
 		if _, err := revisions.EnsureInitialRevision("album", album.ID, user.ID); err != nil {
 			return err
 		}
-		_, err := revisions.CreateCurrentSnapshotRevision("song", song.ID, user.ID, "转换为专辑曲目")
+		_, err := revisions.CreateCurrentSnapshotRevision("song", song.ID, user.ID, reason)
 		return err
 	})
 	if err != nil {
@@ -118,6 +122,10 @@ func (s *Service) ConvertStandaloneSongToAlbum(user authctx.CurrentUser, songID 
 func (s *Service) ConvertAlbumToStandaloneSong(user authctx.CurrentUser, albumID uuid.UUID, input MusicReleaseConversionRequest) (uuid.UUID, error) {
 	if user.ID == uuid.Nil {
 		return uuid.Nil, apperr.Unauthorized("Login required")
+	}
+	reason := strings.TrimSpace(input.Reason)
+	if reason == "" {
+		return uuid.Nil, apperr.BadRequest("validation.invalid_request", "reason is required")
 	}
 	releaseType := strings.ToLower(strings.TrimSpace(input.ReleaseType))
 	if releaseType != "single" && releaseType != "leak" {
@@ -199,7 +207,7 @@ func (s *Service) ConvertAlbumToStandaloneSong(user authctx.CurrentUser, albumID
 		if err := removeStandaloneAlbumWrapper(tx, album.ID); err != nil {
 			return err
 		}
-		_, err := revisions.CreateCurrentSnapshotRevision("song", song.ID, user.ID, "转换为独立歌曲")
+		_, err := revisions.CreateCurrentSnapshotRevision("song", song.ID, user.ID, reason)
 		return err
 	})
 	if err != nil {
