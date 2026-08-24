@@ -41,6 +41,7 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		&model.PodcastEpisode{},
 		&model.ContentEntry{},
 		&model.ContentEpisodeExtension{},
+		&model.ContentPublicationEvent{},
 		&model.ContentCollection{},
 		&model.ContentCollectionMembership{},
 		&model.StudioMetricEvent{},
@@ -176,19 +177,26 @@ func validWAVBytes() []byte {
 	return append([]byte("RIFF$\x00\x00\x00WAVEfmt "), bytes.Repeat([]byte{0}, 64)...)
 }
 
+func isCanonicalContentEntryRow(tx *gorm.DB) bool {
+	if tx.Statement.TableExpr != nil {
+		return strings.Contains(tx.Statement.TableExpr.SQL, "content_entries")
+	}
+	return strings.Contains(tx.Statement.Table, "content_entries")
+}
 func TestGetPodcastEpisodesReturnsInternalServerErrorWhenQueryFails(t *testing.T) {
 	r, db, _, _ := newPodcastHandlerTestDB(t)
 
 	callbackName := "podcast_episode_list_error_" + strings.ReplaceAll(t.Name(), "/", "_")
-	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
-		if tx.Statement.Table == "content_entries" {
-			tx.AddError(errors.New("injected episode list error"))
+	if err := db.Callback().Row().Before("gorm:row").Register(callbackName, func(tx *gorm.DB) {
+		if !isCanonicalContentEntryRow(tx) {
+			return
 		}
+		tx.AddError(errors.New("injected episode list error"))
 	}); err != nil {
 		t.Fatalf("register query error callback: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = db.Callback().Query().Remove(callbackName)
+		_ = db.Callback().Row().Remove(callbackName)
 	})
 
 	w := httptest.NewRecorder()
@@ -1043,32 +1051,30 @@ func TestUpdatePodcastEpisodeReturnsInternalServerErrorWhenReloadFails(t *testin
 	r, db, user, channel := newPodcastHandlerTestDB(t)
 	episode := createPodcastEpisodeForPostStatus(t, db, user, channel, "draft")
 
+	authHeader := podcastAuthHeader(t, db, user)
 	episodeQueries := 0
 	callbackName := "podcast_episode_reload_error_" + strings.ReplaceAll(t.Name(), "/", "_")
-	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
-		if tx.Statement.Table != "podcast_episodes" {
-			return
-		}
+	if err := db.Callback().Row().Before("gorm:row").Register(callbackName, func(tx *gorm.DB) {
 		episodeQueries++
-		if episodeQueries == 2 {
+		if episodeQueries == 3 {
 			tx.AddError(errors.New("injected episode reload error"))
 		}
 	}); err != nil {
 		t.Fatalf("register query error callback: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = db.Callback().Query().Remove(callbackName)
+		_ = db.Callback().Row().Remove(callbackName)
 	})
 
 	body := []byte(`{"title":"updated title"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/podcast/episodes/"+episode.ID.String(), bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
+	req.Header.Set("Authorization", authHeader)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404 after canonical reload query failure, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var post model.Post

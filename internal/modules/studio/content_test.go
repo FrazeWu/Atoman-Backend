@@ -141,6 +141,16 @@ func TestStudioVideoContentsUseScalarCollectionAndExposeLegacyConflict(t *testin
 	if err := fixture.db.Model(&conflicted).Association("Collections").Replace([]model.Collection{videoCollection, secondCollection}); err != nil {
 		t.Fatal(err)
 	}
+	if err := fixture.db.Where("content_id IN ?", []uuid.UUID{scalar.ID, conflicted.ID}).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create([]model.ContentCollectionMembership{
+		{ContentID: scalar.ID, CollectionID: videoCollection.ID},
+		{ContentID: conflicted.ID, CollectionID: videoCollection.ID},
+		{ContentID: conflicted.ID, CollectionID: secondCollection.ID},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	items, total, err := fixture.service.ListContents(fixture.user, ModuleVideo, ContentQuery{
 		ChannelID: fixture.channel.ID, CollectionID: videoCollection.ID,
@@ -195,12 +205,13 @@ func TestStudioReorderCollectionContentsPersistsPodcastAndVideoPositions(t *test
 	if err := fixture.service.ReorderCollectionContents(fixture.user, ModulePodcast, podcastCollection.ID, []uuid.UUID{secondEpisode.ID, firstEpisode.ID}); err != nil {
 		t.Fatal(err)
 	}
-	var posts []model.Post
-	if err := fixture.db.Where("id IN ?", []uuid.UUID{firstPost.ID, secondPost.ID}).Order("collection_position ASC").Find(&posts).Error; err != nil {
+	var podcastMemberships []model.ContentCollectionMembership
+	if err := fixture.db.Where("content_id IN ? AND collection_id = ?", []uuid.UUID{firstPost.ID, secondPost.ID}, podcastCollection.ID).
+		Order("position ASC").Find(&podcastMemberships).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(posts) != 2 || posts[0].ID != secondPost.ID {
-		t.Fatalf("unexpected podcast order: %#v", posts)
+	if len(podcastMemberships) != 2 || podcastMemberships[0].ContentID != secondPost.ID {
+		t.Fatalf("unexpected podcast order: %#v", podcastMemberships)
 	}
 
 	firstVideo := model.Video{UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &videoCollection.ID, Title: "first video", VideoURL: "https://example.com/one.mp4"}
@@ -213,12 +224,13 @@ func TestStudioReorderCollectionContentsPersistsPodcastAndVideoPositions(t *test
 	if err := fixture.service.ReorderCollectionContents(fixture.user, ModuleVideo, videoCollection.ID, []uuid.UUID{secondVideo.ID, firstVideo.ID}); err != nil {
 		t.Fatal(err)
 	}
-	var videos []model.Video
-	if err := fixture.db.Where("id IN ?", []uuid.UUID{firstVideo.ID, secondVideo.ID}).Order("collection_position ASC").Find(&videos).Error; err != nil {
+	var videoMemberships []model.ContentCollectionMembership
+	if err := fixture.db.Where("content_id IN ? AND collection_id = ?", []uuid.UUID{firstVideo.ID, secondVideo.ID}, videoCollection.ID).
+		Order("position ASC").Find(&videoMemberships).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(videos) != 2 || videos[0].ID != secondVideo.ID {
-		t.Fatalf("unexpected video order: %#v", videos)
+	if len(videoMemberships) != 2 || videoMemberships[0].ContentID != secondVideo.ID {
+		t.Fatalf("unexpected video order: %#v", videoMemberships)
 	}
 	if err := fixture.service.ReorderCollectionContents(fixture.user, ModuleVideo, videoCollection.ID, []uuid.UUID{firstVideo.ID}); apperr.FromError(err) == nil {
 		t.Fatalf("expected incomplete order to be rejected, got %v", err)

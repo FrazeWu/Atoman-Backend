@@ -20,9 +20,9 @@ type studioChannelSelection struct {
 
 type legacyUserDefaultChannel struct {
 	model.Base
-	UserID      uuid.UUID
+	UserID      uuid.UUID `gorm:"type:uuid"`
 	ContentType string
-	ChannelID   uuid.UUID
+	ChannelID   uuid.UUID `gorm:"type:uuid"`
 }
 
 func (legacyUserDefaultChannel) TableName() string { return "user_default_channels" }

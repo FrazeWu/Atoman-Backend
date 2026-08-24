@@ -50,6 +50,7 @@ func newOAuthServiceTestDB(t *testing.T) *gorm.DB {
 		&model.OAuthFlow{},
 		&model.Channel{},
 		&model.Collection{},
+		&model.ContentCollection{},
 		&model.UserStudioState{},
 		&model.StudioModuleSettings{},
 		&model.FeedSource{},

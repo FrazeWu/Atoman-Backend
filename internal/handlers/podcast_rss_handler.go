@@ -32,7 +32,7 @@ func GetPodcastRSS(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		episodes, err := contentmodule.LoadPodcastEpisodes(db, contentmodule.PodcastQuery(db).
-			Where("episodes.channel_id = ? AND posts.status = ? AND posts.visibility IN ?", channel.ID, "published", []string{"", "public"}).
+			Where("posts.channel_id = ? AND posts.status = ? AND posts.visibility IN ?", channel.ID, "published", []string{"", "public"}).
 			Order("episodes.season_number ASC, episodes.episode_number ASC"))
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load podcast episodes"})

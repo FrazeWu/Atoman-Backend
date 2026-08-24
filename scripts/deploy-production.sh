@@ -26,6 +26,7 @@ STATE_DIR="${ATOMAN_STATE_DIR:-/var/lib/$SERVICE_NAME}"
 
 TEMP_BINARY=""
 TEMP_WORKER_BINARY=""
+TEMP_MIGRATE_BINARY=""
 BACKUP_BINARY=""
 
 log() {
@@ -55,6 +56,7 @@ EOF
 cleanup() {
   [[ -z "$TEMP_BINARY" ]] || rm -f "$TEMP_BINARY"
   [[ -z "$TEMP_WORKER_BINARY" ]] || rm -f "$TEMP_WORKER_BINARY"
+  [[ -z "$TEMP_MIGRATE_BINARY" ]] || rm -f "$TEMP_MIGRATE_BINARY"
 }
 trap cleanup EXIT
 
@@ -153,15 +155,23 @@ start_postgres() {
 build_backend() {
   TEMP_BINARY="$(mktemp "$REPO_DIR/.start_server.new.XXXXXX")"
   TEMP_WORKER_BINARY="$(mktemp "$REPO_DIR/.music_import_worker.new.XXXXXX")"
+  TEMP_MIGRATE_BINARY="$(mktemp "$REPO_DIR/.migrate.new.XXXXXX")"
   log "Building backend"
   (
     cd "$REPO_DIR"
     go build ./...
     go build -trimpath -o "$TEMP_BINARY" ./cmd/start_server
     go build -trimpath -o "$TEMP_WORKER_BINARY" ./cmd/music_import_worker
+    go build -trimpath -o "$TEMP_MIGRATE_BINARY" ./cmd/migrate
   )
   chmod 0755 "$TEMP_BINARY"
   chmod 0755 "$TEMP_WORKER_BINARY"
+  chmod 0755 "$TEMP_MIGRATE_BINARY"
+}
+
+run_database_migrations() {
+  log "Running database migrations"
+  run_root "$TEMP_MIGRATE_BINARY" -env "$ENV_FILE"
 }
 
 install_systemd_unit() {
@@ -396,6 +406,7 @@ check_prerequisites
 sync_source
 start_postgres
 build_backend
+run_database_migrations
 install_nginx_config
 activate_backend
 

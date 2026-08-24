@@ -101,7 +101,7 @@ func (h *Handler) listPosts(c *gin.Context) {
 		resolved, err := canonicalBlogCollectionID(h.service.db, *collectionID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				httpx.List(c, []PostListItemDTO{}, page, pageSize, 0)
+				httpx.List(c, []BlogContentListItemDTO{}, page, pageSize, 0)
 				return
 			}
 			httpx.Error(c, err)
@@ -177,11 +177,11 @@ func (h *Handler) listPosts(c *gin.Context) {
 			countsByPostID[count.PostID] = count
 		}
 	}
-	items := make([]PostListItemDTO, 0, len(posts))
+	items := make([]BlogContentListItemDTO, 0, len(posts))
 	for index, post := range posts {
 		count := countsByPostID[post.ID]
-		items = append(items, PostListItemDTO{
-			PostDTO: postDTOs[index], LikesCount: count.LikesCount,
+		items = append(items, BlogContentListItemDTO{
+			BlogContentDTO: postDTOs[index], LikesCount: count.LikesCount,
 			CommentsCount: count.CommentsCount, BookmarksCount: count.BookmarksCount,
 		})
 	}
@@ -238,7 +238,7 @@ func (h *Handler) listRecommendedPosts(c *gin.Context) {
 // @Tags blog
 // @Produce json
 // @Param id path string true "文章 UUID"
-// @Success 200 {object} model.Post
+// @Success 200 {object} BlogContentDTO
 // @Failure 403 {object} handlers.ErrorResponse
 // @Failure 404 {object} handlers.ErrorResponse
 // @Router /api/v1/blog/posts/{id} [get]
@@ -324,14 +324,14 @@ func (h *Handler) getPost(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, struct {
-		PostDTO
+		BlogContentDTO
 		Liked                 bool  `json:"liked"`
 		LikesCount            int64 `json:"likes_count"`
 		CommentsCount         int64 `json:"comments_count"`
 		BookmarksCount        int64 `json:"bookmarks_count"`
 		ChannelFollowersCount int64 `json:"channel_followers_count"`
 	}{
-		PostDTO:               postDTO,
+		BlogContentDTO:        postDTO,
 		Liked:                 liked,
 		LikesCount:            likesCount,
 		CommentsCount:         commentsCount,
@@ -406,7 +406,7 @@ func boundedListLimit(raw string, fallback int, max int) int {
 // @Accept json
 // @Produce json
 // @Param input body CreatePostRequest true "文章输入"
-// @Success 201 {object} model.Post
+// @Success 201 {object} BlogContentDTO
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
 // @Failure 500 {object} handlers.ErrorResponse
@@ -444,7 +444,7 @@ func (h *Handler) createPost(c *gin.Context) {
 // @Tags blog
 // @Produce json
 // @Param id path string true "文章 UUID"
-// @Success 200 {array} model.BlogPostVersion
+// @Success 200 {array} BlogContentVersionDTO
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/blog/posts/{id}/versions [get]
@@ -473,7 +473,7 @@ func (h *Handler) listPostVersions(c *gin.Context) {
 // @Produce json
 // @Param id path string true "文章 UUID"
 // @Param version path int true "版本号"
-// @Success 200 {object} model.Post
+// @Success 200 {object} BlogContentDTO
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/blog/posts/{id}/versions/{version}/restore [post]

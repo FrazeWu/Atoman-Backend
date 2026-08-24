@@ -67,13 +67,14 @@ func TestRecommendArticlesUsesCanonicalBlogExtensions(t *testing.T) {
 	}
 }
 
-func TestRecommendArticlesFallsBackWithoutCanonicalBlogExtensions(t *testing.T) {
+func TestRecommendArticlesReturnsEmptyWithoutCanonicalBlogExtensions(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Channel{},
 		&model.Post{},
-		&model.FeedSource{},
+		&model.ContentEntry{},
+		&model.ContentBlogExtension{},
 		&model.FeedItem{},
 		&model.FeedItemRead{},
 		&model.FeedItemStar{},
@@ -108,20 +109,19 @@ func TestRecommendArticlesFallsBackWithoutCanonicalBlogExtensions(t *testing.T) 
 	if err != nil {
 		t.Fatalf("legacy recommendation should work without canonical extensions: %v", err)
 	}
-	if total != 1 || len(items) != 1 {
-		t.Fatalf("expected one legacy recommendation, got total=%d items=%d", total, len(items))
-	}
-	if items[0].ID != post.ID.String() || items[0].Title != post.Title {
-		t.Fatalf("unexpected recommendation: %+v", items[0])
+	if total != 0 || len(items) != 0 {
+		t.Fatalf("expected canonical-only recommendation query to exclude legacy post, got total=%d items=%d", total, len(items))
 	}
 }
 
-func TestRecommendChannelsFallsBackWithoutCanonicalBlogExtensions(t *testing.T) {
+func TestRecommendChannelsReturnsEmptyWithoutCanonicalBlogExtensions(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
 		&model.Channel{},
 		&model.Post{},
+		&model.ContentEntry{},
+		&model.ContentBlogExtension{},
 	)
 
 	user := model.User{
@@ -158,14 +158,14 @@ func TestRecommendChannelsFallsBackWithoutCanonicalBlogExtensions(t *testing.T) 
 	if err != nil {
 		t.Fatalf("legacy channel recommendation should work without canonical extensions: %v", err)
 	}
-	if len(rows) != 1 || rows[0].ChannelID != channel.ID || rows[0].Name != channel.Name {
-		t.Fatalf("unexpected legacy channel rows: %+v", rows)
+	if len(rows) != 0 {
+		t.Fatalf("expected canonical-only channel recommendation query to exclude legacy channel, got %+v", rows)
 	}
 	recentPosts, err := NewRepo(db).ListRecentPublishedPostsByChannelID(channel.ID, 3)
 	if err != nil {
 		t.Fatalf("legacy channel recent posts should load without canonical extensions: %v", err)
 	}
-	if len(recentPosts) != 1 || recentPosts[0].ID != post.ID {
-		t.Fatalf("unexpected legacy recent posts: %+v", recentPosts)
+	if len(recentPosts) != 0 {
+		t.Fatalf("expected canonical-only recent posts query to exclude legacy post, got %+v", recentPosts)
 	}
 }

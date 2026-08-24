@@ -32,14 +32,14 @@ func TestForumSearchIndexStatementsUsePartialGINIndexes(t *testing.T) {
 	}
 }
 
-func TestRunForumSearchIndexesSkipsSQLite(t *testing.T) {
+func TestRunForumSearchIndexesCreatesPostgresIndexes(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.ForumTopic{}, &model.CommentEntry{})
 
 	if err := RunForumSearchIndexes(db); err != nil {
-		t.Fatalf("expected SQLite migration to be skipped: %v", err)
+		t.Fatalf("run PostgreSQL search indexes: %v", err)
 	}
-	if db.Migrator().HasIndex("forum_topics", "idx_forum_topics_search") || db.Migrator().HasIndex("comment_entries", "idx_forum_comments_search") {
-		t.Fatal("expected PostgreSQL search indexes to remain absent on SQLite")
+	if !db.Migrator().HasIndex("forum_topics", "idx_forum_topics_search") || !db.Migrator().HasIndex("comment_entries", "idx_forum_comments_search") {
+		t.Fatal("expected PostgreSQL search indexes to exist")
 	}
 }

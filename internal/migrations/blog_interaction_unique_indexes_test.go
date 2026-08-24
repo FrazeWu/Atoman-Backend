@@ -1,6 +1,7 @@
 package migrations
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -78,9 +79,9 @@ func TestDeduplicateBlogInteractionsSupportsLegacyPodcastBookmarksWithoutKind(t 
 	if err := db.Exec(`
 CREATE TABLE podcast_episode_bookmarks (
 	id text PRIMARY KEY,
-	created_at datetime,
-	updated_at datetime,
-	deleted_at datetime,
+	created_at timestamp with time zone,
+	updated_at timestamp with time zone,
+	deleted_at timestamp with time zone,
 	user_id text NOT NULL,
 	episode_id text NOT NULL
 );
@@ -114,9 +115,9 @@ func TestRunBlogInteractionUniqueIndexesDeduplicatesExistingRows(t *testing.T) {
 	if err := db.Exec(`
 CREATE TABLE likes (
 	id text PRIMARY KEY,
-	created_at datetime,
-	updated_at datetime,
-	deleted_at datetime,
+	created_at timestamp with time zone,
+	updated_at timestamp with time zone,
+	deleted_at timestamp with time zone,
 	user_id text NOT NULL,
 	target_type text NOT NULL,
 	target_id text NOT NULL
@@ -127,9 +128,9 @@ CREATE TABLE likes (
 	if err := db.Exec(`
 CREATE TABLE bookmarks (
 	id text PRIMARY KEY,
-	created_at datetime,
-	updated_at datetime,
-	deleted_at datetime,
+	created_at timestamp with time zone,
+	updated_at timestamp with time zone,
+	deleted_at timestamp with time zone,
 	user_id text NOT NULL,
 	post_id text NOT NULL,
 	bookmark_folder_id text
@@ -179,9 +180,9 @@ func TestRunBlogInteractionUniqueIndexesMigratesPodcastBookmarkKinds(t *testing.
 	if err := db.Exec(`
 CREATE TABLE podcast_episode_bookmarks (
 	id text PRIMARY KEY,
-	created_at datetime,
-	updated_at datetime,
-	deleted_at datetime,
+	created_at timestamp with time zone,
+	updated_at timestamp with time zone,
+	deleted_at timestamp with time zone,
 	user_id text NOT NULL,
 	episode_id text NOT NULL
 );
@@ -225,9 +226,9 @@ func TestRunBlogInteractionUniqueIndexesDeduplicatesNormalizedPodcastBookmarkKin
 	if err := db.Exec(`
 CREATE TABLE podcast_episode_bookmarks (
 	id text PRIMARY KEY,
-	created_at datetime,
-	updated_at datetime,
-	deleted_at datetime,
+	created_at timestamp with time zone,
+	updated_at timestamp with time zone,
+	deleted_at timestamp with time zone,
 	user_id text NOT NULL,
 	episode_id text NOT NULL,
 	kind text
@@ -302,25 +303,22 @@ func TestPodcastBookmarkMigrationNormalizesKindsBeforeAutoMigrate(t *testing.T) 
 		t.Fatalf("expected one favorite podcast bookmark, got %d", count)
 	}
 
-	var columns []struct {
-		Name       string
-		NotNull    int    `gorm:"column:notnull"`
-		DefaultSQL string `gorm:"column:dflt_value"`
+	var column struct {
+		IsNullable string  `gorm:"column:is_nullable"`
+		DefaultSQL *string `gorm:"column:column_default"`
 	}
-	if err := db.Raw(`PRAGMA table_info('podcast_episode_bookmarks')`).Scan(&columns).Error; err != nil {
+	if err := db.Raw(`
+SELECT is_nullable, column_default
+FROM information_schema.columns
+WHERE table_schema = current_schema()
+  AND table_name = 'podcast_episode_bookmarks'
+  AND column_name = 'kind'`).Scan(&column).Error; err != nil {
 		t.Fatalf("inspect podcast bookmark schema: %v", err)
 	}
-	for _, column := range columns {
-		if column.Name != "kind" {
-			continue
-		}
-		if column.NotNull != 1 {
-			t.Fatalf("expected kind to be NOT NULL, got notnull=%d", column.NotNull)
-		}
-		if column.DefaultSQL != "\"favorite\"" && column.DefaultSQL != "'favorite'" {
-			t.Fatalf("expected kind default favorite, got %q", column.DefaultSQL)
-		}
-		return
+	if column.IsNullable != "NO" {
+		t.Fatalf("expected kind to be NOT NULL, got nullable=%q", column.IsNullable)
 	}
-	t.Fatal("expected kind column")
+	if column.DefaultSQL == nil || !strings.Contains(*column.DefaultSQL, "favorite") {
+		t.Fatalf("expected kind default favorite, got %v", column.DefaultSQL)
+	}
 }

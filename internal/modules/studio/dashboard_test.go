@@ -54,6 +54,7 @@ func newStudioQueryFixture(t *testing.T) studioQueryFixture {
 		&model.ContentCollection{},
 		&model.ContentCollectionMembership{},
 		&model.ContentEpisodeExtension{},
+		&model.ContentVideoExtension{},
 	)
 	registerStudioCanonicalTestSeeds(t, db)
 	owner := model.User{Username: "studio-query-owner", Email: "studio-query-owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
@@ -163,8 +164,8 @@ func TestDashboardReturnsThreeIndependentModuleSections(t *testing.T) {
 		if section.Module != module || section.Error != "" {
 			t.Fatalf("expected healthy %s section, got %#v", module, section)
 		}
-		if len(section.Recent) == 0 || len(section.Recent) > 3 {
-			t.Fatalf("expected one to three recent %s items, got %#v", module, section.Recent)
+		if len(section.Recent) == 0 || len(section.Recent) > 5 {
+			t.Fatalf("expected one to five recent %s items, got %#v", module, section.Recent)
 		}
 		if section.Metrics["contents"] != wantContents[index] {
 			t.Fatalf("expected independent %s content count %d, got %#v", module, wantContents[index], section.Metrics)
@@ -175,6 +176,92 @@ func TestDashboardReturnsThreeIndependentModuleSections(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestDashboardProvidesFiveRecentItemsPerModule(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	collection := fixture.collections[ModuleBlog]
+	for index := 0; index < 6; index++ {
+		post := model.Post{
+			UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &collection.ID,
+			Title: "Recent blog", Content: "body", Status: "published", Visibility: "public",
+		}
+		if err := fixture.db.Create(&post).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dashboard, err := fixture.service.GetDashboard(fixture.user, fixture.channel.ID)
+	if err != nil {
+		t.Fatalf("get dashboard: %v", err)
+	}
+	if got := len(dashboard.Sections[0].Recent); got != 5 {
+		t.Fatalf("expected five recent blog items, got %d", got)
+	}
+}
+
+func TestDashboardIncludesScheduledContentInStatusSummary(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	collection := fixture.collections[ModuleBlog]
+	post := model.Post{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &collection.ID,
+		Title: "Scheduled blog", Content: "body", Status: "scheduled", Visibility: "public",
+	}
+	if err := fixture.db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	dashboard, err := fixture.service.GetDashboard(fixture.user, fixture.channel.ID)
+	if err != nil {
+		t.Fatalf("get dashboard: %v", err)
+	}
+	if got := dashboard.Sections[0].Metrics["scheduled"]; got != 1 {
+		t.Fatalf("expected one scheduled blog, got %d", got)
+	}
+}
+
+func TestDashboardRecentPodcastUsesEffectiveUpdateTime(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	collection := fixture.collections[ModulePodcast]
+	now := time.Now().UTC().Truncate(time.Second)
+	var newestEpisodeID uuid.UUID
+	for index := 0; index < 6; index++ {
+		post := model.Post{
+			UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &collection.ID,
+			Title: "Podcast", Content: "notes", Status: "published", Visibility: "public",
+		}
+		if err := fixture.db.Create(&post).Error; err != nil {
+			t.Fatal(err)
+		}
+		episode := model.PodcastEpisode{PostID: post.ID, ChannelID: fixture.channel.ID, AudioURL: "episode.mp3"}
+		if err := fixture.db.Create(&episode).Error; err != nil {
+			t.Fatal(err)
+		}
+		entryUpdatedAt := now.Add(time.Duration(index) * time.Minute)
+		episodeUpdatedAt := now.Add(time.Duration(index) * time.Minute)
+		if index == 5 {
+			newestEpisodeID = episode.ID
+			entryUpdatedAt = now.Add(30 * time.Minute)
+			episodeUpdatedAt = now.Add(-time.Minute)
+		}
+		if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", post.ID).Update("updated_at", entryUpdatedAt).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := fixture.db.Model(&model.ContentEpisodeExtension{}).Where("content_id = ?", post.ID).Update("updated_at", episodeUpdatedAt).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dashboard, err := fixture.service.GetDashboard(fixture.user, fixture.channel.ID)
+	if err != nil {
+		t.Fatalf("get dashboard: %v", err)
+	}
+	for _, item := range dashboard.Sections[1].Recent {
+		if item.ID == newestEpisodeID {
+			return
+		}
+	}
+	t.Fatalf("expected most recently updated podcast %s in dashboard recent items, got %#v", newestEpisodeID, dashboard.Sections[1].Recent)
 }
 
 func TestDashboardReportsUnrepliedPodcastComments(t *testing.T) {
@@ -254,7 +341,7 @@ func TestDashboardDoesNotReportBlogWithManyToManyCollectionAsMissing(t *testing.
 	}
 }
 
-func TestDashboardKeepsModuleErrorInsideSection(t *testing.T) {
+func TestDashboardUsesCanonicalVideoDataWithoutLegacyVideoTable(t *testing.T) {
 	fixture := newStudioQueryFixture(t)
 	seedStudioDashboardContent(t, fixture)
 	if err := fixture.db.Migrator().DropTable(&model.Video{}); err != nil {
@@ -265,10 +352,10 @@ func TestDashboardKeepsModuleErrorInsideSection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected partial dashboard success, got %v", err)
 	}
-	if dashboard.Sections[0].Error != "" || dashboard.Sections[1].Error != "" {
-		t.Fatalf("expected blog and podcast sections to remain available: %#v", dashboard.Sections)
+	if dashboard.Sections[0].Error != "" || dashboard.Sections[1].Error != "" || dashboard.Sections[2].Error != "" {
+		t.Fatalf("expected all dashboard sections to remain available: %#v", dashboard.Sections)
 	}
-	if dashboard.Sections[2].Module != ModuleVideo || dashboard.Sections[2].Error == "" {
-		t.Fatalf("expected isolated video error, got %#v", dashboard.Sections[2])
+	if dashboard.Sections[2].Metrics["contents"] != 1 {
+		t.Fatalf("expected canonical video content to remain visible, got %#v", dashboard.Sections[2])
 	}
 }

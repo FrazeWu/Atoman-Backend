@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -51,6 +52,7 @@ func (s *Service) SearchMany(ctx context.Context, viewer Viewer, targetTypes []s
 		uniqueTypes = append(uniqueTypes, targetType)
 	}
 
+	startedAt := time.Now()
 	itemsByType := make([][]Target, len(uniqueTypes))
 	registry := NewRegistry(s.db.WithContext(ctx))
 	jobs := make(chan int)
@@ -75,13 +77,16 @@ func (s *Service) SearchMany(ctx context.Context, viewer Viewer, targetTypes []s
 					errMu.Unlock()
 					continue
 				}
+				typeStartedAt := time.Now()
 				matches, err := registry.Search(viewer, uniqueTypes[index], query, limit)
+				typeDuration := time.Since(typeStartedAt)
 				if err != nil {
 					errMu.Lock()
 					if firstErr == nil {
 						firstErr = fmt.Errorf("reference search type %q: %w", uniqueTypes[index], err)
 					}
 					errMu.Unlock()
+					log.Printf("reference_search_type type=%q duration_ms=%d results=0 failed=true", uniqueTypes[index], typeDuration.Milliseconds())
 					log.Printf("reference search type %q failed: %v", uniqueTypes[index], err)
 					continue
 				}
@@ -89,11 +94,18 @@ func (s *Service) SearchMany(ctx context.Context, viewer Viewer, targetTypes []s
 				errMu.Lock()
 				successfulTypes++
 				errMu.Unlock()
+				log.Printf("reference_search_type type=%q duration_ms=%d results=%d failed=false", uniqueTypes[index], typeDuration.Milliseconds(), len(matches))
 			}
 		}()
 	}
 	for index := range uniqueTypes {
-		jobs <- index
+		select {
+		case jobs <- index:
+		case <-ctx.Done():
+			close(jobs)
+			workers.Wait()
+			return nil, ctx.Err()
+		}
 	}
 	close(jobs)
 	workers.Wait()
@@ -112,6 +124,7 @@ func (s *Service) SearchMany(ctx context.Context, viewer Viewer, targetTypes []s
 	for _, matches := range itemsByType {
 		items = append(items, matches...)
 	}
+	log.Printf("reference_search total_duration_ms=%d types=%d successful_types=%d result_count=%d query_length=%d", time.Since(startedAt).Milliseconds(), len(uniqueTypes), successes, len(items), len([]rune(strings.TrimSpace(query))))
 	return items, nil
 }
 

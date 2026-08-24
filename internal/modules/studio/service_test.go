@@ -59,14 +59,14 @@ func TestValidateContentScopeRejectsCollectionFromAnotherChannel(t *testing.T) {
 	}
 
 	err := NewService(db).ValidateContentScope(user.UUID, channel.ID, ModuleBlog, []uuid.UUID{foreignCollection.ID}, true)
-	if app := apperr.FromError(err); app == nil || app.HTTPStatus != 403 {
-		t.Fatalf("expected foreign collection 403, got %v", err)
+	if app := apperr.FromError(err); app == nil || app.HTTPStatus != 400 {
+		t.Fatalf("expected foreign collection 400, got %v", err)
 	}
 }
 
 func TestDeleteChannelRejectsActiveVideoProcessingJob(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.Video{}, &model.VideoProcessingJob{}, &model.ContentEntry{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.Video{}, &model.VideoProcessingJob{}, &model.ContentEntry{}, &model.ContentVideoExtension{})
 	user := model.User{Username: "channel-delete-owner", Email: "channel-delete-owner@example.com", Password: "hash", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
@@ -79,7 +79,23 @@ func TestDeleteChannelRejectsActiveVideoProcessingJob(t *testing.T) {
 	if err := db.Create(&video).Error; err != nil {
 		t.Fatal(err)
 	}
+	videoEntry := model.ContentEntry{
+		Base: video.Base, AuthorID: &user.UUID, ChannelID: channel.ID, Kind: "video", Title: video.Title,
+		Status: video.Status, Visibility: video.Visibility,
+	}
+	if err := db.Create(&videoEntry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&model.ContentVideoExtension{
+		ContentID: videoEntry.ID, VideoID: video.ID, VideoURL: video.VideoURL,
+		StorageType: video.StorageType, ProcessingStatus: video.ProcessingStatus,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Delete(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&videoEntry).Error; err != nil {
 		t.Fatal(err)
 	}
 	job := model.VideoProcessingJob{VideoID: video.ID, Status: "processing"}

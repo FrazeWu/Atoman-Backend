@@ -13,7 +13,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 // CreateSubscription godoc
@@ -23,6 +22,7 @@ import (
 // @Accept json
 // @Produce json
 // @Param input body SubscriptionInput true "订阅输入"
+// @Success 200 {object} SubscriptionResponse
 // @Success 201 {object} SubscriptionResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -89,12 +89,6 @@ func CreateSubscription(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		var existingSub model.Subscription
-		if err := db.Where("user_id = ? AND feed_source_id = ?", userID, source.ID).First(&existingSub).Error; err == nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Already subscribed to this source"})
-			return
-		}
-
 		subscription := model.Subscription{
 			UserID:              userID,
 			FeedSourceID:        source.ID,
@@ -102,29 +96,26 @@ func CreateSubscription(db *gorm.DB) gin.HandlerFunc {
 			SubscriptionGroupID: subscriptionGroupID,
 			Position:            nextSubscriptionPosition(db, userID, subscriptionGroupID),
 		}
-
-		result := db.Clauses(clause.OnConflict{
-			Columns: []clause.Column{{Name: "user_id"}, {Name: "feed_source_id"}},
-			TargetWhere: clause.Where{Exprs: []clause.Expression{
-				clause.Eq{Column: clause.Column{Name: "deleted_at"}, Value: nil},
-			}},
-			DoNothing: true,
-		}).Create(&subscription)
-		if result.Error != nil {
+		createdSubscription, created, err := ensureSubscription(db, subscription)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create subscription"})
 			return
 		}
-		if result.RowsAffected == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Already subscribed to this source"})
-			return
+		if created {
+			applySubscriptionRulesForSubscription(db, createdSubscription)
 		}
-		applySubscriptionRulesForSubscription(db, subscription)
 
-		if input.TargetType == "external_rss" {
+		if input.TargetType == "external_rss" && created {
 			syncFeedSource(db, *source)
 		}
 
-		c.JSON(http.StatusCreated, gin.H{"data": subscription, "message": "ok"})
+		status := http.StatusCreated
+		message := "ok"
+		if !created {
+			status = http.StatusOK
+			message = "already subscribed"
+		}
+		c.JSON(status, gin.H{"data": createdSubscription, "message": message})
 	}
 }
 

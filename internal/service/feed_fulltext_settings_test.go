@@ -8,6 +8,28 @@ import (
 	"atoman/internal/testdb"
 )
 
+func TestLoadFeedFullTextSettingsSeedsMissingDefaults(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.SiteSetting{})
+
+	settings, err := LoadFeedFullTextSettings(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults := DefaultFeedFullTextSettings()
+	if settings != defaults {
+		t.Fatalf("settings=%+v, want defaults=%+v", settings, defaults)
+	}
+
+	var stored model.SiteSetting
+	if err := db.First(&stored, "key = ?", FeedFullTextSettingsKey).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Value == "" {
+		t.Fatal("expected default feed full text settings to be persisted")
+	}
+}
+
 func TestLoadFeedFullTextSettingsPreservesDefaultsForLegacyJSON(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.SiteSetting{})
@@ -98,20 +120,20 @@ func TestRunFeedReaderCrawlHonorsDateRangeAndPersistsStatus(t *testing.T) {
 	now := time.Now().UTC()
 	items := []model.FeedItem{
 		{
-			FeedSourceID: source.ID,
-			GUID:         "recent-reader-candidate",
-			Link:         "https://example.com/recent",
+			FeedSourceID:    source.ID,
+			GUID:            "recent-reader-candidate",
+			Link:            "https://example.com/recent",
 			FeedContentHTML: `<article><p>Recent stored article content with enough words to remain useful for reading and indexing.</p></article>`,
-			PublishedAt: now.Add(-12 * time.Hour),
-			FetchedAt:   now,
+			PublishedAt:     now.Add(-12 * time.Hour),
+			FetchedAt:       now,
 		},
 		{
-			FeedSourceID: source.ID,
-			GUID:         "old-reader-candidate",
-			Link:         "https://example.com/old",
+			FeedSourceID:    source.ID,
+			GUID:            "old-reader-candidate",
+			Link:            "https://example.com/old",
 			FeedContentHTML: `<article><p>Old stored article content with enough words to remain useful for reading and indexing.</p></article>`,
-			PublishedAt: now.Add(-48 * time.Hour),
-			FetchedAt:   now,
+			PublishedAt:     now.Add(-48 * time.Hour),
+			FetchedAt:       now,
 		},
 	}
 	for index := range items {

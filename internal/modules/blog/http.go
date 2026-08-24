@@ -25,7 +25,7 @@ type collectionInput struct {
 }
 
 type bookmarkInput struct {
-	PostID           uuid.UUID  `json:"post_id" binding:"required"`
+	ContentID        uuid.UUID  `json:"content_id" binding:"required"`
 	BookmarkFolderID *uuid.UUID `json:"bookmark_folder_id"`
 }
 
@@ -54,32 +54,32 @@ type reorderCollectionPostsInput struct {
 }
 
 type blogDraftInput struct {
-	ContextKey    string `json:"context_key" binding:"required"`
-	SourcePostID  string `json:"source_post_id"`
-	Title         string `json:"title"`
-	Content       string `json:"content"`
-	Summary       string `json:"summary"`
-	CoverURL      string `json:"cover_url"`
-	Visibility    string `json:"visibility"`
-	AllowComments *bool  `json:"allow_comments"`
-	ChannelID     string `json:"channel_id"`
-	CollectionID  string `json:"collection_id"`
+	ContextKey      string `json:"context_key" binding:"required"`
+	SourceContentID string `json:"source_content_id"`
+	Title           string `json:"title"`
+	Content         string `json:"content"`
+	Summary         string `json:"summary"`
+	CoverURL        string `json:"cover_url"`
+	Visibility      string `json:"visibility"`
+	AllowComments   *bool  `json:"allow_comments"`
+	ChannelID       string `json:"channel_id"`
+	CollectionID    string `json:"collection_id"`
 }
 
 type blogDraftResponse struct {
-	ID           uuid.UUID `json:"id"`
-	UserID       uuid.UUID `json:"user_id"`
-	ContextKey   string    `json:"context_key"`
-	SourcePostID *string   `json:"source_post_id,omitempty"`
-	Title        string    `json:"title"`
-	Content      string    `json:"content"`
-	Summary      string    `json:"summary"`
-	CoverURL     string    `json:"cover_url"`
-	Visibility   string    `json:"visibility"`
-	ChannelID    *string   `json:"channel_id,omitempty"`
-	CollectionID *string   `json:"collection_id,omitempty"`
-	CreatedAt    any       `json:"created_at"`
-	UpdatedAt    any       `json:"updated_at"`
+	ID              uuid.UUID `json:"id"`
+	UserID          uuid.UUID `json:"user_id"`
+	ContextKey      string    `json:"context_key"`
+	SourceContentID *string   `json:"source_content_id,omitempty"`
+	Title           string    `json:"title"`
+	Content         string    `json:"content"`
+	Summary         string    `json:"summary"`
+	CoverURL        string    `json:"cover_url"`
+	Visibility      string    `json:"visibility"`
+	ChannelID       *string   `json:"channel_id,omitempty"`
+	CollectionID    *string   `json:"collection_id,omitempty"`
+	CreatedAt       any       `json:"created_at"`
+	UpdatedAt       any       `json:"updated_at"`
 }
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {

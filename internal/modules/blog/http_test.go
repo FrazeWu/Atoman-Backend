@@ -485,7 +485,7 @@ func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 
 	r := newBlogHTTPRouter(service, &user)
 	missingFolderW := httptest.NewRecorder()
-	missingFolderReq := httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"post_id":"`+post.ID.String()+`"}`))
+	missingFolderReq := httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"content_id":"`+post.ID.String()+`"}`))
 	missingFolderReq.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(missingFolderW, missingFolderReq)
 	if missingFolderW.Code != http.StatusBadRequest {
@@ -561,7 +561,8 @@ func TestListBookmarksReturnsPostEngagementCounts(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			Post struct {
+			ContentID uuid.UUID `json:"content_id"`
+			Content   struct {
 				ID            uuid.UUID `json:"id"`
 				Title         string    `json:"title"`
 				Summary       string    `json:"summary"`
@@ -571,20 +572,20 @@ func TestListBookmarksReturnsPostEngagementCounts(t *testing.T) {
 				User          struct {
 					Username string `json:"username"`
 				} `json:"user"`
-			} `json:"post"`
+			} `json:"content"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(payload.Data) != 1 || payload.Data[0].Post.ID != post.ID {
-		t.Fatalf("expected bookmarked post, got %s", w.Body.String())
+	if len(payload.Data) != 1 || payload.Data[0].ContentID != post.ID || payload.Data[0].Content.ID != post.ID {
+		t.Fatalf("expected bookmarked content, got %s", w.Body.String())
 	}
-	if payload.Data[0].Post.Title != post.Title || payload.Data[0].Post.Summary != post.Summary || payload.Data[0].Post.CoverURL != post.CoverURL || payload.Data[0].Post.User.Username != user.Username {
-		t.Fatalf("expected original post fields and user, got %s", w.Body.String())
+	if payload.Data[0].Content.Title != post.Title || payload.Data[0].Content.Summary != post.Summary || payload.Data[0].Content.CoverURL != post.CoverURL || payload.Data[0].Content.User.Username != user.Username {
+		t.Fatalf("expected original content fields and user, got %s", w.Body.String())
 	}
-	if payload.Data[0].Post.LikesCount != 1 || payload.Data[0].Post.CommentsCount != 1 {
-		t.Fatalf("expected bookmark engagement 1/1, got %d/%d: %s", payload.Data[0].Post.LikesCount, payload.Data[0].Post.CommentsCount, w.Body.String())
+	if payload.Data[0].Content.LikesCount != 1 || payload.Data[0].Content.CommentsCount != 1 {
+		t.Fatalf("expected bookmark engagement 1/1, got %d/%d: %s", payload.Data[0].Content.LikesCount, payload.Data[0].Content.CommentsCount, w.Body.String())
 	}
 }
 
@@ -695,7 +696,7 @@ func TestRegisterRoutesMountsBookmarkAndFolderMutationEndpoints(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"post_id":"`+post2.ID.String()+`","bookmark_folder_id":"`+folderResp.Data.ID.String()+`"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"content_id":"`+post2.ID.String()+`","bookmark_folder_id":"`+folderResp.Data.ID.String()+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
@@ -703,7 +704,7 @@ func TestRegisterRoutesMountsBookmarkAndFolderMutationEndpoints(t *testing.T) {
 	}
 
 	var bookmarkResp struct {
-		Data model.Bookmark `json:"data"`
+		Data BlogBookmarkDTO `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &bookmarkResp); err != nil {
 		t.Fatalf("decode bookmark response: %v", err)
@@ -713,7 +714,7 @@ func TestRegisterRoutesMountsBookmarkAndFolderMutationEndpoints(t *testing.T) {
 	}
 
 	w = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"post_id":"`+post.ID.String()+`","bookmark_folder_id":"`+folderResp.Data.ID.String()+`"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"content_id":"`+post.ID.String()+`","bookmark_folder_id":"`+folderResp.Data.ID.String()+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	r.ServeHTTP(w, req)
 	if w.Code >= http.StatusBadRequest {
@@ -721,7 +722,7 @@ func TestRegisterRoutesMountsBookmarkAndFolderMutationEndpoints(t *testing.T) {
 	}
 
 	var bookmarkForFolderResp struct {
-		Data model.Bookmark `json:"data"`
+		Data BlogBookmarkDTO `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &bookmarkForFolderResp); err != nil {
 		t.Fatalf("decode second bookmark response: %v", err)
@@ -789,7 +790,7 @@ func TestBlogBookmarksSupportPopularSort(t *testing.T) {
 
 	var resp struct {
 		Data []struct {
-			PostID string `json:"post_id"`
+			ContentID string `json:"content_id"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
@@ -798,7 +799,7 @@ func TestBlogBookmarksSupportPopularSort(t *testing.T) {
 	if len(resp.Data) < 2 {
 		t.Fatalf("expected 2 bookmarks, got %s", w.Body.String())
 	}
-	if resp.Data[0].PostID != hotPost.ID.String() {
+	if resp.Data[0].ContentID != hotPost.ID.String() {
 		t.Fatalf("expected hot post first, got %#v", resp.Data)
 	}
 }
@@ -2484,12 +2485,12 @@ func TestPublishedPostVersionsPreservePublishedAtAndRestore(t *testing.T) {
 		t.Fatalf("list versions: %d %s", listW.Code, listW.Body.String())
 	}
 	var listed struct {
-		Data []model.BlogPostVersion `json:"data"`
+		Data []BlogContentVersionDTO `json:"data"`
 	}
 	if err := json.Unmarshal(listW.Body.Bytes(), &listed); err != nil {
 		t.Fatalf("decode versions: %v", err)
 	}
-	if len(listed.Data) != 2 || listed.Data[0].Version != 2 || listed.Data[1].Version != 1 {
+	if len(listed.Data) != 2 || listed.Data[0].ContentID != post.ID || listed.Data[0].Version != 2 || listed.Data[1].Version != 1 {
 		t.Fatalf("expected versions 2 and 1, got %s", listW.Body.String())
 	}
 

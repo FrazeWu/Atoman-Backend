@@ -57,7 +57,7 @@ func TestContentReferenceIndexesRejectDuplicateRangeAndAllowRepeatedTarget(t *te
 func TestRunContentReferencesMigrationBackfillsPublishedLongFormContentSilently(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{},
+		&model.User{}, &model.Channel{}, &model.Collection{}, &model.ContentCollection{}, &model.Post{}, &model.PodcastEpisode{},
 		&model.ForumCategory{}, &model.ForumTopic{}, &model.ForumCategoryPermission{},
 		&model.Debate{}, &model.DiscussionTarget{}, &model.CommentEntry{}, &model.CommentMention{},
 		&model.Notification{},
@@ -70,6 +70,11 @@ func TestRunContentReferencesMigrationBackfillsPublishedLongFormContentSilently(
 	require.NoError(t, db.Create(&channel).Error)
 	collection := model.Collection{ChannelID: channel.ID, Name: "Migration collection"}
 	require.NoError(t, db.Create(&collection).Error)
+	canonicalCollection := model.ContentCollection{
+		Base: collection.Base, ChannelID: collection.ChannelID, CreatedBy: collection.CreatedBy,
+		Name: collection.Name, Description: collection.Description, IsDefault: collection.IsDefault,
+	}
+	require.NoError(t, db.Create(&canonicalCollection).Error)
 	published := model.Post{UserID: actor.UUID, Title: "Published", Content: "@migration-mentioned @channel:" + channel.ID.String(), Status: "published", Visibility: "public"}
 	draft := model.Post{UserID: actor.UUID, Title: "Draft", Content: "@migration-mentioned", Status: "draft", Visibility: "public"}
 	require.NoError(t, db.Create(&published).Error)

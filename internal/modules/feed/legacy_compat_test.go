@@ -1598,8 +1598,8 @@ func TestCreateSubscriptionReusesExistingFeedSourceForSameCanonicalURL(t *testin
 	second.Header.Set("Content-Type", "application/json")
 	secondRR := httptest.NewRecorder()
 	router.ServeHTTP(secondRR, second)
-	if secondRR.Code != http.StatusBadRequest {
-		t.Fatalf("expected second subscription status %d, got %d with body %s", http.StatusBadRequest, secondRR.Code, secondRR.Body.String())
+	if secondRR.Code != http.StatusOK {
+		t.Fatalf("expected second subscription status %d, got %d with body %s", http.StatusOK, secondRR.Code, secondRR.Body.String())
 	}
 
 	var sources []model.FeedSource
@@ -1692,10 +1692,10 @@ func TestCreateSubscriptionMapsDuplicateToAlreadySubscribed(t *testing.T) {
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d with body %s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected idempotent status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "Already subscribed to this source") {
+	if !strings.Contains(rr.Body.String(), "already subscribed") {
 		t.Fatalf("expected already subscribed message, got body %s", rr.Body.String())
 	}
 }

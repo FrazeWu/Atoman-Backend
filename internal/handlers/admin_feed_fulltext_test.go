@@ -763,20 +763,20 @@ func TestGetAdminFeedFullTextHealth(t *testing.T) {
 	}
 
 	var payload struct {
-		EnabledSources    int64     `json:"enabled_sources"`
-		DisabledSources   int64     `json:"disabled_sources"`
-		PendingItems      int64     `json:"pending_items"`
-		FetchingItems     int64     `json:"fetching_items"`
-		RetryItems        int64     `json:"retry_items"`
-		SuccessItems      int64     `json:"success_items"`
-		FailedItems       int64     `json:"failed_items"`
-		SuccessRate       float64   `json:"success_rate"`
+		EnabledSources     int64     `json:"enabled_sources"`
+		DisabledSources    int64     `json:"disabled_sources"`
+		PendingItems       int64     `json:"pending_items"`
+		FetchingItems      int64     `json:"fetching_items"`
+		RetryItems         int64     `json:"retry_items"`
+		SuccessItems       int64     `json:"success_items"`
+		FailedItems        int64     `json:"failed_items"`
+		SuccessRate        float64   `json:"success_rate"`
 		ReaderCrawlPending int64     `json:"reader_crawl_pending"`
-		OldestPendingAt   time.Time `json:"oldest_pending_at"`
-		WorkerEnabled     bool      `json:"enabled"`
-		WorkerConcurrency int       `json:"concurrency"`
-		WorkerTimeout     int       `json:"timeout_seconds"`
-		WorkerMaxAttempts int       `json:"max_attempts"`
+		OldestPendingAt    time.Time `json:"oldest_pending_at"`
+		WorkerEnabled      bool      `json:"enabled"`
+		WorkerConcurrency  int       `json:"concurrency"`
+		WorkerTimeout      int       `json:"timeout_seconds"`
+		WorkerMaxAttempts  int       `json:"max_attempts"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)

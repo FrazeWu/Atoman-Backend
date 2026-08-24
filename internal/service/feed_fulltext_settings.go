@@ -2,12 +2,12 @@ package service
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"atoman/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -59,14 +59,33 @@ func normalizeFeedFullTextSettings(settings FeedFullTextSettings) FeedFullTextSe
 	return settings
 }
 
+func EnsureFeedFullTextSettings(db *gorm.DB) error {
+	value, err := json.Marshal(DefaultFeedFullTextSettings())
+	if err != nil {
+		return fmt.Errorf("encode default feed full text settings: %w", err)
+	}
+	if err := db.Clauses(clause.OnConflict{DoNothing: true}).Create(&model.SiteSetting{
+		Key:         FeedFullTextSettingsKey,
+		Value:       string(value),
+		Description: "Feed full text global settings",
+	}).Error; err != nil {
+		return fmt.Errorf("ensure feed full text settings: %w", err)
+	}
+	return nil
+}
+
 func LoadFeedFullTextSettings(db *gorm.DB) (FeedFullTextSettings, error) {
 	settings := DefaultFeedFullTextSettings()
 	var stored model.SiteSetting
-	if err := db.First(&stored, "key = ?", FeedFullTextSettingsKey).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return settings, nil
+	result := db.Where("key = ?", FeedFullTextSettingsKey).Limit(1).Find(&stored)
+	if result.Error != nil {
+		return FeedFullTextSettings{}, fmt.Errorf("load feed full text settings: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		if err := EnsureFeedFullTextSettings(db); err != nil {
+			return FeedFullTextSettings{}, err
 		}
-		return FeedFullTextSettings{}, fmt.Errorf("load feed full text settings: %w", err)
+		return settings, nil
 	}
 	if err := json.Unmarshal([]byte(stored.Value), &settings); err != nil {
 		return FeedFullTextSettings{}, fmt.Errorf("decode feed full text settings: %w", err)

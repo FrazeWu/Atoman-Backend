@@ -14,6 +14,7 @@ type dashboardCounts struct {
 	Contents           int64
 	Published          int64
 	Drafts             int64
+	Scheduled          int64
 	Views              int64
 	MissingCover       int64
 	MissingCollection  int64
@@ -61,8 +62,7 @@ func (s *Service) GetDashboard(user authctx.CurrentUser, channelID uuid.UUID) (D
 }
 
 func (s *Service) dashboardSection(userID uuid.UUID, channel model.Channel, module Module) (DashboardSection, error) {
-	query := ContentQuery{ChannelID: channel.ID, Page: 1, PageSize: 3}
-	recent, _, err := s.listContentsForChannel(userID, module, query)
+	recent, err := s.dashboardRecentContents(userID, channel.ID, module, 5)
 	if err != nil {
 		return DashboardSection{}, err
 	}
@@ -71,7 +71,7 @@ func (s *Service) dashboardSection(userID uuid.UUID, channel model.Channel, modu
 		return DashboardSection{}, err
 	}
 	metrics := map[string]int64{
-		"contents": counts.Contents, "published": counts.Published, "drafts": counts.Drafts,
+		"contents": counts.Contents, "published": counts.Published, "drafts": counts.Drafts, "scheduled": counts.Scheduled,
 	}
 	engagement, err := s.dashboardEngagementMetrics(userID, channel.ID, module, counts.Views)
 	if err != nil {
@@ -189,6 +189,7 @@ func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, modul
 			Select(`COUNT(*) AS contents,
 				COALESCE(SUM(CASE WHEN posts.status = 'published' THEN 1 ELSE 0 END), 0) AS published,
 				COALESCE(SUM(CASE WHEN posts.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
+				COALESCE(SUM(CASE WHEN posts.status = 'scheduled' THEN 1 ELSE 0 END), 0) AS scheduled,
 				COALESCE(SUM(blog_extensions.view_count), 0) AS views,
 				COALESCE(SUM(CASE WHEN TRIM(COALESCE(posts.cover_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
 				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM content_collection_memberships WHERE content_collection_memberships.content_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection`).
@@ -200,6 +201,7 @@ func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, modul
 			Select(`COUNT(*) AS contents,
 				COALESCE(SUM(CASE WHEN posts.status = 'published' THEN 1 ELSE 0 END), 0) AS published,
 				COALESCE(SUM(CASE WHEN posts.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
+				COALESCE(SUM(CASE WHEN posts.status = 'scheduled' THEN 1 ELSE 0 END), 0) AS scheduled,
 				COALESCE(SUM(episodes.view_count), 0) AS views,
 				COALESCE(SUM(CASE WHEN TRIM(COALESCE(episodes.episode_cover_url, '')) = '' AND ? = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
 				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection,
@@ -212,6 +214,7 @@ func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, modul
 			Select(`COUNT(*) AS contents,
 				COALESCE(SUM(CASE WHEN posts.status = 'published' THEN 1 ELSE 0 END), 0) AS published,
 				COALESCE(SUM(CASE WHEN posts.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
+				COALESCE(SUM(CASE WHEN posts.status = 'scheduled' THEN 1 ELSE 0 END), 0) AS scheduled,
 				COALESCE(SUM(videos.view_count), 0) AS views,
 				COALESCE(SUM(CASE WHEN TRIM(COALESCE(videos.thumbnail_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
 				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection,

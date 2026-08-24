@@ -7,8 +7,8 @@ import (
 
 func TestGlobalSearchIndexStatementsCoverCrossModuleSearchFields(t *testing.T) {
 	statements := globalSearchIndexStatements()
-	if len(statements) != 25 {
-		t.Fatalf("expected extension plus twenty-four global search indexes, got %d", len(statements))
+	if len(statements) != 28 {
+		t.Fatalf("expected extension plus twenty-seven global search indexes, got %d", len(statements))
 	}
 
 	joined := strings.Join(statements, "\n")
@@ -37,6 +37,9 @@ func TestGlobalSearchIndexStatementsCoverCrossModuleSearchFields(t *testing.T) {
 		"idx_timeline_persons_bio_trgm",
 		"idx_timeline_events_description_trgm",
 		"idx_timeline_events_content_trgm",
+		"idx_content_entries_title_trgm",
+		"idx_content_entries_summary_trgm",
+		"idx_content_collections_name_trgm",
 		"idx_debates_tags_gin",
 		"LOWER(title) gin_trgm_ops",
 		"WHERE deleted_at IS NULL",

@@ -88,9 +88,9 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "context_key required"))
 		return
 	}
-	sourcePostID, err := parseOptionalUUID(req.SourcePostID)
+	sourceContentID, err := parseOptionalUUID(req.SourceContentID)
 	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid source_post_id"))
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Invalid source_content_id"))
 		return
 	}
 	channelID, err := parseOptionalUUID(req.ChannelID)
@@ -105,8 +105,8 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 	}
 	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
 		var contentID *uuid.UUID
-		if sourcePostID != nil {
-			post, err := loadCanonicalBlogPost(tx, *sourcePostID)
+		if sourceContentID != nil {
+			post, err := loadCanonicalBlogPost(tx, *sourceContentID)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return apperr.NotFound("blog.post_not_found", "Post not found")

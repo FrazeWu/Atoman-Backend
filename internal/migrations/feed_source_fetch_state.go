@@ -31,6 +31,8 @@ func RunFeedSourceFetchStateMigration(db *gorm.DB) error {
 		`fetch_last_error TEXT`,
 		`fetch_last_duration_ms BIGINT NOT NULL DEFAULT 0`,
 		`fetch_last_item_count INTEGER NOT NULL DEFAULT 0`,
+		`fetch_lease_token VARCHAR(128)`,
+		"fetch_lease_until " + columnType,
 	}
 	for _, column := range columns {
 		if err := db.Exec("ALTER TABLE feed_sources ADD COLUMN IF NOT EXISTS " + column).Error; err != nil {
@@ -47,6 +49,10 @@ func RunFeedSourceFetchStateMigration(db *gorm.DB) error {
 			return err
 		}
 	}
-	return db.Exec(`CREATE INDEX IF NOT EXISTS idx_feed_sources_fetch_schedule
-		ON feed_sources (fetch_next_at, source_type, hidden)`).Error
+	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_feed_sources_fetch_schedule
+		ON feed_sources (fetch_next_at, source_type, hidden)`).Error; err != nil {
+		return err
+	}
+	return db.Exec(`CREATE INDEX IF NOT EXISTS idx_feed_sources_fetch_lease
+		ON feed_sources (fetch_lease_until, source_type, hidden)`).Error
 }

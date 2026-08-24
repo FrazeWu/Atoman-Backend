@@ -15,9 +15,9 @@ func TestRunForumDraftUniqueIndexDeduplicatesAndCreatesIndex(t *testing.T) {
 	if err := db.Exec(`
 CREATE TABLE forum_drafts (
 	id TEXT PRIMARY KEY,
-	created_at DATETIME,
-	updated_at DATETIME,
-	deleted_at DATETIME,
+	created_at TIMESTAMP WITH TIME ZONE,
+	updated_at TIMESTAMP WITH TIME ZONE,
+	deleted_at TIMESTAMP WITH TIME ZONE,
 	user_id TEXT NOT NULL,
 	context_key TEXT NOT NULL,
 	title TEXT,

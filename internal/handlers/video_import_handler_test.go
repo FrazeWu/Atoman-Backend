@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 )
 
 func fakeVideoImportS3(t *testing.T) *s3.S3 {
@@ -111,8 +112,8 @@ func TestVideoImportCompletesUploadAndPublishesOnce(t *testing.T) {
 	require.Equal(t, videoImportPublished, task.Status)
 	require.NotNil(t, task.TargetVideoID)
 
-	var video model.Video
-	require.NoError(t, db.Preload("Collections").Preload("Tags").First(&video, "id = ?", *task.TargetVideoID).Error)
+	video, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", *task.TargetVideoID))
+	require.NoError(t, err)
 	require.Equal(t, "Imported video", video.Title)
 	require.Equal(t, 214, video.DurationSec)
 	require.Equal(t, "published", video.Status)
@@ -123,7 +124,7 @@ func TestVideoImportCompletesUploadAndPublishesOnce(t *testing.T) {
 	again := performVideoImportRequest(t, router, http.MethodPost, "/api/v1/videos/imports/"+task.ID.String()+"/complete", nil)
 	require.Equal(t, http.StatusOK, again.Code, again.Body.String())
 	var count int64
-	require.NoError(t, db.Model(&model.Video{}).Where("title = ?", "Imported video").Count(&count).Error)
+	require.NoError(t, db.Model(&model.ContentVideoExtension{}).Where("video_id = ?", *task.TargetVideoID).Count(&count).Error)
 	require.EqualValues(t, 1, count)
 }
 

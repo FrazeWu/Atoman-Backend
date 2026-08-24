@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/modules/lifecycle"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
@@ -265,7 +266,7 @@ func UpdateVideoImport(db *gorm.DB) gin.HandlerFunc {
 			videoImportHTTPError(c, err)
 			return
 		}
-		if session.TargetVideoID != nil || session.Status == videoImportCanceled {
+		if session.ContentID != nil || session.TargetVideoID != nil || session.Status == videoImportCanceled {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "导入任务不能再编辑"})
 			return
 		}
@@ -312,7 +313,7 @@ func SubmitVideoImport(db *gorm.DB) gin.HandlerFunc {
 			videoImportHTTPError(c, err)
 			return
 		}
-		if session.TargetVideoID != nil || session.Status == videoImportCanceled {
+		if session.ContentID != nil || session.TargetVideoID != nil || session.Status == videoImportCanceled {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "导入任务不能再次提交"})
 			return
 		}
@@ -578,7 +579,7 @@ func CancelVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 			videoImportHTTPError(c, err)
 			return
 		}
-		if session.TargetVideoID != nil {
+		if session.ContentID != nil || session.TargetVideoID != nil {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "已创建的视频不能取消"})
 			return
 		}
@@ -586,7 +587,7 @@ func CancelVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 			_, _ = client.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
 				Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey), UploadId: aws.String(session.UploadID),
 			})
-		} else if client != nil && session.TargetVideoID == nil {
+		} else if client != nil && (session.ContentID != nil || session.TargetVideoID != nil) {
 			_, _ = client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey)})
 		}
 		if err := db.Model(&session).Updates(map[string]any{"status": videoImportCanceled, "error_message": ""}).Error; err != nil {
@@ -632,7 +633,7 @@ func finalizeVideoImport(db *gorm.DB, id, userID uuid.UUID) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND user_id = ?", id, userID).First(&session).Error; err != nil {
 			return err
 		}
-		if session.TargetVideoID != nil {
+		if session.ContentID != nil || session.TargetVideoID != nil {
 			return nil
 		}
 		if session.UploadCompletedAt == nil || session.PublishRequestedAt == nil {
@@ -668,6 +669,11 @@ func finalizeVideoImport(db *gorm.DB, id, userID uuid.UUID) error {
 				return err
 			}
 		}
+		canonicalID, err := contentmodule.VideoContentID(tx, video.ID)
+		if err != nil {
+			return err
+		}
+		session.ContentID = &canonicalID
 		session.TargetVideoID = &video.ID
 		session.Status = map[string]string{"published": videoImportPublished, "scheduled": videoImportScheduled, "draft": videoImportDraft}[session.PublishMode]
 		return tx.Save(&session).Error

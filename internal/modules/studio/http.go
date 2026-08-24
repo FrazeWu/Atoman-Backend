@@ -35,6 +35,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/collections", h.createUnifiedCollection)
 	group.PATCH("/collections/:id", h.updateUnifiedCollection)
 	group.DELETE("/collections/:id", h.deleteUnifiedCollection)
+	group.GET("/collections/:id/contents", h.listUnifiedCollectionContents)
 	group.PUT("/collections/:id/contents/order", h.reorderUnifiedCollectionContents)
 	group.GET("/contents", h.listUnifiedContents)
 	group.GET("/:module/contents", h.listContents)

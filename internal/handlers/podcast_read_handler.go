@@ -217,7 +217,7 @@ func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 		q := contentmodule.PodcastQuery(db)
 		q = blog.ApplyPublishedPostListVisibility(q, currentPodcastViewerID(c))
 		if channelID != "" {
-			q = q.Where("episodes.channel_id = ?", channelID)
+			q = q.Where("posts.channel_id = ?", channelID)
 		}
 		if sort == "random" {
 			q = q.Order("RANDOM()")
@@ -251,7 +251,7 @@ func GetShowEpisodes(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusNotFound, gin.H{"error": "show not found"})
 			return
 		}
-		q := contentmodule.PodcastQuery(db).Where("episodes.channel_id = ? AND posts.status = ?", channel.ID, "published")
+		q := contentmodule.PodcastQuery(db).Where("posts.channel_id = ? AND posts.status = ?", channel.ID, "published")
 		q = blog.ApplyPublishedPostListVisibility(q, currentPodcastViewerID(c))
 		episodes, err := contentmodule.LoadPodcastEpisodes(db, q.
 			Order("episodes.season_number ASC, episodes.episode_number ASC"))
@@ -278,7 +278,7 @@ func GetPodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		id := c.Param("id")
 		q := contentmodule.PodcastQuery(db).Where("episodes.episode_id = ?", id)
 		if viewer, ok := authctx.Current(c); ok {
-			q = q.Where("posts.status = ? OR (posts.status = ? AND posts.author_id = ?)", "published", "draft", viewer.ID)
+			q = q.Where("posts.status = ? OR (posts.status = ? AND "+contentmodule.PodcastAuthorColumn(db)+" = ?)", "published", "draft", viewer.ID)
 		} else {
 			q = q.Where("posts.status = ?", "published")
 		}

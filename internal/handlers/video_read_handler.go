@@ -192,7 +192,7 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 					"published", "public", "followers", subscribedChannelIDs)
 			}
 		} else {
-			q = q.Where("posts.author_id = ?", viewerID)
+			q = q.Where(contentmodule.VideoAuthorColumn(db)+" = ?", viewerID)
 		}
 		if channelID != "" {
 			q = q.Where("posts.channel_id = ?", channelID)

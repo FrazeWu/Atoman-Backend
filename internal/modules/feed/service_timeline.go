@@ -1,17 +1,26 @@
 package feed
 
 import (
+	"errors"
 	"strings"
 	"time"
 
 	"atoman/internal/model"
+	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	legacyfeed "atoman/internal/service"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func (s *Service) GetPublicFeedBySourceID(feedSourceID uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {
+	if _, err := s.repo.GetPublicExternalFeedSource(feedSourceID); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, 0, apperr.NotFound("feed.source_not_found", "Feed source not found")
+		}
+		return nil, 0, err
+	}
 	if query.ContentType == "blog" {
 		return []TimelineItemDTO{}, 0, nil
 	}
@@ -69,7 +78,11 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	channelIDs := make([]uuid.UUID, 0)
 	collectionIDs := make([]uuid.UUID, 0)
 	feedSourceIDs := make([]uuid.UUID, 0)
+	feedSourceVisibleAfter := make(map[uuid.UUID]time.Time)
 	for _, sub := range subscriptions {
+		if sub.IsPaused {
+			continue
+		}
 		if sub.FeedSource == nil {
 			continue
 		}
@@ -89,6 +102,9 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 		case "external_rss":
 			if query.ContentType != "blog" {
 				feedSourceIDs = append(feedSourceIDs, sub.FeedSource.ID)
+				if sub.ResumedAfter != nil {
+					feedSourceVisibleAfter[sub.FeedSource.ID] = *sub.ResumedAfter
+				}
 			}
 		}
 	}
@@ -100,8 +116,9 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	if query.ContentType == "blog" {
 		return s.getSubscribedBlogFeed(user.ID, userIDs, channelIDs, collectionIDs, query)
 	}
+	query.sourceVisibleAfter = feedSourceVisibleAfter
 	if len(userIDs) == 0 && len(channelIDs) == 0 && len(collectionIDs) == 0 && !query.HideDuplicates && strings.TrimSpace(query.Search) == "" {
-		return s.getSubscribedExternalFeed(user.ID, feedSourceIDs, query)
+		return s.getSubscribedExternalFeed(user.ID, feedSourceIDs, query, feedSourceVisibleAfter)
 	}
 
 	posts := make([]model.Post, 0)
@@ -148,7 +165,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	}
 	videos = dedupeVideos(videos)
 
-	feedItems, err := s.repo.ListFeedItemsBySourceIDs(feedSourceIDs)
+	feedItems, err := s.repo.ListFeedItemsBySourceIDs(feedSourceIDs, feedSourceVisibleAfter)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -308,7 +325,7 @@ func postTimelinePublishedAt(post model.Post) time.Time {
 	return post.CreatedAt
 }
 
-func (s *Service) getSubscribedExternalFeed(userID uuid.UUID, feedSourceIDs []uuid.UUID, query FeedQuery) ([]TimelineItemDTO, int64, error) {
+func (s *Service) getSubscribedExternalFeed(userID uuid.UUID, feedSourceIDs []uuid.UUID, query FeedQuery, visibleAfter map[uuid.UUID]time.Time) ([]TimelineItemDTO, int64, error) {
 	if len(feedSourceIDs) == 0 {
 		return []TimelineItemDTO{}, 0, nil
 	}
@@ -319,7 +336,7 @@ func (s *Service) getSubscribedExternalFeed(userID uuid.UUID, feedSourceIDs []uu
 	page := normalizedPage(query.Page)
 	limit := normalizedPageSize(query.PageSize)
 	offset := (page - 1) * limit
-	feedItems, err := s.repo.ListFeedItemsBySourceIDsPaged(feedSourceIDs, limit, offset)
+	feedItems, err := s.repo.ListFeedItemsBySourceIDsPaged(feedSourceIDs, limit, offset, visibleAfter)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -336,7 +353,7 @@ func (s *Service) getSubscribedExternalFeed(userID uuid.UUID, feedSourceIDs []uu
 			IsRead:      readMap[feedItems[i].ID],
 		})
 	}
-	total, err := s.repo.CountFeedItemsBySourceIDs(feedSourceIDs)
+	total, err := s.repo.CountFeedItemsBySourceIDs(feedSourceIDs, visibleAfter)
 	if err != nil {
 		return nil, 0, err
 	}

@@ -1,27 +1,44 @@
 basePath: /api/v1
 definitions:
-  blog.BookmarkListItemDTO:
+  blog.BlogBookmarkDTO:
     properties:
-      bookmark_folder:
-        $ref: '#/definitions/model.BookmarkFolder'
       bookmark_folder_id:
+        type: string
+      content_id:
         type: string
       created_at:
         type: string
       id:
         type: string
-      post:
-        $ref: '#/definitions/blog.BookmarkPostDTO'
-      post_id:
-        type: string
       updated_at:
         type: string
-      user:
-        $ref: '#/definitions/model.User'
       user_id:
         type: string
     type: object
-  blog.BookmarkPostDTO:
+  blog.BlogCollectionDTO:
+    properties:
+      channel:
+        $ref: '#/definitions/model.Channel'
+      channel_id:
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      created_by:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      is_default:
+        type: boolean
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  blog.BlogContentDTO:
     properties:
       bookmarks_count:
         type: integer
@@ -30,7 +47,7 @@ definitions:
       channel_id:
         type: string
       collection:
-        $ref: '#/definitions/model.Collection'
+        $ref: '#/definitions/blog.BlogCollectionDTO'
       collection_conflict:
         type: boolean
       collection_id:
@@ -39,7 +56,99 @@ definitions:
         type: integer
       collections:
         items:
-          $ref: '#/definitions/model.Collection'
+          $ref: '#/definitions/blog.BlogCollectionDTO'
+        type: array
+      content:
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      language_code:
+        type: string
+      pinned:
+        type: boolean
+      published_at:
+        type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
+      references:
+        items:
+          $ref: '#/definitions/reference.ResolvedReference'
+        type: array
+      scheduled_at:
+        type: string
+      status:
+        type: string
+      summary:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      user:
+        $ref: '#/definitions/model.User'
+      user_id:
+        type: string
+      view_count:
+        type: integer
+      viewer_rating:
+        type: integer
+      visibility:
+        type: string
+    type: object
+  blog.BlogContentVersionDTO:
+    properties:
+      content:
+        type: string
+      content_collection_id:
+        type: string
+      content_id:
+        type: string
+      cover_url:
+        type: string
+      created_at:
+        type: string
+      editor_id:
+        type: string
+      id:
+        type: string
+      published_at:
+        type: string
+      summary:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+      version:
+        type: integer
+      visibility:
+        type: string
+    type: object
+  blog.BookmarkBlogContentDTO:
+    properties:
+      bookmarks_count:
+        type: integer
+      channel:
+        $ref: '#/definitions/model.Channel'
+      channel_id:
+        type: string
+      collection:
+        $ref: '#/definitions/blog.BlogCollectionDTO'
+      collection_conflict:
+        type: boolean
+      collection_id:
+        type: string
+      collection_position:
+        type: integer
+      collections:
+        items:
+          $ref: '#/definitions/blog.BlogCollectionDTO'
         type: array
       comments_count:
         type: integer
@@ -70,7 +179,6 @@ definitions:
       scheduled_at:
         type: string
       status:
-        description: draft / published
         type: string
       summary:
         type: string
@@ -87,6 +195,23 @@ definitions:
       viewer_rating:
         type: integer
       visibility:
+        type: string
+    type: object
+  blog.BookmarkListItemDTO:
+    properties:
+      bookmark_folder_id:
+        type: string
+      content:
+        $ref: '#/definitions/blog.BookmarkBlogContentDTO'
+      content_id:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      updated_at:
+        type: string
+      user_id:
         type: string
     type: object
   blog.CreatePostRequest:
@@ -189,10 +314,10 @@ definitions:
     properties:
       bookmark_folder_id:
         type: string
-      post_id:
+      content_id:
         type: string
     required:
-    - post_id
+    - content_id
     type: object
   blog.postRatingInput:
     properties:
@@ -3578,56 +3703,6 @@ definitions:
       updated_at:
         type: string
     type: object
-  model.BlogPostVersion:
-    properties:
-      collection_id:
-        type: string
-      content:
-        type: string
-      cover_url:
-        type: string
-      created_at:
-        type: string
-      editor_id:
-        type: string
-      id:
-        type: string
-      post_id:
-        type: string
-      published_at:
-        type: string
-      summary:
-        type: string
-      title:
-        type: string
-      updated_at:
-        type: string
-      version:
-        type: integer
-      visibility:
-        type: string
-    type: object
-  model.Bookmark:
-    properties:
-      bookmark_folder:
-        $ref: '#/definitions/model.BookmarkFolder'
-      bookmark_folder_id:
-        type: string
-      created_at:
-        type: string
-      id:
-        type: string
-      post:
-        $ref: '#/definitions/model.Post'
-      post_id:
-        type: string
-      updated_at:
-        type: string
-      user:
-        $ref: '#/definitions/model.User'
-      user_id:
-        type: string
-    type: object
   model.BookmarkFolder:
     properties:
       created_at:
@@ -3937,6 +4012,26 @@ definitions:
       cover_url:
         type: string
       created_at:
+        type: string
+      fetch_consecutive_failures:
+        type: integer
+      fetch_http_status:
+        type: integer
+      fetch_last_duration_ms:
+        type: integer
+      fetch_last_error:
+        type: string
+      fetch_last_error_code:
+        type: string
+      fetch_last_item_count:
+        type: integer
+      fetch_last_success_at:
+        type: string
+      fetch_next_at:
+        type: string
+      fetch_provider:
+        type: string
+      fetch_status:
         type: string
       full_text_consecutive_failure_count:
         type: integer
@@ -6827,6 +6922,25 @@ definitions:
       current_channel:
         $ref: '#/definitions/studio.ChannelSummary'
     type: object
+  studio.StudioCollectionContentItem:
+    properties:
+      content_id:
+        type: string
+      cover_url:
+        type: string
+      id:
+        type: string
+      module:
+        $ref: '#/definitions/studio.Module'
+      position:
+        type: integer
+      status:
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
   studio.StudioCollectionSummary:
     properties:
       id:
@@ -9637,7 +9751,7 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/model.Bookmark'
+            $ref: '#/definitions/blog.BlogBookmarkDTO'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -9720,7 +9834,7 @@ paths:
         "201":
           description: Created
           schema:
-            $ref: '#/definitions/model.Post'
+            $ref: '#/definitions/blog.BlogContentDTO'
         "400":
           description: Bad Request
           schema:
@@ -9754,7 +9868,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.Post'
+            $ref: '#/definitions/blog.BlogContentDTO'
         "403":
           description: Forbidden
           schema:
@@ -9859,7 +9973,7 @@ paths:
           description: OK
           schema:
             items:
-              $ref: '#/definitions/model.BlogPostVersion'
+              $ref: '#/definitions/blog.BlogContentVersionDTO'
             type: array
       security:
       - BearerAuth: []
@@ -9886,7 +10000,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/model.Post'
+            $ref: '#/definitions/blog.BlogContentDTO'
       security:
       - BearerAuth: []
       - CookieAuth: []
@@ -12211,7 +12325,7 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: 管理员上传 OPML 文件，批量创建或复用全局 RSS 源，不创建用户订阅。
+      description: 管理员上传 OPML 文件，批量创建或复用全局 RSS 源；导入后由定时抓取器按源状态调度，不创建用户订阅。
       parameters:
       - description: OPML 文件
         in: formData
@@ -12537,6 +12651,10 @@ paths:
       produces:
       - application/json
       responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.SubscriptionResponse'
         "201":
           description: Created
           schema:
@@ -18556,6 +18674,40 @@ paths:
       security:
       - BearerAuth: []
       summary: 更新创作频道
+      tags:
+      - studio
+  /api/v1/studio/collections/{id}/contents:
+    get:
+      parameters:
+      - description: 合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/studio.StudioCollectionContentItem'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取统一合集成员
       tags:
       - studio
   /api/v1/studio/dashboard:

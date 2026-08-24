@@ -11,7 +11,11 @@ import (
 
 func TestRunRevisionUniqueIndexesDeduplicatesAndCreatesIndexes(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.Revision{})
+	testdb.Migrate(t, db, &model.User{}, &model.Revision{})
+	editor := model.User{Username: "revision-editor", Email: "revision-editor@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&editor).Error; err != nil {
+		t.Fatalf("create revision editor: %v", err)
+	}
 	if err := db.Exec(`DROP INDEX IF EXISTS idx_revisions_content_version`).Error; err != nil {
 		t.Fatalf("drop content version index: %v", err)
 	}
@@ -20,7 +24,7 @@ func TestRunRevisionUniqueIndexesDeduplicatesAndCreatesIndexes(t *testing.T) {
 	}
 
 	contentID := uuid.New()
-	editorID := uuid.New()
+	editorID := editor.UUID
 	duplicateOld := model.Revision{
 		ContentType:     "album",
 		ContentID:       contentID,

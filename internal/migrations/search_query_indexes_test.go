@@ -7,8 +7,8 @@ import (
 
 func TestSearchQueryIndexStatementsCoverSearchExecutionPaths(t *testing.T) {
 	statements := searchQueryIndexStatements()
-	if len(statements) != 12 {
-		t.Fatalf("expected twelve search query indexes, got %d", len(statements))
+	if len(statements) != 19 {
+		t.Fatalf("expected nineteen search query indexes, got %d", len(statements))
 	}
 	joined := strings.Join(statements, "\n")
 	for _, fragment := range []string{
@@ -24,6 +24,13 @@ func TestSearchQueryIndexStatementsCoverSearchExecutionPaths(t *testing.T) {
 		"idx_timeline_events_public_date",
 		"idx_timeline_persons_public_name",
 		"idx_feed_item_stars_item",
+		"idx_feed_items_fulltext_eligible",
+		"idx_feed_items_fulltext_ready",
+		"idx_feed_items_reader_backfill_published",
+		"idx_feed_items_fulltext_stale",
+		"idx_content_entries_published_order",
+		"idx_content_entries_owner_channel_live",
+		"idx_content_collections_channel_name_live",
 		"CREATE INDEX CONCURRENTLY IF NOT EXISTS",
 	} {
 		if !strings.Contains(joined, fragment) {

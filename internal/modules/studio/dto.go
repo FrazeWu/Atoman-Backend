@@ -109,6 +109,17 @@ type StudioContentItem struct {
 	UpdatedAt          time.Time                 `json:"updated_at"`
 }
 
+type StudioCollectionContentItem struct {
+	ContentID uuid.UUID `json:"content_id"`
+	ID        uuid.UUID `json:"id"`
+	Module    Module    `json:"module"`
+	Title     string    `json:"title"`
+	CoverURL  string    `json:"cover_url"`
+	Status    string    `json:"status"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Position  int       `json:"position"`
+}
+
 type StudioContentIssue struct {
 	Code  string `json:"code"`
 	Count int64  `json:"count"`

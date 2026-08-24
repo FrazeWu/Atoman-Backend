@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestNewPostDTOProducesFlatCanonicalResponse(t *testing.T) {
+func TestNewBlogContentDTOProducesFlatCanonicalResponse(t *testing.T) {
 	postID := uuid.New()
 	channelID := uuid.New()
 	collectionID := uuid.New()
@@ -39,9 +39,9 @@ func TestNewPostDTOProducesFlatCanonicalResponse(t *testing.T) {
 		ViewerRating:       &rating,
 	}
 
-	payload, err := json.Marshal(newPostDTO(post))
+	payload, err := json.Marshal(newBlogContentDTO(post))
 	if err != nil {
-		t.Fatalf("marshal post DTO: %v", err)
+		t.Fatalf("marshal Blog content DTO: %v", err)
 	}
 	var response map[string]any
 	if err := json.Unmarshal(payload, &response); err != nil {

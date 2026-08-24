@@ -8,7 +8,34 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
+
+func TestEnsurePostContentEntryReusesSoftDeletedEntry(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Post{}, &model.ContentEntry{}, &model.ContentPostExtension{})
+
+	owner := model.User{Username: "unified-content-soft-delete-owner", Email: "unified-content-soft-delete@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, db.Create(&owner).Error)
+	channel := model.Channel{UserID: &owner.UUID, Name: "Soft deleted content", Slug: "soft-deleted-content"}
+	require.NoError(t, db.Create(&channel).Error)
+	post := model.Post{UserID: owner.UUID, ChannelID: &channel.ID, Title: "Deleted article", Status: "published", Visibility: "public"}
+	require.NoError(t, db.Create(&post).Error)
+
+	entry := model.ContentEntry{AuthorID: &owner.UUID, ChannelID: channel.ID, Kind: "blog", Title: post.Title, Status: post.Status, Visibility: post.Visibility}
+	require.NoError(t, db.Create(&entry).Error)
+	require.NoError(t, db.Delete(&entry).Error)
+	require.NoError(t, db.Create(&model.ContentPostExtension{ContentID: entry.ID, PostID: post.ID}).Error)
+	require.NoError(t, db.Delete(&post).Error)
+
+	result, err := ensurePostContentEntry(db, post, "blog")
+	require.NoError(t, err)
+	require.Equal(t, entry.ID, result.ID)
+	require.True(t, result.DeletedAt.Valid)
+
+	var visible model.ContentEntry
+	require.ErrorIs(t, db.First(&visible, "id = ?", entry.ID).Error, gorm.ErrRecordNotFound)
+}
 
 func TestRunUnifiedContentMigrationBackfillsMixedContentAndCollections(t *testing.T) {
 	db := testdb.Open(t)
@@ -39,6 +66,8 @@ func TestRunUnifiedContentMigrationBackfillsMixedContentAndCollections(t *testin
 	require.NoError(t, db.Create(&post).Error)
 	require.NoError(t, db.Create(&episodePost).Error)
 	require.NoError(t, db.Create(&video).Error)
+	orphanContentID := uuid.New()
+	require.NoError(t, db.Create(&model.ContentPostExtension{ContentID: orphanContentID, PostID: post.ID}).Error)
 	episode := model.PodcastEpisode{PostID: episodePost.ID, ChannelID: channel.ID, AudioURL: "episode.mp3"}
 	require.NoError(t, db.Create(&episode).Error)
 	require.NoError(t, db.Create(&model.PostCollection{PostID: post.ID, CollectionID: blogDefault.ID, Position: 2}).Error)
@@ -83,6 +112,12 @@ func TestRunUnifiedContentMigrationBackfillsMixedContentAndCollections(t *testin
 		"view_count": 7,
 	}).Error)
 	require.NoError(t, RunUnifiedContentMigration(db))
+
+	var restoredEntry model.ContentEntry
+	require.NoError(t, db.Where("kind = ? AND title = ?", "blog", post.Title).First(&restoredEntry).Error)
+	require.NoError(t, db.Delete(&restoredEntry).Error)
+	require.NoError(t, RunUnifiedContentMigration(db))
+	require.NoError(t, db.Where("id = ?", restoredEntry.ID).First(&restoredEntry).Error)
 
 	var entries []model.ContentEntry
 	require.NoError(t, db.Where("channel_id = ?", channel.ID).Find(&entries).Error)

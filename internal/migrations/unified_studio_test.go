@@ -28,10 +28,10 @@ func seedUnifiedStudioFixture(t *testing.T, db *gorm.DB) unifiedStudioFixture {
 		&model.PodcastEpisode{},
 		&model.Video{},
 	)
-	if err := db.Exec("ALTER TABLE channels ADD COLUMN `content_type` varchar(16) NOT NULL DEFAULT 'blog'").Error; err != nil {
+	if err := db.Exec("ALTER TABLE channels ADD COLUMN content_type varchar(16) NOT NULL DEFAULT 'blog'").Error; err != nil {
 		t.Fatalf("add legacy channel content type: %v", err)
 	}
-	if err := db.Exec("ALTER TABLE channels ADD COLUMN `is_default` boolean NOT NULL DEFAULT false").Error; err != nil {
+	if err := db.Exec("ALTER TABLE channels ADD COLUMN is_default boolean NOT NULL DEFAULT false").Error; err != nil {
 		t.Fatalf("add legacy channel default flag: %v", err)
 	}
 
@@ -247,9 +247,7 @@ func TestRunUnifiedStudioMigrationDropsLegacyChannelModuleColumns(t *testing.T) 
 		for _, column := range columns {
 			names = append(names, column.Name())
 		}
-		var ddl string
-		_ = db.Raw("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'channels'").Scan(&ddl).Error
-		t.Fatalf("expected legacy channel columns to be dropped, columns=%v ddl=%s", names, ddl)
+		t.Fatalf("expected legacy channel columns to be dropped, columns=%v", names)
 	}
 }
 

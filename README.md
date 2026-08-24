@@ -37,10 +37,22 @@ go run ./cmd/start_server --mode dev
 常用命令：
 
 ```bash
+# 内存受限环境：限制 Go 的包级并发。
+make build-low-memory
+
+# 只运行受影响包的定向测试；PACKAGE 必填。
+make test-focused PACKAGE=./internal/modules/blog TEST_ARGS='-run TestPostRating -count=1'
+
+# 迁移和 API 契约稳定后再执行。
+make migrate
+make swagger
+```
+
+常规构建和完整测试仅在发布前或跨模块变更后运行：
+
+```bash
 go build ./...
 go test ./...
-go run cmd/migrate/main.go
-go run cmd/create_admin/main.go
 ```
 
 开发环境读取 `.env.dev`，生产环境读取 `.env.prod`。

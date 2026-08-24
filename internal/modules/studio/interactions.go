@@ -95,7 +95,7 @@ func (s *Service) interactionContentTitles(userID, channelID uuid.UUID, module M
 		}
 		err := contentmodule.PodcastQuery(s.db).
 			Select("episodes.episode_id AS id, posts.title").
-			Where("posts.author_id = ? AND posts.channel_id = ?", userID, channelID).
+			Where(contentmodule.PodcastAuthorColumn(s.db)+" = ? AND posts.channel_id = ?", userID, channelID).
 			Scan(&rows).Error
 		for _, row := range rows {
 			titles[row.ID] = row.Title
@@ -108,7 +108,7 @@ func (s *Service) interactionContentTitles(userID, channelID uuid.UUID, module M
 		}
 		err := contentmodule.VideoQuery(s.db).
 			Select("videos.video_id AS id, posts.title").
-			Where("posts.author_id = ? AND posts.channel_id = ?", userID, channelID).
+			Where(contentmodule.VideoAuthorColumn(s.db)+" = ? AND posts.channel_id = ?", userID, channelID).
 			Scan(&rows).Error
 		for _, row := range rows {
 			titles[row.ID] = row.Title

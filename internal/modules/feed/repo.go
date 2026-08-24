@@ -79,6 +79,12 @@ func (r *Repo) ListFollowedUserIDs(userID uuid.UUID) ([]uuid.UUID, error) {
 	return ids, err
 }
 
+func (r *Repo) GetPublicExternalFeedSource(feedSourceID uuid.UUID) (model.FeedSource, error) {
+	var source model.FeedSource
+	err := r.db.Where("id = ? AND source_type = ? AND hidden = ?", feedSourceID, "external_rss", false).First(&source).Error
+	return source, err
+}
+
 func (r *Repo) ListVisibleFeedSources(query FeedQuery) ([]model.FeedSource, error) {
 	db := r.db.Model(&model.FeedSource{}).Where("hidden = ?", false)
 	if query.SourceType != "" {
@@ -118,7 +124,7 @@ func (r *Repo) listPublishedCanonicalPodcastPosts(scope string, ids []uuid.UUID)
 	query := contentmodule.PodcastQuery(r.db).Where("posts.status = ?", "published")
 	switch scope {
 	case "user_id":
-		query = query.Where("posts.author_id IN ?", ids)
+		query = query.Where(contentmodule.PodcastAuthorColumn(r.db)+" IN ?", ids)
 	case "channel_id":
 		query = query.Where("posts.channel_id IN ?", ids)
 	case "collection_id":
@@ -227,7 +233,7 @@ func (r *Repo) ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs []u
 	conditions := make([]string, 0, 3)
 	args := make([]any, 0, 3)
 	if len(userIDs) > 0 {
-		conditions = append(conditions, "posts.author_id IN ?")
+		conditions = append(conditions, contentmodule.VideoAuthorColumn(r.db)+" IN ?")
 		args = append(args, userIDs)
 	}
 	if len(channelIDs) > 0 {
@@ -412,28 +418,33 @@ func (r *Repo) ListSubscribedBlogPosts(
 	return posts, total, err
 }
 
-func (r *Repo) ListFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID) ([]model.FeedItem, error) {
+func (r *Repo) ListFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID, visibleAfter ...map[uuid.UUID]time.Time) ([]model.FeedItem, error) {
 	if len(feedSourceIDs) == 0 {
 		return []model.FeedItem{}, nil
 	}
 	var items []model.FeedItem
-	err := r.db.Preload("FeedSource").
+	db := r.db.Preload("FeedSource").
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
-		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false).
-		Order("feed_items.published_at DESC, feed_items.id DESC").
-		Find(&items).Error
+		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false)
+	if len(visibleAfter) > 0 {
+		db = applyFeedSourceVisibleAfter(db, visibleAfter[0])
+	}
+	err := db.Order("feed_items.published_at DESC, feed_items.id DESC").Find(&items).Error
 	return items, err
 }
 
-func (r *Repo) ListFeedItemsBySourceIDsPaged(feedSourceIDs []uuid.UUID, limit int, offset int) ([]model.FeedItem, error) {
+func (r *Repo) ListFeedItemsBySourceIDsPaged(feedSourceIDs []uuid.UUID, limit int, offset int, visibleAfter ...map[uuid.UUID]time.Time) ([]model.FeedItem, error) {
 	if len(feedSourceIDs) == 0 {
 		return []model.FeedItem{}, nil
 	}
 	var items []model.FeedItem
-	err := r.db.Preload("FeedSource").
+	db := r.db.Preload("FeedSource").
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
-		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false).
-		Order("feed_items.published_at DESC, feed_items.id DESC").
+		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false)
+	if len(visibleAfter) > 0 {
+		db = applyFeedSourceVisibleAfter(db, visibleAfter[0])
+	}
+	err := db.Order("feed_items.published_at DESC, feed_items.id DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&items).Error
@@ -461,10 +472,30 @@ func (r *Repo) CountFeedItemsBySourceIDsFiltered(feedSourceIDs []uuid.UUID, quer
 	return count, r.buildFeedItemsBySourceIDsQuery(feedSourceIDs, query).Count(&count).Error
 }
 
+func applyFeedSourceVisibleAfter(db *gorm.DB, visibleAfter map[uuid.UUID]time.Time) *gorm.DB {
+	if len(visibleAfter) == 0 {
+		return db
+	}
+	conditions := make([]string, 0, len(visibleAfter))
+	args := make([]any, 0, len(visibleAfter)*2)
+	for sourceID, resumedAfter := range visibleAfter {
+		if resumedAfter.IsZero() {
+			continue
+		}
+		conditions = append(conditions, "(feed_items.feed_source_id = ? AND feed_items.published_at >= ?)")
+		args = append(args, sourceID, resumedAfter)
+	}
+	if len(conditions) == 0 {
+		return db
+	}
+	return db.Where(strings.Join(conditions, " OR "), args...)
+}
+
 func (r *Repo) buildFeedItemsBySourceIDsQuery(feedSourceIDs []uuid.UUID, query FeedQuery) *gorm.DB {
 	db := r.db.Model(&model.FeedItem{}).
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
 		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false)
+	db = applyFeedSourceVisibleAfter(db, query.sourceVisibleAfter)
 	if query.Category != "" {
 		db = db.Where(recommendationFeedItemCategorySQL()+" = ?", query.Category)
 	}
@@ -516,15 +547,18 @@ func (r *Repo) CountFeedItemsBySourceID(feedSourceID uuid.UUID) (int64, error) {
 	return count, err
 }
 
-func (r *Repo) CountFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID) (int64, error) {
+func (r *Repo) CountFeedItemsBySourceIDs(feedSourceIDs []uuid.UUID, visibleAfter ...map[uuid.UUID]time.Time) (int64, error) {
 	if len(feedSourceIDs) == 0 {
 		return 0, nil
 	}
-	var count int64
-	err := r.db.Model(&model.FeedItem{}).
+	db := r.db.Model(&model.FeedItem{}).
 		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
-		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false).
-		Count(&count).Error
+		Where("feed_items.feed_source_id IN ? AND feed_sources.hidden = ?", feedSourceIDs, false)
+	if len(visibleAfter) > 0 {
+		db = applyFeedSourceVisibleAfter(db, visibleAfter[0])
+	}
+	var count int64
+	err := db.Count(&count).Error
 	return count, err
 }
 
@@ -1064,18 +1098,7 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 			LOWER(feed_sources.rss_url) LIKE ? ESCAPE '\')`, like, like)
 	}
 	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
-		storedCategory := "LOWER(COALESCE(feed_sources.category, '')) = ?"
-		if normalizedCategory == "blog" {
-			nonBlogCategories := []string{"news", "social", "video", "forum", "podcast"}
-			inferred := make([]string, 0, len(nonBlogCategories))
-			for _, value := range nonBlogCategories {
-				inferred = append(inferred, "("+exploreSourceInferredCategorySQL(value)+")")
-			}
-			db = db.Where("("+storedCategory+" OR (COALESCE(feed_sources.category, '') = '' AND NOT ("+strings.Join(inferred, " OR ")+")))", normalizedCategory)
-		} else {
-			inferredCategory := exploreSourceInferredCategorySQL(normalizedCategory)
-			db = db.Where("("+storedCategory+" OR ("+inferredCategory+"))", normalizedCategory)
-		}
+		db = applyExploreSourceCategoryFilter(db, normalizedCategory)
 	}
 	queryDB := db.
 		Group("feed_sources.id").
@@ -1205,18 +1228,6 @@ func (r *Repo) attachExploreSourceRecentItems(rows []ExploreSourceRow, sourceIDs
 }
 
 func (r *Repo) CountExploreSources(category string, query string, language ...string) (int64, error) {
-	if normalizeFeedSourceCategory(category) != "" {
-		args := []string{query}
-		if len(language) > 0 {
-			args = append(args, language[0])
-		}
-		rows, err := r.ListExploreSources(100000, 0, category, args...)
-		if err != nil {
-			return 0, err
-		}
-		return int64(len(rows)), nil
-	}
-
 	languageValue := ""
 	if len(language) > 0 {
 		languageValue = language[0]
@@ -1225,6 +1236,9 @@ func (r *Repo) CountExploreSources(category string, query string, language ...st
 		Select("feed_sources.id").
 		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
 		Where("feed_sources.source_type = ? AND feed_sources.hidden = ?", "external_rss", false)
+	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
+		db = applyExploreSourceCategoryFilter(db, normalizedCategory)
+	}
 	if languageValue != "" {
 		db = db.Where("feed_sources.language_code = ?", languageValue)
 	}
@@ -1265,6 +1279,20 @@ func normalizeFeedSourceCategory(category string) string {
 	default:
 		return ""
 	}
+}
+
+func applyExploreSourceCategoryFilter(db *gorm.DB, normalizedCategory string) *gorm.DB {
+	storedCategory := "LOWER(COALESCE(feed_sources.category, '')) = ?"
+	if normalizedCategory == "blog" {
+		nonBlogCategories := []string{"news", "social", "video", "forum", "podcast"}
+		inferred := make([]string, 0, len(nonBlogCategories))
+		for _, value := range nonBlogCategories {
+			inferred = append(inferred, "("+exploreSourceInferredCategorySQL(value)+")")
+		}
+		return db.Where("("+storedCategory+" OR (COALESCE(feed_sources.category, '') = '' AND NOT ("+strings.Join(inferred, " OR ")+")))", normalizedCategory)
+	}
+	inferredCategory := exploreSourceInferredCategorySQL(normalizedCategory)
+	return db.Where("("+storedCategory+" OR ("+inferredCategory+"))", normalizedCategory)
 }
 
 func defaultFeedSourceCategory(category string) string {
@@ -1338,12 +1366,16 @@ func parseExploreSourceTimestamp(raw string) (time.Time, error) {
 		"2006-01-02 15:04:05-07:00",
 		"2006-01-02 15:04:05Z07:00",
 	}
+	var lastErr error
 	for _, layout := range layouts {
-		if parsed, err := time.Parse(layout, value); err == nil {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
 			return parsed, nil
 		}
+		lastErr = err
 	}
-	return time.Time{}, fmt.Errorf("parse explore source timestamp %q", raw)
+	resultErr := fmt.Errorf("parse explore source timestamp %q: %w", raw, lastErr)
+	return time.Time{}, resultErr
 }
 
 func (r *Repo) FeedItemExists(id uuid.UUID) (bool, error) {

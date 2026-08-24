@@ -24,6 +24,8 @@ func Run(db *gorm.DB) error {
 		{"feed source fetch state migration", migrations.RunFeedSourceFetchStateMigration},
 		{"deduplicate subscriptions", migrations.DeduplicateSubscriptions},
 		{"deduplicate subscription groups", migrations.DeduplicateSubscriptionGroups},
+		{"subscription unique index repair", migrations.RunSubscriptionUniqueIndex},
+		{"feed item unique index repair", migrations.RunFeedItemUniqueIndex},
 		{"feed source management mvp migration", migrations.Migrate20260603FeedSourceManagementMVP},
 		{"blog collection post order migration", migrations.RunBlogCollectionPostOrderMigration},
 		{"deduplicate blog interactions", migrations.DeduplicateBlogInteractions},
@@ -31,6 +33,7 @@ func Run(db *gorm.DB) error {
 		{"auth oauth migration", migrations.RunAuthOAuthMigration},
 		{"unified reading list migration", migrations.RunUnifiedReadingListMigration},
 		{"debate wiki migration", migrations.RunDebateWikiMigration},
+		{"unified content partial-schema repair", migrations.RunUnifiedContentMigrationIfReady},
 		{"music standalone songs pre-schema migration", migrations.RunMusicStandaloneSongsPreSchemaMigration},
 	}
 	for _, step := range steps {
@@ -87,6 +90,7 @@ func Run(db *gorm.DB) error {
 		{"user default resources migration", backfillUserDefaultResources},
 		{"resource management migration", migrations.RunResourceManagementMigration},
 		{"unified content migration", migrations.RunUnifiedContentMigration},
+		{"blog rating content migration", migrations.RunBlogRatingContentMigration},
 	}
 	for _, step := range postSchemaSteps {
 		if err := step.run(db); err != nil {
@@ -112,7 +116,10 @@ func runMusicFavoritePlaylistMigration(db *gorm.DB) error {
 	if legacyBookmarks == 0 && favoritePlaylists == 0 {
 		return nil
 	}
-	return migrations.RunMusicFavoritePlaylistMigration(db)
+	if err := migrations.RunMusicFavoritePlaylistMigration(db); err != nil {
+		return fmt.Errorf("music favorite playlist migration: %w", err)
+	}
+	return nil
 }
 
 func runMusicRevisionBaselinesMigration(db *gorm.DB) error {
@@ -122,7 +129,7 @@ func runMusicRevisionBaselinesMigration(db *gorm.DB) error {
 		}
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
+	if err := db.Transaction(func(tx *gorm.DB) error {
 		var users []model.User
 		if err := tx.Where("is_active = ?", true).
 			Order("CASE WHEN role = 'admin' THEN 0 WHEN role = 'moderator' THEN 1 ELSE 2 END").
@@ -201,7 +208,10 @@ func runMusicRevisionBaselinesMigration(db *gorm.DB) error {
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("music revision baselines migration: %w", err)
+	}
+	return nil
 }
 
 func backfillUserDefaultResources(db *gorm.DB) error {

@@ -50,25 +50,18 @@ func SubscribeChannel(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		// Check if already subscribed
-		var existingSub model.Subscription
-		if err := db.Where("user_id = ? AND feed_source_id = ?", userID, feedSource.ID).First(&existingSub).Error; err == nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "Already subscribed"})
-			return
-		}
-
-		// Create subscription
 		subscription := model.Subscription{
 			UserID:       userID,
 			FeedSourceID: feedSource.ID,
 			Title:        title,
 		}
-		if err := db.Create(&subscription).Error; err != nil {
+		createdSubscription, _, err := ensureSubscription(db, subscription)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create subscription"})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"message": "Subscribed successfully", "subscription": subscription})
+		c.JSON(http.StatusOK, gin.H{"message": "Subscribed successfully", "subscription": createdSubscription})
 	}
 }
 
@@ -93,7 +86,9 @@ func resolveChannelSubscriptionFeedSource(db *gorm.DB, id uuid.UUID, createForCh
 				Hash:       hash,
 			}
 			if err := db.Create(&feedSource).Error; err != nil {
-				return model.FeedSource{}, "", false, err
+				if loadErr := db.Where("hash = ?", hash).First(&feedSource).Error; loadErr != nil {
+					return model.FeedSource{}, "", false, err
+				}
 			}
 		}
 		return feedSource, channel.Name, true, nil
@@ -222,30 +217,25 @@ func SubscribeCollection(db *gorm.DB) gin.HandlerFunc {
 				Hash:       hash,
 			}
 			if err := db.Create(&feedSource).Error; err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create feed source"})
-				return
+				if loadErr := db.Where("hash = ?", hash).First(&feedSource).Error; loadErr != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create feed source"})
+					return
+				}
 			}
 		}
 
-		// Check if already subscribed
-		var existingSub model.Subscription
-		if err := db.Where("user_id = ? AND feed_source_id = ?", userID, feedSource.ID).First(&existingSub).Error; err == nil {
-			c.JSON(http.StatusConflict, gin.H{"error": "Already subscribed"})
-			return
-		}
-
-		// Create subscription
 		subscription := model.Subscription{
 			UserID:       userID,
 			FeedSourceID: feedSource.ID,
 			Title:        collectionName,
 		}
-		if err := db.Create(&subscription).Error; err != nil {
+		createdSubscription, _, err := ensureSubscription(db, subscription)
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create subscription"})
 			return
 		}
 
-		c.JSON(http.StatusOK, gin.H{"message": "Subscribed successfully", "subscription": subscription})
+		c.JSON(http.StatusOK, gin.H{"message": "Subscribed successfully", "subscription": createdSubscription})
 	}
 }
 

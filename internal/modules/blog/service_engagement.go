@@ -38,10 +38,10 @@ func (s *Service) SetPostRating(user authctx.CurrentUser, postID uuid.UUID, scor
 	}
 
 	var rating model.PostRating
-	err := s.db.Where("user_id = ? AND post_id = ?", user.ID, postID).First(&rating).Error
+	err := s.db.Where("user_id = ? AND content_id = ?", user.ID, postID).First(&rating).Error
 	switch {
 	case errors.Is(err, gorm.ErrRecordNotFound):
-		rating = model.PostRating{UserID: user.ID, PostID: postID, Score: score}
+		rating = model.PostRating{UserID: user.ID, ContentID: postID, Score: score}
 		if err := s.db.Create(&rating).Error; err != nil {
 			return PostRatingSummary{}, err
 		}
@@ -62,7 +62,7 @@ func (s *Service) DeletePostRating(user authctx.CurrentUser, postID uuid.UUID) e
 	if err := s.ensurePostRatingAccess(user.ID, postID); err != nil {
 		return err
 	}
-	return s.db.Where("user_id = ? AND post_id = ?", user.ID, postID).Delete(&model.PostRating{}).Error
+	return s.db.Where("user_id = ? AND content_id = ?", user.ID, postID).Delete(&model.PostRating{}).Error
 }
 
 func (s *Service) PostRatingSummary(postID uuid.UUID, viewerID *uuid.UUID) (PostRatingSummary, error) {
@@ -78,7 +78,7 @@ func (s *Service) PostRatingSummary(postID uuid.UUID, viewerID *uuid.UUID) (Post
 	}
 	if err := s.db.Model(&model.PostRating{}).
 		Select("COALESCE(AVG(score), 0) AS rating_score, COUNT(*) AS rating_count").
-		Where("post_id = ?", postID).
+		Where("content_id = ?", postID).
 		Scan(&aggregate).Error; err != nil {
 		return PostRatingSummary{}, err
 	}
@@ -88,7 +88,7 @@ func (s *Service) PostRatingSummary(postID uuid.UUID, viewerID *uuid.UUID) (Post
 	}
 	if viewerID != nil {
 		var rating model.PostRating
-		if err := s.db.Where("user_id = ? AND post_id = ?", *viewerID, postID).First(&rating).Error; err == nil {
+		if err := s.db.Where("user_id = ? AND content_id = ?", *viewerID, postID).First(&rating).Error; err == nil {
 			score := rating.Score
 			summary.ViewerRating = &score
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -194,21 +194,23 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 	if err != nil {
 		return nil, err
 	}
-	postDTOByID := make(map[uuid.UUID]PostDTO, len(postDTOs))
+	postDTOByID := make(map[uuid.UUID]BlogContentDTO, len(postDTOs))
 	for _, postDTO := range postDTOs {
 		postDTOByID[postDTO.ID] = postDTO
 	}
 
 	items := make([]BookmarkListItemDTO, 0, len(bookmarks))
 	for _, bookmark := range bookmarks {
-		item := BookmarkListItemDTO{Bookmark: bookmark}
+		item := BookmarkListItemDTO{BlogBookmarkDTO: BlogBookmarkDTO{
+			ID: bookmark.ID, CreatedAt: bookmark.CreatedAt, UpdatedAt: bookmark.UpdatedAt,
+			UserID: bookmark.UserID, ContentID: bookmark.PostID, BookmarkFolderID: bookmark.BookmarkFolderID,
+		}}
 		if bookmark.Post != nil {
 			count := countsByPostID[bookmark.PostID]
-			item.Bookmark.Post = nil
-			item.Post = &BookmarkPostDTO{
-				PostDTO:       postDTOByID[bookmark.PostID],
-				LikesCount:    count.LikesCount,
-				CommentsCount: count.CommentsCount,
+			item.Content = &BookmarkBlogContentDTO{
+				BlogContentDTO: postDTOByID[bookmark.PostID],
+				LikesCount:     count.LikesCount,
+				CommentsCount:  count.CommentsCount,
 			}
 		}
 		items = append(items, item)

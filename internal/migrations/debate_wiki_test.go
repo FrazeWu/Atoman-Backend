@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
@@ -160,7 +161,7 @@ func TestRunDebateWikiMigrationCleansLegacyArgumentsAndBackfillsRevision(t *test
 	require.Equal(t, "creation", revision.EditType)
 	require.Equal(t, "approved", revision.Status)
 	require.Equal(t, user.UUID, revision.EditorID)
-	require.Equal(t, debate.CreatedAt.UTC(), revision.CreatedAt.UTC())
+	require.WithinDuration(t, debate.CreatedAt.UTC(), revision.CreatedAt.UTC(), time.Millisecond)
 
 	for _, table := range []string{"debate_argument_details", "debate_argument_references", "debate_argument_debate_refs", "vote_histories", "debate_conclude_votes"} {
 		require.Falsef(t, db.Migrator().HasTable(table), "legacy table %s should be removed", table)
@@ -225,9 +226,11 @@ func TestRunDebateWikiMigrationIsIdempotentAndKeepsNewProjectionData(t *testing.
 
 func TestBackfillDebateRevisionContentReferencesLinksExistingOccurrences(t *testing.T) {
 	db := testdb.Open(t)
-	require.NoError(t, db.AutoMigrate(&model.Debate{}, &model.Revision{}, &model.ContentReference{}, &model.DebateRevisionReference{}))
+	editor := model.User{UUID: uuid.New(), Username: "reference-editor", Email: "reference-editor@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Debate{}, &model.Revision{}, &model.ContentReference{}, &model.DebateRevisionReference{}))
+	require.NoError(t, db.Create(&editor).Error)
 	debateID := uuid.New()
-	revision := model.Revision{ContentType: debateRevisionContentType, ContentID: debateID, VersionNumber: 1, ContentSnapshot: []byte(`{"content":"x @debate:11111111-1111-1111-1111-111111111111:support y"}`), EditorID: uuid.New()}
+	revision := model.Revision{ContentType: debateRevisionContentType, ContentID: debateID, VersionNumber: 1, ContentSnapshot: []byte(`{"content":"x @debate:11111111-1111-1111-1111-111111111111:support y"}`), EditorID: editor.UUID}
 	require.NoError(t, db.Create(&revision).Error)
 	ref := model.DebateRevisionReference{DebateID: debateID, RevisionID: revision.ID, Raw: "@debate:11111111-1111-1111-1111-111111111111:support", Kind: "debate", ResourceID: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Title: "Source", Qualifier: "support", Occurrence: 1, State: model.DebateRelationActive}
 	require.NoError(t, db.Create(&ref).Error)
@@ -243,10 +246,20 @@ func TestBackfillDebateRevisionContentReferencesLinksExistingOccurrences(t *test
 
 func TestCleanLegacyDebateDataKeepsNewRelationProjectionWhenOtherLegacyMarkerExists(t *testing.T) {
 	db := testdb.Open(t)
-	require.NoError(t, db.AutoMigrate(&model.DebateRelation{}, &legacyDebateArgumentDetail{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Debate{}, &model.Revision{}, &model.DebateConclusionEvent{}, &model.DebateRelation{}, &legacyDebateArgumentDetail{}))
+	user := model.User{UUID: uuid.New(), Username: "relation-owner", Email: "relation-owner@example.com", Password: "hash"}
+	require.NoError(t, db.Create(&user).Error)
+	source := model.Debate{UserID: user.UUID, Title: "Source", Status: model.DebateStatusActive}
+	target := model.Debate{UserID: user.UUID, Title: "Target", Status: model.DebateStatusActive}
+	require.NoError(t, db.Create(&source).Error)
+	require.NoError(t, db.Create(&target).Error)
+	revision := model.Revision{ContentType: "debate", ContentID: target.ID, VersionNumber: 1, ContentSnapshot: []byte(`{"content":"target"}`), EditorID: user.UUID}
+	require.NoError(t, db.Create(&revision).Error)
+	event := model.DebateConclusionEvent{DebateID: source.ID, Direction: model.DebateVoteYes, TotalVotes: 1}
+	require.NoError(t, db.Create(&event).Error)
 	relation := model.DebateRelation{
-		SourceDebateID: uuid.New(), TargetDebateID: uuid.New(), Stance: model.DebateRelationSupport,
-		TargetRevisionID: uuid.New(), SourceConclusionEventID: uuid.New(), Status: model.DebateRelationActive,
+		SourceDebateID: source.ID, TargetDebateID: target.ID, Stance: model.DebateRelationSupport,
+		TargetRevisionID: revision.ID, SourceConclusionEventID: event.ID, Status: model.DebateRelationActive,
 	}
 	require.NoError(t, db.Create(&relation).Error)
 

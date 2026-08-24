@@ -11,7 +11,11 @@ import (
 
 func TestRunContentProtectionLiveUniqueIndexAllowsRecreateAfterSoftDelete(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.ContentProtection{})
+	testdb.Migrate(t, db, &model.User{}, &model.ContentProtection{})
+	protectedBy := model.User{Username: "protection-admin", Email: "protection-admin@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&protectedBy).Error; err != nil {
+		t.Fatalf("create protection user: %v", err)
+	}
 
 	if err := RunContentProtectionLiveUniqueIndex(db); err != nil {
 		t.Fatalf("run content protection unique index migration: %v", err)
@@ -22,7 +26,7 @@ func TestRunContentProtectionLiveUniqueIndexAllowsRecreateAfterSoftDelete(t *tes
 		ContentType:     "album",
 		ContentID:       contentID,
 		ProtectionLevel: "full",
-		ProtectedBy:     uuid.New(),
+		ProtectedBy:     protectedBy.UUID,
 	}
 	if err := db.Create(&initial).Error; err != nil {
 		t.Fatalf("create initial protection: %v", err)
@@ -36,7 +40,7 @@ func TestRunContentProtectionLiveUniqueIndexAllowsRecreateAfterSoftDelete(t *tes
 		ContentType:     "album",
 		ContentID:       contentID,
 		ProtectionLevel: "semi",
-		ProtectedBy:     uuid.New(),
+		ProtectedBy:     protectedBy.UUID,
 	}
 	if err := db.Create(&recreated).Error; err != nil {
 		t.Fatalf("recreate protection after migration: %v", err)
@@ -67,7 +71,11 @@ func TestRunContentProtectionLiveUniqueIndexAllowsRecreateAfterSoftDelete(t *tes
 
 func TestRunContentProtectionLiveUniqueIndexDeduplicatesLiveRows(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.ContentProtection{})
+	testdb.Migrate(t, db, &model.User{}, &model.ContentProtection{})
+	protectedBy := model.User{Username: "protection-dedupe-admin", Email: "protection-dedupe-admin@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&protectedBy).Error; err != nil {
+		t.Fatalf("create protection user: %v", err)
+	}
 
 	if err := db.Exec(`DROP INDEX IF EXISTS idx_content_protections_live_content`).Error; err != nil {
 		t.Fatalf("drop model index: %v", err)
@@ -78,7 +86,7 @@ func TestRunContentProtectionLiveUniqueIndexDeduplicatesLiveRows(t *testing.T) {
 		ContentType:     "album",
 		ContentID:       contentID,
 		ProtectionLevel: "full",
-		ProtectedBy:     uuid.New(),
+		ProtectedBy:     protectedBy.UUID,
 	}).Error; err != nil {
 		t.Fatalf("create first protection: %v", err)
 	}
@@ -86,7 +94,7 @@ func TestRunContentProtectionLiveUniqueIndexDeduplicatesLiveRows(t *testing.T) {
 		ContentType:     "album",
 		ContentID:       contentID,
 		ProtectionLevel: "semi",
-		ProtectedBy:     uuid.New(),
+		ProtectedBy:     protectedBy.UUID,
 	}).Error; err != nil {
 		t.Fatalf("create duplicate protection: %v", err)
 	}

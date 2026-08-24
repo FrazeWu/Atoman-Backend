@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/testdb"
 )
 
@@ -32,6 +33,7 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.Video{},
 		&model.ContentEntry{},
 		&model.ContentVideoExtension{},
+		&model.ContentPublicationEvent{},
 		&model.ContentCollection{},
 		&model.ContentCollectionMembership{},
 		&model.VideoBookmark{},
@@ -716,6 +718,21 @@ func TestGetVideoCollectionBookmarksReturnsOnlyVideoCollections(t *testing.T) {
 	require.NoError(t, db.Create(&blogSource).Error)
 	require.NoError(t, db.Create(&model.Subscription{UserID: viewer.UUID, FeedSourceID: videoSource.ID}).Error)
 	require.NoError(t, db.Create(&model.Subscription{UserID: viewer.UUID, FeedSourceID: blogSource.ID}).Error)
+	video := model.Video{
+		UserID: viewer.UUID, ChannelID: &channel.ID, Title: "Video collection member",
+		StorageType: "external", VideoURL: "https://example.com/video.mp4", Status: "published", Visibility: "public",
+	}
+	require.NoError(t, db.Create(&video).Error)
+	syncVideoTestRecord(db, video.ID)
+	blogEntry := model.ContentEntry{
+		Base: model.Base{ID: uuid.New()}, AuthorID: &viewer.UUID, ChannelID: channel.ID,
+		Kind: "blog", Title: "Blog collection member", Status: "published", Visibility: "public",
+	}
+	require.NoError(t, db.Create(&blogEntry).Error)
+	require.NoError(t, db.Create([]model.ContentCollectionMembership{
+		{ContentID: video.ID, CollectionID: videoCollection.ID},
+		{ContentID: blogEntry.ID, CollectionID: blogCollection.ID},
+	}).Error)
 
 	r := gin.New()
 	r.GET("/api/v1/videos/collection-bookmarks", withVideoAuth(viewer.UUID, GetVideoCollectionBookmarks(db)))
@@ -880,13 +897,12 @@ func TestCreateVideoPublishUsesSystemDefaultCollection(t *testing.T) {
 	router.ServeHTTP(response, request)
 
 	require.Equal(t, http.StatusCreated, response.Code, response.Body.String())
-	var video model.Video
-	require.NoError(t, db.Where("title = ?", "Published").First(&video).Error)
+	video, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("posts.title = ?", "Published"))
+	require.NoError(t, err)
 	require.NotNil(t, video.CollectionID)
-	var collection model.Collection
-	require.NoError(t, db.First(&collection, "id = ?", *video.CollectionID).Error)
-	require.True(t, collection.IsDefault)
-	require.Equal(t, "video", collection.ContentType)
+	require.NotNil(t, video.Collection)
+	require.True(t, video.Collection.IsDefault)
+	require.Equal(t, "video", video.Collection.ContentType)
 }
 
 func TestCreateLocalVideoPublishRequiresReadyProcessing(t *testing.T) {

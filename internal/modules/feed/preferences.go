@@ -70,12 +70,16 @@ func BatchSubscribeFeedSources(db *gorm.DB) gin.HandlerFunc {
 				SubscriptionGroupID: &group.ID,
 				Position:            nextSubscriptionPosition(db, userID, &group.ID),
 			}
-			result := db.Where("user_id = ? AND feed_source_id = ?", userID, source.ID).FirstOrCreate(&sub)
-			if result.Error == nil && result.RowsAffected > 0 {
+			createdSubscription, wasCreated, createErr := ensureSubscription(db, sub)
+			if createErr != nil {
+				c.JSON(500, gin.H{"error": "create subscription failed"})
+				return
+			}
+			if wasCreated {
 				created++
-				createdSubscriptions = append(createdSubscriptions, sub)
+				createdSubscriptions = append(createdSubscriptions, createdSubscription)
 				createdIDs = append(createdIDs, sourceID)
-			} else if result.Error == nil {
+			} else {
 				reusedIDs = append(reusedIDs, sourceID)
 			}
 		}

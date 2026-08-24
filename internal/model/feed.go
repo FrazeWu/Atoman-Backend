@@ -193,11 +193,10 @@ func (Like) TableName() string { return "likes" }
 
 type PostRating struct {
 	Base
-	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_post_ratings_user_post,priority:1,where:deleted_at IS NULL"`
-	User   *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	PostID uuid.UUID `json:"post_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_post_ratings_user_post,priority:2,where:deleted_at IS NULL"`
-	Post   *Post     `json:"post,omitempty" gorm:"foreignKey:PostID"`
-	Score  int       `json:"score" gorm:"not null"`
+	UserID    uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_post_ratings_user_content,priority:1,where:deleted_at IS NULL"`
+	User      *User     `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
+	ContentID uuid.UUID `json:"content_id" gorm:"type:uuid;index;uniqueIndex:idx_post_ratings_user_content,priority:2,where:deleted_at IS NULL"`
+	Score     int       `json:"score" gorm:"not null"`
 }
 
 func (PostRating) TableName() string { return "post_ratings" }
@@ -262,6 +261,8 @@ type FeedSource struct {
 	FetchLastError                  string     `json:"fetch_last_error" gorm:"type:text"`
 	FetchLastDurationMs             int64      `json:"fetch_last_duration_ms" gorm:"not null;default:0"`
 	FetchLastItemCount              int        `json:"fetch_last_item_count" gorm:"not null;default:0"`
+	FetchLeaseToken                 string     `json:"-" gorm:"column:fetch_lease_token;type:varchar(128)"`
+	FetchLeaseUntil                 *time.Time `json:"-" gorm:"column:fetch_lease_until;index"`
 	FullTextEnabled                 bool       `json:"full_text_enabled" gorm:"not null;default:false;index:idx_feed_sources_type_enabled,priority:2"`
 	FullTextSuccessCount            int        `json:"full_text_success_count" gorm:"not null;default:0"`
 	FullTextFailureCount            int        `json:"full_text_failure_count" gorm:"not null;default:0"`

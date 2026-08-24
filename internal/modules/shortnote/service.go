@@ -165,11 +165,10 @@ func (s *Service) dto(note model.ShortNote, viewerID uuid.UUID) (NoteDTO, error)
 	}
 	var target model.DiscussionTarget
 	commentsCount := 0
-	if err := s.db.Select("comment_count").Where("kind = ? AND resource_id = ?", "short_note", note.ID).First(&target).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := s.db.Select("comment_count").Where("kind = ? AND resource_id = ?", "short_note", note.ID).Limit(1).Find(&target).Error; err != nil {
 		return NoteDTO{}, err
-	} else if err == nil {
-		commentsCount = target.CommentCount
 	}
+	commentsCount = target.CommentCount
 	liked := false
 	if viewerID != uuid.Nil {
 		var viewerLike model.Like

@@ -90,7 +90,12 @@ func GetVideoCollectionBookmarks(db *gorm.DB) gin.HandlerFunc {
 		collectionsByID := make(map[uuid.UUID]*model.Collection, len(collectionIDs))
 		if len(collectionIDs) > 0 {
 			var collections []model.ContentCollection
-			if err := db.Where("id IN ?", collectionIDs).Find(&collections).Error; err != nil {
+			if err := db.Table("content_collections AS collections").
+				Select("collections.*").
+				Joins("JOIN content_collection_memberships memberships ON memberships.collection_id = collections.id").
+				Joins("JOIN content_entries entries ON entries.id = memberships.content_id AND entries.kind = ? AND entries.deleted_at IS NULL", "video").
+				Where("collections.id IN ?", collectionIDs).
+				Group("collections.id").Find(&collections).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch collection bookmarks"})
 				return
 			}

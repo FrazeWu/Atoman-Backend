@@ -21,10 +21,10 @@ func TestRunSubscriptionUniqueIndexCreatesExpectedIndex(t *testing.T) {
 	assertIndexExists(t, db, "subscriptions", "idx_subscriptions_user_source")
 
 	var definition string
-	if err := db.Raw(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`, "idx_subscriptions_user_source").Scan(&definition).Error; err != nil {
-		t.Fatalf("load sqlite index definition: %v", err)
+	if err := db.Raw(`SELECT indexdef FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?`, "idx_subscriptions_user_source").Scan(&definition).Error; err != nil {
+		t.Fatalf("load PostgreSQL index definition: %v", err)
 	}
-	if !strings.Contains(strings.ToLower(definition), "where deleted_at is null") {
+	if !strings.Contains(strings.ToLower(definition), "deleted_at is null") {
 		t.Fatalf("expected partial unique index on live subscriptions, got %q", definition)
 	}
 }
@@ -34,9 +34,9 @@ func TestRunSubscriptionUniqueIndexDeduplicatesOnlyLiveRows(t *testing.T) {
 	if err := db.Exec(`
 CREATE TABLE subscriptions (
 	id text PRIMARY KEY,
-	created_at datetime,
-	updated_at datetime,
-	deleted_at datetime,
+	created_at timestamp with time zone,
+	updated_at timestamp with time zone,
+	deleted_at timestamp with time zone,
 	user_id text NOT NULL,
 	feed_source_id text NOT NULL,
 	subscription_group_id text
@@ -106,9 +106,9 @@ func TestRunSubscriptionGroupUniqueIndexDeduplicatesExistingRows(t *testing.T) {
 	if err := db.Exec(`
 CREATE TABLE subscription_groups (
 	id text PRIMARY KEY,
-	created_at datetime,
-	updated_at datetime,
-	deleted_at datetime,
+	created_at timestamp with time zone,
+	updated_at timestamp with time zone,
+	deleted_at timestamp with time zone,
 	user_id text NOT NULL,
 	name text NOT NULL
 );
@@ -118,9 +118,9 @@ CREATE TABLE subscription_groups (
 	if err := db.Exec(`
 CREATE TABLE subscriptions (
 	id text PRIMARY KEY,
-	created_at datetime,
-	updated_at datetime,
-	deleted_at datetime,
+	created_at timestamp with time zone,
+	updated_at timestamp with time zone,
+	deleted_at timestamp with time zone,
 	user_id text NOT NULL,
 	feed_source_id text NOT NULL,
 	subscription_group_id text

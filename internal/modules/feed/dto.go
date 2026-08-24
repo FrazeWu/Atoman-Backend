@@ -10,19 +10,20 @@ import (
 )
 
 type FeedQuery struct {
-	Page           int       `json:"page" form:"page"`
-	PageSize       int       `json:"page_size" form:"page_size"`
-	ContentType    string    `json:"content_type" form:"content_type"`
-	Category       string    `json:"category" form:"category"`
-	LanguageCode   string    `json:"language" form:"language"`
-	SourceType     string    `json:"source_type" form:"source_type"`
-	SourceID       uuid.UUID `json:"source_id" form:"source_id"`
-	GroupID        uuid.UUID `json:"group_id" form:"group_id"`
-	IsRead         *bool     `json:"is_read" form:"is_read"`
-	HideDuplicates bool      `json:"hide_duplicates" form:"hide_duplicates"`
-	Sort           string    `json:"sort" form:"sort"`
-	Search         string    `json:"q" form:"q"`
-	viewerID       uuid.UUID
+	Page               int       `json:"page" form:"page"`
+	PageSize           int       `json:"page_size" form:"page_size"`
+	ContentType        string    `json:"content_type" form:"content_type"`
+	Category           string    `json:"category" form:"category"`
+	LanguageCode       string    `json:"language" form:"language"`
+	SourceType         string    `json:"source_type" form:"source_type"`
+	SourceID           uuid.UUID `json:"source_id" form:"source_id"`
+	GroupID            uuid.UUID `json:"group_id" form:"group_id"`
+	IsRead             *bool     `json:"is_read" form:"is_read"`
+	HideDuplicates     bool      `json:"hide_duplicates" form:"hide_duplicates"`
+	Sort               string    `json:"sort" form:"sort"`
+	Search             string    `json:"q" form:"q"`
+	viewerID           uuid.UUID
+	sourceVisibleAfter map[uuid.UUID]time.Time
 }
 
 type TimelineItemDTO struct {

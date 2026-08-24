@@ -4180,7 +4180,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/model.Bookmark"
+                            "$ref": "#/definitions/blog.BlogBookmarkDTO"
                         }
                     }
                 }
@@ -4314,7 +4314,7 @@
                     "201": {
                         "description": "Created",
                         "schema": {
-                            "$ref": "#/definitions/model.Post"
+                            "$ref": "#/definitions/blog.BlogContentDTO"
                         }
                     },
                     "400": {
@@ -4404,7 +4404,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.Post"
+                            "$ref": "#/definitions/blog.BlogContentDTO"
                         }
                     },
                     "403": {
@@ -4579,7 +4579,7 @@
                         "schema": {
                             "type": "array",
                             "items": {
-                                "$ref": "#/definitions/model.BlogPostVersion"
+                                "$ref": "#/definitions/blog.BlogContentVersionDTO"
                             }
                         }
                     }
@@ -4623,7 +4623,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/model.Post"
+                            "$ref": "#/definitions/blog.BlogContentDTO"
                         }
                     }
                 }
@@ -8243,7 +8243,7 @@
                         "CookieAuth": []
                     }
                 ],
-                "description": "管理员上传 OPML 文件，批量创建或复用全局 RSS 源，不创建用户订阅。",
+                "description": "管理员上传 OPML 文件，批量创建或复用全局 RSS 源；导入后由定时抓取器按源状态调度，不创建用户订阅。",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -8777,6 +8777,12 @@
                     }
                 ],
                 "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionResponse"
+                        }
+                    },
                     "201": {
                         "description": "Created",
                         "schema": {
@@ -17337,6 +17343,60 @@
                 }
             }
         },
+        "/api/v1/studio/collections/{id}/contents": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "studio"
+                ],
+                "summary": "获取统一合集成员",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "合集 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/studio.StudioCollectionContentItem"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/studio/dashboard": {
             "get": {
                 "security": [
@@ -21640,13 +21700,13 @@
         }
     },
     "definitions": {
-        "blog.BookmarkListItemDTO": {
+        "blog.BlogBookmarkDTO": {
             "type": "object",
             "properties": {
-                "bookmark_folder": {
-                    "$ref": "#/definitions/model.BookmarkFolder"
-                },
                 "bookmark_folder_id": {
+                    "type": "string"
+                },
+                "content_id": {
                     "type": "string"
                 },
                 "created_at": {
@@ -21655,24 +21715,50 @@
                 "id": {
                     "type": "string"
                 },
-                "post": {
-                    "$ref": "#/definitions/blog.BookmarkPostDTO"
-                },
-                "post_id": {
-                    "type": "string"
-                },
                 "updated_at": {
                     "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
                 },
                 "user_id": {
                     "type": "string"
                 }
             }
         },
-        "blog.BookmarkPostDTO": {
+        "blog.BlogCollectionDTO": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "$ref": "#/definitions/model.Channel"
+                },
+                "channel_id": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "is_default": {
+                    "type": "boolean"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.BlogContentDTO": {
             "type": "object",
             "properties": {
                 "bookmarks_count": {
@@ -21685,7 +21771,7 @@
                     "type": "string"
                 },
                 "collection": {
-                    "$ref": "#/definitions/model.Collection"
+                    "$ref": "#/definitions/blog.BlogCollectionDTO"
                 },
                 "collection_conflict": {
                     "type": "boolean"
@@ -21699,7 +21785,146 @@
                 "collections": {
                     "type": "array",
                     "items": {
-                        "$ref": "#/definitions/model.Collection"
+                        "$ref": "#/definitions/blog.BlogCollectionDTO"
+                    }
+                },
+                "content": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "language_code": {
+                    "type": "string"
+                },
+                "pinned": {
+                    "type": "boolean"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "references": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/reference.ResolvedReference"
+                    }
+                },
+                "scheduled_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/model.User"
+                },
+                "user_id": {
+                    "type": "string"
+                },
+                "view_count": {
+                    "type": "integer"
+                },
+                "viewer_rating": {
+                    "type": "integer"
+                },
+                "visibility": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.BlogContentVersionDTO": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "content_collection_id": {
+                    "type": "string"
+                },
+                "content_id": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "editor_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "visibility": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.BookmarkBlogContentDTO": {
+            "type": "object",
+            "properties": {
+                "bookmarks_count": {
+                    "type": "integer"
+                },
+                "channel": {
+                    "$ref": "#/definitions/model.Channel"
+                },
+                "channel_id": {
+                    "type": "string"
+                },
+                "collection": {
+                    "$ref": "#/definitions/blog.BlogCollectionDTO"
+                },
+                "collection_conflict": {
+                    "type": "boolean"
+                },
+                "collection_id": {
+                    "type": "string"
+                },
+                "collection_position": {
+                    "type": "integer"
+                },
+                "collections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/blog.BlogCollectionDTO"
                     }
                 },
                 "comments_count": {
@@ -21745,7 +21970,6 @@
                     "type": "string"
                 },
                 "status": {
-                    "description": "draft / published",
                     "type": "string"
                 },
                 "summary": {
@@ -21770,6 +21994,32 @@
                     "type": "integer"
                 },
                 "visibility": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.BookmarkListItemDTO": {
+            "type": "object",
+            "properties": {
+                "bookmark_folder_id": {
+                    "type": "string"
+                },
+                "content": {
+                    "$ref": "#/definitions/blog.BookmarkBlogContentDTO"
+                },
+                "content_id": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
                     "type": "string"
                 }
             }
@@ -21925,13 +22175,13 @@
         "blog.bookmarkInput": {
             "type": "object",
             "required": [
-                "post_id"
+                "content_id"
             ],
             "properties": {
                 "bookmark_folder_id": {
                     "type": "string"
                 },
-                "post_id": {
+                "content_id": {
                     "type": "string"
                 }
             }
@@ -26999,82 +27249,6 @@
                 }
             }
         },
-        "model.BlogPostVersion": {
-            "type": "object",
-            "properties": {
-                "collection_id": {
-                    "type": "string"
-                },
-                "content": {
-                    "type": "string"
-                },
-                "cover_url": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "editor_id": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "post_id": {
-                    "type": "string"
-                },
-                "published_at": {
-                    "type": "string"
-                },
-                "summary": {
-                    "type": "string"
-                },
-                "title": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "version": {
-                    "type": "integer"
-                },
-                "visibility": {
-                    "type": "string"
-                }
-            }
-        },
-        "model.Bookmark": {
-            "type": "object",
-            "properties": {
-                "bookmark_folder": {
-                    "$ref": "#/definitions/model.BookmarkFolder"
-                },
-                "bookmark_folder_id": {
-                    "type": "string"
-                },
-                "created_at": {
-                    "type": "string"
-                },
-                "id": {
-                    "type": "string"
-                },
-                "post": {
-                    "$ref": "#/definitions/model.Post"
-                },
-                "post_id": {
-                    "type": "string"
-                },
-                "updated_at": {
-                    "type": "string"
-                },
-                "user": {
-                    "$ref": "#/definitions/model.User"
-                },
-                "user_id": {
-                    "type": "string"
-                }
-            }
-        },
         "model.BookmarkFolder": {
             "type": "object",
             "properties": {
@@ -27536,6 +27710,36 @@
                     "type": "string"
                 },
                 "created_at": {
+                    "type": "string"
+                },
+                "fetch_consecutive_failures": {
+                    "type": "integer"
+                },
+                "fetch_http_status": {
+                    "type": "integer"
+                },
+                "fetch_last_duration_ms": {
+                    "type": "integer"
+                },
+                "fetch_last_error": {
+                    "type": "string"
+                },
+                "fetch_last_error_code": {
+                    "type": "string"
+                },
+                "fetch_last_item_count": {
+                    "type": "integer"
+                },
+                "fetch_last_success_at": {
+                    "type": "string"
+                },
+                "fetch_next_at": {
+                    "type": "string"
+                },
+                "fetch_provider": {
+                    "type": "string"
+                },
+                "fetch_status": {
                     "type": "string"
                 },
                 "full_text_consecutive_failure_count": {
@@ -31915,6 +32119,35 @@
                 },
                 "current_channel": {
                     "$ref": "#/definitions/studio.ChannelSummary"
+                }
+            }
+        },
+        "studio.StudioCollectionContentItem": {
+            "type": "object",
+            "properties": {
+                "content_id": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "module": {
+                    "$ref": "#/definitions/studio.Module"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
                 }
             }
         },

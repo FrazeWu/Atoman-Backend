@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 func multipartUploadBody(t *testing.T, purpose, filename, contentType string, content []byte) (*bytes.Buffer, string) {
@@ -196,7 +198,21 @@ func TestUploadAssetDeletesObjectWhenMediaAssetPersistenceFails(t *testing.T) {
 		t.Fatalf("new s3 session: %v", err)
 	}
 
-	db := testdb.Open(t) // Deliberately omit MediaAsset migration so persistence fails after upload.
+	db := testdb.Open(t) // Inject the database failure after the object has been uploaded.
+	if err := db.AutoMigrate(&model.MediaAsset{}); err != nil {
+		t.Fatalf("migrate media assets: %v", err)
+	}
+	callbackName := "test:upload-media-asset-failure-" + uuid.NewString()
+	if err := db.Callback().Create().Before("gorm:create").Register(callbackName, func(tx *gorm.DB) {
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "media_assets" {
+			tx.AddError(errors.New("injected media asset persistence failure"))
+		}
+	}); err != nil {
+		t.Fatalf("register media asset failure callback: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Callback().Create().Remove(callbackName)
+	})
 	r := gin.New()
 	r.POST("/uploads", func(c *gin.Context) {
 		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: uuid.New(), Role: authctx.RoleUser})

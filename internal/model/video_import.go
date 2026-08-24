@@ -24,8 +24,9 @@ type VideoImportSession struct {
 	UploadCompletedAt  *time.Time `json:"upload_completed_at,omitempty"`
 	ScheduledAt        *time.Time `json:"scheduled_at,omitempty"`
 	ErrorMessage       string     `json:"error_message" gorm:"type:text;not null;default:''"`
+	ContentID          *uuid.UUID `json:"content_id,omitempty" gorm:"type:uuid;index"`
 	TargetVideoID      *uuid.UUID `json:"target_video_id,omitempty" gorm:"type:uuid;index"`
-	TargetVideo        *Video     `json:"-" gorm:"foreignKey:TargetVideoID;references:ID"`
+	TargetVideo        *Video     `json:"-" gorm:"-"`
 }
 
 func (VideoImportSession) TableName() string { return "video_import_sessions" }

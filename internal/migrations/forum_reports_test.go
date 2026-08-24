@@ -10,7 +10,7 @@ func TestRunForumReportUniqueIndexDeduplicatesLegacyRows(t *testing.T) {
 	db := testdb.Open(t)
 	if err := db.Exec(`CREATE TABLE forum_reports (
 		id TEXT PRIMARY KEY,
-		created_at DATETIME,
+		created_at TIMESTAMP WITH TIME ZONE,
 		user_id TEXT NOT NULL,
 		target_type TEXT NOT NULL,
 		target_id TEXT NOT NULL

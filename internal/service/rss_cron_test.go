@@ -568,6 +568,11 @@ func TestPersistNormalizedFeedItemDeduplicatesSameLinkWithDifferentGUID(t *testi
 		t.Fatal(err)
 	}
 
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_feed_items_source_link
+		ON feed_items (feed_source_id, link) WHERE link <> ''`).Error; err != nil {
+		t.Fatalf("create link unique index: %v", err)
+	}
+
 	now := time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
 	first := normalizedFeedItem{
 		Title:       "Entry One",
@@ -595,6 +600,109 @@ func TestPersistNormalizedFeedItemDeduplicatesSameLinkWithDifferentGUID(t *testi
 	}
 	if count != 1 {
 		t.Fatalf("count=%d", count)
+	}
+}
+
+func TestClaimRSSSourceGroupUsesLeaseAndAllowsExpiry(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "rss-lease-test-source",
+		RssURL:     "https://example.com/lease.xml",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	group := rssSourceGroup{URL: source.RssURL, Sources: []model.FeedSource{source}}
+	now := time.Now().UTC()
+	claimed, err := claimRSSSourceGroup(db, &group, now)
+	if err != nil {
+		t.Fatalf("claim initial lease: %v", err)
+	}
+	if !claimed || group.LeaseToken == "" {
+		t.Fatalf("expected initial lease claim, token=%q", group.LeaseToken)
+	}
+
+	secondGroup := rssSourceGroup{URL: source.RssURL, Sources: []model.FeedSource{source}}
+	claimed, err = claimRSSSourceGroup(db, &secondGroup, now)
+	if err != nil {
+		t.Fatalf("claim active lease: %v", err)
+	}
+	if claimed {
+		t.Fatal("expected active lease to reject a competing claim")
+	}
+
+	if err := db.Model(&model.FeedSource{}).Where("id = ?", source.ID).Updates(map[string]any{
+		"fetch_lease_until": now.Add(-time.Second),
+	}).Error; err != nil {
+		t.Fatalf("expire lease: %v", err)
+	}
+	claimed, err = claimRSSSourceGroup(db, &secondGroup, now)
+	if err != nil {
+		t.Fatalf("claim expired lease: %v", err)
+	}
+	if !claimed || secondGroup.LeaseToken == "" {
+		t.Fatal("expected expired lease to be claimable")
+	}
+}
+
+func TestPersistNormalizedFeedItemRestoresSoftDeletedItem(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "shared-persistence-restore-source",
+		RssURL:     "https://example.com/feed.xml",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
+	normalized := normalizedFeedItem{
+		Title:       "Restored entry",
+		Link:        "https://example.com/posts/restored",
+		Identifier:  "restored-guid",
+		PublishedAt: now,
+		ContentHTML: "<p>Restored content.</p>",
+	}
+	if _, err := persistNormalizedFeedItem(db, source, normalized, now); err != nil {
+		t.Fatalf("persist initial item: %v", err)
+	}
+
+	var item model.FeedItem
+	if err := db.Where("feed_source_id = ? AND guid = ?", source.ID, normalized.Identifier).First(&item).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Delete(&item).Error; err != nil {
+		t.Fatalf("soft delete item: %v", err)
+	}
+	if _, err := persistNormalizedFeedItem(db, source, normalized, now.Add(time.Hour)); err != nil {
+		t.Fatalf("restore item: %v", err)
+	}
+
+	var total int64
+	if err := db.Unscoped().Model(&model.FeedItem{}).
+		Where("feed_source_id = ? AND guid = ?", source.ID, normalized.Identifier).
+		Count(&total).Error; err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 {
+		t.Fatalf("expected one historical row, got %d", total)
+	}
+	var live model.FeedItem
+	if err := db.Where("feed_source_id = ? AND guid = ?", source.ID, normalized.Identifier).First(&live).Error; err != nil {
+		t.Fatalf("find restored item: %v", err)
+	}
+	if live.DeletedAt.Valid {
+		t.Fatal("expected restored feed item to be live")
 	}
 }
 
@@ -957,7 +1065,8 @@ func TestSyncSingleRSSWithResultKeepsCountsWhenSourceUpdateFails(t *testing.T) {
 
 	callbackName := "test:fail_feed_source_update"
 	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
-		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "feed_sources" {
+		updates, ok := tx.Statement.Dest.(map[string]interface{})
+		if tx.Statement.Schema != nil && tx.Statement.Schema.Table == "feed_sources" && ok && updates["last_fetched_at"] != nil {
 			tx.AddError(errors.New("source state unavailable"))
 		}
 	}); err != nil {

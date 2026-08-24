@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -20,9 +21,30 @@ var legacySystemDefaultCollectionNames = []string{
 	"未分类视频",
 }
 
-// RunUnifiedContentMigration backfills canonical entries and collection memberships. Once
-// those mappings are complete, it soft-deletes migrated system default collections from
-// the legacy table while retaining the mappings for compatibility.
+// RunUnifiedContentMigrationIfReady repairs a partially applied schema without
+// running against a fresh database before the legacy tables exist.
+func RunUnifiedContentMigrationIfReady(db *gorm.DB) error {
+	legacyTables := []any{
+		&model.Post{}, &model.PodcastEpisode{}, &model.Collection{}, &model.Video{},
+		&model.PostCollection{}, &model.VideoCollection{}, &model.BlogPostVersion{}, &model.BlogDraft{},
+	}
+	for _, table := range legacyTables {
+		if !db.Migrator().HasTable(table) {
+			return nil
+		}
+	}
+	canonicalTables := []any{
+		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{},
+		&model.ContentCollection{}, &model.LegacyCollectionMapping{},
+	}
+	for _, table := range canonicalTables {
+		if !db.Migrator().HasTable(table) {
+			return RunUnifiedContentMigration(db)
+		}
+	}
+	return nil
+}
+
 func RunUnifiedContentMigration(db *gorm.DB) error {
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(
@@ -53,15 +75,30 @@ func RunUnifiedContentMigration(db *gorm.DB) error {
 	}); err != nil {
 		return fmt.Errorf("unified content migration: %w", err)
 	}
+	if err := RunSearchQueryIndexes(db); err != nil {
+		return fmt.Errorf("refresh search query indexes after unified content migration: %w", err)
+	}
+	contentmodule.RefreshMediaSchema(db)
 	return nil
 }
 
 func dropLegacyVideoProcessingForeignKey(tx *gorm.DB) error {
-	if tx.Dialector.Name() != "postgres" || !tx.Migrator().HasTable(&model.VideoProcessingJob{}) {
+	if tx.Dialector.Name() != "postgres" {
 		return nil
 	}
-	return tx.Exec(`ALTER TABLE video_processing_jobs DROP CONSTRAINT IF EXISTS fk_video_processing_jobs_video`).Error
+	if tx.Migrator().HasTable(&model.VideoProcessingJob{}) {
+		if err := tx.Exec(`ALTER TABLE video_processing_jobs DROP CONSTRAINT IF EXISTS fk_video_processing_jobs_video`).Error; err != nil {
+			return err
+		}
+	}
+	if tx.Migrator().HasTable(&model.VideoImportSession{}) {
+		if err := tx.Exec(`ALTER TABLE video_import_sessions DROP CONSTRAINT IF EXISTS fk_video_import_sessions_target_video`).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
+
 func backfillPostContentEntries(tx *gorm.DB) error {
 	var episodes []model.PodcastEpisode
 	if err := tx.Find(&episodes).Error; err != nil {
@@ -124,8 +161,31 @@ func ensurePostContentEntry(tx *gorm.DB, post model.Post, kind string) (model.Co
 	}
 	if extensionContentID != uuid.Nil {
 		var entry model.ContentEntry
-		if err := tx.First(&entry, "id = ?", extensionContentID).Error; err != nil {
-			return model.ContentEntry{}, err
+		result := tx.Unscoped().First(&entry, "id = ?", extensionContentID)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			if post.ChannelID == nil {
+				return model.ContentEntry{}, fmt.Errorf("post %s has no channel", post.ID)
+			}
+			authorID := post.UserID
+			entry = model.ContentEntry{
+				Base: post.Base, AuthorID: &authorID, ChannelID: *post.ChannelID, Kind: kind,
+				Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL,
+				Status: post.Status, Visibility: post.Visibility, PublishedAt: post.PublishedAt, ScheduledAt: post.ScheduledAt,
+			}
+			entry.ID = extensionContentID
+			if err := tx.Create(&entry).Error; err != nil {
+				return model.ContentEntry{}, fmt.Errorf("recreate content entry for post %s: %w", post.ID, err)
+			}
+			return entry, nil
+		}
+		if result.Error != nil {
+			return model.ContentEntry{}, result.Error
+		}
+		if entry.DeletedAt.Valid && !post.DeletedAt.Valid {
+			if err := tx.Unscoped().Model(&entry).Update("deleted_at", nil).Error; err != nil {
+				return model.ContentEntry{}, fmt.Errorf("restore content entry for post %s: %w", post.ID, err)
+			}
+			entry.DeletedAt = gorm.DeletedAt{}
 		}
 		if err := syncContentEntryFromPost(tx, &entry, post, kind); err != nil {
 			return model.ContentEntry{}, err
@@ -325,7 +385,10 @@ func cleanupLegacyDefaultCollections(tx *gorm.DB) error {
 			return fmt.Errorf("remove legacy default collection %s: %w", collection.ID, err)
 		}
 	}
-	return createDefaultCollectionProtection(tx)
+	if err := createDefaultCollectionProtection(tx); err != nil {
+		return fmt.Errorf("restore default collection protection: %w", err)
+	}
+	return nil
 }
 
 func lowerCollectionNames(names []string) []string {

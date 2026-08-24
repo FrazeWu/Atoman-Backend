@@ -57,20 +57,33 @@ type RecommendationItemDTO struct {
 	CommentsCount int64  `json:"comments_count"`
 }
 
-type PostListItemDTO struct {
-	PostDTO
+type BlogContentListItemDTO struct {
+	BlogContentDTO
 	LikesCount     int64 `json:"likes_count"`
 	CommentsCount  int64 `json:"comments_count"`
 	BookmarksCount int64 `json:"bookmarks_count"`
 }
 
-type BookmarkPostDTO struct {
-	PostDTO
+type BookmarkBlogContentDTO struct {
+	BlogContentDTO
 	LikesCount    int64 `json:"likes_count"`
 	CommentsCount int64 `json:"comments_count"`
 }
 
-type PostDTO struct {
+type BlogCollectionDTO struct {
+	ID          uuid.UUID      `json:"id"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	ChannelID   uuid.UUID      `json:"channel_id"`
+	Channel     *model.Channel `json:"channel,omitempty"`
+	CreatedBy   *uuid.UUID     `json:"created_by,omitempty"`
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	CoverURL    string         `json:"cover_url"`
+	IsDefault   bool           `json:"is_default"`
+}
+
+type BlogContentDTO struct {
 	ID                 uuid.UUID                     `json:"id"`
 	CreatedAt          time.Time                     `json:"created_at"`
 	UpdatedAt          time.Time                     `json:"updated_at"`
@@ -79,8 +92,8 @@ type PostDTO struct {
 	ChannelID          *uuid.UUID                    `json:"channel_id,omitempty"`
 	Channel            *model.Channel                `json:"channel,omitempty"`
 	CollectionID       *uuid.UUID                    `json:"collection_id,omitempty"`
-	Collection         *model.Collection             `json:"collection,omitempty"`
-	Collections        []model.Collection            `json:"collections,omitempty"`
+	Collection         *BlogCollectionDTO            `json:"collection,omitempty"`
+	Collections        []BlogCollectionDTO           `json:"collections,omitempty"`
 	CollectionPosition int                           `json:"collection_position"`
 	CollectionConflict bool                          `json:"collection_conflict"`
 	Title              string                        `json:"title"`
@@ -101,11 +114,33 @@ type PostDTO struct {
 	References         []reference.ResolvedReference `json:"references"`
 }
 
-func newPostDTO(post model.Post) PostDTO {
-	return PostDTO{
+func newBlogCollectionDTO(collection *model.Collection) *BlogCollectionDTO {
+	if collection == nil {
+		return nil
+	}
+	return &BlogCollectionDTO{
+		ID: collection.ID, CreatedAt: collection.CreatedAt, UpdatedAt: collection.UpdatedAt,
+		ChannelID: collection.ChannelID, Channel: collection.Channel, CreatedBy: collection.CreatedBy,
+		Name: collection.Name, Description: collection.Description, CoverURL: collection.CoverURL,
+		IsDefault: collection.IsDefault,
+	}
+}
+
+func newBlogCollectionDTOs(collections []model.Collection) []BlogCollectionDTO {
+	result := make([]BlogCollectionDTO, 0, len(collections))
+	for index := range collections {
+		if collection := newBlogCollectionDTO(&collections[index]); collection != nil {
+			result = append(result, *collection)
+		}
+	}
+	return result
+}
+
+func newBlogContentDTO(post model.Post) BlogContentDTO {
+	return BlogContentDTO{
 		ID: post.ID, CreatedAt: post.CreatedAt, UpdatedAt: post.UpdatedAt,
 		UserID: post.UserID, User: post.User, ChannelID: post.ChannelID, Channel: post.Channel,
-		CollectionID: post.CollectionID, Collection: post.Collection, Collections: post.Collections,
+		CollectionID: post.CollectionID, Collection: newBlogCollectionDTO(post.Collection), Collections: newBlogCollectionDTOs(post.Collections),
 		CollectionPosition: post.CollectionPosition, CollectionConflict: post.CollectionConflict,
 		Title: post.Title, Content: post.Content, Summary: post.Summary, LanguageCode: post.LanguageCode,
 		CoverURL: post.CoverURL, Status: post.Status, Visibility: post.Visibility, Pinned: post.Pinned,
@@ -115,7 +150,49 @@ func newPostDTO(post model.Post) PostDTO {
 	}
 }
 
+type BlogContentVersionDTO struct {
+	ID           uuid.UUID  `json:"id"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
+	ContentID    uuid.UUID  `json:"content_id"`
+	Version      int        `json:"version"`
+	EditorID     uuid.UUID  `json:"editor_id"`
+	Title        string     `json:"title"`
+	Content      string     `json:"content"`
+	Summary      string     `json:"summary"`
+	CoverURL     string     `json:"cover_url"`
+	Visibility   string     `json:"visibility"`
+	CollectionID uuid.UUID  `json:"content_collection_id"`
+	PublishedAt  *time.Time `json:"published_at,omitempty"`
+}
+
+func newBlogContentVersionDTO(version model.ContentBlogVersion) BlogContentVersionDTO {
+	return BlogContentVersionDTO{
+		ID: version.ID, CreatedAt: version.CreatedAt, UpdatedAt: version.UpdatedAt,
+		ContentID: version.ContentID, Version: version.Version, EditorID: version.EditorID,
+		Title: version.Title, Content: version.Content, Summary: version.Summary,
+		CoverURL: version.CoverURL, Visibility: version.Visibility, CollectionID: version.CollectionID,
+		PublishedAt: version.PublishedAt,
+	}
+}
+
+type BlogBookmarkDTO struct {
+	ID               uuid.UUID  `json:"id"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	UserID           uuid.UUID  `json:"user_id"`
+	ContentID        uuid.UUID  `json:"content_id"`
+	BookmarkFolderID *uuid.UUID `json:"bookmark_folder_id,omitempty"`
+}
+
+func newBlogBookmarkDTO(bookmark model.Bookmark) BlogBookmarkDTO {
+	return BlogBookmarkDTO{
+		ID: bookmark.ID, CreatedAt: bookmark.CreatedAt, UpdatedAt: bookmark.UpdatedAt,
+		UserID: bookmark.UserID, ContentID: bookmark.PostID, BookmarkFolderID: bookmark.BookmarkFolderID,
+	}
+}
+
 type BookmarkListItemDTO struct {
-	model.Bookmark
-	Post *BookmarkPostDTO `json:"post,omitempty"`
+	BlogBookmarkDTO
+	Content *BookmarkBlogContentDTO `json:"content,omitempty"`
 }

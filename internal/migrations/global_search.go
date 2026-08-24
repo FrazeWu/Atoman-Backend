@@ -116,6 +116,15 @@ func globalSearchIndexStatements(operatorClass ...string) []string {
 		fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_timeline_events_content_trgm
 			ON timeline_events USING GIN (LOWER(content) %s)
 			WHERE deleted_at IS NULL`, trigramOperatorClass),
+		fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_content_entries_title_trgm
+			ON content_entries USING GIN (LOWER(title) %s)
+			WHERE deleted_at IS NULL`, trigramOperatorClass),
+		fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_content_entries_summary_trgm
+			ON content_entries USING GIN (LOWER(summary) %s)
+			WHERE deleted_at IS NULL`, trigramOperatorClass),
+		fmt.Sprintf(`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_content_collections_name_trgm
+			ON content_collections USING GIN (LOWER(name) %s)
+			WHERE deleted_at IS NULL`, trigramOperatorClass),
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_debates_tags_gin
 			ON debates USING GIN (tags)
 			WHERE deleted_at IS NULL`,

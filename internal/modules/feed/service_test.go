@@ -95,10 +95,60 @@ func registerFeedCanonicalTestSeeds(t *testing.T, db *gorm.DB) {
 		default:
 			return
 		}
-		_ = tx.Session(&gorm.Session{NewDB: true}).Model(&model.ContentEntry{}).Where("id = ?", episode.PostID).Update("kind", "podcast").Error
+		_ = tx.Session(&gorm.Session{NewDB: true}).Model(&model.ContentEntry{}).Where("id = ?", episode.PostID).Updates(map[string]any{
+			"kind":       "podcast",
+			"channel_id": episode.ChannelID,
+		}).Error
 		_ = tx.Session(&gorm.Session{NewDB: true}).Where("content_id = ?", episode.PostID).Delete(&model.ContentBlogExtension{}).Error
+		extension := model.ContentEpisodeExtension{
+			ContentID: episode.PostID, EpisodeID: episode.ID, LegacyPostID: episode.PostID,
+			CreatedAt: episode.CreatedAt, UpdatedAt: episode.UpdatedAt, AudioURL: episode.AudioURL,
+			DurationSec: episode.DurationSec, EpisodeCoverURL: episode.EpisodeCoverURL,
+			SeasonNumber: episode.SeasonNumber, EpisodeNumber: episode.EpisodeNumber,
+		}
+		_ = tx.Session(&gorm.Session{NewDB: true}).Create(&extension).Error
 	}); err != nil {
 		t.Fatalf("register canonical feed episode callback: %v", err)
+	}
+	videoCallback := "test:feed-canonical-video-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(videoCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "videos" {
+			return
+		}
+		video, ok := tx.Statement.Dest.(*model.Video)
+		if !ok {
+			return
+		}
+		channelID := uuid.Nil
+		if video.ChannelID != nil {
+			channelID = *video.ChannelID
+		} else {
+			var channel model.Channel
+			if tx.Session(&gorm.Session{NewDB: true}).Where("user_id = ?", video.UserID).First(&channel).Error != nil {
+				return
+			}
+			channelID = channel.ID
+		}
+		entry := model.ContentEntry{
+			Base: video.Base, AuthorID: &video.UserID, ChannelID: channelID, Kind: "video",
+			Title: video.Title, Summary: video.Description, CoverURL: video.ThumbnailURL,
+			Status: video.Status, Visibility: video.Visibility,
+		}
+		if err := tx.Session(&gorm.Session{NewDB: true}).Create(&entry).Error; err != nil {
+			t.Fatalf("create canonical feed video entry: %v", err)
+		}
+		if err := tx.Session(&gorm.Session{NewDB: true}).Create(&model.ContentVideoExtension{
+			ContentID: entry.ID, VideoID: video.ID, CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt,
+			StorageType: video.StorageType, VideoURL: video.VideoURL, ThumbnailURL: video.ThumbnailURL,
+			DurationSec: video.DurationSec, ProcessingStatus: video.ProcessingStatus, ViewCount: video.ViewCount,
+		}).Error; err != nil {
+			t.Fatalf("create canonical feed video extension: %v", err)
+		}
+		if video.CollectionID != nil {
+			_ = tx.Session(&gorm.Session{NewDB: true}).Create(&model.ContentCollectionMembership{ContentID: entry.ID, CollectionID: *video.CollectionID}).Error
+		}
+	}); err != nil {
+		t.Fatalf("register canonical feed video callback: %v", err)
 	}
 	updateCallback := "test:feed-canonical-post-update-" + uuid.NewString()
 	if err := db.Callback().Update().After("gorm:update").Register(updateCallback, func(tx *gorm.DB) {
@@ -125,6 +175,7 @@ func registerFeedCanonicalTestSeeds(t *testing.T, db *gorm.DB) {
 		_ = db.Callback().Create().Remove(collectionCallback)
 		_ = db.Callback().Create().Remove(postCallback)
 		_ = db.Callback().Create().Remove(episodeCallback)
+		_ = db.Callback().Create().Remove(videoCallback)
 		_ = db.Callback().Update().Remove(updateCallback)
 	})
 }
@@ -152,6 +203,8 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		&model.PostCollection{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentEpisodeExtension{},
+		&model.ContentVideoExtension{},
 		&model.ContentCollection{},
 		&model.ContentCollectionMembership{},
 		&model.PodcastEpisode{},
@@ -271,7 +324,7 @@ func newUnifiedSubscriptionFixture(t *testing.T) (*Service, *gorm.DB, authctx.Cu
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PostCollection{},
-		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
+		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
 		&model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
 		&model.FeedSource{}, &model.Subscription{}, &model.FeedItem{}, &model.FeedItemRead{},
 		&model.Like{}, &model.DiscussionTarget{}, &model.Follow{},
@@ -579,6 +632,71 @@ func TestHasExternalFeedUpdatesScopesToCurrentUsersSubscriptions(t *testing.T) {
 	}
 	if !hasUpdates {
 		t.Fatal("a single source timeline must continue to report its own updates")
+	}
+}
+
+func TestGetSubscribedFeedExcludesPausedSubscriptions(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var subscription model.Subscription
+	if err := db.Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+		Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", user.ID, "external_rss").
+		First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{SourceType: "external_rss", Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("load active subscription feed: %v", err)
+	}
+	if total == 0 || len(items) == 0 {
+		t.Fatal("expected active subscription to return feed items")
+	}
+
+	if err := db.Model(&model.Subscription{}).Where("id = ?", subscription.ID).Update("is_paused", true).Error; err != nil {
+		t.Fatalf("pause subscription: %v", err)
+	}
+	items, total, err = service.GetSubscribedFeed(user, FeedQuery{SourceType: "external_rss", Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("load paused subscription feed: %v", err)
+	}
+	if total != 0 || len(items) != 0 {
+		t.Fatalf("paused subscription returned content: total=%d items=%d", total, len(items))
+	}
+}
+
+func TestGetSubscribedFeedExcludesItemsBeforeResume(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	var subscription model.Subscription
+	if err := db.Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+		Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", user.ID, "external_rss").
+		First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+
+	resumedAt := time.Now().UTC()
+	if err := db.Model(&model.Subscription{}).Where("id = ?", subscription.ID).Updates(map[string]any{
+		"is_paused":     false,
+		"resumed_after": resumedAt,
+	}).Error; err != nil {
+		t.Fatalf("set resume marker: %v", err)
+	}
+	if err := db.Create(&model.FeedItem{
+		FeedSourceID: subscription.FeedSourceID,
+		GUID:         "resumed-after-guid",
+		Title:        "Published after resume",
+		Link:         "https://example.com/items/resumed-after",
+		PublishedAt:  resumedAt.Add(time.Second),
+		FetchedAt:    resumedAt.Add(time.Second),
+	}).Error; err != nil {
+		t.Fatalf("create post-resume item: %v", err)
+	}
+
+	items, total, err := service.GetSubscribedFeed(user, FeedQuery{SourceType: "external_rss", Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("load resumed subscription feed: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].FeedItem == nil || items[0].FeedItem.GUID != "resumed-after-guid" {
+		t.Fatalf("unexpected resumed feed: total=%d items=%d", total, len(items))
 	}
 }
 
@@ -1444,6 +1562,27 @@ func TestGetPublicFeedBySourceIDReturnsOnlyRequestedSource(t *testing.T) {
 	}
 	if items[0].FeedItem.Title != "Feed item" {
 		t.Fatalf("expected original source item title, got %s", items[0].FeedItem.Title)
+	}
+}
+
+func TestGetPublicFeedBySourceIDRejectsNonExternalSource(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	internalSource := model.FeedSource{
+		SourceType: "internal_channel",
+		Hash:       "internal-channel-public-test-hash",
+		Title:      "Internal channel",
+	}
+	if err := db.Create(&internalSource).Error; err != nil {
+		t.Fatalf("create internal source: %v", err)
+	}
+
+	items, total, err := service.GetPublicFeedBySourceID(internalSource.ID, FeedQuery{Page: 1, PageSize: 20})
+	if err == nil {
+		t.Fatalf("expected non-external source to be rejected, got items=%d total=%d", len(items), total)
+	}
+	if items != nil || total != 0 {
+		t.Fatalf("expected empty result for rejected source, got items=%d total=%d", len(items), total)
 	}
 }
 

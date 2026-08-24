@@ -215,7 +215,7 @@ func (s *Service) listBlogContents(userID uuid.UUID, query ContentQuery) ([]Stud
 
 func (s *Service) listPodcastContents(userID uuid.UUID, query ContentQuery) ([]StudioContentItem, int64, error) {
 	db := contentmodule.PodcastQuery(s.db).
-		Where("posts.author_id = ? AND posts.channel_id = ?", userID, query.ChannelID)
+		Where(contentmodule.PodcastAuthorColumn(s.db)+" = ? AND posts.channel_id = ?", userID, query.ChannelID)
 	if query.Status != "" {
 		db = db.Where("posts.status = ?", strings.TrimSpace(query.Status))
 	}
@@ -269,7 +269,7 @@ func (s *Service) listPodcastContents(userID uuid.UUID, query ContentQuery) ([]S
 }
 
 func (s *Service) listVideoContents(userID uuid.UUID, query ContentQuery) ([]StudioContentItem, int64, error) {
-	db := contentmodule.VideoQuery(s.db).Where("posts.author_id = ? AND posts.channel_id = ?", userID, query.ChannelID)
+	db := contentmodule.VideoQuery(s.db).Where(contentmodule.VideoAuthorColumn(s.db)+" = ? AND posts.channel_id = ?", userID, query.ChannelID)
 	if query.Status != "" {
 		db = db.Where("posts.status = ?", strings.TrimSpace(query.Status))
 	}

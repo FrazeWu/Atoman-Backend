@@ -242,7 +242,10 @@ func withRSSFetchLock(feedURL string, fn func() error) error {
 
 	lock.Lock()
 	defer lock.Unlock()
-	return fn()
+	if err := fn(); err != nil {
+		return fmt.Errorf("rss fetch lock callback: %w", err)
+	}
+	return nil
 }
 
 type rssCronConfig struct {
@@ -286,9 +289,11 @@ func sanitizeRSSLogError(err error) error {
 		if copyErr.Err != nil {
 			copyErr.Err = errors.New(sanitizeRSSLogText(copyErr.Err.Error()))
 		}
-		return &copyErr
+		resultErr := fmt.Errorf("rss request failed: %w", &copyErr)
+		return resultErr
 	}
-	return errors.New(sanitizeRSSLogText(err.Error()))
+	resultErr := fmt.Errorf("rss request failed: %s", sanitizeRSSLogText(err.Error()))
+	return resultErr
 }
 
 func sanitizeRSSLogText(text string) string {
@@ -566,20 +571,28 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		},
 		DoNothing: true,
 	}).Create(&newFeedItem)
-	if result.Error == nil && result.RowsAffected > 0 {
-		return true, nil
-	}
 	if result.Error != nil && !isFeedItemDuplicateKeyError(result.Error) {
 		return false, result.Error
 	}
+	if result.Error == nil && result.RowsAffected > 0 {
+		return true, nil
+	}
 
 	var existing model.FeedItem
-	if err := db.Where("feed_source_id = ? AND guid = ?", src.ID, normalized.Identifier).First(&existing).Error; err != nil {
+	lookup := db.Unscoped().Where("feed_source_id = ? AND guid = ?", src.ID, normalized.Identifier).Find(&existing)
+	if lookup.Error == nil && existing.ID == uuid.Nil {
+		lookup = db.Unscoped().Where("feed_source_id = ? AND link = ?", src.ID, normalized.Link).Find(&existing)
+	}
+	if lookup.Error != nil {
+		return false, fmt.Errorf("load existing feed item after conflict: %w", lookup.Error)
+	}
+	if existing.ID == uuid.Nil {
 		if result.Error != nil && isFeedItemDuplicateKeyError(result.Error) {
 			return false, nil
 		}
-		return false, err
+		return false, fmt.Errorf("load existing feed item after conflict: no matching GUID or link")
 	}
+
 	updates := map[string]any{
 		"title":             newFeedItem.Title,
 		"link":              newFeedItem.Link,
@@ -592,6 +605,9 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		"duration":          newFeedItem.Duration,
 		"image_url":         newFeedItem.ImageURL,
 		"feed_content_html": newFeedItem.FeedContentHTML,
+	}
+	if existing.DeletedAt.Valid {
+		updates["deleted_at"] = nil
 	}
 	if newFeedItem.LanguageCode != "" {
 		updates["language_code"] = newFeedItem.LanguageCode
@@ -608,7 +624,7 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		updates["full_text_status"] = FullTextStatusPending
 		updates["next_full_text_attempt_at"] = nil
 	}
-	return false, db.Model(&model.FeedItem{}).Where("id = ?", existing.ID).Updates(updates).Error
+	return false, db.Unscoped().Model(&model.FeedItem{}).Where("id = ?", existing.ID).Updates(updates).Error
 }
 
 func isFeedItemDuplicateKeyError(err error) bool {
@@ -721,16 +737,49 @@ func StartRSSCron(ctx context.Context, db *gorm.DB) <-chan struct{} {
 	})
 }
 
+var rssLeaseOwner = func() string {
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		hostname = "unknown-host"
+	}
+	return fmt.Sprintf("%s:%d:%s", hostname, os.Getpid(), uuid.NewString())
+}()
+
+const rssLeaseDuration = 2 * time.Minute
+
+var (
+	rssHostLimiterMu sync.Mutex
+	rssHostLimiters  = make(map[string]chan struct{})
+)
+
+func acquireRSSHostSlot(host string) func() {
+	limit := parseEnvPositiveInt("RSS_HOST_CONCURRENCY", 2)
+	if limit < 1 || strings.TrimSpace(host) == "" {
+		return func() {}
+	}
+	rssHostLimiterMu.Lock()
+	limiter := rssHostLimiters[host]
+	if limiter == nil {
+		limiter = make(chan struct{}, limit)
+		rssHostLimiters[host] = limiter
+	}
+	rssHostLimiterMu.Unlock()
+	limiter <- struct{}{}
+	return func() { <-limiter }
+}
+
 type rssSourceGroup struct {
 	URL             string
 	Sources         []model.FeedSource
 	HasSubscription bool
+	LeaseToken      string
 }
 
 func listDueRSSSourceGroups(db *gorm.DB, now time.Time) ([]rssSourceGroup, error) {
 	var sources []model.FeedSource
 	if err := db.Where("source_type = ? AND hidden = ?", "external_rss", false).
 		Where("fetch_next_at IS NULL OR fetch_next_at <= ?", now).
+		Where("fetch_lease_until IS NULL OR fetch_lease_until <= ?", now).
 		Order("fetch_next_at ASC NULLS FIRST, created_at ASC").Find(&sources).Error; err != nil {
 		return nil, err
 	}
@@ -784,6 +833,48 @@ func listDueRSSSourceGroups(db *gorm.DB, now time.Time) ([]rssSourceGroup, error
 	return groups, nil
 }
 
+func rssSourceIDs(group rssSourceGroup) []uuid.UUID {
+	ids := make([]uuid.UUID, 0, len(group.Sources))
+	for _, source := range group.Sources {
+		ids = append(ids, source.ID)
+	}
+	return ids
+}
+
+func claimRSSSourceGroup(db *gorm.DB, group *rssSourceGroup, now time.Time) (bool, error) {
+	if len(group.Sources) == 0 {
+		return false, nil
+	}
+	token := fmt.Sprintf("%s:%s", rssLeaseOwner, uuid.NewString())
+	result := db.Model(&model.FeedSource{}).
+		Where("id IN ? AND (fetch_lease_until IS NULL OR fetch_lease_until <= ?)", rssSourceIDs(*group), now).
+		Updates(map[string]any{
+			"fetch_lease_token": token,
+			"fetch_lease_until": now.Add(rssLeaseDuration),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected != int64(len(group.Sources)) {
+		if err := db.Model(&model.FeedSource{}).
+			Where("fetch_lease_token = ?", token).
+			Updates(map[string]any{"fetch_lease_token": "", "fetch_lease_until": nil}).Error; err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	group.LeaseToken = token
+	return true, nil
+}
+
+func rssLeaseQuery(db *gorm.DB, group rssSourceGroup) *gorm.DB {
+	query := db.Model(&model.FeedSource{}).Where("id IN ?", rssSourceIDs(group))
+	if group.LeaseToken != "" {
+		query = query.Where("fetch_lease_token = ?", group.LeaseToken)
+	}
+	return query
+}
+
 func syncAllRSSFeeds(db *gorm.DB, concurrency int) {
 	now := time.Now().UTC()
 	groups, err := listDueRSSSourceGroups(db, now)
@@ -792,6 +883,20 @@ func syncAllRSSFeeds(db *gorm.DB, concurrency int) {
 		return
 	}
 
+	candidateCount := len(groups)
+	claimedGroups := make([]rssSourceGroup, 0, candidateCount)
+	for index := range groups {
+		group := groups[index]
+		claimed, claimErr := claimRSSSourceGroup(db, &group, now)
+		if claimErr != nil {
+			log.Printf("RSS sync failed to claim %s: %v", sanitizeRSSLogURL(group.URL), claimErr)
+			continue
+		}
+		if claimed {
+			claimedGroups = append(claimedGroups, group)
+		}
+	}
+	groups = claimedGroups
 	total := len(groups)
 	if concurrency < 1 {
 		concurrency = 1
@@ -833,7 +938,7 @@ func syncAllRSSFeeds(db *gorm.DB, concurrency int) {
 			failed++
 		}
 	}
-	log.Printf("RSS sync completed: total=%d success=%d failed=%d skipped=0", total, success, failed)
+	log.Printf("RSS sync completed: total=%d success=%d failed=%d skipped=%d", total, success, failed, candidateCount-total)
 }
 
 func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
@@ -843,7 +948,7 @@ func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
 	err := withRSSFetchLock(group.URL, func() error {
 		startedAt := time.Now()
 		now := startedAt.UTC()
-		if err := markRSSFetchStarted(db, group.Sources); err != nil {
+		if err := markRSSFetchStarted(db, group); err != nil {
 			return err
 		}
 
@@ -854,7 +959,7 @@ func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
 		})
 		fetchResult.Duration = time.Since(startedAt)
 		if err != nil {
-			markErr := markRSSFetchFailure(db, group.Sources, err, fetchResult, now)
+			markErr := markRSSFetchFailure(db, group, err, fetchResult, now)
 			if markErr != nil {
 				return errors.Join(err, markErr)
 			}
@@ -867,7 +972,7 @@ func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
 
 		failSync := func(syncErr error) error {
 			failure := &rssFetchError{Code: "persist_failed", Err: syncErr}
-			if markErr := markRSSFetchFailure(db, group.Sources, failure, fetchResult, now); markErr != nil {
+			if markErr := markRSSFetchFailure(db, group, failure, fetchResult, now); markErr != nil {
 				return errors.Join(syncErr, markErr)
 			}
 			return syncErr
@@ -901,22 +1006,21 @@ func rssFetchInterval(hasSubscription bool) time.Duration {
 	return 6 * time.Hour
 }
 
-func markRSSFetchStarted(db *gorm.DB, sources []model.FeedSource) error {
-	ids := make([]uuid.UUID, 0, len(sources))
-	for _, source := range sources {
-		ids = append(ids, source.ID)
-	}
-	return db.Model(&model.FeedSource{}).Where("id IN ?", ids).Updates(map[string]any{
+func markRSSFetchStarted(db *gorm.DB, group rssSourceGroup) error {
+	result := rssLeaseQuery(db, group).Updates(map[string]any{
 		"fetch_status": rssFetchStatusFetching,
-	}).Error
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if group.LeaseToken != "" && result.RowsAffected != int64(len(group.Sources)) {
+		return fmt.Errorf("rss fetch lease lost before fetch")
+	}
+	return nil
 }
 
 func markRSSFetchSuccess(db *gorm.DB, group rssSourceGroup, result RSSFetchResult, now time.Time, itemCount int) error {
 	nextAt := now.Add(rssFetchInterval(group.HasSubscription))
-	ids := make([]uuid.UUID, 0, len(group.Sources))
-	for _, source := range group.Sources {
-		ids = append(ids, source.ID)
-	}
 	updates := map[string]any{
 		"fetch_status":               rssFetchStatusHealthy,
 		"fetch_provider":             result.Provider,
@@ -932,11 +1036,13 @@ func markRSSFetchSuccess(db *gorm.DB, group rssSourceGroup, result RSSFetchResul
 		"fetch_last_item_count":      itemCount,
 		"last_error":                 "",
 		"health_status":              "healthy",
+		"fetch_lease_token":          "",
+		"fetch_lease_until":          nil,
 	}
-	return db.Model(&model.FeedSource{}).Where("id IN ?", ids).Updates(updates).Error
+	return rssLeaseQuery(db, group).Updates(updates).Error
 }
 
-func markRSSFetchFailure(db *gorm.DB, sources []model.FeedSource, err error, result RSSFetchResult, now time.Time) error {
+func markRSSFetchFailure(db *gorm.DB, group rssSourceGroup, err error, result RSSFetchResult, now time.Time) error {
 	code := "request_failed"
 	if fetchErr := new(rssFetchError); errors.As(err, &fetchErr) {
 		code = fetchErr.Code
@@ -945,10 +1051,8 @@ func markRSSFetchFailure(db *gorm.DB, sources []model.FeedSource, err error, res
 		}
 	}
 	message := sanitizeRSSLogError(err).Error()
-	ids := make([]uuid.UUID, 0, len(sources))
 	attempt := 1
-	for _, source := range sources {
-		ids = append(ids, source.ID)
+	for _, source := range group.Sources {
 		if source.FetchConsecutiveFailures+1 > attempt {
 			attempt = source.FetchConsecutiveFailures + 1
 		}
@@ -969,8 +1073,10 @@ func markRSSFetchFailure(db *gorm.DB, sources []model.FeedSource, err error, res
 		"fetch_last_duration_ms":     result.Duration.Milliseconds(),
 		"last_error":                 message,
 		"health_status":              "error",
+		"fetch_lease_token":          "",
+		"fetch_lease_until":          nil,
 	}
-	return db.Model(&model.FeedSource{}).Where("id IN ?", ids).Updates(updates).Error
+	return rssLeaseQuery(db, group).Updates(updates).Error
 }
 
 func feedFetchRetryDelay(code string, attempt int) time.Duration {
@@ -1016,11 +1122,19 @@ func SyncSingleRSSWithResult(db *gorm.DB, src model.FeedSource) (RSSSyncResult, 
 	if err := db.Model(&model.Subscription{}).Where("feed_source_id = ?", src.ID).Count(&subscriptionCount).Error; err != nil {
 		return result, err
 	}
-	fetchedItems, newItems, err := syncRSSSourceGroup(db, rssSourceGroup{
+	group := rssSourceGroup{
 		URL:             src.RssURL,
 		Sources:         []model.FeedSource{src},
 		HasSubscription: subscriptionCount > 0,
-	})
+	}
+	claimed, err := claimRSSSourceGroup(db, &group, time.Now().UTC())
+	if err != nil {
+		return result, err
+	}
+	if !claimed {
+		return result, fmt.Errorf("RSS source is already being fetched")
+	}
+	fetchedItems, newItems, err := syncRSSSourceGroup(db, group)
 	result.FetchedItems = fetchedItems
 	result.NewItems = newItems
 	return result, err
@@ -1046,6 +1160,8 @@ func fetchAndParseRSS(feedURL string, conditions RSSFetchConditions) (RSSFetchRe
 	if err != nil {
 		return result, &rssFetchError{Code: "invalid_request", Err: err}
 	}
+	releaseHostSlot := acquireRSSHostSlot(req.URL.Hostname())
+	defer releaseHostSlot()
 	// Many servers reject Go default user-agent.
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
 	req.Header.Set("Accept", "application/rss+xml, application/atom+xml, application/xml, text/xml;q=0.9, */*;q=0.1")
@@ -1117,7 +1233,8 @@ func rssFetchErrorCode(statusCode int) string {
 func parseRSSDocument(bodyStr, feedURL string) ([]ExtRSSItem, string, string, error) {
 	// Try RSS first.
 	var parsedRSS ExtRSS
-	if err := xml.Unmarshal([]byte(bodyStr), &parsedRSS); err == nil && parsedRSS.Channel.Title != "" {
+	rssErr := xml.Unmarshal([]byte(bodyStr), &parsedRSS)
+	if rssErr == nil && parsedRSS.Channel.Title != "" {
 		feedLanguage := firstNonEmpty(parsedRSS.Channel.Language, parsedRSS.Channel.XMLLanguage)
 		for index := range parsedRSS.Channel.Items {
 			if strings.TrimSpace(parsedRSS.Channel.Items[index].Language) == "" {
@@ -1130,19 +1247,26 @@ func parseRSSDocument(bodyStr, feedURL string) ([]ExtRSSItem, string, string, er
 			parsedRSS.Channel.MediaThumbnail.URL,
 			parsedRSS.Channel.Image.URL,
 		)
-		if parsedURL, parseErr := url.Parse(feedURL); parseErr == nil {
-			coverURL = resolveFeedImageURL(coverURL, parsedURL)
+		parsedURL, parseErr := url.Parse(feedURL)
+		if parseErr != nil {
+			resultErr := fmt.Errorf("parse feed URL: %w", parseErr)
+			return nil, "", "", resultErr
 		}
+		coverURL = resolveFeedImageURL(coverURL, parsedURL)
 		return parsedRSS.Channel.Items, parsedRSS.Channel.Title, coverURL, nil
 	}
 
-	// Try Atom.
+	// Try Atom after RSS parsing fails or yields no channel title.
 	var parsedAtom ExtAtom
-	if err := xml.Unmarshal([]byte(bodyStr), &parsedAtom); err == nil {
+	atomErr := xml.Unmarshal([]byte(bodyStr), &parsedAtom)
+	if atomErr == nil {
 		feedImageURL := firstNonEmpty(parsedAtom.Logo, parsedAtom.Icon)
-		if parsedURL, parseErr := url.Parse(feedURL); parseErr == nil {
-			feedImageURL = resolveFeedImageURL(feedImageURL, parsedURL)
+		parsedURL, parseErr := url.Parse(feedURL)
+		if parseErr != nil {
+			resultErr := fmt.Errorf("parse feed URL: %w", parseErr)
+			return nil, "", "", resultErr
 		}
+		feedImageURL = resolveFeedImageURL(feedImageURL, parsedURL)
 		items := make([]ExtRSSItem, len(parsedAtom.Entries))
 		for i, entry := range parsedAtom.Entries {
 			normalized := normalizeAtomEntry(entry, strings.TrimSpace(parsedAtom.Title), feedImageURL, time.Time{})
@@ -1168,7 +1292,8 @@ func parseRSSDocument(bodyStr, feedURL string) ([]ExtRSSItem, string, string, er
 		return items, strings.TrimSpace(parsedAtom.Title), feedImageURL, nil
 	}
 
-	return nil, "", "", fmt.Errorf("failed to parse feed as RSS or Atom")
+	parseErr := fmt.Errorf("failed to parse feed as RSS or Atom: %w", errors.Join(rssErr, atomErr))
+	return nil, "", "", parseErr
 }
 
 func rssClientWithRedirectValidation(base *http.Client) *http.Client {

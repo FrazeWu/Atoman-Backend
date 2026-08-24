@@ -549,16 +549,17 @@ func (h *Handler) getAlbum(c *gin.Context) {
 
 	viewer, hasViewer := currentMusicUser(c)
 	viewerPtr := musicViewer(viewer, hasViewer)
-	var album model.Album
+	var albums []model.Album
 	query := scopeVisibleMusicEntries(h.service.db, "\"Albums\"", "uploaded_by", viewerPtr, true)
-	if err := query.Preload("Artists", visibleArtistPreload(viewerPtr)).Preload("ArtistCredits", visibleAlbumArtistCreditsPreload(viewerPtr)).Preload("ArtistCredits.Artist", visibleArtistPreload(viewerPtr)).Preload("Songs", visibleSongPreload(viewerPtr)).Preload("Songs.ArtistCredits", visibleSongArtistCreditsPreload(viewerPtr)).Preload("Songs.ArtistCredits.Artist", visibleArtistPreload(viewerPtr)).First(&album, "\"Albums\".id = ?", albumID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			httpx.Error(c, apperr.NotFound("music.album_not_found", "Album not found"))
-			return
-		}
+	if err := query.Preload("Artists", visibleArtistPreload(viewerPtr)).Preload("ArtistCredits", visibleAlbumArtistCreditsPreload(viewerPtr)).Preload("ArtistCredits.Artist", visibleArtistPreload(viewerPtr)).Preload("Songs", visibleSongPreload(viewerPtr)).Preload("Songs.ArtistCredits", visibleSongArtistCreditsPreload(viewerPtr)).Preload("Songs.ArtistCredits.Artist", visibleArtistPreload(viewerPtr)).Where("\"Albums\".id = ?", albumID).Limit(1).Find(&albums).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
+	if len(albums) == 0 {
+		httpx.Error(c, apperr.NotFound("music.album_not_found", "Album not found"))
+		return
+	}
+	album := albums[0]
 	albumRows := []model.Album{album}
 	if err := hydrateAlbumStats(h.service.db, albumRows); err != nil {
 		httpx.Error(c, err)

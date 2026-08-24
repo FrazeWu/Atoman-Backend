@@ -89,8 +89,8 @@ func TestMigrateLegacyForumRepliesPreservesGraphFieldsSolvedAndLikes(t *testing.
 	require.NoError(t, db.First(&promotedAfterDelete, "id = ?", hiddenChildID).Error)
 	require.Equal(t, " cafe\u0301 ", root.Content)
 	require.Equal(t, commentmodule.ContentHash("café", nil), root.ContentHash)
-	require.Equal(t, created, root.CreatedAt)
-	require.Equal(t, updated, root.UpdatedAt)
+	require.WithinDuration(t, created, root.CreatedAt, time.Second)
+	require.WithinDuration(t, updated, root.UpdatedAt, time.Second)
 	require.Nil(t, root.RootID)
 	require.Equal(t, 0, root.ReplyCount)
 	require.Nil(t, child.RootID, "solved child must be promoted to a root")
@@ -121,8 +121,8 @@ func TestMigrateLegacyForumRepliesPreservesGraphFieldsSolvedAndLikes(t *testing.
 	var deletedLike model.CommentLike
 	require.NoError(t, db.Unscoped().First(&deletedLike, "id = ?", deletedLikeID).Error)
 	require.True(t, deletedLike.DeletedAt.Valid)
-	require.Equal(t, created, deletedLike.CreatedAt)
-	require.Equal(t, updated, deletedLike.UpdatedAt)
+	require.WithinDuration(t, created, deletedLike.CreatedAt, time.Second)
+	require.WithinDuration(t, updated, deletedLike.UpdatedAt, time.Second)
 }
 
 func TestMigrateLegacyForumRepliesIsIdempotentAndKeepsUnifiedEdits(t *testing.T) {

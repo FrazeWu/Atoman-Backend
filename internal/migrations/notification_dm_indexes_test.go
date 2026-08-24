@@ -42,7 +42,11 @@ func TestRunNotificationDMIndexesSupportsImmediateAndUnreadAggregateSemantics(t 
 		t.Fatalf("idempotent migration: %v", err)
 	}
 
-	recipient, source := uuid.New(), uuid.New()
+	recipientUser := model.User{Username: "notification-recipient", Email: "notification-recipient@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&recipientUser).Error; err != nil {
+		t.Fatalf("create notification recipient: %v", err)
+	}
+	recipient, source := recipientUser.UUID, uuid.New()
 	immediate := model.Notification{RecipientID: recipient, Type: "comment_reply", SourceType: "comment", SourceID: source}
 	if err := db.Create(&immediate).Error; err != nil {
 		t.Fatalf("create immediate: %v", err)

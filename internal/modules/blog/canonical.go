@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -34,7 +35,8 @@ type canonicalBlogPostRow struct {
 }
 
 func canonicalBlogPostsQuery(db *gorm.DB) *gorm.DB {
-	return db.Table("content_entries AS posts").
+	capabilities := contentmodule.CurrentMediaSchema(db)
+	query := db.Table("content_entries AS posts").
 		Select(`posts.id, posts.created_at, posts.updated_at, posts.author_id, posts.channel_id,
 			posts.title, posts.summary, posts.cover_url, posts.status, posts.visibility,
 			posts.published_at, posts.scheduled_at, blog_extensions.content,
@@ -42,14 +44,26 @@ func canonicalBlogPostsQuery(db *gorm.DB) *gorm.DB {
 			blog_extensions.collection_conflict, memberships.collection_id,
 			memberships.position AS collection_position`).
 		Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
-		Joins(`LEFT JOIN LATERAL (
-			SELECT collection_id, position
-			FROM content_collection_memberships
-			WHERE content_id = posts.id
-			ORDER BY position ASC, collection_id ASC
-			LIMIT 1
-		) AS memberships ON TRUE`).
 		Where("posts.kind = ? AND posts.deleted_at IS NULL", "blog")
+	if !capabilities.ContentCollectionMembershipTable {
+		query = db.Table("content_entries AS posts").
+			Select(`posts.id, posts.created_at, posts.updated_at, posts.author_id, posts.channel_id,
+				posts.title, posts.summary, posts.cover_url, posts.status, posts.visibility,
+				posts.published_at, posts.scheduled_at, blog_extensions.content,
+				blog_extensions.language_code, blog_extensions.pinned, blog_extensions.view_count,
+				blog_extensions.collection_conflict, NULL::uuid AS collection_id,
+				0 AS collection_position`).
+			Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
+			Where("posts.kind = ? AND posts.deleted_at IS NULL", "blog")
+		return query
+	}
+	return query.Joins(`LEFT JOIN LATERAL (
+		SELECT collection_id, position
+		FROM content_collection_memberships
+		WHERE content_id = posts.id
+		ORDER BY position ASC, collection_id ASC
+		LIMIT 1
+	) AS memberships ON TRUE`)
 }
 
 func CanonicalBlogPostsQuery(db *gorm.DB) *gorm.DB {
@@ -261,10 +275,10 @@ func resolveBlogCollection(db *gorm.DB, userID, channelID uuid.UUID, requestedID
 }
 
 func buildBlogDraftResponseFromCanonical(draft model.ContentBlogDraft) blogDraftResponse {
-	var sourcePostID *string
+	var sourceContentID *string
 	if draft.ContentID != nil {
 		value := draft.ContentID.String()
-		sourcePostID = &value
+		sourceContentID = &value
 	}
 	var channelID *string
 	if draft.ChannelID != nil {
@@ -280,7 +294,7 @@ func buildBlogDraftResponseFromCanonical(draft model.ContentBlogDraft) blogDraft
 		ID:           draft.ID,
 		UserID:       draft.UserID,
 		ContextKey:   draft.ContextKey,
-		SourcePostID: sourcePostID,
+		SourceContentID: sourceContentID,
 		Title:        draft.Title,
 		Content:      draft.Content,
 		Summary:      draft.Summary,

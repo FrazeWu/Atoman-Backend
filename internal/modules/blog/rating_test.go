@@ -97,7 +97,7 @@ func TestPostRatingRejectsScoresOutsideOneToTen(t *testing.T) {
 	}
 
 	var count int64
-	if err := db.Model(&model.PostRating{}).Where("post_id = ?", post.ID).Count(&count).Error; err != nil {
+	if err := db.Model(&model.PostRating{}).Where("content_id = ?", post.ID).Count(&count).Error; err != nil {
 		t.Fatalf("count ratings: %v", err)
 	}
 	if count != 0 {

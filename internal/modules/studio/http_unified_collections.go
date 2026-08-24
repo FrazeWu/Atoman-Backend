@@ -38,6 +38,30 @@ func (h *Handler) updateUnifiedCollection(c *gin.Context) {
 	respond(c, http.StatusOK, collection, err)
 }
 
+// listUnifiedCollectionContents godoc
+// @Summary 获取统一合集成员
+// @Tags studio
+// @Produce json
+// @Param id path string true "合集 UUID"
+// @Success 200 {array} StudioCollectionContentItem
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Router /api/v1/studio/collections/{id}/contents [get]
+func (h *Handler) listUnifiedCollectionContents(c *gin.Context) {
+	user, ok := currentUser(c)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(c, "id")
+	if !ok {
+		return
+	}
+	items, err := h.service.ListUnifiedCollectionContents(user, id)
+	respond(c, http.StatusOK, items, err)
+}
+
 func (h *Handler) reorderUnifiedCollectionContents(c *gin.Context) {
 	user, ok := currentUser(c)
 	if !ok {

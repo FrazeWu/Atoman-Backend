@@ -54,7 +54,7 @@ func newOAuthHandlerTestDB(t *testing.T) *gorm.DB {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{}, &model.UserSettings{}, &model.AuthSession{}, &model.LoginEvent{}, &model.ExternalIdentity{}, &model.OAuthFlow{},
-		&model.Channel{}, &model.Collection{}, &model.UserStudioState{}, &model.StudioModuleSettings{},
+		&model.Channel{}, &model.Collection{}, &model.ContentCollection{}, &model.UserStudioState{}, &model.StudioModuleSettings{},
 		&model.FeedSource{}, &model.SubscriptionGroup{}, &model.Subscription{},
 		&model.BookmarkFolder{}, &model.Playlist{}, &model.PlaylistSong{},
 	)

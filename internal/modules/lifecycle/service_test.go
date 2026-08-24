@@ -49,7 +49,7 @@ func newLifecycleFixture(t *testing.T) lifecycleFixture {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
-		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
+		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
 		&model.ContentLifecycleEvent{}, &model.ContentProgress{}, &model.ContentNotificationPreference{},
 		&model.ContentPublicationEvent{}, &model.FeedSource{}, &model.Subscription{}, &model.Follow{}, &model.Notification{},
 	)
@@ -240,6 +240,10 @@ func TestDispatchPublicationNotifiesVideoCollectionSubscribers(t *testing.T) {
 	if err := fixture.db.Create(&videoCollection).Error; err != nil {
 		t.Fatal(err)
 	}
+	canonicalVideoCollection := model.ContentCollection{Base: videoCollection.Base, ChannelID: videoCollection.ChannelID, Name: videoCollection.Name}
+	if err := fixture.db.Create(&canonicalVideoCollection).Error; err != nil {
+		t.Fatal(err)
+	}
 	video := model.Video{
 		UserID: fixture.owner.ID, ChannelID: &fixture.channel.ID, Title: "Lifecycle video",
 		StorageType: "external", VideoURL: "https://example.com/video.mp4", Status: "published", Visibility: "public",
@@ -247,7 +251,20 @@ func TestDispatchPublicationNotifiesVideoCollectionSubscribers(t *testing.T) {
 	if err := fixture.db.Create(&video).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.db.Create(&model.VideoCollection{VideoID: video.ID, CollectionID: videoCollection.ID}).Error; err != nil {
+	videoEntry := model.ContentEntry{
+		Base: video.Base, AuthorID: &fixture.owner.ID, ChannelID: fixture.channel.ID,
+		Kind: "video", Title: video.Title, Status: video.Status, Visibility: video.Visibility,
+	}
+	if err := fixture.db.Create(&videoEntry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.ContentVideoExtension{
+		ContentID: videoEntry.ID, VideoID: video.ID, CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt,
+		StorageType: video.StorageType, VideoURL: video.VideoURL, ProcessingStatus: "none",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.ContentCollectionMembership{ContentID: videoEntry.ID, CollectionID: canonicalVideoCollection.ID}).Error; err != nil {
 		t.Fatal(err)
 	}
 	source := model.FeedSource{SourceType: "internal_collection", SourceID: &videoCollection.ID, Hash: uuid.NewString(), Title: videoCollection.Name}

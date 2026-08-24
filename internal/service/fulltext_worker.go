@@ -296,8 +296,10 @@ func claimNextFullTextItem(db *gorm.DB, now time.Time) (model.FeedItem, model.Fe
 
 func claimNextFullTextItemExcluding(db *gorm.DB, now time.Time, excludedSourceIDs []uuid.UUID) (model.FeedItem, model.FeedSource, bool, error) {
 	for {
-		var candidates []model.FeedItem
-		query := db.Preload("FeedSource").
+		var candidateIDs []struct {
+			ID uuid.UUID
+		}
+		query := db.Model(&model.FeedItem{}).
 			Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id").
 			Where("feed_items.full_text_status IN ?", []string{FullTextStatusPending, FullTextStatusRetry}).
 			Where("feed_items.next_full_text_attempt_at IS NULL OR feed_items.next_full_text_attempt_at <= ?", now).
@@ -312,16 +314,20 @@ func claimNextFullTextItemExcluding(db *gorm.DB, now time.Time, excludedSourceID
 			query = query.Where("feed_items.feed_source_id NOT IN ?", excludedSourceIDs)
 		}
 		query = query.
+			Select("feed_items.id").
 			Order("CASE WHEN EXISTS (SELECT 1 FROM reading_list_items WHERE target_type = 'feed_item' AND target_id = feed_items.id) THEN 0 WHEN EXISTS (SELECT 1 FROM feed_item_stars WHERE feed_item_id = feed_items.id) THEN 1 ELSE 2 END").
 			Order("feed_items.created_at ASC, feed_items.published_at ASC")
-		result := query.Limit(1).Find(&candidates)
+		result := query.Limit(1).Find(&candidateIDs)
 		if result.Error != nil {
 			return model.FeedItem{}, model.FeedSource{}, false, result.Error
 		}
 		if result.RowsAffected == 0 {
 			return model.FeedItem{}, model.FeedSource{}, false, nil
 		}
-		candidate := candidates[0]
+		var candidate model.FeedItem
+		if err := db.Preload("FeedSource").First(&candidate, "id = ?", candidateIDs[0].ID).Error; err != nil {
+			return model.FeedItem{}, model.FeedSource{}, false, err
+		}
 		if candidate.FeedSource == nil {
 			return model.FeedItem{}, model.FeedSource{}, false, fmt.Errorf("feed item %s missing feed source", candidate.ID)
 		}

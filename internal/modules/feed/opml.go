@@ -136,25 +136,20 @@ func importFeedFromURL(db *gorm.DB, userID uuid.UUID, title, xmlURL string, grou
 	}
 	feedSource := result.Source
 
-	var existingSub model.Subscription
-	if err := db.Where("user_id = ? AND feed_source_id = ?", userID, feedSource.ID).First(&existingSub).Error; err == nil {
-		return userOPMLImportResult{Imported: false}, nil
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		return userOPMLImportResult{}, err
-	}
-
-	subscription := model.Subscription{
+	createdSubscription, created, err := ensureSubscription(db, model.Subscription{
 		UserID:              userID,
 		FeedSourceID:        feedSource.ID,
 		Title:               title,
 		SubscriptionGroupID: groupID,
 		Position:            nextSubscriptionPosition(db, userID, groupID),
-	}
-
-	if err := db.Create(&subscription).Error; err != nil {
+	})
+	if err != nil {
 		return userOPMLImportResult{}, err
 	}
-	applySubscriptionRulesForSubscription(db, subscription)
+	if !created {
+		return userOPMLImportResult{Imported: false}, nil
+	}
+	applySubscriptionRulesForSubscription(db, createdSubscription)
 
 	syncFeedSource(db, *feedSource)
 	return userOPMLImportResult{Imported: true}, nil
@@ -323,6 +318,7 @@ func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
 		reused := 0
 		failed := 0
 		failedSources := []gin.H{}
+		sourcesToSync := make([]model.FeedSource, 0)
 
 		importOutline := func(outline OPMLOutline) {
 			if strings.TrimSpace(outline.XMLURL) == "" {
@@ -336,6 +332,9 @@ func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
 			}
 			if result.Imported {
 				imported++
+				if result.Source != nil {
+					sourcesToSync = append(sourcesToSync, *result.Source)
+				}
 			} else {
 				reused++
 			}
@@ -350,6 +349,10 @@ func ImportGlobalOPML(db *gorm.DB) gin.HandlerFunc {
 			"failed":         failed,
 			"failed_sources": failedSources,
 		})
+		for _, source := range sourcesToSync {
+			source := source
+			go syncFeedSource(db, source)
+		}
 	}
 }
 

@@ -5,8 +5,6 @@ import (
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
-
-	"github.com/google/uuid"
 )
 
 func TestRunCreatesCoreSchema(t *testing.T) {
@@ -64,7 +62,11 @@ func TestRunCreatesShortNoteSchema(t *testing.T) {
 		t.Fatal("expected short_note_media short_note_id index")
 	}
 
-	note := model.ShortNote{UserID: uuid.New(), Content: "short note"}
+	user := model.User{Username: "short-note-owner", Email: "short-note-owner@example.com", Password: "hash", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create short note owner: %v", err)
+	}
+	note := model.ShortNote{UserID: user.UUID, Content: "short note"}
 	if err := db.Create(&note).Error; err != nil {
 		t.Fatalf("create short note: %v", err)
 	}

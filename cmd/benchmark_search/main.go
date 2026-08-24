@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -27,7 +29,14 @@ func main() {
 	token := flag.String("token", "", "optional bearer token")
 	iterations := flag.Int("iterations", 30, "measured requests")
 	warmup := flag.Int("warmup", 5, "warmup requests")
+	concurrency := flag.Int("concurrency", 1, "concurrent measured requests")
 	flag.Parse()
+	if *iterations < 1 {
+		fatal(fmt.Errorf("iterations must be greater than zero"))
+	}
+	if *concurrency < 1 {
+		fatal(fmt.Errorf("concurrency must be greater than zero"))
+	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	for i := 0; i < *warmup; i++ {
@@ -37,19 +46,52 @@ func main() {
 	}
 
 	samples := make([]float64, 0, *iterations)
-	status := 0
+	var statusValue atomic.Int32
+	sampleChannel := make(chan float64, *iterations)
+	errorChannel := make(chan error, 1)
+	semaphore := make(chan struct{}, *concurrency)
+	var workers sync.WaitGroup
 	for i := 0; i < *iterations; i++ {
-		started := time.Now()
-		code, err := request(client, *url, *token)
-		if err != nil {
-			fatal(err)
-		}
-		status = code
-		samples = append(samples, float64(time.Since(started).Microseconds())/1000)
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			select {
+			case semaphore <- struct{}{}:
+			case <-time.After(30 * time.Second):
+				select {
+				case errorChannel <- fmt.Errorf("timed out waiting for benchmark concurrency slot"):
+				default:
+				}
+				return
+			}
+			defer func() { <-semaphore }()
+			started := time.Now()
+			code, err := request(client, *url, *token)
+			if err != nil {
+				select {
+				case errorChannel <- err:
+				default:
+				}
+				return
+			}
+			statusValue.Store(int32(code))
+			sampleChannel <- float64(time.Since(started).Microseconds()) / 1000
+		}()
+	}
+	workers.Wait()
+	close(sampleChannel)
+	select {
+	case err := <-errorChannel:
+		fatal(err)
+	default:
+	}
+	for sample := range sampleChannel {
+		samples = append(samples, sample)
 	}
 	if len(samples) == 0 {
-		fatal(fmt.Errorf("iterations must be greater than zero"))
+		fatal(fmt.Errorf("benchmark produced no samples"))
 	}
+	status := int(statusValue.Load())
 	sort.Float64s(samples)
 	output := result{
 		URL: *url, Iterations: len(samples), Status: status,

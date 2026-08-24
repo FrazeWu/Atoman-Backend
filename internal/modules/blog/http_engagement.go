@@ -203,7 +203,7 @@ func (h *Handler) listBookmarks(c *gin.Context) {
 // @Accept json
 // @Produce json
 // @Param input body bookmarkInput true "收藏输入"
-// @Success 201 {object} model.Bookmark
+// @Success 201 {object} BlogBookmarkDTO
 // @Security BearerAuth
 // @Security CookieAuth
 // @Router /api/v1/blog/bookmarks [post]
@@ -218,12 +218,12 @@ func (h *Handler) createBookmark(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
 		return
 	}
-	bookmark, err := h.service.CreateBookmark(user, req.PostID, req.BookmarkFolderID)
+	bookmark, err := h.service.CreateBookmark(user, req.ContentID, req.BookmarkFolderID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusCreated, bookmark)
+	httpx.OK(c, http.StatusCreated, newBlogBookmarkDTO(bookmark))
 }
 
 // deleteBookmark godoc

@@ -57,6 +57,7 @@ func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 		&model.CommentTimeAnchor{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentVideoExtension{},
 		&model.ContentCollection{},
 		&model.ContentCollectionMembership{},
 		&model.ContentEpisodeExtension{},
@@ -187,14 +188,99 @@ func registerStudioCanonicalTestSeeds(t *testing.T, db *gorm.DB) {
 		default:
 			return
 		}
-		_ = tx.Session(&gorm.Session{NewDB: true}).Model(&model.ContentEntry{}).Where("id = ?", episode.PostID).Update("kind", "podcast").Error
+		_ = tx.Session(&gorm.Session{NewDB: true}).Model(&model.ContentEntry{}).Where("id = ?", episode.PostID).Updates(map[string]any{
+			"kind":       "podcast",
+			"channel_id": episode.ChannelID,
+		}).Error
+		extension := model.ContentEpisodeExtension{
+			ContentID: episode.PostID, EpisodeID: episode.ID, LegacyPostID: episode.PostID,
+			CreatedAt: episode.CreatedAt, UpdatedAt: episode.UpdatedAt, AudioURL: episode.AudioURL,
+			DurationSec: episode.DurationSec, EpisodeCoverURL: episode.EpisodeCoverURL,
+			SeasonNumber: episode.SeasonNumber, EpisodeNumber: episode.EpisodeNumber,
+		}
+		var existing model.ContentEpisodeExtension
+		result := tx.Session(&gorm.Session{NewDB: true}).First(&existing, "content_id = ?", episode.PostID)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			if err := tx.Session(&gorm.Session{NewDB: true}).Create(&extension).Error; err != nil {
+				t.Fatalf("create canonical studio episode extension: %v", err)
+			}
+		}
 	}); err != nil {
 		t.Fatalf("register canonical studio episode callback: %v", err)
+	}
+	videoCallback := "test:studio-canonical-video-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(videoCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "videos" {
+			return
+		}
+		var video model.Video
+		switch value := tx.Statement.Dest.(type) {
+		case *model.Video:
+			video = *value
+		case model.Video:
+			video = value
+		default:
+			return
+		}
+		if video.ChannelID == nil || *video.ChannelID == uuid.Nil {
+			return
+		}
+		entry := model.ContentEntry{
+			Base: video.Base, AuthorID: &video.UserID, ChannelID: *video.ChannelID, Kind: "video",
+			Title: video.Title, Summary: video.Description, Status: video.Status, Visibility: video.Visibility,
+			PublishedAt: video.PublishedAt, ScheduledAt: video.ScheduledAt,
+		}
+		var existingEntry model.ContentEntry
+		result := tx.Session(&gorm.Session{NewDB: true}).First(&existingEntry, "id = ?", video.ID)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			if err := tx.Session(&gorm.Session{NewDB: true}).Create(&entry).Error; err != nil {
+				t.Fatalf("create canonical studio video entry: %v", err)
+			}
+		}
+		extension := model.ContentVideoExtension{
+			ContentID: video.ID, VideoID: video.ID, CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt,
+			StorageType: video.StorageType, VideoURL: video.VideoURL, ThumbnailURL: video.ThumbnailURL,
+			DurationSec: video.DurationSec, ProcessingStatus: video.ProcessingStatus,
+			ProcessingError: video.ProcessingError, PreviewThumbnails: video.PreviewThumbnails,
+			ViewCount: video.ViewCount, CollectionConflict: video.CollectionConflict,
+		}
+		var existingExtension model.ContentVideoExtension
+		result = tx.Session(&gorm.Session{NewDB: true}).First(&existingExtension, "content_id = ?", video.ID)
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			if err := tx.Session(&gorm.Session{NewDB: true}).Create(&extension).Error; err != nil {
+				t.Fatalf("create canonical studio video extension: %v", err)
+			}
+		}
+		if video.CollectionID != nil {
+			_ = tx.Session(&gorm.Session{NewDB: true}).Where("content_id = ?", video.ID).Delete(&model.ContentCollectionMembership{}).Error
+			if err := tx.Session(&gorm.Session{NewDB: true}).Create(&model.ContentCollectionMembership{ContentID: video.ID, CollectionID: *video.CollectionID, Position: video.CollectionPosition}).Error; err != nil {
+				t.Fatalf("create canonical studio video membership: %v", err)
+			}
+		}
+	}); err != nil {
+		t.Fatalf("register canonical studio video callback: %v", err)
+	}
+	videoCollectionCallback := "test:studio-canonical-video-collection-" + uuid.NewString()
+	if err := db.Callback().Create().After("gorm:create").Register(videoCollectionCallback, func(tx *gorm.DB) {
+		if tx.Statement.Schema == nil || tx.Statement.Schema.Table != "video_collections" {
+			return
+		}
+		link, ok := tx.Statement.Dest.(*model.VideoCollection)
+		if !ok {
+			return
+		}
+		if err := tx.Session(&gorm.Session{NewDB: true}).Create(&model.ContentCollectionMembership{ContentID: link.VideoID, CollectionID: link.CollectionID}).Error; err != nil {
+			t.Fatalf("create canonical studio video collection membership: %v", err)
+		}
+	}); err != nil {
+		t.Fatalf("register canonical studio video collection callback: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = db.Callback().Create().Remove(collectionCallback)
 		_ = db.Callback().Create().Remove(postCallback)
 		_ = db.Callback().Create().Remove(episodeCallback)
+		_ = db.Callback().Create().Remove(videoCallback)
+		_ = db.Callback().Create().Remove(videoCollectionCallback)
 		_ = db.Callback().Create().Remove(postCollectionCallback)
 	})
 }
@@ -336,6 +422,65 @@ func TestStudioCollectionsAreScopedByChannelAndUseUnifiedCollections(t *testing.
 	}
 	if len(payload.Data) != 2 || payload.Data[0].ID != blogCollection.ID || payload.Data[1].ID != videoCollection.ID {
 		t.Fatalf("expected all unified collections in channel order, got %#v", payload.Data)
+	}
+}
+
+func TestStudioUnifiedCollectionContentsExposeMixedMembersInPersistedOrder(t *testing.T) {
+	fixture := newStudioHTTPFixture(t)
+	channel := createStudioChannel(t, fixture.db, fixture.owner, "Collection Detail")
+	collection := model.Collection{ChannelID: channel.ID, ContentType: string(ModuleBlog), Name: "Research"}
+	if err := fixture.db.Create(&collection).Error; err != nil {
+		t.Fatal(err)
+	}
+	blog := model.Post{
+		UserID: fixture.owner.UUID, ChannelID: &channel.ID, CollectionID: &collection.ID,
+		Title: "Article", Content: "body", Status: "published", Visibility: "public",
+	}
+	podcastPost := model.Post{
+		UserID: fixture.owner.UUID, ChannelID: &channel.ID, CollectionID: &collection.ID,
+		Title: "Episode", Content: "notes", Status: "draft", Visibility: "public",
+	}
+	if err := fixture.db.Create(&blog).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&podcastPost).Error; err != nil {
+		t.Fatal(err)
+	}
+	episode := model.PodcastEpisode{PostID: podcastPost.ID, ChannelID: channel.ID, AudioURL: "episode.mp3"}
+	if err := fixture.db.Create(&episode).Error; err != nil {
+		t.Fatal(err)
+	}
+	for contentID, position := range map[uuid.UUID]int{blog.ID: 0, podcastPost.ID: 1} {
+		if err := fixture.db.Model(&model.ContentCollectionMembership{}).
+			Where("content_id = ? AND collection_id = ?", contentID, collection.ID).
+			Update("position", position).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	response := studioRequest(t, fixture, fixture.owner, http.MethodGet, "/api/v1/studio/collections/"+collection.ID.String()+"/contents", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Data []StudioCollectionContentItem `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Data) != 2 {
+		t.Fatalf("expected two members, got %#v", payload.Data)
+	}
+	if payload.Data[0].ContentID != blog.ID || payload.Data[0].ID != blog.ID || payload.Data[0].Module != ModuleBlog {
+		t.Fatalf("unexpected blog member %#v", payload.Data[0])
+	}
+	if payload.Data[1].ContentID != podcastPost.ID || payload.Data[1].ID != episode.ID || payload.Data[1].Module != ModulePodcast {
+		t.Fatalf("unexpected podcast member %#v", payload.Data[1])
+	}
+
+	foreignResponse := studioRequest(t, fixture, fixture.foreign, http.MethodGet, "/api/v1/studio/collections/"+collection.ID.String()+"/contents", "")
+	if foreignResponse.Code != http.StatusForbidden {
+		t.Fatalf("expected foreign user to receive 403, got %d: %s", foreignResponse.Code, foreignResponse.Body.String())
 	}
 }
 

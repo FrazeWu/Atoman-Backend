@@ -65,23 +65,87 @@ type videoRow struct {
 type modelTime = time.Time
 
 func PodcastQuery(db *gorm.DB) *gorm.DB {
-	return db.Table("content_entries AS posts").
-		Joins("JOIN content_episode_extensions AS episodes ON episodes.content_id = posts.id").
-		Select(`posts.id AS content_id, episodes.episode_id, episodes.legacy_post_id,
-			posts.author_id, posts.channel_id, posts.created_at AS entry_created_at,
+	capabilities := CurrentMediaSchema(db)
+	if !capabilities.ContentEntryTable || !capabilities.ContentEpisodeExtensionTable {
+		return legacyPodcastQuery(db)
+	}
+
+	query := db.Table("content_entries AS posts").
+		Joins("JOIN content_episode_extensions AS episodes ON episodes.content_id = posts.id")
+	authorColumn := "posts.author_id"
+	legacyPostIDColumn := "episodes.legacy_post_id"
+	if !capabilities.ContentEpisodeExtensionLegacyID {
+		legacyPostIDColumn = "posts.id"
+	}
+	if !capabilities.ContentEntryAuthor {
+		query = query.Joins("LEFT JOIN posts AS legacy_posts ON legacy_posts.id = " + legacyPostIDColumn + " AND legacy_posts.deleted_at IS NULL")
+		authorColumn = "legacy_posts.user_id"
+	}
+	shownotesColumn := "episodes.shownotes"
+	if !capabilities.ContentEpisodeExtensionData {
+		shownotesColumn = "posts.content"
+	}
+	return query.
+		Select(`posts.id AS content_id, episodes.episode_id, `+legacyPostIDColumn+` AS legacy_post_id,
+			`+authorColumn+` AS author_id, posts.channel_id, posts.created_at AS entry_created_at,
 			posts.updated_at AS entry_updated_at, posts.title, posts.summary,
 			posts.status, posts.visibility, posts.published_at, posts.scheduled_at,
 			episodes.created_at AS episode_created_at, episodes.updated_at AS episode_updated_at,
-			episodes.shownotes, episodes.audio_url, episodes.duration_sec,
+			`+shownotesColumn+` AS shownotes, episodes.audio_url, episodes.duration_sec,
 			episodes.episode_cover_url, episodes.season_number, episodes.episode_number,
 			episodes.view_count, episodes.collection_conflict`).
 		Where("posts.kind = ? AND posts.deleted_at IS NULL", "podcast")
 }
 
+func legacyPodcastQuery(db *gorm.DB) *gorm.DB {
+	return db.Table("posts AS posts").
+		Joins(`JOIN (
+			SELECT id, id AS episode_id, post_id, created_at, updated_at, audio_url,
+				duration_sec, episode_cover_url, season_number, episode_number
+			FROM podcast_episodes
+			WHERE deleted_at IS NULL
+		) AS episodes ON episodes.post_id = posts.id`).
+		Select(`posts.id AS content_id, episodes.episode_id AS episode_id, posts.id AS legacy_post_id,
+			posts.user_id AS author_id, posts.channel_id, posts.created_at AS entry_created_at,
+			posts.updated_at AS entry_updated_at, posts.title, posts.summary,
+			posts.status, posts.visibility, posts.published_at, posts.scheduled_at,
+			episodes.created_at AS episode_created_at, episodes.updated_at AS episode_updated_at,
+			posts.content AS shownotes, episodes.audio_url, episodes.duration_sec,
+			episodes.episode_cover_url, episodes.season_number, episodes.episode_number,
+			posts.view_count, posts.collection_conflict`).
+		Where("posts.deleted_at IS NULL")
+}
+
 func VideoQuery(db *gorm.DB) *gorm.DB {
-	return db.Table("content_entries AS posts").
-		Joins("JOIN content_video_extensions AS videos ON videos.content_id = posts.id").
-		Select(`posts.id AS content_id, videos.video_id, posts.author_id AS author_id, posts.channel_id,
+	capabilities := CurrentMediaSchema(db)
+	if !capabilities.ContentEntryTable || !capabilities.ContentVideoExtensionTable || !capabilities.ContentVideoExtensionMedia {
+		return db.Table("(SELECT videos.*, videos.user_id AS author_id FROM videos) AS posts").
+			Joins(`JOIN (
+				SELECT id, id AS video_id, created_at, updated_at, storage_type, video_url,
+					thumbnail_url, duration_sec, processing_status, processing_error,
+					preview_thumbnails, view_count
+				FROM videos
+			) AS videos ON videos.id = posts.id`).
+			Select(`posts.id AS content_id, videos.video_id AS video_id, posts.author_id AS author_id, posts.channel_id,
+				posts.created_at AS entry_created_at, posts.updated_at AS entry_updated_at,
+				videos.created_at AS video_created_at, videos.updated_at AS video_updated_at,
+				posts.title, posts.description AS summary, posts.status, posts.visibility,
+				posts.published_at, posts.scheduled_at, videos.storage_type, videos.video_url,
+				videos.thumbnail_url, videos.duration_sec, videos.processing_status,
+				videos.processing_error, videos.preview_thumbnails, videos.view_count,
+				0 AS collection_conflict`).
+			Where("posts.deleted_at IS NULL")
+	}
+
+	query := db.Table("content_entries AS posts").
+		Joins("JOIN content_video_extensions AS videos ON videos.content_id = posts.id")
+	authorColumn := "posts.author_id"
+	if !capabilities.ContentEntryAuthor {
+		query = query.Joins("LEFT JOIN videos AS legacy_videos ON legacy_videos.id = videos.video_id")
+		authorColumn = "legacy_videos.user_id"
+	}
+	return query.
+		Select(`posts.id AS content_id, videos.video_id, `+authorColumn+` AS author_id, posts.channel_id,
 			posts.created_at AS entry_created_at, posts.updated_at AS entry_updated_at,
 			videos.created_at AS video_created_at, videos.updated_at AS video_updated_at,
 			posts.title, posts.summary, posts.status, posts.visibility,
@@ -104,6 +168,12 @@ func PodcastContentID(db *gorm.DB, episodeID uuid.UUID) (uuid.UUID, error) {
 	var row struct {
 		ContentID uuid.UUID `gorm:"column:content_id"`
 	}
+	if !CurrentMediaSchema(db).ContentEpisodeExtensionTable {
+		if err := db.Table("podcast_episodes").Select("post_id AS content_id").Where("id = ?", episodeID).First(&row).Error; err != nil {
+			return uuid.Nil, err
+		}
+		return row.ContentID, nil
+	}
 	if err := db.Table("content_episode_extensions").Select("content_id").Where("episode_id = ?", episodeID).First(&row).Error; err != nil {
 		return uuid.Nil, err
 	}
@@ -113,6 +183,12 @@ func PodcastContentID(db *gorm.DB, episodeID uuid.UUID) (uuid.UUID, error) {
 func VideoContentID(db *gorm.DB, videoID uuid.UUID) (uuid.UUID, error) {
 	var row struct {
 		ContentID uuid.UUID `gorm:"column:content_id"`
+	}
+	if !CurrentMediaSchema(db).ContentVideoExtensionTable {
+		if err := db.Table("videos").Select("id AS content_id").Where("id = ?", videoID).First(&row).Error; err != nil {
+			return uuid.Nil, err
+		}
+		return row.ContentID, nil
 	}
 	if err := db.Table("content_video_extensions").Select("content_id").Where("video_id = ?", videoID).First(&row).Error; err != nil {
 		return uuid.Nil, err
@@ -169,7 +245,24 @@ func loadMemberships(db *gorm.DB, contentIDs []uuid.UUID, contentType string) (m
 		return collectionsByContent, positions, nil
 	}
 	var rows []membershipRow
-	if err := db.Table("content_collection_memberships AS memberships").
+	capabilities := CurrentMediaSchema(db)
+	if !capabilities.ContentCollectionTable || !capabilities.ContentCollectionMembershipTable {
+		joinTable := "post_collections"
+		contentColumn := "post_id"
+		if contentType == "video" {
+			joinTable = "video_collections"
+			contentColumn = "video_id"
+		}
+		if err := db.Table(joinTable+" AS memberships").
+			Select(`memberships.`+contentColumn+` AS content_id, memberships.collection_id, 0 AS position,
+				collections.name, collections.description, collections.cover_url,
+				collections.channel_id, collections.created_by, collections.is_default`).
+			Joins("JOIN collections AS collections ON collections.id = memberships.collection_id").
+			Where("memberships."+contentColumn+" IN ?", contentIDs).
+			Scan(&rows).Error; err != nil {
+			return nil, nil, err
+		}
+	} else if err := db.Table("content_collection_memberships AS memberships").
 		Select(`memberships.content_id, memberships.collection_id, memberships.position,
 			collections.name, collections.description, collections.cover_url,
 			collections.channel_id, collections.created_by, collections.is_default`).
