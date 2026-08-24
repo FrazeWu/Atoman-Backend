@@ -48,10 +48,11 @@ func (a *postgresCasbinAdapter) SavePolicy(m model.Model) error {
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&casbinRule{}).Error; err != nil {
 			return err
 		}
-		for sec, astMap := range m {
+		for _, astMap := range m {
 			for ptype, ast := range astMap {
 				for _, policy := range ast.Policy {
-					if err := tx.Create(ruleFor(sec+"_"+ptype, policy)).Error; err != nil {
+					rule := ruleFor(ptype, policy)
+					if err := tx.Create(&rule).Error; err != nil {
 						return err
 					}
 				}
@@ -61,7 +62,8 @@ func (a *postgresCasbinAdapter) SavePolicy(m model.Model) error {
 	})
 }
 func (a *postgresCasbinAdapter) AddPolicy(_ string, ptype string, rule []string) error {
-	return a.db.Create(ruleFor(ptype, rule)).Error
+	record := ruleFor(ptype, rule)
+	return a.db.Create(&record).Error
 }
 func (a *postgresCasbinAdapter) RemovePolicy(_ string, ptype string, rule []string) error {
 	query := a.db.Where("ptype = ?", ptype)
