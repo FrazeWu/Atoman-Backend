@@ -55,7 +55,7 @@ func (s *Service) postDTOs(db *gorm.DB, posts []model.Post, viewerID *uuid.UUID)
 	dtos := make([]PostDTO, len(posts))
 	ids := make([]uuid.UUID, 0, len(posts))
 	for index, post := range posts {
-		dtos[index] = PostDTO{Post: post, References: []reference.ResolvedReference{}}
+		dtos[index] = newPostDTO(post)
 		ids = append(ids, post.ID)
 	}
 	if len(ids) == 0 {
@@ -126,11 +126,11 @@ func (s *Service) populatePostRatings(db *gorm.DB, dtos []PostDTO, viewerID *uui
 
 	for index := range dtos {
 		aggregate := aggregatesByPostID[dtos[index].ID]
-		dtos[index].Post.RatingScore = math.Round(aggregate.RatingScore*10) / 10
-		dtos[index].Post.RatingCount = aggregate.RatingCount
+		dtos[index].RatingScore = math.Round(aggregate.RatingScore*10) / 10
+		dtos[index].RatingCount = aggregate.RatingCount
 		if score, ok := viewerRatings[dtos[index].ID]; ok {
 			value := score
-			dtos[index].Post.ViewerRating = &value
+			dtos[index].ViewerRating = &value
 		}
 	}
 	return nil

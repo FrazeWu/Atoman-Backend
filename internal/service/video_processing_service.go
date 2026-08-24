@@ -23,17 +23,18 @@ func EnsureVideoPreviewJob(db *gorm.DB, video *model.Video) error {
 
 	return db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.ContentVideoExtension{}).Where("content_id = ?", contentID).Updates(map[string]interface{}{
-			"processing_status": "pending",
-			"processing_error":  "",
+			"processing_status":  "pending",
+			"processing_error":   "",
 			"preview_thumbnails": nil,
 		}).Error; err != nil {
 			return err
 		}
 
 		job := model.VideoProcessingJob{
-			VideoID: video.ID,
-			Status:  "pending",
-			JobType: "thumbnail_preview",
+			ContentID: contentID,
+			VideoID:   video.ID,
+			Status:    "pending",
+			JobType:   "thumbnail_preview",
 		}
 		return tx.Create(&job).Error
 	})

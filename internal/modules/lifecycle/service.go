@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/indexnow"
@@ -343,15 +344,19 @@ func (s *Service) ScheduleContent(user authctx.CurrentUser, input ScheduleInput)
 			return ScheduleResult{}, err
 		}
 	case "podcast":
-		var episode model.PodcastEpisode
-		if err := s.db.First(&episode, "id = ?", input.ContentID).Error; err != nil {
+		contentID, err := contentmodule.PodcastContentID(s.db, input.ContentID)
+		if err != nil {
 			return ScheduleResult{}, contentError(err)
 		}
-		if err := s.db.Model(&model.Post{}).Where("id = ? AND user_id = ?", episode.PostID, user.ID).Updates(map[string]any{"status": "scheduled", "scheduled_at": publishAt}).Error; err != nil {
+		if err := s.db.Model(&model.ContentEntry{}).Where("id = ? AND author_id = ?", contentID, user.ID).Updates(map[string]any{"status": "scheduled", "scheduled_at": publishAt}).Error; err != nil {
 			return ScheduleResult{}, err
 		}
 	case "video":
-		if err := s.db.Model(&model.Video{}).Where("id = ? AND user_id = ?", input.ContentID, user.ID).Updates(map[string]any{"status": "scheduled", "scheduled_at": publishAt}).Error; err != nil {
+		contentID, err := contentmodule.VideoContentID(s.db, input.ContentID)
+		if err != nil {
+			return ScheduleResult{}, contentError(err)
+		}
+		if err := s.db.Model(&model.ContentEntry{}).Where("id = ? AND author_id = ?", contentID, user.ID).Updates(map[string]any{"status": "scheduled", "scheduled_at": publishAt}).Error; err != nil {
 			return ScheduleResult{}, err
 		}
 	}
@@ -374,13 +379,17 @@ func (s *Service) CancelSchedule(user authctx.CurrentUser, module string, conten
 	case "blog":
 		return s.db.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", contentID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error
 	case "podcast":
-		var episode model.PodcastEpisode
-		if err := s.db.First(&episode, "id = ?", contentID).Error; err != nil {
+		contentID, err := contentmodule.PodcastContentID(s.db, contentID)
+		if err != nil {
 			return contentError(err)
 		}
-		return s.db.Model(&model.Post{}).Where("id = ? AND status = ?", episode.PostID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error
+		return s.db.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", contentID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error
 	case "video":
-		return s.db.Model(&model.Video{}).Where("id = ? AND status = ?", contentID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error
+		canonicalID, err := contentmodule.VideoContentID(s.db, contentID)
+		if err != nil {
+			return contentError(err)
+		}
+		return s.db.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", canonicalID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error
 	default:
 		return apperr.BadRequest("lifecycle.invalid_module", "module must be blog, podcast, or video")
 	}
@@ -416,34 +425,38 @@ func (s *Service) PublishDue(now time.Time, limit int) error {
 	if remaining <= 0 {
 		return nil
 	}
-	var posts []model.Post
-	if err := s.db.Where("status = ? AND scheduled_at IS NOT NULL AND scheduled_at <= ?", "scheduled", now).
-		Where("EXISTS (SELECT 1 FROM podcast_episodes WHERE podcast_episodes.post_id = posts.id AND podcast_episodes.deleted_at IS NULL)").
-		Order("scheduled_at ASC").Limit(remaining).Find(&posts).Error; err != nil {
+	var episodes []model.PodcastEpisode
+	podcastQuery := contentmodule.PodcastQuery(s.db).
+		Where("posts.status = ? AND posts.scheduled_at IS NOT NULL AND posts.scheduled_at <= ?", "scheduled", now).
+		Order("posts.scheduled_at ASC").Limit(remaining)
+	episodes, err := contentmodule.LoadPodcastEpisodes(s.db, podcastQuery)
+	if err != nil {
 		return err
 	}
-	for _, post := range posts {
-		var episode model.PodcastEpisode
-		if err := s.db.First(&episode, "post_id = ?", post.ID).Error; err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				continue
-			}
-			return err
-		}
+	for _, episode := range episodes {
 		if err := s.validatePublishable("podcast", episode.ID, true); err != nil {
 			continue
 		}
+		contentID, err := contentmodule.PodcastContentID(s.db, episode.ID)
+		if err != nil {
+			return contentError(err)
+		}
 		if err := s.db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&model.Post{}).Where("id = ? AND status = ?", post.ID, "scheduled").Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil}).Error; err != nil {
+			if err := tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", contentID, "scheduled").Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil}).Error; err != nil {
 				return err
 			}
-			return enqueuePublication(tx, "podcast", episode.ID, *post.ChannelID, post.UserID)
+			return enqueuePublication(tx, "podcast", episode.ID, episode.ChannelID, episode.Post.UserID)
 		}); err != nil {
 			return err
 		}
 	}
+
 	var videos []model.Video
-	if err := s.db.Where("status = ? AND scheduled_at IS NOT NULL AND scheduled_at <= ?", "scheduled", now).Order("scheduled_at ASC").Limit(remaining).Find(&videos).Error; err != nil {
+	videoQuery := contentmodule.VideoQuery(s.db).
+		Where("posts.status = ? AND posts.scheduled_at IS NOT NULL AND posts.scheduled_at <= ?", "scheduled", now).
+		Order("posts.scheduled_at ASC").Limit(remaining)
+	videos, err = contentmodule.LoadVideos(s.db, videoQuery)
+	if err != nil {
 		return err
 	}
 	for _, video := range videos {
@@ -453,9 +466,16 @@ func (s *Service) PublishDue(now time.Time, limit int) error {
 		if video.StorageType == "local" && video.ProcessingStatus != "ready" {
 			continue
 		}
+		contentID, err := contentmodule.VideoContentID(s.db, video.ID)
+		if err != nil {
+			return contentError(err)
+		}
 		if err := s.db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&model.Video{}).Where("id = ? AND status = ?", video.ID, "scheduled").Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil}).Error; err != nil {
+			if err := tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", contentID, "scheduled").Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil}).Error; err != nil {
 				return err
+			}
+			if video.ChannelID == nil {
+				return fmt.Errorf("video %s has no channel", video.ID)
 			}
 			return enqueuePublication(tx, "video", video.ID, *video.ChannelID, video.UserID)
 		}); err != nil {
@@ -484,16 +504,16 @@ func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Blog title, content, and collection are required")
 		}
 	case "podcast":
-		var episode model.PodcastEpisode
-		if err := s.db.Preload("Post").First(&episode, "id = ?", contentID).Error; err != nil {
+		episode, err := contentmodule.LoadPodcastEpisode(s.db, contentmodule.PodcastQuery(s.db).Where("episodes.episode_id = ?", contentID))
+		if err != nil {
 			return contentError(err)
 		}
 		if episode.Post == nil || strings.TrimSpace(episode.Post.Title) == "" || strings.TrimSpace(episode.AudioURL) == "" || !postHasResolvedCollection(*episode.Post) {
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Podcast title, audio, and collection are required")
 		}
 	case "video":
-		var video model.Video
-		if err := s.db.First(&video, "id = ?", contentID).Error; err != nil {
+		video, err := contentmodule.LoadVideo(s.db, contentmodule.VideoQuery(s.db).Where("videos.video_id = ?", contentID))
+		if err != nil {
 			return contentError(err)
 		}
 		if strings.TrimSpace(video.Title) == "" || strings.TrimSpace(video.VideoURL) == "" || video.CollectionID == nil || video.CollectionConflict {
@@ -698,8 +718,8 @@ func (s *Service) resolveContent(module string, id uuid.UUID) (contentSummary, e
 		}
 		return contentSummary{Module: "blog", ContentID: id, ChannelID: entry.ChannelID, OwnerID: *entry.AuthorID, Title: entry.Title, Path: "/posts/post/" + id.String(), CoverURL: entry.CoverURL, Status: entry.Status, Visibility: entry.Visibility}, nil
 	case "podcast":
-		var episode model.PodcastEpisode
-		if err := s.db.Preload("Post").First(&episode, "id = ?", id).Error; err != nil {
+		episode, err := contentmodule.LoadPodcastEpisode(s.db, contentmodule.PodcastQuery(s.db).Where("episodes.episode_id = ?", id))
+		if err != nil {
 			return contentSummary{}, contentError(err)
 		}
 		if episode.Post == nil {
@@ -707,15 +727,19 @@ func (s *Service) resolveContent(module string, id uuid.UUID) (contentSummary, e
 		}
 		return contentSummary{Module: "podcast", ContentID: id, ChannelID: episode.ChannelID, OwnerID: episode.Post.UserID, Title: episode.Post.Title, Path: "/podcasts/episode/" + id.String(), CoverURL: episode.EpisodeCoverURL, Status: episode.Post.Status, Visibility: episode.Post.Visibility, DurationSec: episode.DurationSec}, nil
 	case "video":
-		var video model.Video
-		if err := s.db.First(&video, "id = ?", id).Error; err != nil {
+		video, err := contentmodule.LoadVideo(s.db, contentmodule.VideoQuery(s.db).Where("videos.video_id = ?", id))
+		if err != nil {
 			return contentSummary{}, contentError(err)
 		}
 		if video.ChannelID == nil {
 			return contentSummary{}, apperr.NotFound("lifecycle.content_not_found", "Content not found")
 		}
+		canonicalID, err := contentmodule.VideoContentID(s.db, id)
+		if err != nil {
+			return contentSummary{}, contentError(err)
+		}
 		var collectionIDs []uuid.UUID
-		if err := s.db.Model(&model.VideoCollection{}).Where("video_id = ?", video.ID).Pluck("collection_id", &collectionIDs).Error; err != nil {
+		if err := s.db.Model(&model.ContentCollectionMembership{}).Where("content_id = ?", canonicalID).Pluck("collection_id", &collectionIDs).Error; err != nil {
 			return contentSummary{}, err
 		}
 		return contentSummary{Module: "video", ContentID: id, ChannelID: *video.ChannelID, OwnerID: video.UserID, Title: video.Title, Path: "/videos/watch/" + id.String(), CoverURL: video.ThumbnailURL, Status: video.Status, Visibility: video.Visibility, CollectionIDs: collectionIDs, DurationSec: video.DurationSec}, nil

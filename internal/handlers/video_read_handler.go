@@ -30,7 +30,7 @@ func GetRecommendedVideoItems(db *gorm.DB) gin.HandlerFunc {
 
 		videos, err := contentmodule.LoadVideos(db, contentmodule.VideoQuery(db).
 			Where("posts.status = ? AND posts.visibility = ?", "published", "public").
-			Order("posts.created_at DESC"))
+			Order("videos.created_at DESC"))
 		if err != nil {
 			httpx.Error(c, err)
 			return
@@ -216,7 +216,7 @@ func GetVideos(db *gorm.DB) gin.HandlerFunc {
 		if sort == "popular" {
 			q = q.Order("videos.view_count DESC, videos.video_id DESC")
 		} else {
-			q = q.Order("posts.created_at DESC, videos.video_id DESC")
+			q = q.Order("videos.created_at DESC, videos.video_id DESC")
 		}
 
 		videos, err := contentmodule.LoadVideos(db, q.Offset(httpx.Offset(page, limit)).Limit(limit))
@@ -391,13 +391,13 @@ func GetRecommendedVideos(db *gorm.DB) gin.HandlerFunc {
 		if source.ChannelID != nil {
 			channelCandidates, _ = contentmodule.LoadVideos(db, contentmodule.VideoQuery(db).
 				Where("posts.channel_id = ? AND videos.video_id <> ? AND posts.status = ? AND posts.visibility = ?", *source.ChannelID, id, "published", "public").
-				Order("posts.created_at DESC").Limit(20))
+				Order("videos.created_at DESC").Limit(20))
 		}
 		if len(tagIDs) > 0 {
 			tagCandidates, _ = contentmodule.LoadVideos(db, contentmodule.VideoQuery(db).
 				Joins("JOIN video_tag_relations vtr ON vtr.video_id = videos.video_id").
 				Where("vtr.tag_id IN ? AND videos.video_id <> ? AND posts.status = ? AND posts.visibility = ?", tagIDs, id, "published", "public").
-				Order("posts.created_at DESC").Limit(20))
+				Order("videos.created_at DESC").Limit(20))
 		}
 
 		scores := map[uuid.UUID]int{}
@@ -415,7 +415,7 @@ func GetRecommendedVideos(db *gorm.DB) gin.HandlerFunc {
 		if len(seen) == 0 {
 			results, _ = contentmodule.LoadVideos(db, contentmodule.VideoQuery(db).
 				Where("videos.video_id <> ? AND posts.status = ? AND posts.visibility = ?", id, "published", "public").
-				Order("posts.created_at DESC").Limit(8))
+				Order("videos.created_at DESC").Limit(8))
 			c.JSON(http.StatusOK, results)
 			return
 		}

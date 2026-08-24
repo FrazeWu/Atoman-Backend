@@ -37,14 +37,8 @@ func (s *UserBootstrapService) EnsureDefaults(userID uuid.UUID, username string)
 	if err != nil {
 		return err
 	}
-	for _, contentType := range []string{
-		"blog",
-		"podcast",
-		"video",
-	} {
-		if err := s.ensureDefaultCollectionForChannel(userID, channel.ID, contentType); err != nil {
-			return err
-		}
+	if err := s.ensureDefaultCollectionForChannel(userID, channel.ID); err != nil {
+		return err
 	}
 
 	group, err := s.ensureDefaultSubscriptionGroup(userID)
@@ -119,59 +113,34 @@ func (s *UserBootstrapService) saveStudioState(userID, channelID uuid.UUID) erro
 	return s.db.Save(&model.UserStudioState{UserID: userID, ChannelID: &channelID}).Error
 }
 
-func (s *UserBootstrapService) ensureDefaultCollectionForChannel(userID, channelID uuid.UUID, contentType string) error {
-	if contentType == "blog" {
-		var collection model.ContentCollection
-		err := s.db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
-		if err == nil {
-			return nil
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		var softDeleted model.ContentCollection
-		softErr := s.db.Unscoped().Where("channel_id = ? AND name = ?", channelID, defaultCollectionName).First(&softDeleted).Error
-		if softErr == nil && softDeleted.DeletedAt.Valid {
-			return s.db.Unscoped().Model(&softDeleted).Updates(map[string]any{
-				"deleted_at": nil, "is_default": true, "name": defaultCollectionName, "created_by": userID,
-			}).Error
-		}
-		if softErr != nil && !errors.Is(softErr, gorm.ErrRecordNotFound) {
-			return softErr
-		}
-		collection = model.ContentCollection{
-			ChannelID: channelID, CreatedBy: &userID, Name: defaultCollectionName,
-			Description: defaultChannelDescription, IsDefault: true,
-		}
-		return s.db.Create(&collection).Error
-	}
-	var collection model.Collection
-	err := s.db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channelID, contentType, true).First(&collection).Error
+func (s *UserBootstrapService) ensureDefaultCollectionForChannel(userID, channelID uuid.UUID) error {
+	var collection model.ContentCollection
+	err := s.db.Where("channel_id = ? AND is_default = ?", channelID, true).First(&collection).Error
 	if err == nil {
 		return nil
 	}
-	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
 
-	var softDeleted model.Collection
-	softErr := s.db.Unscoped().Where("channel_id = ? AND content_type = ? AND name = ?", channelID, contentType, defaultCollectionName).First(&softDeleted).Error
+	var softDeleted model.ContentCollection
+	softErr := s.db.Unscoped().Where(
+		"channel_id = ? AND (is_default = ? OR name = ?)",
+		channelID, true, defaultCollectionName,
+	).First(&softDeleted).Error
 	if softErr == nil && softDeleted.DeletedAt.Valid {
 		return s.db.Unscoped().Model(&softDeleted).Updates(map[string]any{
-			"deleted_at":   nil,
-			"is_default":   true,
-			"name":         defaultCollectionName,
-			"content_type": contentType,
-			"created_by":   userID,
+			"deleted_at": nil,
+			"is_default": true,
+			"created_by": userID,
 		}).Error
 	}
 	if softErr != nil && !errors.Is(softErr, gorm.ErrRecordNotFound) {
 		return softErr
 	}
 
-	collection = model.Collection{
+	collection = model.ContentCollection{
 		ChannelID:   channelID,
-		ContentType: contentType,
 		CreatedBy:   &userID,
 		Name:        defaultCollectionName,
 		Description: defaultChannelDescription,

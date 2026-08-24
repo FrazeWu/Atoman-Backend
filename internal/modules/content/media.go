@@ -13,9 +13,10 @@ type podcastRow struct {
 	ContentID          uuid.UUID  `gorm:"column:content_id"`
 	EpisodeID          uuid.UUID  `gorm:"column:episode_id"`
 	LegacyPostID       uuid.UUID  `gorm:"column:legacy_post_id"`
+	EpisodeCreatedAt   modelTime  `gorm:"column:episode_created_at"`
+	EpisodeUpdatedAt   modelTime  `gorm:"column:episode_updated_at"`
 	AuthorID           uuid.UUID  `gorm:"column:author_id"`
 	ChannelID          uuid.UUID  `gorm:"column:channel_id"`
-	CreatedAt          model.Base `gorm:"embedded"`
 	EntryCreatedAt     modelTime  `gorm:"column:entry_created_at"`
 	EntryUpdatedAt     modelTime  `gorm:"column:entry_updated_at"`
 	Title              string     `gorm:"column:title"`
@@ -37,6 +38,8 @@ type podcastRow struct {
 type videoRow struct {
 	ContentID          uuid.UUID  `gorm:"column:content_id"`
 	VideoID            uuid.UUID  `gorm:"column:video_id"`
+	VideoCreatedAt     modelTime  `gorm:"column:video_created_at"`
+	VideoUpdatedAt     modelTime  `gorm:"column:video_updated_at"`
 	AuthorID           uuid.UUID  `gorm:"column:author_id"`
 	ChannelID          *uuid.UUID `gorm:"column:channel_id"`
 	EntryCreatedAt     modelTime  `gorm:"column:entry_created_at"`
@@ -68,6 +71,7 @@ func PodcastQuery(db *gorm.DB) *gorm.DB {
 			posts.author_id, posts.channel_id, posts.created_at AS entry_created_at,
 			posts.updated_at AS entry_updated_at, posts.title, posts.summary,
 			posts.status, posts.visibility, posts.published_at, posts.scheduled_at,
+			episodes.created_at AS episode_created_at, episodes.updated_at AS episode_updated_at,
 			episodes.shownotes, episodes.audio_url, episodes.duration_sec,
 			episodes.episode_cover_url, episodes.season_number, episodes.episode_number,
 			episodes.view_count, episodes.collection_conflict`).
@@ -77,8 +81,9 @@ func PodcastQuery(db *gorm.DB) *gorm.DB {
 func VideoQuery(db *gorm.DB) *gorm.DB {
 	return db.Table("content_entries AS posts").
 		Joins("JOIN content_video_extensions AS videos ON videos.content_id = posts.id").
-		Select(`posts.id AS content_id, videos.video_id, posts.author_id, posts.channel_id,
+		Select(`posts.id AS content_id, videos.video_id, posts.author_id AS author_id, posts.channel_id,
 			posts.created_at AS entry_created_at, posts.updated_at AS entry_updated_at,
+			videos.created_at AS video_created_at, videos.updated_at AS video_updated_at,
 			posts.title, posts.summary, posts.status, posts.visibility,
 			posts.published_at, posts.scheduled_at, videos.storage_type, videos.video_url,
 			videos.thumbnail_url, videos.duration_sec, videos.processing_status,
@@ -223,8 +228,16 @@ func hydratePodcastEpisodes(db *gorm.DB, rows []podcastRow) ([]model.PodcastEpis
 			post.Collection = &post.Collections[0]
 			post.CollectionID = &post.Collections[0].ID
 		}
+		episodeCreatedAt := row.EpisodeCreatedAt
+		if episodeCreatedAt.IsZero() {
+			episodeCreatedAt = row.EntryCreatedAt
+		}
+		episodeUpdatedAt := row.EpisodeUpdatedAt
+		if episodeUpdatedAt.IsZero() {
+			episodeUpdatedAt = row.EntryUpdatedAt
+		}
 		episode := model.PodcastEpisode{
-			Base:   model.Base{ID: row.EpisodeID, CreatedAt: row.EntryCreatedAt, UpdatedAt: row.EntryUpdatedAt},
+			Base:   model.Base{ID: row.EpisodeID, CreatedAt: episodeCreatedAt, UpdatedAt: episodeUpdatedAt},
 			PostID: postID, Post: &post, ChannelID: row.ChannelID, Channel: channels[row.ChannelID],
 			AudioURL: row.AudioURL, DurationSec: row.DurationSec, EpisodeCoverURL: row.EpisodeCoverURL,
 			SeasonNumber: row.SeasonNumber, EpisodeNumber: row.EpisodeNumber,
@@ -259,8 +272,16 @@ func hydrateVideos(db *gorm.DB, rows []videoRow) ([]model.Video, error) {
 	}
 	result := make([]model.Video, 0, len(rows))
 	for _, row := range rows {
+		videoCreatedAt := row.VideoCreatedAt
+		if videoCreatedAt.IsZero() {
+			videoCreatedAt = row.EntryCreatedAt
+		}
+		videoUpdatedAt := row.VideoUpdatedAt
+		if videoUpdatedAt.IsZero() {
+			videoUpdatedAt = row.EntryUpdatedAt
+		}
 		video := model.Video{
-			Base:      model.Base{ID: row.VideoID, CreatedAt: row.EntryCreatedAt, UpdatedAt: row.EntryUpdatedAt},
+			Base:      model.Base{ID: row.VideoID, CreatedAt: videoCreatedAt, UpdatedAt: videoUpdatedAt},
 			ChannelID: row.ChannelID, Channel: channelForID(channels, row.ChannelID), UserID: row.AuthorID,
 			Title: row.Title, Description: row.Summary, StorageType: row.StorageType, VideoURL: row.VideoURL,
 			ThumbnailURL: row.ThumbnailURL, DurationSec: row.DurationSec, ProcessingStatus: row.ProcessingStatus,

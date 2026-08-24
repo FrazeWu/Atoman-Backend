@@ -195,28 +195,29 @@ func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, modul
 			Where("posts.kind = ? AND posts.deleted_at IS NULL AND posts.author_id = ? AND posts.channel_id = ?", "blog", userID, channel.ID).
 			Scan(&counts).Error
 	case ModulePodcast:
-		err = s.db.Model(&model.PodcastEpisode{}).
+		err = s.db.Table("content_entries AS posts").
+			Joins("JOIN content_episode_extensions episodes ON episodes.content_id = posts.id").
 			Select(`COUNT(*) AS contents,
 				COALESCE(SUM(CASE WHEN posts.status = 'published' THEN 1 ELSE 0 END), 0) AS published,
 				COALESCE(SUM(CASE WHEN posts.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
-				COALESCE(SUM(posts.view_count), 0) AS views,
-				COALESCE(SUM(CASE WHEN TRIM(COALESCE(podcast_episodes.episode_cover_url, '')) = '' AND ? = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
-				COALESCE(SUM(CASE WHEN posts.collection_id IS NULL AND NOT EXISTS (SELECT 1 FROM post_collections WHERE post_collections.post_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection,
-				COALESCE(SUM(CASE WHEN TRIM(COALESCE(podcast_episodes.audio_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_audio`, strings.TrimSpace(channel.CoverURL)).
-			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL").
-			Where("posts.user_id = ? AND podcast_episodes.channel_id = ?", userID, channel.ID).
+				COALESCE(SUM(episodes.view_count), 0) AS views,
+				COALESCE(SUM(CASE WHEN TRIM(COALESCE(episodes.episode_cover_url, '')) = '' AND ? = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
+				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection,
+				COALESCE(SUM(CASE WHEN TRIM(COALESCE(episodes.audio_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_audio`, strings.TrimSpace(channel.CoverURL)).
+			Where("posts.kind = ? AND posts.deleted_at IS NULL AND posts.author_id = ? AND posts.channel_id = ?", "podcast", userID, channel.ID).
 			Scan(&counts).Error
 	case ModuleVideo:
-		err = s.db.Model(&model.Video{}).
+		err = s.db.Table("content_entries AS posts").
+			Joins("JOIN content_video_extensions videos ON videos.content_id = posts.id").
 			Select(`COUNT(*) AS contents,
-				COALESCE(SUM(CASE WHEN videos.status = 'published' THEN 1 ELSE 0 END), 0) AS published,
-				COALESCE(SUM(CASE WHEN videos.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
+				COALESCE(SUM(CASE WHEN posts.status = 'published' THEN 1 ELSE 0 END), 0) AS published,
+				COALESCE(SUM(CASE WHEN posts.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
 				COALESCE(SUM(videos.view_count), 0) AS views,
 				COALESCE(SUM(CASE WHEN TRIM(COALESCE(videos.thumbnail_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
-				COALESCE(SUM(CASE WHEN videos.collection_id IS NULL AND NOT EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id) THEN 1 ELSE 0 END), 0) AS missing_collection,
+				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection,
 				COALESCE(SUM(CASE WHEN videos.processing_status = 'failed' THEN 1 ELSE 0 END), 0) AS processing_failed,
 				COALESCE(SUM(CASE WHEN videos.storage_type = 'external' AND TRIM(COALESCE(videos.video_url, '')) = '' THEN 1 ELSE 0 END), 0) AS external_unplayable`).
-			Where("videos.user_id = ? AND videos.channel_id = ?", userID, channel.ID).
+			Where("posts.kind = ? AND posts.deleted_at IS NULL AND posts.author_id = ? AND posts.channel_id = ?", "video", userID, channel.ID).
 			Scan(&counts).Error
 	default:
 		return dashboardCounts{}, fmt.Errorf("invalid Studio module %q", module)

@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestValidateContentScopeUsesCollectionModuleInsteadOfChannelType(t *testing.T) {
+func TestValidateContentScopeAcceptsSharedCollectionAcrossModules(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.ContentCollection{})
 	user := model.User{Username: "scope-owner", Email: "scope-owner@example.com", Password: "hash", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
@@ -22,35 +22,45 @@ func TestValidateContentScopeUsesCollectionModuleInsteadOfChannelType(t *testing
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatal(err)
 	}
-	podcastCollection := model.Collection{ChannelID: channel.ID, ContentType: string(ModulePodcast), Name: "Episodes"}
-	if err := db.Create(&podcastCollection).Error; err != nil {
+	collection := model.ContentCollection{ChannelID: channel.ID, CreatedBy: &user.UUID, Name: "Shared"}
+	if err := db.Create(&collection).Error; err != nil {
 		t.Fatal(err)
 	}
 
-	if err := NewService(db).ValidateContentScope(user.UUID, channel.ID, ModulePodcast, []uuid.UUID{podcastCollection.ID}, true); err != nil {
-		t.Fatalf("expected shared channel with podcast collection to be valid: %v", err)
+	for _, module := range []Module{ModuleBlog, ModulePodcast, ModuleVideo} {
+		if err := NewService(db).ValidateContentScope(user.UUID, channel.ID, module, []uuid.UUID{collection.ID}, true); err != nil {
+			t.Fatalf("expected shared collection to be valid for %s: %v", module, err)
+		}
 	}
 }
 
-func TestValidateContentScopeRejectsCollectionFromAnotherModule(t *testing.T) {
+func TestValidateContentScopeRejectsCollectionFromAnotherChannel(t *testing.T) {
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Collection{})
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.ContentCollection{})
 	user := model.User{Username: "module-owner", Email: "module-owner@example.com", Password: "hash", IsActive: true}
+	foreignUser := model.User{Username: "foreign-owner", Email: "foreign-owner@example.com", Password: "hash", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Create(&foreignUser).Error; err != nil {
+		t.Fatal(err)
+	}
 	channel := model.Channel{UserID: &user.UUID, Name: "Module Channel", Slug: "module-channel"}
+	foreignChannel := model.Channel{UserID: &foreignUser.UUID, Name: "Foreign Channel", Slug: "foreign-channel"}
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatal(err)
 	}
-	videoCollection := model.Collection{ChannelID: channel.ID, ContentType: string(ModuleVideo), Name: "Videos"}
-	if err := db.Create(&videoCollection).Error; err != nil {
+	if err := db.Create(&foreignChannel).Error; err != nil {
+		t.Fatal(err)
+	}
+	foreignCollection := model.ContentCollection{ChannelID: foreignChannel.ID, CreatedBy: &foreignUser.UUID, Name: "Foreign"}
+	if err := db.Create(&foreignCollection).Error; err != nil {
 		t.Fatal(err)
 	}
 
-	err := NewService(db).ValidateContentScope(user.UUID, channel.ID, ModuleBlog, []uuid.UUID{videoCollection.ID}, true)
-	if app := apperr.FromError(err); app == nil || app.HTTPStatus != 400 {
-		t.Fatalf("expected module mismatch 400, got %v", err)
+	err := NewService(db).ValidateContentScope(user.UUID, channel.ID, ModuleBlog, []uuid.UUID{foreignCollection.ID}, true)
+	if app := apperr.FromError(err); app == nil || app.HTTPStatus != 403 {
+		t.Fatalf("expected foreign collection 403, got %v", err)
 	}
 }
 

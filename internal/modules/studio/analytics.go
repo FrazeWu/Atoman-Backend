@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -173,8 +174,8 @@ func (s *Service) shareableContent(userID, channelID uuid.UUID, module Module, c
 		}
 		return entry.Visibility, entry.Status, "/posts/post/" + entry.ID.String(), nil
 	case ModulePodcast:
-		var episode model.PodcastEpisode
-		if err := s.db.Preload("Post").First(&episode, "id = ?", contentID).Error; err != nil {
+		episode, err := contentmodule.LoadPodcastEpisode(s.db, contentmodule.PodcastQuery(s.db).Where("episodes.episode_id = ?", contentID))
+		if err != nil {
 			return "", "", "", contentLookupError(err)
 		}
 		if episode.Post == nil || episode.Post.UserID != userID || episode.ChannelID != channelID {
@@ -182,8 +183,8 @@ func (s *Service) shareableContent(userID, channelID uuid.UUID, module Module, c
 		}
 		return episode.Post.Visibility, episode.Post.Status, "/podcasts/episode/" + episode.ID.String(), nil
 	case ModuleVideo:
-		var video model.Video
-		if err := s.db.First(&video, "id = ?", contentID).Error; err != nil {
+		video, err := contentmodule.LoadVideo(s.db, contentmodule.VideoQuery(s.db).Where("videos.video_id = ?", contentID))
+		if err != nil {
 			return "", "", "", contentLookupError(err)
 		}
 		if video.UserID != userID || video.ChannelID == nil || *video.ChannelID != channelID {

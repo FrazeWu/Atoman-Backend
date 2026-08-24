@@ -250,7 +250,7 @@ func resolveBlogCollection(db *gorm.DB, userID, channelID uuid.UUID, requestedID
 	collection = model.ContentCollection{
 		ChannelID:   channelID,
 		CreatedBy:   &userID,
-		Name:        "默认专栏",
+		Name:        "默认合集",
 		Description: "默认合集",
 		IsDefault:   true,
 	}

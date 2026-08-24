@@ -2,11 +2,11 @@ package studio
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -66,33 +66,16 @@ func (s *Service) validateContentQuery(userID uuid.UUID, module Module, query Co
 	if query.CollectionID == uuid.Nil {
 		return nil
 	}
-	var collectionChannelID uuid.UUID
-	if module == ModuleBlog {
-		var collection model.ContentCollection
-		if err := s.db.First(&collection, "id = ?", query.CollectionID).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return apperr.NotFound("studio.collection_not_found", "Collection not found")
-		} else if err != nil {
-			return err
-		} else {
-			collectionChannelID = collection.ChannelID
-		}
-	} else {
-		collection, err := s.repo.GetCollection(query.CollectionID)
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return apperr.NotFound("studio.collection_not_found", "Collection not found")
-		}
-		if err != nil {
-			return err
-		}
-		if collection.ContentType != string(module) {
-			return apperr.BadRequest("studio.collection_module_mismatch", "Collection does not belong to this module")
-		}
-		collectionChannelID = collection.ChannelID
-	}
-	if _, err := s.ownedChannel(userID, collectionChannelID); err != nil {
+	var collection model.ContentCollection
+	if err := s.db.First(&collection, "id = ?", query.CollectionID).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return apperr.NotFound("studio.collection_not_found", "Collection not found")
+	} else if err != nil {
 		return err
 	}
-	if collectionChannelID != query.ChannelID {
+	if _, err := s.ownedChannel(userID, collection.ChannelID); err != nil {
+		return err
+	}
+	if collection.ChannelID != query.ChannelID {
 		return apperr.BadRequest("studio.invalid_collection_scope", "Collection does not belong to the selected channel")
 	}
 	return nil
@@ -231,33 +214,39 @@ func (s *Service) listBlogContents(userID uuid.UUID, query ContentQuery) ([]Stud
 }
 
 func (s *Service) listPodcastContents(userID uuid.UUID, query ContentQuery) ([]StudioContentItem, int64, error) {
-	db := s.db.Model(&model.PodcastEpisode{}).
-		Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL").
-		Where("posts.user_id = ? AND podcast_episodes.channel_id = ?", userID, query.ChannelID)
-	db = applyPostContentFilters(db, query)
+	db := contentmodule.PodcastQuery(s.db).
+		Where("posts.author_id = ? AND posts.channel_id = ?", userID, query.ChannelID)
+	if query.Status != "" {
+		db = db.Where("posts.status = ?", strings.TrimSpace(query.Status))
+	}
+	if visibility, _ := studioVisibilityToDB(query.Visibility); visibility != "" {
+		db = db.Where("posts.visibility = ?", visibility)
+	}
+	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
+		like := "%" + search + "%"
+		db = db.Where("LOWER(posts.title) LIKE ? OR LOWER(posts.summary) LIKE ? OR LOWER(episodes.shownotes) LIKE ?", like, like, like)
+	}
 	switch strings.TrimSpace(query.Issue) {
 	case "draft":
 		db = db.Where("posts.status = ?", "draft")
 	case "missing_cover":
-		db = db.Where("TRIM(COALESCE(podcast_episodes.episode_cover_url, '')) = ''")
+		db = db.Where("TRIM(COALESCE(episodes.episode_cover_url, '')) = ''")
 	case "missing_collection":
-		db = db.Where("posts.collection_id IS NULL AND NOT EXISTS (SELECT 1 FROM post_collections WHERE post_collections.post_id = posts.id)")
+		db = db.Where("NOT EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id)")
 	case "missing_audio":
-		db = db.Where("TRIM(COALESCE(podcast_episodes.audio_url, '')) = ''")
+		db = db.Where("TRIM(COALESCE(episodes.audio_url, '')) = ''")
 	}
 	if query.CollectionID != uuid.Nil {
-		db = db.Where("posts.collection_id = ? OR EXISTS (SELECT 1 FROM post_collections WHERE post_collections.post_id = posts.id AND post_collections.collection_id = ?)", query.CollectionID, query.CollectionID)
+		db = db.Where("EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id AND memberships.collection_id = ?)", query.CollectionID)
 	}
 	var total int64
-	if err := db.Count(&total).Error; err != nil {
+	if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var episodes []model.PodcastEpisode
-	if err := db.Preload("Post").Preload("Post.Collection").Preload("Post.Collections", "content_type = ?", string(ModulePodcast)).
-		Order("CASE WHEN podcast_episodes.updated_at > posts.updated_at THEN podcast_episodes.updated_at ELSE posts.updated_at END DESC").
-		Order("podcast_episodes.id DESC").
-		Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).
-		Find(&episodes).Error; err != nil {
+	episodes, err := contentmodule.LoadPodcastEpisodes(s.db, db.
+		Order("episodes.updated_at DESC, episodes.episode_id DESC").
+		Offset((query.Page-1)*query.PageSize).Limit(query.PageSize))
+	if err != nil {
 		return nil, 0, err
 	}
 	items := make([]StudioContentItem, 0, len(episodes))
@@ -266,11 +255,7 @@ func (s *Service) listPodcastContents(userID uuid.UUID, query ContentQuery) ([]S
 			continue
 		}
 		post := *episode.Post
-		collections := append([]model.Collection{}, post.Collections...)
-		if post.Collection != nil && post.Collection.ContentType == string(ModulePodcast) {
-			collections = append(collections, *post.Collection)
-		}
-		item := studioPostItem(ModulePodcast, episode.ID, post, collections)
+		item := studioPostItem(ModulePodcast, episode.ID, post, post.Collections)
 		item.CoverURL = episode.EpisodeCoverURL
 		item.DurationSec = episode.DurationSec
 		item.CreatedAt = earlierTime(post.CreatedAt, episode.CreatedAt)
@@ -284,44 +269,40 @@ func (s *Service) listPodcastContents(userID uuid.UUID, query ContentQuery) ([]S
 }
 
 func (s *Service) listVideoContents(userID uuid.UUID, query ContentQuery) ([]StudioContentItem, int64, error) {
-	if !s.db.Migrator().HasTable(&model.Video{}) {
-		return nil, 0, fmt.Errorf("video content table is unavailable")
-	}
-	db := s.db.Model(&model.Video{}).Where("videos.user_id = ? AND videos.channel_id = ?", userID, query.ChannelID)
+	db := contentmodule.VideoQuery(s.db).Where("posts.author_id = ? AND posts.channel_id = ?", userID, query.ChannelID)
 	if query.Status != "" {
-		db = db.Where("videos.status = ?", strings.TrimSpace(query.Status))
+		db = db.Where("posts.status = ?", strings.TrimSpace(query.Status))
 	}
 	if visibility, _ := studioVisibilityToDB(query.Visibility); visibility != "" {
-		db = db.Where("videos.visibility = ?", visibility)
+		db = db.Where("posts.visibility = ?", visibility)
 	}
 	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
 		like := "%" + search + "%"
-		db = db.Where("LOWER(videos.title) LIKE ? OR LOWER(videos.description) LIKE ?", like, like)
+		db = db.Where("LOWER(posts.title) LIKE ? OR LOWER(posts.summary) LIKE ?", like, like)
 	}
 	switch strings.TrimSpace(query.Issue) {
 	case "draft":
-		db = db.Where("videos.status = ?", "draft")
+		db = db.Where("posts.status = ?", "draft")
 	case "missing_cover":
 		db = db.Where("TRIM(COALESCE(videos.thumbnail_url, '')) = ''")
 	case "missing_collection":
-		db = db.Where("videos.collection_id IS NULL AND NOT EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id)")
+		db = db.Where("NOT EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id)")
 	case "processing_failed":
 		db = db.Where("videos.processing_status = ?", "failed")
 	case "external_unplayable":
 		db = db.Where("videos.storage_type = ? AND TRIM(COALESCE(videos.video_url, '')) = ''", "external")
 	}
 	if query.CollectionID != uuid.Nil {
-		db = db.Where("videos.collection_id = ? OR EXISTS (SELECT 1 FROM video_collections WHERE video_collections.video_id = videos.id AND video_collections.collection_id = ?)", query.CollectionID, query.CollectionID)
+		db = db.Where("EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id AND memberships.collection_id = ?)", query.CollectionID)
 	}
 	var total int64
-	if err := db.Count(&total).Error; err != nil {
+	if err := db.Session(&gorm.Session{}).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
-	var videos []model.Video
-	if err := db.Preload("Collection").Preload("Collections", "content_type = ?", string(ModuleVideo)).
-		Order("videos.updated_at DESC").Order("videos.id DESC").
-		Offset((query.Page - 1) * query.PageSize).Limit(query.PageSize).
-		Find(&videos).Error; err != nil {
+	videos, err := contentmodule.LoadVideos(s.db, db.
+		Order("videos.updated_at DESC, videos.video_id DESC").
+		Offset((query.Page-1)*query.PageSize).Limit(query.PageSize))
+	if err != nil {
 		return nil, 0, err
 	}
 	items := make([]StudioContentItem, 0, len(videos))
@@ -330,15 +311,11 @@ func (s *Service) listVideoContents(userID uuid.UUID, query ContentQuery) ([]Stu
 		if video.ChannelID != nil {
 			channelID = *video.ChannelID
 		}
-		collections := append([]model.Collection{}, video.Collections...)
-		if video.Collection != nil {
-			collections = append(collections, *video.Collection)
-		}
 		item := StudioContentItem{
 			ID: video.ID, Module: ModuleVideo, ChannelID: channelID,
 			Title: video.Title, Summary: video.Description, CoverURL: video.ThumbnailURL,
 			Status: video.Status, Visibility: studioVisibilityFromDB(video.Visibility),
-			Collections: studioCollectionSummaries(collections), CollectionConflict: video.CollectionConflict, DurationSec: video.DurationSec,
+			Collections: studioCollectionSummaries(video.Collections), CollectionConflict: video.CollectionConflict, DurationSec: video.DurationSec,
 			ViewCount: int64(video.ViewCount), ProcessingStatus: video.ProcessingStatus,
 			PublishedAt: video.PublishedAt, ScheduledAt: video.ScheduledAt,
 			CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt,

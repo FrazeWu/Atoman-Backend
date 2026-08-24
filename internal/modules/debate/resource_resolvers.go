@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/platform/resourceref"
 
 	"github.com/google/uuid"
@@ -80,18 +81,17 @@ func NewResourceRegistry(db *gorm.DB) *resourceref.Registry {
 		return resolved(kindTitle(resourceref.KindPodcast, id, item.Name), err == nil), err
 	})
 	register(resourceref.KindEpisode, func(_ context.Context, _ resourceref.Viewer, id uuid.UUID) (resourceref.Resolved, error) {
-		var item model.PodcastEpisode
-		err := db.Preload("Post").First(&item, "id = ?", id).Error
-		visible := err == nil && item.Post != nil && isPublicPublishedPost(*item.Post)
+		item, err := contentmodule.LoadPodcastEpisode(db, contentmodule.PodcastQuery(db).Where("episodes.episode_id = ?", id))
 		title := ""
+		visible := false
 		if item.Post != nil {
 			title = item.Post.Title
+			visible = isPublicPublishedPost(*item.Post)
 		}
 		return resolved(kindTitle(resourceref.KindEpisode, id, title), visible), err
 	})
 	register(resourceref.KindVideo, func(_ context.Context, _ resourceref.Viewer, id uuid.UUID) (resourceref.Resolved, error) {
-		var item model.Video
-		err := db.First(&item, "id = ?", id).Error
+		item, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", id))
 		return resolved(kindTitle(resourceref.KindVideo, id, item.Title), err == nil && item.Status == "published" && item.Visibility == "public"), err
 	})
 	register(resourceref.KindPerson, func(_ context.Context, _ resourceref.Viewer, id uuid.UUID) (resourceref.Resolved, error) {
@@ -162,13 +162,11 @@ func publicCommentTargetVisible(db *gorm.DB, target model.DiscussionTarget) (boo
 		err := db.Where("id = ? AND kind = ?", target.ResourceID, "blog").First(&item).Error
 		return err == nil && isPublicPublishedContentEntry(item), err
 	case "video":
-		var item model.Video
-		err := db.First(&item, "id = ?", target.ResourceID).Error
+		item, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", target.ResourceID))
 		return err == nil && item.Status == "published" && item.Visibility == "public", err
 	case "podcast_episode":
-		var item model.PodcastEpisode
-		err := db.Preload("Post").First(&item, "id = ?", target.ResourceID).Error
-		return err == nil && item.Post != nil && item.Post.Status == "published" && item.Post.Visibility == "public", err
+		item, err := contentmodule.LoadPodcastEpisode(db, contentmodule.PodcastQuery(db).Where("episodes.episode_id = ?", target.ResourceID))
+		return err == nil && item.Post != nil && isPublicPublishedPost(*item.Post), err
 	case "feed_article":
 		var item model.FeedItem
 		err := db.Preload("FeedSource").First(&item, "id = ?", target.ResourceID).Error

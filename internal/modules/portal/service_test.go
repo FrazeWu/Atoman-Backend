@@ -16,7 +16,7 @@ func migratePortalHotContentTables(t *testing.T, db *gorm.DB) {
 	t.Helper()
 	testdb.Migrate(t, db,
 		&model.User{}, &model.Channel{}, &model.Post{},
-		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentCollectionMembership{},
+		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{}, &model.ContentCollectionMembership{},
 		&model.Video{}, &model.Artist{}, &model.Album{}, &model.AlbumArtist{},
 		&model.ForumCategory{}, &model.ForumTopic{}, &model.ForumGroup{}, &model.ForumCategoryPermission{},
 		&model.Debate{}, &model.PodcastEpisode{}, &model.FeedSource{}, &model.FeedItem{}, &model.TimelineEvent{},
@@ -292,6 +292,8 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 		&model.Post{},
 		&model.ContentEntry{},
 		&model.ContentBlogExtension{},
+		&model.ContentEpisodeExtension{},
+		&model.ContentVideoExtension{},
 		&model.ContentCollectionMembership{},
 		&model.Video{},
 		&model.FeedSource{},
@@ -358,6 +360,21 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 	if err := db.Create(&video).Error; err != nil {
 		t.Fatalf("create video: %v", err)
 	}
+	videoChannel := channel.ID
+	videoEntry := model.ContentEntry{
+		Base: video.Base, AuthorID: &userID, ChannelID: videoChannel, Kind: "video", Title: video.Title,
+		Status: video.Status, Visibility: video.Visibility,
+	}
+	if err := db.Create(&videoEntry).Error; err != nil {
+		t.Fatalf("create canonical video entry: %v", err)
+	}
+	if err := db.Create(&model.ContentVideoExtension{
+		ContentID: videoEntry.ID, VideoID: video.ID, CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt,
+		StorageType: video.StorageType, VideoURL: video.VideoURL, ThumbnailURL: video.ThumbnailURL,
+		DurationSec: video.DurationSec, ProcessingStatus: video.ProcessingStatus, ViewCount: video.ViewCount,
+	}).Error; err != nil {
+		t.Fatalf("create canonical video extension: %v", err)
+	}
 	if err := db.Create(&feedItem).Error; err != nil {
 		t.Fatalf("create feed item: %v", err)
 	}
@@ -374,6 +391,21 @@ func TestHotContentUsesReachableTargetPaths(t *testing.T) {
 	}
 	if err := db.Create(&episode).Error; err != nil {
 		t.Fatalf("create episode: %v", err)
+	}
+	podcastEntry := model.ContentEntry{
+		Base: post.Base, AuthorID: &userID, ChannelID: channel.ID, Kind: "podcast", Title: post.Title,
+		Summary: post.Summary, CoverURL: post.CoverURL, Status: post.Status, Visibility: post.Visibility,
+	}
+	if err := db.Create(&podcastEntry).Error; err != nil {
+		t.Fatalf("create canonical podcast entry: %v", err)
+	}
+	if err := db.Create(&model.ContentEpisodeExtension{
+		ContentID: podcastEntry.ID, EpisodeID: episode.ID, LegacyPostID: post.ID,
+		CreatedAt: episode.CreatedAt, UpdatedAt: episode.UpdatedAt, AudioURL: episode.AudioURL,
+		DurationSec: episode.DurationSec, EpisodeCoverURL: episode.EpisodeCoverURL,
+		SeasonNumber: episode.SeasonNumber, EpisodeNumber: episode.EpisodeNumber,
+	}).Error; err != nil {
+		t.Fatalf("create canonical podcast extension: %v", err)
 	}
 
 	response, err := NewService(db).HotContent(6)

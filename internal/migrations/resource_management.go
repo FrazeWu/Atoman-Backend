@@ -14,9 +14,9 @@ import (
 )
 
 var studioDefaultCollectionNames = map[string]string{
-	"blog":    "未分类文章",
-	"podcast": "未分类单集",
-	"video":   "未分类视频",
+	"blog":    "默认合集",
+	"podcast": "默认合集",
+	"video":   "默认合集",
 }
 
 // RunResourceManagementMigration establishes the additive single-collection model.
@@ -50,31 +50,113 @@ func ensureStudioDefaultCollections(tx *gorm.DB) (map[string]uuid.UUID, error) {
 	}
 	defaults := make(map[string]uuid.UUID, len(channels)*len(studioDefaultCollectionNames))
 	for _, channel := range channels {
-		for _, contentType := range []string{"blog", "podcast", "video"} {
-			var collection model.Collection
-			err := tx.Where("channel_id = ? AND content_type = ? AND is_default = ?", channel.ID, contentType, true).
-				Order("created_at ASC, id ASC").First(&collection).Error
-			if errors.Is(err, gorm.ErrRecordNotFound) {
-				name := studioDefaultCollectionNames[contentType]
-				err = tx.Where("channel_id = ? AND content_type = ? AND LOWER(name) = LOWER(?)", channel.ID, contentType, name).
-					First(&collection).Error
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					collection = model.Collection{
-						ChannelID: channel.ID, ContentType: contentType, CreatedBy: channel.UserID,
-						Name: name, IsDefault: true,
-					}
-					err = tx.Create(&collection).Error
-				} else if err == nil {
-					err = tx.Model(&collection).Update("is_default", true).Error
-				}
+		var unified model.ContentCollection
+		err := tx.Where("channel_id = ? AND is_default = ?", channel.ID, true).
+			Order("created_at ASC, id ASC").First(&unified).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			unified = model.ContentCollection{
+				ChannelID:   channel.ID,
+				CreatedBy:   channel.UserID,
+				Name:        "默认合集",
+				Description: "默认合集",
+				IsDefault:   true,
 			}
+			if err := tx.Create(&unified).Error; err != nil {
+				return nil, fmt.Errorf("ensure unified default collection for channel %s: %w", channel.ID, err)
+			}
+		} else if err != nil {
+			return nil, fmt.Errorf("load unified default collection for channel %s: %w", channel.ID, err)
+		}
+
+		for _, contentType := range []string{"blog", "podcast", "video"} {
+			legacy, err := needsLegacyDefaultCollection(tx, channel.ID, contentType)
 			if err != nil {
-				return nil, fmt.Errorf("ensure %s default collection for channel %s: %w", contentType, channel.ID, err)
+				return nil, err
+			}
+			if !legacy {
+				continue
+			}
+			collection, err := ensureLegacyDefaultCollection(tx, channel, contentType)
+			if err != nil {
+				return nil, fmt.Errorf("ensure %s legacy default collection for channel %s: %w", contentType, channel.ID, err)
 			}
 			defaults[defaultCollectionKey(channel.ID, contentType)] = collection.ID
 		}
 	}
 	return defaults, nil
+}
+
+func ensureLegacyDefaultCollection(tx *gorm.DB, channel model.Channel, contentType string) (model.Collection, error) {
+	var collection model.Collection
+	err := tx.Where("channel_id = ? AND content_type = ? AND is_default = ?", channel.ID, contentType, true).
+		Order("created_at ASC, id ASC").First(&collection).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		name := studioDefaultCollectionNames[contentType]
+		err = tx.Where("channel_id = ? AND content_type = ? AND LOWER(name) = LOWER(?)", channel.ID, contentType, name).
+			First(&collection).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			collection = model.Collection{
+				ChannelID: channel.ID, ContentType: contentType, CreatedBy: channel.UserID,
+				Name: name, IsDefault: true,
+			}
+			err = tx.Create(&collection).Error
+		} else if err == nil {
+			err = tx.Model(&collection).Update("is_default", true).Error
+		}
+	}
+	return collection, err
+}
+
+func needsLegacyDefaultCollection(tx *gorm.DB, channelID uuid.UUID, contentType string) (bool, error) {
+	var legacyCount int64
+	if err := tx.Model(&model.Collection{}).
+		Where("channel_id = ? AND content_type = ?", channelID, contentType).
+		Count(&legacyCount).Error; err != nil {
+		return false, err
+	}
+	if legacyCount > 0 {
+		return true, nil
+	}
+
+	switch contentType {
+	case "blog":
+		if !tx.Migrator().HasTable(&model.Post{}) {
+			return false, nil
+		}
+		if !tx.Migrator().HasTable(&model.ContentPostExtension{}) {
+			return countChannelRows(tx, &model.Post{}, "channel_id = ?", channelID)
+		}
+		return countChannelRows(tx, &model.Post{},
+			"channel_id = ? AND NOT EXISTS (SELECT 1 FROM content_post_extensions WHERE content_post_extensions.post_id = posts.id)", channelID)
+	case "podcast":
+		if !tx.Migrator().HasTable(&model.PodcastEpisode{}) {
+			return false, nil
+		}
+		if !tx.Migrator().HasTable(&model.ContentEpisodeExtension{}) {
+			return countChannelRows(tx, &model.PodcastEpisode{}, "channel_id = ?", channelID)
+		}
+		return countChannelRows(tx, &model.PodcastEpisode{},
+			"channel_id = ? AND NOT EXISTS (SELECT 1 FROM content_episode_extensions WHERE content_episode_extensions.episode_id = podcast_episodes.id)", channelID)
+	case "video":
+		if !tx.Migrator().HasTable(&model.Video{}) {
+			return false, nil
+		}
+		if !tx.Migrator().HasTable(&model.ContentVideoExtension{}) {
+			return countChannelRows(tx, &model.Video{}, "channel_id = ?", channelID)
+		}
+		return countChannelRows(tx, &model.Video{},
+			"channel_id = ? AND NOT EXISTS (SELECT 1 FROM content_video_extensions WHERE content_video_extensions.video_id = videos.id)", channelID)
+	default:
+		return false, nil
+	}
+}
+
+func countChannelRows(tx *gorm.DB, destination any, where string, channelID uuid.UUID) (bool, error) {
+	var count int64
+	if err := tx.Model(destination).Where(where, channelID).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func migrateStudioSettingsScope(tx *gorm.DB) error {
@@ -124,6 +206,15 @@ func migratePodcastCollections(tx *gorm.DB, defaults map[string]uuid.UUID) error
 	}
 	positions := make(map[uuid.UUID]int)
 	for _, episode := range episodes {
+		if tx.Migrator().HasTable(&model.ContentEpisodeExtension{}) {
+			var canonicalCount int64
+			if err := tx.Model(&model.ContentEpisodeExtension{}).Where("episode_id = ?", episode.ID).Count(&canonicalCount).Error; err != nil {
+				return err
+			}
+			if canonicalCount > 0 {
+				continue
+			}
+		}
 		if episode.Post == nil {
 			return fmt.Errorf("podcast episode %s has no post", episode.ID)
 		}
@@ -200,6 +291,15 @@ func migrateVideoCollections(tx *gorm.DB, defaults map[string]uuid.UUID) error {
 	}
 	positions := make(map[uuid.UUID]int)
 	for _, video := range videos {
+		if tx.Migrator().HasTable(&model.ContentVideoExtension{}) {
+			var canonicalCount int64
+			if err := tx.Model(&model.ContentVideoExtension{}).Where("video_id = ?", video.ID).Count(&canonicalCount).Error; err != nil {
+				return err
+			}
+			if canonicalCount > 0 {
+				continue
+			}
+		}
 		if video.ChannelID == nil {
 			if video.Status == "published" {
 				return fmt.Errorf("published video %s has no channel", video.ID)
@@ -336,6 +436,14 @@ func createDefaultCollectionProtection(tx *gorm.DB) error {
 			`CREATE TRIGGER protect_active_default_collection_delete
 				BEFORE DELETE ON collections
 				FOR EACH ROW EXECUTE FUNCTION protect_active_default_collection()`,
+			`DROP TRIGGER IF EXISTS protect_active_default_content_collection_update ON content_collections`,
+			`CREATE TRIGGER protect_active_default_content_collection_update
+				BEFORE UPDATE OF is_default, deleted_at ON content_collections
+				FOR EACH ROW EXECUTE FUNCTION protect_active_default_collection()`,
+			`DROP TRIGGER IF EXISTS protect_active_default_content_collection_delete ON content_collections`,
+			`CREATE TRIGGER protect_active_default_content_collection_delete
+				BEFORE DELETE ON content_collections
+				FOR EACH ROW EXECUTE FUNCTION protect_active_default_collection()`,
 		}
 		for _, statement := range statements {
 			if err := tx.Exec(statement).Error; err != nil {
@@ -355,6 +463,19 @@ func createDefaultCollectionProtection(tx *gorm.DB) error {
 			`DROP TRIGGER IF EXISTS protect_active_default_collection_delete`,
 			`CREATE TRIGGER protect_active_default_collection_delete
 				BEFORE DELETE ON collections
+				WHEN OLD.is_default = 1
+					AND EXISTS (SELECT 1 FROM channels WHERE id = OLD.channel_id AND deleted_at IS NULL)
+				BEGIN SELECT RAISE(ABORT, 'active system default collection is protected'); END`,
+			`DROP TRIGGER IF EXISTS protect_active_default_content_collection_update`,
+			`CREATE TRIGGER protect_active_default_content_collection_update
+				BEFORE UPDATE OF is_default, deleted_at ON content_collections
+				WHEN OLD.is_default = 1
+					AND EXISTS (SELECT 1 FROM channels WHERE id = OLD.channel_id AND deleted_at IS NULL)
+					AND (NEW.is_default = 0 OR (OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL))
+				BEGIN SELECT RAISE(ABORT, 'active system default collection is protected'); END`,
+			`DROP TRIGGER IF EXISTS protect_active_default_content_collection_delete`,
+			`CREATE TRIGGER protect_active_default_content_collection_delete
+				BEFORE DELETE ON content_collections
 				WHEN OLD.is_default = 1
 					AND EXISTS (SELECT 1 FROM channels WHERE id = OLD.channel_id AND deleted_at IS NULL)
 				BEGIN SELECT RAISE(ABORT, 'active system default collection is protected'); END`,

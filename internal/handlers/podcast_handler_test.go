@@ -39,7 +39,10 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 		&model.FeedSource{},
 		&model.Subscription{},
 		&model.PodcastEpisode{},
-		&model.ContentPublicationEvent{},
+		&model.ContentEntry{},
+		&model.ContentEpisodeExtension{},
+		&model.ContentCollection{},
+		&model.ContentCollectionMembership{},
 		&model.StudioMetricEvent{},
 		&model.PodcastEpisodeBookmark{},
 		&model.ChannelBookmark{},
@@ -57,6 +60,8 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
+
+	registerPodcastCanonicalTestCallbacks(t, db)
 
 	r := gin.New()
 	SetupPodcastRoutes(r, db, nil)
@@ -176,7 +181,7 @@ func TestGetPodcastEpisodesReturnsInternalServerErrorWhenQueryFails(t *testing.T
 
 	callbackName := "podcast_episode_list_error_" + strings.ReplaceAll(t.Name(), "/", "_")
 	if err := db.Callback().Query().Before("gorm:query").Register(callbackName, func(tx *gorm.DB) {
-		if tx.Statement.Table == "podcast_episodes" {
+		if tx.Statement.Table == "content_entries" {
 			tx.AddError(errors.New("injected episode list error"))
 		}
 	}); err != nil {
@@ -269,9 +274,19 @@ func TestGetPodcastEpisodeAllowsPublishedOrAuthorDraftOnly(t *testing.T) {
 	if err := db.Delete(&model.Post{}, "id = ?", deletedPostEpisode.PostID).Error; err != nil {
 		t.Fatalf("soft delete post: %v", err)
 	}
+	if err := db.Delete(&model.ContentEntry{}, "id = ?", deletedPostEpisode.PostID).Error; err != nil {
+		t.Fatalf("soft delete canonical post: %v", err)
+	}
 	deletedEpisode := createPodcastEpisodeForPostStatus(t, db, user, channel, "published")
 	if err := db.Delete(&deletedEpisode).Error; err != nil {
 		t.Fatalf("soft delete episode: %v", err)
+	}
+	var deletedEpisodeExtension model.ContentEpisodeExtension
+	if err := db.Where("episode_id = ?", deletedEpisode.ID).First(&deletedEpisodeExtension).Error; err != nil {
+		t.Fatalf("load deleted episode mapping: %v", err)
+	}
+	if err := db.Delete(&model.ContentEntry{}, "id = ?", deletedEpisodeExtension.ContentID).Error; err != nil {
+		t.Fatalf("soft delete canonical episode: %v", err)
 	}
 
 	cases := []struct {
@@ -322,12 +337,20 @@ func TestPodcastPublishedVisibilityAppliesToListsDetailAndRSS(t *testing.T) {
 	publicEpisode := createPodcastEpisodeForPostStatus(t, db, owner, channel, "published")
 	followersEpisode := createPodcastEpisodeForPostStatus(t, db, owner, channel, "published")
 	privateEpisode := createPodcastEpisodeForPostStatus(t, db, owner, channel, "published")
-	require.NoError(t, db.Model(&model.Post{}).Where("id = ?", publicEpisode.PostID).Updates(map[string]any{"title": "Public podcast", "visibility": "public"}).Error)
-	require.NoError(t, db.Model(&model.Post{}).Where("id = ?", followersEpisode.PostID).Updates(map[string]any{"title": "Followers podcast", "visibility": "followers"}).Error)
-	require.NoError(t, db.Model(&model.Post{}).Where("id = ?", privateEpisode.PostID).Updates(map[string]any{"title": "Private podcast", "visibility": "private"}).Error)
-	require.NoError(t, db.Model(&model.PodcastEpisode{}).Where("id = ?", publicEpisode.ID).Update("audio_url", "https://cdn.example.com/public.mp3").Error)
-	require.NoError(t, db.Model(&model.PodcastEpisode{}).Where("id = ?", followersEpisode.ID).Update("audio_url", "https://cdn.example.com/followers.mp3").Error)
-	require.NoError(t, db.Model(&model.PodcastEpisode{}).Where("id = ?", privateEpisode.ID).Update("audio_url", "https://cdn.example.com/private.mp3").Error)
+	for _, update := range []struct {
+		episode    model.PodcastEpisode
+		title      string
+		visibility string
+	}{
+		{publicEpisode, "Public podcast", "public"},
+		{followersEpisode, "Followers podcast", "followers"},
+		{privateEpisode, "Private podcast", "private"},
+	} {
+		var extension model.ContentEpisodeExtension
+		require.NoError(t, db.Where("episode_id = ?", update.episode.ID).First(&extension).Error)
+		require.NoError(t, db.Model(&model.ContentEntry{}).Where("id = ?", extension.ContentID).Updates(map[string]any{"title": update.title, "visibility": update.visibility}).Error)
+		require.NoError(t, db.Model(&model.ContentEpisodeExtension{}).Where("episode_id = ?", update.episode.ID).Update("audio_url", "https://cdn.example.com/"+strings.ToLower(strings.Split(update.title, " ")[0])+".mp3").Error)
+	}
 	publicEpisode.AudioURL = "https://cdn.example.com/public.mp3"
 	followersEpisode.AudioURL = "https://cdn.example.com/followers.mp3"
 	privateEpisode.AudioURL = "https://cdn.example.com/private.mp3"
@@ -907,12 +930,12 @@ func TestCreatePodcastEpisodePersistsVisibility(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
 	}
-	var post model.Post
-	if err := db.Where("title = ?", "Private").First(&post).Error; err != nil {
+	var entry model.ContentEntry
+	if err := db.Where("title = ? AND kind = ?", "Private", "podcast").First(&entry).Error; err != nil {
 		t.Fatal(err)
 	}
-	if post.Visibility != "private" {
-		t.Fatalf("expected private visibility, got %q", post.Visibility)
+	if entry.Visibility != "private" {
+		t.Fatalf("expected private visibility, got %q", entry.Visibility)
 	}
 	var publicationCount int64
 	if err := db.Model(&model.ContentPublicationEvent{}).Where("content_type = ?", "podcast").Count(&publicationCount).Error; err != nil {
@@ -929,7 +952,7 @@ func TestUpdatePodcastEpisodeReturnsInternalServerErrorAndRollsBackWhenEpisodeUp
 
 	callbackName := "podcast_episode_update_error_" + strings.ReplaceAll(t.Name(), "/", "_")
 	if err := db.Callback().Update().Before("gorm:update").Register(callbackName, func(tx *gorm.DB) {
-		if tx.Statement.Table == "podcast_episodes" {
+		if tx.Statement.Table == "content_episode_extensions" {
 			tx.AddError(errors.New("injected episode update error"))
 		}
 	}); err != nil {
@@ -996,21 +1019,22 @@ func TestUpdatePodcastEpisodePublishUsesSystemDefaultCollection(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected collectionless publish 200, got %d: %s", response.Code, response.Body.String())
 	}
-	var post model.Post
-	if err := db.First(&post, "id = ?", episode.PostID).Error; err != nil {
+	var entry model.ContentEntry
+	if err := db.First(&entry, "id = ?", episode.PostID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if post.Status != "published" {
-		t.Fatalf("expected status to be published, got %q", post.Status)
+	if entry.Status != "published" {
+		t.Fatalf("expected status to be published, got %q", entry.Status)
 	}
-	if post.CollectionID == nil {
-		t.Fatal("expected system default collection to be assigned")
-	}
-	var collection model.Collection
-	if err := db.First(&collection, "id = ?", *post.CollectionID).Error; err != nil {
+	var membership model.ContentCollectionMembership
+	if err := db.Where("content_id = ?", entry.ID).First(&membership).Error; err != nil {
 		t.Fatal(err)
 	}
-	if !collection.IsDefault || collection.ContentType != "podcast" {
+	var collection model.ContentCollection
+	if err := db.First(&collection, "id = ?", membership.CollectionID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !collection.IsDefault {
 		t.Fatalf("expected podcast system default collection, got %#v", collection)
 	}
 }

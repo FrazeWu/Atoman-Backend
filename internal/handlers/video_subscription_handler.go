@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/platform/httpx"
 
 	"github.com/gin-gonic/gin"
@@ -34,22 +35,21 @@ func GetSubscribedVideos(db *gorm.DB) gin.HandlerFunc {
 		collectionIDs := db.Model(&model.FeedSource{}).
 			Select("feed_sources.source_id").
 			Joins("JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id").
-			Joins("JOIN collections ON collections.id = feed_sources.source_id AND collections.content_type = ?", "video").
 			Where("subscriptions.user_id = ? AND subscriptions.deleted_at IS NULL", userID).
 			Where("feed_sources.source_type = ? AND feed_sources.source_id IS NOT NULL", "internal_collection")
 
-		videos := make([]model.Video, 0)
-		query := db.Model(&model.Video{}).Preload("Channel").Preload("Collections").Preload("Tags").
-			Where("videos.status = ?", "published").
-			Where("(videos.visibility = ? OR (videos.visibility = ? AND (videos.channel_id IN (?) OR EXISTS (SELECT 1 FROM video_collections vc WHERE vc.video_id = videos.id AND vc.collection_id IN (?)))))", "public", "followers", channelIDs, collectionIDs).
-			Where("(videos.channel_id IN (?) OR EXISTS (SELECT 1 FROM video_collections vc WHERE vc.video_id = videos.id AND vc.collection_id IN (?)) )", channelIDs, collectionIDs).
-			Order("videos.created_at DESC, videos.id DESC")
+		query := contentmodule.VideoQuery(db).
+			Where("posts.status = ?", "published").
+			Where("(posts.visibility = ? OR (posts.visibility = ? AND (posts.channel_id IN (?) OR EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id AND memberships.collection_id IN (?)))))", "public", "followers", channelIDs, collectionIDs).
+			Where("(posts.channel_id IN (?) OR EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id AND memberships.collection_id IN (?)))", channelIDs, collectionIDs).
+			Order("posts.created_at DESC, videos.video_id DESC")
 		var total int64
 		if err := query.Count(&total).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to count subscribed videos"})
 			return
 		}
-		if err := query.Offset(httpx.Offset(page, pageSize)).Limit(pageSize).Find(&videos).Error; err != nil {
+		videos, err := contentmodule.LoadVideos(db, query.Offset(httpx.Offset(page, pageSize)).Limit(pageSize))
+		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch subscribed videos"})
 			return
 		}
@@ -89,14 +89,15 @@ func GetVideoCollectionBookmarks(db *gorm.DB) gin.HandlerFunc {
 		}
 		collectionsByID := make(map[uuid.UUID]*model.Collection, len(collectionIDs))
 		if len(collectionIDs) > 0 {
-			var collections []model.Collection
-			if err := db.Where("id IN (?) AND content_type = ?", collectionIDs, "video").Find(&collections).Error; err != nil {
+			var collections []model.ContentCollection
+			if err := db.Where("id IN ?", collectionIDs).Find(&collections).Error; err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch collection bookmarks"})
 				return
 			}
 			for index := range collections {
 				collection := collections[index]
-				collectionsByID[collection.ID] = &collection
+				adapted := model.Collection{Base: collection.Base, ChannelID: collection.ChannelID, ContentType: "video", CreatedBy: collection.CreatedBy, Name: collection.Name, Description: collection.Description, CoverURL: collection.CoverURL, IsDefault: collection.IsDefault}
+				collectionsByID[collection.ID] = &adapted
 			}
 		}
 

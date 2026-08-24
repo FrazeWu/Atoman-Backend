@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 )
 
 type videoBookmarkInput struct {
@@ -24,16 +25,20 @@ func GetVideoBookmarks(db *gorm.DB) gin.HandlerFunc {
 		userID := c.MustGet("userID").(uuid.UUID)
 		sort := strings.TrimSpace(c.DefaultQuery("sort", "latest"))
 		var bookmarks []model.VideoBookmark
-		query := db.Preload("Video").Where("video_bookmarks.user_id = ?", userID)
+		query := db.Where("video_bookmarks.user_id = ?", userID)
 		if sort == "popular" {
 			query = query.
-				Joins("JOIN videos ON videos.id = video_bookmarks.video_id").
+				Joins("JOIN content_video_extensions AS videos ON videos.video_id = video_bookmarks.video_id").
 				Order("videos.view_count DESC").
 				Order("video_bookmarks.created_at DESC")
 		} else {
 			query = query.Order("video_bookmarks.created_at DESC")
 		}
 		if err := query.Find(&bookmarks).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch video bookmarks"})
+			return
+		}
+		if err := hydrateVideoBookmarks(db, bookmarks); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch video bookmarks"})
 			return
 		}
@@ -50,8 +55,7 @@ func CreateVideoBookmark(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		var video model.Video
-		if err := db.First(&video, "id = ?", input.VideoID).Error; err != nil {
+		if _, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", input.VideoID)); err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
@@ -61,10 +65,16 @@ func CreateVideoBookmark(db *gorm.DB) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create video bookmark"})
 			return
 		}
-		if err := db.Preload("Video").First(&bookmark, "id = ?", bookmark.ID).Error; err != nil {
+		if err := db.First(&bookmark, "id = ?", bookmark.ID).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create video bookmark"})
 			return
 		}
+		hydrated := []model.VideoBookmark{bookmark}
+		if err := hydrateVideoBookmarks(db, hydrated); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create video bookmark"})
+			return
+		}
+		bookmark = hydrated[0]
 		c.JSON(http.StatusCreated, gin.H{"data": bookmark, "message": "ok"})
 	}
 }
@@ -83,6 +93,29 @@ func DeleteVideoBookmark(db *gorm.DB) gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"message": "ok"})
 	}
+}
+
+func hydrateVideoBookmarks(db *gorm.DB, bookmarks []model.VideoBookmark) error {
+	if len(bookmarks) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(bookmarks))
+	for _, bookmark := range bookmarks {
+		ids = append(ids, bookmark.VideoID)
+	}
+	videos, err := contentmodule.LoadVideos(db, contentmodule.VideoQuery(db).Where("videos.video_id IN ?", ids))
+	if err != nil {
+		return err
+	}
+	byID := make(map[uuid.UUID]*model.Video, len(videos))
+	for index := range videos {
+		video := videos[index]
+		byID[video.ID] = &video
+	}
+	for index := range bookmarks {
+		bookmarks[index].Video = byID[bookmarks[index].VideoID]
+	}
+	return nil
 }
 
 func GetChannelBookmarks(db *gorm.DB) gin.HandlerFunc {

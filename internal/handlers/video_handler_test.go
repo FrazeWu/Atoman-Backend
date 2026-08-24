@@ -30,7 +30,10 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.Channel{},
 		&model.Collection{},
 		&model.Video{},
-		&model.ContentPublicationEvent{},
+		&model.ContentEntry{},
+		&model.ContentVideoExtension{},
+		&model.ContentCollection{},
+		&model.ContentCollectionMembership{},
 		&model.VideoBookmark{},
 		&model.ChannelBookmark{},
 		&model.VideoProcessingJob{},
@@ -44,6 +47,7 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 	)
+	registerVideoCanonicalTestCallbacks(t, db)
 	return db
 }
 
@@ -356,14 +360,25 @@ func TestGetVideosUsesStableUniqueOrderingAcrossPages(t *testing.T) {
 
 func seedVideoUser(t *testing.T, db *gorm.DB) model.User {
 	t.Helper()
-	u := model.User{Username: "vuser_" + uuid.NewString()[:8], Email: uuid.NewString() + "@test.com", Password: "x", IsActive: true}
+	u := model.User{UUID: uuid.New(), Username: "vuser_" + uuid.NewString()[:8], Email: uuid.NewString() + "@test.com", Password: "x", IsActive: true}
 	require.NoError(t, db.Create(&u).Error)
+	var stored struct {
+		UUID uuid.UUID `gorm:"column:uuid"`
+	}
+	require.NoError(t, db.Table("Users").Select("uuid").Where("username = ?", u.Username).Scan(&stored).Error)
+	u.UUID = stored.UUID
 	return u
 }
 
 func seedVideo(t *testing.T, db *gorm.DB, userID uuid.UUID) model.Video {
 	t.Helper()
+	if userID == uuid.Nil {
+		var user model.User
+		require.NoError(t, db.First(&user).Error)
+		userID = user.UUID
+	}
 	v := model.Video{
+		Base:        model.Base{ID: uuid.New()},
 		UserID:      userID,
 		Title:       "test video",
 		StorageType: "local",
@@ -372,12 +387,19 @@ func seedVideo(t *testing.T, db *gorm.DB, userID uuid.UUID) model.Video {
 		Visibility:  "public",
 	}
 	require.NoError(t, db.Create(&v).Error)
+	syncVideoTestRecord(db, v.ID)
 	return v
 }
 
 func seedVideoWithState(t *testing.T, db *gorm.DB, userID uuid.UUID, status string, visibility string) model.Video {
 	t.Helper()
+	if userID == uuid.Nil {
+		var user model.User
+		require.NoError(t, db.First(&user).Error)
+		userID = user.UUID
+	}
 	v := model.Video{
+		Base:        model.Base{ID: uuid.New()},
 		UserID:      userID,
 		Title:       "test video",
 		StorageType: "local",
@@ -386,6 +408,7 @@ func seedVideoWithState(t *testing.T, db *gorm.DB, userID uuid.UUID, status stri
 		Visibility:  visibility,
 	}
 	require.NoError(t, db.Create(&v).Error)
+	syncVideoTestRecord(db, v.ID)
 	return v
 }
 
@@ -399,6 +422,7 @@ func withVideoAuth(userID uuid.UUID, h gin.HandlerFunc) gin.HandlerFunc {
 func seedVideoChannel(t *testing.T, db *gorm.DB, userID uuid.UUID, name string) model.Channel {
 	t.Helper()
 	channel := model.Channel{
+		Base:   model.Base{ID: uuid.New()},
 		UserID: &userID,
 		Name:   name,
 		Slug:   strings.ToLower(strings.ReplaceAll(name, " ", "-")) + "-" + uuid.NewString()[:8],
@@ -410,6 +434,7 @@ func seedVideoChannel(t *testing.T, db *gorm.DB, userID uuid.UUID, name string) 
 func seedVideoCollection(t *testing.T, db *gorm.DB, channelID uuid.UUID, name string) model.Collection {
 	t.Helper()
 	collection := model.Collection{
+		Base:        model.Base{ID: uuid.New()},
 		ChannelID:   channelID,
 		ContentType: "video",
 		Name:        name,

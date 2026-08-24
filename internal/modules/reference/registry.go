@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -137,18 +138,20 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 		}
 		return target(targetType, row.ID, row.Name, "podcast", "/show/"+row.Slug), nil
 	case "episode":
-		var row model.PodcastEpisode
-		if err := visiblePodcastEpisodes(r.db.Preload("Post"), viewer).First(&row, "podcast_episodes.id = ?", id).Error; err != nil {
+		episode, err := contentmodule.LoadPodcastEpisode(r.db, contentmodule.PodcastQuery(r.db).Where("episodes.episode_id = ?", id))
+		if err != nil {
 			return Target{}, targetError(err)
 		}
-		return target(targetType, row.ID, row.Post.Title, "podcast", "/episode/"+row.ID.String()), nil
+		if episode.Post == nil || episode.Post.Status != "published" || !podcastReferenceVisible(episode.Post, viewer) {
+			return Target{}, ErrTargetUnavailable
+		}
+		return target(targetType, episode.ID, episode.Post.Title, "podcast", "/episode/"+episode.ID.String()), nil
 	case "video":
-		var row model.Video
-		query := visibleOwned(r.db.Where("status = ?", "published"), viewer, "user_id", "visibility")
-		if err := query.First(&row, "id = ?", id).Error; err != nil {
-			return Target{}, targetError(err)
+		video, err := contentmodule.LoadVideo(r.db, contentmodule.VideoQuery(r.db).Where("videos.video_id = ?", id))
+		if err != nil || video.Status != "published" || !videoReferenceVisible(video, viewer) {
+			return Target{}, ErrTargetUnavailable
 		}
-		return target(targetType, row.ID, row.Title, "video", "/videos/watch/"+row.ID.String()), nil
+		return target(targetType, video.ID, video.Title, "video", "/videos/watch/"+video.ID.String()), nil
 	case "person":
 		var row model.TimelinePerson
 		query := visiblePublicOwned(r.db, viewer)
@@ -301,12 +304,23 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 		query = visiblePodcastChannels(r.db.Model(&model.Channel{}).Where("LOWER(channels.name) LIKE ?", like), viewer).
 			Select("channels.id, channels.name AS label, channels.slug")
 	case "episode":
-		query = visiblePodcastEpisodes(r.db.Model(&model.PodcastEpisode{}), viewer).
-			Where("LOWER(posts.title) LIKE ?", like).
-			Select("podcast_episodes.id, posts.title AS label")
+		query = contentmodule.PodcastQuery(r.db).
+			Where("posts.status = ? AND LOWER(posts.title) LIKE ?", "published", like).
+			Select("episodes.episode_id AS id, posts.title AS label")
+		if viewer.UserID == uuid.Nil {
+			query = query.Where("posts.visibility IN ?", []string{"", "public"})
+		} else {
+			query = query.Where("posts.visibility IN ? OR posts.author_id = ?", []string{"", "public"}, viewer.UserID)
+		}
 	case "video":
-		query = visibleOwned(r.db.Model(&model.Video{}).Where("videos.status = ? AND LOWER(videos.title) LIKE ?", "published", like), viewer, "videos.user_id", "videos.visibility").
-			Select("videos.id, videos.title AS label")
+		query = contentmodule.VideoQuery(r.db).
+			Where("posts.status = ? AND LOWER(posts.title) LIKE ?", "published", like).
+			Select("videos.video_id AS id, posts.title AS label")
+		if viewer.UserID == uuid.Nil {
+			query = query.Where("posts.visibility IN ?", []string{"", "public"})
+		} else {
+			query = query.Where("posts.visibility IN ? OR posts.author_id = ?", []string{"", "public"}, viewer.UserID)
+		}
 	case "person":
 		query = visiblePublicOwned(r.db.Model(&model.TimelinePerson{}).Where("LOWER(timeline_persons.name) LIKE ?", like), viewer).
 			Select("timeline_persons.id, timeline_persons.name AS label")
@@ -332,7 +346,9 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 	case "article":
 		orderColumn = "feed_items.created_at"
 	case "episode":
-		orderColumn = "podcast_episodes.created_at"
+		orderColumn = "episodes.created_at"
+	case "video":
+		orderColumn = "videos.created_at"
 	default:
 		orderColumn = "created_at"
 	}
@@ -391,6 +407,20 @@ func searchTargetLocation(targetType string, row searchTargetRow) (string, strin
 	}
 }
 
+func podcastReferenceVisible(post *model.Post, viewer Viewer) bool {
+	if post.Visibility == "" || post.Visibility == "public" {
+		return true
+	}
+	return viewer.UserID != uuid.Nil && post.UserID == viewer.UserID
+}
+
+func videoReferenceVisible(video model.Video, viewer Viewer) bool {
+	if video.Visibility == "" || video.Visibility == "public" {
+		return true
+	}
+	return viewer.UserID != uuid.Nil && video.UserID == viewer.UserID
+}
+
 func visibleMusicWikiEntries(db *gorm.DB, viewer Viewer, ownerColumn string) *gorm.DB {
 	if viewer.UserID != uuid.Nil {
 		return db.Where("(lifecycle_status = ? OR (lifecycle_status = ? AND "+ownerColumn+" = ?))", model.MusicLifecycleActive, model.MusicLifecycleDraft, viewer.UserID)
@@ -439,11 +469,23 @@ func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, l
 	case "podcast":
 		query = visiblePodcastChannels(r.db.Model(&model.Channel{}).Where("LOWER(name) LIKE ?", like), viewer)
 	case "episode":
-		query = visiblePodcastEpisodes(r.db.Model(&model.PodcastEpisode{}), viewer).Where("LOWER(posts.title) LIKE ?", like)
-		idColumn = "podcast_episodes.id"
-		createdAtColumn = "podcast_episodes.created_at"
+		query = contentmodule.PodcastQuery(r.db).Where("posts.status = ? AND LOWER(posts.title) LIKE ?", "published", like)
+		if viewer.UserID == uuid.Nil {
+			query = query.Where("posts.visibility IN ?", []string{"", "public"})
+		} else {
+			query = query.Where("posts.visibility IN ? OR posts.author_id = ?", []string{"", "public"}, viewer.UserID)
+		}
+		idColumn = "episodes.episode_id"
+		createdAtColumn = "episodes.created_at"
 	case "video":
-		query = visibleOwned(r.db.Model(&model.Video{}).Where("status = ? AND LOWER(title) LIKE ?", "published", like), viewer, "user_id", "visibility")
+		query = contentmodule.VideoQuery(r.db).Where("posts.status = ? AND LOWER(posts.title) LIKE ?", "published", like)
+		if viewer.UserID == uuid.Nil {
+			query = query.Where("posts.visibility IN ?", []string{"", "public"})
+		} else {
+			query = query.Where("posts.visibility IN ? OR posts.author_id = ?", []string{"", "public"}, viewer.UserID)
+		}
+		idColumn = "videos.video_id"
+		createdAtColumn = "videos.created_at"
 	case "person":
 		query = visiblePublicOwned(r.db.Model(&model.TimelinePerson{}).Where("LOWER(name) LIKE ?", like), viewer)
 	case "event":
@@ -543,25 +585,17 @@ func visiblePublicOwned(query *gorm.DB, viewer Viewer) *gorm.DB {
 }
 
 func visiblePodcastChannels(query *gorm.DB, viewer Viewer) *gorm.DB {
-	visibility := "p.visibility = ?"
-	args := []interface{}{"public"}
+	visibility := "p.visibility IN ?"
+	args := []interface{}{[]string{"", "public"}}
 	if viewer.UserID != uuid.Nil {
-		visibility = "(p.visibility = ? OR p.user_id = ?)"
+		visibility = "(p.visibility IN ? OR p.author_id = ?)"
 		args = append(args, viewer.UserID)
 	}
 	return query.Where(`EXISTS (
-		SELECT 1 FROM podcast_episodes pe
-		JOIN posts p ON p.id = pe.post_id AND p.deleted_at IS NULL AND p.status = 'published'
-		WHERE pe.channel_id = channels.id AND pe.deleted_at IS NULL AND `+visibility+`
+		SELECT 1 FROM content_entries p
+		JOIN content_episode_extensions pe ON pe.content_id = p.id
+		WHERE p.channel_id = channels.id AND p.deleted_at IS NULL AND p.status = 'published' AND `+visibility+`
 	)`, args...)
-}
-
-func visiblePodcastEpisodes(query *gorm.DB, viewer Viewer) *gorm.DB {
-	query = query.Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL AND posts.status = ?", "published")
-	if viewer.UserID == uuid.Nil {
-		return query.Where("posts.visibility = ?", "public")
-	}
-	return query.Where("(posts.visibility = ? OR posts.user_id = ?)", "public", viewer.UserID)
 }
 
 func (r *Registry) visibleForumTopics(query *gorm.DB, viewer Viewer) *gorm.DB {

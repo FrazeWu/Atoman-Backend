@@ -10,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 )
 
 // GetVideoRSS godoc
@@ -30,10 +31,13 @@ func GetVideoRSS(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		var videos []model.Video
-		db.Where("channel_id = ? AND status = ? AND visibility = ?",
-			channel.ID, "published", "public").
-			Order("created_at DESC").Limit(100).Find(&videos)
+		videos, err := contentmodule.LoadVideos(db, contentmodule.VideoQuery(db).
+			Where("posts.channel_id = ? AND posts.status = ? AND posts.visibility = ?", channel.ID, "published", "public").
+			Order("posts.created_at DESC").Limit(100))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load videos"})
+			return
+		}
 
 		scheme := c.Request.Header.Get("X-Forwarded-Proto")
 		if scheme == "" {

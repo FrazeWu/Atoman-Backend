@@ -16,7 +16,7 @@ import (
 	"atoman/internal/service"
 )
 
-const defaultCollectionName = "默认专栏"
+const defaultCollectionName = "默认合集"
 
 var slugInvalidChars = regexp.MustCompile(`[^a-z0-9一-龥]+`)
 

@@ -339,7 +339,7 @@ func TestStudioCollectionsAreScopedByChannelAndUseUnifiedCollections(t *testing.
 	}
 }
 
-func TestStudioCollectionMutationRejectsWrongModule(t *testing.T) {
+func TestStudioCollectionMutationAllowsSharedCollectionAcrossModules(t *testing.T) {
 	fixture := newStudioHTTPFixture(t)
 	channel := createStudioChannel(t, fixture.db, fixture.owner, "Mixed")
 	collection := model.Collection{ChannelID: channel.ID, ContentType: string(ModuleBlog), Name: "Articles"}
@@ -347,9 +347,16 @@ func TestStudioCollectionMutationRejectsWrongModule(t *testing.T) {
 		t.Fatalf("create collection: %v", err)
 	}
 
-	response := studioRequest(t, fixture, fixture.owner, http.MethodPatch, "/api/v1/studio/video/collections/"+collection.ID.String(), `{"name":"Wrong"}`)
-	if response.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+	response := studioRequest(t, fixture, fixture.owner, http.MethodPatch, "/api/v1/studio/video/collections/"+collection.ID.String(), `{"name":"Shared"}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", response.Code, response.Body.String())
+	}
+	var updated model.ContentCollection
+	if err := fixture.db.First(&updated, "id = ?", collection.ID).Error; err != nil {
+		t.Fatalf("load updated collection: %v", err)
+	}
+	if updated.Name != "Shared" {
+		t.Fatalf("expected shared collection name to update, got %q", updated.Name)
 	}
 }
 

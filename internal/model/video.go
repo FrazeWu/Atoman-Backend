@@ -44,8 +44,8 @@ func (Video) TableName() string { return "videos" }
 
 type VideoProcessingJob struct {
 	Base
+	ContentID  uuid.UUID  `json:"content_id" gorm:"type:uuid;index"`
 	VideoID    uuid.UUID  `json:"video_id" gorm:"type:uuid;not null;index"`
-	Video      *Video     `json:"video,omitempty" gorm:"foreignKey:VideoID"`
 	Status     string     `json:"status" gorm:"not null;default:'pending';index"`
 	JobType    string     `json:"job_type" gorm:"not null;default:'thumbnail_preview';index"`
 	Attempts   int        `json:"attempts" gorm:"not null;default:0"`

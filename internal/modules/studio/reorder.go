@@ -16,15 +16,11 @@ func (s *Service) ReorderCollectionContents(user authctx.CurrentUser, module Mod
 	if len(orderedIDs) == 0 {
 		return apperr.BadRequest("validation.invalid_request", "content_ids is required")
 	}
+	if module != ModuleBlog && module != ModulePodcast && module != ModuleVideo {
+		return apperr.BadRequest("studio.invalid_module", "module must be blog, podcast, or video")
+	}
 	if module == ModuleBlog {
 		return s.ReorderUnifiedCollectionContents(user, collectionID, orderedIDs)
-	}
-	collection, err := s.collectionInModule(collectionID, module)
-	if err != nil {
-		return err
-	}
-	if _, err := s.ownedChannel(user.ID, collection.ChannelID); err != nil {
-		return err
 	}
 	seen := make(map[uuid.UUID]struct{}, len(orderedIDs))
 	for _, id := range orderedIDs {
@@ -37,35 +33,44 @@ func (s *Service) ReorderCollectionContents(user authctx.CurrentUser, module Mod
 		seen[id] = struct{}{}
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		collection, err := s.collectionInModule(collectionID, module)
+		if err != nil {
+			return err
+		}
+		if _, err := s.ownedChannel(user.ID, collection.ChannelID); err != nil {
+			return err
+		}
+		type contentLink struct {
+			ContentID uuid.UUID `gorm:"column:content_id"`
+			PublicID  uuid.UUID `gorm:"column:public_id"`
+		}
+		var links []contentLink
+		query := tx.Table("content_entries AS posts").
+			Select("posts.id AS content_id, posts.id AS public_id").
+			Joins("JOIN content_collection_memberships memberships ON memberships.content_id = posts.id").
+			Where("memberships.collection_id = ? AND posts.author_id = ? AND posts.kind = ? AND posts.deleted_at IS NULL", collectionID, user.ID, string(module))
 		switch module {
 		case ModulePodcast:
-			var episodes []model.PodcastEpisode
-			if err := tx.Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL").Where("posts.user_id = ? AND posts.collection_id = ? AND posts.collection_conflict = ?", user.ID, collection.ID, false).Find(&episodes).Error; err != nil {
-				return err
-			}
-			if err := requireExactOrder(episodes, orderedIDs, func(episode model.PodcastEpisode) uuid.UUID { return episode.ID }); err != nil {
-				return err
-			}
-			for position, id := range orderedIDs {
-				if err := tx.Model(&model.Post{}).Where("id = (SELECT post_id FROM podcast_episodes WHERE id = ?)", id).Update("collection_position", position).Error; err != nil {
-					return err
-				}
-			}
+			query = query.Joins("JOIN content_episode_extensions episodes ON episodes.content_id = posts.id").Select("posts.id AS content_id, episodes.episode_id AS public_id")
 		case ModuleVideo:
-			var videos []model.Video
-			if err := tx.Where("user_id = ? AND collection_id = ? AND collection_conflict = ?", user.ID, collection.ID, false).Find(&videos).Error; err != nil {
+			query = query.Joins("JOIN content_video_extensions videos ON videos.content_id = posts.id").Select("posts.id AS content_id, videos.video_id AS public_id")
+		}
+		if err := query.Find(&links).Error; err != nil {
+			return err
+		}
+		if err := requireExactOrder(links, orderedIDs, func(link contentLink) uuid.UUID { return link.PublicID }); err != nil {
+			return err
+		}
+		contentByPublicID := make(map[uuid.UUID]uuid.UUID, len(links))
+		for _, link := range links {
+			contentByPublicID[link.PublicID] = link.ContentID
+		}
+		for position, publicID := range orderedIDs {
+			if err := tx.Model(&model.ContentCollectionMembership{}).
+				Where("content_id = ? AND collection_id = ?", contentByPublicID[publicID], collectionID).
+				Update("position", position).Error; err != nil {
 				return err
 			}
-			if err := requireExactOrder(videos, orderedIDs, func(video model.Video) uuid.UUID { return video.ID }); err != nil {
-				return err
-			}
-			for position, id := range orderedIDs {
-				if err := tx.Model(&model.Video{}).Where("id = ?", id).Update("collection_position", position).Error; err != nil {
-					return err
-				}
-			}
-		default:
-			return apperr.BadRequest("studio.invalid_module", "module must be blog, podcast, or video")
 		}
 		return recordStudioAudit(tx, user.ID, "studio.collection_contents_reordered", "collection", collection.ID, map[string]any{
 			"module": module, "content_count": len(orderedIDs),

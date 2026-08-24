@@ -39,6 +39,7 @@ func newAuthTestDB(t *testing.T) *gorm.DB {
 		&model.EmailVerificationCode{},
 		&model.Channel{},
 		&model.Collection{},
+		&model.ContentCollection{},
 		&model.UserStudioState{},
 		&model.StudioModuleSettings{},
 		&model.FeedSource{},
@@ -803,11 +804,12 @@ func TestRegisterHandlerCreatesDefaultBootstrapResources(t *testing.T) {
 	if state.ChannelID == nil || *state.ChannelID != channel.ID {
 		t.Fatalf("expected current channel %s, got %#v", channel.ID, state.ChannelID)
 	}
-	for _, contentType := range []string{"blog", "podcast", "video"} {
-		var collection model.Collection
-		if err := db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channel.ID, contentType, true).First(&collection).Error; err != nil {
-			t.Fatalf("find %s default collection: %v", contentType, err)
-		}
+	var collections []model.ContentCollection
+	if err := db.Where("channel_id = ? AND is_default = ?", channel.ID, true).Find(&collections).Error; err != nil {
+		t.Fatalf("find default collection: %v", err)
+	}
+	if len(collections) != 1 || collections[0].Name != "默认合集" {
+		t.Fatalf("expected one mixed-content default collection, got %#v", collections)
 	}
 
 	var groups []model.SubscriptionGroup

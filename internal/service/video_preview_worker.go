@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 
 	"gorm.io/gorm"
 )
@@ -41,8 +42,8 @@ func (w VideoPreviewWorker) ProcessNext() (bool, error) {
 		return false, err
 	}
 
-	var video model.Video
-	if err := w.DB.First(&video, "id = ?", job.VideoID).Error; err != nil {
+	video, err := contentmodule.LoadVideo(w.DB, contentmodule.VideoQuery(w.DB).Where("videos.video_id = ?", job.VideoID))
+	if err != nil {
 		return true, w.failJob(job, maxAttempts, err)
 	}
 
@@ -58,7 +59,11 @@ func (w VideoPreviewWorker) ProcessNext() (bool, error) {
 
 	finishedAt := time.Now()
 	return true, w.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&video).Updates(map[string]interface{}{
+		contentID, err := contentmodule.VideoContentID(tx, video.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&model.ContentVideoExtension{}).Where("content_id = ?", contentID).Updates(map[string]interface{}{
 			"preview_thumbnails": json.RawMessage(raw),
 			"processing_status":  "ready",
 			"processing_error":   "",
@@ -125,7 +130,11 @@ func (w VideoPreviewWorker) failJob(job model.VideoProcessingJob, maxAttempts in
 			return err
 		}
 
-		return tx.Model(&model.Video{}).Where("id = ?", job.VideoID).Updates(map[string]interface{}{
+		contentID, err := contentmodule.VideoContentID(tx, job.VideoID)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&model.ContentVideoExtension{}).Where("content_id = ?", contentID).Updates(map[string]interface{}{
 			"processing_status": videoStatus,
 			"processing_error":  cause.Error(),
 		}).Error

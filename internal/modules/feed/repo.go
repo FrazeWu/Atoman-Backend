@@ -4,6 +4,7 @@ import (
 	"atoman/internal/feedclass"
 	"atoman/internal/model"
 	blogmodule "atoman/internal/modules/blog"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/platform/apperr"
 	"database/sql"
 	"fmt"
@@ -110,104 +111,113 @@ func (r *Repo) listPublishedCanonicalBlogPosts(scope string, ids []uuid.UUID) ([
 	return blogmodule.LoadCanonicalBlogPosts(r.db, query)
 }
 
+func (r *Repo) listPublishedCanonicalPodcastPosts(scope string, ids []uuid.UUID) ([]model.Post, error) {
+	if len(ids) == 0 {
+		return []model.Post{}, nil
+	}
+	query := contentmodule.PodcastQuery(r.db).Where("posts.status = ?", "published")
+	switch scope {
+	case "user_id":
+		query = query.Where("posts.author_id IN ?", ids)
+	case "channel_id":
+		query = query.Where("posts.channel_id IN ?", ids)
+	case "collection_id":
+		query = query.Where("EXISTS (SELECT 1 FROM content_collection_memberships links WHERE links.content_id = posts.id AND links.collection_id IN ?)", ids)
+	default:
+		return nil, fmt.Errorf("unsupported canonical podcast scope %q", scope)
+	}
+	episodes, err := contentmodule.LoadPodcastEpisodes(r.db, query)
+	if err != nil {
+		return nil, err
+	}
+	posts := make([]model.Post, 0, len(episodes))
+	for _, episode := range episodes {
+		if episode.Post != nil {
+			posts = append(posts, *episode.Post)
+		}
+	}
+	return posts, nil
+}
+
 func (r *Repo) ListPublishedPostsByUserIDs(userIDs []uuid.UUID, contentType string) ([]model.Post, error) {
 	if len(userIDs) == 0 {
 		return []model.Post{}, nil
 	}
-	if contentType == "blog" {
+	switch contentType {
+	case "blog":
 		return r.listPublishedCanonicalBlogPosts("user_id", userIDs)
+	case "podcast":
+		return r.listPublishedCanonicalPodcastPosts("user_id", userIDs)
+	case "video":
+		return []model.Post{}, nil
+	default:
+		podcastPosts, err := r.listPublishedCanonicalPodcastPosts("user_id", userIDs)
+		if err != nil {
+			return nil, err
+		}
+		blogPosts, err := r.listPublishedCanonicalBlogPosts("user_id", userIDs)
+		return append(podcastPosts, blogPosts...), err
 	}
-	var posts []model.Post
-	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
-		Where("posts.status = ?", "published").
-		Where("posts.user_id IN ?", userIDs)
-	if contentType == "" {
-		db = filterPostContentType(db, "podcast")
-	} else {
-		db = filterPostContentType(db, contentType)
-	}
-	if err := db.Find(&posts).Error; err != nil {
-		return nil, err
-	}
-	if contentType != "" {
-		return posts, nil
-	}
-	blogPosts, err := r.listPublishedCanonicalBlogPosts("user_id", userIDs)
-	return append(posts, blogPosts...), err
 }
 
 func (r *Repo) ListPublishedPostsByChannelIDs(channelIDs []uuid.UUID, contentType string) ([]model.Post, error) {
 	if len(channelIDs) == 0 {
 		return []model.Post{}, nil
 	}
-	if contentType == "blog" {
+	switch contentType {
+	case "blog":
 		return r.listPublishedCanonicalBlogPosts("channel_id", channelIDs)
+	case "podcast":
+		return r.listPublishedCanonicalPodcastPosts("channel_id", channelIDs)
+	case "video":
+		return []model.Post{}, nil
+	default:
+		podcastPosts, err := r.listPublishedCanonicalPodcastPosts("channel_id", channelIDs)
+		if err != nil {
+			return nil, err
+		}
+		blogPosts, err := r.listPublishedCanonicalBlogPosts("channel_id", channelIDs)
+		return append(podcastPosts, blogPosts...), err
 	}
-	var posts []model.Post
-	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
-		Where("posts.status = ?", "published").
-		Where("posts.channel_id IN ?", channelIDs)
-	if contentType == "" {
-		db = filterPostContentType(db, "podcast")
-	} else {
-		db = filterPostContentType(db, contentType)
-	}
-	if err := db.Find(&posts).Error; err != nil {
-		return nil, err
-	}
-	if contentType != "" {
-		return posts, nil
-	}
-	blogPosts, err := r.listPublishedCanonicalBlogPosts("channel_id", channelIDs)
-	return append(posts, blogPosts...), err
 }
 
 func (r *Repo) ListPublishedPostsByCollectionIDs(collectionIDs []uuid.UUID, contentType string) ([]model.Post, error) {
 	if len(collectionIDs) == 0 {
 		return []model.Post{}, nil
 	}
-	if contentType == "blog" {
+	switch contentType {
+	case "blog":
 		return r.listPublishedCanonicalBlogPosts("collection_id", collectionIDs)
+	case "podcast":
+		return r.listPublishedCanonicalPodcastPosts("collection_id", collectionIDs)
+	case "video":
+		return []model.Post{}, nil
+	default:
+		podcastPosts, err := r.listPublishedCanonicalPodcastPosts("collection_id", collectionIDs)
+		if err != nil {
+			return nil, err
+		}
+		blogPosts, err := r.listPublishedCanonicalBlogPosts("collection_id", collectionIDs)
+		return append(podcastPosts, blogPosts...), err
 	}
-	var posts []model.Post
-	db := r.db.Preload("User").Preload("Channel").Preload("Collection").
-		Where("posts.status = ?", "published").
-		Where("posts.collection_id IN ? OR EXISTS (SELECT 1 FROM post_collections links WHERE links.post_id = posts.id AND links.collection_id IN ?)", collectionIDs, collectionIDs)
-	if contentType == "" {
-		db = filterPostContentType(db, "podcast")
-	} else {
-		db = filterPostContentType(db, contentType)
-	}
-	if err := db.Find(&posts).Error; err != nil {
-		return nil, err
-	}
-	if contentType != "" {
-		return posts, nil
-	}
-	blogPosts, err := r.listPublishedCanonicalBlogPosts("collection_id", collectionIDs)
-	return append(posts, blogPosts...), err
+
 }
 
 func filterPostContentType(db *gorm.DB, contentType string) *gorm.DB {
-	switch contentType {
-	case "blog":
-		return db.Where("NOT EXISTS (SELECT 1 FROM podcast_episodes episodes WHERE episodes.post_id = posts.id AND episodes.deleted_at IS NULL)")
-	case "podcast":
-		return db.Where("EXISTS (SELECT 1 FROM podcast_episodes episodes WHERE episodes.post_id = posts.id AND episodes.deleted_at IS NULL)")
-	case "video":
+	if contentType == "podcast" || contentType == "video" {
 		return db.Where("1 = 0")
-	default:
-		return db
 	}
+	return db
 }
 
+func hasCanonicalBlogExtensions(db *gorm.DB) bool {
+	return db.Migrator().HasTable(&model.ContentBlogExtension{})
+}
 func (r *Repo) ListPodcastEpisodesByPostIDs(postIDs []uuid.UUID) ([]model.PodcastEpisode, error) {
 	if len(postIDs) == 0 {
 		return []model.PodcastEpisode{}, nil
 	}
-	var episodes []model.PodcastEpisode
-	err := r.db.Preload("Channel").Where("post_id IN ?", postIDs).Find(&episodes).Error
-	return episodes, err
+	return contentmodule.LoadPodcastEpisodes(r.db, contentmodule.PodcastQuery(r.db).Where("episodes.legacy_post_id IN ?", postIDs))
 }
 
 func (r *Repo) ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs []uuid.UUID, contentType string) ([]model.Video, error) {
@@ -215,47 +225,61 @@ func (r *Repo) ListPublishedVideosByScope(userIDs, channelIDs, collectionIDs []u
 		return []model.Video{}, nil
 	}
 	conditions := make([]string, 0, 3)
-	args := make([]any, 0, 4)
+	args := make([]any, 0, 3)
 	if len(userIDs) > 0 {
-		conditions = append(conditions, "videos.user_id IN ?")
+		conditions = append(conditions, "posts.author_id IN ?")
 		args = append(args, userIDs)
 	}
 	if len(channelIDs) > 0 {
-		conditions = append(conditions, "videos.channel_id IN ?")
+		conditions = append(conditions, "posts.channel_id IN ?")
 		args = append(args, channelIDs)
 	}
 	if len(collectionIDs) > 0 {
-		conditions = append(conditions, "EXISTS (SELECT 1 FROM video_collections links WHERE links.video_id = videos.id AND links.collection_id IN ?)")
+		conditions = append(conditions, "EXISTS (SELECT 1 FROM content_collection_memberships links WHERE links.content_id = posts.id AND links.collection_id IN ?)")
 		args = append(args, collectionIDs)
 	}
 	if len(conditions) == 0 {
 		return []model.Video{}, nil
 	}
-	var videos []model.Video
-	err := r.db.Preload("Channel").Preload("Collections").
-		Where("videos.status = ? AND videos.visibility IN ?", "published", []string{"public", "followers"}).
+	query := contentmodule.VideoQuery(r.db).
+		Where("posts.status = ? AND posts.visibility IN ?", "published", []string{"public", "followers"}).
 		Where("("+strings.Join(conditions, " OR ")+")", args...).
-		Find(&videos).Error
-	return videos, err
+		Order("videos.created_at DESC, videos.video_id DESC")
+	return contentmodule.LoadVideos(r.db, query)
 }
 
 func (r *Repo) ListPostEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCount, error) {
-	legacy, err := r.listEngagementCounts(postIDs, "posts")
+	if len(postIDs) == 0 {
+		return []PostEngagementCount{}, nil
+	}
+	canonicalIDs := append([]uuid.UUID(nil), postIDs...)
+	type legacyMapping struct {
+		ContentID    uuid.UUID `gorm:"column:content_id"`
+		LegacyPostID uuid.UUID `gorm:"column:legacy_post_id"`
+	}
+	var mappings []legacyMapping
+	if err := r.db.Table("content_episode_extensions").
+		Select("content_id, legacy_post_id").Where("legacy_post_id IN ?", postIDs).Scan(&mappings).Error; err != nil {
+		return nil, err
+	}
+	for _, mapping := range mappings {
+		canonicalIDs = append(canonicalIDs, mapping.ContentID)
+	}
+	counts, err := r.listEngagementCounts(canonicalIDs)
 	if err != nil {
 		return nil, err
 	}
-	canonical, err := r.listEngagementCounts(postIDs, "content_entries")
-	if err != nil {
-		return nil, err
-	}
-	byID := make(map[uuid.UUID]PostEngagementCount, len(legacy)+len(canonical))
-	for _, count := range legacy {
+	byID := make(map[uuid.UUID]PostEngagementCount, len(counts))
+	for _, count := range counts {
 		byID[count.PostID] = count
 	}
-	for _, count := range canonical {
-		byID[count.PostID] = count
+	for _, mapping := range mappings {
+		if count, ok := byID[mapping.ContentID]; ok {
+			count.PostID = mapping.LegacyPostID
+			byID[mapping.LegacyPostID] = count
+		}
 	}
-	result := make([]PostEngagementCount, 0, len(byID))
+	result := make([]PostEngagementCount, 0, len(postIDs))
 	for _, postID := range postIDs {
 		if count, ok := byID[postID]; ok {
 			result = append(result, count)
@@ -265,10 +289,10 @@ func (r *Repo) ListPostEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCo
 }
 
 func (r *Repo) ListCanonicalBlogEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCount, error) {
-	return r.listEngagementCounts(postIDs, "content_entries")
+	return r.listEngagementCounts(postIDs)
 }
 
-func (r *Repo) listEngagementCounts(postIDs []uuid.UUID, table string) ([]PostEngagementCount, error) {
+func (r *Repo) listEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCount, error) {
 	if len(postIDs) == 0 {
 		return []PostEngagementCount{}, nil
 	}
@@ -282,12 +306,7 @@ func (r *Repo) listEngagementCounts(postIDs []uuid.UUID, table string) ([]PostEn
 		selectSQL += `, 0 AS bookmarks_count`
 	}
 	var counts []PostEngagementCount
-	var query *gorm.DB
-	if table == "content_entries" {
-		query = r.db.Table("content_entries AS posts")
-	} else {
-		query = r.db.Model(&model.Post{})
-	}
+	query := r.db.Table("content_entries AS posts")
 	if err := query.Select(selectSQL).Where("posts.id IN ?", postIDs).Scan(&counts).Error; err != nil {
 		return nil, err
 	}
@@ -646,15 +665,7 @@ type RecommendationArticleFeedItemRow struct {
 	LanguageCode   string
 }
 
-func hasCanonicalBlogExtensions(db *gorm.DB) bool {
-	return db.Migrator().HasTable("content_blog_extensions")
-}
-
 func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, languageCode string, search string, limit int) ([]RecommendationArticlePostRow, error) {
-	if !hasCanonicalBlogExtensions(r.db) {
-		return r.listLegacyRecommendationArticlePosts(includeText, publishedAfter, keywords, languageCode, search, limit)
-	}
-
 	columns := []string{"posts.id", "posts.author_id AS user_id", "posts.channel_id", "blog_extensions.view_count", "posts.created_at", "'' AS title", "'' AS summary", "blog_extensions.language_code"}
 	if includeText {
 		columns[5] = "posts.title"
@@ -806,15 +817,6 @@ func (r *Repo) ListRecommendationPostsByIDs(ids []uuid.UUID) ([]model.Post, erro
 	if len(ids) == 0 {
 		return []model.Post{}, nil
 	}
-	if !hasCanonicalBlogExtensions(r.db) {
-		var posts []model.Post
-		err := r.db.Model(&model.Post{}).
-			Preload("Channel").
-			Select("id", "title", "summary", "cover_url", "language_code", "channel_id").
-			Where("id IN ?", ids).
-			Find(&posts).Error
-		return posts, err
-	}
 	return blogmodule.LoadCanonicalBlogPosts(r.db, blogmodule.CanonicalBlogPostsQuery(r.db).Where("posts.id IN ?", ids))
 }
 
@@ -845,10 +847,6 @@ type RecommendationChannelRow struct {
 }
 
 func (r *Repo) ListRecommendationChannels(languageCode string) ([]RecommendationChannelRow, error) {
-	if !hasCanonicalBlogExtensions(r.db) {
-		return r.listLegacyRecommendationChannels(languageCode)
-	}
-
 	rows := make([]RecommendationChannelRow, 0)
 	latestPublishedExpr := recommendationChannelLatestPublishedExpr(r.db.Dialector.Name())
 	db := r.db.Table("channels").
@@ -878,47 +876,7 @@ func (r *Repo) ListRecommendationChannels(languageCode string) ([]Recommendation
 	return rows, err
 }
 
-func (r *Repo) listLegacyRecommendationChannels(languageCode string) ([]RecommendationChannelRow, error) {
-	rows := make([]RecommendationChannelRow, 0)
-	latestPublishedExpr := recommendationChannelLatestPublishedExpr(r.db.Dialector.Name())
-	db := r.db.Table("channels").
-		Select(`
-			channels.id AS channel_id,
-			channels.slug AS slug,
-			channels.name AS name,
-			channels.description AS description,
-			channels.cover_url AS cover_url,
-			COUNT(posts.id) AS published_count,
-			SUM(CASE WHEN posts.created_at >= ? THEN 1 ELSE 0 END) AS recent_post_count,
-			COALESCE(AVG(posts.view_count), 0) AS average_views,
-			`+latestPublishedExpr+` AS latest_published_at_unix,
-			MAX(posts.language_code) AS language_code
-		`, time.Now().Add(-7*24*time.Hour)).
-		Joins("JOIN posts AS posts ON posts.channel_id = channels.id").
-		Where("channels.deleted_at IS NULL AND posts.deleted_at IS NULL AND posts.status = ?", "published").
-		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"})
-	if languageCode != "" {
-		db = db.Where("posts.language_code = ?", languageCode)
-	}
-	err := db.
-		Group("channels.id").
-		Order("MAX(posts.created_at) DESC").
-		Scan(&rows).Error
-	return rows, err
-}
-
 func (r *Repo) ListRecentPublishedPostsByChannelID(channelID uuid.UUID, limit int) ([]model.Post, error) {
-	if !hasCanonicalBlogExtensions(r.db) {
-		var posts []model.Post
-		db := r.db.Model(&model.Post{}).
-			Preload("Channel").
-			Where("channel_id = ? AND status = ?", channelID, "published").
-			Where("COALESCE(visibility, '') IN ?", []string{"", "public"}).
-			Order("created_at DESC").
-			Limit(limit)
-		return posts, db.Find(&posts).Error
-	}
-
 	query := blogmodule.CanonicalBlogPostsQuery(r.db).
 		Where("posts.channel_id = ? AND posts.status = ?", channelID, "published").
 		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).

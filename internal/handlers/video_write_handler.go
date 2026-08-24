@@ -50,8 +50,13 @@ type videoCreateParams struct {
 func ReprocessVideo(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
-		var video model.Video
-		if err := db.First(&video, "id = ?", c.Param("id")).Error; err != nil {
+		videoID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		video, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", videoID))
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
 			return
 		}
@@ -161,7 +166,7 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 			return err
 		}
 		extension := model.ContentVideoExtension{
-			ContentID: contentID, VideoID: video.ID, StorageType: video.StorageType,
+			ContentID: contentID, VideoID: video.ID, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt, StorageType: video.StorageType,
 			VideoURL: video.VideoURL, ThumbnailURL: video.ThumbnailURL, DurationSec: video.DurationSec,
 			ProcessingStatus: "none",
 		}
@@ -471,21 +476,6 @@ func attachVideoTags(db *gorm.DB, video *model.Video, names []string) error {
 		}
 	}
 	return nil
-}
-
-func syncVideoCollection(db *gorm.DB, video *model.Video, collectionID *uuid.UUID) error {
-	if collectionID == nil {
-		return db.Model(video).Association("Collections").Clear()
-	}
-	if video.ChannelID == nil {
-		return apperr.BadRequest("validation.invalid_request", "channel_id is required before selecting a collection")
-	}
-	var collection model.Collection
-	if err := db.Where("id = ? AND channel_id = ? AND content_type = ?", *collectionID, *video.ChannelID, studioapi.ModuleVideo).
-		First(&collection).Error; err != nil {
-		return err
-	}
-	return db.Model(video).Association("Collections").Replace(&collection)
 }
 
 // GetRecommendedVideos returns up to 8 recommended videos based on same channel (score 60) and same tags (score 40).

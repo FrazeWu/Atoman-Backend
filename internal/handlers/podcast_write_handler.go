@@ -119,6 +119,7 @@ func CreatePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 			}
 			extension := model.ContentEpisodeExtension{
 				ContentID: contentID, EpisodeID: episodeID, LegacyPostID: contentID,
+				CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt,
 				AudioURL: input.AudioURL, DurationSec: input.DurationSec, EpisodeCoverURL: input.EpisodeCoverURL,
 				SeasonNumber: seasonNum, EpisodeNumber: input.EpisodeNumber, Shownotes: input.Shownotes,
 			}

@@ -13,7 +13,7 @@ import (
 func TestResourceManagementMigrationBuildsDefaultsAndScalarAssignments(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.Channel{}, &model.Collection{}, &model.StudioModuleSettings{},
+		&model.User{}, &model.Channel{}, &model.Collection{}, &model.ContentCollection{}, &model.StudioModuleSettings{},
 		&model.Post{}, &model.PostCollection{}, &model.PodcastEpisode{},
 		&model.Video{}, &model.VideoCollection{},
 	)
@@ -63,7 +63,10 @@ func TestResourceManagementMigrationBuildsDefaultsAndScalarAssignments(t *testin
 
 	var defaultCount int64
 	require.NoError(t, db.Model(&model.Collection{}).Where("channel_id = ? AND is_default = ?", channel.ID, true).Count(&defaultCount).Error)
+	var unifiedDefaults int64
+	require.NoError(t, db.Model(&model.ContentCollection{}).Where("channel_id = ? AND is_default = ?", channel.ID, true).Count(&unifiedDefaults).Error)
 	require.Equal(t, int64(3), defaultCount)
+	require.Equal(t, int64(1), unifiedDefaults)
 
 	require.NoError(t, db.First(&singlePost, "id = ?", singlePost.ID).Error)
 	require.NotNil(t, singlePost.CollectionID)
@@ -102,7 +105,7 @@ func TestResourceManagementMigrationBuildsDefaultsAndScalarAssignments(t *testin
 func TestResourceManagementMigrationProtectsDefaultAndReusesDeletedNames(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.Channel{}, &model.Collection{}, &model.StudioModuleSettings{},
+		&model.User{}, &model.Channel{}, &model.Collection{}, &model.ContentCollection{}, &model.StudioModuleSettings{},
 		&model.Post{}, &model.PostCollection{}, &model.PodcastEpisode{},
 		&model.Video{}, &model.VideoCollection{},
 	)
@@ -113,8 +116,9 @@ func TestResourceManagementMigrationProtectsDefaultAndReusesDeletedNames(t *test
 	require.NoError(t, db.Create(&channel).Error)
 	require.NoError(t, RunResourceManagementMigration(db))
 
-	var collection model.Collection
-	require.NoError(t, db.Where("channel_id = ? AND content_type = ? AND is_default = ?", channel.ID, "blog", true).First(&collection).Error)
+	var collection model.ContentCollection
+	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", channel.ID, true).First(&collection).Error)
+	require.Equal(t, "默认合集", collection.Name)
 	require.Error(t, db.Delete(&collection).Error)
 	require.Error(t, db.Model(&collection).Update("is_default", false).Error)
 	require.Error(t, db.Create(&model.Channel{UserID: &owner.UUID, Name: "case name", Slug: "case-name-2"}).Error)

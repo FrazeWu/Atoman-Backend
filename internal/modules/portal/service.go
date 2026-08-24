@@ -9,6 +9,7 @@ import (
 
 	"atoman/internal/model"
 	blogmodule "atoman/internal/modules/blog"
+	contentmodule "atoman/internal/modules/content"
 
 	"github.com/google/uuid"
 
@@ -141,12 +142,11 @@ func (s *Service) hotBlogPosts(limit int) ([]HotItem, error) {
 }
 
 func (s *Service) hotVideos(limit int) ([]HotItem, error) {
-	var videos []model.Video
-	err := s.db.Where("status = ? AND visibility = ?", "published", "public").
-		Order("view_count DESC").
-		Order("updated_at DESC").
-		Limit(limit).
-		Find(&videos).Error
+	videos, err := contentmodule.LoadVideos(s.db, contentmodule.VideoQuery(s.db).
+		Where("posts.status = ? AND posts.visibility IN ?", "published", []string{"", "public"}).
+		Order("videos.view_count DESC").
+		Order("videos.updated_at DESC").
+		Limit(limit))
 	if err != nil {
 		return nil, err
 	}
@@ -288,18 +288,16 @@ func (s *Service) hotDebates(limit int) ([]HotItem, error) {
 }
 
 func (s *Service) hotPodcastEpisodes(limit int) ([]HotItem, error) {
-	var episodes []model.PodcastEpisode
-	err := s.db.Preload("Post").
-		Order("updated_at DESC").
-		Limit(limit).
-		Find(&episodes).Error
+	episodes, err := contentmodule.LoadPodcastEpisodes(s.db, contentmodule.PodcastQuery(s.db).
+		Where("posts.status = ? AND posts.visibility IN ?", "published", []string{"", "public"}).
+		Order("episodes.updated_at DESC").Limit(limit))
 	if err != nil {
 		return nil, err
 	}
 
 	items := make([]HotItem, 0, len(episodes))
 	for _, episode := range episodes {
-		if episode.Post == nil || episode.Post.Status != "published" || episode.Post.Visibility != "public" {
+		if episode.Post == nil {
 			continue
 		}
 		items = append(items, HotItem{

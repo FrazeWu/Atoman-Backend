@@ -127,7 +127,7 @@ func migrationCollectionForPost(tx *gorm.DB, post model.Post, links []model.Post
 	} else if err != gorm.ErrRecordNotFound {
 		return model.Collection{}, 0, err
 	}
-	collection = model.Collection{ChannelID: *channelID, ContentType: "blog", CreatedBy: &post.UserID, Name: "默认专栏", Description: "默认合集", IsDefault: true}
+	collection = model.Collection{ChannelID: *channelID, ContentType: "blog", CreatedBy: &post.UserID, Name: "默认合集", Description: "默认合集", IsDefault: true}
 	if err := tx.Create(&collection).Error; err != nil {
 		return model.Collection{}, 0, err
 	}

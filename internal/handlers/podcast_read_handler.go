@@ -222,7 +222,7 @@ func GetPodcastEpisodes(db *gorm.DB) gin.HandlerFunc {
 		if sort == "random" {
 			q = q.Order("RANDOM()")
 		} else {
-			q = q.Order("posts.created_at DESC, episodes.episode_id DESC")
+			q = q.Order("episodes.created_at DESC, episodes.episode_id DESC")
 		}
 		episodes, err := contentmodule.LoadPodcastEpisodes(db, q.Offset(httpx.Offset(page, limit)).Limit(limit))
 		if err != nil {

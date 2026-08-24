@@ -2,6 +2,7 @@ package studio
 
 import (
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -84,58 +85,77 @@ func (s *Service) ResolveCollectionConflict(user authctx.CurrentUser, module Mod
 			}
 			return recordStudioAudit(tx, user.ID, "studio.collection_conflict_resolved", "content_entry", entry.ID, map[string]any{"module": module, "collection_id": collectionID.String()})
 		case ModulePodcast:
-			var episode model.PodcastEpisode
-			if err := tx.Preload("Post.Collections").First(&episode, "id = ?", contentID).Error; err != nil {
+			canonicalID, err := contentmodule.PodcastContentID(tx, contentID)
+			if err != nil {
 				return contentNotFound(err)
 			}
-			if episode.Post == nil || episode.Post.UserID != user.ID {
-				return apperr.NotFound("studio.content_not_found", "content not found")
+			var entry model.ContentEntry
+			if err := tx.Where("id = ? AND author_id = ? AND kind = ?", canonicalID, user.ID, "podcast").First(&entry).Error; err != nil {
+				return contentNotFound(err)
 			}
-			if !episode.Post.CollectionConflict {
+			var extension model.ContentEpisodeExtension
+			if err := tx.First(&extension, "content_id = ?", canonicalID).Error; err != nil {
+				return err
+			}
+			if !extension.CollectionConflict {
 				return apperr.Conflict("studio.collection_not_conflicted", "content has no collection conflict")
 			}
-			if !containsCollection(episode.Post.Collections, collectionID) {
+			var candidateCount int64
+			if err := tx.Model(&model.ContentCollectionMembership{}).Where("content_id = ? AND collection_id = ?", canonicalID, collectionID).Count(&candidateCount).Error; err != nil {
+				return err
+			}
+			if candidateCount != 1 {
 				return apperr.BadRequest("studio.invalid_collection", "collection is not a conflict candidate")
 			}
-			if err := tx.Model(episode.Post).Updates(map[string]any{"collection_id": collectionID, "collection_conflict": false}).Error; err != nil {
+			if err := tx.Model(&model.ContentEpisodeExtension{}).Where("content_id = ?", canonicalID).Update("collection_conflict", false).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(episode.Post).Association("Collections").Replace([]model.Collection{collection}); err != nil {
+			if err := tx.Where("content_id = ?", canonicalID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
 				return err
 			}
-			return recordStudioAudit(tx, user.ID, "studio.collection_conflict_resolved", "podcast_episode", episode.ID, map[string]any{"module": module, "collection_id": collectionID.String()})
+			if err := tx.Create(&model.ContentCollectionMembership{ContentID: canonicalID, CollectionID: collectionID}).Error; err != nil {
+				return err
+			}
+			return recordStudioAudit(tx, user.ID, "studio.collection_conflict_resolved", "content_entry", entry.ID, map[string]any{"module": module, "collection_id": collectionID.String()})
 		case ModuleVideo:
-			var video model.Video
-			if err := tx.Preload("Collections").First(&video, "id = ? AND user_id = ?", contentID, user.ID).Error; err != nil {
+			canonicalID, err := contentmodule.VideoContentID(tx, contentID)
+			if err != nil {
 				return contentNotFound(err)
 			}
-			if !video.CollectionConflict {
+			var entry model.ContentEntry
+			if err := tx.Where("id = ? AND author_id = ? AND kind = ?", canonicalID, user.ID, "video").First(&entry).Error; err != nil {
+				return contentNotFound(err)
+			}
+			var extension model.ContentVideoExtension
+			if err := tx.First(&extension, "content_id = ?", canonicalID).Error; err != nil {
+				return err
+			}
+			if !extension.CollectionConflict {
 				return apperr.Conflict("studio.collection_not_conflicted", "content has no collection conflict")
 			}
-			if !containsCollection(video.Collections, collectionID) {
+			var candidateCount int64
+			if err := tx.Model(&model.ContentCollectionMembership{}).Where("content_id = ? AND collection_id = ?", canonicalID, collectionID).Count(&candidateCount).Error; err != nil {
+				return err
+			}
+			if candidateCount != 1 {
 				return apperr.BadRequest("studio.invalid_collection", "collection is not a conflict candidate")
 			}
-			if err := tx.Model(&video).Updates(map[string]any{"collection_id": collectionID, "collection_conflict": false}).Error; err != nil {
+			if err := tx.Model(&model.ContentVideoExtension{}).Where("content_id = ?", canonicalID).Update("collection_conflict", false).Error; err != nil {
 				return err
 			}
-			if err := tx.Model(&video).Association("Collections").Replace([]model.Collection{collection}); err != nil {
+			if err := tx.Where("content_id = ?", canonicalID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
 				return err
 			}
-			return recordStudioAudit(tx, user.ID, "studio.collection_conflict_resolved", "video", video.ID, map[string]any{"module": module, "collection_id": collectionID.String()})
+			if err := tx.Create(&model.ContentCollectionMembership{ContentID: canonicalID, CollectionID: collectionID}).Error; err != nil {
+				return err
+			}
+			return recordStudioAudit(tx, user.ID, "studio.collection_conflict_resolved", "content_entry", entry.ID, map[string]any{"module": module, "collection_id": collectionID.String()})
 		default:
 			return apperr.BadRequest("studio.invalid_module", "module must be blog, podcast, or video")
 		}
 	})
 }
 
-func containsCollection(collections []model.Collection, id uuid.UUID) bool {
-	for _, collection := range collections {
-		if collection.ID == id {
-			return true
-		}
-	}
-	return false
-}
 func contentNotFound(err error) error {
 	if err == gorm.ErrRecordNotFound {
 		return apperr.NotFound("studio.content_not_found", "content not found")

@@ -3,6 +3,7 @@ package migrations
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"atoman/internal/model"
 
@@ -11,14 +12,26 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// RunUnifiedContentMigration backfills canonical entries without changing legacy
-// resources. Extension rows make the operation safe to run on every startup.
+var legacySystemDefaultCollectionNames = []string{
+	"默认合集",
+	"默认专栏",
+	"未分类文章",
+	"未分类单集",
+	"未分类视频",
+}
+
+// RunUnifiedContentMigration backfills canonical entries and collection memberships. Once
+// those mappings are complete, it soft-deletes migrated system default collections from
+// the legacy table while retaining the mappings for compatibility.
 func RunUnifiedContentMigration(db *gorm.DB) error {
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.AutoMigrate(
 			&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{}, &model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
 			&model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
 		); err != nil {
+			return err
+		}
+		if err := dropLegacyVideoProcessingForeignKey(tx); err != nil {
 			return err
 		}
 		if err := backfillPostContentEntries(tx); err != nil {
@@ -33,13 +46,22 @@ func RunUnifiedContentMigration(db *gorm.DB) error {
 		if err := backfillContentBlogVersions(tx); err != nil {
 			return err
 		}
-		return backfillContentBlogDrafts(tx)
+		if err := backfillContentBlogDrafts(tx); err != nil {
+			return err
+		}
+		return cleanupLegacyDefaultCollections(tx)
 	}); err != nil {
 		return fmt.Errorf("unified content migration: %w", err)
 	}
 	return nil
 }
 
+func dropLegacyVideoProcessingForeignKey(tx *gorm.DB) error {
+	if tx.Dialector.Name() != "postgres" || !tx.Migrator().HasTable(&model.VideoProcessingJob{}) {
+		return nil
+	}
+	return tx.Exec(`ALTER TABLE video_processing_jobs DROP CONSTRAINT IF EXISTS fk_video_processing_jobs_video`).Error
+}
 func backfillPostContentEntries(tx *gorm.DB) error {
 	var episodes []model.PodcastEpisode
 	if err := tx.Find(&episodes).Error; err != nil {
@@ -130,7 +152,7 @@ func backfillContentCollections(tx *gorm.DB) error {
 			if id, ok := defaults[collection.ChannelID]; ok {
 				unified.ID = id
 			} else {
-				unified = model.ContentCollection{ChannelID: collection.ChannelID, CreatedBy: collection.CreatedBy, Name: "未分类", IsDefault: true}
+				unified = model.ContentCollection{ChannelID: collection.ChannelID, CreatedBy: collection.CreatedBy, Name: "默认合集", Description: "默认合集", IsDefault: true}
 				if err := tx.Where("channel_id = ? AND is_default = ?", collection.ChannelID, true).FirstOrCreate(&unified).Error; err != nil {
 					return err
 				}
@@ -175,6 +197,18 @@ func backfillContentCollectionMemberships(tx *gorm.DB) error {
 			return err
 		}
 	}
+	var posts []model.Post
+	if err := tx.Where("collection_id IS NOT NULL").Find(&posts).Error; err != nil {
+		return err
+	}
+	for _, post := range posts {
+		if post.CollectionID == nil {
+			continue
+		}
+		if err := createContentCollectionMembership(tx, contentByPostID[post.ID], collectionByLegacyID[*post.CollectionID], post.CollectionPosition); err != nil {
+			return err
+		}
+	}
 	var videoExtensions []model.ContentVideoExtension
 	if err := tx.Find(&videoExtensions).Error; err != nil {
 		return err
@@ -189,6 +223,18 @@ func backfillContentCollectionMemberships(tx *gorm.DB) error {
 	}
 	for _, link := range videoLinks {
 		if err := createContentCollectionMembership(tx, contentByVideoID[link.VideoID], collectionByLegacyID[link.CollectionID], 0); err != nil {
+			return err
+		}
+	}
+	var videos []model.Video
+	if err := tx.Where("collection_id IS NOT NULL").Find(&videos).Error; err != nil {
+		return err
+	}
+	for _, video := range videos {
+		if video.CollectionID == nil {
+			continue
+		}
+		if err := createContentCollectionMembership(tx, contentByVideoID[video.ID], collectionByLegacyID[*video.CollectionID], video.CollectionPosition); err != nil {
 			return err
 		}
 	}
@@ -230,6 +276,85 @@ func createContentCollectionMembership(tx *gorm.DB, contentID, collectionID uuid
 	}
 	membership := model.ContentCollectionMembership{ContentID: contentID, CollectionID: collectionID, Position: position}
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&membership).Error
+}
+
+func cleanupLegacyDefaultCollections(tx *gorm.DB) error {
+	var collections []model.Collection
+	if err := tx.Joins("JOIN channels ON channels.id = collections.channel_id AND channels.deleted_at IS NULL").
+		Joins("JOIN legacy_collection_mappings mappings ON mappings.legacy_collection_id = collections.id").
+		Joins("JOIN content_collections unified ON unified.id = mappings.content_collection_id AND unified.is_default = ?", true).
+		Where("collections.is_default = ? AND (collections.created_by IS NULL OR collections.created_by = channels.user_id)", true).
+		Where("LOWER(collections.name) IN ?", lowerCollectionNames(legacySystemDefaultCollectionNames)).
+		Order("collections.channel_id ASC, collections.created_at ASC, collections.id ASC").Find(&collections).Error; err != nil {
+		return err
+	}
+	if len(collections) == 0 {
+		return nil
+	}
+
+	if err := dropDefaultCollectionProtection(tx); err != nil {
+		return err
+	}
+
+	legacyIDs := make([]uuid.UUID, 0, len(collections))
+	for _, collection := range collections {
+		legacyIDs = append(legacyIDs, collection.ID)
+	}
+	var mappings []model.LegacyCollectionMapping
+	if err := tx.Where("legacy_collection_id IN ?", legacyIDs).Find(&mappings).Error; err != nil {
+		return err
+	}
+	contentCollectionByLegacyID := make(map[uuid.UUID]uuid.UUID, len(mappings))
+	for _, mapping := range mappings {
+		contentCollectionByLegacyID[mapping.LegacyCollectionID] = mapping.ContentCollectionID
+	}
+
+	for _, collection := range collections {
+		contentCollectionID, ok := contentCollectionByLegacyID[collection.ID]
+		if !ok {
+			return fmt.Errorf("legacy collection %s has no unified collection mapping", collection.ID)
+		}
+		if tx.Migrator().HasTable(&model.StudioModuleSettings{}) {
+			if err := tx.Model(&model.StudioModuleSettings{}).
+				Where("default_collection_id = ?", collection.ID).
+				Update("default_collection_id", contentCollectionID).Error; err != nil {
+				return fmt.Errorf("update studio settings for legacy collection %s: %w", collection.ID, err)
+			}
+		}
+		if err := tx.Delete(&collection).Error; err != nil {
+			return fmt.Errorf("remove legacy default collection %s: %w", collection.ID, err)
+		}
+	}
+	return createDefaultCollectionProtection(tx)
+}
+
+func lowerCollectionNames(names []string) []string {
+	result := make([]string, 0, len(names))
+	for _, name := range names {
+		result = append(result, strings.ToLower(name))
+	}
+	return result
+}
+func dropDefaultCollectionProtection(tx *gorm.DB) error {
+	triggers := []struct {
+		name  string
+		table string
+	}{
+		{name: "protect_active_default_collection_update", table: "collections"},
+		{name: "protect_active_default_collection_delete", table: "collections"},
+		{name: "protect_active_default_content_collection_update", table: "content_collections"},
+		{name: "protect_active_default_content_collection_delete", table: "content_collections"},
+	}
+	for _, trigger := range triggers {
+		statement := fmt.Sprintf("DROP TRIGGER IF EXISTS %s", trigger.name)
+		if tx.Dialector.Name() == "postgres" {
+			statement += " ON " + trigger.table
+		}
+		if err := tx.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func backfillContentBlogVersions(tx *gorm.DB) error {
@@ -419,13 +544,14 @@ func ensurePostExtension(tx *gorm.DB, contentID, postID uuid.UUID) error {
 func ensureEpisodeExtension(tx *gorm.DB, contentID, episodeID uuid.UUID, post model.Post) error {
 	extension := model.ContentEpisodeExtension{
 		ContentID: contentID, EpisodeID: episodeID, LegacyPostID: post.ID,
-		AudioURL: "", DurationSec: 0, EpisodeCoverURL: "", SeasonNumber: 1,
 		EpisodeNumber: 0, Shownotes: post.Content, ViewCount: post.ViewCount, CollectionConflict: post.CollectionConflict,
 	}
 	var episode model.PodcastEpisode
 	if err := tx.First(&episode, "id = ?", episodeID).Error; err != nil {
 		return err
 	}
+	extension.CreatedAt = episode.CreatedAt
+	extension.UpdatedAt = episode.UpdatedAt
 	extension.AudioURL = episode.AudioURL
 	extension.DurationSec = episode.DurationSec
 	extension.EpisodeCoverURL = episode.EpisodeCoverURL
@@ -442,6 +568,8 @@ func ensureEpisodeExtension(tx *gorm.DB, contentID, episodeID uuid.UUID, post mo
 	return tx.Model(&existing).Updates(map[string]any{
 		"content_id":          existing.ContentID,
 		"legacy_post_id":      extension.LegacyPostID,
+		"created_at":          extension.CreatedAt,
+		"updated_at":          extension.UpdatedAt,
 		"audio_url":           extension.AudioURL,
 		"duration_sec":        extension.DurationSec,
 		"episode_cover_url":   extension.EpisodeCoverURL,
@@ -473,7 +601,7 @@ func syncContentEntryFromVideo(tx *gorm.DB, entry *model.ContentEntry, video mod
 
 func syncContentVideoExtension(tx *gorm.DB, contentID uuid.UUID, video model.Video) error {
 	extension := model.ContentVideoExtension{
-		ContentID: contentID, VideoID: video.ID, StorageType: video.StorageType,
+		ContentID: contentID, VideoID: video.ID, CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt, StorageType: video.StorageType,
 		VideoURL: video.VideoURL, ThumbnailURL: video.ThumbnailURL, DurationSec: video.DurationSec,
 		ProcessingStatus: video.ProcessingStatus, ProcessingError: video.ProcessingError,
 		PreviewThumbnails: video.PreviewThumbnails, ViewCount: video.ViewCount,
@@ -489,8 +617,9 @@ func syncContentVideoExtension(tx *gorm.DB, contentID uuid.UUID, video model.Vid
 	}
 	return tx.Model(&existing).Updates(map[string]any{
 		"content_id":          existing.ContentID,
+		"created_at":          extension.CreatedAt,
+		"updated_at":          extension.UpdatedAt,
 		"storage_type":        extension.StorageType,
-		"video_url":           extension.VideoURL,
 		"thumbnail_url":       extension.ThumbnailURL,
 		"duration_sec":        extension.DurationSec,
 		"processing_status":   extension.ProcessingStatus,

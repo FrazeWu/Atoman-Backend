@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -42,8 +43,8 @@ func ToggleVideoLike(db *gorm.DB, liked bool) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "视频 ID 无效"})
 			return
 		}
-		var video model.Video
-		if err := db.First(&video, "id = ?", videoID).Error; err != nil {
+		video, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", videoID))
+		if err != nil {
 			c.JSON(http.StatusNotFound, gin.H{"error": "视频不存在"})
 			return
 		}

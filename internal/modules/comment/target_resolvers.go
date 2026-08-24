@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -66,8 +67,8 @@ func (r *databaseTargetResolvers) resolveBlogPost(viewer Viewer, resourceID uuid
 }
 
 func (r *databaseTargetResolvers) resolveVideo(viewer Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
-	var video model.Video
-	if err := r.db.First(&video, "id = ?", resourceID).Error; err != nil {
+	video, err := contentmodule.LoadVideo(r.db, contentmodule.VideoQuery(r.db).Where("videos.video_id = ?", resourceID))
+	if err != nil {
 		return ResolvedTarget{}, targetLookupError(TargetKindVideo, resourceID, err)
 	}
 	visible, err := r.canViewPublishedContent(viewer, video.UserID, video.ChannelID, video.Status, video.Visibility)
@@ -78,8 +79,8 @@ func (r *databaseTargetResolvers) resolveVideo(viewer Viewer, resourceID uuid.UU
 }
 
 func (r *databaseTargetResolvers) resolvePodcastEpisode(viewer Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
-	var episode model.PodcastEpisode
-	if err := r.db.Preload("Post").First(&episode, "id = ?", resourceID).Error; err != nil {
+	episode, err := contentmodule.LoadPodcastEpisode(r.db, contentmodule.PodcastQuery(r.db).Where("episodes.episode_id = ?", resourceID))
+	if err != nil {
 		return ResolvedTarget{}, targetLookupError(TargetKindPodcastEpisode, resourceID, err)
 	}
 	if episode.Post == nil {

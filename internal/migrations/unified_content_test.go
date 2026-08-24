@@ -6,14 +6,16 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/testdb"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
 func TestRunUnifiedContentMigrationBackfillsMixedContentAndCollections(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
-		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PostCollection{}, &model.BlogPostVersion{}, &model.BlogDraft{},
-		&model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
+		&model.User{}, &model.Channel{}, &model.Collection{}, &model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{}, &model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
+		&model.Post{}, &model.PostCollection{}, &model.BlogPostVersion{}, &model.BlogDraft{},
+		&model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{}, &model.StudioModuleSettings{},
 	)
 	owner := model.User{Username: "unified-content-owner", Email: "unified-content-owner@example.com", Password: "hash", IsActive: true}
 	require.NoError(t, db.Create(&owner).Error)
@@ -26,6 +28,10 @@ func TestRunUnifiedContentMigrationBackfillsMixedContentAndCollections(t *testin
 	for _, collection := range []*model.Collection{&blogDefault, &podcastDefault, &videoDefault} {
 		require.NoError(t, db.Create(collection).Error)
 	}
+	customCollection := model.Collection{ChannelID: channel.ID, ContentType: "blog", CreatedBy: &owner.UUID, Name: "我的合集"}
+	require.NoError(t, db.Create(&customCollection).Error)
+	settings := model.StudioModuleSettings{UserID: owner.UUID, ChannelID: channel.ID, ContentType: "blog", DefaultCollectionID: &blogDefault.ID}
+	require.NoError(t, db.Create(&settings).Error)
 
 	post := model.Post{UserID: owner.UUID, ChannelID: &channel.ID, Title: "Article", Content: "body", Status: "published", Visibility: "public"}
 	episodePost := model.Post{UserID: owner.UUID, ChannelID: &channel.ID, Title: "Episode", Content: "notes", Status: "published", Visibility: "public"}
@@ -49,7 +55,29 @@ func TestRunUnifiedContentMigrationBackfillsMixedContentAndCollections(t *testin
 		ChannelID: &channel.ID, CollectionID: &blogDefault.ID,
 	}).Error)
 
+	require.NoError(t, RunResourceManagementMigration(db))
+	renamedDefault := model.Collection{ChannelID: channel.ID, ContentType: "blog", CreatedBy: &owner.UUID, Name: "我的旧合集", IsDefault: true}
+	require.NoError(t, db.Create(&renamedDefault).Error)
 	require.NoError(t, RunUnifiedContentMigration(db))
+	var activeLegacyDefaults int64
+	require.NoError(t, db.Model(&model.Collection{}).
+		Where("channel_id = ? AND is_default = ?", channel.ID, true).
+		Count(&activeLegacyDefaults).Error)
+	require.Equal(t, int64(1), activeLegacyDefaults)
+	var deletedLegacyDefaults []model.Collection
+	require.NoError(t, db.Unscoped().Where("channel_id = ? AND is_default = ?", channel.ID, true).Find(&deletedLegacyDefaults).Error)
+	require.Len(t, deletedLegacyDefaults, 4)
+	var persistedCustom model.Collection
+	require.NoError(t, db.First(&persistedCustom, "id = ?", customCollection.ID).Error)
+	require.Equal(t, customCollection.Name, persistedCustom.Name)
+	var defaults []model.ContentCollection
+	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", channel.ID, true).Find(&defaults).Error)
+	require.Len(t, defaults, 1)
+	var migratedSettings model.StudioModuleSettings
+	require.NoError(t, db.First(&migratedSettings, "id = ?", settings.ID).Error)
+	require.NotNil(t, migratedSettings.DefaultCollectionID)
+	require.Equal(t, defaults[0].ID, *migratedSettings.DefaultCollectionID)
+
 	require.NoError(t, db.Model(&model.Post{}).Where("id = ?", post.ID).Updates(map[string]any{
 		"content":    "updated body",
 		"view_count": 7,
@@ -59,15 +87,19 @@ func TestRunUnifiedContentMigrationBackfillsMixedContentAndCollections(t *testin
 	var entries []model.ContentEntry
 	require.NoError(t, db.Where("channel_id = ?", channel.ID).Find(&entries).Error)
 	require.Len(t, entries, 3)
-	var defaults []model.ContentCollection
 	require.NoError(t, db.Where("channel_id = ? AND is_default = ?", channel.ID, true).Find(&defaults).Error)
 	require.Len(t, defaults, 1)
 	var mappings []model.LegacyCollectionMapping
 	require.NoError(t, db.Find(&mappings).Error)
-	require.Len(t, mappings, 3)
+	require.Len(t, mappings, 5)
+	mappingByLegacyID := make(map[uuid.UUID]uuid.UUID, len(mappings))
 	for _, mapping := range mappings {
-		require.Equal(t, defaults[0].ID, mapping.ContentCollectionID)
+		mappingByLegacyID[mapping.LegacyCollectionID] = mapping.ContentCollectionID
 	}
+	for _, legacyID := range []uuid.UUID{blogDefault.ID, podcastDefault.ID, videoDefault.ID, renamedDefault.ID} {
+		require.Equal(t, defaults[0].ID, mappingByLegacyID[legacyID])
+	}
+	require.NotEqual(t, defaults[0].ID, mappingByLegacyID[customCollection.ID])
 	var memberships []model.ContentCollectionMembership
 	require.NoError(t, db.Where("collection_id = ?", defaults[0].ID).Find(&memberships).Error)
 	require.Len(t, memberships, 3)

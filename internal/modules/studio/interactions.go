@@ -2,6 +2,7 @@ package studio
 
 import (
 	"atoman/internal/model"
+	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 
@@ -89,23 +90,28 @@ func (s *Service) interactionContentTitles(userID, channelID uuid.UUID, module M
 		return "blog_post", titles, err
 	case ModulePodcast:
 		var rows []struct {
-			ID    uuid.UUID
-			Title string
+			ID    uuid.UUID `gorm:"column:id"`
+			Title string    `gorm:"column:title"`
 		}
-		err := s.db.Model(&model.PodcastEpisode{}).
-			Select("podcast_episodes.id, posts.title").
-			Joins("JOIN posts ON posts.id = podcast_episodes.post_id AND posts.deleted_at IS NULL").
-			Where("posts.user_id = ? AND podcast_episodes.channel_id = ?", userID, channelID).
+		err := contentmodule.PodcastQuery(s.db).
+			Select("episodes.episode_id AS id, posts.title").
+			Where("posts.author_id = ? AND posts.channel_id = ?", userID, channelID).
 			Scan(&rows).Error
 		for _, row := range rows {
 			titles[row.ID] = row.Title
 		}
 		return "podcast_episode", titles, err
 	case ModuleVideo:
-		var videos []model.Video
-		err := s.db.Select("id", "title").Where("user_id = ? AND channel_id = ?", userID, channelID).Find(&videos).Error
-		for _, video := range videos {
-			titles[video.ID] = video.Title
+		var rows []struct {
+			ID    uuid.UUID `gorm:"column:id"`
+			Title string    `gorm:"column:title"`
+		}
+		err := contentmodule.VideoQuery(s.db).
+			Select("videos.video_id AS id, posts.title").
+			Where("posts.author_id = ? AND posts.channel_id = ?", userID, channelID).
+			Scan(&rows).Error
+		for _, row := range rows {
+			titles[row.ID] = row.Title
 		}
 		return "video", titles, err
 	default:

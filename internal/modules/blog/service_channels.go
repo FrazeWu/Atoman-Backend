@@ -309,7 +309,7 @@ func (s *Service) CreateDefaultChannelForUser(userID uuid.UUID, displayName stri
 }
 
 func ensureDefaultCollectionName() string {
-	return "默认专栏"
+	return "默认合集"
 }
 
 func (s *Service) ensureDefaultCollectionForChannel(channelID uuid.UUID) error {

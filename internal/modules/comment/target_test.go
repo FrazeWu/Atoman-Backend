@@ -22,6 +22,8 @@ func newTargetTestRegistry(t *testing.T) (*TargetRegistry, *gorm.DB) {
 		&model.Channel{},
 		&model.Post{},
 		&model.ContentEntry{},
+		&model.ContentEpisodeExtension{},
+		&model.ContentVideoExtension{},
 		&model.ShortNote{},
 		&model.Video{},
 		&model.PodcastEpisode{},
@@ -70,6 +72,84 @@ func createTargetTestUser(t *testing.T, db *gorm.DB, name string) model.User {
 	user := model.User{Username: name, Email: name + "@example.com", Password: "hash", IsActive: true}
 	require.NoError(t, db.Create(&user).Error)
 	return user
+}
+func createCanonicalVideo(t *testing.T, db *gorm.DB, video model.Video) {
+	t.Helper()
+	entry := model.ContentEntry{
+		Base:        video.Base,
+		AuthorID:    &video.UserID,
+		ChannelID:   uuid.Nil,
+		Kind:        "video",
+		Title:       video.Title,
+		Status:      video.Status,
+		Visibility:  video.Visibility,
+		PublishedAt: video.PublishedAt,
+		ScheduledAt: video.ScheduledAt,
+	}
+	if video.ChannelID != nil {
+		entry.ChannelID = *video.ChannelID
+	} else {
+		channel := model.Channel{UserID: &video.UserID, Name: "Video Test Channel", Slug: "video-test-" + uuid.NewString()}
+		require.NoError(t, db.Create(&channel).Error)
+		entry.ChannelID = channel.ID
+	}
+	require.NoError(t, db.Create(&entry).Error)
+	require.NoError(t, db.Create(&model.ContentVideoExtension{
+		ContentID:          entry.ID,
+		VideoID:            video.ID,
+		CreatedAt:          video.CreatedAt,
+		UpdatedAt:          video.UpdatedAt,
+		StorageType:        video.StorageType,
+		VideoURL:           video.VideoURL,
+		ThumbnailURL:       video.ThumbnailURL,
+		DurationSec:        video.DurationSec,
+		ProcessingStatus:   video.ProcessingStatus,
+		ProcessingError:    video.ProcessingError,
+		PreviewThumbnails:  video.PreviewThumbnails,
+		ViewCount:          video.ViewCount,
+		CollectionConflict: video.CollectionConflict,
+	}).Error)
+}
+
+func createCanonicalEpisode(t *testing.T, db *gorm.DB, post model.Post, episode model.PodcastEpisode) {
+	t.Helper()
+	entry := model.ContentEntry{
+		Base:        post.Base,
+		AuthorID:    &post.UserID,
+		ChannelID:   episode.ChannelID,
+		Kind:        "podcast",
+		Title:       post.Title,
+		Summary:     post.Summary,
+		CoverURL:    post.CoverURL,
+		Status:      post.Status,
+		Visibility:  post.Visibility,
+		PublishedAt: post.PublishedAt,
+		ScheduledAt: post.ScheduledAt,
+	}
+	require.NoError(t, db.Model(&model.ContentEntry{}).Where("id = ?", entry.ID).Updates(map[string]any{
+		"channel_id": entry.ChannelID,
+		"kind":       entry.Kind,
+		"title":      entry.Title,
+		"summary":    entry.Summary,
+		"cover_url":  entry.CoverURL,
+		"status":     entry.Status,
+		"visibility": entry.Visibility,
+	}).Error)
+	require.NoError(t, db.Create(&model.ContentEpisodeExtension{
+		ContentID:          entry.ID,
+		EpisodeID:          episode.ID,
+		LegacyPostID:       post.ID,
+		CreatedAt:          episode.CreatedAt,
+		UpdatedAt:          episode.UpdatedAt,
+		AudioURL:           episode.AudioURL,
+		DurationSec:        episode.DurationSec,
+		EpisodeCoverURL:    episode.EpisodeCoverURL,
+		SeasonNumber:       episode.SeasonNumber,
+		EpisodeNumber:      episode.EpisodeNumber,
+		Shownotes:          "",
+		ViewCount:          0,
+		CollectionConflict: false,
+	}).Error)
 }
 
 func TestTargetRegistryRegistersExactlySupportedKinds(t *testing.T) {
@@ -291,10 +371,12 @@ func TestContentResolversRespectPublicationVisibilityAndOwnership(t *testing.T) 
 	video := model.Video{UserID: owner.UUID, Title: "video", VideoURL: "video.mp4", Status: "draft", Visibility: "private", DurationSec: 75}
 	require.NoError(t, db.Create(&post).Error)
 	require.NoError(t, db.Create(&video).Error)
+	createCanonicalVideo(t, db, video)
 	episodePost := model.Post{UserID: owner.UUID, Title: "episode", Content: "body", Status: "draft", Visibility: "private"}
 	require.NoError(t, db.Create(&episodePost).Error)
 	episode := model.PodcastEpisode{PostID: episodePost.ID, ChannelID: channel.ID, AudioURL: "episode.mp3", DurationSec: 125}
 	require.NoError(t, db.Create(&episode).Error)
+	createCanonicalEpisode(t, db, episodePost, episode)
 
 	refs := []TargetRef{
 		{Kind: TargetKindBlogPost, ResourceID: post.ID},
@@ -331,6 +413,7 @@ func TestContentResolversAllowChannelSubscribersToSeePublishedFollowersContent(t
 	video := model.Video{UserID: owner.UUID, ChannelID: &channel.ID, Title: "video", VideoURL: "video.mp4", Status: "published", Visibility: "followers"}
 	require.NoError(t, db.Create(&post).Error)
 	require.NoError(t, db.Create(&video).Error)
+	createCanonicalVideo(t, db, video)
 
 	for _, ref := range []TargetRef{
 		{Kind: TargetKindBlogPost, ResourceID: post.ID},
@@ -361,8 +444,11 @@ func TestResolversCoverAllKindsDurationsOwnersAndMarkLabels(t *testing.T) {
 	episodePost := model.Post{UserID: owner.UUID, Title: "episode", Content: "body", Status: "published", Visibility: "public"}
 	require.NoError(t, db.Create(&post).Error)
 	require.NoError(t, db.Create(&video).Error)
+	createCanonicalVideo(t, db, video)
 	require.NoError(t, db.Create(&episodePost).Error)
 	episode := model.PodcastEpisode{PostID: episodePost.ID, ChannelID: channel.ID, AudioURL: "episode.mp3", DurationSec: 181}
+	require.NoError(t, db.Create(&episode).Error)
+	createCanonicalEpisode(t, db, episodePost, episode)
 	feedItem := model.FeedItem{FeedSourceID: source.ID, GUID: "all", Link: "https://example.com/article"}
 	artist := model.Artist{Name: "artist", EntryStatus: "open"}
 	album := model.Album{Title: "album", Status: "open", EntryStatus: "open"}
@@ -371,7 +457,7 @@ func TestResolversCoverAllKindsDurationsOwnersAndMarkLabels(t *testing.T) {
 	debate := model.Debate{UserID: owner.UUID, Title: "debate", Status: "open"}
 	event := model.TimelineEvent{UserID: owner.UUID, Title: "event", IsPublic: true}
 	person := model.TimelinePerson{UserID: owner.UUID, Name: "person", IsPublic: true}
-	for _, entity := range []any{&episode, &feedItem, &artist, &album, &song, &topic, &debate, &event, &person} {
+	for _, entity := range []any{&feedItem, &artist, &album, &song, &topic, &debate, &event, &person} {
 		require.NoError(t, db.Create(entity).Error)
 	}
 
