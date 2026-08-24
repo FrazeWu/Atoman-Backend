@@ -20,12 +20,15 @@ func RunBlogRatingContentMigration(db *gorm.DB) error {
 		}
 	}
 
-	return db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Exec(`
+	hasLegacyPostID := db.Migrator().HasColumn("post_ratings", "post_id")
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if hasLegacyPostID {
+			if err := tx.Exec(`
 UPDATE post_ratings
 SET content_id = post_id
 WHERE content_id IS NULL`).Error; err != nil {
-			return fmt.Errorf("backfill post_ratings.content_id: %w", err)
+				return fmt.Errorf("backfill post_ratings.content_id: %w", err)
+			}
 		}
 
 		var missing int64
@@ -48,5 +51,8 @@ WHERE content_id IS NULL`).Error; err != nil {
 			return fmt.Errorf("create canonical post rating index: %w", err)
 		}
 		return nil
-	})
+	}); err != nil {
+		return fmt.Errorf("blog rating content migration: %w", err)
+	}
+	return nil
 }

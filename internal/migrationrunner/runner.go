@@ -76,6 +76,7 @@ func Run(db *gorm.DB) error {
 		{"global search indexes migration", migrations.RunGlobalSearchIndexes},
 		{"search query indexes migration", migrations.RunSearchQueryIndexes},
 		{"music listening migration", migrations.RunMusicListeningMigration},
+		{"music recommendation events migration", migrations.RunMusicRecommendationEventsMigration},
 		{"music album artist credits migration", migrations.RunMusicAlbumArtistCreditsMigration},
 		{"music song credits migration", migrations.RunMusicSongCreditsMigration},
 		{"music catalog v2 migration", migrations.RunMusicCatalogV2Migration},
@@ -259,7 +260,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.MusicEdit{}, &model.MusicEditVote{}, &model.MusicEditDecision{}, &model.MusicEditChange{},
 		&model.AlbumImportSession{}, &model.AlbumImportFile{}, &model.AlbumImportJob{}, &model.MusicAssetUploadSession{},
 		&model.ArtistBookmark{}, &model.AlbumBookmark{}, &model.PlaylistBookmark{},
-		&model.Playlist{}, &model.PlaylistSong{}, &model.MusicListeningHistory{}, &model.MusicPlaybackSession{}, &model.MusicPlaybackProgress{}, &model.MusicSearchInteraction{},
+		&model.Playlist{}, &model.PlaylistSong{}, &model.MusicListeningHistory{}, &model.MusicPlaybackSession{}, &model.MusicPlaybackProgress{}, &model.MusicSearchInteraction{}, &model.MusicRecommendationEvent{},
 		&model.Bookmark{}, &model.BookmarkFolder{}, &model.ChannelBookmark{}, &model.SiteSetting{}, &model.SiteVisitDaily{},
 		&model.FeedSource{}, &model.OnboardingFeedRecommendation{}, &model.Subscription{},
 		&model.FeedSubscriptionRule{}, &model.FeedPreference{}, &model.SubscriptionGroup{}, &model.FeedItem{},
@@ -287,6 +288,11 @@ func MigrateSchema(db *gorm.DB) error {
 	}
 	if err := db.AutoMigrate(models...); err != nil {
 		return err
+	}
+	if db.Dialector.Name() == "postgres" {
+		if err := db.Exec("DISCARD PLANS").Error; err != nil {
+			return fmt.Errorf("discard PostgreSQL prepared plans after schema migration: %w", err)
+		}
 	}
 	steps := []struct {
 		name string

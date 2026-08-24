@@ -117,16 +117,35 @@ func TestRunMigrationsAddsPasswordResetAuthSchema(t *testing.T) {
 
 func TestRunMigrationsBackfillsLegacyForumReplies(t *testing.T) {
 	db := testdb.Open(t)
-	if err := migrateSchema(db); err != nil {
-		t.Fatalf("migrate initial schema: %v", err)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatalf("get test database connection: %v", err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	if err := db.AutoMigrate(&model.User{}, &model.ForumCategory{}, &model.ForumTopic{}); err != nil {
+		t.Fatalf("create forum topic schema: %v", err)
 	}
 	if err := db.Exec(`ALTER TABLE forum_topics ADD COLUMN solved_reply_id TEXT`).Error; err != nil {
 		t.Fatalf("add legacy solved reply column: %v", err)
 	}
-	if err := db.Exec(`CREATE TABLE forum_replies (id TEXT PRIMARY KEY, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME, topic_id TEXT NOT NULL, user_id TEXT NOT NULL, parent_reply_id TEXT, content TEXT NOT NULL, floor_number INTEGER, is_solved NUMERIC)`).Error; err != nil {
+	if err := migrateSchema(db); err != nil {
+		t.Fatalf("migrate initial schema: %v", err)
+	}
+	if err := db.Exec("DISCARD PLANS").Error; err != nil {
+		t.Fatalf("discard cached PostgreSQL plans: %v", err)
+	}
+	if err := db.Exec(`CREATE TABLE forum_replies (id TEXT PRIMARY KEY, created_at TIMESTAMP, updated_at TIMESTAMP, deleted_at TIMESTAMP, topic_id TEXT NOT NULL, user_id TEXT NOT NULL, parent_reply_id TEXT, content TEXT NOT NULL, floor_number INTEGER, is_solved NUMERIC)`).Error; err != nil {
 		t.Fatalf("create legacy forum replies table: %v", err)
 	}
 	topicID, ownerID, categoryID, replyID, authorID := uuid.New(), uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	if err := db.Create(&model.User{
+		UUID: ownerID, Username: "legacy-topic-owner", Email: "legacy-topic-owner@example.com", Password: "hash", IsActive: true,
+	}).Error; err != nil {
+		t.Fatalf("seed legacy topic owner: %v", err)
+	}
+	if err := db.Create(&model.ForumCategory{Base: model.Base{ID: categoryID}, Name: "legacy-category"}).Error; err != nil {
+		t.Fatalf("seed legacy topic category: %v", err)
+	}
 	topic := model.ForumTopic{Base: model.Base{ID: topicID}, UserID: ownerID, CategoryID: categoryID, Title: "legacy", Content: "legacy"}
 	if err := db.Create(&topic).Error; err != nil {
 		t.Fatalf("seed legacy topic: %v", err)
@@ -174,11 +193,11 @@ func TestRunMigrationsBackfillsUserDefaultResources(t *testing.T) {
 	if state.ChannelID == nil || *state.ChannelID != channels[0].ID {
 		t.Fatalf("expected current channel %s, got %#v", channels[0].ID, state.ChannelID)
 	}
-	for _, contentType := range []string{"blog", "podcast", "video"} {
-		var collections int64
-		if err := db.Model(&model.Collection{}).Where("channel_id = ? AND content_type = ? AND is_default = ?", channels[0].ID, contentType, true).Count(&collections).Error; err != nil || collections != 1 {
-			t.Fatalf("expected one %s default collection, got %d err=%v", contentType, collections, err)
-		}
+	var collections int64
+	if err := db.Model(&model.ContentCollection{}).
+		Where("channel_id = ? AND is_default = ?", channels[0].ID, true).
+		Count(&collections).Error; err != nil || collections != 1 {
+		t.Fatalf("expected one default content collection, got %d err=%v", collections, err)
 	}
 	if db.Migrator().HasTable("user_default_channels") {
 		t.Fatal("expected legacy default channel selections to be removed")
@@ -221,21 +240,15 @@ func TestRunMigrationsCreatesUnifiedStudioStateAndTypedCollections(t *testing.T)
 		t.Fatal("expected a current studio channel")
 	}
 
-	for _, contentType := range []string{
-		"blog",
-		"podcast",
-		"video",
-	} {
-		var count int64
-		if err := db.Model(&model.Collection{}).
-			Joins("JOIN channels ON channels.id = collections.channel_id").
-			Where("channels.user_id = ? AND collections.content_type = ? AND collections.is_default = ?", user.UUID, contentType, true).
-			Count(&count).Error; err != nil {
-			t.Fatalf("count %s collections: %v", contentType, err)
-		}
-		if count != 1 {
-			t.Fatalf("expected one %s default collection, got %d", contentType, count)
-		}
+	var collections int64
+	if err := db.Model(&model.ContentCollection{}).
+		Joins("JOIN channels ON channels.id = content_collections.channel_id").
+		Where("channels.user_id = ? AND content_collections.is_default = ?", user.UUID, true).
+		Count(&collections).Error; err != nil {
+		t.Fatalf("count default content collections: %v", err)
+	}
+	if collections != 1 {
+		t.Fatalf("expected one default content collection, got %d", collections)
 	}
 }
 
@@ -244,9 +257,9 @@ func TestRunMigrationsDeduplicatesLegacyForumDrafts(t *testing.T) {
 	if err := db.Exec(`
 CREATE TABLE forum_drafts (
 	id TEXT PRIMARY KEY,
-	created_at DATETIME,
-	updated_at DATETIME,
-	deleted_at DATETIME,
+	created_at TIMESTAMP,
+	updated_at TIMESTAMP,
+	deleted_at TIMESTAMP,
 	user_id TEXT NOT NULL,
 	context_key TEXT NOT NULL,
 	title TEXT,
