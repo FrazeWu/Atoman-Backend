@@ -158,14 +158,14 @@ func TestRecommendHomeAlbumsFillsWithPopularAlbumsWhenAffinityIsSparse(t *testin
 	}
 }
 
-func TestRecommendHomeAlbumsExcludesAlbumsContainingSeenSongs(t *testing.T) {
+func TestRecommendHomeAlbumsExcludesFullyHeardAlbums(t *testing.T) {
 	service, db, _ := newMusicTestService(t)
 	artist := model.Artist{Name: "Affinity Artist", EntryStatus: "open"}
 	if err := db.Create(&artist).Error; err != nil {
 		t.Fatal(err)
 	}
 
-	createAlbum := func(title string) (model.Album, model.Song) {
+	createAlbum := func(title string, songCount int) (model.Album, []model.Song) {
 		t.Helper()
 		album := model.Album{Title: title, CoverURL: "/" + title + ".jpg", Status: "open", EntryStatus: "open"}
 		if err := db.Create(&album).Error; err != nil {
@@ -174,25 +174,50 @@ func TestRecommendHomeAlbumsExcludesAlbumsContainingSeenSongs(t *testing.T) {
 		if err := db.Model(&album).Association("Artists").Append(&artist); err != nil {
 			t.Fatal(err)
 		}
-		song := model.Song{Title: title + " song", AlbumID: &album.ID, AudioURL: "/" + title + ".mp3", Status: "open"}
-		if err := db.Create(&song).Error; err != nil {
-			t.Fatal(err)
+		songs := make([]model.Song, 0, songCount)
+		for index := 0; index < songCount; index++ {
+			songTitle := title + " song"
+			if songCount > 1 {
+				songTitle += " " + string(rune('A'+index))
+			}
+			song := model.Song{Title: songTitle, AlbumID: &album.ID, AudioURL: "/" + title + ".mp3", Status: "open"}
+			if err := db.Create(&song).Error; err != nil {
+				t.Fatal(err)
+			}
+			songs = append(songs, song)
 		}
-		return album, song
+		return album, songs
 	}
 
-	excludedAlbum, seenSong := createAlbum("Excluded")
-	includedAlbum, _ := createAlbum("Included")
+	fullyHeardAlbum, fullyHeardSongs := createAlbum("Fully Heard", 1)
+	partiallyHeardAlbum, partiallyHeardSongs := createAlbum("Partially Heard", 2)
+	unheardAlbum, _ := createAlbum("Unheard", 1)
 	recommendations, err := service.recommendHomeAlbums(
 		map[uuid.UUID]float64{artist.ID: 1},
 		map[uuid.UUID]struct{}{},
-		map[uuid.UUID]struct{}{seenSong.ID: {}},
+		map[uuid.UUID]struct{}{
+			fullyHeardSongs[0].ID:     {},
+			partiallyHeardSongs[0].ID: {},
+		},
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(recommendations) != 1 || recommendations[0].ID != includedAlbum.ID {
-		t.Fatalf("unexpected recommendations: %#v", recommendations)
+	if len(recommendations) != 2 {
+		t.Fatalf("expected two recommendations, got %#v", recommendations)
+	}
+	recommendedIDs := make(map[uuid.UUID]struct{}, len(recommendations))
+	for _, recommendation := range recommendations {
+		recommendedIDs[recommendation.ID] = struct{}{}
+	}
+	if _, exists := recommendedIDs[fullyHeardAlbum.ID]; exists {
+		t.Fatalf("returned fully heard album: %s", fullyHeardAlbum.ID)
+	}
+	if _, exists := recommendedIDs[partiallyHeardAlbum.ID]; !exists {
+		t.Fatalf("did not return partially heard album: %s", partiallyHeardAlbum.ID)
+	}
+	if _, exists := recommendedIDs[unheardAlbum.ID]; !exists {
+		t.Fatalf("did not return unheard album: %s", unheardAlbum.ID)
 	}
 	var payload map[string]any
 	encoded, err := json.Marshal(recommendations[0])
@@ -204,11 +229,6 @@ func TestRecommendHomeAlbumsExcludesAlbumsContainingSeenSongs(t *testing.T) {
 	}
 	if _, exists := payload["songs"]; exists {
 		t.Fatalf("home recommendation must not include song details: %#v", payload)
-	}
-	for _, recommendation := range recommendations {
-		if recommendation.ID == excludedAlbum.ID {
-			t.Fatalf("returned album containing a seen song: %s", excludedAlbum.ID)
-		}
 	}
 }
 

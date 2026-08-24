@@ -93,9 +93,6 @@ func (s *Service) homeAffinity(userID uuid.UUID, history []model.MusicListeningH
 			continue
 		}
 		seenSongs[item.Song.ID] = struct{}{}
-		if item.Song.AlbumID != nil {
-			seenAlbums[*item.Song.AlbumID] = struct{}{}
-		}
 		weight := homeHistoryAffinityWeight(item, now)
 		for _, artist := range item.Song.Artists {
 			affinity[artist.ID] += weight
@@ -319,7 +316,7 @@ func (s *Service) addHomeSongArtistAffinityWeighted(weights map[uuid.UUID]float6
 	return nil
 }
 
-func (s *Service) queryHomeAlbums(artistIDs, excludedAlbumIDs, excludedSongIDs []uuid.UUID, limit int) ([]model.Album, error) {
+func (s *Service) queryHomeAlbums(artistIDs, excludedAlbumIDs, seenSongIDs []uuid.UUID, limit int) ([]model.Album, error) {
 	query := s.db.Model(&model.Album{}).
 		Where("\"Albums\".lifecycle_status = ?", model.MusicLifecycleActive).
 		Where("COALESCE(\"Albums\".cover_url, '') <> ''").
@@ -331,8 +328,15 @@ func (s *Service) queryHomeAlbums(artistIDs, excludedAlbumIDs, excludedSongIDs [
 	if len(excludedAlbumIDs) > 0 {
 		query = query.Where("\"Albums\".id NOT IN ?", excludedAlbumIDs)
 	}
-	if len(excludedSongIDs) > 0 {
-		query = query.Where(`NOT EXISTS (SELECT 1 FROM "Songs" WHERE "Songs".album_id = "Albums".id AND "Songs".deleted_at IS NULL AND "Songs".id IN ?)`, excludedSongIDs)
+	if len(seenSongIDs) > 0 {
+		query = query.Where(`EXISTS (
+			SELECT 1 FROM "Songs" AS remaining_songs
+			WHERE remaining_songs.album_id = "Albums".id
+				AND remaining_songs.deleted_at IS NULL
+				AND remaining_songs.lifecycle_status = 'active'
+				AND COALESCE(remaining_songs.audio_url, '') <> ''
+				AND remaining_songs.id NOT IN ?
+		)`, seenSongIDs)
 	}
 
 	var albums []model.Album
