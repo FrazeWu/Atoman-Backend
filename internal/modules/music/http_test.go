@@ -228,6 +228,100 @@ func TestRegisterRoutesAlbumListReturnsOnlyAlbumEntities(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesSongListIncludesAlbumTracksForFeaturedArtist(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	primary := model.Artist{Name: "Primary Artist", EntryStatus: "open"}
+	featured := model.Artist{Name: "Featured Artist", EntryStatus: "open"}
+	if err := db.Create(&primary).Error; err != nil {
+		t.Fatalf("create primary artist: %v", err)
+	}
+	if err := db.Create(&featured).Error; err != nil {
+		t.Fatalf("create featured artist: %v", err)
+	}
+	album := model.Album{
+		Title: "Primary Album", AlbumType: "album", ReleaseDate: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC),
+		EntryStatus: "open", Status: "open",
+	}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	if err := db.Create(&model.AlbumArtist{AlbumID: album.ID, ArtistID: primary.ID, Role: "primary", Position: 1}).Error; err != nil {
+		t.Fatalf("create album artist: %v", err)
+	}
+	song := model.Song{
+		Title: "Featured Album Track", AlbumID: &album.ID, TrackNumber: 3,
+		ReleaseDate: album.ReleaseDate, AudioURL: "/audio/featured.mp3", Status: "open",
+	}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	for _, credit := range []model.SongArtist{
+		{SongID: song.ID, ArtistID: primary.ID, Role: "primary", Position: 1},
+		{SongID: song.ID, ArtistID: featured.ID, Role: "featured", Position: 2},
+	} {
+		if err := db.Create(&credit).Error; err != nil {
+			t.Fatalf("create song artist credit: %v", err)
+		}
+	}
+
+	response := httptest.NewRecorder()
+	path := "/api/v1/music/songs?artist_id=" + featured.ID.String() + "&sort=-release_date"
+	newMusicHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected featured artist song list to return 200, got %d: %s", response.Code, response.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			Title   string `json:"title"`
+			Artists []struct {
+				Name string `json:"name"`
+			} `json:"artists"`
+			Credits []struct {
+				ArtistID string `json:"artist_id"`
+				Role     string `json:"role"`
+				Artist   *struct {
+					Name string `json:"name"`
+				} `json:"artist"`
+			} `json:"artist_credits"`
+			Album *struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"album"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode featured artist song list: %v", err)
+	}
+	if payload.Meta.Total != 1 || len(payload.Data) != 1 {
+		t.Fatalf("expected one featured album track, got total=%d data=%#v", payload.Meta.Total, payload.Data)
+	}
+	item := payload.Data[0]
+	if item.Title != song.Title || item.Album == nil || item.Album.ID != album.ID.String() || item.Album.Title != album.Title {
+		t.Fatalf("unexpected featured album track payload: %#v", item)
+	}
+	names := make([]string, 0, len(item.Artists))
+	for _, artist := range item.Artists {
+		names = append(names, artist.Name)
+	}
+	slices.Sort(names)
+	if !slices.Equal(names, []string{featured.Name, primary.Name}) {
+		t.Fatalf("unexpected song artists: %v", names)
+	}
+	foundFeaturedCredit := false
+	for _, credit := range item.Credits {
+		if credit.ArtistID == featured.ID.String() && credit.Role == "featured" && credit.Artist != nil && credit.Artist.Name == featured.Name {
+			foundFeaturedCredit = true
+		}
+	}
+	if !foundFeaturedCredit {
+		t.Fatalf("expected featured credit in song payload: %#v", item.Credits)
+	}
+}
+
 func TestRegisterRoutesSongListFiltersArtistAndStandaloneReleaseTypes(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	artist := model.Artist{Name: "Song List Artist", EntryStatus: "open"}

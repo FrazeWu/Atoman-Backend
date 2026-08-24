@@ -104,7 +104,7 @@ func (h *Handler) listSongs(c *gin.Context) {
 	}
 
 	var songs []model.Song
-	if err := query.Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).Order(order).Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&songs).Error; err != nil {
+	if err := query.Preload("Album", visibleAlbumPreload(viewerPtr)).Preload("Artists", visibleArtistPreload(viewerPtr)).Preload("ArtistCredits", visibleSongArtistCreditsPreload(viewerPtr)).Preload("ArtistCredits.Artist", visibleArtistPreload(viewerPtr)).Order(order).Limit(pageSize).Offset(httpx.Offset(page, pageSize)).Find(&songs).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}
