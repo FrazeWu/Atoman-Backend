@@ -23,7 +23,6 @@ func RunMusicArtistAlbumVisibilityMigration(db *gorm.DB) error {
 			FROM album_artists aa
 			JOIN "Albums" a ON a.id = aa.album_id
 			WHERE aa.artist_id = "Artists".id
-			  AND aa.deleted_at IS NULL
 			  AND a.deleted_at IS NULL
 			  AND a.lifecycle_status IN ('draft', 'active')
 		  )`).Error
