@@ -42,6 +42,8 @@ func musicOperation(path string) string {
 		return "playback_session"
 	case strings.HasSuffix(path, "/music/plays"):
 		return "play"
+	case strings.Contains(path, "/music/recommendation-events"):
+		return "recommendation_event"
 	case strings.Contains(path, "/music/recommend/") || strings.HasSuffix(path, "/music/home"):
 		return "recommend"
 	default:

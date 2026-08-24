@@ -218,6 +218,35 @@ func TestDashboardIncludesScheduledContentInStatusSummary(t *testing.T) {
 	if got := dashboard.Sections[0].Metrics["scheduled"]; got != 1 {
 		t.Fatalf("expected one scheduled blog, got %d", got)
 	}
+	for _, issue := range dashboard.Sections[0].Issues {
+		if issue.Code == "scheduled" && issue.Count == 1 {
+			return
+		}
+	}
+	t.Fatalf("expected scheduled issue, got %#v", dashboard.Sections[0].Issues)
+}
+
+func TestDashboardQueuesStaleBlogDrafts(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	stale := createStudioBlogPost(t, fixture, fixture.collections[ModuleBlog], "Stale", "draft", "public", time.Now())
+	fresh := createStudioBlogPost(t, fixture, fixture.collections[ModuleBlog], "Fresh", "draft", "public", time.Now())
+	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", stale.ID).Update("updated_at", staleDraftBefore().Add(-time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", fresh.ID).Update("updated_at", staleDraftBefore().Add(time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	dashboard, err := fixture.service.GetDashboard(fixture.user, fixture.channel.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, issue := range dashboard.Sections[0].Issues {
+		if issue.Code == "stale_draft" && issue.Count == 1 {
+			return
+		}
+	}
+	t.Fatalf("expected one stale draft issue, got %#v", dashboard.Sections[0].Issues)
 }
 
 func TestDashboardRecentPodcastUsesEffectiveUpdateTime(t *testing.T) {

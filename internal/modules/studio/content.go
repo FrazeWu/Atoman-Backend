@@ -55,9 +55,9 @@ func (s *Service) validateContentQuery(userID uuid.UUID, module Module, query Co
 	}
 	if issue := strings.TrimSpace(query.Issue); issue != "" {
 		allowed := map[Module]map[string]bool{
-			ModuleBlog:    {"draft": true, "missing_cover": true, "missing_collection": true},
-			ModulePodcast: {"draft": true, "missing_cover": true, "missing_collection": true, "missing_audio": true},
-			ModuleVideo:   {"draft": true, "missing_cover": true, "missing_collection": true, "processing_failed": true, "external_unplayable": true},
+			ModuleBlog:    {"draft": true, "stale_draft": true, "missing_cover": true, "missing_collection": true},
+			ModulePodcast: {"draft": true, "stale_draft": true, "missing_cover": true, "missing_collection": true, "missing_audio": true},
+			ModuleVideo:   {"draft": true, "stale_draft": true, "missing_cover": true, "missing_collection": true, "processing_failed": true, "external_unplayable": true},
 		}
 		if !allowed[module][issue] {
 			return apperr.BadRequest("studio.invalid_issue", "issue is not supported for this module")
@@ -145,6 +145,8 @@ func (s *Service) listBlogContents(userID uuid.UUID, query ContentQuery) ([]Stud
 	switch strings.TrimSpace(query.Issue) {
 	case "draft":
 		db = db.Where("posts.status = ?", "draft")
+	case "stale_draft":
+		db = db.Where("posts.status = ? AND posts.updated_at < ?", "draft", staleDraftBefore())
 	case "missing_cover":
 		db = db.Where("TRIM(COALESCE(posts.cover_url, '')) = ''")
 	case "missing_collection":
@@ -229,6 +231,8 @@ func (s *Service) listPodcastContents(userID uuid.UUID, query ContentQuery) ([]S
 	switch strings.TrimSpace(query.Issue) {
 	case "draft":
 		db = db.Where("posts.status = ?", "draft")
+	case "stale_draft":
+		db = db.Where("posts.status = ? AND GREATEST(posts.updated_at, episodes.updated_at) < ?", "draft", staleDraftBefore())
 	case "missing_cover":
 		db = db.Where("TRIM(COALESCE(episodes.episode_cover_url, '')) = ''")
 	case "missing_collection":
@@ -283,6 +287,8 @@ func (s *Service) listVideoContents(userID uuid.UUID, query ContentQuery) ([]Stu
 	switch strings.TrimSpace(query.Issue) {
 	case "draft":
 		db = db.Where("posts.status = ?", "draft")
+	case "stale_draft":
+		db = db.Where("posts.status = ? AND GREATEST(posts.updated_at, videos.updated_at) < ?", "draft", staleDraftBefore())
 	case "missing_cover":
 		db = db.Where("TRIM(COALESCE(videos.thumbnail_url, '')) = ''")
 	case "missing_collection":
@@ -402,7 +408,7 @@ func (s *Service) enrichContentMetrics(module Module, items []StudioContentItem)
 	rows = nil
 	switch module {
 	case ModuleBlog:
-		if err := s.db.Model(&model.Bookmark{}).Select("post_id AS content_id, 'bookmark' AS metric, COUNT(*) AS count").Where("post_id IN ?", ids).Group("post_id").Scan(&rows).Error; err != nil {
+		if err := s.db.Model(&model.Bookmark{}).Select("content_id, 'bookmark' AS metric, COUNT(*) AS count").Where("content_id IN ?", ids).Group("content_id").Scan(&rows).Error; err != nil {
 			return err
 		}
 	case ModulePodcast:

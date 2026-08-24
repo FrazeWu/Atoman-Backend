@@ -168,7 +168,7 @@ func (h *Handler) listPosts(c *gin.Context) {
 		if err := h.service.db.Table("content_entries AS posts").Select(`posts.id AS post_id,
 			(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
 			COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count,
-			(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count`).
+			(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.content_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count`).
 			Where("posts.id IN ?", postIDs).Scan(&counts).Error; err != nil {
 			httpx.Error(c, err)
 			return
@@ -303,7 +303,7 @@ func (h *Handler) getPost(c *gin.Context) {
 		return
 	}
 	var bookmarksCount int64
-	if err := h.service.db.Model(&model.Bookmark{}).Where("post_id = ?", post.ID).Count(&bookmarksCount).Error; err != nil {
+	if err := h.service.db.Model(&model.Bookmark{}).Where("content_id = ?", post.ID).Count(&bookmarksCount).Error; err != nil {
 		httpx.Error(c, err)
 		return
 	}

@@ -60,7 +60,7 @@ func TestRunBlogInteractionUniqueIndexesCreatesExpectedIndexes(t *testing.T) {
 	}
 
 	assertIndexExists(t, db, "likes", "idx_likes_user_target")
-	assertIndexExists(t, db, "bookmarks", "idx_bookmarks_user_post")
+	assertIndexExists(t, db, "bookmarks", "idx_bookmarks_user_content")
 	assertIndexExists(t, db, "video_bookmarks", "idx_video_bookmarks_user_video")
 	assertIndexExists(t, db, "podcast_episode_bookmarks", "idx_podcast_episode_bookmarks_user_episode_kind")
 	assertIndexExists(t, db, "channel_bookmarks", "idx_channel_bookmarks_user_channel_kind")

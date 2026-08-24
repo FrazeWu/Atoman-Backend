@@ -1,6 +1,8 @@
 package studio
 
 import (
+	"strings"
+
 	"atoman/internal/model"
 	contentmodule "atoman/internal/modules/content"
 	"atoman/internal/platform/apperr"
@@ -16,6 +18,9 @@ func (s *Service) ListInteractions(user authctx.CurrentUser, module Module, quer
 	if _, err := ParseModule(string(module)); err != nil {
 		return nil, 0, err
 	}
+	if query.Priority != "" && query.Priority != "normal" && query.Priority != "high" {
+		return nil, 0, apperr.BadRequest("studio.invalid_interaction_priority", "priority must be normal or high")
+	}
 	channel, err := s.resolveContentChannel(user.ID, query.ChannelID)
 	if err != nil {
 		return nil, 0, err
@@ -23,6 +28,13 @@ func (s *Service) ListInteractions(user authctx.CurrentUser, module Module, quer
 	targetKind, titles, err := s.interactionContentTitles(user.ID, channel.ID, module)
 	if err != nil {
 		return nil, 0, err
+	}
+	if query.ContentID != uuid.Nil {
+		title, exists := titles[query.ContentID]
+		if !exists {
+			return []StudioInteractionItem{}, 0, nil
+		}
+		titles = map[uuid.UUID]string{query.ContentID: title}
 	}
 	if len(titles) == 0 {
 		return []StudioInteractionItem{}, 0, nil
@@ -46,6 +58,18 @@ func (s *Service) ListInteractions(user authctx.CurrentUser, module Module, quer
 	}
 	db := s.db.Model(&model.CommentEntry{}).
 		Where("comment_entries.target_id IN ? AND comment_entries.root_id IS NULL AND comment_entries.status = ?", targetIDs, "active")
+	if search := strings.TrimSpace(query.Search); search != "" {
+		db = db.Where("comment_entries.content ILIKE ?", "%"+search+"%")
+	}
+	if query.Handled != nil || query.Priority != "" {
+		db = db.Joins("LEFT JOIN studio_interaction_states AS interaction_states ON interaction_states.channel_id = ? AND interaction_states.comment_id = comment_entries.id", channel.ID)
+		if query.Handled != nil {
+			db = db.Where("COALESCE(interaction_states.handled, false) = ?", *query.Handled)
+		}
+		if query.Priority != "" {
+			db = db.Where("COALESCE(interaction_states.priority, 'normal') = ?", query.Priority)
+		}
+	}
 	if query.Unreplied {
 		db = db.Where(`NOT EXISTS (
 			SELECT 1 FROM comment_entries replies
@@ -68,7 +92,11 @@ func (s *Service) ListInteractions(user authctx.CurrentUser, module Module, quer
 		Offset((page - 1) * pageSize).Limit(pageSize).Find(&comments).Error; err != nil {
 		return nil, 0, err
 	}
-	items, err := s.buildInteractionItems(user.ID, comments, targetByID, titles)
+	states, err := s.interactionStates(channel.ID, comments)
+	if err != nil {
+		return nil, 0, err
+	}
+	items, err := s.buildInteractionItems(user.ID, comments, targetByID, titles, states)
 	return items, total, err
 }
 
@@ -124,6 +152,7 @@ func (s *Service) buildInteractionItems(
 	comments []model.CommentEntry,
 	targetByID map[uuid.UUID]model.DiscussionTarget,
 	titles map[uuid.UUID]string,
+	states map[uuid.UUID]model.StudioInteractionState,
 ) ([]StudioInteractionItem, error) {
 	if len(comments) == 0 {
 		return []StudioInteractionItem{}, nil
@@ -167,11 +196,18 @@ func (s *Service) buildInteractionItems(
 		target := targetByID[comment.TargetID]
 		author := authorByID[comment.AuthorID]
 		_, hasReply := replied[comment.ID]
+		state, tracked := states[comment.ID]
+		priority := "normal"
+		if tracked && state.Priority != "" {
+			priority = state.Priority
+		}
 		items = append(items, StudioInteractionItem{
 			ID: comment.ID, ContentID: target.ResourceID, ContentTitle: titles[target.ResourceID], TargetKind: target.Kind,
 			Author:  StudioInteractionAuthor{ID: author.UUID, Username: author.Username, DisplayName: author.DisplayName, AvatarURL: author.AvatarURL},
 			Content: comment.Content, ReplyCount: comment.ReplyCount, Replied: hasReply,
 			Pinned:      target.PinnedCommentID != nil && *target.PinnedCommentID == comment.ID,
+			Handled:     tracked && state.Handled,
+			Priority:    priority,
 			TimeAnchors: anchorsByComment[comment.ID], CreatedAt: comment.CreatedAt,
 		})
 	}

@@ -20,6 +20,11 @@ import (
 const (
 	recommendationArticleCandidateLimit         = 5000
 	recommendationInternalArticleCandidateLimit = 2500
+	recommendationInternalArticleMinimumLength  = 280
+	recommendationInternalArticleViewThreshold  = 20
+	recommendationFeedReaderQualityThreshold    = 40
+	recommendationFeedFallbackWordCount         = 300
+	recommendationFeedFallbackSummaryLength     = 280
 )
 
 func parseRecommendationMode(raw string) (recommendation.Mode, error) {
@@ -87,12 +92,13 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 			EntityID:        post.ID.String(),
 			SourceKey:       recommendationSourceKeyForPost(post),
 			QualityScore:    normalizeArticleQuality(post),
-			TrendScore:      0.5,
-			FreshnessScore:  0.5,
+			QualityFirst:    true,
+			TrendScore:      normalizePostRecency(post.PublishedAt, 7*24*time.Hour),
+			FreshnessScore:  normalizePostRecency(post.PublishedAt, 14*24*time.Hour),
 			AuthorityScore:  normalizeArticleAuthority(post),
 			ExposureScore:   0,
 			EditorialScore:  0,
-			PublishedAtUnix: post.CreatedAt.Unix(),
+			PublishedAtUnix: post.PublishedAt.Unix(),
 		}
 		candidates = append(candidates, candidate)
 		postByID[candidate.EntityID] = post
@@ -104,6 +110,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 			EntityID:        feedItem.ID.String(),
 			SourceKey:       recommendationSourceKeyForFeedItem(feedItem),
 			QualityScore:    normalizeFeedItemQuality(feedItem),
+			QualityFirst:    true,
 			TrendScore:      normalizeFeedItemTrend(feedItem),
 			FreshnessScore:  normalizePostRecency(feedItem.PublishedAt, 14*24*time.Hour),
 			AuthorityScore:  normalizeFeedItemAuthority(feedItem),
@@ -316,7 +323,7 @@ func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) e
 	if len(postIDs) > 0 {
 		bookmarkSQL := "0 AS bookmark_count"
 		if s.db.Migrator().HasTable(&model.Bookmark{}) {
-			bookmarkSQL = "COALESCE((SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL), 0) AS bookmark_count"
+			bookmarkSQL = "COALESCE((SELECT COUNT(*) FROM bookmarks WHERE bookmarks.content_id = posts.id AND bookmarks.deleted_at IS NULL), 0) AS bookmark_count"
 		}
 		hasCanonical := hasCanonicalBlogExtensions(s.db)
 		var statsQuery *gorm.DB
@@ -336,8 +343,8 @@ func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) e
 		if s.db.Migrator().HasTable(&model.PostRating{}) {
 			selectSQL = `posts.id AS post_id,
 				` + viewColumn + `, ` + bookmarkSQL + `,
-				COALESCE((SELECT AVG(score) FROM post_ratings WHERE post_ratings.post_id = posts.id AND post_ratings.deleted_at IS NULL), 0) AS rating_score,
-				COALESCE((SELECT COUNT(*) FROM post_ratings WHERE post_ratings.post_id = posts.id AND post_ratings.deleted_at IS NULL), 0) AS rating_count`
+				COALESCE((SELECT AVG(score) FROM post_ratings WHERE post_ratings.content_id = posts.id AND post_ratings.deleted_at IS NULL), 0) AS rating_score,
+				COALESCE((SELECT COUNT(*) FROM post_ratings WHERE post_ratings.content_id = posts.id AND post_ratings.deleted_at IS NULL), 0) AS rating_count`
 		}
 		var stats []postRecommendationStats
 		if err := statsQuery.Select(selectSQL).Scan(&stats).Error; err != nil {
@@ -503,21 +510,36 @@ func recommendationSourceKeyForFeedItem(item RecommendationArticleFeedItemRow) s
 }
 
 func normalizeArticleQuality(post RecommendationArticlePostRow) float64 {
-	return clamp01(float64(post.ViewCount) / 100)
+	contentScore := clamp01(float64(post.ContentLength) / 2400)
+	metadataScore := 0.0
+	if post.HasSummary {
+		metadataScore += 0.10
+	}
+	if post.HasCover {
+		metadataScore += 0.05
+	}
+	engagementScore := clamp01(float64(post.ViewCount) / 100)
+	return clamp01(0.70*contentScore + metadataScore + 0.15*engagementScore)
 }
 
 func normalizeFeedItemQuality(item RecommendationArticleFeedItemRow) float64 {
-	score := 0.35
+	readerScore := clamp01(float64(item.ReaderQualityScore) / 100)
+	fallbackScore := clamp01(float64(item.FullTextWordCount) / float64(recommendationFeedFallbackWordCount))
+	if item.ReaderQualityScore > 0 {
+		fallbackScore = readerScore
+	}
+
+	metadataScore := 0.0
 	if item.HasSummary {
-		score += 0.2
+		metadataScore += 0.05
 	}
 	if item.HasImage {
-		score += 0.15
+		metadataScore += 0.05
 	}
 	if item.HasFullText {
-		score += 0.2
+		metadataScore += 0.05
 	}
-	return clamp01(score)
+	return clamp01(0.85*fallbackScore + metadataScore)
 }
 
 func normalizeFeedItemTrend(item RecommendationArticleFeedItemRow) float64 {

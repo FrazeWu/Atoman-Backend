@@ -301,13 +301,14 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 	}
 	publishedAt := time.Now().Add(-1 * time.Hour).UTC()
 	feedItem := model.FeedItem{
-		FeedSourceID: externalSource.ID,
-		GUID:         "guid-1",
-		Title:        "Feed item",
-		Link:         "https://example.com/items/1",
-		Summary:      "feed summary",
-		PublishedAt:  publishedAt,
-		FetchedAt:    publishedAt.Add(5 * time.Minute),
+		FeedSourceID:       externalSource.ID,
+		GUID:               "guid-1",
+		Title:              "Feed item",
+		Link:               "https://example.com/items/1",
+		Summary:            "feed summary",
+		ReaderQualityScore: 60,
+		PublishedAt:        publishedAt,
+		FetchedAt:          publishedAt.Add(5 * time.Minute),
 	}
 	if err := db.Create(&feedItem).Error; err != nil {
 		t.Fatalf("create feed item: %v", err)

@@ -503,7 +503,7 @@ func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 	if err := db.Create(&folder).Error; err != nil {
 		t.Fatalf("create bookmark folder: %v", err)
 	}
-	bookmark := model.Bookmark{UserID: user.ID, PostID: post.ID, BookmarkFolderID: &folder.ID}
+	bookmark := model.Bookmark{UserID: user.ID, ContentID: post.ID, BookmarkFolderID: &folder.ID}
 	if err := db.Create(&bookmark).Error; err != nil {
 		t.Fatalf("create bookmark: %v", err)
 	}
@@ -539,7 +539,7 @@ func TestListBookmarksReturnsPostEngagementCounts(t *testing.T) {
 	if err := db.Create(&folder).Error; err != nil {
 		t.Fatalf("create bookmark folder: %v", err)
 	}
-	if err := db.Create(&model.Bookmark{UserID: user.ID, PostID: post.ID, BookmarkFolderID: &folder.ID}).Error; err != nil {
+	if err := db.Create(&model.Bookmark{UserID: user.ID, ContentID: post.ID, BookmarkFolderID: &folder.ID}).Error; err != nil {
 		t.Fatalf("create bookmark: %v", err)
 	}
 	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
@@ -769,10 +769,10 @@ func TestBlogBookmarksSupportPopularSort(t *testing.T) {
 	if err := db.Create(&coldPost).Error; err != nil {
 		t.Fatalf("create cold post: %v", err)
 	}
-	if err := db.Create(&model.Bookmark{UserID: user.ID, PostID: coldPost.ID}).Error; err != nil {
+	if err := db.Create(&model.Bookmark{UserID: user.ID, ContentID: coldPost.ID}).Error; err != nil {
 		t.Fatalf("create cold bookmark: %v", err)
 	}
-	if err := db.Create(&model.Bookmark{UserID: user.ID, PostID: hotPost.ID}).Error; err != nil {
+	if err := db.Create(&model.Bookmark{UserID: user.ID, ContentID: hotPost.ID}).Error; err != nil {
 		t.Fatalf("create hot bookmark: %v", err)
 	}
 	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: hotPost.ID}).Error; err != nil {
@@ -1578,7 +1578,7 @@ func TestStudioBlogReadReturnsPublicStatsWithoutWritingMetrics(t *testing.T) {
 	if err := db.Create(&model.DiscussionTarget{Kind: "blog_post", ResourceID: post.ID, ResourceKey: post.ID.String(), CommentCount: 1, RootCount: 1}).Error; err != nil {
 		t.Fatalf("create discussion target: %v", err)
 	}
-	if err := db.Create(&model.Bookmark{UserID: owner.ID, PostID: post.ID}).Error; err != nil {
+	if err := db.Create(&model.Bookmark{UserID: owner.ID, ContentID: post.ID}).Error; err != nil {
 		t.Fatalf("create bookmark: %v", err)
 	}
 	source := model.FeedSource{SourceType: "internal_channel", SourceID: &channel.ID, Provider: "internal", Category: "blog", Hash: uuid.NewString(), Title: channel.Name}

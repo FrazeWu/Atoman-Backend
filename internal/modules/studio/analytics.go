@@ -117,10 +117,53 @@ func (s *Service) GetAnalytics(user authctx.CurrentUser, module Module, query An
 	if err := s.addExistingAnalytics(module, titles, from, to, totals, pointByDate, contentMetrics); err != nil {
 		return AnalyticsResponse{}, err
 	}
+	previousFrom := from.AddDate(0, 0, -days)
+	previousTotals, err := s.analyticsTotals(user.ID, channel.ID, module, previousFrom, from)
+	if err != nil {
+		return AnalyticsResponse{}, err
+	}
 	return AnalyticsResponse{
-		Range: days, From: from, To: to, Totals: totals, Trend: trend,
-		Top: rankedContentMetrics(titles, contentMetrics), Sources: sources, Retention: retention,
+		Range: days, From: from, To: to, Totals: totals,
+		PreviousPeriod: AnalyticsPeriod{From: previousFrom, To: from, Totals: previousTotals},
+		Trend:          trend, Top: rankedContentMetrics(titles, contentMetrics), Sources: sources, Retention: retention,
 	}, nil
+}
+
+func (s *Service) analyticsTotals(userID, channelID uuid.UUID, module Module, from, to time.Time) (map[string]int64, error) {
+	totals := emptyMetricMap(metricNamesByModule[module])
+	points := make(map[string]map[string]int64)
+	contentMetrics := make(map[uuid.UUID]map[string]int64)
+
+	var events []model.StudioMetricEvent
+	if err := s.db.Where(
+		"channel_id = ? AND content_type = ? AND created_at >= ? AND created_at < ?",
+		channelID, module, from, to,
+	).Find(&events).Error; err != nil {
+		return nil, err
+	}
+	for _, event := range events {
+		addAnalyticsMetric(event.Metric, event.ContentID, event.CreatedAt, totals, points, contentMetrics)
+	}
+
+	var lifecycleEvents []model.ContentLifecycleEvent
+	if err := s.db.Where(
+		"channel_id = ? AND content_type = ? AND created_at >= ? AND created_at < ?",
+		channelID, module, from, to,
+	).Find(&lifecycleEvents).Error; err != nil {
+		return nil, err
+	}
+	for _, event := range lifecycleEvents {
+		addAnalyticsMetric(event.Event, event.ContentID, event.CreatedAt, totals, points, contentMetrics)
+	}
+
+	titles, existingMetrics, err := s.analyticsContentMetrics(userID, channelID, module)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.addExistingAnalytics(module, titles, from, to, totals, points, existingMetrics); err != nil {
+		return nil, err
+	}
+	return totals, nil
 }
 
 func (s *Service) RecordMetricEvent(channelID uuid.UUID, module Module, contentID uuid.UUID, metric string) error {
@@ -271,11 +314,11 @@ func (s *Service) addExistingReactions(
 			addAnalyticsMetric("like", like.TargetID, like.CreatedAt, totals, points, contentMetrics)
 		}
 		var bookmarks []model.Bookmark
-		if err := s.db.Select("post_id", "created_at").Where("post_id IN ? AND created_at >= ? AND created_at < ?", contentIDs, from, to).Find(&bookmarks).Error; err != nil {
+		if err := s.db.Select("content_id", "created_at").Where("content_id IN ? AND created_at >= ? AND created_at < ?", contentIDs, from, to).Find(&bookmarks).Error; err != nil {
 			return err
 		}
 		for _, bookmark := range bookmarks {
-			addAnalyticsMetric("bookmark", bookmark.PostID, bookmark.CreatedAt, totals, points, contentMetrics)
+			addAnalyticsMetric("bookmark", bookmark.ContentID, bookmark.CreatedAt, totals, points, contentMetrics)
 		}
 	case ModulePodcast:
 		var bookmarks []model.PodcastEpisodeBookmark
@@ -316,12 +359,10 @@ func addAnalyticsMetric(
 		return
 	}
 	date := createdAt.UTC().Format("2006-01-02")
-	point, exists := points[date]
-	if !exists {
-		return
-	}
 	totals[metric]++
-	point[metric]++
+	if point, exists := points[date]; exists {
+		point[metric]++
+	}
 	if metrics, exists := contentMetrics[contentID]; exists {
 		metrics[metric]++
 	}

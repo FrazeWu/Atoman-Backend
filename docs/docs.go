@@ -14144,6 +14144,60 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/recommendation-events": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "记录登录用户对音乐首页推荐的曝光、点击和播放反馈。",
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "记录音乐推荐反馈事件",
+                "parameters": [
+                    {
+                        "description": "音乐推荐反馈事件",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.RecordMusicRecommendationEventsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/search": {
             "get": {
                 "produces": [
@@ -28488,6 +28542,9 @@ const docTemplate = `{
                 "channel_id": {
                     "type": "string"
                 },
+                "content_id": {
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -30384,6 +30441,9 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/model.MusicListeningHistory"
                     }
+                },
+                "request_id": {
+                    "type": "string"
                 }
             }
         },
@@ -30692,6 +30752,43 @@ const docTemplate = `{
                 }
             }
         },
+        "music.MusicRecommendationEventInput": {
+            "type": "object",
+            "properties": {
+                "entity_id": {
+                    "type": "string"
+                },
+                "entity_type": {
+                    "type": "string"
+                },
+                "event": {
+                    "$ref": "#/definitions/music.MusicRecommendationEventName"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.MusicRecommendationEventName": {
+            "type": "string",
+            "enum": [
+                "impression",
+                "click",
+                "play_start",
+                "play_complete",
+                "skip"
+            ],
+            "x-enum-varnames": [
+                "MusicRecommendationEventImpression",
+                "MusicRecommendationEventClick",
+                "MusicRecommendationEventPlayStart",
+                "MusicRecommendationEventPlayComplete",
+                "MusicRecommendationEventSkip"
+            ]
+        },
         "music.MusicReleaseConversionRequest": {
             "type": "object",
             "properties": {
@@ -30973,6 +31070,23 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "music.RecordMusicRecommendationEventsRequest": {
+            "type": "object",
+            "properties": {
+                "events": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/music.MusicRecommendationEventInput"
+                    }
+                },
+                "request_id": {
+                    "type": "string"
+                },
+                "surface": {
                     "type": "string"
                 }
             }
@@ -31849,6 +31963,24 @@ const docTemplate = `{
                 }
             }
         },
+        "studio.AnalyticsPeriod": {
+            "type": "object",
+            "properties": {
+                "from": {
+                    "type": "string"
+                },
+                "to": {
+                    "type": "string"
+                },
+                "totals": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "integer",
+                        "format": "int64"
+                    }
+                }
+            }
+        },
         "studio.AnalyticsPoint": {
             "type": "object",
             "properties": {
@@ -31869,6 +32001,9 @@ const docTemplate = `{
             "properties": {
                 "from": {
                     "type": "string"
+                },
+                "previous_period": {
+                    "$ref": "#/definitions/studio.AnalyticsPeriod"
                 },
                 "range": {
                     "type": "integer"
@@ -32280,11 +32415,17 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "handled": {
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "string"
                 },
                 "pinned": {
                     "type": "boolean"
+                },
+                "priority": {
+                    "type": "string"
                 },
                 "replied": {
                     "type": "boolean"

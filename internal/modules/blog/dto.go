@@ -188,7 +188,7 @@ type BlogBookmarkDTO struct {
 func newBlogBookmarkDTO(bookmark model.Bookmark) BlogBookmarkDTO {
 	return BlogBookmarkDTO{
 		ID: bookmark.ID, CreatedAt: bookmark.CreatedAt, UpdatedAt: bookmark.UpdatedAt,
-		UserID: bookmark.UserID, ContentID: bookmark.PostID, BookmarkFolderID: bookmark.BookmarkFolderID,
+		UserID: bookmark.UserID, ContentID: bookmark.ContentID, BookmarkFolderID: bookmark.BookmarkFolderID,
 	}
 }
 

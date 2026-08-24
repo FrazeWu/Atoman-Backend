@@ -271,7 +271,7 @@ func TestStudioContentsIncludeModuleMetrics(t *testing.T) {
 	if err := fixture.db.Create(&model.Like{UserID: fixture.foreignUser.UUID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := fixture.db.Create(&model.Bookmark{UserID: fixture.foreignUser.UUID, PostID: post.ID}).Error; err != nil {
+	if err := fixture.db.Create(&model.Bookmark{UserID: fixture.foreignUser.UUID, ContentID: post.ID}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.db.Create(&model.StudioMetricEvent{ChannelID: fixture.channel.ID, ContentType: "blog", ContentID: post.ID, Metric: "share"}).Error; err != nil {
@@ -372,6 +372,26 @@ func TestStudioContentsFilterByDashboardIssue(t *testing.T) {
 	}
 	if total != 1 || len(items) != 1 || items[0].ID != missing.ID {
 		t.Fatalf("expected only missing cover issue, total=%d items=%#v", total, items)
+	}
+}
+
+func TestStudioContentsFilterByStaleDraft(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	stale := createStudioBlogPost(t, fixture, fixture.collections[ModuleBlog], "Stale draft", "draft", "public", time.Now())
+	fresh := createStudioBlogPost(t, fixture, fixture.collections[ModuleBlog], "Fresh draft", "draft", "public", time.Now())
+	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", stale.ID).Update("updated_at", staleDraftBefore().Add(-time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", fresh.ID).Update("updated_at", staleDraftBefore().Add(time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, total, err := fixture.service.ListContents(fixture.user, ModuleBlog, ContentQuery{Issue: "stale_draft"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != stale.ID {
+		t.Fatalf("expected only stale draft, total=%d items=%#v", total, items)
 	}
 }
 

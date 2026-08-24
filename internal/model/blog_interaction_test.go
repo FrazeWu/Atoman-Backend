@@ -27,10 +27,10 @@ func TestBlogLikeAndBookmarkAreUniquePerUserTarget(t *testing.T) {
 		t.Fatal("expected duplicate like to fail")
 	}
 
-	if err := db.Create(&Bookmark{UserID: user.UUID, PostID: post.ID}).Error; err != nil {
+	if err := db.Create(&Bookmark{UserID: user.UUID, ContentID: post.ID}).Error; err != nil {
 		t.Fatalf("create bookmark: %v", err)
 	}
-	if err := db.Create(&Bookmark{UserID: user.UUID, PostID: post.ID}).Error; err == nil {
+	if err := db.Create(&Bookmark{UserID: user.UUID, ContentID: post.ID}).Error; err == nil {
 		t.Fatal("expected duplicate bookmark to fail")
 	}
 }
@@ -76,7 +76,7 @@ func TestMediaBookmarksAreUniquePerUserTarget(t *testing.T) {
 		t.Fatalf("create post: %v", err)
 	}
 
-	episode := PodcastEpisode{PostID: post.ID, ChannelID: channel.ID, AudioURL: "https://example.com/episode.mp3"}
+	episode := PodcastEpisode{ContentID: post.ID, ChannelID: channel.ID, AudioURL: "https://example.com/episode.mp3"}
 	if err := db.Create(&episode).Error; err != nil {
 		t.Fatalf("create episode: %v", err)
 	}

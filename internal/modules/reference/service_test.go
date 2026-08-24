@@ -22,6 +22,24 @@ func TestSearchManyStopsWhenRequestContextIsCanceled(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestReferenceSearchWorkerLimit(t *testing.T) {
+	tests := []struct {
+		typeCount int
+		want      int
+	}{
+		{typeCount: 0, want: 0},
+		{typeCount: 1, want: 1},
+		{typeCount: 2, want: 2},
+		{typeCount: 16, want: 2},
+	}
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("types_%d", test.typeCount), func(t *testing.T) {
+			require.Equal(t, test.want, referenceSearchWorkerLimit(test.typeCount))
+		})
+	}
+	require.Equal(t, referenceSearchGlobalWorkerCount, cap(referenceSearchSlots))
+}
+
 func TestReplacePublishedPersistsOccurrencesAndNotifiesMentionedUserOnce(t *testing.T) {
 	service, db, actor, ids := seededReferenceService(t)
 	sourceID := uuid.New()

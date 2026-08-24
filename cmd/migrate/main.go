@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
@@ -43,9 +44,15 @@ func main() {
 }
 
 func runMigrations(db *gorm.DB) error {
-	return migrationrunner.Run(db)
+	if err := migrationrunner.Run(db); err != nil {
+		return fmt.Errorf("run migration runner: %w", err)
+	}
+	return nil
 }
 
 func migrateSchema(db *gorm.DB) error {
-	return migrationrunner.MigrateSchema(db)
+	if err := migrationrunner.MigrateSchema(db); err != nil {
+		return fmt.Errorf("migrate schema: %w", err)
+	}
+	return nil
 }

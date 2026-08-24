@@ -122,6 +122,30 @@ type RecordSongPlayRequest struct {
 	SongID uuid.UUID `json:"song_id"`
 }
 
+type MusicRecommendationEventName string
+
+const (
+	MusicRecommendationEventImpression   MusicRecommendationEventName = "impression"
+	MusicRecommendationEventClick        MusicRecommendationEventName = "click"
+	MusicRecommendationEventPlayStart    MusicRecommendationEventName = "play_start"
+	MusicRecommendationEventPlayComplete MusicRecommendationEventName = "play_complete"
+	MusicRecommendationEventSkip         MusicRecommendationEventName = "skip"
+)
+
+type MusicRecommendationEventInput struct {
+	Event      MusicRecommendationEventName `json:"event"`
+	EntityType string                       `json:"entity_type"`
+	EntityID   uuid.UUID                    `json:"entity_id"`
+	Position   int                          `json:"position"`
+	Reason     string                       `json:"reason"`
+}
+
+type RecordMusicRecommendationEventsRequest struct {
+	RequestID string                          `json:"request_id"`
+	Surface   string                          `json:"surface"`
+	Events    []MusicRecommendationEventInput `json:"events"`
+}
+
 type SavePlaybackProgressRequest struct {
 	SongID          uuid.UUID `json:"song_id" binding:"required"`
 	PositionSeconds float64   `json:"position_seconds" binding:"required"`
@@ -206,6 +230,7 @@ type ListeningHistoryListResponse struct {
 }
 
 type HomeResponse struct {
+	RequestID         string                        `json:"request_id,omitempty"`
 	Personalized      bool                          `json:"personalized"`
 	ContinueListening *model.MusicPlaybackProgress  `json:"continue_listening,omitempty"`
 	RecentlyPlayed    []model.MusicListeningHistory `json:"recently_played"`

@@ -140,54 +140,50 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 
 	postIDs := make([]uuid.UUID, 0, len(bookmarks))
 	seen := make(map[uuid.UUID]struct{}, len(bookmarks))
-	for i := range bookmarks {
-		post := bookmarks[i].Post
-		if post == nil {
+	for _, bookmark := range bookmarks {
+		if bookmark.ContentID == uuid.Nil {
 			continue
 		}
-		visible := false
-		if post.Status != "published" {
-			visible = post.UserID == user.ID
-		} else {
-			visible, err = CanViewPublishedPost(s.db, &user.ID, *post)
+		if _, exists := seen[bookmark.ContentID]; !exists {
+			seen[bookmark.ContentID] = struct{}{}
+			postIDs = append(postIDs, bookmark.ContentID)
+		}
+	}
+	posts, err := loadCanonicalBlogPosts(s.db, canonicalBlogPostsQuery(s.db).Where("posts.id IN ?", postIDs))
+	if err != nil {
+		return nil, err
+	}
+	visibleContentIDs := make(map[uuid.UUID]struct{}, len(posts))
+	for _, post := range posts {
+		visible := post.Status != "published" && post.UserID == user.ID
+		if post.Status == "published" {
+			visible, err = CanViewPublishedPost(s.db, &user.ID, post)
 			if err != nil {
 				return nil, err
 			}
 		}
-		if !visible {
-			bookmarks[i].Post = nil
-			continue
+		if visible {
+			visibleContentIDs[post.ID] = struct{}{}
 		}
-		if _, exists := seen[bookmarks[i].PostID]; exists {
-			continue
-		}
-		seen[bookmarks[i].PostID] = struct{}{}
-		postIDs = append(postIDs, bookmarks[i].PostID)
 	}
 
 	type engagementCount struct {
-		PostID        uuid.UUID `gorm:"column:post_id"`
+		ContentID     uuid.UUID `gorm:"column:content_id"`
 		LikesCount    int64     `gorm:"column:likes_count"`
 		CommentsCount int64     `gorm:"column:comments_count"`
 	}
-	countsByPostID := make(map[uuid.UUID]engagementCount, len(postIDs))
+	countsByContentID := make(map[uuid.UUID]engagementCount, len(postIDs))
 	if len(postIDs) > 0 {
 		var counts []engagementCount
-		if err := s.db.Table("content_entries AS posts").Select(`posts.id AS post_id,
-			(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = posts.id AND likes.deleted_at IS NULL) AS likes_count,
-			COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count`).
-			Where("posts.id IN ?", postIDs).
+		if err := s.db.Table("content_entries AS content").Select(`content.id AS content_id,
+			(SELECT COUNT(*) FROM likes WHERE likes.target_type = 'post' AND likes.target_id = content.id AND likes.deleted_at IS NULL) AS likes_count,
+			COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = content.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count`).
+			Where("content.id IN ?", postIDs).
 			Scan(&counts).Error; err != nil {
 			return nil, err
 		}
 		for _, count := range counts {
-			countsByPostID[count.PostID] = count
-		}
-	}
-	posts := make([]model.Post, 0, len(bookmarks))
-	for _, bookmark := range bookmarks {
-		if bookmark.Post != nil {
-			posts = append(posts, *bookmark.Post)
+			countsByContentID[count.ContentID] = count
 		}
 	}
 	postDTOs, err := s.postDTOs(s.db, posts, &user.ID)
@@ -203,12 +199,12 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 	for _, bookmark := range bookmarks {
 		item := BookmarkListItemDTO{BlogBookmarkDTO: BlogBookmarkDTO{
 			ID: bookmark.ID, CreatedAt: bookmark.CreatedAt, UpdatedAt: bookmark.UpdatedAt,
-			UserID: bookmark.UserID, ContentID: bookmark.PostID, BookmarkFolderID: bookmark.BookmarkFolderID,
+			UserID: bookmark.UserID, ContentID: bookmark.ContentID, BookmarkFolderID: bookmark.BookmarkFolderID,
 		}}
-		if bookmark.Post != nil {
-			count := countsByPostID[bookmark.PostID]
+		if _, visible := visibleContentIDs[bookmark.ContentID]; visible {
+			count := countsByContentID[bookmark.ContentID]
 			item.Content = &BookmarkBlogContentDTO{
-				BlogContentDTO: postDTOByID[bookmark.PostID],
+				BlogContentDTO: postDTOByID[bookmark.ContentID],
 				LikesCount:     count.LikesCount,
 				CommentsCount:  count.CommentsCount,
 			}
@@ -253,9 +249,9 @@ func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, fol
 		return model.Bookmark{}, err
 	}
 	var bookmark model.Bookmark
-	err = s.db.Where("user_id = ? AND post_id = ?", user.ID, postID).First(&bookmark).Error
+	err = s.db.Where("user_id = ? AND content_id = ?", user.ID, postID).First(&bookmark).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		bookmark = model.Bookmark{UserID: user.ID, PostID: postID, BookmarkFolderID: folderID}
+		bookmark = model.Bookmark{UserID: user.ID, ContentID: postID, BookmarkFolderID: folderID}
 		if err := s.db.Create(&bookmark).Error; err != nil {
 			return model.Bookmark{}, err
 		}

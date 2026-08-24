@@ -6,12 +6,21 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: atoman
-      POSTGRES_PASSWORD: atoman_secret
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: postgres
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/etc/postgresql/certs/server.crt
+      - -c
+      - ssl_key_file=/etc/postgresql/certs/server.key
     ports:
       - "5432:5432"
     volumes:
       - atoman-postgres-data:/var/lib/postgresql/data
+      - ./.postgres-certs:/etc/postgresql/certs:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U atoman -d postgres"]
       interval: 5s
@@ -24,7 +33,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      PGPASSWORD: atoman_secret
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     command:
       - /bin/sh
       - -lc

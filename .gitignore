@@ -1,6 +1,7 @@
 .DS_Store
 .env
 .env.*
+.postgres-certs/
 !.env.example
 !.env.prod.example
 .gocache/

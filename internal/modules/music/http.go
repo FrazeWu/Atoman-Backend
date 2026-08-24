@@ -83,6 +83,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/bookmarks/playlists", h.createPlaylistBookmark)
 	group.DELETE("/bookmarks/playlists/:playlistId", h.deletePlaylistBookmark)
 	group.GET("/home", h.home)
+	group.POST("/recommendation-events", h.recordMusicRecommendationEvents)
 	group.GET("/playlists", h.listPlaylists)
 	group.POST("/playlists/later/:songId", h.addToLaterPlaylist)
 	group.DELETE("/playlists/later/:songId", h.deleteFromLaterPlaylist)

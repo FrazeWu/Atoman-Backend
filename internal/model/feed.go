@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 type NullableUserUUID struct {
@@ -175,8 +176,21 @@ func (BlogDraft) TableName() string { return "blog_drafts" }
 
 type PostCollection struct {
 	PostID       uuid.UUID `json:"post_id" gorm:"type:uuid;primaryKey"`
+	ContentID    uuid.UUID `json:"content_id" gorm:"-"`
 	CollectionID uuid.UUID `json:"collection_id" gorm:"type:uuid;primaryKey"`
 	Position     int       `json:"position" gorm:"not null;default:0"`
+}
+
+func (link *PostCollection) BeforeSave(_ *gorm.DB) error {
+	if link.PostID == uuid.Nil {
+		link.PostID = link.ContentID
+	}
+	return nil
+}
+
+func (link *PostCollection) AfterFind(_ *gorm.DB) error {
+	link.ContentID = link.PostID
+	return nil
 }
 
 func (PostCollection) TableName() string { return "post_collections" }
@@ -212,10 +226,9 @@ func (BookmarkFolder) TableName() string { return "bookmark_folders" }
 
 type Bookmark struct {
 	Base
-	UserID           uuid.UUID       `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_bookmarks_user_post,priority:1,where:deleted_at IS NULL"`
+	UserID           uuid.UUID       `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_bookmarks_user_content,priority:1,where:deleted_at IS NULL"`
 	User             *User           `json:"user,omitempty" gorm:"foreignKey:UserID;references:UUID"`
-	PostID           uuid.UUID       `json:"post_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_bookmarks_user_post,priority:2,where:deleted_at IS NULL"`
-	Post             *Post           `json:"post,omitempty" gorm:"foreignKey:PostID"`
+	ContentID        uuid.UUID       `json:"content_id" gorm:"type:uuid;index;uniqueIndex:idx_bookmarks_user_content,priority:2,where:deleted_at IS NULL"`
 	BookmarkFolderID *uuid.UUID      `json:"bookmark_folder_id" gorm:"type:uuid;index"`
 	BookmarkFolder   *BookmarkFolder `json:"bookmark_folder,omitempty" gorm:"foreignKey:BookmarkFolderID"`
 }

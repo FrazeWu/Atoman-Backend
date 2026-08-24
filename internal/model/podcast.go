@@ -1,6 +1,9 @@
 package model
 
-import "github.com/google/uuid"
+import (
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+)
 
 // PodcastEpisode extends Post with audio-specific fields.
 // Show (节目) = Channel; Episode (单集) = Post + PodcastEpisode.
@@ -8,6 +11,7 @@ import "github.com/google/uuid"
 type PodcastEpisode struct {
 	Base
 	PostID    uuid.UUID `json:"post_id" gorm:"type:uuid;not null;uniqueIndex"`
+	ContentID uuid.UUID `json:"content_id" gorm:"-"`
 	Post      *Post     `json:"post,omitempty" gorm:"foreignKey:PostID"`
 	ChannelID uuid.UUID `json:"channel_id" gorm:"type:uuid;not null;index"`
 	Channel   *Channel  `json:"channel,omitempty" gorm:"foreignKey:ChannelID"`
@@ -21,7 +25,17 @@ type PodcastEpisode struct {
 	EpisodeNumber int `json:"episode_number" gorm:"default:0"`
 }
 
-func (PodcastEpisode) TableName() string { return "podcast_episodes" }
+func (episode *PodcastEpisode) BeforeSave(_ *gorm.DB) error {
+	if episode.PostID == uuid.Nil {
+		episode.PostID = episode.ContentID
+	}
+	return nil
+}
+
+func (episode *PodcastEpisode) AfterFind(_ *gorm.DB) error {
+	episode.ContentID = episode.PostID
+	return nil
+}
 
 type PodcastEpisodeBookmark struct {
 	Base

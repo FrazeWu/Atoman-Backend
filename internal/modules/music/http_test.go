@@ -44,6 +44,7 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.MusicPlaybackSession{},
 		&model.MusicPlaybackProgress{},
 		&model.MusicSearchInteraction{},
+		&model.MusicRecommendationEvent{},
 		&model.AlbumImportSession{},
 		&model.MusicAssetUploadSession{},
 		&model.AlbumImportFile{},

@@ -824,6 +824,9 @@ func (h *Handler) home(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	if user != nil {
+		response.RequestID = uuid.NewString()
+	}
 	for index := range response.RecentlyPlayed {
 		if response.RecentlyPlayed[index].Song == nil {
 			continue

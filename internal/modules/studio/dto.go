@@ -157,8 +157,12 @@ type SettingsResponse struct {
 
 type InteractionQuery struct {
 	ChannelID uuid.UUID
+	ContentID uuid.UUID
+	Search    string
 	Unreplied bool
 	Anchored  bool
+	Handled   *bool
+	Priority  string
 	Page      int
 	PageSize  int
 }
@@ -186,13 +190,17 @@ type StudioInteractionItem struct {
 	ReplyCount   int                     `json:"reply_count"`
 	Replied      bool                    `json:"replied"`
 	Pinned       bool                    `json:"pinned"`
+	Handled      bool                    `json:"handled"`
+	Priority     string                  `json:"priority"`
 	TimeAnchors  []StudioTimeAnchor      `json:"time_anchors"`
 	CreatedAt    time.Time               `json:"created_at"`
 }
 
 type AnalyticsQuery struct {
-	ChannelID uuid.UUID
-	Range     int
+	ChannelID    uuid.UUID
+	CollectionID uuid.UUID
+	ContentID    uuid.UUID
+	Range        int
 }
 
 type AnalyticsPoint struct {
@@ -217,17 +225,73 @@ type AnalyticsRetention struct {
 	Rate               int64 `json:"rate"`
 }
 
+type AnalyticsPeriod struct {
+	From   time.Time        `json:"from"`
+	To     time.Time        `json:"to"`
+	Totals map[string]int64 `json:"totals"`
+}
+
 type AnalyticsResponse struct {
-	Range     int                      `json:"range"`
-	From      time.Time                `json:"from"`
-	To        time.Time                `json:"to"`
-	Totals    map[string]int64         `json:"totals"`
-	Trend     []AnalyticsPoint         `json:"trend"`
-	Top       []AnalyticsContentMetric `json:"top"`
-	Sources   []AnalyticsSourceMetric  `json:"sources"`
-	Retention AnalyticsRetention       `json:"retention"`
+	Range          int                      `json:"range"`
+	From           time.Time                `json:"from"`
+	To             time.Time                `json:"to"`
+	Totals         map[string]int64         `json:"totals"`
+	PreviousPeriod AnalyticsPeriod          `json:"previous_period"`
+	Trend          []AnalyticsPoint         `json:"trend"`
+	Top            []AnalyticsContentMetric `json:"top"`
+	Sources        []AnalyticsSourceMetric  `json:"sources"`
+	Retention      AnalyticsRetention       `json:"retention"`
 }
 
 type ShareResponse struct {
 	Path string `json:"path"`
+}
+
+type StudioCollectionContentCandidate struct {
+	ContentID             uuid.UUID `json:"content_id"`
+	ID                    uuid.UUID `json:"id"`
+	Module                Module    `json:"module"`
+	Title                 string    `json:"title"`
+	CoverURL              string    `json:"cover_url"`
+	Status                string    `json:"status"`
+	CurrentCollectionID   uuid.UUID `json:"current_collection_id,omitempty"`
+	CurrentCollectionName string    `json:"current_collection_name,omitempty"`
+}
+
+type StudioPreflightIssue struct {
+	Code string `json:"code"`
+}
+
+type StudioCalendarItem struct {
+	ContentID   uuid.UUID              `json:"content_id"`
+	ID          uuid.UUID              `json:"id"`
+	Module      Module                 `json:"module"`
+	Title       string                 `json:"title"`
+	ScheduledAt time.Time              `json:"scheduled_at"`
+	Preflight   []StudioPreflightIssue `json:"preflight"`
+}
+
+type UpdateInteractionStateInput struct {
+	Handled  *bool   `json:"handled"`
+	Priority *string `json:"priority"`
+}
+
+type BatchInteractionStateInput struct {
+	CommentIDs []uuid.UUID `json:"comment_ids" binding:"required"`
+	Handled    bool        `json:"handled"`
+}
+
+type StudioReplyTemplateInput struct {
+	ChannelID uuid.UUID `json:"channel_id" binding:"required"`
+	Name      string    `json:"name" binding:"required"`
+	Content   string    `json:"content" binding:"required"`
+}
+
+type StudioReplyTemplate struct {
+	ID        uuid.UUID `json:"id"`
+	ChannelID uuid.UUID `json:"channel_id"`
+	Name      string    `json:"name"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }

@@ -3,6 +3,7 @@ package studio
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
@@ -10,10 +11,17 @@ import (
 	"github.com/google/uuid"
 )
 
+const staleDraftMaxAge = 7 * 24 * time.Hour
+
+func staleDraftBefore() time.Time {
+	return time.Now().UTC().Add(-staleDraftMaxAge)
+}
+
 type dashboardCounts struct {
 	Contents           int64
 	Published          int64
 	Drafts             int64
+	StaleDrafts        int64
 	Scheduled          int64
 	Views              int64
 	MissingCover       int64
@@ -42,7 +50,7 @@ func (s *Service) GetDashboard(user authctx.CurrentUser, channelID uuid.UUID) (D
 	failed := 0
 	var firstErr error
 	for _, module := range []Module{ModuleBlog, ModulePodcast, ModuleVideo} {
-		section, sectionErr := s.dashboardSection(user.ID, channel, module)
+		section, sectionErr := s.dashboardSection(user.ID, channel, module, staleDraftBefore())
 		if sectionErr != nil {
 			failed++
 			if firstErr == nil {
@@ -61,12 +69,12 @@ func (s *Service) GetDashboard(user authctx.CurrentUser, channelID uuid.UUID) (D
 	return response, nil
 }
 
-func (s *Service) dashboardSection(userID uuid.UUID, channel model.Channel, module Module) (DashboardSection, error) {
+func (s *Service) dashboardSection(userID uuid.UUID, channel model.Channel, module Module, staleDraftBefore time.Time) (DashboardSection, error) {
 	recent, err := s.dashboardRecentContents(userID, channel.ID, module, 5)
 	if err != nil {
 		return DashboardSection{}, err
 	}
-	counts, err := s.dashboardCounts(userID, channel, module)
+	counts, err := s.dashboardCounts(userID, channel, module, staleDraftBefore)
 	if err != nil {
 		return DashboardSection{}, err
 	}
@@ -86,22 +94,21 @@ func (s *Service) dashboardSection(userID uuid.UUID, channel model.Channel, modu
 			issues = append(issues, StudioContentIssue{Code: code, Count: count})
 		}
 	}
-	appendIssue("draft", counts.Drafts)
+	appendIssue("stale_draft", counts.StaleDrafts)
+	appendIssue("scheduled", counts.Scheduled)
 	appendIssue("missing_cover", counts.MissingCover)
 	appendIssue("missing_collection", counts.MissingCollection)
 	appendIssue("missing_audio", counts.MissingAudio)
 	appendIssue("processing_failed", counts.ProcessingFailed)
 	appendIssue("external_unplayable", counts.ExternalUnplayable)
-	if module == ModulePodcast || module == ModuleVideo {
-		_, unreplied, err := s.ListInteractions(
-			authctx.CurrentUser{ID: userID}, module,
-			InteractionQuery{ChannelID: channel.ID, Unreplied: true, Page: 1, PageSize: 1},
-		)
-		if err != nil {
-			return DashboardSection{}, err
-		}
-		appendIssue("unreplied_comment", unreplied)
+	_, unreplied, err := s.ListInteractions(
+		authctx.CurrentUser{ID: userID}, module,
+		InteractionQuery{ChannelID: channel.ID, Unreplied: true, Page: 1, PageSize: 1},
+	)
+	if err != nil {
+		return DashboardSection{}, err
 	}
+	appendIssue("unreplied_comment", unreplied)
 	return DashboardSection{Module: module, Metrics: metrics, Recent: recent, Issues: issues}, nil
 }
 
@@ -154,7 +161,7 @@ func (s *Service) dashboardEngagementMetrics(userID, channelID uuid.UUID, module
 		}
 		metrics["like"] = count
 		count = 0
-		if err := s.db.Model(&model.Bookmark{}).Where("post_id IN ?", contentIDs).Count(&count).Error; err != nil {
+		if err := s.db.Model(&model.Bookmark{}).Where("content_id IN ?", contentIDs).Count(&count).Error; err != nil {
 			return nil, err
 		}
 		metrics["bookmark"] = count
@@ -179,7 +186,7 @@ func (s *Service) dashboardEngagementMetrics(userID, channelID uuid.UUID, module
 	return metrics, nil
 }
 
-func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, module Module) (dashboardCounts, error) {
+func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, module Module, staleDraftBefore time.Time) (dashboardCounts, error) {
 	var counts dashboardCounts
 	var err error
 	switch module {
@@ -189,10 +196,11 @@ func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, modul
 			Select(`COUNT(*) AS contents,
 				COALESCE(SUM(CASE WHEN posts.status = 'published' THEN 1 ELSE 0 END), 0) AS published,
 				COALESCE(SUM(CASE WHEN posts.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
+				COALESCE(SUM(CASE WHEN posts.status = 'draft' AND posts.updated_at < ? THEN 1 ELSE 0 END), 0) AS stale_drafts,
 				COALESCE(SUM(CASE WHEN posts.status = 'scheduled' THEN 1 ELSE 0 END), 0) AS scheduled,
 				COALESCE(SUM(blog_extensions.view_count), 0) AS views,
 				COALESCE(SUM(CASE WHEN TRIM(COALESCE(posts.cover_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
-				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM content_collection_memberships WHERE content_collection_memberships.content_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection`).
+				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM content_collection_memberships WHERE content_collection_memberships.content_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection`, staleDraftBefore).
 			Where("posts.kind = ? AND posts.deleted_at IS NULL AND posts.author_id = ? AND posts.channel_id = ?", "blog", userID, channel.ID).
 			Scan(&counts).Error
 	case ModulePodcast:
@@ -201,11 +209,12 @@ func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, modul
 			Select(`COUNT(*) AS contents,
 				COALESCE(SUM(CASE WHEN posts.status = 'published' THEN 1 ELSE 0 END), 0) AS published,
 				COALESCE(SUM(CASE WHEN posts.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
+				COALESCE(SUM(CASE WHEN posts.status = 'draft' AND GREATEST(posts.updated_at, episodes.updated_at) < ? THEN 1 ELSE 0 END), 0) AS stale_drafts,
 				COALESCE(SUM(CASE WHEN posts.status = 'scheduled' THEN 1 ELSE 0 END), 0) AS scheduled,
 				COALESCE(SUM(episodes.view_count), 0) AS views,
 				COALESCE(SUM(CASE WHEN TRIM(COALESCE(episodes.episode_cover_url, '')) = '' AND ? = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
 				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection,
-				COALESCE(SUM(CASE WHEN TRIM(COALESCE(episodes.audio_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_audio`, strings.TrimSpace(channel.CoverURL)).
+				COALESCE(SUM(CASE WHEN TRIM(COALESCE(episodes.audio_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_audio`, staleDraftBefore, strings.TrimSpace(channel.CoverURL)).
 			Where("posts.kind = ? AND posts.deleted_at IS NULL AND posts.author_id = ? AND posts.channel_id = ?", "podcast", userID, channel.ID).
 			Scan(&counts).Error
 	case ModuleVideo:
@@ -214,12 +223,13 @@ func (s *Service) dashboardCounts(userID uuid.UUID, channel model.Channel, modul
 			Select(`COUNT(*) AS contents,
 				COALESCE(SUM(CASE WHEN posts.status = 'published' THEN 1 ELSE 0 END), 0) AS published,
 				COALESCE(SUM(CASE WHEN posts.status = 'draft' THEN 1 ELSE 0 END), 0) AS drafts,
+				COALESCE(SUM(CASE WHEN posts.status = 'draft' AND GREATEST(posts.updated_at, videos.updated_at) < ? THEN 1 ELSE 0 END), 0) AS stale_drafts,
 				COALESCE(SUM(CASE WHEN posts.status = 'scheduled' THEN 1 ELSE 0 END), 0) AS scheduled,
 				COALESCE(SUM(videos.view_count), 0) AS views,
 				COALESCE(SUM(CASE WHEN TRIM(COALESCE(videos.thumbnail_url, '')) = '' THEN 1 ELSE 0 END), 0) AS missing_cover,
 				COALESCE(SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM content_collection_memberships memberships WHERE memberships.content_id = posts.id) THEN 1 ELSE 0 END), 0) AS missing_collection,
 				COALESCE(SUM(CASE WHEN videos.processing_status = 'failed' THEN 1 ELSE 0 END), 0) AS processing_failed,
-				COALESCE(SUM(CASE WHEN videos.storage_type = 'external' AND TRIM(COALESCE(videos.video_url, '')) = '' THEN 1 ELSE 0 END), 0) AS external_unplayable`).
+				COALESCE(SUM(CASE WHEN videos.storage_type = 'external' AND TRIM(COALESCE(videos.video_url, '')) = '' THEN 1 ELSE 0 END), 0) AS external_unplayable`, staleDraftBefore).
 			Where("posts.kind = ? AND posts.deleted_at IS NULL AND posts.author_id = ? AND posts.channel_id = ?", "video", userID, channel.ID).
 			Scan(&counts).Error
 	default:

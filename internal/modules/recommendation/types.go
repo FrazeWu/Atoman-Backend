@@ -32,6 +32,7 @@ type Candidate struct {
 	AuthorityScore      float64
 	ExposureScore       float64
 	EditorialScore      float64
+	QualityFirst        bool
 	PublishedAtUnix     int64
 	PublishedAtUnixNano int64
 }

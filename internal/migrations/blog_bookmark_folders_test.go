@@ -18,7 +18,7 @@ func TestRunBlogBookmarkFolderMigrationClassifiesLegacyBookmarks(t *testing.T) {
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
-	bookmark := model.Bookmark{UserID: user.UUID, PostID: post.ID}
+	bookmark := model.Bookmark{UserID: user.UUID, ContentID: post.ID}
 	if err := db.Create(&bookmark).Error; err != nil {
 		t.Fatalf("create bookmark: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestRunBlogBookmarkFolderMigrationRenamesLegacyDefaultFolder(t *testing.T) 
 	if err := db.Create(&folder).Error; err != nil {
 		t.Fatalf("create legacy folder: %v", err)
 	}
-	bookmark := model.Bookmark{UserID: user.UUID, PostID: post.ID, BookmarkFolderID: &folder.ID}
+	bookmark := model.Bookmark{UserID: user.UUID, ContentID: post.ID, BookmarkFolderID: &folder.ID}
 	if err := db.Create(&bookmark).Error; err != nil {
 		t.Fatalf("create bookmark: %v", err)
 	}

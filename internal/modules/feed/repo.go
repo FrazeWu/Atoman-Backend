@@ -307,7 +307,7 @@ func (r *Repo) listEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCount,
 		COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count`
 	if r.db.Migrator().HasTable(&model.Bookmark{}) {
 		selectSQL += `,
-			(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.post_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count`
+			(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.content_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count`
 	} else {
 		selectSQL += `, 0 AS bookmarks_count`
 	}
@@ -324,9 +324,9 @@ func (r *Repo) listEngagementCounts(postIDs []uuid.UUID) ([]PostEngagementCount,
 		}
 		var ratings []ratingAggregate
 		if err := r.db.Model(&model.PostRating{}).
-			Select("post_id, AVG(score) AS rating_score, COUNT(*) AS rating_count").
-			Where("post_id IN ?", postIDs).
-			Group("post_id").Scan(&ratings).Error; err != nil {
+			Select("content_id AS post_id, AVG(score) AS rating_score, COUNT(*) AS rating_count").
+			Where("content_id IN ?", postIDs).
+			Group("content_id").Scan(&ratings).Error; err != nil {
 			return nil, err
 		}
 		countsByPostID := make(map[uuid.UUID]*PostEngagementCount, len(counts))
@@ -675,35 +675,56 @@ func (r *Repo) ListRecommendationPosts() ([]model.Post, error) {
 }
 
 type RecommendationArticlePostRow struct {
-	ID           uuid.UUID
-	UserID       uuid.UUID
-	ChannelID    *uuid.UUID
-	ViewCount    int
-	CreatedAt    time.Time
-	Title        string
-	Summary      string
-	LanguageCode string
+	ID            uuid.UUID
+	UserID        uuid.UUID
+	ChannelID     *uuid.UUID
+	ViewCount     int
+	CreatedAt     time.Time
+	PublishedAt   time.Time
+	ContentLength int64
+	HasSummary    bool
+	HasCover      bool
+	Title         string
+	Summary       string
+	LanguageCode  string
 }
 
 type RecommendationArticleFeedItemRow struct {
-	ID             uuid.UUID
-	FeedSourceID   uuid.UUID
-	Title          string
-	Summary        string
-	HasSummary     bool
-	HasImage       bool
-	HasFullText    bool
-	EnclosureType  string
-	PublishedAt    time.Time
-	SourceCategory string
-	LanguageCode   string
+	ID                 uuid.UUID
+	FeedSourceID       uuid.UUID
+	Title              string
+	Summary            string
+	SummaryLength      int
+	HasSummary         bool
+	HasImage           bool
+	HasFullText        bool
+	ReaderQualityScore int
+	FullTextWordCount  int
+	ReaderSource       string
+	EnclosureType      string
+	PublishedAt        time.Time
+	SourceCategory     string
+	LanguageCode       string
 }
 
 func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, languageCode string, search string, limit int) ([]RecommendationArticlePostRow, error) {
-	columns := []string{"posts.id", "posts.author_id AS user_id", "posts.channel_id", "blog_extensions.view_count", "posts.created_at", "'' AS title", "'' AS summary", "blog_extensions.language_code"}
+	columns := []string{
+		"posts.id",
+		"posts.author_id AS user_id",
+		"posts.channel_id",
+		"blog_extensions.view_count",
+		"posts.created_at",
+		"COALESCE(posts.published_at, posts.created_at) AS published_at",
+		"LENGTH(COALESCE(blog_extensions.content, '')) AS content_length",
+		"COALESCE(posts.summary, '') <> '' AS has_summary",
+		"COALESCE(posts.cover_url, '') <> '' AS has_cover",
+		"'' AS title",
+		"'' AS summary",
+		"blog_extensions.language_code",
+	}
 	if includeText {
-		columns[5] = "posts.title"
-		columns[6] = "posts.summary"
+		columns[9] = "posts.title"
+		columns[10] = "posts.summary"
 	}
 
 	var posts []RecommendationArticlePostRow
@@ -712,8 +733,9 @@ func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter t
 		Select(columns).
 		Where("posts.kind = ? AND posts.status = ?", "blog", "published").
 		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).
-		Where("posts.created_at >= ?", publishedAfter).
-		Order("posts.created_at DESC, posts.id DESC").
+		Where(recommendationArticlePostQualityPredicate("blog_extensions.content", "blog_extensions.view_count"), recommendationInternalArticleMinimumLength, recommendationInternalArticleViewThreshold).
+		Where("COALESCE(posts.published_at, posts.created_at) >= ?", publishedAfter).
+		Order("COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC").
 		Limit(limit)
 	db = applyRecommendationLanguageFilter(db, "blog_extensions.language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "posts.title", "posts.summary", keywords)
@@ -723,10 +745,23 @@ func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter t
 }
 
 func (r *Repo) listLegacyRecommendationArticlePosts(includeText bool, publishedAfter time.Time, keywords []string, languageCode string, search string, limit int) ([]RecommendationArticlePostRow, error) {
-	columns := []string{"posts.id", "posts.user_id", "posts.channel_id", "posts.view_count", "posts.created_at", "'' AS title", "'' AS summary", "posts.language_code"}
+	columns := []string{
+		"posts.id",
+		"posts.user_id",
+		"posts.channel_id",
+		"posts.view_count",
+		"posts.created_at",
+		"COALESCE(posts.published_at, posts.created_at) AS published_at",
+		"LENGTH(COALESCE(posts.content, '')) AS content_length",
+		"COALESCE(posts.summary, '') <> '' AS has_summary",
+		"COALESCE(posts.cover_url, '') <> '' AS has_cover",
+		"'' AS title",
+		"'' AS summary",
+		"posts.language_code",
+	}
 	if includeText {
-		columns[5] = "posts.title"
-		columns[6] = "posts.summary"
+		columns[9] = "posts.title"
+		columns[10] = "posts.summary"
 	}
 
 	var posts []RecommendationArticlePostRow
@@ -734,8 +769,9 @@ func (r *Repo) listLegacyRecommendationArticlePosts(includeText bool, publishedA
 		Select(columns).
 		Where("posts.deleted_at IS NULL AND posts.status = ?", "published").
 		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).
-		Where("posts.created_at >= ?", publishedAfter).
-		Order("posts.created_at DESC, posts.id DESC").
+		Where(recommendationArticlePostQualityPredicate("posts.content", "posts.view_count"), recommendationInternalArticleMinimumLength, recommendationInternalArticleViewThreshold).
+		Where("COALESCE(posts.published_at, posts.created_at) >= ?", publishedAfter).
+		Order("COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC").
 		Limit(limit)
 	db = applyRecommendationLanguageFilter(db, "posts.language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "posts.title", "posts.summary", keywords)
@@ -750,11 +786,15 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 		"feed_items.feed_source_id",
 		"'' AS title",
 		"'' AS summary",
-		"feed_items.enclosure_type",
-		"feed_items.published_at",
+		"LENGTH(COALESCE(feed_items.summary, '')) AS summary_length",
 		"COALESCE(feed_items.summary, '') <> '' AS has_summary",
 		"COALESCE(feed_items.image_url, '') <> '' AS has_image",
 		"COALESCE(feed_items.reader_html, '') <> '' OR COALESCE(feed_items.full_text_html, '') <> '' AS has_full_text",
+		"COALESCE(feed_items.reader_quality_score, 0) AS reader_quality_score",
+		"COALESCE(feed_items.full_text_word_count, 0) AS full_text_word_count",
+		"COALESCE(feed_items.reader_source, '') AS reader_source",
+		"feed_items.enclosure_type",
+		"feed_items.published_at",
 		"feed_sources.category AS source_category",
 		"feed_items.language_code",
 	}
@@ -770,6 +810,7 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 		Where("feed_sources.hidden = ?", false).
 		Where("feed_items.deleted_at IS NULL").
 		Where("feed_items.published_at >= ?", publishedAfter).
+		Where(recommendationFeedItemQualityPredicate(), recommendationFeedReaderQualityThreshold, recommendationFeedFallbackWordCount, recommendationFeedFallbackSummaryLength).
 		Where(recommendationFeedItemCategorySQL()+" = ?", category)
 	db = applyRecommendationLanguageFilter(db, "feed_items.language_code", languageCode)
 	db = applyRecommendationTextFilter(db, "feed_items.title", "feed_items.summary", keywords)
@@ -835,6 +876,23 @@ func applyRecommendationTextFilter(db *gorm.DB, titleColumn string, summaryColum
 		args = append(args, pattern, pattern)
 	}
 	return db.Where(strings.Join(clauses, " OR "), args...)
+}
+
+func recommendationArticlePostQualityPredicate(contentColumn string, viewCountColumn string) string {
+	return "(LENGTH(COALESCE(" + contentColumn + ", '')) >= ? OR COALESCE(" + viewCountColumn + ", 0) >= ?)"
+}
+
+func recommendationFeedItemQualityPredicate() string {
+	return `(
+		COALESCE(feed_items.reader_quality_score, 0) >= ?
+		OR (
+			COALESCE(feed_items.reader_quality_score, 0) = 0
+			AND (
+				COALESCE(feed_items.full_text_word_count, 0) >= ?
+				OR LENGTH(COALESCE(feed_items.summary, '')) >= ?
+			)
+		)
+	)`
 }
 
 func recommendationFeedItemCategorySQL() string {

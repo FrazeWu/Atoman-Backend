@@ -1249,22 +1249,24 @@ func TestFeedRecommendationArticlesFiltersByCategoryAndTheme(t *testing.T) {
 	now := time.Now().UTC()
 	for _, item := range []model.FeedItem{
 		{
-			FeedSourceID: aiSource.ID,
-			GUID:         "recommend-ai-item",
-			Title:        "AI model release",
-			Summary:      "Large model tools and agents",
-			Link:         "https://ai.example.com/model-release",
-			PublishedAt:  now,
-			FetchedAt:    now,
+			FeedSourceID:       aiSource.ID,
+			GUID:               "recommend-ai-item",
+			Title:              "AI model release",
+			Summary:            "Large model tools and agents",
+			ReaderQualityScore: 60,
+			Link:               "https://ai.example.com/model-release",
+			PublishedAt:        now,
+			FetchedAt:          now,
 		},
 		{
-			FeedSourceID: newsSource.ID,
-			GUID:         "recommend-news-item",
-			Title:        "Global market update",
-			Summary:      "Macroeconomic headline",
-			Link:         "https://news.example.com/market-update",
-			PublishedAt:  now.Add(-time.Minute),
-			FetchedAt:    now.Add(-time.Minute),
+			FeedSourceID:       newsSource.ID,
+			GUID:               "recommend-news-item",
+			Title:              "Global market update",
+			Summary:            "Macroeconomic headline",
+			ReaderQualityScore: 60,
+			Link:               "https://news.example.com/market-update",
+			PublishedAt:        now.Add(-time.Minute),
+			FetchedAt:          now.Add(-time.Minute),
 		},
 	} {
 		if err := db.Create(&item).Error; err != nil {

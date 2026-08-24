@@ -92,6 +92,7 @@ func Run(db *gorm.DB) error {
 		{"resource management migration", migrations.RunResourceManagementMigration},
 		{"unified content migration", migrations.RunUnifiedContentMigration},
 		{"blog rating content migration", migrations.RunBlogRatingContentMigration},
+		{"blog bookmark content migration", migrations.RunBlogBookmarkContentMigration},
 	}
 	for _, step := range postSchemaSteps {
 		if err := step.run(db); err != nil {
@@ -249,7 +250,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.ExternalIdentity{}, &model.OAuthFlow{}, &model.Follow{}, &model.Channel{}, &model.Collection{},
 		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{}, &model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
 		&model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
-		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.ContentLifecycleEvent{},
+		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.StudioMetricEvent{}, &model.StudioInteractionState{}, &model.StudioReplyTemplate{}, &model.ContentLifecycleEvent{},
 		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{},
 		&model.Post{}, &model.BlogPostVersion{}, &model.PostCollection{}, &model.BlogDraft{}, &model.ShortNote{},
 		&model.ShortNoteMedia{}, &model.Like{}, &model.PostRating{},

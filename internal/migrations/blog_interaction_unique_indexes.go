@@ -41,10 +41,19 @@ func RunBlogInteractionUniqueIndexes(db *gorm.DB) error {
 		}
 
 		if tx.Migrator().HasTable("bookmarks") {
-			if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bookmarks_user_post
-				ON bookmarks (user_id, post_id)
-				WHERE deleted_at IS NULL`).Error; err != nil {
-				return err
+			switch bookmarkColumn := bookmarkIdentityColumn(tx); bookmarkColumn {
+			case "post_id":
+				if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bookmarks_user_post
+					ON bookmarks (user_id, post_id)
+					WHERE deleted_at IS NULL`).Error; err != nil {
+					return err
+				}
+			case "content_id":
+				if err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bookmarks_user_content
+					ON bookmarks (user_id, content_id)
+					WHERE deleted_at IS NULL`).Error; err != nil {
+					return err
+				}
 			}
 		}
 
@@ -90,6 +99,21 @@ func RunBlogInteractionUniqueIndexes(db *gorm.DB) error {
 	})
 }
 
+func bookmarkIdentityColumn(db *gorm.DB) string {
+	hasContentID := db.Migrator().HasColumn("bookmarks", "content_id")
+	hasPostID := db.Migrator().HasColumn("bookmarks", "post_id")
+	switch {
+	case hasContentID && hasPostID:
+		return "COALESCE(content_id, post_id)"
+	case hasContentID:
+		return "content_id"
+	case hasPostID:
+		return "post_id"
+	default:
+		return ""
+	}
+}
+
 func DeduplicateBlogInteractions(db *gorm.DB) error {
 	if !db.Migrator().HasTable("likes") &&
 		!db.Migrator().HasTable("bookmarks") &&
@@ -124,14 +148,15 @@ WHERE l.ctid = duplicates.ctid;
 		}
 
 		if db.Migrator().HasTable("bookmarks") {
-			if err := db.Exec(`
+			if identityColumn := bookmarkIdentityColumn(db); identityColumn != "" {
+				query := fmt.Sprintf(`
 DELETE FROM bookmarks b
 USING (
   SELECT ctid
   FROM (
     SELECT ctid,
            ROW_NUMBER() OVER (
-             PARTITION BY user_id, post_id
+             PARTITION BY user_id, %s
              ORDER BY created_at DESC, id DESC
            ) AS row_num
     FROM bookmarks
@@ -140,8 +165,10 @@ USING (
   WHERE ranked.row_num > 1
 ) duplicates
 WHERE b.ctid = duplicates.ctid;
-`).Error; err != nil {
-				return fmt.Errorf("deduplicate bookmarks: %w", err)
+`, identityColumn)
+				if err := db.Exec(query).Error; err != nil {
+					return fmt.Errorf("deduplicate bookmarks: %w", err)
+				}
 			}
 		}
 		if err := deduplicateSimpleBookmarkTablePostgres(db, "video_bookmarks", "video_id"); err != nil {
@@ -177,14 +204,15 @@ WHERE rowid IN (
 		}
 
 		if db.Migrator().HasTable("bookmarks") {
-			if err := db.Exec(`
+			if identityColumn := bookmarkIdentityColumn(db); identityColumn != "" {
+				query := fmt.Sprintf(`
 DELETE FROM bookmarks
 WHERE rowid IN (
   SELECT rowid
   FROM (
     SELECT rowid,
            ROW_NUMBER() OVER (
-             PARTITION BY user_id, post_id
+             PARTITION BY user_id, %s
              ORDER BY created_at DESC, id DESC
            ) AS row_num
     FROM bookmarks
@@ -192,8 +220,10 @@ WHERE rowid IN (
   )
   WHERE row_num > 1
 );
-`).Error; err != nil {
-				return fmt.Errorf("deduplicate bookmarks: %w", err)
+`, identityColumn)
+				if err := db.Exec(query).Error; err != nil {
+					return fmt.Errorf("deduplicate bookmarks: %w", err)
+				}
 			}
 		}
 		if err := deduplicateSimpleBookmarkTableSQLite(db, "video_bookmarks", "video_id"); err != nil {

@@ -45,6 +45,31 @@ func TestStudioAnalyticsUsesEventTimeForSevenTwentyEightAndNinetyDays(t *testing
 	}
 }
 
+func TestStudioAnalyticsComparesThePreviousEqualLengthPeriod(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	now := time.Now().UTC()
+	for _, createdAt := range []time.Time{now.Add(-time.Hour), now.Add(-8 * 24 * time.Hour)} {
+		event := model.StudioMetricEvent{
+			Base: model.Base{CreatedAt: createdAt}, ChannelID: fixture.channel.ID,
+			ContentType: string(ModuleBlog), ContentID: fixture.channel.ID, Metric: "view",
+		}
+		if err := fixture.db.Create(&event).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	analytics, err := fixture.service.GetAnalytics(fixture.user, ModuleBlog, AnalyticsQuery{ChannelID: fixture.channel.ID, Range: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if analytics.Totals["view"] != 1 || analytics.PreviousPeriod.Totals["view"] != 1 {
+		t.Fatalf("expected one view in each period, got current=%#v previous=%#v", analytics.Totals, analytics.PreviousPeriod.Totals)
+	}
+	if !analytics.PreviousPeriod.To.Equal(analytics.From) || analytics.PreviousPeriod.To.Sub(analytics.PreviousPeriod.From) != 7*24*time.Hour {
+		t.Fatalf("expected previous period to immediately precede current period, got %#v", analytics.PreviousPeriod)
+	}
+}
+
 func TestStudioAnalyticsIncludesLifecycleFunnelEvents(t *testing.T) {
 	fixture := newStudioQueryFixture(t)
 	collection := fixture.collections[ModuleBlog]

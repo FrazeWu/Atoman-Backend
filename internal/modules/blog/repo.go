@@ -139,8 +139,8 @@ func (r *Repo) ListBookmarks(userID uuid.UUID, folderID *uuid.UUID, sort string)
 			Select("resource_id AS target_id, comment_count AS comments_count").
 			Where("kind = ? AND deleted_at IS NULL", "blog_post")
 		query = query.
-			Joins("LEFT JOIN (?) AS post_likes ON post_likes.target_id = bookmarks.post_id", likesSubquery).
-			Joins("LEFT JOIN (?) AS post_comments ON post_comments.target_id = bookmarks.post_id", commentsSubquery).
+			Joins("LEFT JOIN (?) AS post_likes ON post_likes.target_id = bookmarks.content_id", likesSubquery).
+			Joins("LEFT JOIN (?) AS post_comments ON post_comments.target_id = bookmarks.content_id", commentsSubquery).
 			Order("COALESCE(post_likes.likes_count, 0) DESC").
 			Order("COALESCE(post_comments.comments_count, 0) DESC").
 			Order("bookmarks.created_at DESC")
@@ -154,22 +154,6 @@ func (r *Repo) ListBookmarks(userID uuid.UUID, folderID *uuid.UUID, sort string)
 	}
 	if len(bookmarks) == 0 {
 		return bookmarks, nil
-	}
-	postIDs := make([]uuid.UUID, 0, len(bookmarks))
-	for _, bookmark := range bookmarks {
-		postIDs = append(postIDs, bookmark.PostID)
-	}
-	posts, err := loadCanonicalBlogPosts(r.db, canonicalBlogPostsQuery(r.db).Where("posts.id IN ?", postIDs))
-	if err != nil {
-		return nil, err
-	}
-	postsByID := make(map[uuid.UUID]*model.Post, len(posts))
-	for index := range posts {
-		post := posts[index]
-		postsByID[post.ID] = &post
-	}
-	for index := range bookmarks {
-		bookmarks[index].Post = postsByID[bookmarks[index].PostID]
 	}
 	return bookmarks, nil
 }

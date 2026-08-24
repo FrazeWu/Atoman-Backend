@@ -4527,6 +4527,8 @@ definitions:
         $ref: '#/definitions/model.Channel'
       channel_id:
         type: string
+      content_id:
+        type: string
       created_at:
         type: string
       duration_sec:
@@ -5784,6 +5786,8 @@ definitions:
         items:
           $ref: '#/definitions/model.MusicListeningHistory'
         type: array
+      request_id:
+        type: string
     type: object
   music.ListeningHistoryItemResponse:
     properties:
@@ -5984,6 +5988,33 @@ definitions:
       data:
         $ref: '#/definitions/music.MusicLyricsDTO'
     type: object
+  music.MusicRecommendationEventInput:
+    properties:
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      event:
+        $ref: '#/definitions/music.MusicRecommendationEventName'
+      position:
+        type: integer
+      reason:
+        type: string
+    type: object
+  music.MusicRecommendationEventName:
+    enum:
+    - impression
+    - click
+    - play_start
+    - play_complete
+    - skip
+    type: string
+    x-enum-varnames:
+    - MusicRecommendationEventImpression
+    - MusicRecommendationEventClick
+    - MusicRecommendationEventPlayStart
+    - MusicRecommendationEventPlayComplete
+    - MusicRecommendationEventSkip
   music.MusicReleaseConversionRequest:
     properties:
       artist_credits:
@@ -6167,6 +6198,17 @@ definitions:
       song_count:
         type: integer
       user_id:
+        type: string
+    type: object
+  music.RecordMusicRecommendationEventsRequest:
+    properties:
+      events:
+        items:
+          $ref: '#/definitions/music.MusicRecommendationEventInput'
+        type: array
+      request_id:
+        type: string
+      surface:
         type: string
     type: object
   music.RecordSongPlayRequest:
@@ -6740,6 +6782,18 @@ definitions:
       title:
         type: string
     type: object
+  studio.AnalyticsPeriod:
+    properties:
+      from:
+        type: string
+      to:
+        type: string
+      totals:
+        additionalProperties:
+          format: int64
+          type: integer
+        type: object
+    type: object
   studio.AnalyticsPoint:
     properties:
       date:
@@ -6754,6 +6808,8 @@ definitions:
     properties:
       from:
         type: string
+      previous_period:
+        $ref: '#/definitions/studio.AnalyticsPeriod'
       range:
         type: integer
       retention:
@@ -7024,10 +7080,14 @@ definitions:
         type: string
       created_at:
         type: string
+      handled:
+        type: boolean
       id:
         type: string
       pinned:
         type: boolean
+      priority:
+        type: string
       replied:
         type: boolean
       reply_count:
@@ -16007,6 +16067,39 @@ paths:
           schema:
             $ref: '#/definitions/handlers.ErrorResponse'
       summary: 记录有效播放
+      tags:
+      - music
+  /api/v1/music/recommendation-events:
+    post:
+      consumes:
+      - application/json
+      description: 记录登录用户对音乐首页推荐的曝光、点击和播放反馈。
+      parameters:
+      - description: 音乐推荐反馈事件
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/music.RecordMusicRecommendationEventsRequest'
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 记录音乐推荐反馈事件
       tags:
       - music
   /api/v1/music/search:
