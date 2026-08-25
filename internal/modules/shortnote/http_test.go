@@ -199,17 +199,18 @@ func TestShortNoteLikeIsIdempotent(t *testing.T) {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 	}
-	var count int64
-	if err := db.Model(&model.Like{}).Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, "short_note", note.ID).Count(&count).Error; err != nil || count != 1 {
-		t.Fatalf("expected one like, count=%d err=%v", count, err)
+	var vote model.ShortNoteVote
+	if err := db.Where("short_note_id = ? AND user_id = ?", note.ID, user.ID).First(&vote).Error; err != nil || vote.Direction != "up" {
+		t.Fatalf("expected one up vote, vote=%+v err=%v", vote, err)
 	}
 	for range 2 {
 		if w := shortNoteRequest(t, r, http.MethodDelete, path, ""); w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 	}
-	if err := db.Model(&model.Like{}).Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, "short_note", note.ID).Count(&count).Error; err != nil || count != 0 {
-		t.Fatalf("expected no active likes, count=%d err=%v", count, err)
+	var count int64
+	if err := db.Model(&model.ShortNoteVote{}).Where("short_note_id = ? AND user_id = ?", note.ID, user.ID).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("expected no active votes, count=%d err=%v", count, err)
 	}
 }
 
