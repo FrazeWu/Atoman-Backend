@@ -13,3 +13,10 @@ type MediaAsset struct {
 }
 
 func (MediaAsset) TableName() string { return "media_assets" }
+
+type ContentMediaAsset struct {
+	ContentID    uuid.UUID `json:"content_id" gorm:"type:uuid;primaryKey"`
+	MediaAssetID uuid.UUID `json:"media_asset_id" gorm:"type:uuid;primaryKey"`
+}
+
+func (ContentMediaAsset) TableName() string { return "content_media_assets" }

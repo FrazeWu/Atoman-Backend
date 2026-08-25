@@ -537,6 +537,7 @@ func newAdminFeedFullTextTestDB(t *testing.T) *gorm.DB {
 		&model.AuthSession{},
 		&model.SiteSetting{},
 		&model.FeedSource{},
+		&model.FeedFullTextHost{},
 		&model.FeedItem{},
 		&model.Subscription{},
 		&model.FeedItemRead{},
@@ -718,12 +719,14 @@ func TestGetAdminFeedFullTextHealth(t *testing.T) {
 	newerCreatedAt := now.Add(-2 * time.Hour)
 	lastAttempt := now.Add(-3 * time.Hour)
 	nextAttempt := now.Add(2 * time.Hour)
+	activeLeaseUntil := now.Add(5 * time.Minute)
 	enabledSource := model.FeedSource{
-		SourceType:      "external_rss",
-		Hash:            "enabled-source",
-		RssURL:          "https://example.com/feed.xml",
-		Title:           "Enabled Source",
-		FullTextEnabled: true,
+		SourceType:         "external_rss",
+		Hash:               "enabled-source",
+		RssURL:             "https://example.com/feed.xml",
+		Title:              "Enabled Source",
+		FullTextEnabled:    true,
+		FullTextLeaseUntil: &activeLeaseUntil,
 	}
 	disabledSource := model.FeedSource{
 		SourceType:      "external_rss",
@@ -737,6 +740,12 @@ func TestGetAdminFeedFullTextHealth(t *testing.T) {
 	}
 	if err := db.Create(&disabledSource).Error; err != nil {
 		t.Fatalf("create disabled source: %v", err)
+	}
+	if err := db.Create(&model.FeedFullTextHost{Host: "example.com", LeaseUntil: &activeLeaseUntil}).Error; err != nil {
+		t.Fatalf("create host lease: %v", err)
+	}
+	if err := db.Create(&model.FeedSourceDiagnostic{FeedSourceID: enabledSource.ID, Kind: "reused"}).Error; err != nil {
+		t.Fatalf("create reuse diagnostic: %v", err)
 	}
 
 	items := []model.FeedItem{
@@ -766,6 +775,10 @@ func TestGetAdminFeedFullTextHealth(t *testing.T) {
 		EnabledSources     int64     `json:"enabled_sources"`
 		DisabledSources    int64     `json:"disabled_sources"`
 		PendingItems       int64     `json:"pending_items"`
+		ReadyItems         int64     `json:"ready_items"`
+		ActiveSourceLeases int64     `json:"active_source_leases"`
+		ActiveHostLeases   int64     `json:"active_host_leases"`
+		ReusedItems        int64     `json:"reused_items"`
 		FetchingItems      int64     `json:"fetching_items"`
 		RetryItems         int64     `json:"retry_items"`
 		SuccessItems       int64     `json:"success_items"`
@@ -784,8 +797,11 @@ func TestGetAdminFeedFullTextHealth(t *testing.T) {
 	if payload.EnabledSources != 1 || payload.DisabledSources != 1 {
 		t.Fatalf("unexpected source counts: %+v", payload)
 	}
-	if payload.PendingItems != 2 || payload.FetchingItems != 1 || payload.RetryItems != 1 || payload.SuccessItems != 1 || payload.FailedItems != 1 {
+	if payload.PendingItems != 2 || payload.ReadyItems != 2 || payload.FetchingItems != 1 || payload.RetryItems != 1 || payload.SuccessItems != 1 || payload.FailedItems != 1 {
 		t.Fatalf("unexpected item counts: %+v", payload)
+	}
+	if payload.ActiveSourceLeases != 1 || payload.ActiveHostLeases != 1 || payload.ReusedItems != 1 {
+		t.Fatalf("unexpected coordination metrics: %+v", payload)
 	}
 	if payload.SuccessRate != 0.5 || payload.ReaderCrawlPending != 1 {
 		t.Fatalf("expected success_rate=0.5 and reader_crawl_pending=1, got %+v", payload)

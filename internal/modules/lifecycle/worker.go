@@ -18,6 +18,9 @@ func StartWorker(ctx context.Context, db *gorm.DB) <-chan struct{} {
 	service := NewService(db)
 	run := func() {
 		now := time.Now().UTC()
+		if err := service.PublishDueBlogSchedules(now, 50); err != nil {
+			log.Printf("content lifecycle scheduled blog publish failed: %v", err)
+		}
 		if err := service.PublishDue(now, 50); err != nil {
 			log.Printf("content lifecycle scheduled publish failed: %v", err)
 		}

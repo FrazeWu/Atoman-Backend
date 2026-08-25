@@ -26,7 +26,8 @@ type ReadingListInput struct {
 }
 
 type ContentFeedbackInput struct {
-	Kind string `json:"kind" enums:"missing,layout,image,noise"`
+	Kind    string `json:"kind" enums:"missing,layout,image,noise"`
+	Variant string `json:"variant" enums:"rss,full_text,summary"`
 }
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
@@ -526,7 +527,7 @@ func (h *Handler) recordReadEvent(c *gin.Context) {
 
 // recordContentFeedback godoc
 // @Summary 反馈订阅正文质量
-// @Description 提交当前订阅正文的缺失、排版、图片或噪声问题；同一用户的同类反馈幂等。
+// @Description 提交当前显示的 RSS、全文或摘要的缺失、排版、图片或噪声问题；同一用户的同类反馈幂等。
 // @Tags feed
 // @Accept json
 // @Produce json
@@ -555,7 +556,7 @@ func (h *Handler) recordContentFeedback(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
 		return
 	}
-	created, err := h.service.RecordContentFeedback(user, itemID, strings.TrimSpace(req.Kind))
+	created, err := h.service.RecordContentFeedback(user, itemID, strings.TrimSpace(req.Kind), strings.TrimSpace(req.Variant))
 	if err != nil {
 		httpx.Error(c, err)
 		return

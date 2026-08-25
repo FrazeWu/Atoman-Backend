@@ -544,7 +544,10 @@ func buildModelFeedItem(src model.FeedSource, normalized normalizedFeedItem, fet
 	}
 
 	feedCandidate, err := SanitizeFeedContent(normalized.Link, firstNonEmpty(normalized.ContentHTML, normalized.SummaryText))
-	if err == nil {
+	if err != nil {
+		// Keep the summary fallback and retain the reason for source-quality diagnostics.
+		newFeedItem.ReaderQualityFlags = ReaderQualityFlagsJSON([]string{"rss_unavailable"})
+	} else {
 		newFeedItem.FeedContentHTML = feedCandidate.HTML
 		newFeedItem.ReaderHTML = feedCandidate.HTML
 		newFeedItem.ReaderSource = feedCandidate.Source
@@ -593,6 +596,10 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		return false, fmt.Errorf("load existing feed item after conflict: no matching GUID or link")
 	}
 
+	return false, updateExistingNormalizedFeedItem(db, existing, newFeedItem)
+}
+
+func updateExistingNormalizedFeedItem(db *gorm.DB, existing model.FeedItem, newFeedItem model.FeedItem) error {
 	updates := map[string]any{
 		"title":             newFeedItem.Title,
 		"link":              newFeedItem.Link,
@@ -624,7 +631,7 @@ func persistNormalizedFeedItem(db *gorm.DB, src model.FeedSource, normalized nor
 		updates["full_text_status"] = FullTextStatusPending
 		updates["next_full_text_attempt_at"] = nil
 	}
-	return false, db.Unscoped().Model(&model.FeedItem{}).Where("id = ?", existing.ID).Updates(updates).Error
+	return db.Unscoped().Model(&model.FeedItem{}).Where("id = ?", existing.ID).Updates(updates).Error
 }
 
 func isFeedItemDuplicateKeyError(err error) bool {
@@ -663,18 +670,99 @@ func isFeedItemDuplicateKeyError(err error) bool {
 }
 
 func persistParsedFeedItems(db *gorm.DB, src model.FeedSource, items []ExtRSSItem, sourceTitle string, sourceCoverURL string, fetchedAt time.Time) (int64, error) {
-	var inserted int64
+	normalizedItems := make([]normalizedFeedItem, 0, len(items))
+	indexByIdentifier := make(map[string]int, len(items))
 	for _, raw := range items {
 		normalized := normalizeRSSItem(raw, sourceTitle, sourceCoverURL, fetchedAt)
-		created, err := persistNormalizedFeedItem(db, src, normalized, fetchedAt)
-		if err != nil {
-			return inserted, err
+		if normalized.Identifier == "" || normalized.Link == "" {
+			continue
 		}
-		if created {
-			inserted++
+		if index, exists := indexByIdentifier[normalized.Identifier]; exists {
+			normalizedItems[index] = normalized
+			continue
 		}
+		indexByIdentifier[normalized.Identifier] = len(normalizedItems)
+		normalizedItems = append(normalizedItems, normalized)
 	}
-	return inserted, nil
+	if len(normalizedItems) == 0 {
+		return 0, nil
+	}
+
+	var inserted int64
+	err := db.Transaction(func(tx *gorm.DB) error {
+		identifiers := make([]string, 0, len(normalizedItems))
+		links := make([]string, 0, len(normalizedItems))
+		for _, normalized := range normalizedItems {
+			identifiers = append(identifiers, normalized.Identifier)
+			links = append(links, normalized.Link)
+		}
+
+		var existingItems []model.FeedItem
+		if err := tx.Unscoped().
+			Where("feed_source_id = ? AND (guid IN ? OR link IN ?)", src.ID, identifiers, links).
+			Find(&existingItems).Error; err != nil {
+			return err
+		}
+		existingByIdentifier := make(map[string]model.FeedItem, len(existingItems))
+		existingByLink := make(map[string]model.FeedItem, len(existingItems))
+		for _, existing := range existingItems {
+			existingByIdentifier[existing.GUID] = existing
+			if existing.Link != "" {
+				existingByLink[existing.Link] = existing
+			}
+		}
+
+		newItems := make([]model.FeedItem, 0, len(normalizedItems))
+		newNormalized := make([]normalizedFeedItem, 0, len(normalizedItems))
+		for _, normalized := range normalizedItems {
+			if existing, found := existingByIdentifier[normalized.Identifier]; found {
+				if err := updateExistingNormalizedFeedItem(tx, existing, buildModelFeedItem(src, normalized, fetchedAt)); err != nil {
+					return err
+				}
+				continue
+			}
+			if existing, found := existingByLink[normalized.Link]; found {
+				if err := updateExistingNormalizedFeedItem(tx, existing, buildModelFeedItem(src, normalized, fetchedAt)); err != nil {
+					return err
+				}
+				continue
+			}
+			newItems = append(newItems, buildModelFeedItem(src, normalized, fetchedAt))
+			newNormalized = append(newNormalized, normalized)
+		}
+		if len(newItems) == 0 {
+			return nil
+		}
+
+		if err := tx.SavePoint("feed_item_batch_insert").Error; err != nil {
+			return err
+		}
+		result := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "feed_source_id"}, {Name: "guid"}},
+			DoNothing: true,
+		}).CreateInBatches(&newItems, 100)
+		if result.Error == nil {
+			inserted = result.RowsAffected
+			return nil
+		}
+		if !isFeedItemDuplicateKeyError(result.Error) {
+			return result.Error
+		}
+		if err := tx.RollbackTo("feed_item_batch_insert").Error; err != nil {
+			return err
+		}
+		for _, normalized := range newNormalized {
+			created, err := persistNormalizedFeedItem(tx, src, normalized, fetchedAt)
+			if err != nil {
+				return err
+			}
+			if created {
+				inserted++
+			}
+		}
+		return nil
+	})
+	return inserted, err
 }
 
 func applyFetchedSourceUpdates(db *gorm.DB, src *model.FeedSource, sourceTitle string, sourceCoverURL string, fetchedAt time.Time) error {
@@ -773,6 +861,13 @@ type rssSourceGroup struct {
 	Sources         []model.FeedSource
 	HasSubscription bool
 	LeaseToken      string
+}
+
+type rssSyncWorkerResult struct {
+	claimed      bool
+	success      bool
+	fetchedItems int
+	newItems     int64
 }
 
 func listDueRSSSourceGroups(db *gorm.DB, now time.Time) ([]rssSourceGroup, error) {
@@ -875,6 +970,20 @@ func rssLeaseQuery(db *gorm.DB, group rssSourceGroup) *gorm.DB {
 	return query
 }
 
+func renewRSSSourceGroupLease(db *gorm.DB, group rssSourceGroup, now time.Time) error {
+	if group.LeaseToken == "" {
+		return nil
+	}
+	result := rssLeaseQuery(db, group).Update("fetch_lease_until", now.Add(rssLeaseDuration))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != int64(len(group.Sources)) {
+		return fmt.Errorf("RSS fetch lease expired for %s", sanitizeRSSLogURL(group.URL))
+	}
+	return nil
+}
+
 func syncAllRSSFeeds(db *gorm.DB, concurrency int) {
 	now := time.Now().UTC()
 	groups, err := listDueRSSSourceGroups(db, now)
@@ -882,45 +991,22 @@ func syncAllRSSFeeds(db *gorm.DB, concurrency int) {
 		log.Printf("RSS sync failed to fetch due sources: %v", err)
 		return
 	}
-
 	candidateCount := len(groups)
-	claimedGroups := make([]rssSourceGroup, 0, candidateCount)
-	for index := range groups {
-		group := groups[index]
-		claimed, claimErr := claimRSSSourceGroup(db, &group, now)
-		if claimErr != nil {
-			log.Printf("RSS sync failed to claim %s: %v", sanitizeRSSLogURL(group.URL), claimErr)
-			continue
-		}
-		if claimed {
-			claimedGroups = append(claimedGroups, group)
-		}
+	if candidateCount == 0 {
+		return
 	}
-	groups = claimedGroups
-	total := len(groups)
 	if concurrency < 1 {
 		concurrency = 1
 	}
-	if concurrency > total {
-		concurrency = total
+	if concurrency > candidateCount {
+		concurrency = candidateCount
 	}
 
 	jobs := make(chan rssSourceGroup)
-	results := make(chan bool, total)
+	results := make(chan rssSyncWorkerResult, candidateCount)
 	var workers sync.WaitGroup
 	for i := 0; i < concurrency; i++ {
-		workers.Add(1)
-		go func(jobs <-chan rssSourceGroup, db *gorm.DB) {
-			defer workers.Done()
-			for group := range jobs {
-				if _, _, err := syncRSSSourceGroup(db, group); err != nil {
-					log.Printf("Failed to fetch RSS %s: %v", sanitizeRSSLogURL(group.URL), sanitizeRSSLogError(err))
-					results <- false
-					continue
-				}
-				results <- true
-			}
-		}(jobs, db)
+		startRSSSyncWorker(&workers, jobs, results, db, now)
 	}
 	for _, group := range groups {
 		jobs <- group
@@ -929,16 +1015,55 @@ func syncAllRSSFeeds(db *gorm.DB, concurrency int) {
 	workers.Wait()
 	close(results)
 
+	claimed := 0
 	success := 0
 	failed := 0
-	for ok := range results {
-		if ok {
+	fetchedItems := 0
+	newItems := int64(0)
+	for result := range results {
+		if !result.claimed {
+			continue
+		}
+		claimed++
+		fetchedItems += result.fetchedItems
+		newItems += result.newItems
+		if result.success {
 			success++
 		} else {
 			failed++
 		}
 	}
-	log.Printf("RSS sync completed: total=%d success=%d failed=%d skipped=%d", total, success, failed, candidateCount-total)
+	log.Printf("RSS sync completed: total=%d success=%d failed=%d skipped=%d fetched_items=%d new_items=%d", claimed, success, failed, candidateCount-claimed, fetchedItems, newItems)
+}
+
+func startRSSSyncWorker(workers *sync.WaitGroup, jobs <-chan rssSourceGroup, results chan<- rssSyncWorkerResult, db *gorm.DB, now time.Time) {
+	workers.Add(1)
+	go func(work <-chan rssSourceGroup, output chan<- rssSyncWorkerResult, database *gorm.DB, claimedAt time.Time) {
+		defer workers.Done()
+		syncRSSWorker(work, output, database, claimedAt)
+	}(jobs, results, db, now)
+}
+
+func syncRSSWorker(jobs <-chan rssSourceGroup, results chan<- rssSyncWorkerResult, db *gorm.DB, now time.Time) {
+	for group := range jobs {
+		claimed, claimErr := claimRSSSourceGroup(db, &group, now)
+		if claimErr != nil {
+			log.Printf("RSS sync failed to claim %s: %v", sanitizeRSSLogURL(group.URL), claimErr)
+			results <- rssSyncWorkerResult{}
+			continue
+		}
+		if !claimed {
+			results <- rssSyncWorkerResult{}
+			continue
+		}
+		fetchedItems, newItems, syncErr := syncRSSSourceGroup(db, group)
+		if syncErr != nil {
+			log.Printf("Failed to fetch RSS %s: %v", sanitizeRSSLogURL(group.URL), sanitizeRSSLogError(syncErr))
+			results <- rssSyncWorkerResult{claimed: true, fetchedItems: fetchedItems, newItems: newItems}
+			continue
+		}
+		results <- rssSyncWorkerResult{claimed: true, success: true, fetchedItems: fetchedItems, newItems: newItems}
+	}
 }
 
 func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
@@ -958,6 +1083,9 @@ func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
 			LastModified: representative.FetchLastModified,
 		})
 		fetchResult.Duration = time.Since(startedAt)
+		if err := renewRSSSourceGroupLease(db, group, time.Now().UTC()); err != nil {
+			return err
+		}
 		if err != nil {
 			markErr := markRSSFetchFailure(db, group, err, fetchResult, now)
 			if markErr != nil {
@@ -967,7 +1095,7 @@ func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
 		}
 
 		if fetchResult.NotModified {
-			return markRSSFetchSuccess(db, group, fetchResult, now, 0)
+			return markRSSFetchSuccess(db, group, fetchResult, now, 0, true)
 		}
 
 		failSync := func(syncErr error) error {
@@ -980,6 +1108,9 @@ func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
 
 		fetchedItems = len(fetchResult.Items)
 		for _, source := range group.Sources {
+			if err := renewRSSSourceGroupLease(db, group, time.Now().UTC()); err != nil {
+				return err
+			}
 			inserted, persistErr := persistParsedFeedItems(db, source, fetchResult.Items, fetchResult.SourceTitle, fetchResult.SourceCoverURL, now)
 			newItems += inserted
 			if persistErr != nil {
@@ -993,17 +1124,27 @@ func syncRSSSourceGroup(db *gorm.DB, group rssSourceGroup) (int, int64, error) {
 				return failSync(err)
 			}
 		}
-		return markRSSFetchSuccess(db, group, fetchResult, now, fetchedItems)
+		return markRSSFetchSuccess(db, group, fetchResult, now, fetchedItems, false)
 	})
 	syncErr = err
 	return fetchedItems, newItems, syncErr
 }
 
-func rssFetchInterval(hasSubscription bool) time.Duration {
+func rssFetchInterval(hasSubscription bool, unchangedCount int) time.Duration {
+	interval := 6 * time.Hour
+	maximum := 24 * time.Hour
 	if hasSubscription {
-		return 15 * time.Minute
+		interval = 15 * time.Minute
+		maximum = 2 * time.Hour
 	}
-	return 6 * time.Hour
+	for unchangedCount > 0 && interval < maximum {
+		interval *= 2
+		unchangedCount--
+	}
+	if interval > maximum {
+		return maximum
+	}
+	return interval
 }
 
 func markRSSFetchStarted(db *gorm.DB, group rssSourceGroup) error {
@@ -1019,8 +1160,16 @@ func markRSSFetchStarted(db *gorm.DB, group rssSourceGroup) error {
 	return nil
 }
 
-func markRSSFetchSuccess(db *gorm.DB, group rssSourceGroup, result RSSFetchResult, now time.Time, itemCount int) error {
-	nextAt := now.Add(rssFetchInterval(group.HasSubscription))
+func markRSSFetchSuccess(db *gorm.DB, group rssSourceGroup, result RSSFetchResult, now time.Time, itemCount int, notModified bool) error {
+	unchangedCount := 0
+	if notModified {
+		for _, source := range group.Sources {
+			if source.FetchUnchangedCount >= unchangedCount {
+				unchangedCount = source.FetchUnchangedCount + 1
+			}
+		}
+	}
+	nextAt := now.Add(rssFetchInterval(group.HasSubscription, unchangedCount))
 	updates := map[string]any{
 		"fetch_status":               rssFetchStatusHealthy,
 		"fetch_provider":             result.Provider,
@@ -1034,6 +1183,7 @@ func markRSSFetchSuccess(db *gorm.DB, group rssSourceGroup, result RSSFetchResul
 		"fetch_last_error":           "",
 		"fetch_last_duration_ms":     result.Duration.Milliseconds(),
 		"fetch_last_item_count":      itemCount,
+		"fetch_unchanged_count":      unchangedCount,
 		"last_error":                 "",
 		"health_status":              "healthy",
 		"fetch_lease_token":          "",

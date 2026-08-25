@@ -24,6 +24,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.DELETE("/:id", h.delete)
 	group.POST("/:id/like", h.like)
 	group.DELETE("/:id/like", h.unlike)
+	group.PUT("/:id/vote", h.setVote)
+	group.DELETE("/:id/vote", h.clearVote)
 }
 
 func (h *Handler) list(c *gin.Context) {
@@ -112,6 +114,39 @@ func (h *Handler) toggleLike(c *gin.Context, liked bool) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "ok"})
+}
+
+func (h *Handler) setVote(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	var input voteInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+		return
+	}
+	note, err := h.service.SetVote(user, noteID(c), input.Direction)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, note)
+}
+
+func (h *Handler) clearVote(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	note, err := h.service.SetVote(user, noteID(c), "none")
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, note)
 }
 
 func noteID(c *gin.Context) uuid.UUID {

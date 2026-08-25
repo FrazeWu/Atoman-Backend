@@ -323,6 +323,9 @@ func (s *RevisionService) createBaselineRevision(tx *gorm.DB, contentType string
 	if err := tx.Create(&baseline).Error; err != nil {
 		return nil, fmt.Errorf("failed to create baseline revision: %w", err)
 	}
+	if err := HandleMusicRevisionApplied(tx, &baseline); err != nil {
+		return nil, err
+	}
 	return &baseline, nil
 }
 

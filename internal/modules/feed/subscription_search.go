@@ -4,10 +4,8 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"atoman/internal/model"
-	"atoman/internal/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -68,11 +66,11 @@ func SearchSubscriptions(db *gorm.DB) gin.HandlerFunc {
 // GetFeedItem retrieves a single feed item by ID
 // GetFeedItem godoc
 // @Summary 获取单个 feed 条目
-// @Description 返回单个 feed item 详情。
+// @Description 返回条目元数据和可阅读的 RSS、网页全文变体；default_variant 指定首次展示内容。
 // @Tags feed
 // @Produce json
 // @Param id path string true "Feed item UUID"
-// @Success 200 {object} FeedItemResponse
+// @Success 200 {object} FeedItemDetailResponse
 // @Failure 400 {object} ErrorResponse
 // @Failure 404 {object} ErrorResponse
 // @Failure 500 {object} ErrorResponse
@@ -101,33 +99,10 @@ func GetFeedItem(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 
-		contentHTML := strings.TrimSpace(item.ReaderHTML)
-		contentSource := strings.TrimSpace(item.ReaderSource)
-		if contentHTML == "" && item.FullTextStatus == service.FullTextStatusSuccess {
-			contentHTML = strings.TrimSpace(item.FullTextHTML)
-			contentSource = service.ReaderSourcePage
-		}
-		if contentHTML == "" {
-			contentHTML = strings.TrimSpace(item.Summary)
-			contentSource = service.ReaderSourceSummary
-		}
-
 		c.JSON(http.StatusOK, gin.H{
 			"data": FeedItemDetailResponse{
-				ID:            item.ID,
-				Title:         item.Title,
-				Summary:       item.Summary,
-				Link:          item.Link,
-				Author:        item.Author,
-				PublishedAt:   item.PublishedAt,
-				ImageURL:      item.ImageURL,
-				EnclosureURL:  item.EnclosureURL,
-				EnclosureType: item.EnclosureType,
-				Duration:      item.Duration,
-				ContentHTML:   contentHTML,
-				ContentSource: contentSource,
-				FeedSource:    item.FeedSource,
-				FeedItem:      &item,
+				Item:   &item,
+				Reader: newFeedItemReaderResponse(item),
 			},
 		})
 	}

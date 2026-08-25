@@ -130,6 +130,7 @@ func (s *Service) StartAlbumImportMultipart(user authctx.CurrentUser, id uuid.UU
 			ObjectKey:      preparedObjectKey,
 			UploadID:       preparedUploadID,
 			Format:         format,
+			PartSize:       albumImportMultipartPartSize,
 			CompletedParts: []AlbumImportMultipartPartDTO{},
 		}
 		writeAlbumImportMultipartState(payload, state)

@@ -27,7 +27,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func openFullTextWorkerTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{}, &model.FeedSourceDiagnostic{}, &model.ReadingListItem{}, &model.FeedItemStar{})
+	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedFullTextHost{}, &model.FeedItem{}, &model.FeedSourceDiagnostic{}, &model.ReadingListItem{}, &model.FeedItemStar{})
 	if err := migrations.RunFeedItemUniqueIndex(db); err != nil {
 		return nil, err
 	}
@@ -390,12 +390,12 @@ func TestClaimNextFullTextItemReturnsFalseWhenQueueEmpty(t *testing.T) {
 	}
 
 	now := time.Date(2026, 5, 30, 18, 0, 0, 0, time.UTC)
-	claimed, source, ok, err := claimNextFullTextItem(db, now)
+	claimed, err := claimFullTextBatch(db, now, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok {
-		t.Fatalf("expected no claim, got item=%s source=%s", claimed.ID, source.ID)
+	if len(claimed) != 0 {
+		t.Fatalf("expected no claim, got item=%s source=%s", claimed[0].item.ID, claimed[0].source.ID)
 	}
 }
 
@@ -423,13 +423,13 @@ func TestClaimNextFullTextItemDoesNotDoubleClaim(t *testing.T) {
 	for i := 0; i < workers; i++ {
 		go func() {
 			defer wg.Done()
-			claimed, _, ok, err := claimNextFullTextItem(db, now)
+			claims, err := claimFullTextBatch(db, now, 1)
 			if err != nil {
 				errs <- err
 				return
 			}
-			if ok {
-				results <- claimed.ID.String()
+			if len(claims) == 1 {
+				results <- claims[0].item.ID.String()
 			}
 		}()
 	}
@@ -492,12 +492,12 @@ func TestClaimNextFullTextItemSkipsPodcastEnclosures(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	claimed, source, ok, err := claimNextFullTextItem(db, now)
+	claimed, err := claimFullTextBatch(db, now, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ok {
-		t.Fatalf("expected podcast item skipped, got item=%s source=%s", claimed.ID, source.ID)
+	if len(claimed) != 0 {
+		t.Fatalf("expected podcast item skipped, got item=%s source=%s", claimed[0].item.ID, claimed[0].source.ID)
 	}
 }
 

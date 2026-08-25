@@ -128,17 +128,37 @@ func (s *Service) Delete(user authctx.CurrentUser, id uuid.UUID) error {
 }
 
 func (s *Service) ToggleLike(user authctx.CurrentUser, id uuid.UUID, liked bool) error {
+	direction := "none"
+	if liked {
+		direction = "up"
+	}
+	_, err := s.SetVote(user, id, direction)
+	return err
+}
+
+func (s *Service) SetVote(user authctx.CurrentUser, id uuid.UUID, direction string) (NoteDTO, error) {
 	if user.ID == uuid.Nil {
-		return apperr.Unauthorized("Login required")
+		return NoteDTO{}, apperr.Unauthorized("Login required")
+	}
+	if direction != "up" && direction != "down" && direction != "none" {
+		return NoteDTO{}, apperr.BadRequest("validation.invalid_request", "direction must be up, down, or none")
 	}
 	if _, err := s.Get(id, user.ID); err != nil {
-		return err
+		return NoteDTO{}, err
 	}
-	if liked {
-		like := model.Like{UserID: user.ID, TargetType: "short_note", TargetID: id}
-		return s.db.Where(model.Like{UserID: user.ID, TargetType: "short_note", TargetID: id}).FirstOrCreate(&like).Error
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, "short_note", id).Delete(&model.Like{}).Error; err != nil {
+			return err
+		}
+		if direction == "none" {
+			return tx.Where("short_note_id = ? AND user_id = ?", id, user.ID).Delete(&model.ShortNoteVote{}).Error
+		}
+		vote := model.ShortNoteVote{ShortNoteID: id, UserID: user.ID, Direction: direction}
+		return tx.Where("short_note_id = ? AND user_id = ?", id, user.ID).Assign(map[string]any{"direction": direction}).FirstOrCreate(&vote).Error
+	}); err != nil {
+		return NoteDTO{}, err
 	}
-	return s.db.Where("user_id = ? AND target_type = ? AND target_id = ?", user.ID, "short_note", id).Delete(&model.Like{}).Error
+	return s.Get(id, user.ID)
 }
 
 func (s *Service) ownedNote(user authctx.CurrentUser, id uuid.UUID) (model.ShortNote, error) {
@@ -159,8 +179,8 @@ func (s *Service) ownedNote(user authctx.CurrentUser, id uuid.UUID) (model.Short
 }
 
 func (s *Service) dto(note model.ShortNote, viewerID uuid.UUID) (NoteDTO, error) {
-	var likesCount int64
-	if err := s.db.Model(&model.Like{}).Where("target_type = ? AND target_id = ?", "short_note", note.ID).Count(&likesCount).Error; err != nil {
+	likesCount, dislikesCount, viewerVote, err := s.voteSummary(note.ID, viewerID)
+	if err != nil {
 		return NoteDTO{}, err
 	}
 	var target model.DiscussionTarget
@@ -169,20 +189,52 @@ func (s *Service) dto(note model.ShortNote, viewerID uuid.UUID) (NoteDTO, error)
 		return NoteDTO{}, err
 	}
 	commentsCount = target.CommentCount
-	liked := false
-	if viewerID != uuid.Nil {
-		var viewerLike model.Like
-		if err := s.db.Where("user_id = ? AND target_type = ? AND target_id = ?", viewerID, "short_note", note.ID).First(&viewerLike).Error; err == nil {
-			liked = true
-		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return NoteDTO{}, err
-		}
-	}
+	liked := viewerVote == "up"
 	media := make([]MediaDTO, 0, len(note.Media))
 	for _, item := range note.Media {
 		media = append(media, MediaDTO{ID: item.ID, URL: item.URL, Position: item.Position})
 	}
-	return NoteDTO{ID: note.ID, UserID: note.UserID, User: note.User, Content: note.Content, Media: media, LikesCount: likesCount, CommentsCount: commentsCount, Liked: liked, Edited: note.UpdatedAt.After(note.CreatedAt), CreatedAt: note.CreatedAt, UpdatedAt: note.UpdatedAt}, nil
+	return NoteDTO{ID: note.ID, UserID: note.UserID, User: note.User, Content: note.Content, Media: media, LikesCount: likesCount, DislikesCount: dislikesCount, VoteScore: likesCount - dislikesCount, ViewerVote: viewerVote, CommentsCount: commentsCount, Liked: liked, Edited: note.UpdatedAt.After(note.CreatedAt), CreatedAt: note.CreatedAt, UpdatedAt: note.UpdatedAt}, nil
+}
+
+func (s *Service) voteSummary(noteID, viewerID uuid.UUID) (int64, int64, string, error) {
+	var votes []model.ShortNoteVote
+	if err := s.db.Where("short_note_id = ?", noteID).Find(&votes).Error; err != nil {
+		return 0, 0, "", err
+	}
+	explicitVotes := make(map[uuid.UUID]string, len(votes))
+	var likesCount, dislikesCount int64
+	for _, vote := range votes {
+		explicitVotes[vote.UserID] = vote.Direction
+		if vote.Direction == "up" {
+			likesCount++
+		} else {
+			dislikesCount++
+		}
+	}
+	var legacyLikes []model.Like
+	if err := s.db.Where("target_type = ? AND target_id = ?", "short_note", noteID).Find(&legacyLikes).Error; err != nil {
+		return 0, 0, "", err
+	}
+	for _, like := range legacyLikes {
+		if _, hasExplicitVote := explicitVotes[like.UserID]; !hasExplicitVote {
+			likesCount++
+		}
+	}
+	viewerVote := "none"
+	if viewerID != uuid.Nil {
+		if direction, ok := explicitVotes[viewerID]; ok {
+			viewerVote = direction
+		} else {
+			for _, like := range legacyLikes {
+				if like.UserID == viewerID {
+					viewerVote = "up"
+					break
+				}
+			}
+		}
+	}
+	return likesCount, dislikesCount, viewerVote, nil
 }
 
 func validateInput(input noteInput) (string, []string, error) {

@@ -20,7 +20,7 @@ func (h *Handler) getPostLikesCount(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
 		return
 	}
-	post, err := h.service.repo.GetPost(postID)
+	post, err := h.service.repo.GetBlogContent(postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
@@ -36,7 +36,7 @@ func (h *Handler) getPostLikesCount(c *gin.Context) {
 			return
 		}
 	} else {
-		allowed, err := CanViewPublishedPost(h.service.db, viewerID, post)
+		allowed, err := CanViewPublishedBlogContent(h.service.db, viewerID, post)
 		if err != nil {
 			httpx.Error(c, err)
 			return

@@ -18,33 +18,27 @@ func (r *Repo) GetChannel(id uuid.UUID) (model.Channel, error) {
 	return channel, err
 }
 
-func (r *Repo) GetPost(id uuid.UUID) (model.Post, error) {
-	return loadCanonicalBlogPost(r.db, id)
+func (r *Repo) GetBlogContent(id uuid.UUID) (BlogContent, error) {
+	return loadCanonicalBlogContent(r.db, id)
 }
 
-func (r *Repo) GetPublicPublishedPost(id uuid.UUID) (model.Post, error) {
-	posts, err := loadCanonicalBlogPosts(r.db, canonicalBlogPostsQuery(r.db).
+func (r *Repo) GetPublicPublishedPost(id uuid.UUID) (BlogContent, error) {
+	contents, err := LoadCanonicalBlogContents(r.db, canonicalBlogPostsQuery(r.db).
 		Where("posts.status = ? AND (posts.visibility = ? OR posts.visibility = ?)", "published", "", "public").
 		Where("posts.id = ?", id))
 	if err != nil {
-		return model.Post{}, err
+		return BlogContent{}, err
 	}
-	if len(posts) == 0 {
-		return model.Post{}, gorm.ErrRecordNotFound
+	if len(contents) == 0 {
+		return BlogContent{}, gorm.ErrRecordNotFound
 	}
-	return posts[0], nil
+	return contents[0], nil
 }
 
-func (r *Repo) ListPublicPublishedPosts() ([]model.Post, error) {
-	var posts []model.Post
-	err := canonicalBlogPostsQuery(r.db).
-		Select("posts.id, posts.updated_at").
+func (r *Repo) ListPublicPublishedPosts() ([]BlogContent, error) {
+	return LoadCanonicalBlogContents(r.db, canonicalBlogPostsQuery(r.db).
 		Where("posts.status = ? AND (posts.visibility = ? OR posts.visibility = ?)", "published", "", "public").
-		Order("COALESCE(posts.published_at, posts.created_at) DESC").
-		Order("posts.created_at DESC").
-		Order("posts.id DESC").
-		Scan(&posts).Error
-	return posts, err
+		Order("COALESCE(posts.published_at, posts.created_at) DESC").Order("posts.created_at DESC").Order("posts.id DESC"))
 }
 
 func (r *Repo) ListChannels(userID *uuid.UUID) ([]model.Channel, error) {
@@ -63,20 +57,24 @@ func (r *Repo) GetChannelBySlug(slug string) (model.Channel, error) {
 	return channel, err
 }
 
-func (r *Repo) ListCollectionsByChannel(channelID uuid.UUID) ([]model.Collection, error) {
+func (r *Repo) ListCollectionsByChannel(channelID uuid.UUID) ([]BlogCollection, error) {
 	var collections []model.ContentCollection
 	if err := r.db.Where("channel_id = ?", channelID).Order("created_at ASC, id ASC").Find(&collections).Error; err != nil {
 		return nil, err
 	}
-	return blogCollectionDTOs(collections), nil
+	result := make([]BlogCollection, 0, len(collections))
+	for _, collection := range collections {
+		result = append(result, blogCollectionFromContentCollection(collection))
+	}
+	return result, nil
 }
 
-func (r *Repo) GetCollection(id uuid.UUID) (model.Collection, error) {
+func (r *Repo) GetCollection(id uuid.UUID) (BlogCollection, error) {
 	var collection model.ContentCollection
 	if err := r.db.Preload("Channel").First(&collection, "id = ?", id).Error; err != nil {
-		return model.Collection{}, err
+		return BlogCollection{}, err
 	}
-	return blogCollectionDTO(collection), nil
+	return blogCollectionFromContentCollection(collection), nil
 }
 
 func (r *Repo) SaveChannel(channel *model.Channel) error { return r.db.Save(channel).Error }
@@ -97,7 +95,7 @@ func (r *Repo) DeleteCollection(id uuid.UUID) error {
 	return r.db.Delete(&model.ContentCollection{}, "id = ?", id).Error
 }
 
-func (r *Repo) ListUserCollections(userID uuid.UUID) ([]model.Collection, error) {
+func (r *Repo) ListUserCollections(userID uuid.UUID) ([]BlogCollection, error) {
 	var channels []model.Channel
 	if err := r.db.Where("user_id = ?", userID).Find(&channels).Error; err != nil {
 		return nil, err
@@ -107,11 +105,17 @@ func (r *Repo) ListUserCollections(userID uuid.UUID) ([]model.Collection, error)
 		channelIDs = append(channelIDs, channel.ID)
 	}
 	if len(channelIDs) == 0 {
-		return []model.Collection{}, nil
+		return []BlogCollection{}, nil
 	}
 	var collections []model.ContentCollection
-	err := r.db.Where("channel_id IN ?", channelIDs).Order("created_at DESC").Find(&collections).Error
-	return blogCollectionDTOs(collections), err
+	if err := r.db.Where("channel_id IN ?", channelIDs).Order("created_at DESC").Find(&collections).Error; err != nil {
+		return nil, err
+	}
+	result := make([]BlogCollection, 0, len(collections))
+	for _, collection := range collections {
+		result = append(result, blogCollectionFromContentCollection(collection))
+	}
+	return result, nil
 }
 
 func (r *Repo) CountPostLikes(postID uuid.UUID) (int64, error) {

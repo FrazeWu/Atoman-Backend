@@ -28,7 +28,7 @@ func parseRecommendationMode(raw string) (recommendation.Mode, error) {
 }
 
 type blogRecommendationRow struct {
-	model.Post
+	BlogContent
 	LikesCount            int64
 	CommentsCount         int64
 	BookmarksCount        int64
@@ -48,7 +48,7 @@ type blogRankedPost struct {
 	ChannelID     string
 	Score         float64
 	PublishedAt   time.Time
-	Post          model.Post
+	Post          BlogContent
 	LikesCount    int64
 	CommentsCount int64
 }
@@ -120,22 +120,22 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 			CollectionID: candidate.CollectionID, CollectionPosition: candidate.CollectionPosition,
 		})
 	}
-	posts, err := hydrateCanonicalBlogPosts(s.db, canonicalRows)
+	contents, err := hydrateCanonicalBlogContents(s.db, canonicalRows)
 	if err != nil {
 		return nil, 0, err
 	}
-	postsByID := make(map[uuid.UUID]model.Post, len(posts))
-	for _, post := range posts {
-		postsByID[post.ID] = post
+	contentsByID := make(map[uuid.UUID]BlogContent, len(contents))
+	for _, content := range contents {
+		contentsByID[content.ID] = content
 	}
 	rows := make([]blogRecommendationRow, 0, len(candidates))
 	for _, candidate := range candidates {
-		post, ok := postsByID[candidate.ID]
+		content, ok := contentsByID[candidate.ID]
 		if !ok {
 			continue
 		}
 		rows = append(rows, blogRecommendationRow{
-			Post: post, LikesCount: candidate.LikesCount, CommentsCount: candidate.CommentsCount,
+			BlogContent: content, LikesCount: candidate.LikesCount, CommentsCount: candidate.CommentsCount,
 			BookmarksCount: candidate.BookmarksCount, ChannelFollowersCount: candidate.ChannelFollowersCount,
 		})
 	}
@@ -175,7 +175,7 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 			Subscribers: subscriberScores[i],
 		}
 		composite := blogCompositeScore(signals)
-		publishedAt := blogPublishedAt(row.Post)
+		publishedAt := blogContentPublishedAt(row.BlogContent)
 		_, subscribed := subscribedChannels[uuidValue(row.ChannelID)]
 		score := composite
 		switch mode {
@@ -187,8 +187,8 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 			score = blogRecommendedScore(composite, subscribed, publishedAt, now) + 0.10*(1-signals.Reads)
 		}
 		ranked = append(ranked, blogRankedPost{
-			ID: row.ID.String(), ChannelID: blogRecommendationSourceKey(row.Post), Score: score,
-			PublishedAt: publishedAt, Post: row.Post,
+			ID: row.ID.String(), ChannelID: blogContentRecommendationSourceKey(row.BlogContent), Score: score,
+			PublishedAt: publishedAt, Post: row.BlogContent,
 			LikesCount: row.LikesCount, CommentsCount: row.CommentsCount,
 		})
 	}
@@ -281,6 +281,13 @@ func blogRecommendedScore(composite float64, subscribed bool, publishedAt time.T
 	return score
 }
 
+func blogContentPublishedAt(content BlogContent) time.Time {
+	if content.PublishedAt != nil {
+		return *content.PublishedAt
+	}
+	return content.CreatedAt
+}
+
 func blogPublishedAt(post model.Post) time.Time {
 	if post.PublishedAt != nil {
 		return *post.PublishedAt
@@ -312,6 +319,13 @@ func rerankBlogDiversity(items []blogRankedPost, maxConsecutive int) []blogRanke
 		result = append(result, item)
 	}
 	return result
+}
+
+func blogContentRecommendationSourceKey(content BlogContent) string {
+	if content.ChannelID != nil {
+		return content.ChannelID.String()
+	}
+	return content.UserID.String()
 }
 
 func blogRecommendationSourceKey(post model.Post) string {

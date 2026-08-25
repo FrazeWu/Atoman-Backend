@@ -42,23 +42,6 @@ type FeedStatsData struct {
 	SourceBreakdown []FeedSourceStat `json:"source_breakdown"`
 }
 
-type FeedItemDetailResponse struct {
-	ID            uuid.UUID         `json:"id"`
-	Title         string            `json:"title"`
-	Summary       string            `json:"summary"`
-	Link          string            `json:"link"`
-	Author        string            `json:"author"`
-	PublishedAt   time.Time         `json:"published_at"`
-	ImageURL      string            `json:"image_url"`
-	EnclosureURL  string            `json:"enclosure_url"`
-	EnclosureType string            `json:"enclosure_type"`
-	Duration      string            `json:"duration"`
-	ContentHTML   string            `json:"content_html"`
-	ContentSource string            `json:"content_source"`
-	FeedSource    *model.FeedSource `json:"feed_source,omitempty"`
-	FeedItem      *model.FeedItem   `json:"feed_item,omitempty"`
-}
-
 type feedReadEvent struct {
 	ReadAt       time.Time `gorm:"column:read_at"`
 	FeedSourceID uuid.UUID `gorm:"column:feed_source_id"`

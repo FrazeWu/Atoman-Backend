@@ -70,129 +70,181 @@ func CanonicalBlogPostsQuery(db *gorm.DB) *gorm.DB {
 	return canonicalBlogPostsQuery(db)
 }
 
-func LoadCanonicalBlogPosts(db *gorm.DB, query *gorm.DB) ([]model.Post, error) {
-	return loadCanonicalBlogPosts(db, query)
-}
-
-func loadCanonicalBlogPosts(db *gorm.DB, query *gorm.DB) ([]model.Post, error) {
+func LoadCanonicalBlogContents(db *gorm.DB, query *gorm.DB) ([]BlogContent, error) {
 	var rows []canonicalBlogPostRow
 	if err := query.Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	return hydrateCanonicalBlogPosts(db, rows)
+	return hydrateCanonicalBlogContents(db, rows)
 }
 
-func loadCanonicalBlogPost(db *gorm.DB, postID uuid.UUID) (model.Post, error) {
-	posts, err := loadCanonicalBlogPosts(db, canonicalBlogPostsQuery(db).Where("posts.id = ?", postID))
+// LoadCanonicalBlogPosts preserves the legacy feed projection while callers
+// migrate to BlogContent.
+func LoadCanonicalBlogPosts(db *gorm.DB, query *gorm.DB) ([]model.Post, error) {
+	contents, err := LoadCanonicalBlogContents(db, query)
 	if err != nil {
-		return model.Post{}, err
+		return nil, err
 	}
-	if len(posts) == 0 {
-		return model.Post{}, gorm.ErrRecordNotFound
+
+	posts := make([]model.Post, 0, len(contents))
+	for _, content := range contents {
+		posts = append(posts, model.Post{
+			Base:               model.Base{ID: content.ID, CreatedAt: content.CreatedAt, UpdatedAt: content.UpdatedAt},
+			UserID:             content.UserID,
+			User:               content.User,
+			ChannelID:          content.ChannelID,
+			Channel:            content.Channel,
+			CollectionID:       content.CollectionID,
+			Collection:         legacyBlogCollection(content.Collection),
+			Collections:        legacyBlogCollections(content.Collections),
+			CollectionPosition: content.CollectionPosition,
+			CollectionConflict: content.CollectionConflict,
+			Title:              content.Title,
+			Content:            content.Content,
+			Summary:            content.Summary,
+			LanguageCode:       content.LanguageCode,
+			CoverURL:           content.CoverURL,
+			Status:             content.Status,
+			Visibility:         content.Visibility,
+			Pinned:             content.Pinned,
+			ScheduledAt:        content.ScheduledAt,
+			PublishedAt:        content.PublishedAt,
+			ViewCount:          content.ViewCount,
+			BookmarksCount:     content.BookmarksCount,
+			RatingScore:        content.RatingScore,
+			RatingCount:        content.RatingCount,
+			ViewerRating:       content.ViewerRating,
+		})
 	}
-	return posts[0], nil
+	return posts, nil
 }
 
-func hydrateCanonicalBlogPosts(db *gorm.DB, rows []canonicalBlogPostRow) ([]model.Post, error) {
-	if len(rows) == 0 {
-		return []model.Post{}, nil
+func legacyBlogCollection(collection *BlogCollection) *model.Collection {
+	if collection == nil {
+		return nil
 	}
+	return &model.Collection{
+		Base:        model.Base{ID: collection.ID, CreatedAt: collection.CreatedAt, UpdatedAt: collection.UpdatedAt},
+		ChannelID:   collection.ChannelID,
+		Channel:     collection.Channel,
+		ContentType: "blog",
+		CreatedBy:   collection.CreatedBy,
+		Name:        collection.Name,
+		Description: collection.Description,
+		CoverURL:    collection.CoverURL,
+		IsDefault:   collection.IsDefault,
+	}
+}
 
-	authorIDs := make([]uuid.UUID, 0, len(rows))
+func legacyBlogCollections(collections []BlogCollection) []model.Collection {
+	if len(collections) == 0 {
+		return nil
+	}
+	legacy := make([]model.Collection, 0, len(collections))
+	for index := range collections {
+		legacy = append(legacy, *legacyBlogCollection(&collections[index]))
+	}
+	return legacy
+}
+
+func hydrateCanonicalBlogContents(db *gorm.DB, rows []canonicalBlogPostRow) ([]BlogContent, error) {
+	if len(rows) == 0 {
+		return []BlogContent{}, nil
+	}
+	userIDs := make([]uuid.UUID, 0, len(rows))
 	channelIDs := make([]uuid.UUID, 0, len(rows))
 	collectionIDs := make([]uuid.UUID, 0, len(rows))
-	authorSet := make(map[uuid.UUID]struct{})
-	channelSet := make(map[uuid.UUID]struct{})
-	collectionSet := make(map[uuid.UUID]struct{})
+	usersSeen, channelsSeen, collectionsSeen := map[uuid.UUID]struct{}{}, map[uuid.UUID]struct{}{}, map[uuid.UUID]struct{}{}
 	for _, row := range rows {
 		if row.AuthorID != nil && *row.AuthorID != uuid.Nil {
-			if _, ok := authorSet[*row.AuthorID]; !ok {
-				authorSet[*row.AuthorID] = struct{}{}
-				authorIDs = append(authorIDs, *row.AuthorID)
+			if _, ok := usersSeen[*row.AuthorID]; !ok {
+				usersSeen[*row.AuthorID] = struct{}{}
+				userIDs = append(userIDs, *row.AuthorID)
 			}
 		}
 		if row.ChannelID != uuid.Nil {
-			if _, ok := channelSet[row.ChannelID]; !ok {
-				channelSet[row.ChannelID] = struct{}{}
+			if _, ok := channelsSeen[row.ChannelID]; !ok {
+				channelsSeen[row.ChannelID] = struct{}{}
 				channelIDs = append(channelIDs, row.ChannelID)
 			}
 		}
 		if row.CollectionID != nil && *row.CollectionID != uuid.Nil {
-			if _, ok := collectionSet[*row.CollectionID]; !ok {
-				collectionSet[*row.CollectionID] = struct{}{}
+			if _, ok := collectionsSeen[*row.CollectionID]; !ok {
+				collectionsSeen[*row.CollectionID] = struct{}{}
 				collectionIDs = append(collectionIDs, *row.CollectionID)
 			}
 		}
 	}
-
-	usersByID := make(map[uuid.UUID]model.User, len(authorIDs))
-	if len(authorIDs) > 0 {
-		var users []model.User
-		if err := db.Where("uuid IN ?", authorIDs).Find(&users).Error; err != nil {
+	users := map[uuid.UUID]model.User{}
+	if len(userIDs) > 0 {
+		var values []model.User
+		if err := db.Where("uuid IN ?", userIDs).Find(&values).Error; err != nil {
 			return nil, err
 		}
-		for _, user := range users {
-			usersByID[user.UUID] = user
+		for _, value := range values {
+			users[value.UUID] = value
 		}
 	}
-	channelsByID := make(map[uuid.UUID]model.Channel, len(channelIDs))
+	channels := map[uuid.UUID]model.Channel{}
 	if len(channelIDs) > 0 {
-		var channels []model.Channel
-		if err := db.Preload("User").Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+		var values []model.Channel
+		if err := db.Preload("User").Where("id IN ?", channelIDs).Find(&values).Error; err != nil {
 			return nil, err
 		}
-		for _, channel := range channels {
-			channelsByID[channel.ID] = channel
+		for _, value := range values {
+			channels[value.ID] = value
 		}
 	}
-	collectionsByID := make(map[uuid.UUID]model.Collection, len(collectionIDs))
+	collections := map[uuid.UUID]BlogCollection{}
 	if len(collectionIDs) > 0 {
-		var collections []model.ContentCollection
-		if err := db.Where("id IN ?", collectionIDs).Find(&collections).Error; err != nil {
+		var values []model.ContentCollection
+		if err := db.Where("id IN ?", collectionIDs).Find(&values).Error; err != nil {
 			return nil, err
 		}
-		for _, collection := range collections {
-			collectionsByID[collection.ID] = model.Collection{
-				Base:        collection.Base,
-				ChannelID:   collection.ChannelID,
-				ContentType: "blog",
-				CreatedBy:   collection.CreatedBy,
-				Name:        collection.Name,
-				Description: collection.Description,
-				CoverURL:    collection.CoverURL,
-				IsDefault:   collection.IsDefault,
-			}
+		for _, value := range values {
+			collections[value.ID] = BlogCollection{ID: value.ID, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, ChannelID: value.ChannelID, CreatedBy: value.CreatedBy, Name: value.Name, Description: value.Description, CoverURL: value.CoverURL, IsDefault: value.IsDefault}
 		}
 	}
-
-	posts := make([]model.Post, 0, len(rows))
+	contents := make([]BlogContent, 0, len(rows))
 	for _, row := range rows {
-		post := model.Post{
-			Base:  model.Base{ID: row.ID, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt},
-			Title: row.Title, Content: row.Content, Summary: row.Summary, LanguageCode: row.LanguageCode,
-			CoverURL: row.CoverURL, Status: row.Status, Visibility: row.Visibility, Pinned: row.Pinned,
-			ScheduledAt: row.ScheduledAt, PublishedAt: row.PublishedAt, ViewCount: row.ViewCount,
-			CollectionConflict: row.CollectionConflict, CollectionPosition: row.CollectionPosition,
-		}
+		content := BlogContent{ID: row.ID, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt, ChannelID: &row.ChannelID, Title: row.Title, Content: row.Content, Summary: row.Summary, LanguageCode: row.LanguageCode, CoverURL: row.CoverURL, Status: row.Status, Visibility: row.Visibility, Pinned: row.Pinned, ScheduledAt: row.ScheduledAt, PublishedAt: row.PublishedAt, ViewCount: row.ViewCount, CollectionConflict: row.CollectionConflict, CollectionPosition: row.CollectionPosition}
 		if row.AuthorID != nil {
-			post.UserID = *row.AuthorID
-			if user, ok := usersByID[*row.AuthorID]; ok {
-				post.User = &user
+			content.UserID = *row.AuthorID
+			if value, ok := users[*row.AuthorID]; ok {
+				content.User = &value
 			}
 		}
-		post.ChannelID = &row.ChannelID
-		if channel, ok := channelsByID[row.ChannelID]; ok {
-			post.Channel = &channel
+		if value, ok := channels[row.ChannelID]; ok {
+			content.Channel = &value
 		}
 		if row.CollectionID != nil {
-			post.CollectionID = row.CollectionID
-			if collection, ok := collectionsByID[*row.CollectionID]; ok {
-				post.Collection = &collection
+			content.CollectionID = row.CollectionID
+			if value, ok := collections[*row.CollectionID]; ok {
+				content.Collection = &value
 			}
 		}
-		posts = append(posts, post)
+		contents = append(contents, content)
 	}
-	return posts, nil
+	return contents, nil
+}
+
+func loadCanonicalBlogContent(db *gorm.DB, contentID uuid.UUID) (BlogContent, error) {
+	contents, err := LoadCanonicalBlogContents(db, canonicalBlogPostsQuery(db).Where("posts.id = ?", contentID))
+	if err != nil {
+		return BlogContent{}, err
+	}
+	if len(contents) == 0 {
+		return BlogContent{}, gorm.ErrRecordNotFound
+	}
+	return contents[0], nil
+}
+
+func blogCollectionFromContentCollection(collection model.ContentCollection) BlogCollection {
+	return BlogCollection{
+		ID: collection.ID, CreatedAt: collection.CreatedAt, UpdatedAt: collection.UpdatedAt,
+		ChannelID: collection.ChannelID, Channel: collection.Channel, CreatedBy: collection.CreatedBy,
+		Name: collection.Name, Description: collection.Description, CoverURL: collection.CoverURL, IsDefault: collection.IsDefault,
+	}
 }
 
 func canonicalBlogCollectionID(db *gorm.DB, collectionID uuid.UUID) (uuid.UUID, error) {
@@ -291,18 +343,18 @@ func buildBlogDraftResponseFromCanonical(draft model.ContentBlogDraft) blogDraft
 		collectionID = &value
 	}
 	return blogDraftResponse{
-		ID:           draft.ID,
-		UserID:       draft.UserID,
-		ContextKey:   draft.ContextKey,
+		ID:              draft.ID,
+		UserID:          draft.UserID,
+		ContextKey:      draft.ContextKey,
 		SourceContentID: sourceContentID,
-		Title:        draft.Title,
-		Content:      draft.Content,
-		Summary:      draft.Summary,
-		CoverURL:     draft.CoverURL,
-		Visibility:   draft.Visibility,
-		ChannelID:    channelID,
-		CollectionID: collectionID,
-		CreatedAt:    draft.CreatedAt,
-		UpdatedAt:    draft.UpdatedAt,
+		Title:           draft.Title,
+		Content:         draft.Content,
+		Summary:         draft.Summary,
+		CoverURL:        draft.CoverURL,
+		Visibility:      draft.Visibility,
+		ChannelID:       channelID,
+		CollectionID:    collectionID,
+		CreatedAt:       draft.CreatedAt,
+		UpdatedAt:       draft.UpdatedAt,
 	}
 }

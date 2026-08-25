@@ -240,7 +240,7 @@ func newFeedTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) 
 		UserID:    user.UUID,
 		ChannelID: &channel.ID,
 		Title:     "Post item",
-		Content:   "post content",
+		Content:   strings.Repeat("post content ", 30),
 		Status:    "published",
 	}
 	if err := db.Create(&post).Error; err != nil {

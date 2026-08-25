@@ -15,8 +15,9 @@ func TestBlogServiceOnlyOwnsCompositionAndSharedHelpers(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"NewService":  true,
-		"dedupeUUIDs": true,
+		"NewService":            true,
+		"WithExportAssetReader": true,
+		"dedupeUUIDs":           true,
 	}
 	actual := make(map[string]bool)
 	for _, declaration := range parsed.Decls {

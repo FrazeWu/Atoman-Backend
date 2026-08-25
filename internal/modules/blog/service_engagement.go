@@ -102,7 +102,7 @@ func (s *Service) ensurePostRatingAccess(userID, postID uuid.UUID) error {
 	if postID == uuid.Nil {
 		return apperr.BadRequest("validation.invalid_request", "post_id is required")
 	}
-	post, err := s.repo.GetPost(postID)
+	post, err := loadCanonicalBlogContent(s.db, postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return apperr.NotFound("blog.post_not_found", "Post not found")
@@ -115,7 +115,7 @@ func (s *Service) ensurePostRatingAccess(userID, postID uuid.UUID) error {
 		}
 		return nil
 	}
-	allowed, err := CanViewPublishedPost(s.db, &userID, post)
+	allowed, err := CanViewPublishedBlogContent(s.db, &userID, post)
 	if err != nil {
 		return err
 	}
@@ -149,7 +149,7 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 			postIDs = append(postIDs, bookmark.ContentID)
 		}
 	}
-	posts, err := loadCanonicalBlogPosts(s.db, canonicalBlogPostsQuery(s.db).Where("posts.id IN ?", postIDs))
+	posts, err := LoadCanonicalBlogContents(s.db, canonicalBlogPostsQuery(s.db).Where("posts.id IN ?", postIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -157,7 +157,7 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 	for _, post := range posts {
 		visible := post.Status != "published" && post.UserID == user.ID
 		if post.Status == "published" {
-			visible, err = CanViewPublishedPost(s.db, &user.ID, post)
+			visible, err = CanViewPublishedBlogContent(s.db, &user.ID, post)
 			if err != nil {
 				return nil, err
 			}
@@ -186,7 +186,7 @@ func (s *Service) ListBookmarkItems(user authctx.CurrentUser, folderID *uuid.UUI
 			countsByContentID[count.ContentID] = count
 		}
 	}
-	postDTOs, err := s.postDTOs(s.db, posts, &user.ID)
+	postDTOs, err := s.blogContentDTOs(s.db, posts, &user.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,7 @@ func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, fol
 	if folderID == nil || *folderID == uuid.Nil {
 		return model.Bookmark{}, apperr.BadRequest("validation.invalid_request", "bookmark_folder_id is required")
 	}
-	post, err := s.repo.GetPost(postID)
+	post, err := loadCanonicalBlogContent(s.db, postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return model.Bookmark{}, apperr.NotFound("blog.post_not_found", "Post not found")
@@ -233,7 +233,7 @@ func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, fol
 			return model.Bookmark{}, apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this unpublished post")
 		}
 	} else {
-		allowed, err := CanViewPublishedPost(s.db, &user.ID, post)
+		allowed, err := CanViewPublishedBlogContent(s.db, &user.ID, post)
 		if err != nil {
 			return model.Bookmark{}, err
 		}
@@ -311,7 +311,7 @@ func (s *Service) ToggleLike(user authctx.CurrentUser, targetType string, target
 	}
 	switch targetType {
 	case "post":
-		post, err := s.repo.GetPost(targetID)
+		post, err := loadCanonicalBlogContent(s.db, targetID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return apperr.NotFound("blog.post_not_found", "Post not found")
@@ -323,7 +323,7 @@ func (s *Service) ToggleLike(user authctx.CurrentUser, targetType string, target
 				return apperr.Forbidden("blog.post_forbidden", "You don't have permission to interact with this unpublished post")
 			}
 		} else {
-			allowed, err := CanViewPublishedPost(s.db, &user.ID, post)
+			allowed, err := CanViewPublishedBlogContent(s.db, &user.ID, post)
 			if err != nil {
 				return err
 			}

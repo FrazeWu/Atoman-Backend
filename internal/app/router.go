@@ -24,6 +24,7 @@ import (
 	"atoman/internal/modules/podcast"
 	"atoman/internal/modules/portal"
 	"atoman/internal/modules/reference"
+	"atoman/internal/modules/reputation"
 	"atoman/internal/modules/shortnote"
 	"atoman/internal/modules/studio"
 	"atoman/internal/modules/timeline"
@@ -51,7 +52,8 @@ func RegisterV1Routes(
 	comment.RegisterRoutes(group, commentService)
 	refService := reference.NewService(db)
 	reference.RegisterRoutes(group, refService)
-	blog.RegisterRoutes(group.Group("/blog"), blog.NewService(db))
+	blogService := blog.NewService(db).WithExportAssetReader(blog.NewS3ExportAssetReader(s3Client))
+	blog.RegisterRoutes(group.Group("/blog"), blogService)
 	shortnote.RegisterRoutes(group.Group("/short-notes"), shortnote.NewService(db, refService))
 	feed.RegisterRoutes(group.Group("/feed"), feed.NewService(db))
 	feed.RegisterPublicRSSRoutes(group.Group("/rss"), db)
@@ -85,6 +87,7 @@ func RegisterV1Routes(
 		))
 	}
 	music.RegisterRoutes(musicGroup, musicService)
+	reputation.RegisterRoutes(group.Group("/reputation"), reputation.NewService(db))
 	portal.RegisterRoutes(group.Group("/portal"), portal.NewService(db))
 	studio.RegisterRoutes(group.Group("/studio"), studio.NewService(db))
 	lifecycle.RegisterRoutes(group.Group("/content"), lifecycle.NewService(db))

@@ -114,40 +114,16 @@ type BlogContentDTO struct {
 	References         []reference.ResolvedReference `json:"references"`
 }
 
-func newBlogCollectionDTO(collection *model.Collection) *BlogCollectionDTO {
-	if collection == nil {
-		return nil
+func newBlogContentDTOFromCanonical(content BlogContent) BlogContentDTO {
+	var collection *BlogCollectionDTO
+	if content.Collection != nil {
+		collection = &BlogCollectionDTO{ID: content.Collection.ID, CreatedAt: content.Collection.CreatedAt, UpdatedAt: content.Collection.UpdatedAt, ChannelID: content.Collection.ChannelID, Channel: content.Collection.Channel, CreatedBy: content.Collection.CreatedBy, Name: content.Collection.Name, Description: content.Collection.Description, CoverURL: content.Collection.CoverURL, IsDefault: content.Collection.IsDefault}
 	}
-	return &BlogCollectionDTO{
-		ID: collection.ID, CreatedAt: collection.CreatedAt, UpdatedAt: collection.UpdatedAt,
-		ChannelID: collection.ChannelID, Channel: collection.Channel, CreatedBy: collection.CreatedBy,
-		Name: collection.Name, Description: collection.Description, CoverURL: collection.CoverURL,
-		IsDefault: collection.IsDefault,
+	collections := make([]BlogCollectionDTO, 0, len(content.Collections))
+	for _, item := range content.Collections {
+		collections = append(collections, BlogCollectionDTO{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, ChannelID: item.ChannelID, Channel: item.Channel, CreatedBy: item.CreatedBy, Name: item.Name, Description: item.Description, CoverURL: item.CoverURL, IsDefault: item.IsDefault})
 	}
-}
-
-func newBlogCollectionDTOs(collections []model.Collection) []BlogCollectionDTO {
-	result := make([]BlogCollectionDTO, 0, len(collections))
-	for index := range collections {
-		if collection := newBlogCollectionDTO(&collections[index]); collection != nil {
-			result = append(result, *collection)
-		}
-	}
-	return result
-}
-
-func newBlogContentDTO(post model.Post) BlogContentDTO {
-	return BlogContentDTO{
-		ID: post.ID, CreatedAt: post.CreatedAt, UpdatedAt: post.UpdatedAt,
-		UserID: post.UserID, User: post.User, ChannelID: post.ChannelID, Channel: post.Channel,
-		CollectionID: post.CollectionID, Collection: newBlogCollectionDTO(post.Collection), Collections: newBlogCollectionDTOs(post.Collections),
-		CollectionPosition: post.CollectionPosition, CollectionConflict: post.CollectionConflict,
-		Title: post.Title, Content: post.Content, Summary: post.Summary, LanguageCode: post.LanguageCode,
-		CoverURL: post.CoverURL, Status: post.Status, Visibility: post.Visibility, Pinned: post.Pinned,
-		ScheduledAt: post.ScheduledAt, PublishedAt: post.PublishedAt, ViewCount: post.ViewCount,
-		BookmarksCount: post.BookmarksCount, RatingScore: post.RatingScore, RatingCount: post.RatingCount,
-		ViewerRating: post.ViewerRating, References: []reference.ResolvedReference{},
-	}
+	return BlogContentDTO{ID: content.ID, CreatedAt: content.CreatedAt, UpdatedAt: content.UpdatedAt, UserID: content.UserID, User: content.User, ChannelID: content.ChannelID, Channel: content.Channel, CollectionID: content.CollectionID, Collection: collection, Collections: collections, CollectionPosition: content.CollectionPosition, CollectionConflict: content.CollectionConflict, Title: content.Title, Content: content.Content, Summary: content.Summary, LanguageCode: content.LanguageCode, CoverURL: content.CoverURL, Status: content.Status, Visibility: content.Visibility, Pinned: content.Pinned, ScheduledAt: content.ScheduledAt, PublishedAt: content.PublishedAt, ViewCount: content.ViewCount, BookmarksCount: content.BookmarksCount, RatingScore: content.RatingScore, RatingCount: content.RatingCount, ViewerRating: content.ViewerRating, References: []reference.ResolvedReference{}}
 }
 
 type BlogContentVersionDTO struct {

@@ -23,6 +23,11 @@ func NewService(db *gorm.DB) *Service { return &Service{db: db} }
 
 const publicationProcessingTimeout = 5 * time.Minute
 
+const (
+	blogScheduleLeaseDuration = 2 * time.Minute
+	blogScheduleFailureAfter  = 24 * time.Hour
+)
+
 type EventInput struct {
 	Module        string    `json:"module"`
 	ContentID     uuid.UUID `json:"content_id"`
@@ -67,6 +72,7 @@ type ScheduleInput struct {
 	Module    string    `json:"module"`
 	ContentID uuid.UUID `json:"content_id"`
 	PublishAt time.Time `json:"publish_at"`
+	Timezone  string    `json:"timezone"`
 }
 
 type ScheduleResult struct {
@@ -74,6 +80,18 @@ type ScheduleResult struct {
 	ContentID uuid.UUID `json:"content_id"`
 	Status    string    `json:"status"`
 	PublishAt time.Time `json:"publish_at"`
+}
+
+type BlogScheduleStatus struct {
+	ContentID   uuid.UUID  `json:"content_id"`
+	Status      string     `json:"status"`
+	PublishAt   time.Time  `json:"publish_at"`
+	Timezone    string     `json:"timezone"`
+	Attempts    int        `json:"attempts"`
+	NextRunAt   time.Time  `json:"next_run_at"`
+	LastError   string     `json:"last_error,omitempty"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
+	CancelledAt *time.Time `json:"cancelled_at,omitempty"`
 }
 
 type contentSummary struct {
@@ -319,6 +337,27 @@ func (s *Service) EnqueuePublication(module string, contentID uuid.UUID) error {
 	return s.db.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "content_type"}, {Name: "content_id"}}, DoNothing: true}).Create(&event).Error
 }
 
+func (s *Service) GetBlogSchedule(user authctx.CurrentUser, contentID uuid.UUID) (BlogScheduleStatus, error) {
+	if user.ID == uuid.Nil {
+		return BlogScheduleStatus{}, apperr.Unauthorized("Login required")
+	}
+	content, err := s.resolveContent("blog", contentID)
+	if err != nil {
+		return BlogScheduleStatus{}, err
+	}
+	if content.OwnerID != user.ID && !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		return BlogScheduleStatus{}, apperr.Forbidden("lifecycle.content_forbidden", "You do not have permission to view this schedule")
+	}
+	var schedule model.BlogPublishSchedule
+	if err := s.db.Where("content_id = ?", contentID).First(&schedule).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return BlogScheduleStatus{}, apperr.NotFound("lifecycle.schedule_not_found", "Schedule not found")
+		}
+		return BlogScheduleStatus{}, err
+	}
+	return BlogScheduleStatus{ContentID: schedule.ContentID, Status: schedule.Status, PublishAt: schedule.PublishAt, Timezone: schedule.Timezone, Attempts: schedule.Attempts, NextRunAt: schedule.NextRunAt, LastError: schedule.LastError, PublishedAt: schedule.PublishedAt, CancelledAt: schedule.CancelledAt}, nil
+}
+
 func (s *Service) ScheduleContent(user authctx.CurrentUser, input ScheduleInput) (ScheduleResult, error) {
 	if user.ID == uuid.Nil {
 		return ScheduleResult{}, apperr.Unauthorized("Login required")
@@ -340,7 +379,20 @@ func (s *Service) ScheduleContent(user authctx.CurrentUser, input ScheduleInput)
 	}
 	switch input.Module {
 	case "blog":
-		if err := s.db.Model(&model.ContentEntry{}).Where("id = ? AND author_id = ?", input.ContentID, user.ID).Updates(map[string]any{"status": "scheduled", "scheduled_at": publishAt}).Error; err != nil {
+		timezone := strings.TrimSpace(input.Timezone)
+		if timezone == "" {
+			timezone = "UTC"
+		}
+		if _, err := time.LoadLocation(timezone); err != nil {
+			return ScheduleResult{}, apperr.BadRequest("lifecycle.invalid_timezone", "timezone must be a valid IANA time zone")
+		}
+		if err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.ContentEntry{}).Where("id = ? AND author_id = ?", input.ContentID, user.ID).Updates(map[string]any{"status": "scheduled", "scheduled_at": publishAt}).Error; err != nil {
+				return err
+			}
+			schedule := model.BlogPublishSchedule{ContentID: input.ContentID, AuthorID: user.ID, PublishAt: publishAt, Timezone: timezone, Status: "pending", NextRunAt: publishAt}
+			return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "content_id"}}, DoUpdates: clause.Assignments(map[string]any{"publish_at": publishAt, "timezone": timezone, "status": "pending", "lease_token": "", "lease_until": nil, "attempts": 0, "next_run_at": publishAt, "last_error": "", "published_at": nil, "cancelled_at": nil})}).Create(&schedule).Error
+		}); err != nil {
 			return ScheduleResult{}, err
 		}
 	case "podcast":
@@ -377,7 +429,13 @@ func (s *Service) CancelSchedule(user authctx.CurrentUser, module string, conten
 	}
 	switch module {
 	case "blog":
-		return s.db.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", contentID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error
+		now := time.Now().UTC()
+		return s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&model.ContentEntry{}).Where("id = ? AND author_id = ? AND status = ?", contentID, user.ID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error; err != nil {
+				return err
+			}
+			return tx.Model(&model.BlogPublishSchedule{}).Where("content_id = ? AND author_id = ? AND status IN ?", contentID, user.ID, []string{"pending", "processing"}).Updates(map[string]any{"status": "cancelled", "cancelled_at": now, "lease_token": "", "lease_until": nil}).Error
+		})
 	case "podcast":
 		contentID, err := contentmodule.PodcastContentID(s.db, contentID)
 		if err != nil {
@@ -395,36 +453,100 @@ func (s *Service) CancelSchedule(user authctx.CurrentUser, module string, conten
 	}
 }
 
+func (s *Service) PublishDueBlogSchedules(now time.Time, limit int) error {
+	if limit < 1 || limit > 100 {
+		limit = 20
+	}
+	now = now.UTC()
+	var schedules []model.BlogPublishSchedule
+	if err := s.db.Where("(status = ? AND next_run_at <= ?) OR (status = ? AND lease_until <= ?)", "pending", now, "processing", now).
+		Order("next_run_at ASC").Limit(limit).Find(&schedules).Error; err != nil {
+		return err
+	}
+	for _, schedule := range schedules {
+		token := uuid.NewString()
+		leaseUntil := now.Add(blogScheduleLeaseDuration)
+		claim := s.db.Model(&model.BlogPublishSchedule{}).Where("id = ? AND ((status = ? AND next_run_at <= ?) OR (status = ? AND lease_until <= ?))", schedule.ID, "pending", now, "processing", now).
+			Updates(map[string]any{"status": "processing", "lease_token": token, "lease_until": leaseUntil})
+		if claim.Error != nil {
+			return claim.Error
+		}
+		if claim.RowsAffected != 1 {
+			continue
+		}
+		if err := s.publishScheduledBlog(schedule, token, now); err != nil {
+			if updateErr := s.retryBlogSchedule(schedule.ID, token, now, err); updateErr != nil {
+				return updateErr
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) publishScheduledBlog(schedule model.BlogPublishSchedule, token string, now time.Time) error {
+	if err := s.validatePublishable("blog", schedule.ContentID, true); err != nil {
+		return err
+	}
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var entry model.ContentEntry
+		if err := tx.Where("id = ? AND kind = ? AND status = ?", schedule.ContentID, "blog", "scheduled").First(&entry).Error; err != nil {
+			return err
+		}
+		if entry.AuthorID == nil {
+			return fmt.Errorf("blog content %s has no author", entry.ID)
+		}
+		if err := tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", entry.ID, "scheduled").Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil}).Error; err != nil {
+			return err
+		}
+		if err := enqueuePublication(tx, "blog", entry.ID, entry.ChannelID, *entry.AuthorID); err != nil {
+			return err
+		}
+		result := tx.Model(&model.BlogPublishSchedule{}).Where("id = ? AND status = ? AND lease_token = ?", schedule.ID, "processing", token).Updates(map[string]any{"status": "published", "published_at": now, "lease_token": "", "lease_until": nil, "last_error": ""})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("blog publish schedule lease lost")
+		}
+		return nil
+	})
+}
+
+func (s *Service) retryBlogSchedule(id uuid.UUID, token string, now time.Time, cause error) error {
+	var schedule model.BlogPublishSchedule
+	if err := s.db.Where("id = ?", id).First(&schedule).Error; err != nil {
+		return err
+	}
+	attempts := schedule.Attempts + 1
+	status := "pending"
+	deadline := schedule.PublishAt.Add(blogScheduleFailureAfter)
+	nextRunAt := now.Add(blogScheduleRetryDelay(attempts))
+	if !now.Before(deadline) {
+		status = "failed"
+		nextRunAt = now
+	} else if nextRunAt.After(deadline) {
+		nextRunAt = deadline
+	}
+	return s.db.Model(&model.BlogPublishSchedule{}).Where("id = ? AND status = ? AND lease_token = ?", id, "processing", token).Updates(map[string]any{"status": status, "attempts": attempts, "next_run_at": nextRunAt, "last_error": cause.Error(), "lease_token": "", "lease_until": nil}).Error
+}
+
+func blogScheduleRetryDelay(attempt int) time.Duration {
+	delays := []time.Duration{time.Minute, 5 * time.Minute, 30 * time.Minute, 2 * time.Hour, 6 * time.Hour, 12 * time.Hour}
+	if attempt < 1 {
+		return delays[0]
+	}
+	if attempt >= len(delays) {
+		return delays[len(delays)-1]
+	}
+	return delays[attempt-1]
+}
+
 func (s *Service) PublishDue(now time.Time, limit int) error {
 	if limit < 1 || limit > 100 {
 		limit = 20
 	}
 	now = now.UTC()
-	var entries []model.ContentEntry
-	if err := s.db.Where("kind = ? AND status = ? AND scheduled_at IS NOT NULL AND scheduled_at <= ?", "blog", "scheduled", now).
-		Order("scheduled_at ASC").Limit(limit).Find(&entries).Error; err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		if err := s.validatePublishable("blog", entry.ID, true); err != nil {
-			continue
-		}
-		if err := s.db.Transaction(func(tx *gorm.DB) error {
-			if err := tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", entry.ID, "scheduled").Updates(map[string]any{"status": "published", "published_at": now, "scheduled_at": nil}).Error; err != nil {
-				return err
-			}
-			if entry.AuthorID == nil {
-				return fmt.Errorf("blog content %s has no author", entry.ID)
-			}
-			return enqueuePublication(tx, "blog", entry.ID, entry.ChannelID, *entry.AuthorID)
-		}); err != nil {
-			return err
-		}
-	}
-	remaining := limit - len(entries)
-	if remaining <= 0 {
-		return nil
-	}
+	remaining := limit
 	var episodes []model.PodcastEpisode
 	podcastQuery := contentmodule.PodcastQuery(s.db).
 		Where("posts.status = ? AND posts.scheduled_at IS NOT NULL AND posts.scheduled_at <= ?", "scheduled", now).

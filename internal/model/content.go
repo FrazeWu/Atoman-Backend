@@ -80,6 +80,32 @@ type ContentBlogDraft struct {
 
 func (ContentBlogDraft) TableName() string { return "content_blog_drafts" }
 
+type BlogMarkdownImport struct {
+	Base
+	UserID      uuid.UUID  `json:"user_id" gorm:"type:uuid;not null;index"`
+	DraftID     *uuid.UUID `json:"draft_id,omitempty" gorm:"type:uuid;index"`
+	ContentID   *uuid.UUID `json:"content_id,omitempty" gorm:"type:uuid;index"`
+	FileName    string     `json:"file_name" gorm:"type:text;not null"`
+	ContentHash string     `json:"content_hash" gorm:"type:char(64);not null;index"`
+	Status      string     `json:"status" gorm:"type:varchar(16);not null;default:'preview';index"`
+	Title       string     `json:"title" gorm:"type:text"`
+	Summary     string     `json:"summary" gorm:"type:text"`
+	Content     string     `json:"content" gorm:"type:text"`
+}
+
+func (BlogMarkdownImport) TableName() string { return "blog_markdown_imports" }
+
+type BlogMarkdownImportDiagnostic struct {
+	Base
+	ImportID uuid.UUID `json:"import_id" gorm:"type:uuid;not null;index"`
+	Level    string    `json:"level" gorm:"type:varchar(16);not null"`
+	Code     string    `json:"code" gorm:"type:varchar(64);not null"`
+	Message  string    `json:"message" gorm:"type:text;not null"`
+	Line     int       `json:"line" gorm:"not null;default:0"`
+}
+
+func (BlogMarkdownImportDiagnostic) TableName() string { return "blog_markdown_import_diagnostics" }
+
 type ContentEpisodeExtension struct {
 	ContentID          uuid.UUID `json:"content_id" gorm:"type:uuid;primaryKey"`
 	EpisodeID          uuid.UUID `json:"episode_id" gorm:"type:uuid;not null;uniqueIndex"` // legacy resource identity during API transition

@@ -274,9 +274,12 @@ type FeedSource struct {
 	FetchLastError                  string     `json:"fetch_last_error" gorm:"type:text"`
 	FetchLastDurationMs             int64      `json:"fetch_last_duration_ms" gorm:"not null;default:0"`
 	FetchLastItemCount              int        `json:"fetch_last_item_count" gorm:"not null;default:0"`
+	FetchUnchangedCount             int        `json:"fetch_unchanged_count" gorm:"not null;default:0"`
 	FetchLeaseToken                 string     `json:"-" gorm:"column:fetch_lease_token;type:varchar(128)"`
 	FetchLeaseUntil                 *time.Time `json:"-" gorm:"column:fetch_lease_until;index"`
 	FullTextEnabled                 bool       `json:"full_text_enabled" gorm:"not null;default:false;index:idx_feed_sources_type_enabled,priority:2"`
+	FullTextLeaseToken              string     `json:"-" gorm:"column:full_text_lease_token;type:varchar(128)"`
+	FullTextLeaseUntil              *time.Time `json:"-" gorm:"column:full_text_lease_until;index"`
 	FullTextSuccessCount            int        `json:"full_text_success_count" gorm:"not null;default:0"`
 	FullTextFailureCount            int        `json:"full_text_failure_count" gorm:"not null;default:0"`
 	FullTextConsecutiveFailureCount int        `json:"full_text_consecutive_failure_count" gorm:"not null;default:0"`
@@ -287,6 +290,17 @@ type FeedSource struct {
 }
 
 func (FeedSource) TableName() string { return "feed_sources" }
+
+// FeedFullTextHost coordinates polite full-text requests for a hostname across workers.
+type FeedFullTextHost struct {
+	Host          string     `json:"-" gorm:"primaryKey;type:varchar(253)"`
+	LeaseToken    string     `json:"-" gorm:"type:varchar(128)"`
+	LeaseUntil    *time.Time `json:"-" gorm:"index"`
+	NextAllowedAt *time.Time `json:"-" gorm:"index"`
+	UpdatedAt     time.Time  `json:"-"`
+}
+
+func (FeedFullTextHost) TableName() string { return "feed_fulltext_hosts" }
 
 // Subscription 存储用户与订阅源的多对多关系
 type Subscription struct {
@@ -351,14 +365,15 @@ type FeedItem struct {
 	Duration              string          `json:"duration"`
 	ImageURL              string          `json:"image_url" gorm:"type:text"`
 	FeedContentHTML       string          `json:"-" gorm:"type:text"`
-	ReaderHTML            string          `json:"content_html,omitempty" gorm:"type:text"`
-	ReaderSource          string          `json:"content_source,omitempty" gorm:"type:varchar(24);not null;default:'summary';index"`
+	ReaderHTML            string          `json:"-" gorm:"type:text"`
+	ReaderSource          string          `json:"-" gorm:"type:varchar(24);not null;default:'summary';index"`
 	ReaderQualityScore    int             `json:"reader_quality_score" gorm:"not null;default:0;index"`
 	ReaderQualityFlags    json.RawMessage `json:"reader_quality_flags" gorm:"type:jsonb;not null;default:'[]'" swaggertype:"array,string"`
 	ReaderVersion         int             `json:"reader_version" gorm:"not null;default:0"`
 	ReaderContentHash     string          `json:"-" gorm:"type:varchar(64)"`
-	FullTextHTML          string          `json:"full_text_html" gorm:"type:text"`
+	FullTextHTML          string          `json:"-" gorm:"type:text"`
 	FullTextStatus        string          `json:"full_text_status" gorm:"type:varchar(24);not null;default:'disabled';index:idx_feed_items_status_retry,priority:1;index:idx_feed_items_source_status,priority:2"`
+	FullTextURLHash       string          `json:"-" gorm:"type:varchar(64);index"`
 	FullTextErrorCode     string          `json:"full_text_error_code" gorm:"type:varchar(64)"`
 	FullTextError         string          `json:"-" gorm:"type:text"`
 	FullTextAttemptCount  int             `json:"full_text_attempt_count" gorm:"not null;default:0"`
