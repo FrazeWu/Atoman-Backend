@@ -585,7 +585,7 @@ func TestRegisterRoutesSongRatingsUpdateAndPopulateDetail(t *testing.T) {
 	if albumOtherRating.Code != http.StatusOK {
 		t.Fatalf("expected second album rating 200, got %d: %s", albumOtherRating.Code, albumOtherRating.Body.String())
 	}
-	albumDetail := performMusicJSONRequest(t, userRouter, http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), "")
+	albumDetail = performMusicJSONRequest(t, userRouter, http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), "")
 	if albumDetail.Code != http.StatusOK || !strings.Contains(albumDetail.Body.String(), `"rating_score":3`) || !strings.Contains(albumDetail.Body.String(), `"viewer_rating":4`) {
 		t.Fatalf("expected album rating summary, got %d: %s", albumDetail.Code, albumDetail.Body.String())
 	}
@@ -2014,6 +2014,37 @@ func TestRegisterRoutesRejectsPlayReportsForNonPublicSongs(t *testing.T) {
 	}
 	response := performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodPost, "/api/v1/music/plays", `{"song_id":"`+song.ID.String()+`"}`)
 	assertMusicHTTPError(t, response, http.StatusNotFound, "music.song_not_found")
+}
+
+func TestRegisterRoutesPlayReportsRespectSongVisibility(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	ownerID := user.ID
+	song := model.Song{
+		Title:           "Private Draft Play",
+		AudioURL:        "/audio/private-draft.mp3",
+		Status:          "draft",
+		LifecycleStatus: model.MusicLifecycleDraft,
+		UploadedBy:      &ownerID,
+	}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create private draft song: %v", err)
+	}
+
+	anonymous := performMusicJSONRequest(t, newMusicHTTPRouter(service, nil), http.MethodPost, "/api/v1/music/plays", `{"song_id":"`+song.ID.String()+`"}`)
+	assertMusicHTTPError(t, anonymous, http.StatusNotFound, "music.song_not_found")
+
+	owner := performMusicJSONRequest(t, newMusicHTTPRouter(service, &user), http.MethodPost, "/api/v1/music/plays", `{"song_id":"`+song.ID.String()+`"}`)
+	if owner.Code != http.StatusOK {
+		t.Fatalf("expected owner play report 200, got %d: %s", owner.Code, owner.Body.String())
+	}
+
+	var persisted model.Song
+	if err := db.First(&persisted, "id = ?", song.ID).Error; err != nil {
+		t.Fatalf("reload private draft song: %v", err)
+	}
+	if persisted.PlayCount != 1 {
+		t.Fatalf("expected only the owner play to count, got %d", persisted.PlayCount)
+	}
 }
 
 func TestRegisterRoutesListsCurrentUserListeningHistory(t *testing.T) {
