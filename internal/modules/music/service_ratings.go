@@ -3,6 +3,7 @@ package music
 import (
 	"errors"
 	"math"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type SongRatingSummary struct {
@@ -35,22 +37,24 @@ func (s *Service) SetSongRating(user authctx.CurrentUser, songID uuid.UUID, scor
 		return SongRatingSummary{}, err
 	}
 
-	var rating model.SongRating
-	err := s.db.Where("user_id = ? AND song_id = ?", user.ID, songID).First(&rating).Error
-	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		rating = model.SongRating{UserID: user.ID, SongID: songID, Score: score}
-		if err := s.db.Create(&rating).Error; err != nil {
-			return SongRatingSummary{}, err
-		}
-	case err != nil:
+	rating := model.SongRating{UserID: user.ID, SongID: songID, Score: score}
+	if err := s.db.Clauses(ratingUpsertConflict("user_id", "song_id", score)).Create(&rating).Error; err != nil {
 		return SongRatingSummary{}, err
-	default:
-		if err := s.db.Model(&rating).Update("score", score).Error; err != nil {
-			return SongRatingSummary{}, err
-		}
 	}
 	return s.SongRatingSummary(songID, &user.ID)
+}
+
+func ratingUpsertConflict(ownerColumn, targetColumn string, score int) clause.OnConflict {
+	return clause.OnConflict{
+		Columns: []clause.Column{{Name: ownerColumn}, {Name: targetColumn}},
+		TargetWhere: clause.Where{Exprs: []clause.Expression{
+			clause.Expr{SQL: "deleted_at IS NULL"},
+		}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"score":      score,
+			"updated_at": time.Now(),
+		}),
+	}
 }
 
 func (s *Service) DeleteSongRating(user authctx.CurrentUser, songID uuid.UUID) error {
@@ -175,20 +179,9 @@ func (s *Service) SetAlbumRating(user authctx.CurrentUser, albumID uuid.UUID, sc
 		return AlbumRatingSummary{}, err
 	}
 
-	var rating model.AlbumRating
-	err := s.db.Where("user_id = ? AND album_id = ?", user.ID, albumID).First(&rating).Error
-	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		rating = model.AlbumRating{UserID: user.ID, AlbumID: albumID, Score: score}
-		if err := s.db.Create(&rating).Error; err != nil {
-			return AlbumRatingSummary{}, err
-		}
-	case err != nil:
+	rating := model.AlbumRating{UserID: user.ID, AlbumID: albumID, Score: score}
+	if err := s.db.Clauses(ratingUpsertConflict("user_id", "album_id", score)).Create(&rating).Error; err != nil {
 		return AlbumRatingSummary{}, err
-	default:
-		if err := s.db.Model(&rating).Update("score", score).Error; err != nil {
-			return AlbumRatingSummary{}, err
-		}
 	}
 	return s.AlbumRatingSummary(albumID, &user.ID)
 }

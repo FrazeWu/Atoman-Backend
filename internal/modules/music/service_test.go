@@ -20,10 +20,7 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		dsn = os.Getenv("TEST_POSTGRES_DSN")
-	}
+	dsn := testdb.TestPostgresDSN()
 	var cleanup func() error
 	if dsn != "" {
 		name, remove, err := testdb.CreatePostgresTemplate(dsn, "music_template", musicTestModels()...)
@@ -47,7 +44,8 @@ func TestMain(m *testing.M) {
 }
 
 func musicTestModels() []any {
-	return []any{&model.User{}, &model.Artist{}, &model.ArtistMember{}, &model.ArtistAlias{}, &model.ArtistMerge{}, &model.Album{}, &model.AlbumRating{}, &model.AlbumArtist{}, &model.Song{}, &model.SongRating{}, &model.SongArtist{}, &model.ArtistBookmark{}, &model.AlbumBookmark{}, &model.PlaylistBookmark{}, &model.Playlist{}, &model.PlaylistSong{}, &model.MusicListeningHistory{}, &model.MusicPlaybackSession{}, &model.MusicPlaybackProgress{}, &model.MusicSearchInteraction{}, &model.MusicRecommendationEvent{}, &model.AlbumImportSession{}, &model.MusicAssetUploadSession{}, &model.MediaAsset{}, &model.AlbumImportFile{}, &model.AlbumImportJob{}, &model.MusicEdit{}, &model.MusicEditVote{}, &model.MusicEditDecision{}, &model.MusicEditChange{}, &model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{}, &model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{}, &model.AuditLog{}, &model.Notification{}, &model.Revision{}, &model.EditConflict{}, &model.MusicEntryStateEvent{}, &model.MusicEntryStateRequest{}, &model.SongAudioReplacement{}}
+	return []any{&model.User{}, &model.Artist{}, &model.ArtistMember{}, &model.ArtistAlias{}, &model.ArtistMerge{}, &model.Album{}, &model.AlbumArtist{}, &model.AlbumRating{}, &model.Song{}, &model.SongRating{}, &model.SongArtist{}, &model.ArtistBookmark{}, &model.AlbumBookmark{}, &model.PlaylistBookmark{}, &model.Playlist{}, &model.PlaylistSong{}, &model.MusicListeningHistory{}, &model.MusicPlaybackSession{}, &model.MusicPlaybackProgress{}, &model.MusicSearchInteraction{}, &model.MusicRecommendationEvent{}, &model.AlbumImportSession{}, &model.MusicAssetUploadSession{}, &model.MediaAsset{}, &model.AlbumImportFile{}, &model.AlbumImportJob{}, &model.MusicEdit{}, &model.MusicEditVote{}, &model.MusicEditDecision{}, &model.MusicEditChange{}, &model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{}, &model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{}, &model.AuditLog{}, &model.Notification{}, &model.Revision{}, &model.EditConflict{}, &model.MusicEntryStateEvent{}, &model.MusicEntryStateRequest{}, &model.SongAudioReplacement{}}
+
 }
 
 func newMusicTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) {
