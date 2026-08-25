@@ -122,7 +122,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 		feedItemByID[candidate.EntityID] = feedItem
 	}
 
-	ranked := recommendation.RankCandidates(mode, candidates, 2)
+	ranked := recommendation.RankCandidates(mode, candidates, 0)
 	items := make([]RecommendationItemDTO, 0, len(ranked))
 	for _, item := range ranked {
 		post, ok := postByID[item.EntityID]

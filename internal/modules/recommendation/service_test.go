@@ -143,6 +143,21 @@ func TestRerankLimitsRepeatedSource(t *testing.T) {
 	}
 }
 
+func TestRankCandidatesAppliesLimitOnlyWhenPositive(t *testing.T) {
+	candidates := []Candidate{
+		{EntityID: "a", SourceKey: "a", QualityScore: 0.9, TrendScore: 0.9, FreshnessScore: 0.9},
+		{EntityID: "b", SourceKey: "b", QualityScore: 0.8, TrendScore: 0.8, FreshnessScore: 0.8},
+		{EntityID: "c", SourceKey: "c", QualityScore: 0.7, TrendScore: 0.7, FreshnessScore: 0.7},
+	}
+
+	if got := RankCandidates(ModeHot, candidates, 0); len(got) != 3 {
+		t.Fatalf("expected zero limit to preserve all candidates, got %d", len(got))
+	}
+	if got := RankCandidates(ModeHot, candidates, 2); len(got) != 2 {
+		t.Fatalf("expected positive limit to truncate candidates, got %d", len(got))
+	}
+}
+
 func TestRankCandidatesSortsDescending(t *testing.T) {
 	candidates := []Candidate{
 		{
