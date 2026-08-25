@@ -17,14 +17,14 @@ func TestRecordContentFeedbackValidatesAndIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	created, err := service.RecordContentFeedback(user, item.ID, "layout")
+	created, err := service.RecordContentFeedback(user, item.ID, "layout", "rss")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !created {
 		t.Fatal("first feedback should be created")
 	}
-	created, err = service.RecordContentFeedback(user, item.ID, "layout")
+	created, err = service.RecordContentFeedback(user, item.ID, "layout", "rss")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,14 +36,14 @@ func TestRecordContentFeedbackValidatesAndIsIdempotent(t *testing.T) {
 	if err := db.First(&feedback, "feed_item_id = ?", item.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if feedback.ReaderSource != "feed" || feedback.ReaderVersion != 2 {
+	if feedback.ReaderSource != "rss" || feedback.ReaderVersion != 2 {
 		t.Fatalf("feedback snapshot=%+v", feedback)
 	}
 
-	if _, err := service.RecordContentFeedback(user, item.ID, "other"); err == nil {
+	if _, err := service.RecordContentFeedback(user, item.ID, "other", "rss"); err == nil {
 		t.Fatal("unsupported feedback kind should fail")
 	}
-	if _, err := service.RecordContentFeedback(authctx.CurrentUser{}, item.ID, "missing"); err == nil {
+	if _, err := service.RecordContentFeedback(authctx.CurrentUser{}, item.ID, "missing", "rss"); err == nil {
 		t.Fatal("anonymous feedback should fail")
 	}
 }

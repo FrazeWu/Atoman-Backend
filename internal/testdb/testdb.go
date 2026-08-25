@@ -18,9 +18,9 @@ func Open(t *testing.T) *gorm.DB {
 // OpenWithConfig creates an isolated PostgreSQL schema for each test.
 func OpenWithConfig(t *testing.T, config *gorm.Config) *gorm.DB {
 	t.Helper()
-	dsn := os.Getenv("TEST_POSTGRES_DSN")
+	dsn := TestPostgresDSN()
 	if dsn == "" {
-		t.Fatal("TEST_POSTGRES_DSN is required for PostgreSQL-backed tests")
+		t.Fatal("TEST_POSTGRES_DSN is not configured; set it or create .env.dev from .env.example")
 	}
 	admin, err := gorm.Open(postgres.Open(dsn), &gorm.Config{DisableAutomaticPing: true})
 	if err != nil {

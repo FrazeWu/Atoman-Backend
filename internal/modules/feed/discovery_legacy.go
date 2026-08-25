@@ -47,7 +47,17 @@ func DiscoverFeedCandidates() gin.HandlerFunc {
 			return
 		}
 
-		if isLikelyDirectFeedURL(u) {
+		if err := validateFeedDiscoveryFetchURL(u); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "url is not allowed for feed discovery"})
+			return
+		}
+
+		isDirectFeed, err := probeAutoSubscriptionDirectFeedURL(u)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to verify feed URL"})
+			return
+		}
+		if isDirectFeed {
 			c.JSON(http.StatusOK, gin.H{"candidates": []service.FeedDiscoveryCandidate{
 				{
 					Title:     rawURL,
@@ -59,11 +69,6 @@ func DiscoverFeedCandidates() gin.HandlerFunc {
 					IsDefault: true,
 				},
 			}})
-			return
-		}
-
-		if err := validateFeedDiscoveryFetchURL(u); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "url is not allowed for feed discovery"})
 			return
 		}
 
@@ -79,19 +84,6 @@ func DiscoverFeedCandidates() gin.HandlerFunc {
 		}
 		c.JSON(http.StatusOK, gin.H{"candidates": candidates})
 	}
-}
-
-func isLikelyDirectFeedURL(u *url.URL) bool {
-	path := strings.ToLower(strings.TrimSpace(u.Path))
-	if path == "" {
-		return false
-	}
-	return strings.HasSuffix(path, ".xml") ||
-		strings.HasSuffix(path, ".rss") ||
-		strings.HasSuffix(path, ".atom") ||
-		strings.HasSuffix(path, "/rss") ||
-		strings.HasSuffix(path, "/atom") ||
-		strings.HasSuffix(path, "/feed")
 }
 
 func fetchFeedDiscoveryHTML(targetURL string) (string, error) {

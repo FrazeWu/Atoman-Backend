@@ -1039,11 +1039,80 @@ func TestGetFeedItemSummaryFallbackWhenFullTextStatusNotSuccess(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
-	if payload.Data.ContentHTML != item.Summary {
-		t.Fatalf("expected summary fallback, got %q", payload.Data.ContentHTML)
+	if payload.Data.Item == nil || payload.Data.Item.ID != item.ID {
+		t.Fatalf("unexpected item: %+v", payload.Data.Item)
 	}
-	if payload.Data.ContentSource != "summary" {
-		t.Fatalf("expected content_source=summary, got %q", payload.Data.ContentSource)
+	if payload.Data.Reader.DefaultVariant != FeedReaderVariantSummary {
+		t.Fatalf("expected summary default, got %q", payload.Data.Reader.DefaultVariant)
+	}
+	if payload.Data.Reader.RSS != nil {
+		t.Fatalf("unexpected RSS content: %+v", payload.Data.Reader.RSS)
+	}
+	if payload.Data.Reader.FullText.Status != service.FullTextStatusRetry || payload.Data.Reader.FullText.HTML != "" {
+		t.Fatalf("stale full text must not be exposed: %+v", payload.Data.Reader.FullText)
+	}
+}
+
+func TestGetFeedItemReturnsRSSAndFullTextVariants(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	source := model.FeedSource{
+		SourceType:      "external_rss",
+		Hash:            "feed-handler-source-variants",
+		RssURL:          "https://example.com/feed.xml",
+		Title:           "Example Feed",
+		FullTextEnabled: true,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	item := model.FeedItem{
+		FeedSourceID:    source.ID,
+		GUID:            "feed-item-content-variants",
+		Title:           "Content variants",
+		Link:            "https://example.com/post",
+		Summary:         "<p>summary fallback</p>",
+		FeedContentHTML: "<p>RSS original content</p>",
+		ReaderHTML:      "<p>reader-selected content</p>",
+		ReaderSource:    service.ReaderSourcePage,
+		FullTextHTML:    "<p>crawled full text</p>",
+		FullTextStatus:  service.FullTextStatusSuccess,
+		PublishedAt:     now,
+		FetchedAt:       now,
+	}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatalf("create item: %v", err)
+	}
+
+	r := gin.New()
+	r.GET("/api/v1/feed/items/:id", GetFeedItem(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/feed/items/"+item.ID.String(), nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	var payload struct {
+		Data FeedItemDetailResponse `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if payload.Data.Item == nil || payload.Data.Item.ID != item.ID {
+		t.Fatalf("unexpected item: %+v", payload.Data.Item)
+	}
+	if payload.Data.Reader.DefaultVariant != FeedReaderVariantFullText {
+		t.Fatalf("default_variant=%q", payload.Data.Reader.DefaultVariant)
+	}
+	if payload.Data.Reader.RSS == nil || payload.Data.Reader.RSS.HTML != item.FeedContentHTML {
+		t.Fatalf("rss=%+v", payload.Data.Reader.RSS)
+	}
+	if payload.Data.Reader.FullText.Status != service.FullTextStatusSuccess || payload.Data.Reader.FullText.HTML != item.FullTextHTML {
+		t.Fatalf("unexpected full text: %+v", payload.Data.Reader.FullText)
 	}
 }
 
@@ -1251,6 +1320,24 @@ func TestDiscoverFeedCandidatesAcceptsDirectFeedURL(t *testing.T) {
 	db := newFeedHandlerTestDB(t)
 	user := seedFeedTestUser(t, db)
 
+	originalClient := feedDiscoveryHTTPClient
+	originalResolver := resolveFeedDiscoveryHostname
+	feedDiscoveryHTTPClient = &http.Client{Transport: feedDiscoveryRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/atom+xml"}},
+			Body:       io.NopCloser(strings.NewReader(`<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>`)),
+			Request:    req,
+		}, nil
+	})}
+	resolveFeedDiscoveryHostname = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	defer func() {
+		feedDiscoveryHTTPClient = originalClient
+		resolveFeedDiscoveryHostname = originalResolver
+	}()
+
 	router := gin.New()
 	feed := router.Group("/api/v1/feed")
 	feed.POST("/discover", withFeedAuth(user.UUID, DiscoverFeedCandidates()))
@@ -1344,7 +1431,7 @@ func TestDiscoverFeedCandidatesFetchesWebsiteAlternateFeeds(t *testing.T) {
 	}
 }
 
-func TestDiscoverFeedCandidatesReturnsEmptyArrayWhenWebsiteHasNoFeeds(t *testing.T) {
+func TestDiscoverFeedCandidatesRejectsHTMLFeedPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newFeedHandlerTestDB(t)
 	user := seedFeedTestUser(t, db)
@@ -1371,7 +1458,7 @@ func TestDiscoverFeedCandidatesReturnsEmptyArrayWhenWebsiteHasNoFeeds(t *testing
 	feed := router.Group("/api/v1/feed")
 	feed.POST("/discover", withFeedAuth(user.UUID, DiscoverFeedCandidates()))
 
-	body := strings.NewReader(`{"url":"https://example.com/no-feed"}`)
+	body := strings.NewReader(`{"url":"https://example.com/feed"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/discover", body)
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()

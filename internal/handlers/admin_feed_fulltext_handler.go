@@ -135,6 +135,7 @@ func GetAdminFeedFullTextHealth(db *gorm.DB) gin.HandlerFunc {
 		var enabledSources int64
 		var disabledSources int64
 		var pendingItems int64
+		var readyItems int64
 		var fetchingItems int64
 		var retryItems int64
 		var successItems int64
@@ -145,6 +146,9 @@ func GetAdminFeedFullTextHealth(db *gorm.DB) gin.HandlerFunc {
 		var readerPageItems int64
 		var readerSummaryItems int64
 		var pendingOverSevenDays int64
+		var activeSourceLeases int64
+		var activeHostLeases int64
+		var reusedItems int64
 		var latestSuccessAt *time.Time
 		var latestFailureAt *time.Time
 		var oldestPendingItem model.FeedItem
@@ -154,7 +158,16 @@ func GetAdminFeedFullTextHealth(db *gorm.DB) gin.HandlerFunc {
 
 		externalSources().Where("full_text_enabled = ?", true).Count(&enabledSources)
 		externalSources().Where("full_text_enabled = ?", false).Count(&disabledSources)
+		externalSources().Where("full_text_lease_until > ?", time.Now().UTC()).Count(&activeSourceLeases)
+		if db.Migrator().HasTable(&model.FeedFullTextHost{}) {
+			db.Model(&model.FeedFullTextHost{}).Where("lease_until > ?", time.Now().UTC()).Count(&activeHostLeases)
+		}
+		db.Model(&model.FeedSourceDiagnostic{}).
+			Joins("JOIN feed_sources ON feed_sources.id = feed_source_diagnostics.feed_source_id").
+			Where("feed_sources.source_type = ? AND feed_source_diagnostics.kind = ?", "external_rss", "reused").
+			Count(&reusedItems)
 		externalItems().Where("feed_items.full_text_status = ?", service.FullTextStatusPending).Count(&pendingItems)
+		externalItems().Where("feed_items.full_text_status IN ? AND (feed_items.next_full_text_attempt_at IS NULL OR feed_items.next_full_text_attempt_at <= ?)", []string{service.FullTextStatusPending, service.FullTextStatusRetry}, time.Now().UTC()).Count(&readyItems)
 		externalItems().Where("feed_items.full_text_status = ?", service.FullTextStatusFetching).Count(&fetchingItems)
 		externalItems().Where("feed_items.full_text_status = ?", service.FullTextStatusRetry).Count(&retryItems)
 		externalItems().Where("feed_items.full_text_status = ?", service.FullTextStatusSuccess).Count(&successItems)
@@ -221,6 +234,7 @@ func GetAdminFeedFullTextHealth(db *gorm.DB) gin.HandlerFunc {
 			"enabled_sources":            enabledSources,
 			"disabled_sources":           disabledSources,
 			"pending_items":              pendingItems,
+			"ready_items":                readyItems,
 			"fetching_items":             fetchingItems,
 			"retry_items":                retryItems,
 			"success_items":              successItems,
@@ -232,6 +246,9 @@ func GetAdminFeedFullTextHealth(db *gorm.DB) gin.HandlerFunc {
 			"reader_page_items":          readerPageItems,
 			"reader_summary_items":       readerSummaryItems,
 			"pending_over_7d":            pendingOverSevenDays,
+			"active_source_leases":       activeSourceLeases,
+			"active_host_leases":         activeHostLeases,
+			"reused_items":               reusedItems,
 			"feedback_counts":            feedbackCounts,
 			"reader_crawl_pending":       readerCrawlPending,
 			"reader_crawl_last_scanned":  readerCrawlStatus.Scanned,

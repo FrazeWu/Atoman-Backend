@@ -196,7 +196,7 @@ func (s *Service) RemoveReadingListItem(user authctx.CurrentUser, targetType str
 	return s.repo.DeleteReadingListItem(user.ID, targetType, targetID)
 }
 
-func (s *Service) RecordContentFeedback(user authctx.CurrentUser, feedItemID uuid.UUID, kind string) (bool, error) {
+func (s *Service) RecordContentFeedback(user authctx.CurrentUser, feedItemID uuid.UUID, kind, variant string) (bool, error) {
 	if user.ID == uuid.Nil {
 		return false, apperr.Unauthorized("Login required")
 	}
@@ -212,15 +212,18 @@ func (s *Service) RecordContentFeedback(user authctx.CurrentUser, feedItemID uui
 		}
 		return false, err
 	}
-	readerSource := item.ReaderSource
+	readerSource := FeedReaderVariant(variant)
 	if readerSource == "" {
-		readerSource = "summary"
+		readerSource = feedReaderVariantFromSource(item.ReaderSource)
+	}
+	if readerSource != FeedReaderVariantRSS && readerSource != FeedReaderVariantFullText && readerSource != FeedReaderVariantSummary {
+		return false, apperr.BadRequest("validation.invalid_request", "variant must be rss, full_text or summary")
 	}
 	feedback := model.FeedContentFeedback{
 		FeedItemID:    feedItemID,
 		UserID:        user.ID,
 		Kind:          kind,
-		ReaderSource:  readerSource,
+		ReaderSource:  string(readerSource),
 		ReaderVersion: item.ReaderVersion,
 	}
 	result := s.db.Where("user_id = ? AND feed_item_id = ? AND kind = ?", user.ID, feedItemID, kind).FirstOrCreate(&feedback)

@@ -34,6 +34,8 @@ cp .env.example .env.dev
 go run ./cmd/start_server --mode dev
 ```
 
+`go test` 在未显式设置 `TEST_POSTGRES_DSN` 时，会读取 `.env.dev` 中的测试 DSN，并为每个测试创建和清理独立 schema。需要改用其他实例时设置 `TEST_POSTGRES_DSN`；该变量优先于兼容字段 `TEST_DATABASE_URL`。
+
 常用命令：
 
 ```bash

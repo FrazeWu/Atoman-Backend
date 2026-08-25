@@ -3,7 +3,6 @@ package feed
 import (
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"atoman/internal/model"
@@ -102,11 +101,6 @@ func autoSubscriptionTargetForAdd(db *gorm.DB, userID uuid.UUID, input AutoSubsc
 	}
 
 	canonicalInput := normalizeCanonicalFeedURL(u.String())
-	if directURL, err := url.Parse(canonicalInput); err == nil && isLikelyDirectFeedURL(directURL) {
-		target := autoSubscriptionTargetFromDirectFeedURL(canonicalInput, firstNonBlank(input.Title, canonicalInput))
-		target.Category = defaultFeedSourceCategory(input.Category)
-		return target, nil
-	}
 	if ok, err := probeAutoSubscriptionDirectFeedURL(u); err != nil {
 		return autoSubscriptionTarget{}, err
 	} else if ok {
