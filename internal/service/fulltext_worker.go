@@ -218,6 +218,7 @@ func runFullTextCycle(db *gorm.DB, now time.Time, batchSize, concurrency int) {
 
 	domainLocks := make(map[string]chan struct{}, len(claimed))
 	sourceLocks := make(map[uuid.UUID]chan struct{}, len(claimed))
+	sourceLeaseTokens := make(map[uuid.UUID]string, len(claimed))
 	for _, claimedItem := range claimed {
 		key := fullTextDomainKey(claimedItem.item.Link)
 		if _, exists := domainLocks[key]; !exists {
@@ -226,6 +227,7 @@ func runFullTextCycle(db *gorm.DB, now time.Time, batchSize, concurrency int) {
 		if _, exists := sourceLocks[claimedItem.source.ID]; !exists {
 			sourceLocks[claimedItem.source.ID] = make(chan struct{}, 1)
 		}
+		sourceLeaseTokens[claimedItem.source.ID] = claimedItem.leaseToken
 	}
 	jobs := make(chan claimedFullTextItem)
 	done := make(chan struct{}, concurrency)
@@ -237,27 +239,25 @@ func runFullTextCycle(db *gorm.DB, now time.Time, batchSize, concurrency int) {
 			sourceLock <- struct{}{}
 			domainLock <- struct{}{}
 			var currentSource model.FeedSource
-			err := db.Where("id = ? AND full_text_lease_token = ?", claimedItem.source.ID, claimedItem.leaseToken).First(&currentSource).Error
-			if err == nil {
-				hostLease, acquired, leaseErr := acquireFullTextHostLease(db, claimedItem.item.Link, now)
-				err = leaseErr
-				if err == nil && !acquired {
-					err = deferFullTextHostClaim(db, claimedItem.item, now)
+			processErr := db.Where("id = ? AND full_text_lease_token = ?", claimedItem.source.ID, claimedItem.leaseToken).First(&currentSource).Error
+			if processErr == nil {
+				hostNow := time.Now().UTC()
+				hostLease, acquired, leaseErr := acquireFullTextHostLease(db, claimedItem.item.Link, hostNow)
+				processErr = leaseErr
+				if processErr == nil && !acquired {
+					processErr = deferFullTextHostClaim(db, claimedItem.item, now)
 				}
-				if err == nil && acquired {
-					err = processFullTextItem(db, &claimedItem.item, &currentSource, now)
+				if processErr == nil && acquired {
+					processErr = processFullTextItem(db, &claimedItem.item, &currentSource, now)
 					if releaseErr := releaseFullTextHostLease(db, hostLease, time.Now().UTC()); releaseErr != nil {
-						err = errors.Join(err, releaseErr)
+						processErr = errors.Join(processErr, releaseErr)
 					}
 				}
 			}
-			if releaseErr := releaseFullTextSourceLease(db, claimedItem.source.ID, claimedItem.leaseToken); releaseErr != nil {
-				err = errors.Join(err, releaseErr)
-			}
 			<-domainLock
 			<-sourceLock
-			if err != nil {
-				log.Printf("fulltext worker process failed for item %s: %v", claimedItem.item.ID, err)
+			if processErr != nil {
+				log.Printf("fulltext worker process failed for item %s: %v", claimedItem.item.ID, processErr)
 			}
 		}
 	}
@@ -268,6 +268,11 @@ func runFullTextCycle(db *gorm.DB, now time.Time, batchSize, concurrency int) {
 	close(jobs)
 	for i := 0; i < concurrency; i++ {
 		<-done
+	}
+	for sourceID, leaseToken := range sourceLeaseTokens {
+		if err := releaseFullTextSourceLease(db, sourceID, leaseToken); err != nil {
+			log.Printf("fulltext worker release source lease failed for %s: %v", sourceID, err)
+		}
 	}
 }
 
@@ -500,7 +505,6 @@ func markFullTextFailure(db *gorm.DB, item *model.FeedItem, source *model.FeedSo
 	}
 
 	source.FullTextConsecutiveFailureCount++
-	source.FullTextConsecutiveFailureCount++
 	source.FullTextLastFailureAt = &now
 	source.FullTextLastErrorCode = errorCode
 	source.FullTextLastError = errorMessage
@@ -541,7 +545,7 @@ func markFullTextDisabled(db *gorm.DB, item *model.FeedItem) error {
 	item.FullTextErrorCode = ""
 	item.FullTextError = ""
 	item.NextFullTextAttemptAt = nil
-	return db.Model(&model.FeedItem{}).Where("id = ?", item.ID).Updates(map[string]any{
+	if err := db.Model(&model.FeedItem{}).Where("id = ?", item.ID).Updates(map[string]any{
 		"full_text_status":          item.FullTextStatus,
 		"full_text_html":            "",
 		"full_text_word_count":      0,
@@ -549,44 +553,8 @@ func markFullTextDisabled(db *gorm.DB, item *model.FeedItem) error {
 		"full_text_error_code":      "",
 		"full_text_error":           "",
 		"next_full_text_attempt_at": nil,
-	}).Error
-}
-
-func recoverStaleFullTextFetches(db *gorm.DB, now time.Time) error {
-	staleBefore := now.Add(-fullTextStaleFetchAfter)
-
-	var staleItems []model.FeedItem
-	if err := db.Preload("FeedSource").
-		Where("full_text_status = ?", FullTextStatusFetching).
-		Where("last_full_text_attempt_at IS NULL OR last_full_text_attempt_at <= ?", staleBefore).
-		Find(&staleItems).Error; err != nil {
-		return err
-	}
-
-	for _, item := range staleItems {
-		nextAttemptAt, terminal := CalculateNextFullTextRetryAt(now, item.FullTextAttemptCount)
-		item.FullTextErrorCode = FullTextErrorRequestTimeout
-		item.FullTextError = "stale full text fetch recovered"
-		item.NextFullTextAttemptAt = nil
-		if terminal {
-			item.FullTextStatus = FullTextStatusFailed
-		} else {
-			item.FullTextStatus = FullTextStatusRetry
-			item.NextFullTextAttemptAt = &nextAttemptAt
-		}
-		if err := db.Model(&model.FeedItem{}).Where("id = ?", item.ID).Updates(map[string]any{
-			"full_text_status":          item.FullTextStatus,
-			"full_text_error_code":      item.FullTextErrorCode,
-			"full_text_error":           item.FullTextError,
-			"next_full_text_attempt_at": item.NextFullTextAttemptAt,
-		}).Error; err != nil {
-			return err
-		}
-		if item.FeedSource != nil {
-			if err := markFullTextFailure(db, &item, item.FeedSource, FullTextErrorRequestTimeout, "stale full text fetch recovered", now); err != nil {
-				return err
-			}
-		}
+	}).Error; err != nil {
+		return fmt.Errorf("disable full text item %s: %w", item.ID, err)
 	}
 	return nil
 }

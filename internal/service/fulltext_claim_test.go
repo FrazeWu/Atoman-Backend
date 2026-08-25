@@ -66,3 +66,36 @@ func TestClaimFullTextBatchClaimsOneItemPerSourceAndLeasesSource(t *testing.T) {
 		t.Fatalf("claimed while source leases are active: %d", len(claimedAgain))
 	}
 }
+
+func TestClaimFullTextBatchFillsCapacityFromLeasedSource(t *testing.T) {
+	db, err := openFullTextWorkerTestDB(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC)
+	source := model.FeedSource{SourceType: "external_rss", Hash: "claim-batch-capacity-source", RssURL: "https://example.com/feed.xml", FullTextEnabled: true}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatal(err)
+	}
+	items := []model.FeedItem{
+		{FeedSourceID: source.ID, GUID: "capacity-1", Link: "https://example.com/posts/1", FullTextStatus: FullTextStatusPending},
+		{FeedSourceID: source.ID, GUID: "capacity-2", Link: "https://example.com/posts/2", FullTextStatus: FullTextStatusPending},
+	}
+	if err := db.Create(&items).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	claimed, err := claimFullTextBatch(db, now, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(claimed) != 2 {
+		t.Fatalf("claimed=%d, want 2", len(claimed))
+	}
+	for _, claim := range claimed {
+		if claim.source.ID != source.ID || claim.leaseToken == "" {
+			t.Fatalf("unexpected claim: %+v", claim)
+		}
+	}
+}
