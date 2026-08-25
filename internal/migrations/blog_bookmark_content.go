@@ -21,10 +21,20 @@ func RunBlogBookmarkContentMigration(db *gorm.DB) error {
 	}
 
 	hasLegacyPostID := db.Migrator().HasColumn("bookmarks", "post_id")
+	hasCanonicalPostMapping := db.Migrator().HasTable(&model.ContentPostExtension{})
 	return db.Transaction(func(tx *gorm.DB) error {
+		if hasLegacyPostID && hasCanonicalPostMapping {
+			if err := tx.Exec(`UPDATE bookmarks AS bookmarks
+				SET content_id = extensions.content_id
+				FROM content_post_extensions AS extensions
+				WHERE extensions.post_id = bookmarks.post_id
+					AND (bookmarks.content_id IS NULL OR bookmarks.content_id = bookmarks.post_id)`).Error; err != nil {
+				return fmt.Errorf("backfill bookmarks.content_id from canonical post mapping: %w", err)
+			}
+		}
 		if hasLegacyPostID {
 			if err := tx.Exec(`UPDATE bookmarks SET content_id = post_id WHERE content_id IS NULL`).Error; err != nil {
-				return fmt.Errorf("backfill bookmarks.content_id: %w", err)
+				return fmt.Errorf("backfill bookmarks.content_id from legacy post identity: %w", err)
 			}
 		}
 

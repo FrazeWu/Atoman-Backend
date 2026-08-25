@@ -42,6 +42,30 @@ func TestRunBlogBookmarkContentMigrationBackfillsAndValidatesCanonicalEntries(t 
 	assertIndexExists(t, db, "bookmarks", "idx_bookmarks_user_content")
 }
 
+func TestRunBlogBookmarkContentMigrationUsesCanonicalPostMapping(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &legacyBookmarkForContentMigration{}, &model.User{}, &model.Channel{}, &model.ContentEntry{}, &model.ContentPostExtension{})
+
+	owner := model.User{Username: "bookmark-content-mapping-owner", Email: "bookmark-content-mapping-owner@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, db.Create(&owner).Error)
+	channel := model.Channel{UserID: &owner.UUID, Name: "Bookmark mapping", Slug: "bookmark-content-mapping"}
+	require.NoError(t, db.Create(&channel).Error)
+	postID := uuid.New()
+	contentID := uuid.New()
+	require.NoError(t, db.Create(&model.ContentEntry{
+		Base: model.Base{ID: contentID}, ChannelID: channel.ID, Kind: "blog", Title: "Canonical bookmarked content", Status: "published", Visibility: "public",
+	}).Error)
+	require.NoError(t, db.Create(&model.ContentPostExtension{ContentID: contentID, PostID: postID}).Error)
+	legacyBookmark := legacyBookmarkForContentMigration{UserID: uuid.New(), PostID: postID}
+	require.NoError(t, db.Create(&legacyBookmark).Error)
+
+	require.NoError(t, RunBlogBookmarkContentMigration(db))
+
+	var bookmark model.Bookmark
+	require.NoError(t, db.First(&bookmark, "id = ?", legacyBookmark.ID).Error)
+	require.Equal(t, contentID, bookmark.ContentID)
+}
+
 func TestRunBlogBookmarkContentMigrationFailsWithoutCanonicalBlogEntry(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &legacyBookmarkForContentMigration{}, &model.ContentEntry{})
