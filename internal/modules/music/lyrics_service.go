@@ -253,6 +253,8 @@ func persistSongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, input SaveLyricsI
 		return findErr
 	}
 	isNew := errors.Is(findErr, gorm.ErrRecordNotFound)
+	hadTranslation := !isNew && strings.TrimSpace(lyric.Translation) != ""
+	hadTiming := !isNew && lyric.Format == "lrc"
 	if isNew {
 		lyric = model.MusicSongLyric{SongID: songID, Version: 1}
 	} else {
@@ -292,6 +294,9 @@ func persistSongLyrics(tx *gorm.DB, actorID, songID uuid.UUID, input SaveLyricsI
 		return err
 	}
 	if err := tx.Model(&model.Song{}).Where("id = ?", songID).Update("lyrics", input.Content).Error; err != nil {
+		return err
+	}
+	if err := revisionservice.RecordMusicLyricsContribution(tx, &created, isNew, hadTranslation, hadTiming); err != nil {
 		return err
 	}
 	return revisionservice.SupersedeAllMusicCloseRequests(tx, "song", songID)

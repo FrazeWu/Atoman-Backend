@@ -1,6 +1,7 @@
 package feed
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestRecommendArticlesUsesCanonicalBlogExtensions(t *testing.T) {
 	if err := db.Create(&entry).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&model.ContentBlogExtension{ContentID: entry.ID, Content: "Article content"}).Error; err != nil {
+	if err := db.Create(&model.ContentBlogExtension{ContentID: entry.ID, Content: strings.Repeat("Article content ", 30)}).Error; err != nil {
 		t.Fatal(err)
 	}
 
@@ -64,6 +65,56 @@ func TestRecommendArticlesUsesCanonicalBlogExtensions(t *testing.T) {
 	}
 	if items[0].ID != entry.ID.String() || items[0].Title != entry.Title {
 		t.Fatalf("unexpected recommendation: %+v", items[0])
+	}
+}
+
+func TestRecommendArticlesRanksReadableFeedItemsAheadOfLowQualityCandidates(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.FeedSource{},
+		&model.FeedItem{},
+		&model.FeedItemRead{},
+		&model.FeedItemStar{},
+	)
+
+	now := time.Now().UTC()
+	highQualitySource := model.FeedSource{SourceType: "external_rss", Hash: "high-quality-source-" + uuid.NewString(), Title: "High Quality Source", Category: "blog"}
+	lowQualitySource := model.FeedSource{SourceType: "external_rss", Hash: "low-quality-source-" + uuid.NewString(), Title: "Low Quality Source", Category: "blog"}
+	for _, source := range []*model.FeedSource{&highQualitySource, &lowQualitySource} {
+		if err := db.Create(source).Error; err != nil {
+			t.Fatalf("create feed source: %v", err)
+		}
+	}
+	highQualityItem := model.FeedItem{
+		FeedSourceID: highQualitySource.ID, GUID: "high-quality-item", Title: "A detailed technical analysis", Summary: strings.Repeat("A substantial article summary. ", 20),
+		ReaderQualityScore: 95, FullTextWordCount: 1200, PublishedAt: now.Add(-time.Hour), FetchedAt: now,
+	}
+	lowQualityItem := model.FeedItem{
+		FeedSourceID: lowQualitySource.ID, GUID: "low-quality-item", Title: "A short update", Summary: "brief",
+		ReaderQualityScore: 10, PublishedAt: now, FetchedAt: now,
+	}
+	for _, item := range []*model.FeedItem{&highQualityItem, &lowQualityItem} {
+		if err := db.Create(item).Error; err != nil {
+			t.Fatalf("create feed item: %v", err)
+		}
+	}
+
+	items, _, err := NewService(db).RecommendArticlesByMode(recommendation.ModeHot, "blog", "", "", "", 1, 20)
+	if err != nil {
+		t.Fatalf("recommend articles: %v", err)
+	}
+
+	highQualityIndex := -1
+	for index, item := range items {
+		switch item.ID {
+		case highQualityItem.ID.String():
+			highQualityIndex = index
+		case lowQualityItem.ID.String():
+			t.Fatalf("low-quality feed item must not be recommended: %+v", item)
+		}
+	}
+	if highQualityIndex < 0 {
+		t.Fatalf("expected readable item to be recommended, got items=%+v", items)
 	}
 }
 

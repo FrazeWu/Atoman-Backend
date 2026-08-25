@@ -20,3 +20,12 @@ type ShortNoteMedia struct {
 }
 
 func (ShortNoteMedia) TableName() string { return "short_note_media" }
+
+type ShortNoteVote struct {
+	Base
+	ShortNoteID uuid.UUID `json:"short_note_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_short_note_votes_note_user,priority:1,where:deleted_at IS NULL"`
+	UserID      uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_short_note_votes_note_user,priority:2,where:deleted_at IS NULL"`
+	Direction   string    `json:"direction" gorm:"type:varchar(4);not null;check:chk_short_note_votes_direction,direction IN ('up','down')"`
+}
+
+func (ShortNoteVote) TableName() string { return "short_note_votes" }

@@ -22,7 +22,7 @@ func newShortNoteHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.Curr
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.User{}, &model.ShortNote{}, &model.ShortNoteMedia{}, &model.Like{}, &model.DiscussionTarget{}, &model.ContentReference{}, &model.Notification{})
+	testdb.Migrate(t, db, &model.User{}, &model.ShortNote{}, &model.ShortNoteMedia{}, &model.ShortNoteVote{}, &model.Like{}, &model.DiscussionTarget{}, &model.ContentReference{}, &model.Notification{})
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {
 		t.Fatalf("create notification indexes: %v", err)
 	}
@@ -95,6 +95,26 @@ func TestShortNoteCreateAndDetailIncludesMediaAndCounts(t *testing.T) {
 	w = shortNoteRequest(t, r, http.MethodGet, "/api/v1/short-notes/"+id, "")
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"likes_count":1`) || !strings.Contains(w.Body.String(), `"comments_count":3`) || !strings.Contains(w.Body.String(), `"liked":true`) || !strings.Contains(w.Body.String(), `"user":{"`) {
 		t.Fatalf("unexpected detail: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestShortNoteVoteReturnsNetScoreAndReplacesLegacyLike(t *testing.T) {
+	service, db, user := newShortNoteHTTPTestService(t)
+	note := model.ShortNote{UserID: user.ID, Content: "note"}
+	if err := db.Create(&note).Error; err != nil {
+		t.Fatalf("create note: %v", err)
+	}
+	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "short_note", TargetID: note.ID}).Error; err != nil {
+		t.Fatalf("create legacy like: %v", err)
+	}
+	r := newShortNoteHTTPRouter(service, &user)
+	w := shortNoteRequest(t, r, http.MethodPut, "/api/v1/short-notes/"+note.ID.String()+"/vote", `{"direction":"down"}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"likes_count":0`) || !strings.Contains(w.Body.String(), `"dislikes_count":1`) || !strings.Contains(w.Body.String(), `"vote_score":-1`) || !strings.Contains(w.Body.String(), `"viewer_vote":"down"`) {
+		t.Fatalf("unexpected downvote response: %d %s", w.Code, w.Body.String())
+	}
+	w = shortNoteRequest(t, r, http.MethodDelete, "/api/v1/short-notes/"+note.ID.String()+"/vote", "")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"vote_score":0`) || !strings.Contains(w.Body.String(), `"viewer_vote":"none"`) {
+		t.Fatalf("unexpected cleared vote response: %d %s", w.Code, w.Body.String())
 	}
 }
 

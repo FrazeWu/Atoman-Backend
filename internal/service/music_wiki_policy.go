@@ -140,6 +140,9 @@ func HandleMusicRevisionApplied(tx *gorm.DB, revision *model.Revision) error {
 	if err := SupersedeMusicCloseRequests(tx, revision.ContentType, revision.ContentID, revision.ID); err != nil {
 		return err
 	}
+	if err := RecordMusicRevisionContribution(tx, revision); err != nil {
+		return err
+	}
 	if revision.EditType == "creation" || !isWikiMusicEntity(revision.ContentType) {
 		return nil
 	}
