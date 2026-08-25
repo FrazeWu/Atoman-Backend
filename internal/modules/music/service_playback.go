@@ -15,12 +15,24 @@ import (
 )
 
 func (s *Service) RecordSongPlay(userID *uuid.UUID, songID uuid.UUID) error {
+	var viewer *authctx.CurrentUser
+	if userID != nil && *userID != uuid.Nil {
+		viewer = &authctx.CurrentUser{ID: *userID, Role: authctx.RoleUser}
+	}
+	return s.recordSongPlay(viewer, songID)
+}
+
+func (s *Service) RecordSongPlayForViewer(viewer *authctx.CurrentUser, songID uuid.UUID) error {
+	return s.recordSongPlay(viewer, songID)
+}
+
+func (s *Service) recordSongPlay(viewer *authctx.CurrentUser, songID uuid.UUID) error {
 	if songID == uuid.Nil {
 		return apperr.BadRequest("validation.invalid_request", "song_id is required")
 	}
 
-	result := s.db.Model(&model.Song{}).
-		Where("id = ? AND lifecycle_status = ? AND audio_url <> ?", songID, model.MusicLifecycleActive, "")
+	result := scopeVisibleMusicEntries(s.db.Model(&model.Song{}), `"Songs"`, "uploaded_by", viewer, false).
+		Where(`"Songs".id = ? AND "Songs".audio_url <> ?`, songID, "")
 	var count int64
 	if err := result.Count(&count).Error; err != nil {
 		return err
@@ -34,10 +46,10 @@ func (s *Service) RecordSongPlay(userID *uuid.UUID, songID uuid.UUID) error {
 		if err := repo.IncrementSongPlayCount(songID); err != nil {
 			return err
 		}
-		if userID == nil || *userID == uuid.Nil {
+		if viewer == nil || viewer.ID == uuid.Nil {
 			return nil
 		}
-		return repo.RecordListeningHistory(*userID, songID, time.Now())
+		return repo.RecordListeningHistory(viewer.ID, songID, time.Now())
 	})
 }
 

@@ -611,8 +611,10 @@ func (h *Handler) recordSongPlay(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	var viewer *authctx.CurrentUser
 	var userID *uuid.UUID
 	if user, ok := authctx.Current(c); ok {
+		viewer = &user
 		userID = &user.ID
 	}
 	identity := "ip:" + c.ClientIP()
@@ -625,7 +627,7 @@ func (h *Handler) recordSongPlay(c *gin.Context) {
 		httpx.Error(c, apperr.New(http.StatusTooManyRequests, "music.play_rate_limited", "Too many play reports", map[string]any{"retry_after": seconds}))
 		return
 	}
-	if err := h.service.RecordSongPlay(userID, req.SongID); err != nil {
+	if err := h.service.RecordSongPlayForViewer(viewer, req.SongID); err != nil {
 		httpx.Error(c, err)
 		return
 	}
