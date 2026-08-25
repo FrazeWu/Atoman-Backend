@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	recommendationArticleCandidateLimit         = 5000
-	recommendationInternalArticleCandidateLimit = 2500
+	recommendationArticleCandidateLimit         = 100
+	recommendationInternalArticleCandidateLimit = 100
 	recommendationInternalArticleMinimumLength  = 280
 	recommendationFeedReaderQualityThreshold    = 40
 	recommendationFeedFallbackWordCount         = 300
@@ -169,7 +169,7 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 	if err != nil {
 		return nil, 0, err
 	}
-	sourceRows, err := s.repo.ListExploreSources(100000, 0, "")
+	sourceRows, err := s.repo.ListExploreSources(100, 0, "")
 	if err != nil {
 		return nil, 0, err
 	}
