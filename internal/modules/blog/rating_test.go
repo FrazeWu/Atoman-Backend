@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 )
@@ -126,6 +127,16 @@ func TestPostListIncludesRatingSummary(t *testing.T) {
 	if err := db.Create(&model.PostRating{UserID: other.UUID, ContentID: post.ID, Score: 9}).Error; err != nil {
 		t.Fatalf("create second rating: %v", err)
 	}
+	publishedAt := time.Now().UTC()
+	run := model.ReputationRun{Status: model.ReputationRunPublished, QualityAlgorithmVersion: "test", ContributionRuleVersion: "test", WeightAlgorithmVersion: "test", StartedAt: publishedAt, PublishedAt: &publishedAt}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatalf("create reputation run: %v", err)
+	}
+	weightedScore := 8.6
+	snapshot := model.BlogQualitySnapshot{RunID: run.ID, PostID: post.ID, ValidRatingCount: 6, WeightedScore: &weightedScore, WeightSum: 1.2, QualityEstimate: 70, QualityActive: true, PriorMean: 50, PriorStrength: 5}
+	if err := db.Create(&snapshot).Error; err != nil {
+		t.Fatalf("create blog quality snapshot: %v", err)
+	}
 
 	r := newBlogHTTPRouter(service, &user)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil)
@@ -136,9 +147,12 @@ func TestPostListIncludesRatingSummary(t *testing.T) {
 	}
 	var payload struct {
 		Data struct {
-			RatingScore  float64 `json:"rating_score"`
-			RatingCount  int64   `json:"rating_count"`
-			ViewerRating *int    `json:"viewer_rating"`
+			RatingScore          float64  `json:"rating_score"`
+			RatingCount          int64    `json:"rating_count"`
+			ViewerRating         *int     `json:"viewer_rating"`
+			WeightedRatingScore  *float64 `json:"weighted_rating_score"`
+			WeightedRatingCount  int      `json:"weighted_rating_count"`
+			WeightedRatingActive bool     `json:"weighted_rating_active"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
@@ -146,5 +160,8 @@ func TestPostListIncludesRatingSummary(t *testing.T) {
 	}
 	if payload.Data.RatingScore != 8.5 || payload.Data.RatingCount != 2 || payload.Data.ViewerRating == nil || *payload.Data.ViewerRating != 8 {
 		t.Fatalf("unexpected post rating summary: %+v", payload.Data)
+	}
+	if payload.Data.WeightedRatingScore == nil || *payload.Data.WeightedRatingScore != 8.6 || payload.Data.WeightedRatingCount != 6 || !payload.Data.WeightedRatingActive {
+		t.Fatalf("unexpected weighted rating summary: %+v", payload.Data)
 	}
 }

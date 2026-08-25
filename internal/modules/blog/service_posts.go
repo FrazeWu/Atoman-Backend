@@ -82,6 +82,9 @@ func (s *Service) blogContentDTOs(db *gorm.DB, contents []BlogContent, viewerID 
 	if err := s.populatePostRatings(db, dtos, viewerID); err != nil {
 		return nil, err
 	}
+	if err := s.populatePostWeightedRatings(db, dtos); err != nil {
+		return nil, err
+	}
 	return dtos, nil
 }
 
@@ -131,6 +134,44 @@ func (s *Service) populatePostRatings(db *gorm.DB, dtos []BlogContentDTO, viewer
 		if score, ok := viewerRatings[dtos[index].ID]; ok {
 			value := score
 			dtos[index].ViewerRating = &value
+		}
+	}
+	return nil
+}
+
+func (s *Service) populatePostWeightedRatings(db *gorm.DB, dtos []BlogContentDTO) error {
+	if len(dtos) == 0 || !db.Migrator().HasTable(&model.ReputationRun{}) || !db.Migrator().HasTable(&model.BlogQualitySnapshot{}) {
+		return nil
+	}
+	var run model.ReputationRun
+	if err := db.Where("status = ?", model.ReputationRunPublished).Order("published_at DESC").First(&run).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil
+		}
+		return err
+	}
+	ids := make([]uuid.UUID, 0, len(dtos))
+	for _, dto := range dtos {
+		ids = append(ids, dto.ID)
+	}
+	var snapshots []model.BlogQualitySnapshot
+	if err := db.Where("run_id = ? AND post_id IN ?", run.ID, ids).Find(&snapshots).Error; err != nil {
+		return err
+	}
+	byPostID := make(map[uuid.UUID]model.BlogQualitySnapshot, len(snapshots))
+	for _, snapshot := range snapshots {
+		byPostID[snapshot.PostID] = snapshot
+	}
+	for index := range dtos {
+		snapshot, ok := byPostID[dtos[index].ID]
+		if !ok {
+			continue
+		}
+		dtos[index].WeightedRatingCount = snapshot.ValidRatingCount
+		dtos[index].WeightedRatingActive = snapshot.QualityActive
+		if snapshot.QualityActive && snapshot.WeightedScore != nil {
+			score := math.Round(*snapshot.WeightedScore*10) / 10
+			dtos[index].WeightedRatingScore = &score
 		}
 	}
 	return nil

@@ -12049,7 +12049,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/music.SongRatingSummary"
+                            "$ref": "#/definitions/music.AlbumRatingSummary"
                         }
                     },
                     "400": {
@@ -12098,7 +12098,7 @@
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/music.SongRatingSummary"
+                            "$ref": "#/definitions/music.AlbumRatingSummary"
                         }
                     },
                     "401": {
@@ -23131,6 +23131,15 @@
                 },
                 "visibility": {
                     "type": "string"
+                },
+                "weighted_rating_active": {
+                    "type": "boolean"
+                },
+                "weighted_rating_count": {
+                    "type": "integer"
+                },
+                "weighted_rating_score": {
+                    "type": "number"
                 }
             }
         },
@@ -23276,6 +23285,15 @@
                 },
                 "visibility": {
                     "type": "string"
+                },
+                "weighted_rating_active": {
+                    "type": "boolean"
+                },
+                "weighted_rating_count": {
+                    "type": "integer"
+                },
+                "weighted_rating_score": {
+                    "type": "number"
                 }
             }
         },
@@ -29143,6 +29161,9 @@
                 "fetch_status": {
                     "type": "string"
                 },
+                "fetch_unchanged_count": {
+                    "type": "integer"
+                },
                 "full_text_consecutive_failure_count": {
                     "type": "integer"
                 },
@@ -31349,6 +31370,20 @@
                 },
                 "target_song": {
                     "$ref": "#/definitions/model.Song"
+                }
+            }
+        },
+        "music.AlbumRatingSummary": {
+            "type": "object",
+            "properties": {
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "viewer_rating": {
+                    "type": "integer"
                 }
             }
         },

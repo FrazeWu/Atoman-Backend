@@ -100,6 +100,12 @@ definitions:
         type: integer
       visibility:
         type: string
+      weighted_rating_active:
+        type: boolean
+      weighted_rating_count:
+        type: integer
+      weighted_rating_score:
+        type: number
     type: object
   blog.BlogContentVersionDTO:
     properties:
@@ -196,6 +202,12 @@ definitions:
         type: integer
       visibility:
         type: string
+      weighted_rating_active:
+        type: boolean
+      weighted_rating_count:
+        type: integer
+      weighted_rating_score:
+        type: number
     type: object
   blog.BookmarkListItemDTO:
     properties:
@@ -4113,6 +4125,8 @@ definitions:
         type: string
       fetch_status:
         type: string
+      fetch_unchanged_count:
+        type: integer
       full_text_consecutive_failure_count:
         type: integer
       full_text_enabled:
@@ -5579,6 +5593,15 @@ definitions:
         $ref: '#/definitions/model.Song'
       target_song:
         $ref: '#/definitions/model.Song'
+    type: object
+  music.AlbumRatingSummary:
+    properties:
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
+      viewer_rating:
+        type: integer
     type: object
   music.AnnotationResolutionInput:
     properties:
@@ -14980,7 +15003,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/music.SongRatingSummary'
+            $ref: '#/definitions/music.AlbumRatingSummary'
         "401":
           description: Unauthorized
           schema:
@@ -15016,7 +15039,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/music.SongRatingSummary'
+            $ref: '#/definitions/music.AlbumRatingSummary'
         "400":
           description: Bad Request
           schema:

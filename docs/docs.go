@@ -12052,7 +12052,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/music.SongRatingSummary"
+                            "$ref": "#/definitions/music.AlbumRatingSummary"
                         }
                     },
                     "400": {
@@ -12101,7 +12101,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/music.SongRatingSummary"
+                            "$ref": "#/definitions/music.AlbumRatingSummary"
                         }
                     },
                     "401": {
@@ -23134,6 +23134,15 @@ const docTemplate = `{
                 },
                 "visibility": {
                     "type": "string"
+                },
+                "weighted_rating_active": {
+                    "type": "boolean"
+                },
+                "weighted_rating_count": {
+                    "type": "integer"
+                },
+                "weighted_rating_score": {
+                    "type": "number"
                 }
             }
         },
@@ -23279,6 +23288,15 @@ const docTemplate = `{
                 },
                 "visibility": {
                     "type": "string"
+                },
+                "weighted_rating_active": {
+                    "type": "boolean"
+                },
+                "weighted_rating_count": {
+                    "type": "integer"
+                },
+                "weighted_rating_score": {
+                    "type": "number"
                 }
             }
         },
@@ -29146,6 +29164,9 @@ const docTemplate = `{
                 "fetch_status": {
                     "type": "string"
                 },
+                "fetch_unchanged_count": {
+                    "type": "integer"
+                },
                 "full_text_consecutive_failure_count": {
                     "type": "integer"
                 },
@@ -31352,6 +31373,20 @@ const docTemplate = `{
                 },
                 "target_song": {
                     "$ref": "#/definitions/model.Song"
+                }
+            }
+        },
+        "music.AlbumRatingSummary": {
+            "type": "object",
+            "properties": {
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "viewer_rating": {
+                    "type": "integer"
                 }
             }
         },

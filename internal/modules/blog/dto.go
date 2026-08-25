@@ -84,34 +84,37 @@ type BlogCollectionDTO struct {
 }
 
 type BlogContentDTO struct {
-	ID                 uuid.UUID                     `json:"id"`
-	CreatedAt          time.Time                     `json:"created_at"`
-	UpdatedAt          time.Time                     `json:"updated_at"`
-	UserID             uuid.UUID                     `json:"user_id"`
-	User               *model.User                   `json:"user,omitempty"`
-	ChannelID          *uuid.UUID                    `json:"channel_id,omitempty"`
-	Channel            *model.Channel                `json:"channel,omitempty"`
-	CollectionID       *uuid.UUID                    `json:"collection_id,omitempty"`
-	Collection         *BlogCollectionDTO            `json:"collection,omitempty"`
-	Collections        []BlogCollectionDTO           `json:"collections,omitempty"`
-	CollectionPosition int                           `json:"collection_position"`
-	CollectionConflict bool                          `json:"collection_conflict"`
-	Title              string                        `json:"title"`
-	Content            string                        `json:"content"`
-	Summary            string                        `json:"summary"`
-	LanguageCode       string                        `json:"language_code"`
-	CoverURL           string                        `json:"cover_url"`
-	Status             string                        `json:"status"`
-	Visibility         string                        `json:"visibility"`
-	Pinned             bool                          `json:"pinned"`
-	ScheduledAt        *time.Time                    `json:"scheduled_at,omitempty"`
-	PublishedAt        *time.Time                    `json:"published_at,omitempty"`
-	ViewCount          int64                         `json:"view_count"`
-	BookmarksCount     int64                         `json:"bookmarks_count"`
-	RatingScore        float64                       `json:"rating_score"`
-	RatingCount        int64                         `json:"rating_count"`
-	ViewerRating       *int                          `json:"viewer_rating,omitempty"`
-	References         []reference.ResolvedReference `json:"references"`
+	ID                   uuid.UUID                     `json:"id"`
+	CreatedAt            time.Time                     `json:"created_at"`
+	UpdatedAt            time.Time                     `json:"updated_at"`
+	UserID               uuid.UUID                     `json:"user_id"`
+	User                 *model.User                   `json:"user,omitempty"`
+	ChannelID            *uuid.UUID                    `json:"channel_id,omitempty"`
+	Channel              *model.Channel                `json:"channel,omitempty"`
+	CollectionID         *uuid.UUID                    `json:"collection_id,omitempty"`
+	Collection           *BlogCollectionDTO            `json:"collection,omitempty"`
+	Collections          []BlogCollectionDTO           `json:"collections,omitempty"`
+	CollectionPosition   int                           `json:"collection_position"`
+	CollectionConflict   bool                          `json:"collection_conflict"`
+	Title                string                        `json:"title"`
+	Content              string                        `json:"content"`
+	Summary              string                        `json:"summary"`
+	LanguageCode         string                        `json:"language_code"`
+	CoverURL             string                        `json:"cover_url"`
+	Status               string                        `json:"status"`
+	Visibility           string                        `json:"visibility"`
+	Pinned               bool                          `json:"pinned"`
+	ScheduledAt          *time.Time                    `json:"scheduled_at,omitempty"`
+	PublishedAt          *time.Time                    `json:"published_at,omitempty"`
+	ViewCount            int64                         `json:"view_count"`
+	BookmarksCount       int64                         `json:"bookmarks_count"`
+	RatingScore          float64                       `json:"rating_score"`
+	RatingCount          int64                         `json:"rating_count"`
+	ViewerRating         *int                          `json:"viewer_rating,omitempty"`
+	WeightedRatingScore  *float64                      `json:"weighted_rating_score,omitempty"`
+	WeightedRatingCount  int                           `json:"weighted_rating_count"`
+	WeightedRatingActive bool                          `json:"weighted_rating_active"`
+	References           []reference.ResolvedReference `json:"references"`
 }
 
 func newBlogContentDTOFromCanonical(content BlogContent) BlogContentDTO {
@@ -123,7 +126,7 @@ func newBlogContentDTOFromCanonical(content BlogContent) BlogContentDTO {
 	for _, item := range content.Collections {
 		collections = append(collections, BlogCollectionDTO{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, ChannelID: item.ChannelID, Channel: item.Channel, CreatedBy: item.CreatedBy, Name: item.Name, Description: item.Description, CoverURL: item.CoverURL, IsDefault: item.IsDefault})
 	}
-	return BlogContentDTO{ID: content.ID, CreatedAt: content.CreatedAt, UpdatedAt: content.UpdatedAt, UserID: content.UserID, User: content.User, ChannelID: content.ChannelID, Channel: content.Channel, CollectionID: content.CollectionID, Collection: collection, Collections: collections, CollectionPosition: content.CollectionPosition, CollectionConflict: content.CollectionConflict, Title: content.Title, Content: content.Content, Summary: content.Summary, LanguageCode: content.LanguageCode, CoverURL: content.CoverURL, Status: content.Status, Visibility: content.Visibility, Pinned: content.Pinned, ScheduledAt: content.ScheduledAt, PublishedAt: content.PublishedAt, ViewCount: content.ViewCount, BookmarksCount: content.BookmarksCount, RatingScore: content.RatingScore, RatingCount: content.RatingCount, ViewerRating: content.ViewerRating, References: []reference.ResolvedReference{}}
+	return BlogContentDTO{ID: content.ID, CreatedAt: content.CreatedAt, UpdatedAt: content.UpdatedAt, UserID: content.UserID, User: content.User, ChannelID: content.ChannelID, Channel: content.Channel, CollectionID: content.CollectionID, Collection: collection, Collections: collections, CollectionPosition: content.CollectionPosition, CollectionConflict: content.CollectionConflict, Title: content.Title, Content: content.Content, Summary: content.Summary, LanguageCode: content.LanguageCode, CoverURL: content.CoverURL, Status: content.Status, Visibility: content.Visibility, Pinned: content.Pinned, ScheduledAt: content.ScheduledAt, PublishedAt: content.PublishedAt, ViewCount: content.ViewCount, BookmarksCount: content.BookmarksCount, RatingScore: content.RatingScore, RatingCount: content.RatingCount, ViewerRating: content.ViewerRating, WeightedRatingScore: content.WeightedRatingScore, WeightedRatingCount: content.WeightedRatingCount, WeightedRatingActive: content.WeightedRatingActive, References: []reference.ResolvedReference{}}
 }
 
 type BlogContentVersionDTO struct {
