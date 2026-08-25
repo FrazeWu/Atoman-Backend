@@ -566,6 +566,15 @@ func (h *Handler) getAlbum(c *gin.Context) {
 		return
 	}
 	album = albumRows[0]
+	if err := h.service.PopulateAlbumRatings(albumRows, viewerUserID(viewerPtr)); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	album = albumRows[0]
+	if err := h.service.PopulateSongRatings(album.Songs, viewerUserID(viewerPtr)); err != nil {
+		httpx.Error(c, err)
+		return
+	}
 	resolveAlbumMediaURLs(&album)
 	httpx.OK(c, http.StatusOK, album)
 }

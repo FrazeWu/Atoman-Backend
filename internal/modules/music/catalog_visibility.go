@@ -83,3 +83,11 @@ func musicViewer(cUser authctx.CurrentUser, ok bool) *authctx.CurrentUser {
 	}
 	return &cUser
 }
+
+func viewerUserID(user *authctx.CurrentUser) *uuid.UUID {
+	if user == nil || user.ID == uuid.Nil {
+		return nil
+	}
+	id := user.ID
+	return &id
+}

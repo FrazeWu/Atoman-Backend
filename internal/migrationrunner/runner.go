@@ -255,7 +255,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.Post{}, &model.BlogPostVersion{}, &model.PostCollection{}, &model.BlogDraft{}, &model.ShortNote{},
 		&model.ShortNoteMedia{}, &model.Like{}, &model.PostRating{},
 		&model.AuditLog{}, &model.ActivityLog{}, &model.MediaAsset{},
-		&model.Artist{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.SongArtist{}, &model.SongCorrection{}, &model.AlbumCorrection{},
+		&model.Artist{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.SongArtist{}, &model.SongRating{}, &model.AlbumRating{}, &model.SongCorrection{}, &model.AlbumCorrection{},
 		&model.SongAudioReplacement{}, &model.MusicEntryStateRequest{}, &model.MusicEntryStateEvent{},
 		&model.ArtistCorrection{}, &model.ArtistAlias{}, &model.ArtistMerge{},
 		&model.MusicEdit{}, &model.MusicEditVote{}, &model.MusicEditDecision{}, &model.MusicEditChange{},

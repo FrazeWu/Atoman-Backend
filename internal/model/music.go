@@ -116,11 +116,23 @@ type Album struct {
 	PlayCount            int64         `json:"play_count"`
 	SongCount            int64         `json:"song_count" gorm:"-"`
 	BookmarkCount        int64         `json:"bookmark_count" gorm:"-"`
+	RatingScore          float64       `json:"rating_score" gorm:"-"`
+	RatingCount          int64         `json:"rating_count" gorm:"-"`
+	ViewerRating         *int          `json:"viewer_rating,omitempty" gorm:"-"`
 }
 
 func (Album) TableName() string {
 	return "Albums"
 }
+
+type AlbumRating struct {
+	Base
+	UserID  uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_album_ratings_user_album,priority:1,where:deleted_at IS NULL"`
+	AlbumID uuid.UUID `json:"album_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_album_ratings_user_album,priority:2,where:deleted_at IS NULL"`
+	Score   int       `json:"score" gorm:"not null;check:chk_album_ratings_score,score BETWEEN 1 AND 5"`
+}
+
+func (AlbumRating) TableName() string { return "album_ratings" }
 
 func (album *Album) AfterFind(_ *gorm.DB) error {
 	album.Artists = uniqueArtistsByID(album.Artists)
@@ -217,11 +229,23 @@ type Song struct {
 	PlaybackSampleRateHz int             `json:"playback_sample_rate_hz" gorm:"default:0"`
 	PlaybackChannels     int             `json:"playback_channels" gorm:"default:0"`
 	WaveformPeaks        json.RawMessage `json:"waveform_peaks" gorm:"type:jsonb;not null;default:'[]'" swaggertype:"array,integer"`
+	RatingScore          float64         `json:"rating_score" gorm:"-"`
+	RatingCount          int64           `json:"rating_count" gorm:"-"`
+	ViewerRating         *int            `json:"viewer_rating,omitempty" gorm:"-"`
 }
 
 func (Song) TableName() string {
 	return "Songs"
 }
+
+type SongRating struct {
+	Base
+	UserID uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_song_ratings_user_song,priority:1,where:deleted_at IS NULL"`
+	SongID uuid.UUID `json:"song_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_song_ratings_user_song,priority:2,where:deleted_at IS NULL"`
+	Score  int       `json:"score" gorm:"not null;check:chk_song_ratings_score,score BETWEEN 1 AND 5"`
+}
+
+func (SongRating) TableName() string { return "song_ratings" }
 
 func (song *Song) AfterFind(_ *gorm.DB) error {
 	if strings.TrimSpace(song.SourcesJSON) != "" {

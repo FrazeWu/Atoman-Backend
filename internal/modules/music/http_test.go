@@ -34,6 +34,8 @@ func newMusicHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentU
 		&model.Album{},
 		&model.AlbumArtist{},
 		&model.Song{},
+		&model.SongRating{},
+		&model.AlbumRating{},
 		&model.SongArtist{},
 		&model.ArtistBookmark{},
 		&model.AlbumBookmark{},
@@ -514,6 +516,94 @@ func TestRegisterRoutesPlaylistBookmarksMatchFrontendContract(t *testing.T) {
 	missingPost := performMusicJSONRequest(t, userRouter, http.MethodPost, path, `{"playlist_id":"`+uuid.NewString()+`"}`)
 	if missingPost.Code != http.StatusNotFound {
 		t.Fatalf("expected nonexistent playlist post 404, got %d: %s", missingPost.Code, missingPost.Body.String())
+	}
+}
+
+func TestRegisterRoutesSongRatingsUpdateAndPopulateDetail(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	album := model.Album{Title: "Rated Album", Status: "open", EntryStatus: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	song := model.Song{Title: "Rated Song", AlbumID: &album.ID, AudioURL: "/rated.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+	other := model.User{Username: "song-rater", Email: "song-rater@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create second rater: %v", err)
+	}
+
+	path := "/api/v1/music/songs/" + song.ID.String() + "/rating"
+	userRouter := newMusicHTTPRouter(service, &user)
+	first := performMusicJSONRequest(t, userRouter, http.MethodPut, path, `{"score":4}`)
+	if first.Code != http.StatusOK {
+		t.Fatalf("expected first rating 200, got %d: %s", first.Code, first.Body.String())
+	}
+	updated := performMusicJSONRequest(t, userRouter, http.MethodPut, path, `{"score":5}`)
+	if updated.Code != http.StatusOK {
+		t.Fatalf("expected rating update 200, got %d: %s", updated.Code, updated.Body.String())
+	}
+
+	otherUser := authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: authctx.RoleUser}
+	otherRating := performMusicJSONRequest(t, newMusicHTTPRouter(service, &otherUser), http.MethodPut, path, `{"score":1}`)
+	if otherRating.Code != http.StatusOK {
+		t.Fatalf("expected second rating 200, got %d: %s", otherRating.Code, otherRating.Body.String())
+	}
+
+	detail := performMusicJSONRequest(t, userRouter, http.MethodGet, "/api/v1/music/songs/"+song.ID.String(), "")
+	if detail.Code != http.StatusOK {
+		t.Fatalf("expected detail 200, got %d: %s", detail.Code, detail.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Song struct {
+				RatingScore  float64 `json:"rating_score"`
+				RatingCount  int64   `json:"rating_count"`
+				ViewerRating *int    `json:"viewer_rating"`
+			} `json:"song"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(detail.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode song detail: %v", err)
+	}
+	if payload.Data.Song.RatingScore != 3 || payload.Data.Song.RatingCount != 2 || payload.Data.Song.ViewerRating == nil || *payload.Data.Song.ViewerRating != 5 {
+		t.Fatalf("unexpected rating summary: %#v", payload.Data.Song)
+	}
+
+	albumDetail := performMusicJSONRequest(t, userRouter, http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), "")
+	if albumDetail.Code != http.StatusOK || !strings.Contains(albumDetail.Body.String(), `"rating_score":3`) || !strings.Contains(albumDetail.Body.String(), `"viewer_rating":5`) {
+		t.Fatalf("expected album tracks to include rating summary, got %d: %s", albumDetail.Code, albumDetail.Body.String())
+	}
+
+	albumRatingPath := "/api/v1/music/albums/" + album.ID.String() + "/rating"
+	albumFirst := performMusicJSONRequest(t, userRouter, http.MethodPut, albumRatingPath, `{"score":4}`)
+	if albumFirst.Code != http.StatusOK {
+		t.Fatalf("expected first album rating 200, got %d: %s", albumFirst.Code, albumFirst.Body.String())
+	}
+	albumOtherRating := performMusicJSONRequest(t, newMusicHTTPRouter(service, &otherUser), http.MethodPut, albumRatingPath, `{"score":2}`)
+	if albumOtherRating.Code != http.StatusOK {
+		t.Fatalf("expected second album rating 200, got %d: %s", albumOtherRating.Code, albumOtherRating.Body.String())
+	}
+	albumDetail := performMusicJSONRequest(t, userRouter, http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), "")
+	if albumDetail.Code != http.StatusOK || !strings.Contains(albumDetail.Body.String(), `"rating_score":3`) || !strings.Contains(albumDetail.Body.String(), `"viewer_rating":4`) {
+		t.Fatalf("expected album rating summary, got %d: %s", albumDetail.Code, albumDetail.Body.String())
+	}
+
+	deleted := performMusicJSONRequest(t, userRouter, http.MethodDelete, path, "")
+	if deleted.Code != http.StatusOK {
+		t.Fatalf("expected rating delete 200, got %d: %s", deleted.Code, deleted.Body.String())
+	}
+	var count int64
+	if err := db.Model(&model.SongRating{}).Where("song_id = ?", song.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("expected only the other user's rating to remain, count=%d err=%v", count, err)
+	}
+	albumDeleted := performMusicJSONRequest(t, userRouter, http.MethodDelete, albumRatingPath, "")
+	if albumDeleted.Code != http.StatusOK {
+		t.Fatalf("expected album rating delete 200, got %d: %s", albumDeleted.Code, albumDeleted.Body.String())
+	}
+	if err := db.Model(&model.AlbumRating{}).Where("album_id = ?", album.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("expected only the other user's album rating to remain, count=%d err=%v", count, err)
 	}
 }
 
