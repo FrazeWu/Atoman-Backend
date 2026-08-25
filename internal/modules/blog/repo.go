@@ -3,12 +3,21 @@ package blog
 import (
 	"atoman/internal/model"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 type Repo struct{ db *gorm.DB }
+
+type sitemapPostRow struct {
+	ID        uuid.UUID `gorm:"column:id"`
+	UpdatedAt time.Time `gorm:"column:updated_at"`
+	Title     string
+	Content   string
+	Summary   string
+}
 
 func NewRepo(db *gorm.DB) *Repo { return &Repo{db: db} }
 
@@ -35,10 +44,15 @@ func (r *Repo) GetPublicPublishedPost(id uuid.UUID) (BlogContent, error) {
 	return contents[0], nil
 }
 
-func (r *Repo) ListPublicPublishedPosts() ([]BlogContent, error) {
-	return LoadCanonicalBlogContents(r.db, canonicalBlogPostsQuery(r.db).
+func (r *Repo) ListPublicPublishedPosts() ([]sitemapPostRow, error) {
+	posts := make([]sitemapPostRow, 0)
+	err := r.db.Table("content_entries AS posts").
+		Select("posts.id, posts.updated_at").
+		Where("posts.kind = ? AND posts.deleted_at IS NULL", "blog").
 		Where("posts.status = ? AND (posts.visibility = ? OR posts.visibility = ?)", "published", "", "public").
-		Order("COALESCE(posts.published_at, posts.created_at) DESC").Order("posts.created_at DESC").Order("posts.id DESC"))
+		Order("COALESCE(posts.published_at, posts.created_at) DESC").Order("posts.created_at DESC").Order("posts.id DESC").
+		Scan(&posts).Error
+	return posts, err
 }
 
 func (r *Repo) ListChannels(userID *uuid.UUID) ([]model.Channel, error) {

@@ -18,7 +18,7 @@ func newBlogScopeTest(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser, mo
 		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{},
 		&model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.ContentCollection{},
 		&model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
-		&model.ContentPublicationEvent{}, &model.ContentReference{},
+		&model.ContentPublicationEvent{}, &model.ContentReference{}, &model.ContentMediaAsset{},
 	)
 	user := model.User{Username: "blog-scope", Email: "blog-scope@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
