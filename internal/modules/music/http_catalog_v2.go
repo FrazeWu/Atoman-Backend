@@ -433,6 +433,12 @@ func (h *Handler) getSongDetail(c *gin.Context) {
 		})
 	}
 	result := songDetailResponse{Song: song, Artists: artists, Playable: strings.TrimSpace(song.AudioURL) != ""}
+	ratedSongs := []model.Song{result.Song}
+	if err := h.service.PopulateSongRatings(ratedSongs, viewerUserID(viewerPtr)); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	result.Song = ratedSongs[0]
 	resolveSongEffectiveSources(&result.Song)
 	if song.AlbumID != nil {
 		previous, next := loadAdjacentAlbumSongs(h.service.db, song, viewerPtr)
