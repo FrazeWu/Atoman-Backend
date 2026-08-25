@@ -4091,6 +4091,83 @@ func TestGetPlaybackProgressIgnoresUnavailableSong(t *testing.T) {
 	}
 }
 
+func TestOwnerCanPersistAndRestoreDraftPlaybackState(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	ownerID := user.ID
+	draft := model.Song{
+		Title:           "Owner Draft Playback",
+		AudioURL:        "/owner-draft.mp3",
+		Status:          "draft",
+		LifecycleStatus: model.MusicLifecycleDraft,
+		UploadedBy:      &ownerID,
+	}
+	if err := db.Create(&draft).Error; err != nil {
+		t.Fatalf("create owner draft song: %v", err)
+	}
+
+	progress, err := service.SavePlaybackProgress(user, SavePlaybackProgressRequest{
+		SongID: draft.ID, PositionSeconds: 12, DurationSeconds: 180,
+	})
+	if err != nil {
+		t.Fatalf("owner should save draft playback progress: %v", err)
+	}
+	if progress.SongID != draft.ID || progress.PositionSeconds != 12 {
+		t.Fatalf("unexpected draft playback progress: %#v", progress)
+	}
+	resumable, err := service.GetPlaybackProgress(user)
+	if err != nil {
+		t.Fatalf("owner should load draft playback progress: %v", err)
+	}
+	if resumable == nil || resumable.SongID != draft.ID || resumable.Song == nil || resumable.Song.ID != draft.ID {
+		t.Fatalf("expected owner draft progress to be resumable: %#v", resumable)
+	}
+
+	if err := service.RecordSongPlay(&user.ID, draft.ID); err != nil {
+		t.Fatalf("owner should record draft listening history: %v", err)
+	}
+	history, total, err := service.ListListeningHistory(user, 1, 20)
+	if err != nil {
+		t.Fatalf("owner should list draft listening history: %v", err)
+	}
+	if total != 1 || len(history) != 1 || history[0].SongID != draft.ID || history[0].Song == nil || history[0].Song.ID != draft.ID {
+		t.Fatalf("expected owner draft history to be visible: total=%d history=%#v", total, history)
+	}
+	recent, err := service.repo.ListRecentListeningHistory(user.ID, 8, &user)
+	if err != nil {
+		t.Fatalf("owner should list recent draft listening history: %v", err)
+	}
+	if len(recent) != 1 || recent[0].SongID != draft.ID {
+		t.Fatalf("expected owner draft history in recent playback: %#v", recent)
+	}
+
+	session, err := service.SavePlaybackSession(user, SavePlaybackSessionRequest{
+		SongIDs: []uuid.UUID{draft.ID}, CurrentSongID: draft.ID, PositionSeconds: 12, PlaybackMode: "loop",
+	})
+	if err != nil {
+		t.Fatalf("owner should save draft playback session: %v", err)
+	}
+	if len(session.Queue) != 1 || session.Queue[0].ID != draft.ID {
+		t.Fatalf("unexpected saved draft playback session: %#v", session)
+	}
+	restored, err := service.GetPlaybackSession(user)
+	if err != nil {
+		t.Fatalf("owner should restore draft playback session: %v", err)
+	}
+	if restored == nil || restored.CurrentSongID != draft.ID || len(restored.Queue) != 1 || restored.Queue[0].ID != draft.ID {
+		t.Fatalf("expected owner draft session to be restorable: %#v", restored)
+	}
+
+	other := authctx.CurrentUser{ID: uuid.New(), Username: "other", Role: authctx.RoleUser}
+	if _, err := service.SavePlaybackProgress(other, SavePlaybackProgressRequest{SongID: draft.ID, PositionSeconds: 1, DurationSeconds: 180}); err == nil {
+		t.Fatal("another user must not save playback progress for an owner draft")
+	}
+	if _, err := service.SavePlaybackSession(other, SavePlaybackSessionRequest{
+		SongIDs: []uuid.UUID{draft.ID}, CurrentSongID: draft.ID, PositionSeconds: 1, PlaybackMode: "loop",
+	}); err == nil {
+		t.Fatal("another user must not save a playback session containing an owner draft")
+	}
+}
+
 func TestRegisterRoutesMusicCursorPagination(t *testing.T) {
 	service, db, user := newMusicHTTPTestService(t)
 	older := model.Album{Title: "Older", EntryStatus: "open", Status: "open"}
