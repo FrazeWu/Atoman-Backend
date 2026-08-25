@@ -69,12 +69,17 @@ func newPodcastHandlerTestDB(t *testing.T) (*gin.Engine, *gorm.DB, model.User, m
 	return r, db, user, channel
 }
 
-func TestSetupPodcastRoutesDoesNotMountLegacyCreatorRoutes(t *testing.T) {
-	r, _, _, _ := newPodcastHandlerTestDB(t)
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/podcast/creator/dashboard", nil))
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected legacy creator route to return 404, got %d: %s", w.Code, w.Body.String())
+func TestSetupPodcastRoutesDoesNotMountLegacyRoutes(t *testing.T) {
+	r, _, _, channel := newPodcastHandlerTestDB(t)
+	for _, path := range []string{
+		"/api/v1/podcast/creator/dashboard",
+		"/api/v1/channels/" + channel.Slug + "/rss/podcast",
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("expected legacy route %s to return 404, got %d: %s", path, w.Code, w.Body.String())
+		}
 	}
 }
 
@@ -337,7 +342,7 @@ func TestGetPodcastEpisodeAllowsPublishedOrAuthorDraftOnly(t *testing.T) {
 	}
 }
 
-func TestPodcastPublishedVisibilityAppliesToListsDetailAndRSS(t *testing.T) {
+func TestPodcastPublishedVisibilityAppliesToListsAndDetail(t *testing.T) {
 	r, db, owner, channel := newPodcastHandlerTestDB(t)
 	follower := model.User{Username: "podcast-follower", Email: "podcast-follower@example.com", Password: "hash", Role: "user", IsActive: true}
 	require.NoError(t, db.Create(&follower).Error)
@@ -382,7 +387,6 @@ func TestPodcastPublishedVisibilityAppliesToListsDetailAndRSS(t *testing.T) {
 	for _, path := range []string{
 		"/api/v1/podcast/episodes",
 		"/api/v1/podcast/shows/" + channel.Slug + "/episodes",
-		"/api/v1/channels/" + channel.Slug + "/rss/podcast",
 	} {
 		w := request(path, "")
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())

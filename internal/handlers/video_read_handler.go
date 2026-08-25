@@ -442,5 +442,3 @@ func GetRecommendedVideos(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, results)
 	}
 }
-
-// GetVideoRSS outputs a Media RSS feed for all published videos in a channel.

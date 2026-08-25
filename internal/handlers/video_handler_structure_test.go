@@ -21,6 +21,5 @@ func TestVideoSwaggerAnnotationsStayWithTheirHandlers(t *testing.T) {
 		"UpdateVideo",
 		"DeleteVideo",
 		"GetRecommendedVideos",
-		"GetVideoRSS",
 	})
 }

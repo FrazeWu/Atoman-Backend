@@ -1,13 +1,9 @@
 package blog
 
 import (
-	"fmt"
 	"net/http"
 	"strings"
-	"time"
-	"unicode/utf8"
 
-	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/platform/httpx"
@@ -92,35 +88,6 @@ func (h *Handler) getCollection(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, collection)
-}
-
-func (h *Handler) getChannelArticleRSS(c *gin.Context) {
-	channel, err := h.service.GetChannelBySlug(c.Param("slug"))
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-
-	posts, err := loadCanonicalBlogPosts(h.service.db, canonicalBlogPostsQuery(h.service.db).
-		Where("posts.channel_id = ? AND posts.status = ?", channel.ID, "published").
-		Where("posts.visibility = ? OR posts.visibility = ?", "", "public").
-		Order("COALESCE(posts.published_at, posts.created_at) DESC").
-		Order("posts.created_at DESC").
-		Order("posts.id DESC").
-		Limit(50))
-	if err != nil {
-		httpx.Error(c, err)
-		return
-	}
-
-	scheme := c.Request.Header.Get("X-Forwarded-Proto")
-	if scheme == "" {
-		scheme = "https"
-	}
-	siteURL := fmt.Sprintf("%s://%s", scheme, c.Request.Host)
-
-	c.Header("Content-Type", "application/rss+xml; charset=utf-8")
-	c.String(http.StatusOK, buildArticleRSS(channel, posts, siteURL))
 }
 
 func (h *Handler) listUserCollections(c *gin.Context) {
@@ -276,55 +243,4 @@ func (h *Handler) deleteCollection(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"message": "Collection deleted"})
-}
-
-func buildArticleRSS(ch model.Channel, posts []model.Post, siteURL string) string {
-	var items strings.Builder
-	for _, p := range posts {
-		publishedAt := p.CreatedAt
-		if p.PublishedAt != nil {
-			publishedAt = *p.PublishedAt
-		}
-		pubDate := publishedAt.Format(time.RFC1123Z)
-		summary := p.Summary
-		if summary == "" {
-			summary = p.Content
-			if utf8.RuneCountInString(summary) > 280 {
-				summary = string([]rune(summary)[:280]) + "…"
-			}
-		}
-		authorName := ""
-		if p.User != nil {
-			authorName = p.User.DisplayName
-			if authorName == "" {
-				authorName = p.User.Username
-			}
-		}
-		items.WriteString(fmt.Sprintf(`
-    <item>
-      <title>%s</title>
-      <link>%s/posts/post/%s</link>
-      <guid isPermaLink="true">%s/posts/post/%s</guid>
-      <pubDate>%s</pubDate>
-      <description>%s</description>
-      <author>%s</author>
-    </item>`, rssCDATA(p.Title), siteURL, p.ID, siteURL, p.ID, pubDate, rssCDATA(summary), rssCDATA(authorName)))
-	}
-
-	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-  <channel>
-    <title>%s</title>
-    <link>%s/channel/%s</link>
-    <description>%s</description>
-    <language>zh-cn</language>
-    <lastBuildDate>%s</lastBuildDate>
-    %s
-  </channel>
-</rss>`, rssCDATA(ch.Name), siteURL, ch.Slug, rssCDATA(ch.Description),
-		time.Now().Format(time.RFC1123Z), items.String())
-}
-
-func rssCDATA(value string) string {
-	return "<![CDATA[" + strings.ReplaceAll(value, "]]>", "]]]]><![CDATA[>") + "]" + "]>"
 }

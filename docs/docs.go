@@ -4816,76 +4816,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/channels/slug/{slug}/rss/video": {
-            "get": {
-                "description": "输出指定频道的公开视频 RSS。",
-                "produces": [
-                    "application/rss+xml"
-                ],
-                "tags": [
-                    "videos"
-                ],
-                "summary": "获取频道视频 RSS",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "频道 slug",
-                        "name": "slug",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "RSS XML",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/channels/{slug}/rss/podcast": {
-            "get": {
-                "description": "输出指定频道的播客 RSS。",
-                "produces": [
-                    "application/rss+xml"
-                ],
-                "tags": [
-                    "podcast"
-                ],
-                "summary": "获取播客 RSS",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "频道 slug",
-                        "name": "slug",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Podcast RSS XML",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/comments/{comment_id}": {
             "delete": {
                 "security": [
@@ -8144,47 +8074,6 @@ const docTemplate = `{
                         "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
-        "/api/v1/feed/rss/{username}": {
-            "get": {
-                "description": "输出指定用户的博客 RSS。",
-                "produces": [
-                    "application/rss+xml"
-                ],
-                "tags": [
-                    "feed"
-                ],
-                "summary": "获取用户博客 RSS",
-                "parameters": [
-                    {
-                        "type": "string",
-                        "description": "用户名",
-                        "name": "username",
-                        "in": "path",
-                        "required": true
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "RSS XML",
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "$ref": "#/definitions/feed.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal Server Error",
-                        "schema": {
-                            "$ref": "#/definitions/feed.ErrorResponse"
                         }
                     }
                 }
@@ -16314,6 +16203,129 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/reference.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/rss/channels/{slug}.xml": {
+            "get": {
+                "description": "输出指定频道已发布且公开可见的博客、播客与视频内容。",
+                "produces": [
+                    "application/rss+xml"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取频道公开内容 RSS",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "频道 slug",
+                        "name": "slug",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "RSS XML",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/rss/collections/{id}.xml": {
+            "get": {
+                "description": "输出指定统一合集内已发布且公开可见的博客、播客与视频内容。",
+                "produces": [
+                    "application/rss+xml"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取统一合集公开内容 RSS",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "统一合集 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "RSS XML",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/rss/users/{username}.xml": {
+            "get": {
+                "description": "输出指定用户已发布且公开可见的博客、播客与视频内容。",
+                "produces": [
+                    "application/rss+xml"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取用户公开内容 RSS",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户名",
+                        "name": "username",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "RSS XML",
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
                         }
                     }
                 }

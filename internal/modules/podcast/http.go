@@ -27,6 +27,4 @@ func RegisterRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	p.DELETE("/episodes/:id", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "podcast", "podcast.publish"), handlers.DeletePodcastEpisode(db))
 	p.POST("/upload-audio", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "podcast", "podcast.publish"), handlers.UploadPodcastAudio(s3Client))
 	p.POST("/upload-cover", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "podcast", "podcast.publish"), handlers.UploadPodcastCover(s3Client))
-
-	router.GET("/api/v1/channels/:slug/rss/podcast", handlers.GetPodcastRSS(db))
 }

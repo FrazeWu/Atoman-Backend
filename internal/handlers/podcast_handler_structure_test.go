@@ -48,7 +48,6 @@ func TestPodcastSwaggerAnnotationsStayWithTheirHandlers(t *testing.T) {
 		"CreatePodcastEpisode",
 		"UpdatePodcastEpisode",
 		"DeletePodcastEpisode",
-		"GetPodcastRSS",
 		"UploadPodcastAudio",
 		"UploadPodcastCover",
 	})

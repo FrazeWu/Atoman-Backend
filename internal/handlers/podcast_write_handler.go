@@ -383,5 +383,3 @@ func DeletePodcastEpisode(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{"message": "deleted"})
 	}
 }
-
-// GetPodcastRSS returns a standards-compliant podcast RSS with <enclosure> tags.

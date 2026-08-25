@@ -54,6 +54,7 @@ func RegisterV1Routes(
 	blog.RegisterRoutes(group.Group("/blog"), blog.NewService(db))
 	shortnote.RegisterRoutes(group.Group("/short-notes"), shortnote.NewService(db, refService))
 	feed.RegisterRoutes(group.Group("/feed"), feed.NewService(db))
+	feed.RegisterPublicRSSRoutes(group.Group("/rss"), db)
 	notificationService := notification.NewService(db)
 	notification.RegisterRoutes(group, notificationService)
 	dm.RegisterRoutes(group, dm.NewService(dm.NewRepo(db), dm.NewImageStoreFromEnv(s3Client), dm.UserHubPublisher{Hub: userHub}, notificationService))

@@ -10299,52 +10299,6 @@ paths:
       summary: 上传博客图片
       tags:
       - blog-upload
-  /api/v1/channels/{slug}/rss/podcast:
-    get:
-      description: 输出指定频道的播客 RSS。
-      parameters:
-      - description: 频道 slug
-        in: path
-        name: slug
-        required: true
-        type: string
-      produces:
-      - application/rss+xml
-      responses:
-        "200":
-          description: Podcast RSS XML
-          schema:
-            type: string
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取播客 RSS
-      tags:
-      - podcast
-  /api/v1/channels/slug/{slug}/rss/video:
-    get:
-      description: 输出指定频道的公开视频 RSS。
-      parameters:
-      - description: 频道 slug
-        in: path
-        name: slug
-        required: true
-        type: string
-      produces:
-      - application/rss+xml
-      responses:
-        "200":
-          description: RSS XML
-          schema:
-            type: string
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/handlers.ErrorResponse'
-      summary: 获取频道视频 RSS
-      tags:
-      - videos
   /api/v1/comments/{comment_id}:
     delete:
       parameters:
@@ -12411,33 +12365,6 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 从待读列表移除条目
-      tags:
-      - feed
-  /api/v1/feed/rss/{username}:
-    get:
-      description: 输出指定用户的博客 RSS。
-      parameters:
-      - description: 用户名
-        in: path
-        name: username
-        required: true
-        type: string
-      produces:
-      - application/rss+xml
-      responses:
-        "200":
-          description: RSS XML
-          schema:
-            type: string
-        "404":
-          description: Not Found
-          schema:
-            $ref: '#/definitions/feed.ErrorResponse'
-        "500":
-          description: Internal Server Error
-          schema:
-            $ref: '#/definitions/feed.ErrorResponse'
-      summary: 获取用户博客 RSS
       tags:
       - feed
   /api/v1/feed/sources/opml/export:
@@ -17520,6 +17447,87 @@ paths:
       summary: 搜索引用目标
       tags:
       - references
+  /api/v1/rss/channels/{slug}.xml:
+    get:
+      description: 输出指定频道已发布且公开可见的博客、播客与视频内容。
+      parameters:
+      - description: 频道 slug
+        in: path
+        name: slug
+        required: true
+        type: string
+      produces:
+      - application/rss+xml
+      responses:
+        "200":
+          description: RSS XML
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      summary: 获取频道公开内容 RSS
+      tags:
+      - feed
+  /api/v1/rss/collections/{id}.xml:
+    get:
+      description: 输出指定统一合集内已发布且公开可见的博客、播客与视频内容。
+      parameters:
+      - description: 统一合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/rss+xml
+      responses:
+        "200":
+          description: RSS XML
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      summary: 获取统一合集公开内容 RSS
+      tags:
+      - feed
+  /api/v1/rss/users/{username}.xml:
+    get:
+      description: 输出指定用户已发布且公开可见的博客、播客与视频内容。
+      parameters:
+      - description: 用户名
+        in: path
+        name: username
+        required: true
+        type: string
+      produces:
+      - application/rss+xml
+      responses:
+        "200":
+          description: RSS XML
+          schema:
+            type: string
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      summary: 获取用户公开内容 RSS
+      tags:
+      - feed
   /api/v1/settings/site-access:
     get:
       description: 返回后台模块开关与结构化模块设置，包括 feed/blog/forum 的设置矩阵。

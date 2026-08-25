@@ -53,6 +53,19 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestSetupVideoRoutesDoesNotMountLegacyRSS(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	router := gin.New()
+	SetupVideoRoutes(router, db, nil)
+
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/channels/slug/legacy/rss/video", nil))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy video RSS route to return 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
 func TestStudioVideoViewRecordsPlayMetric(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newVideoTestDB(t)

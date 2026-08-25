@@ -38,7 +38,6 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/recommend/articles", h.getRecommendedArticles)
 	group.GET("/recommend/channels", h.getRecommendedChannels)
 
-	group.GET("/rss/:username", GetUserRSS(service.db))
 	group.GET("/items/:id", GetFeedItem(service.db))
 	group.GET("/media/image", proxyFeedImage)
 

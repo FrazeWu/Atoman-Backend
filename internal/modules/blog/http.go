@@ -92,7 +92,6 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/channels/:id/collections", h.getChannelCollections)
 	group.GET("/channels/slug/:slug", h.getChannelBySlug)
 	group.GET("/channels/slug/:slug/collections", h.getChannelCollectionsBySlug)
-	group.GET("/channels/slug/:slug/rss/article", h.getChannelArticleRSS)
 	group.GET("/collections", h.listUserCollections)
 	group.GET("/collections/:id", h.getCollection)
 	group.POST("/channels/ensure-default", h.ensureDefaultChannel)

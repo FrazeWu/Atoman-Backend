@@ -363,112 +363,19 @@ func TestCreateChannelCreatesGlobalChannel(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesMountsChannelArticleRSS(t *testing.T) {
-	service, db, user := newBlogHTTPTestService(t)
+func TestRegisterRoutesDoesNotMountLegacyChannelArticleRSS(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
 	if err != nil {
 		t.Fatalf("create default channel: %v", err)
-	}
-	post := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "Published", Content: "Body", Summary: "Summary", Status: "published", Visibility: "public"}
-	if err := db.Create(&post).Error; err != nil {
-		t.Fatalf("create published post: %v", err)
 	}
 
 	r := newBlogHTTPRouter(service, &user)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/channels/slug/"+channel.Slug+"/rss/article", nil)
-	req.Host = "example.com"
 	r.ServeHTTP(w, req)
-
-	if w.Code == http.StatusNotFound {
-		t.Fatalf("expected article rss route to be mounted, got 404: %s", w.Body.String())
-	}
-	if contentType := w.Header().Get("Content-Type"); !strings.Contains(contentType, "application/rss+xml") {
-		t.Fatalf("expected rss content-type, got %q", contentType)
-	}
-	if !strings.Contains(w.Body.String(), "<rss") {
-		t.Fatalf("expected rss body, got %s", w.Body.String())
-	}
-}
-
-func TestChannelArticleRSSIncludesOnlyPublishedPublicPosts(t *testing.T) {
-	service, db, user := newBlogHTTPTestService(t)
-	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
-	if err != nil {
-		t.Fatalf("create default channel: %v", err)
-	}
-	for _, post := range []model.Post{
-		{UserID: user.ID, ChannelID: &channel.ID, Title: "Public RSS post", Content: "Body", Status: "published", Visibility: "public"},
-		{UserID: user.ID, ChannelID: &channel.ID, Title: "Legacy empty visibility post", Content: "Body", Status: "published", Visibility: "public"},
-		{UserID: user.ID, ChannelID: &channel.ID, Title: "Early created late published", Content: "Body", Status: "published", Visibility: "public"},
-		{UserID: user.ID, ChannelID: &channel.ID, Title: "Late created early published", Content: "Body", Status: "published", Visibility: "public"},
-		{UserID: user.ID, ChannelID: &channel.ID, Title: "Followers RSS secret", Content: "Body", Status: "published", Visibility: "followers"},
-		{UserID: user.ID, ChannelID: &channel.ID, Title: "Private RSS secret", Content: "Body", Status: "published", Visibility: "private"},
-		{UserID: user.ID, ChannelID: &channel.ID, Title: "Draft RSS secret", Content: "Body", Status: "draft", Visibility: "public"},
-	} {
-		if err := db.Create(&post).Error; err != nil {
-			t.Fatalf("create post %q: %v", post.Title, err)
-		}
-	}
-	if err := db.Model(&model.Post{}).
-		Where("title = ?", "Legacy empty visibility post").
-		Update("visibility", "").Error; err != nil {
-		t.Fatalf("set legacy empty visibility: %v", err)
-	}
-	now := time.Now().UTC().Truncate(time.Second)
-	latePublishedAt := now
-	earlyPublishedAt := now.Add(-24 * time.Hour)
-	if err := db.Model(&model.Post{}).Where("title = ?", "Early created late published").Updates(map[string]any{
-		"created_at": now.Add(-48 * time.Hour), "published_at": latePublishedAt,
-	}).Error; err != nil {
-		t.Fatalf("set late publication timestamps: %v", err)
-	}
-	if err := db.Model(&model.Post{}).Where("title = ?", "Late created early published").Update("published_at", earlyPublishedAt).Error; err != nil {
-		t.Fatalf("set early publication timestamp: %v", err)
-	}
-	var latePublished model.Post
-	if err := db.Where("title = ?", "Early created late published").First(&latePublished).Error; err != nil {
-		t.Fatalf("find late-published post: %v", err)
-	}
-	var rssPosts []model.Post
-	if err := db.Where("channel_id = ?", channel.ID).Find(&rssPosts).Error; err != nil {
-		t.Fatalf("reload rss posts: %v", err)
-	}
-	for _, post := range rssPosts {
-		canonicalizeBlogTestPost(t, db, post)
-	}
-
-	r := newBlogHTTPRouter(service, &user)
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/channels/slug/"+channel.Slug+"/rss/article", nil)
-	req.Host = "example.com"
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	body := w.Body.String()
-	for _, visible := range []string{"Public RSS post", "Legacy empty visibility post"} {
-		if !strings.Contains(body, visible) {
-			t.Fatalf("expected %q in RSS: %s", visible, body)
-		}
-	}
-	for _, secret := range []string{"Followers RSS secret", "Private RSS secret", "Draft RSS secret"} {
-		if strings.Contains(body, secret) {
-			t.Fatalf("expected %q to be excluded from RSS: %s", secret, body)
-		}
-	}
-	lateIndex := strings.Index(body, "Early created late published")
-	earlyIndex := strings.Index(body, "Late created early published")
-	if lateIndex == -1 || earlyIndex == -1 || lateIndex > earlyIndex {
-		t.Fatalf("expected posts ordered by effective publication time: %s", body)
-	}
-	if latePublished.PublishedAt == nil || !strings.Contains(body, "<pubDate>"+latePublished.PublishedAt.Format(time.RFC1123Z)+"</pubDate>") {
-		t.Fatalf("expected effective publication date in RSS: %s", body)
-	}
-	canonicalLink := "<link>https://example.com/posts/post/" + latePublished.ID.String() + "</link>"
-	if !strings.Contains(body, canonicalLink) {
-		t.Fatalf("expected canonical post link %q in RSS: %s", canonicalLink, body)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected legacy article RSS route to be removed, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

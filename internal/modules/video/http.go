@@ -35,6 +35,4 @@ func RegisterRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	imports := v.Group("")
 	imports.Use(middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"))
 	handlers.RegisterVideoImportRoutes(imports, db, s3Client)
-
-	router.GET("/api/v1/channels/slug/:slug/rss/video", handlers.GetVideoRSS(db))
 }
