@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -585,7 +586,7 @@ func TestRegisterRoutesSongRatingsUpdateAndPopulateDetail(t *testing.T) {
 	if albumOtherRating.Code != http.StatusOK {
 		t.Fatalf("expected second album rating 200, got %d: %s", albumOtherRating.Code, albumOtherRating.Body.String())
 	}
-	albumDetail := performMusicJSONRequest(t, userRouter, http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), "")
+	albumDetail = performMusicJSONRequest(t, userRouter, http.MethodGet, "/api/v1/music/albums/"+album.ID.String(), "")
 	if albumDetail.Code != http.StatusOK || !strings.Contains(albumDetail.Body.String(), `"rating_score":3`) || !strings.Contains(albumDetail.Body.String(), `"viewer_rating":4`) {
 		t.Fatalf("expected album rating summary, got %d: %s", albumDetail.Code, albumDetail.Body.String())
 	}
@@ -604,6 +605,64 @@ func TestRegisterRoutesSongRatingsUpdateAndPopulateDetail(t *testing.T) {
 	}
 	if err := db.Model(&model.AlbumRating{}).Where("album_id = ?", album.ID).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("expected only the other user's album rating to remain, count=%d err=%v", count, err)
+	}
+}
+
+func TestRatingUpsertsRemainSingleRowDuringConcurrentFirstSubmissions(t *testing.T) {
+	service, db, user := newMusicHTTPTestService(t)
+	album := model.Album{Title: "Concurrent Ratings", Status: "open", EntryStatus: "open"}
+	if err := db.Create(&album).Error; err != nil {
+		t.Fatalf("create album: %v", err)
+	}
+	song := model.Song{Title: "Concurrent Rating Song", AlbumID: &album.ID, AudioURL: "/concurrent.mp3", Status: "open"}
+	if err := db.Create(&song).Error; err != nil {
+		t.Fatalf("create song: %v", err)
+	}
+
+	const workers = 8
+	start := make(chan struct{})
+	errs := make(chan error, workers*2)
+	var wait sync.WaitGroup
+	for score := 1; score <= workers; score++ {
+		wait.Add(2)
+		go func(score int) {
+			defer wait.Done()
+			<-start
+			_, err := service.SetSongRating(user, song.ID, (score-1)%5+1)
+			errs <- err
+		}(score)
+		go func(score int) {
+			defer wait.Done()
+			<-start
+			_, err := service.SetAlbumRating(user, album.ID, (score-1)%5+1)
+			errs <- err
+		}(score)
+	}
+	close(start)
+	wait.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent rating upsert: %v", err)
+		}
+	}
+
+	for _, target := range []struct {
+		name  string
+		model any
+		where string
+		id    uuid.UUID
+	}{
+		{name: "song", model: &model.SongRating{}, where: "song_id = ?", id: song.ID},
+		{name: "album", model: &model.AlbumRating{}, where: "album_id = ?", id: album.ID},
+	} {
+		var count int64
+		if err := db.Model(target.model).Where(target.where, target.id).Count(&count).Error; err != nil {
+			t.Fatalf("count %s ratings: %v", target.name, err)
+		}
+		if count != 1 {
+			t.Fatalf("%s rating count = %d, want 1", target.name, count)
+		}
 	}
 }
 
