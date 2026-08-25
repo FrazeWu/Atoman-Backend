@@ -85,8 +85,8 @@ func (s *Service) SavePlaybackProgress(user authctx.CurrentUser, input SavePlayb
 	}
 
 	var count int64
-	if err := s.db.Model(&model.Song{}).
-		Where("id = ? AND lifecycle_status = ? AND audio_url <> ?", input.SongID, model.MusicLifecycleActive, "").
+	if err := scopeVisibleMusicEntries(s.db.Model(&model.Song{}), `"Songs"`, "uploaded_by", &user, false).
+		Where(`"Songs".id = ? AND "Songs".audio_url <> ?`, input.SongID, "").
 		Count(&count).Error; err != nil {
 		return model.MusicPlaybackProgress{}, err
 	}
@@ -264,9 +264,10 @@ func (s *Service) loadPlaybackSessionQueueFromStored(session model.MusicPlayback
 
 func (s *Service) loadAvailablePlaybackSessionQueue(songIDs []uuid.UUID, viewer *authctx.CurrentUser) ([]model.Song, error) {
 	var songs []model.Song
-	if err := s.db.Preload("Album", visibleAlbumPreload(viewer)).Preload("Artists", visibleArtistPreload(viewer)).
-		Where("id IN ? AND lifecycle_status = ? AND audio_url <> ?", songIDs, model.MusicLifecycleActive, "").
-		Find(&songs).Error; err != nil {
+	query := scopeVisibleMusicEntries(s.db.Model(&model.Song{}), `"Songs"`, "uploaded_by", viewer, false).
+		Preload("Album", visibleAlbumPreload(viewer)).Preload("Artists", visibleArtistPreload(viewer)).
+		Where(`"Songs".id IN ? AND "Songs".audio_url <> ?`, songIDs, "")
+	if err := query.Find(&songs).Error; err != nil {
 		return nil, err
 	}
 	byID := make(map[uuid.UUID]model.Song, len(songs))
@@ -307,9 +308,11 @@ func (s *Service) GetPlaybackProgress(user authctx.CurrentUser) (*model.MusicPla
 		return nil, apperr.Unauthorized("Login required")
 	}
 	var progress model.MusicPlaybackProgress
-	err := s.db.Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_playback_progresses.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ? AND visible_song.audio_url <> ?", model.MusicLifecycleActive, "").
+	condition, args := musicEntryVisibilityCondition("visible_song", "uploaded_by", &user, false)
+	err := s.db.Model(&model.MusicPlaybackProgress{}).
+		Joins(`JOIN "Songs" AS visible_song ON visible_song.id = music_playback_progresses.song_id AND `+condition, args...).
+		Where("visible_song.audio_url <> ? AND music_playback_progresses.user_id = ? AND music_playback_progresses.completed = ?", "", user.ID, false).
 		Preload("Song.Album", visibleAlbumPreload(&user)).Preload("Song.Artists", visibleArtistPreload(&user)).
-		Where("music_playback_progresses.user_id = ? AND music_playback_progresses.completed = ?", user.ID, false).
 		Order("music_playback_progresses.updated_at DESC").First(&progress).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil

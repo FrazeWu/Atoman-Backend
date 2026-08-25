@@ -522,13 +522,19 @@ func (r *Repo) RecordListeningHistory(userID, songID uuid.UUID, playedAt time.Ti
 	}).Create(&history).Error
 }
 
+func visibleListeningSongJoin(viewer *authctx.CurrentUser) (string, []any) {
+	condition, args := musicEntryVisibilityCondition("visible_song", "uploaded_by", viewer, false)
+	return `JOIN "Songs" AS visible_song ON visible_song.id = music_listening_histories.song_id AND visible_song.audio_url <> ? AND ` + condition, append([]any{""}, args...)
+}
+
 func (r *Repo) ListRecentListeningHistory(userID uuid.UUID, limit int, viewer *authctx.CurrentUser) ([]model.MusicListeningHistory, error) {
 	if limit < 1 {
 		return []model.MusicListeningHistory{}, nil
 	}
+	join, args := visibleListeningSongJoin(viewer)
 	var rows []model.MusicListeningHistory
 	err := r.db.Model(&model.MusicListeningHistory{}).
-		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_listening_histories.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
+		Joins(join, args...).
 		Where("music_listening_histories.user_id = ?", userID).
 		Preload("Song.Artists", visibleArtistPreload(viewer)).
 		Preload("Song.Album", visibleAlbumPreload(viewer)).
@@ -539,8 +545,9 @@ func (r *Repo) ListRecentListeningHistory(userID uuid.UUID, limit int, viewer *a
 }
 
 func (r *Repo) ListListeningHistory(userID uuid.UUID, page, pageSize int, viewer *authctx.CurrentUser) ([]model.MusicListeningHistory, int64, error) {
+	join, args := visibleListeningSongJoin(viewer)
 	base := r.db.Model(&model.MusicListeningHistory{}).
-		Joins("JOIN \"Songs\" AS visible_song ON visible_song.id = music_listening_histories.song_id AND visible_song.deleted_at IS NULL AND visible_song.lifecycle_status = ?", model.MusicLifecycleActive).
+		Joins(join, args...).
 		Where("music_listening_histories.user_id = ?", userID)
 	var total int64
 	if err := base.Count(&total).Error; err != nil {
