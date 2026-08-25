@@ -212,3 +212,53 @@ func TestStudioAnalyticsCalculatesReturningConsumersAcrossDays(t *testing.T) {
 		t.Fatalf("unexpected retention: %#v", analytics.Retention)
 	}
 }
+
+func TestStudioAnalyticsScopesCurrentAndPreviousPeriodsByCollectionAndContent(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	firstCollection := fixture.collections[ModuleBlog]
+	secondCollection := model.Collection{ChannelID: fixture.channel.ID, ContentType: string(ModuleBlog), Name: "second analytics collection"}
+	if err := fixture.db.Create(&secondCollection).Error; err != nil {
+		t.Fatal(err)
+	}
+	first := model.Post{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &firstCollection.ID,
+		Title: "First", Content: "body", Status: "published", Visibility: "public",
+	}
+	second := model.Post{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &secondCollection.ID,
+		Title: "Second", Content: "body", Status: "published", Visibility: "public",
+	}
+	for _, post := range []*model.Post{&first, &second} {
+		if err := fixture.db.Create(post).Error; err != nil {
+			t.Fatal(err)
+		}
+		for _, createdAt := range []time.Time{time.Now().UTC(), time.Now().UTC().Add(-8 * 24 * time.Hour)} {
+			if err := fixture.db.Create(&model.StudioMetricEvent{
+				Base: model.Base{CreatedAt: createdAt}, ChannelID: fixture.channel.ID,
+				ContentType: string(ModuleBlog), ContentID: post.ID, Metric: "view",
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	byCollection, err := fixture.service.GetAnalytics(fixture.user, ModuleBlog, AnalyticsQuery{
+		ChannelID: fixture.channel.ID, CollectionID: firstCollection.ID, Range: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byCollection.Totals["view"] != 1 || byCollection.PreviousPeriod.Totals["view"] != 1 || len(byCollection.Top) != 1 || byCollection.Top[0].ID != first.ID {
+		t.Fatalf("expected collection-scoped analytics for first post, got %#v", byCollection)
+	}
+
+	byContent, err := fixture.service.GetAnalytics(fixture.user, ModuleBlog, AnalyticsQuery{
+		ChannelID: fixture.channel.ID, ContentID: second.ID, Range: 7,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if byContent.Totals["view"] != 1 || byContent.PreviousPeriod.Totals["view"] != 1 || len(byContent.Top) != 1 || byContent.Top[0].ID != second.ID {
+		t.Fatalf("expected content-scoped analytics for second post, got %#v", byContent)
+	}
+}

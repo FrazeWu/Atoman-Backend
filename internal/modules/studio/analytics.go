@@ -56,21 +56,19 @@ func (s *Service) GetAnalytics(user authctx.CurrentUser, module Module, query An
 	if err != nil {
 		return AnalyticsResponse{}, err
 	}
+	titles, contentMetrics, contentIDs, restricted, err := s.filterAnalyticsScope(user.ID, channel.ID, module, query, titles)
+	if err != nil {
+		return AnalyticsResponse{}, err
+	}
 	var events []model.StudioMetricEvent
-	if err := s.db.Where(
-		"channel_id = ? AND content_type = ? AND created_at >= ? AND created_at < ?",
-		channel.ID, module, from, to,
-	).Find(&events).Error; err != nil {
+	if err := s.analyticsEventsQuery(channel.ID, module, from, to, contentIDs, restricted).Find(&events).Error; err != nil {
 		return AnalyticsResponse{}, err
 	}
 	for _, event := range events {
 		addAnalyticsMetric(event.Metric, event.ContentID, event.CreatedAt, totals, pointByDate, contentMetrics)
 	}
 	var lifecycleEvents []model.ContentLifecycleEvent
-	if err := s.db.Where(
-		"channel_id = ? AND content_type = ? AND created_at >= ? AND created_at < ?",
-		channel.ID, module, from, to,
-	).Find(&lifecycleEvents).Error; err != nil {
+	if err := s.analyticsEventsQuery(channel.ID, module, from, to, contentIDs, restricted).Find(&lifecycleEvents).Error; err != nil {
 		return AnalyticsResponse{}, err
 	}
 	sourceCounts := make(map[string]int64)
@@ -118,7 +116,7 @@ func (s *Service) GetAnalytics(user authctx.CurrentUser, module Module, query An
 		return AnalyticsResponse{}, err
 	}
 	previousFrom := from.AddDate(0, 0, -days)
-	previousTotals, err := s.analyticsTotals(user.ID, channel.ID, module, previousFrom, from)
+	previousTotals, err := s.analyticsTotals(channel.ID, module, previousFrom, from, titles, contentIDs, restricted)
 	if err != nil {
 		return AnalyticsResponse{}, err
 	}
@@ -129,16 +127,16 @@ func (s *Service) GetAnalytics(user authctx.CurrentUser, module Module, query An
 	}, nil
 }
 
-func (s *Service) analyticsTotals(userID, channelID uuid.UUID, module Module, from, to time.Time) (map[string]int64, error) {
+func (s *Service) analyticsTotals(channelID uuid.UUID, module Module, from, to time.Time, titles map[uuid.UUID]string, contentIDs []uuid.UUID, restricted bool) (map[string]int64, error) {
 	totals := emptyMetricMap(metricNamesByModule[module])
 	points := make(map[string]map[string]int64)
-	contentMetrics := make(map[uuid.UUID]map[string]int64)
+	contentMetrics := make(map[uuid.UUID]map[string]int64, len(titles))
+	for id := range titles {
+		contentMetrics[id] = emptyMetricMap(metricNamesByModule[module])
+	}
 
 	var events []model.StudioMetricEvent
-	if err := s.db.Where(
-		"channel_id = ? AND content_type = ? AND created_at >= ? AND created_at < ?",
-		channelID, module, from, to,
-	).Find(&events).Error; err != nil {
+	if err := s.analyticsEventsQuery(channelID, module, from, to, contentIDs, restricted).Find(&events).Error; err != nil {
 		return nil, err
 	}
 	for _, event := range events {
@@ -146,21 +144,14 @@ func (s *Service) analyticsTotals(userID, channelID uuid.UUID, module Module, fr
 	}
 
 	var lifecycleEvents []model.ContentLifecycleEvent
-	if err := s.db.Where(
-		"channel_id = ? AND content_type = ? AND created_at >= ? AND created_at < ?",
-		channelID, module, from, to,
-	).Find(&lifecycleEvents).Error; err != nil {
+	if err := s.analyticsEventsQuery(channelID, module, from, to, contentIDs, restricted).Find(&lifecycleEvents).Error; err != nil {
 		return nil, err
 	}
 	for _, event := range lifecycleEvents {
 		addAnalyticsMetric(event.Event, event.ContentID, event.CreatedAt, totals, points, contentMetrics)
 	}
 
-	titles, existingMetrics, err := s.analyticsContentMetrics(userID, channelID, module)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.addExistingAnalytics(module, titles, from, to, totals, points, existingMetrics); err != nil {
+	if err := s.addExistingAnalytics(module, titles, from, to, totals, points, contentMetrics); err != nil {
 		return nil, err
 	}
 	return totals, nil

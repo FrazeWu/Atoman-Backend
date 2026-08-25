@@ -248,18 +248,24 @@ type ShareResponse struct {
 }
 
 type StudioCollectionContentCandidate struct {
-	ContentID             uuid.UUID `json:"content_id"`
-	ID                    uuid.UUID `json:"id"`
-	Module                Module    `json:"module"`
-	Title                 string    `json:"title"`
-	CoverURL              string    `json:"cover_url"`
-	Status                string    `json:"status"`
-	CurrentCollectionID   uuid.UUID `json:"current_collection_id,omitempty"`
-	CurrentCollectionName string    `json:"current_collection_name,omitempty"`
+	ContentID             uuid.UUID  `json:"content_id"`
+	ID                    uuid.UUID  `json:"id"`
+	Module                Module     `json:"module"`
+	Title                 string     `json:"title"`
+	CoverURL              string     `json:"cover_url"`
+	Status                string     `json:"status"`
+	CurrentCollectionID   *uuid.UUID `json:"current_collection_id,omitempty"`
+	CurrentCollectionName string     `json:"current_collection_name,omitempty"`
 }
 
 type StudioPreflightIssue struct {
 	Code string `json:"code"`
+}
+
+type StudioCalendarQuery struct {
+	ChannelID uuid.UUID
+	From      time.Time
+	To        time.Time
 }
 
 type StudioCalendarItem struct {

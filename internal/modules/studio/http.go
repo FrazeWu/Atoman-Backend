@@ -27,6 +27,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/state", h.getState)
 	group.PATCH("/state", h.patchState)
 	group.GET("/dashboard", h.getDashboard)
+	group.GET("/calendar", h.listCalendar)
 	group.GET("/channels", h.listChannels)
 	group.POST("/channels", h.createChannel)
 	group.PATCH("/channels/:id", h.updateChannel)
@@ -36,12 +37,20 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.PATCH("/collections/:id", h.updateUnifiedCollection)
 	group.DELETE("/collections/:id", h.deleteUnifiedCollection)
 	group.GET("/collections/:id/contents", h.listUnifiedCollectionContents)
+	group.GET("/collections/:id/candidates", h.listUnifiedCollectionCandidates)
+	group.PUT("/collections/:id/contents/:contentId", h.addUnifiedCollectionContent)
+	group.DELETE("/collections/:id/contents/:contentId", h.removeUnifiedCollectionContent)
 	group.PUT("/collections/:id/contents/order", h.reorderUnifiedCollectionContents)
+	group.GET("/reply-templates", h.listReplyTemplates)
+	group.POST("/reply-templates", h.createReplyTemplate)
+	group.DELETE("/reply-templates/:id", h.deleteReplyTemplate)
 	group.GET("/contents", h.listUnifiedContents)
 	group.GET("/:module/contents", h.listContents)
 	group.POST("/:module/contents/:id/share", h.shareContent)
 	group.GET("/:module/analytics", h.getAnalytics)
 	group.GET("/:module/interactions", h.listInteractions)
+	group.PUT("/:module/interactions/states", h.setInteractionsHandled)
+	group.PUT("/:module/interactions/:id/state", h.updateInteractionState)
 	group.GET("/:module/settings", h.getSettings)
 	group.PATCH("/:module/settings", h.patchSettings)
 	group.GET("/:module/collections", h.listCollections)
@@ -162,6 +171,8 @@ func (h *Handler) reorderCollectionContents(c *gin.Context) {
 // @Param module path string true "内容模块" Enums(blog,podcast,video)
 // @Param channel_id query string false "频道 UUID"
 // @Param range query int false "统计天数" Enums(7,28,90)
+// @Param collection_id query string false "统一合集 UUID"
+// @Param content_id query string false "内容公开 UUID"
 // @Success 200 {object} AnalyticsResponse
 // @Failure 400 {object} handlers.ErrorResponse
 // @Failure 401 {object} handlers.ErrorResponse
@@ -177,6 +188,14 @@ func (h *Handler) getAnalytics(c *gin.Context) {
 	if !ok {
 		return
 	}
+	collectionID, ok := optionalUUIDQuery(c, "collection_id")
+	if !ok {
+		return
+	}
+	contentID, ok := optionalUUIDQuery(c, "content_id")
+	if !ok {
+		return
+	}
 	rangeDays := 0
 	if raw := c.Query("range"); raw != "" {
 		var err error
@@ -186,7 +205,9 @@ func (h *Handler) getAnalytics(c *gin.Context) {
 			return
 		}
 	}
-	analytics, err := h.service.GetAnalytics(user, module, AnalyticsQuery{ChannelID: channelID, Range: rangeDays})
+	analytics, err := h.service.GetAnalytics(user, module, AnalyticsQuery{
+		ChannelID: channelID, CollectionID: collectionID, ContentID: contentID, Range: rangeDays,
+	})
 	respond(c, http.StatusOK, analytics, err)
 }
 
@@ -198,6 +219,10 @@ func (h *Handler) getAnalytics(c *gin.Context) {
 // @Param channel_id query string false "频道 UUID"
 // @Param unreplied query bool false "仅未回复"
 // @Param anchored query bool false "仅时间锚点评论"
+// @Param handled query bool false "按处理状态筛选"
+// @Param priority query string false "优先级" Enums(normal,high)
+// @Param content_id query string false "内容公开 UUID"
+// @Param q query string false "评论关键词"
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
 // @Success 200 {array} StudioInteractionItem
@@ -223,9 +248,23 @@ func (h *Handler) listInteractions(c *gin.Context) {
 	if !ok {
 		return
 	}
+	contentID, ok := optionalUUIDQuery(c, "content_id")
+	if !ok {
+		return
+	}
+	var handled *bool
+	if raw, exists := c.GetQuery("handled"); exists {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "handled must be true or false"))
+			return
+		}
+		handled = &value
+	}
 	page, pageSize := httpx.PageParams(c)
 	items, total, err := h.service.ListInteractions(user, module, InteractionQuery{
-		ChannelID: channelID, Unreplied: unreplied, Anchored: anchored, Page: page, PageSize: pageSize,
+		ChannelID: channelID, ContentID: contentID, Search: c.Query("q"), Unreplied: unreplied,
+		Anchored: anchored, Handled: handled, Priority: c.Query("priority"), Page: page, PageSize: pageSize,
 	})
 	if err != nil {
 		httpx.Error(c, err)

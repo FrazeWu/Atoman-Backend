@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (s *Service) interactionStates(channelID uuid.UUID, comments []model.CommentEntry) (map[uuid.UUID]model.StudioInteractionState, error) {
@@ -77,10 +79,13 @@ func (s *Service) updateInteractionStates(user authctx.CurrentUser, module Modul
 			existingByComment[state.CommentID] = state
 		}
 		now := time.Now().UTC()
+		states := make([]model.StudioInteractionState, 0, len(commentIDs))
 		for _, commentID := range commentIDs {
 			state, exists := existingByComment[commentID]
 			if !exists {
-				state = model.StudioInteractionState{ChannelID: channel.ID, CommentID: commentID, Priority: "normal"}
+				state = model.StudioInteractionState{
+					ChannelID: channel.ID, CommentID: commentID, Priority: "normal", CreatedAt: now,
+				}
 			}
 			if input.Handled != nil {
 				state.Handled = *input.Handled
@@ -98,22 +103,15 @@ func (s *Service) updateInteractionStates(user authctx.CurrentUser, module Modul
 			if state.Priority == "" {
 				state.Priority = "normal"
 			}
-			if exists {
-				if err := tx.Model(&model.StudioInteractionState{}).
-					Where("channel_id = ? AND comment_id = ?", channel.ID, commentID).
-					Updates(map[string]any{
-						"handled": state.Handled, "priority": state.Priority,
-						"handled_by": state.HandledBy, "handled_at": state.HandledAt,
-					}).Error; err != nil {
-					return err
-				}
-				continue
-			}
-			if err := tx.Create(&state).Error; err != nil {
-				return err
-			}
+			state.UpdatedAt = now
+			states = append(states, state)
 		}
-		return nil
+		return tx.Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "channel_id"}, {Name: "comment_id"}},
+			DoUpdates: clause.AssignmentColumns([]string{
+				"handled", "priority", "handled_by", "handled_at", "updated_at",
+			}),
+		}).Create(&states).Error
 	})
 }
 
@@ -192,6 +190,9 @@ func (s *Service) DeleteReplyTemplate(user authctx.CurrentUser, id uuid.UUID) er
 	}
 	var template model.StudioReplyTemplate
 	if err := s.db.First(&template, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return apperr.NotFound("studio.reply_template_not_found", "reply template not found")
+		}
 		return err
 	}
 	if _, err := s.ownedChannel(user.ID, template.ChannelID); err != nil {

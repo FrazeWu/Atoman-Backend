@@ -85,3 +85,69 @@ func TestStudioVideoInteractionsFilterTimestampComments(t *testing.T) {
 		t.Fatalf("expected only timestamp comment, total=%d items=%#v", total, items)
 	}
 }
+
+func TestStudioInteractionWorkflowPersistsStateAndSupportsFilters(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	collection := fixture.collections[ModuleBlog]
+	post := model.Post{
+		UserID: fixture.user.ID, ChannelID: &fixture.channel.ID, CollectionID: &collection.ID,
+		Title: "Workflow article", Content: "body", Status: "published", Visibility: "public",
+	}
+	if err := fixture.db.Create(&post).Error; err != nil {
+		t.Fatal(err)
+	}
+	comment := createStudioComment(t, fixture, "blog_post", post.ID, fixture.user.ID, "needs reply")
+	handled, priority := true, "high"
+	if err := fixture.service.UpdateInteractionState(fixture.user, ModuleBlog, fixture.channel.ID, comment.ID, UpdateInteractionStateInput{
+		Handled: &handled, Priority: &priority,
+	}); err != nil {
+		t.Fatalf("update interaction state: %v", err)
+	}
+	items, total, err := fixture.service.ListInteractions(fixture.user, ModuleBlog, InteractionQuery{
+		ChannelID: fixture.channel.ID, Handled: &handled, Priority: "high",
+	})
+	if err != nil {
+		t.Fatalf("list handled interactions: %v", err)
+	}
+	if total != 1 || len(items) != 1 || !items[0].Handled || items[0].Priority != "high" {
+		t.Fatalf("expected handled high-priority interaction, total=%d items=%#v", total, items)
+	}
+	if err := fixture.service.SetInteractionsHandled(fixture.user, ModuleBlog, fixture.channel.ID, []uuid.UUID{comment.ID}, false); err != nil {
+		t.Fatalf("restore pending interaction: %v", err)
+	}
+	pending := false
+	items, total, err = fixture.service.ListInteractions(fixture.user, ModuleBlog, InteractionQuery{ChannelID: fixture.channel.ID, Handled: &pending})
+	if err != nil {
+		t.Fatalf("list pending interactions: %v", err)
+	}
+	if total != 1 || len(items) != 1 || items[0].Handled || items[0].Priority != "high" {
+		t.Fatalf("expected restored pending interaction with retained priority, total=%d items=%#v", total, items)
+	}
+}
+
+func TestStudioReplyTemplatesAreScopedToTheChannel(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	created, err := fixture.service.CreateReplyTemplate(fixture.user, StudioReplyTemplateInput{
+		ChannelID: fixture.channel.ID, Name: "感谢", Content: "感谢你的反馈。",
+	})
+	if err != nil {
+		t.Fatalf("create reply template: %v", err)
+	}
+	templates, err := fixture.service.ListReplyTemplates(fixture.user, fixture.channel.ID)
+	if err != nil {
+		t.Fatalf("list reply templates: %v", err)
+	}
+	if len(templates) != 1 || templates[0].ID != created.ID || templates[0].Content != "感谢你的反馈。" {
+		t.Fatalf("unexpected reply templates: %#v", templates)
+	}
+	if err := fixture.service.DeleteReplyTemplate(fixture.user, created.ID); err != nil {
+		t.Fatalf("delete reply template: %v", err)
+	}
+	templates, err = fixture.service.ListReplyTemplates(fixture.user, fixture.channel.ID)
+	if err != nil {
+		t.Fatalf("list deleted reply templates: %v", err)
+	}
+	if len(templates) != 0 {
+		t.Fatalf("expected no reply templates after deletion, got %#v", templates)
+	}
+}

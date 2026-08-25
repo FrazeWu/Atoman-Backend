@@ -25,17 +25,22 @@ func TestStudioSwaggerCoversUnifiedCreatorAPI(t *testing.T) {
 	}
 
 	expected := map[string][]string{
-		"/api/v1/studio/state":                        {"get", "patch"},
-		"/api/v1/studio/dashboard":                    {"get"},
-		"/api/v1/studio/channels":                     {"get", "post"},
-		"/api/v1/studio/channels/{id}":                {"patch", "delete"},
-		"/api/v1/studio/{module}/contents":            {"get"},
-		"/api/v1/studio/{module}/contents/{id}/share": {"post"},
-		"/api/v1/studio/{module}/collections":         {"get", "post"},
-		"/api/v1/studio/{module}/collections/{id}":    {"patch", "delete"},
-		"/api/v1/studio/{module}/analytics":           {"get"},
-		"/api/v1/studio/{module}/interactions":        {"get"},
-		"/api/v1/studio/{module}/settings":            {"get", "patch"},
+		"/api/v1/studio/state":                            {"get", "patch"},
+		"/api/v1/studio/dashboard":                        {"get"},
+		"/api/v1/studio/calendar":                         {"get"},
+		"/api/v1/studio/channels":                         {"get", "post"},
+		"/api/v1/studio/channels/{id}":                    {"patch", "delete"},
+		"/api/v1/studio/{module}/contents":                {"get"},
+		"/api/v1/studio/{module}/contents/{id}/share":     {"post"},
+		"/api/v1/studio/{module}/collections":             {"get", "post"},
+		"/api/v1/studio/{module}/collections/{id}":        {"patch", "delete"},
+		"/api/v1/studio/{module}/analytics":               {"get"},
+		"/api/v1/studio/{module}/interactions":            {"get"},
+		"/api/v1/studio/{module}/interactions/states":     {"put"},
+		"/api/v1/studio/{module}/interactions/{id}/state": {"put"},
+		"/api/v1/studio/reply-templates":                  {"get", "post"},
+		"/api/v1/studio/reply-templates/{id}":             {"delete"},
+		"/api/v1/studio/{module}/settings":                {"get", "patch"},
 	}
 	for path, methods := range expected {
 		for _, method := range methods {
@@ -46,13 +51,17 @@ func TestStudioSwaggerCoversUnifiedCreatorAPI(t *testing.T) {
 	}
 
 	writes := map[string][]string{
-		"/api/v1/studio/state":                        {"patch"},
-		"/api/v1/studio/channels":                     {"post"},
-		"/api/v1/studio/channels/{id}":                {"patch", "delete"},
-		"/api/v1/studio/{module}/contents/{id}/share": {"post"},
-		"/api/v1/studio/{module}/collections":         {"post"},
-		"/api/v1/studio/{module}/collections/{id}":    {"patch", "delete"},
-		"/api/v1/studio/{module}/settings":            {"patch"},
+		"/api/v1/studio/state":                            {"patch"},
+		"/api/v1/studio/channels":                         {"post"},
+		"/api/v1/studio/channels/{id}":                    {"patch", "delete"},
+		"/api/v1/studio/{module}/contents/{id}/share":     {"post"},
+		"/api/v1/studio/{module}/collections":             {"post"},
+		"/api/v1/studio/{module}/collections/{id}":        {"patch", "delete"},
+		"/api/v1/studio/{module}/settings":                {"patch"},
+		"/api/v1/studio/{module}/interactions/states":     {"put"},
+		"/api/v1/studio/{module}/interactions/{id}/state": {"put"},
+		"/api/v1/studio/reply-templates":                  {"post"},
+		"/api/v1/studio/reply-templates/{id}":             {"delete"},
 	}
 	for path, methods := range writes {
 		for _, method := range methods {

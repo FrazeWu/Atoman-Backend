@@ -113,7 +113,8 @@ func (s *Service) ListUnifiedCollectionCandidates(user authctx.CurrentUser, coll
 	}
 	for index := range candidates {
 		if membership, exists := membershipByContent[candidates[index].ContentID]; exists {
-			candidates[index].CurrentCollectionID = membership.CollectionID
+			collectionID := membership.CollectionID
+			candidates[index].CurrentCollectionID = &collectionID
 			candidates[index].CurrentCollectionName = collectionNames[membership.CollectionID]
 		}
 	}

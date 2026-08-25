@@ -6850,6 +6850,17 @@ definitions:
       source:
         type: string
     type: object
+  studio.BatchInteractionStateInput:
+    properties:
+      comment_ids:
+        items:
+          type: string
+        type: array
+      handled:
+        type: boolean
+    required:
+    - comment_ids
+    type: object
   studio.ChannelSummary:
     properties:
       cover_url:
@@ -6978,6 +6989,42 @@ definitions:
       current_channel:
         $ref: '#/definitions/studio.ChannelSummary'
     type: object
+  studio.StudioCalendarItem:
+    properties:
+      content_id:
+        type: string
+      id:
+        type: string
+      module:
+        $ref: '#/definitions/studio.Module'
+      preflight:
+        items:
+          $ref: '#/definitions/studio.StudioPreflightIssue'
+        type: array
+      scheduled_at:
+        type: string
+      title:
+        type: string
+    type: object
+  studio.StudioCollectionContentCandidate:
+    properties:
+      content_id:
+        type: string
+      cover_url:
+        type: string
+      current_collection_id:
+        type: string
+      current_collection_name:
+        type: string
+      id:
+        type: string
+      module:
+        $ref: '#/definitions/studio.Module'
+      status:
+        type: string
+      title:
+        type: string
+    type: object
   studio.StudioCollectionContentItem:
     properties:
       content_id:
@@ -7099,6 +7146,39 @@ definitions:
           $ref: '#/definitions/studio.StudioTimeAnchor'
         type: array
     type: object
+  studio.StudioPreflightIssue:
+    properties:
+      code:
+        type: string
+    type: object
+  studio.StudioReplyTemplate:
+    properties:
+      channel_id:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  studio.StudioReplyTemplateInput:
+    properties:
+      channel_id:
+        type: string
+      content:
+        type: string
+      name:
+        type: string
+    required:
+    - channel_id
+    - content
+    - name
+    type: object
   studio.StudioTimeAnchor:
     properties:
       end:
@@ -7126,6 +7206,13 @@ definitions:
       description:
         type: string
       name:
+        type: string
+    type: object
+  studio.UpdateInteractionStateInput:
+    properties:
+      handled:
+        type: boolean
+      priority:
         type: string
     type: object
   studio.collectionConflictResolution:
@@ -18021,6 +18108,14 @@ paths:
         in: query
         name: range
         type: integer
+      - description: 统一合集 UUID
+        in: query
+        name: collection_id
+        type: string
+      - description: 内容公开 UUID
+        in: query
+        name: content_id
+        type: string
       produces:
       - application/json
       responses:
@@ -18525,6 +18620,25 @@ paths:
         in: query
         name: anchored
         type: boolean
+      - description: 按处理状态筛选
+        in: query
+        name: handled
+        type: boolean
+      - description: 优先级
+        enum:
+        - normal
+        - high
+        in: query
+        name: priority
+        type: string
+      - description: 内容公开 UUID
+        in: query
+        name: content_id
+        type: string
+      - description: 评论关键词
+        in: query
+        name: q
+        type: string
       - description: 页码
         in: query
         name: page
@@ -18557,6 +18671,119 @@ paths:
       security:
       - BearerAuth: []
       summary: 获取创作互动
+      tags:
+      - studio
+  /api/v1/studio/{module}/interactions/{id}/state:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 评论 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        type: string
+      - description: 处理状态
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.UpdateInteractionStateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新互动处理状态
+      tags:
+      - studio
+  /api/v1/studio/{module}/interactions/states:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        - podcast
+        - video
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        type: string
+      - description: 批量处理状态
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.BatchInteractionStateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 批量更新互动处理状态
       tags:
       - studio
   /api/v1/studio/{module}/settings:
@@ -18640,6 +18867,49 @@ paths:
       security:
       - BearerAuth: []
       summary: 保存创作设置
+      tags:
+      - studio
+  /api/v1/studio/calendar:
+    get:
+      parameters:
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        type: string
+      - description: 浏览器本地范围起点的 RFC3339 时间
+        in: query
+        name: from
+        required: true
+        type: string
+      - description: 浏览器本地范围终点的 RFC3339 时间
+        in: query
+        name: to
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/studio.StudioCalendarItem'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取定时发布日历
       tags:
       - studio
   /api/v1/studio/channels:
@@ -18769,6 +19039,44 @@ paths:
       summary: 更新创作频道
       tags:
       - studio
+  /api/v1/studio/collections/{id}/candidates:
+    get:
+      parameters:
+      - description: 合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 搜索内容标题
+        in: query
+        name: q
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/studio.StudioCollectionContentCandidate'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 搜索统一合集候选内容
+      tags:
+      - studio
   /api/v1/studio/collections/{id}/contents:
     get:
       parameters:
@@ -18803,6 +19111,87 @@ paths:
       summary: 获取统一合集成员
       tags:
       - studio
+  /api/v1/studio/collections/{id}/contents/{contentId}:
+    delete:
+      parameters:
+      - description: 合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 规范内容 UUID
+        in: path
+        name: contentId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 移除统一合集成员
+      tags:
+      - studio
+    put:
+      parameters:
+      - description: 合集 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 规范内容 UUID
+        in: path
+        name: contentId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 加入或移动统一合集成员
+      tags:
+      - studio
   /api/v1/studio/dashboard:
     get:
       parameters:
@@ -18832,6 +19221,108 @@ paths:
       security:
       - BearerAuth: []
       summary: 获取创作中心总览
+      tags:
+      - studio
+  /api/v1/studio/reply-templates:
+    get:
+      parameters:
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/studio.StudioReplyTemplate'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取回复模板
+      tags:
+      - studio
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 回复模板
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.StudioReplyTemplateInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/studio.StudioReplyTemplate'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建回复模板
+      tags:
+      - studio
+  /api/v1/studio/reply-templates/{id}:
+    delete:
+      parameters:
+      - description: 模板 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 删除回复模板
       tags:
       - studio
   /api/v1/studio/state:
