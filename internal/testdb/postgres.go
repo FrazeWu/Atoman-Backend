@@ -13,12 +13,9 @@ import (
 
 func OpenPostgres(t *testing.T, schemaPrefix string) *gorm.DB {
 	t.Helper()
-	dsn := os.Getenv("TEST_DATABASE_URL")
+	dsn := TestPostgresDSN()
 	if dsn == "" {
-		dsn = os.Getenv("TEST_POSTGRES_DSN")
-	}
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL or TEST_POSTGRES_DSN is not configured")
+		t.Skip("TEST_POSTGRES_DSN is not configured; set it or create .env.dev from .env.example")
 	}
 	if templateName := os.Getenv("TEST_POSTGRES_TEMPLATE_DATABASE"); templateName != "" {
 		return openTemplateDatabase(t, dsn, schemaPrefix, templateName)
