@@ -262,7 +262,7 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 			Description:     recommendationSourceDescription(source),
 			ContentType:     normalizeSourceCategory(source.Category),
 			LanguageCode:    rowLanguageCode(source.LanguageCode, languageCode),
-			TargetPath:      "/feed?source_id=" + source.ID.String(),
+			TargetPath:      "/feed/sources?source_id=" + source.ID.String(),
 			ScoreLabel:      recommendationScoreLabel(mode, item.FinalScore),
 			BookmarkCount:   source.SubscriptionCount,
 			LastPublishedAt: source.LastPublishedAt,
@@ -422,7 +422,7 @@ func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) e
 				items[i].SourceTitle = feedItem.FeedSource.Title
 				items[i].SourceType = feedItem.FeedSource.SourceType
 				items[i].SourceCategory = normalizeSourceCategory(feedItem.FeedSource.Category)
-				items[i].SourcePath = "/feed?source_id=" + feedItem.FeedSource.ID.String()
+				items[i].SourcePath = "/feed/sources?source_id=" + feedItem.FeedSource.ID.String()
 			}
 		}
 	}
