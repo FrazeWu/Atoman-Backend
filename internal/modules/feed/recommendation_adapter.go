@@ -7,6 +7,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"atoman/internal/feedlanguage"
 	"atoman/internal/model"
@@ -21,7 +22,6 @@ const (
 	recommendationArticleCandidateLimit         = 5000
 	recommendationInternalArticleCandidateLimit = 2500
 	recommendationInternalArticleMinimumLength  = 280
-	recommendationInternalArticleViewThreshold  = 20
 	recommendationFeedReaderQualityThreshold    = 40
 	recommendationFeedFallbackWordCount         = 300
 	recommendationFeedFallbackSummaryLength     = 280
@@ -122,7 +122,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 		feedItemByID[candidate.EntityID] = feedItem
 	}
 
-	ranked := recommendation.RankCandidates(mode, candidates, 0)
+	ranked := recommendation.RankCandidates(mode, candidates, 2)
 	items := make([]RecommendationItemDTO, 0, len(ranked))
 	for _, item := range ranked {
 		post, ok := postByID[item.EntityID]
@@ -510,7 +510,7 @@ func recommendationSourceKeyForFeedItem(item RecommendationArticleFeedItemRow) s
 }
 
 func normalizeArticleQuality(post RecommendationArticlePostRow) float64 {
-	contentScore := clamp01(float64(post.ContentLength) / 2400)
+	contentScore, structureScore := articleContentQualitySignals(post.Content, post.ContentLength)
 	metadataScore := 0.0
 	if post.HasSummary {
 		metadataScore += 0.10
@@ -518,8 +518,44 @@ func normalizeArticleQuality(post RecommendationArticlePostRow) float64 {
 	if post.HasCover {
 		metadataScore += 0.05
 	}
-	engagementScore := clamp01(float64(post.ViewCount) / 100)
-	return clamp01(0.70*contentScore + metadataScore + 0.15*engagementScore)
+	return clamp01(0.60*contentScore + 0.25*structureScore + metadataScore)
+}
+
+func articleContentQualitySignals(content string, contentLength int64) (float64, float64) {
+	characterCount := utf8.RuneCountInString(strings.TrimSpace(content))
+	if characterCount == 0 && contentLength > 0 {
+		characterCount = int(contentLength)
+	}
+	contentScore := clamp01(float64(characterCount) / 4000)
+	if content == "" {
+		return contentScore, 0
+	}
+
+	paragraphs := 0
+	headings := 0
+	links := 0
+	inParagraph := false
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			inParagraph = false
+			continue
+		}
+		if strings.HasPrefix(trimmed, "#") {
+			headings++
+		}
+		if !inParagraph {
+			paragraphs++
+			inParagraph = true
+		}
+		links += strings.Count(trimmed, "](") + strings.Count(trimmed, "http://") + strings.Count(trimmed, "https://")
+	}
+
+	structureScore := clamp01(float64(min(paragraphs, 8))/8*0.65 + float64(min(headings, 4))/4*0.35)
+	if characterCount > 0 && float64(links*80)/float64(characterCount) > 0.30 {
+		structureScore *= 0.5
+	}
+	return contentScore, structureScore
 }
 
 func normalizeFeedItemQuality(item RecommendationArticleFeedItemRow) float64 {

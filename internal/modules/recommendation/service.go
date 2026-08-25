@@ -30,7 +30,16 @@ func rankCandidates(mode Mode, candidates []Candidate, limit int) []RankedItem {
 		if mode == ModeLatest {
 			return ranked[i].EntityID > ranked[j].EntityID
 		}
-		return ranked[i].FinalScore > ranked[j].FinalScore
+		if ranked[i].FinalScore != ranked[j].FinalScore {
+			return ranked[i].FinalScore > ranked[j].FinalScore
+		}
+		if ranked[i].QualityScore != ranked[j].QualityScore {
+			return ranked[i].QualityScore > ranked[j].QualityScore
+		}
+		if leftPublishedAt != rightPublishedAt {
+			return leftPublishedAt > rightPublishedAt
+		}
+		return ranked[i].EntityID > ranked[j].EntityID
 	})
 
 	ranked = rerankBySourceDiversity(ranked, 2)

@@ -678,10 +678,10 @@ type RecommendationArticlePostRow struct {
 	ID            uuid.UUID
 	UserID        uuid.UUID
 	ChannelID     *uuid.UUID
-	ViewCount     int
 	CreatedAt     time.Time
 	PublishedAt   time.Time
 	ContentLength int64
+	Content       string
 	HasSummary    bool
 	HasCover      bool
 	Title         string
@@ -712,10 +712,10 @@ func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter t
 		"posts.id",
 		"posts.author_id AS user_id",
 		"posts.channel_id",
-		"blog_extensions.view_count",
 		"posts.created_at",
 		"COALESCE(posts.published_at, posts.created_at) AS published_at",
 		"LENGTH(COALESCE(blog_extensions.content, '')) AS content_length",
+		"blog_extensions.content",
 		"COALESCE(posts.summary, '') <> '' AS has_summary",
 		"COALESCE(posts.cover_url, '') <> '' AS has_cover",
 		"'' AS title",
@@ -733,7 +733,7 @@ func (r *Repo) ListRecommendationArticlePosts(includeText bool, publishedAfter t
 		Select(columns).
 		Where("posts.kind = ? AND posts.status = ?", "blog", "published").
 		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).
-		Where(recommendationArticlePostQualityPredicate("blog_extensions.content", "blog_extensions.view_count"), recommendationInternalArticleMinimumLength, recommendationInternalArticleViewThreshold).
+		Where(recommendationArticlePostQualityPredicate("blog_extensions.content"), recommendationInternalArticleMinimumLength).
 		Where("COALESCE(posts.published_at, posts.created_at) >= ?", publishedAfter).
 		Order("COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC").
 		Limit(limit)
@@ -749,10 +749,10 @@ func (r *Repo) listLegacyRecommendationArticlePosts(includeText bool, publishedA
 		"posts.id",
 		"posts.user_id",
 		"posts.channel_id",
-		"posts.view_count",
 		"posts.created_at",
 		"COALESCE(posts.published_at, posts.created_at) AS published_at",
 		"LENGTH(COALESCE(posts.content, '')) AS content_length",
+		"posts.content",
 		"COALESCE(posts.summary, '') <> '' AS has_summary",
 		"COALESCE(posts.cover_url, '') <> '' AS has_cover",
 		"'' AS title",
@@ -769,7 +769,7 @@ func (r *Repo) listLegacyRecommendationArticlePosts(includeText bool, publishedA
 		Select(columns).
 		Where("posts.deleted_at IS NULL AND posts.status = ?", "published").
 		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"}).
-		Where(recommendationArticlePostQualityPredicate("posts.content", "posts.view_count"), recommendationInternalArticleMinimumLength, recommendationInternalArticleViewThreshold).
+		Where(recommendationArticlePostQualityPredicate("posts.content"), recommendationInternalArticleMinimumLength).
 		Where("COALESCE(posts.published_at, posts.created_at) >= ?", publishedAfter).
 		Order("COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC").
 		Limit(limit)
@@ -878,8 +878,8 @@ func applyRecommendationTextFilter(db *gorm.DB, titleColumn string, summaryColum
 	return db.Where(strings.Join(clauses, " OR "), args...)
 }
 
-func recommendationArticlePostQualityPredicate(contentColumn string, viewCountColumn string) string {
-	return "(LENGTH(COALESCE(" + contentColumn + ", '')) >= ? OR COALESCE(" + viewCountColumn + ", 0) >= ?)"
+func recommendationArticlePostQualityPredicate(contentColumn string) string {
+	return "LENGTH(COALESCE(" + contentColumn + ", '')) >= ?"
 }
 
 func recommendationFeedItemQualityPredicate() string {

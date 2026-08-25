@@ -4,24 +4,22 @@ func scoreCandidate(mode Mode, c Candidate) float64 {
 	if c.QualityFirst {
 		switch mode {
 		case ModeHot:
-			return 0.55*c.QualityScore +
+			return 0.75*c.QualityScore +
 				0.20*c.FreshnessScore +
-				0.15*c.TrendScore +
-				0.10*c.AuthorityScore
+				0.05*c.AuthorityScore
 		case ModeFeatured:
-			return 0.70*c.QualityScore +
-				0.10*c.EditorialScore +
+			return 0.85*c.QualityScore +
 				0.10*c.AuthorityScore +
-				0.10*c.FreshnessScore
+				0.05*c.FreshnessScore
 		case ModeDiscover:
-			if c.QualityScore < 0.35 {
+			if c.QualityScore < 0.50 {
 				return 0
 			}
 
 			underexposedBonus := 1 - c.ExposureScore
-			return 0.65*c.QualityScore +
-				0.20*underexposedBonus +
-				0.15*c.FreshnessScore
+			return 0.75*c.QualityScore +
+				0.15*underexposedBonus +
+				0.10*c.FreshnessScore
 		}
 	}
 

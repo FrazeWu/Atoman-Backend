@@ -64,6 +64,29 @@ func TestScoreHotPrioritizesTrend(t *testing.T) {
 	}
 }
 
+func TestQualityFirstHotPrioritizesContentOverTrend(t *testing.T) {
+	candidate := Candidate{
+		QualityFirst:   true,
+		QualityScore:   0.8,
+		FreshnessScore: 0.4,
+		TrendScore:     1.0,
+		AuthorityScore: 0.2,
+	}
+
+	got := scoreCandidate(ModeHot, candidate)
+	want := 0.75*0.8 + 0.20*0.4 + 0.05*0.2
+	if math.Abs(got-want) > 1e-9 {
+		t.Fatalf("expected quality-first hot score %.2f, got %.2f", want, got)
+	}
+}
+
+func TestQualityFirstDiscoverDropsBelowContentThreshold(t *testing.T) {
+	candidate := Candidate{QualityFirst: true, QualityScore: 0.49, FreshnessScore: 1}
+	if got := scoreCandidate(ModeDiscover, candidate); got != 0 {
+		t.Fatalf("expected weak quality-first candidate to be excluded, got %.2f", got)
+	}
+}
+
 func TestScoreFeaturedPrioritizesQuality(t *testing.T) {
 	candidate := Candidate{
 		QualityScore:   0.8,
