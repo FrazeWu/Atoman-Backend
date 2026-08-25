@@ -1,16 +1,29 @@
 package blog
 
 import (
+	"context"
+	"io"
+
 	"atoman/internal/modules/reference"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
+type ExportAssetReader interface {
+	ReadExportAsset(context.Context, string, int64) (io.ReadCloser, error)
+}
+
 type Service struct {
-	db         *gorm.DB
-	repo       *Repo
-	references *reference.Service
+	db           *gorm.DB
+	repo         *Repo
+	references   *reference.Service
+	exportAssets ExportAssetReader
+}
+
+func (s *Service) WithExportAssetReader(reader ExportAssetReader) *Service {
+	s.exportAssets = reader
+	return s
 }
 
 func NewService(db *gorm.DB) *Service {

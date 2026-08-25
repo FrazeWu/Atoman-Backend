@@ -22,6 +22,7 @@ func Run(db *gorm.DB) error {
 		run  func(*gorm.DB) error
 	}{
 		{"feed source fetch state migration", migrations.RunFeedSourceFetchStateMigration},
+		{"feed crawl optimization migration", migrations.RunFeedCrawlOptimizationMigration},
 		{"deduplicate subscriptions", migrations.DeduplicateSubscriptions},
 		{"deduplicate subscription groups", migrations.DeduplicateSubscriptionGroups},
 		{"subscription unique index repair", migrations.RunSubscriptionUniqueIndex},
@@ -248,13 +249,15 @@ func MigrateSchema(db *gorm.DB) error {
 	models := []any{
 		&model.User{}, &model.UserSettings{}, &model.AuthSession{}, &model.LoginEvent{}, &model.EmailVerificationCode{},
 		&model.ExternalIdentity{}, &model.OAuthFlow{}, &model.Follow{}, &model.Channel{}, &model.Collection{},
-		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{}, &model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
+		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{}, &model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.BlogMarkdownImport{}, &model.BlogMarkdownImportDiagnostic{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
 		&model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
 		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.StudioMetricEvent{}, &model.StudioInteractionState{}, &model.StudioReplyTemplate{}, &model.ContentLifecycleEvent{},
-		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{},
+		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{}, &model.BlogPublishSchedule{},
 		&model.Post{}, &model.BlogPostVersion{}, &model.PostCollection{}, &model.BlogDraft{}, &model.ShortNote{},
-		&model.ShortNoteMedia{}, &model.Like{}, &model.PostRating{},
-		&model.AuditLog{}, &model.ActivityLog{}, &model.MediaAsset{},
+		&model.ShortNoteMedia{}, &model.ShortNoteVote{}, &model.Like{}, &model.PostRating{},
+		&model.ReputationRun{}, &model.BlogQualitySnapshot{}, &model.UserReputationSnapshot{},
+		&model.MusicContributionEvent{}, &model.MusicContributionEvidence{},
+		&model.AuditLog{}, &model.ActivityLog{}, &model.MediaAsset{}, &model.ContentMediaAsset{},
 		&model.Artist{}, &model.Album{}, &model.AlbumArtist{}, &model.Song{}, &model.SongArtist{}, &model.SongRating{}, &model.AlbumRating{}, &model.SongCorrection{}, &model.AlbumCorrection{},
 		&model.SongAudioReplacement{}, &model.MusicEntryStateRequest{}, &model.MusicEntryStateEvent{},
 		&model.ArtistCorrection{}, &model.ArtistAlias{}, &model.ArtistMerge{},
@@ -306,6 +309,7 @@ func MigrateSchema(db *gorm.DB) error {
 		{"content references migration", migrations.RunContentReferencesMigration},
 		{"music wiki state migration", migrations.RunMusicWikiStateMigration},
 		{"feed subscription management migration", migrations.RunFeedSubscriptionManagementMigration},
+		{"reputation indexes migration", migrations.RunReputationIndexes},
 	}
 	for _, step := range steps {
 		if err := step.run(db); err != nil {

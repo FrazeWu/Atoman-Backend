@@ -12,4 +12,4 @@ migrate:
 	go run ./cmd/migrate -env .env.dev
 
 swagger:
-	go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g cmd/start_server/main.go
+	go run github.com/swaggo/swag/cmd/swag@v1.16.6 init -g cmd/start_server/main.go --packageName docs

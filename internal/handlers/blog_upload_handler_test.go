@@ -41,7 +41,7 @@ func newBlogUploadTestUser(t *testing.T) (*gorm.DB, model.User) {
 	t.Helper()
 	db := testdb.Open(t)
 	middleware.SetAuthDB(db)
-	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{})
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.MediaAsset{})
 
 	user := model.User{Username: "alice_" + uuid.NewString()[:8], Email: uuid.NewString() + "@example.com", Password: "hash", Role: "user", IsActive: true}
 	if err := db.Create(&user).Error; err != nil {
@@ -104,5 +104,12 @@ func TestUploadBlogImageAllowsRealPNGHeader(t *testing.T) {
 	}
 	if s3Path == "" {
 		t.Fatal("expected valid blog image to be uploaded to S3")
+	}
+	var asset model.MediaAsset
+	if err := db.Where("user_id = ? AND purpose = ?", user.UUID, "blog.image").First(&asset).Error; err != nil {
+		t.Fatal(err)
+	}
+	if asset.Key == "" || asset.ContentType != "image/png" || asset.Size != int64(len(validPNGBytes())) {
+		t.Fatalf("unexpected persisted blog image asset: %#v", asset)
 	}
 }

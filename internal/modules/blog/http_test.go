@@ -1,9 +1,13 @@
 package blog
 
 import (
+	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -23,6 +27,168 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
+
+func TestMarkdownImportPreviewCreatesCanonicalDraftAndDiagnostics(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	router := newBlogHTTPRouter(service, &user)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "entry.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("---\ntitle: Imported title\nsummary: Imported summary\n---\n# ignored\n\n![remote](https://example.com/image.png)")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/imports/markdown", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", response.Code, response.Body.String())
+	}
+	var draft model.ContentBlogDraft
+	if err := db.Where("user_id = ?", user.ID).First(&draft).Error; err != nil {
+		t.Fatal(err)
+	}
+	if draft.Title != "Imported title" || draft.Summary != "Imported summary" || !strings.Contains(draft.Content, "https://example.com/image.png") {
+		t.Fatalf("unexpected canonical draft: %#v", draft)
+	}
+	var imported model.BlogMarkdownImport
+	if err := db.Where("user_id = ?", user.ID).First(&imported).Error; err != nil {
+		t.Fatal(err)
+	}
+	var diagnostics []model.BlogMarkdownImportDiagnostic
+	if err := db.Where("import_id = ?", imported.ID).Find(&diagnostics).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(diagnostics) != 1 || diagnostics[0].Code != "external_resource_preserved" {
+		t.Fatalf("expected external resource diagnostic, got %#v", diagnostics)
+	}
+}
+
+func TestMarkdownImportDetailsAndConfirmCanonicalDraft(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "Imported")
+	preview, err := service.PreviewMarkdownImport(user, "import.md", []byte("# Imported\n\n![remote](https://example.com/image.png)"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	post, err := service.CreatePost(user, CreatePostRequest{ChannelID: channel.ID, CollectionID: collection.ID, Title: preview.Title, Summary: preview.Summary, Content: preview.Content, Status: "draft", Visibility: "public"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := newBlogHTTPRouter(service, &user)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/blog/imports/markdown/"+preview.ImportID.String(), nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "external_resource_preserved") {
+		t.Fatalf("expected import details with diagnostics, got %d: %s", response.Code, response.Body.String())
+	}
+	response = httptest.NewRecorder()
+	confirmBody := bytes.NewBufferString(`{"content_id":"` + post.ID.String() + `"}`)
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/blog/imports/markdown/"+preview.ImportID.String()+"/confirm", confirmBody))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"confirmed"`) {
+		t.Fatalf("expected confirmed import, got %d: %s", response.Code, response.Body.String())
+	}
+	var entry model.BlogMarkdownImport
+	if err := db.First(&entry, "id = ?", preview.ImportID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if entry.ContentID == nil || *entry.ContentID != post.ID || entry.Status != "confirmed" {
+		t.Fatalf("unexpected confirmed import: %#v", entry)
+	}
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/v1/blog/imports/markdown/"+preview.ImportID.String()+"/confirm", bytes.NewBufferString(`{"content_id":"`+post.ID.String()+`"}`)))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected idempotent confirmation, got %d: %s", response.Code, response.Body.String())
+	}
+	var draft model.ContentBlogDraft
+	if err := db.First(&draft, "id = ?", preview.DraftID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if draft.ContentID == nil || *draft.ContentID != post.ID {
+		t.Fatalf("expected preview draft to be linked to content, got %#v", draft)
+	}
+
+	other := model.User{Username: "import-other", Email: "import-other@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	otherUser := authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: authctx.RoleUser}
+	response = httptest.NewRecorder()
+	newBlogHTTPRouter(service, &otherUser).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/blog/imports/markdown/"+preview.ImportID.String(), nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected other user details 404, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestMarkdownImportPreviewRejectsUnsupportedFile(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
+	router := newBlogHTTPRouter(service, &user)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "entry.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("<h1>not markdown</h1>")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/imports/markdown", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestMarkdownExportAllowsAuthorAndRejectsOtherUser(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "Exports")
+	asset := model.MediaAsset{UserID: &user.ID, Purpose: "blog.image", URL: "https://assets.example.test/export.png", Key: "blog/export.png", ContentType: "image/png", Size: int64(len("export-asset"))}
+	if err := db.Create(&asset).Error; err != nil {
+		t.Fatal(err)
+	}
+	post, err := service.CreatePost(user, CreatePostRequest{ChannelID: channel.ID, CollectionID: collection.ID, Title: "Export", Content: "![image](https://assets.example.test/export.png)", Status: "draft", Visibility: "private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.WithExportAssetReader(exportAssetReaderFunc(func(_ context.Context, key string, _ int64) (io.ReadCloser, error) {
+		if key != asset.Key {
+			t.Fatalf("unexpected key %q", key)
+		}
+		return io.NopCloser(strings.NewReader("export-asset")), nil
+	}))
+	response := httptest.NewRecorder()
+	newBlogHTTPRouter(service, &user).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String()+"/export", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected author export 200, got %d: %s", response.Code, response.Body.String())
+	}
+	zipReader, err := zip.NewReader(bytes.NewReader(response.Body.Bytes()), int64(response.Body.Len()))
+	if err != nil || len(zipReader.File) != 3 {
+		t.Fatalf("expected exported asset archive, files=%v err=%v", len(zipReader.File), err)
+	}
+
+	other := model.User{Username: "export-other", Email: "export-other@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatal(err)
+	}
+	otherUser := authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: authctx.RoleUser}
+	response = httptest.NewRecorder()
+	newBlogHTTPRouter(service, &otherUser).ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String()+"/export", nil))
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("expected other user export 403, got %d: %s", response.Code, response.Body.String())
+	}
+}
 
 func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUser) {
 	t.Helper()
@@ -46,6 +212,8 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.ContentBlogExtension{},
 		&model.ContentBlogVersion{},
 		&model.ContentBlogDraft{},
+		&model.BlogMarkdownImport{},
+		&model.BlogMarkdownImportDiagnostic{},
 		&model.ContentCollection{},
 		&model.ContentCollectionMembership{},
 		&model.LegacyCollectionMapping{},
@@ -58,6 +226,8 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.SubscriptionGroup{},
 		&model.Subscription{},
 		&model.ContentReference{},
+		&model.MediaAsset{},
+		&model.ContentMediaAsset{},
 		&model.Notification{},
 	)
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {
@@ -955,7 +1125,7 @@ func TestBlogPostCRUDUsesCanonicalTablesOnly(t *testing.T) {
 	if response.Code != http.StatusOK {
 		t.Fatalf("update canonical post: %d %s", response.Code, response.Body.String())
 	}
-	updated, err := loadCanonicalBlogPost(db, post.ID)
+	updated, err := loadCanonicalBlogContent(db, post.ID)
 	if err != nil {
 		t.Fatalf("reload canonical post: %v", err)
 	}
@@ -973,6 +1143,39 @@ func TestBlogPostCRUDUsesCanonicalTablesOnly(t *testing.T) {
 	router.ServeHTTP(readResponse, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil))
 	if readResponse.Code != http.StatusOK || !strings.Contains(readResponse.Body.String(), "Updated canonical title") {
 		t.Fatalf("canonical detail read did not return updated content: %d %s", readResponse.Code, readResponse.Body.String())
+	}
+}
+
+func TestLoadCanonicalBlogContentsUsesCanonicalRuntimeType(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, collection := createOwnedChannelAndCollection(t, service, user, "Canonical loader")
+	post, err := service.CreatePost(user, CreatePostRequest{
+		ChannelID: channel.ID, CollectionID: collection.ID, Title: "Canonical loader title", Content: "canonical loader body", Status: "draft", Visibility: "private",
+	})
+	if err != nil {
+		t.Fatalf("create canonical post: %v", err)
+	}
+
+	contents, err := LoadCanonicalBlogContents(db, CanonicalBlogPostsQuery(db).Where("posts.id = ?", post.ID))
+	if err != nil {
+		t.Fatalf("load canonical contents: %v", err)
+	}
+	if len(contents) != 1 {
+		t.Fatalf("expected one canonical content, got %d", len(contents))
+	}
+	content := contents[0]
+	if content.ID != post.ID || content.Title != "Canonical loader title" || content.Content != "canonical loader body" {
+		t.Fatalf("unexpected canonical content: %#v", content)
+	}
+	if content.CollectionID == nil || *content.CollectionID != collection.ID || content.Collection == nil || content.Collection.ID != collection.ID {
+		t.Fatalf("expected canonical collection projection, got %#v", content.Collection)
+	}
+	var legacyCount int64
+	if err := db.Model(&model.Post{}).Where("id = ?", post.ID).Count(&legacyCount).Error; err != nil {
+		t.Fatalf("count legacy posts: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("canonical loader must not require a legacy post row, got %d", legacyCount)
 	}
 }
 
@@ -1521,7 +1724,7 @@ func TestStudioBlogReadReturnsPublicStatsWithoutWritingMetrics(t *testing.T) {
 	ownerRouter := newBlogHTTPRouter(service, &owner)
 	ownerW := httptest.NewRecorder()
 	ownerRouter.ServeHTTP(ownerW, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+post.ID.String(), nil))
-	updated, err := loadCanonicalBlogPost(db, post.ID)
+	updated, err := loadCanonicalBlogContent(db, post.ID)
 	if err != nil {
 		t.Fatalf("reload canonical post: %v", err)
 	}
@@ -1587,7 +1790,7 @@ func TestSEOGetPostReturnsPublicMetadataWithoutIncrementingViewCount(t *testing.
 		t.Fatalf("unexpected timestamps: %#v", response.Data)
 	}
 
-	updated, err := loadCanonicalBlogPost(db, post.ID)
+	updated, err := loadCanonicalBlogContent(db, post.ID)
 	if err != nil {
 		t.Fatalf("reload canonical post: %v", err)
 	}
@@ -2076,7 +2279,7 @@ func TestRegisterRoutesUpdatePostRejectsInvalidVisibilityWithoutChangingPrivateP
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
-	updated, err := loadCanonicalBlogPost(db, post.ID)
+	updated, err := loadCanonicalBlogContent(db, post.ID)
 	if err != nil {
 		t.Fatalf("reload canonical post: %v", err)
 	}
@@ -2147,7 +2350,7 @@ func TestRegisterRoutesUpdatePostRejectsOutOfScopeCollectionWithoutChangingPost(
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected out-of-scope collection update to return 400, got %d: %s", w.Code, w.Body.String())
 	}
-	updated, err := loadCanonicalBlogPost(db, post.ID)
+	updated, err := loadCanonicalBlogContent(db, post.ID)
 	if err != nil {
 		t.Fatalf("reload canonical post: %v", err)
 	}
@@ -2235,7 +2438,7 @@ func TestRegisterRoutesPublishPostUpdatesStatus(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	updated, err := loadCanonicalBlogPost(db, post.ID)
+	updated, err := loadCanonicalBlogContent(db, post.ID)
 	if err != nil {
 		t.Fatalf("reload canonical post: %v", err)
 	}
@@ -2272,12 +2475,41 @@ func TestRegisterRoutesUnpublishPostUpdatesStatus(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	updated, err := loadCanonicalBlogPost(db, post.ID)
+	updated, err := loadCanonicalBlogContent(db, post.ID)
 	if err != nil {
 		t.Fatalf("reload canonical post: %v", err)
 	}
 	if updated.Status != "draft" {
 		t.Fatalf("expected draft, got %s", updated.Status)
+	}
+}
+
+func TestRegisterRoutesArchiveAndUnarchivePost(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, _ := createOwnedChannelAndCollection(t, service, user, "Alice")
+	post := createPostRecord(t, db, user.ID, &channel.ID, "Archive me", "published")
+	r := newBlogHTTPRouter(service, &user)
+
+	for _, action := range []struct {
+		path   string
+		status string
+	}{
+		{path: "archive", status: "archived"},
+		{path: "unarchive", status: "draft"},
+	} {
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/"+action.path, nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s status = %d: %s", action.path, w.Code, w.Body.String())
+		}
+		content, err := loadCanonicalBlogContent(db, post.ID)
+		if err != nil {
+			t.Fatalf("reload canonical content after %s: %v", action.path, err)
+		}
+		if content.Status != action.status {
+			t.Fatalf("status after %s = %q, want %q", action.path, content.Status, action.status)
+		}
 	}
 }
 
@@ -2298,7 +2530,7 @@ func TestRegisterRoutesAdminCanUnpublishAnotherUsersPost(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	updated, err := loadCanonicalBlogPost(db, post.ID)
+	updated, err := loadCanonicalBlogContent(db, post.ID)
 	if err != nil {
 		t.Fatalf("reload canonical post: %v", err)
 	}
@@ -2321,7 +2553,7 @@ func TestRegisterRoutesPinPostUpdatesPinnedState(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	updated, err := loadCanonicalBlogPost(db, post.ID)
+	updated, err := loadCanonicalBlogContent(db, post.ID)
 	if err != nil {
 		t.Fatalf("reload canonical post: %v", err)
 	}
@@ -2346,7 +2578,7 @@ func TestRegisterRoutesUnpinPostUpdatesPinnedState(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	updated, err := loadCanonicalBlogPost(db, post.ID)
+	updated, err := loadCanonicalBlogContent(db, post.ID)
 	if err != nil {
 		t.Fatalf("reload canonical post: %v", err)
 	}

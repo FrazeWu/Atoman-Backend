@@ -46,14 +46,14 @@ func (s *Service) GetChannelBySlug(slug string) (model.Channel, error) {
 	return channel, err
 }
 
-func (s *Service) ListCollectionsByChannel(channelID uuid.UUID) ([]model.Collection, error) {
+func (s *Service) ListCollectionsByChannel(channelID uuid.UUID) ([]BlogCollection, error) {
 	if _, err := s.GetChannel(channelID); err != nil {
 		return nil, err
 	}
 	return s.repo.ListCollectionsByChannel(channelID)
 }
 
-func (s *Service) ListCollectionsByChannelSlug(slug string) (model.Channel, []model.Collection, error) {
+func (s *Service) ListCollectionsByChannelSlug(slug string) (model.Channel, []BlogCollection, error) {
 	channel, err := s.GetChannelBySlug(slug)
 	if err != nil {
 		return model.Channel{}, nil, err
@@ -62,18 +62,18 @@ func (s *Service) ListCollectionsByChannelSlug(slug string) (model.Channel, []mo
 	return channel, collections, err
 }
 
-func (s *Service) GetCollection(id uuid.UUID) (model.Collection, error) {
+func (s *Service) GetCollection(id uuid.UUID) (BlogCollection, error) {
 	if id == uuid.Nil {
-		return model.Collection{}, apperr.BadRequest("validation.invalid_request", "collection_id is required")
+		return BlogCollection{}, apperr.BadRequest("validation.invalid_request", "collection_id is required")
 	}
 	collection, err := s.repo.GetCollection(id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return model.Collection{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
+		return BlogCollection{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
 	}
 	return collection, err
 }
 
-func (s *Service) ListUserCollections(userID uuid.UUID) ([]model.Collection, error) {
+func (s *Service) ListUserCollections(userID uuid.UUID) ([]BlogCollection, error) {
 	if userID == uuid.Nil {
 		return nil, apperr.Unauthorized("Login required")
 	}
@@ -153,53 +153,47 @@ func (s *Service) DeleteChannel(user authctx.CurrentUser, channelID uuid.UUID) e
 	return studioapi.NewService(s.db).DeleteChannel(user, channel.ID)
 }
 
-func (s *Service) CreateCollection(user authctx.CurrentUser, channelID uuid.UUID, name string, description string, coverURL string) (model.Collection, error) {
+func (s *Service) CreateCollection(user authctx.CurrentUser, channelID uuid.UUID, name string, description string, coverURL string) (BlogCollection, error) {
 	channel, err := s.GetChannel(channelID)
 	if err != nil {
-		return model.Collection{}, err
+		return BlogCollection{}, err
 	}
 	if channel.UserID == nil || *channel.UserID != user.ID {
-		return model.Collection{}, apperr.Forbidden("blog.channel_forbidden", "You do not have permission to add collections to this channel")
+		return BlogCollection{}, apperr.Forbidden("blog.channel_forbidden", "You do not have permission to add collections to this channel")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return model.Collection{}, apperr.BadRequest("validation.invalid_request", "name is required")
+		return BlogCollection{}, apperr.BadRequest("validation.invalid_request", "name is required")
 	}
-	collection := model.ContentCollection{
-		ChannelID:   channelID,
-		CreatedBy:   &user.ID,
-		Name:        name,
-		Description: strings.TrimSpace(description),
-		CoverURL:    strings.TrimSpace(coverURL),
-	}
+	collection := model.ContentCollection{ChannelID: channelID, CreatedBy: &user.ID, Name: name, Description: strings.TrimSpace(description), CoverURL: strings.TrimSpace(coverURL)}
 	if err := s.repo.CreateCollection(&collection); err != nil {
-		return model.Collection{}, err
+		return BlogCollection{}, err
 	}
 	return s.repo.GetCollection(collection.ID)
 }
 
-func (s *Service) UpdateCollection(user authctx.CurrentUser, collectionID uuid.UUID, name string, description string, coverURL string) (model.Collection, error) {
+func (s *Service) UpdateCollection(user authctx.CurrentUser, collectionID uuid.UUID, name string, description string, coverURL string) (BlogCollection, error) {
 	collection, err := s.repo.GetCollection(collectionID)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return model.Collection{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
+		return BlogCollection{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
 	}
 	if err != nil {
-		return model.Collection{}, err
+		return BlogCollection{}, err
 	}
 	channel, err := s.GetChannel(collection.ChannelID)
 	if err != nil {
-		return model.Collection{}, err
+		return BlogCollection{}, err
 	}
 	if channel.UserID == nil || *channel.UserID != user.ID {
-		return model.Collection{}, apperr.Forbidden("blog.collection_forbidden", "You do not have permission to modify this collection")
+		return BlogCollection{}, apperr.Forbidden("blog.collection_forbidden", "You do not have permission to modify this collection")
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return model.Collection{}, apperr.BadRequest("validation.invalid_request", "name is required")
+		return BlogCollection{}, apperr.BadRequest("validation.invalid_request", "name is required")
 	}
 	updates := map[string]any{"name": name, "description": strings.TrimSpace(description), "cover_url": strings.TrimSpace(coverURL)}
 	if err := s.db.Model(&model.ContentCollection{}).Where("id = ?", collectionID).Updates(updates).Error; err != nil {
-		return model.Collection{}, err
+		return BlogCollection{}, err
 	}
 	return s.repo.GetCollection(collectionID)
 }

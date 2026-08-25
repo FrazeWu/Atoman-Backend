@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"atoman/internal/model"
-
 	"github.com/google/uuid"
 )
 
@@ -16,8 +14,10 @@ func TestNewBlogContentDTOProducesFlatCanonicalResponse(t *testing.T) {
 	collectionID := uuid.New()
 	publishedAt := time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
 	rating := 8
-	post := model.Post{
-		Base:               model.Base{ID: postID, CreatedAt: publishedAt, UpdatedAt: publishedAt},
+	content := BlogContent{
+		ID:                 postID,
+		CreatedAt:          publishedAt,
+		UpdatedAt:          publishedAt,
 		UserID:             uuid.New(),
 		ChannelID:          &channelID,
 		CollectionID:       &collectionID,
@@ -39,7 +39,7 @@ func TestNewBlogContentDTOProducesFlatCanonicalResponse(t *testing.T) {
 		ViewerRating:       &rating,
 	}
 
-	payload, err := json.Marshal(newBlogContentDTO(post))
+	payload, err := json.Marshal(newBlogContentDTOFromCanonical(content))
 	if err != nil {
 		t.Fatalf("marshal Blog content DTO: %v", err)
 	}

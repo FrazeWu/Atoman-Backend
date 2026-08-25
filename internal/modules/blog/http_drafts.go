@@ -41,12 +41,17 @@ func (h *Handler) getDrafts(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	posts, err := hydrateCanonicalBlogPosts(h.service.db, rows)
+	contents, err := hydrateCanonicalBlogContents(h.service.db, rows)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, posts)
+	dtos, err := h.service.blogContentDTOs(h.service.db, contents, &user.ID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, dtos)
 }
 
 func (h *Handler) getBlogDraft(c *gin.Context) {
@@ -106,14 +111,14 @@ func (h *Handler) putBlogDraft(c *gin.Context) {
 	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
 		var contentID *uuid.UUID
 		if sourceContentID != nil {
-			post, err := loadCanonicalBlogPost(tx, *sourceContentID)
+			content, err := loadCanonicalBlogContent(tx, *sourceContentID)
 			if err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
 					return apperr.NotFound("blog.post_not_found", "Post not found")
 				}
 				return err
 			}
-			contentID = &post.ID
+			contentID = &content.ID
 		}
 		if collectionID != nil {
 			if _, err := canonicalBlogCollectionID(tx, *collectionID); err != nil {

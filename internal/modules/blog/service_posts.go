@@ -29,6 +29,7 @@ var (
 var allowedPostStatuses = map[string]struct{}{
 	"draft":     {},
 	"published": {},
+	"archived":  {},
 }
 
 var allowedPostVisibilities = map[string]struct{}{
@@ -37,33 +38,32 @@ var allowedPostVisibilities = map[string]struct{}{
 	"private":   {},
 }
 
-func (s *Service) syncPostReferences(tx *gorm.DB, post model.Post) ([]reference.ResolvedReference, error) {
-	if post.Status != "published" {
-		return nil, s.references.RemoveSource(tx, "post", post.ID)
+func (s *Service) syncBlogContentReferences(tx *gorm.DB, content BlogContent) ([]reference.ResolvedReference, error) {
+	if content.Status != "published" {
+		return nil, s.references.RemoveSource(tx, "post", content.ID)
 	}
 	audience := ""
-	if post.Visibility == "" || post.Visibility == "public" {
+	if content.Visibility == "" || content.Visibility == "public" {
 		audience = reference.AudiencePublic
 	}
 	return s.references.ReplacePublished(tx, reference.Source{
-		Type: "post", ID: post.ID, ActorID: post.UserID, Audience: audience,
-		Meta: map[string]interface{}{"module": "blog", "path": "/post/" + post.ID.String()},
-	}, []reference.Field{{Name: "content", Content: post.Content}})
+		Type: "post", ID: content.ID, ActorID: content.UserID, Audience: audience,
+		Meta: map[string]interface{}{"module": "blog", "path": "/post/" + content.ID.String()},
+	}, []reference.Field{{Name: "content", Content: content.Content}})
 }
 
-func (s *Service) postDTOs(db *gorm.DB, posts []model.Post, viewerID *uuid.UUID) ([]BlogContentDTO, error) {
-	dtos := make([]BlogContentDTO, len(posts))
-	ids := make([]uuid.UUID, 0, len(posts))
-	for index, post := range posts {
-		dtos[index] = newBlogContentDTO(post)
-		ids = append(ids, post.ID)
+func (s *Service) blogContentDTOs(db *gorm.DB, contents []BlogContent, viewerID *uuid.UUID) ([]BlogContentDTO, error) {
+	dtos := make([]BlogContentDTO, len(contents))
+	ids := make([]uuid.UUID, 0, len(contents))
+	for index, content := range contents {
+		dtos[index] = newBlogContentDTOFromCanonical(content)
+		ids = append(ids, content.ID)
 	}
 	if len(ids) == 0 {
 		return dtos, nil
 	}
 	var rows []model.ContentReference
-	if err := db.Where("source_type = ? AND source_id IN ?", "post", ids).
-		Order("source_id ASC, source_field ASC, start_offset ASC").Find(&rows).Error; err != nil {
+	if err := db.Where("source_type = ? AND source_id IN ?", "post", ids).Order("source_id ASC, source_field ASC, start_offset ASC").Find(&rows).Error; err != nil {
 		return nil, err
 	}
 	viewer := reference.Viewer{}
@@ -136,14 +136,6 @@ func (s *Service) populatePostRatings(db *gorm.DB, dtos []BlogContentDTO, viewer
 	return nil
 }
 
-func (s *Service) postDTO(db *gorm.DB, post model.Post, viewerID *uuid.UUID) (BlogContentDTO, error) {
-	items, err := s.postDTOs(db, []model.Post{post}, viewerID)
-	if err != nil {
-		return BlogContentDTO{}, err
-	}
-	return items[0], nil
-}
-
 func (s *Service) GetSEOPost(id uuid.UUID) (SEOPostDTO, error) {
 	post, err := s.repo.GetPublicPublishedPost(id)
 	if err != nil {
@@ -170,7 +162,7 @@ func (s *Service) ListSEOSitemap() ([]SEOSitemapItemDTO, error) {
 	return items, nil
 }
 
-func buildSEOPostDTO(post model.Post) SEOPostDTO {
+func buildSEOPostDTO(post BlogContent) SEOPostDTO {
 	authorName := ""
 	if post.User != nil {
 		authorName = strings.TrimSpace(post.User.DisplayName)
@@ -194,7 +186,7 @@ func seoPostPath(id uuid.UUID) string {
 	return "/posts/post/" + id.String()
 }
 
-func seoPostDescription(post model.Post) string {
+func seoPostDescription(post BlogContent) string {
 	if summary := strings.TrimSpace(post.Summary); summary != "" {
 		return summary
 	}
@@ -238,19 +230,19 @@ func stripHTMLTags(value string) string {
 	}
 }
 
-func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (model.Post, error) {
+func (s *Service) CreateBlogContent(user authctx.CurrentUser, req CreatePostRequest) (BlogContent, error) {
 	if user.ID == uuid.Nil {
-		return model.Post{}, apperr.Unauthorized("Login required")
+		return BlogContent{}, apperr.Unauthorized("Login required")
 	}
 	if strings.TrimSpace(req.Title) == "" || strings.TrimSpace(req.Content) == "" {
-		return model.Post{}, apperr.BadRequest("validation.invalid_request", "title and content are required")
+		return BlogContent{}, apperr.BadRequest("validation.invalid_request", "title and content are required")
 	}
 	status := strings.TrimSpace(req.Status)
 	if status == "" {
 		status = "draft"
 	}
 	if _, ok := allowedPostStatuses[status]; !ok {
-		return model.Post{}, apperr.BadRequest("blog.invalid_status_transition", "status is invalid")
+		return BlogContent{}, apperr.BadRequest("blog.invalid_status_transition", "status is invalid")
 	}
 
 	channelID := req.ChannelID
@@ -262,31 +254,31 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 		var collection model.ContentCollection
 		if err := s.db.First(&collection, "id = ?", *requestedCollectionID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return model.Post{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
+				return BlogContent{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
 			}
-			return model.Post{}, err
+			return BlogContent{}, err
 		}
 		channelID = collection.ChannelID
 	}
 	channel, err := s.repo.GetChannel(channelID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return model.Post{}, apperr.NotFound("blog.channel_not_found", "Channel not found")
+			return BlogContent{}, apperr.NotFound("blog.channel_not_found", "Channel not found")
 		}
-		return model.Post{}, err
+		return BlogContent{}, err
 	}
 	if channel.UserID == nil || *channel.UserID != user.ID {
-		return model.Post{}, apperr.Forbidden("blog.channel_forbidden", "You don't have permission to create post in this channel")
+		return BlogContent{}, apperr.Forbidden("blog.channel_forbidden", "You don't have permission to create post in this channel")
 	}
 	if isChannelBanned(channel) && status == "published" {
-		return model.Post{}, apperr.Forbidden("blog.channel_banned", "Banned channel cannot publish posts")
+		return BlogContent{}, apperr.Forbidden("blog.channel_banned", "Banned channel cannot publish posts")
 	}
 	collection, err := resolveBlogCollection(s.db, user.ID, channel.ID, requestedCollectionID, status == "published")
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return model.Post{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
+			return BlogContent{}, apperr.NotFound("blog.collection_not_found", "Collection not found")
 		}
-		return model.Post{}, err
+		return BlogContent{}, err
 	}
 
 	visibility := strings.TrimSpace(req.Visibility)
@@ -294,7 +286,7 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 		visibility = "public"
 	}
 	if _, ok := allowedPostVisibilities[visibility]; !ok {
-		return model.Post{}, apperr.BadRequest("blog.invalid_visibility", "visibility is invalid")
+		return BlogContent{}, apperr.BadRequest("blog.invalid_visibility", "visibility is invalid")
 	}
 	summary := strings.TrimSpace(req.Summary)
 	if summary == "" {
@@ -328,6 +320,9 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 		if err := tx.Create(&blogExtension).Error; err != nil {
 			return err
 		}
+		if err := s.syncBlogContentMediaAssets(tx, entry.ID, user.ID, entry.CoverURL, blogExtension.Content); err != nil {
+			return err
+		}
 		if collection != nil {
 			var maxPosition int
 			if err := tx.Model(&model.ContentCollectionMembership{}).Where("collection_id = ?", collection.ID).
@@ -341,51 +336,37 @@ func (s *Service) CreatePost(user authctx.CurrentUser, req CreatePostRequest) (m
 		if status != "published" {
 			return nil
 		}
-		post, err := loadCanonicalBlogPost(tx, entry.ID)
+		content, err := loadCanonicalBlogContent(tx, entry.ID)
 		if err != nil {
 			return err
 		}
-		if _, err := s.syncPostReferences(tx, post); err != nil {
+		if _, err := s.syncBlogContentReferences(tx, content); err != nil {
 			return err
 		}
-		if err := saveBlogPostVersion(tx, post, user.ID); err != nil {
+		if err := saveBlogContentVersion(tx, content, user.ID); err != nil {
 			return err
 		}
 		return lifecycle.NewService(tx).EnqueuePublication("blog", entry.ID)
 	}); err != nil {
-		return model.Post{}, err
+		return BlogContent{}, err
 	}
-	return loadCanonicalBlogPost(s.db, entry.ID)
+	return loadCanonicalBlogContent(s.db, entry.ID)
 }
 
-func saveBlogPostVersion(tx *gorm.DB, post model.Post, editorID uuid.UUID) error {
-	if post.CollectionID == nil || *post.CollectionID == uuid.Nil {
+func saveBlogContentVersion(tx *gorm.DB, content BlogContent, editorID uuid.UUID) error {
+	if content.CollectionID == nil || *content.CollectionID == uuid.Nil {
 		return apperr.BadRequest("validation.invalid_request", "collection_id is required")
 	}
 	var maxVersion int
-	if err := tx.Model(&model.ContentBlogVersion{}).Where("content_id = ?", post.ID).
+	if err := tx.Model(&model.ContentBlogVersion{}).Where("content_id = ?", content.ID).
 		Select("COALESCE(MAX(version), 0)").Scan(&maxVersion).Error; err != nil {
 		return err
 	}
-	version := model.ContentBlogVersion{
-		ContentID:    post.ID,
-		Version:      maxVersion + 1,
-		EditorID:     editorID,
-		Title:        post.Title,
-		Content:      post.Content,
-		Summary:      post.Summary,
-		CoverURL:     post.CoverURL,
-		LanguageCode: post.LanguageCode,
-		Pinned:       post.Pinned,
-		Visibility:   post.Visibility,
-		CollectionID: *post.CollectionID,
-		PublishedAt:  post.PublishedAt,
-	}
-	return tx.Create(&version).Error
+	return tx.Create(&model.ContentBlogVersion{ContentID: content.ID, Version: maxVersion + 1, EditorID: editorID, Title: content.Title, Content: content.Content, Summary: content.Summary, CoverURL: content.CoverURL, LanguageCode: content.LanguageCode, Pinned: content.Pinned, Visibility: content.Visibility, CollectionID: *content.CollectionID, PublishedAt: content.PublishedAt}).Error
 }
 
 func (s *Service) ListPostVersions(user authctx.CurrentUser, postID uuid.UUID) ([]BlogContentVersionDTO, error) {
-	post, err := s.repo.GetPost(postID)
+	post, err := s.repo.GetBlogContent(postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, apperr.NotFound("blog.post_not_found", "Post not found")
@@ -406,10 +387,10 @@ func (s *Service) ListPostVersions(user authctx.CurrentUser, postID uuid.UUID) (
 	return result, nil
 }
 
-func (s *Service) RestorePostVersion(user authctx.CurrentUser, postID uuid.UUID, versionNumber int) (model.Post, error) {
-	var restored model.Post
+func (s *Service) RestoreBlogContentVersion(user authctx.CurrentUser, postID uuid.UUID, versionNumber int) (BlogContent, error) {
+	var restored BlogContent
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		post, err := loadCanonicalBlogPost(tx, postID)
+		post, err := loadCanonicalBlogContent(tx, postID)
 		if err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
 				return apperr.NotFound("blog.post_not_found", "Post not found")
@@ -443,21 +424,25 @@ func (s *Service) RestorePostVersion(user authctx.CurrentUser, postID uuid.UUID,
 		if err := tx.Create(&model.ContentCollectionMembership{ContentID: postID, CollectionID: version.CollectionID}).Error; err != nil {
 			return err
 		}
-		restored, err = loadCanonicalBlogPost(tx, postID)
+		restored, err = loadCanonicalBlogContent(tx, postID)
 		if err != nil {
 			return err
 		}
-		if _, err := s.syncPostReferences(tx, restored); err != nil {
+		content := restored
+		if err := s.syncBlogContentMediaAssets(tx, content.ID, content.UserID, content.CoverURL, content.Content); err != nil {
 			return err
 		}
-		return saveBlogPostVersion(tx, restored, user.ID)
+		if _, err := s.syncBlogContentReferences(tx, content); err != nil {
+			return err
+		}
+		return saveBlogContentVersion(tx, content, user.ID)
 	})
 	return restored, err
 }
 
-func (s *Service) reorderCollectionPosts(collection model.Collection, orderedPostIDs []uuid.UUID, userID uuid.UUID) error {
+func (s *Service) reorderCollectionPosts(collection BlogCollection, orderedPostIDs []uuid.UUID, userID uuid.UUID) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		posts, err := loadCanonicalBlogPosts(tx, canonicalBlogPostsQuery(tx).Where("memberships.collection_id = ?", collection.ID))
+		posts, err := LoadCanonicalBlogContents(tx, canonicalBlogPostsQuery(tx).Where("memberships.collection_id = ?", collection.ID))
 		if err != nil {
 			return err
 		}
@@ -465,7 +450,7 @@ func (s *Service) reorderCollectionPosts(collection model.Collection, orderedPos
 			return apperr.BadRequest("validation.invalid_request", "post_ids must include every post in the collection")
 		}
 
-		postSet := make(map[uuid.UUID]model.Post, len(posts))
+		postSet := make(map[uuid.UUID]BlogContent, len(posts))
 		for _, post := range posts {
 			postSet[post.ID] = post
 		}

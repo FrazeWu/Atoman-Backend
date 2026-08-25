@@ -306,7 +306,7 @@ func newLifecyclePostgresFixture(t *testing.T) lifecyclePostgresFixture {
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.Video{},
 		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
 		&model.ContentLifecycleEvent{}, &model.ContentProgress{}, &model.ContentNotificationPreference{},
-		&model.ContentPublicationEvent{}, &model.FeedSource{}, &model.Subscription{}, &model.Follow{}, &model.Notification{},
+		&model.ContentPublicationEvent{}, &model.BlogPublishSchedule{}, &model.FeedSource{}, &model.Subscription{}, &model.Follow{}, &model.Notification{},
 	))
 	require.NoError(t, migrations.RunNotificationDMIndexes(db))
 	require.NoError(t, migrations.RunContentPublicationEventIndexes(db))

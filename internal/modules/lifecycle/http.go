@@ -22,6 +22,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/continue", h.listContinue)
 	group.GET("/notification-preferences", h.listNotificationPreferences)
 	group.PUT("/notification-preferences", h.saveNotificationPreference)
+	group.GET("/:module/:id/schedule", h.getSchedule)
 	group.POST("/:module/:id/schedule", h.scheduleContent)
 	group.DELETE("/:module/:id/schedule", h.cancelSchedule)
 }
@@ -100,6 +101,37 @@ func (h *Handler) saveNotificationPreference(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, item)
+}
+
+// getSchedule godoc
+// @Summary 查询定时发布状态
+// @Tags lifecycle
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog)
+// @Param id path string true "内容 UUID"
+// @Success 200 {object} BlogScheduleStatus
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/lifecycle/{module}/{id}/schedule [get]
+func (h *Handler) getSchedule(c *gin.Context) {
+	contentID, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+	if c.Param("module") != "blog" {
+		httpx.Error(c, apperr.BadRequest("lifecycle.invalid_module", "schedule status is available for blog content"))
+		return
+	}
+	user, _ := authctx.Current(c)
+	status, err := h.service.GetBlogSchedule(user, contentID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, status)
 }
 
 func (h *Handler) scheduleContent(c *gin.Context) {

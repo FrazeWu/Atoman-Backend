@@ -79,7 +79,6 @@ func (h *Handler) listSEOSitemap(c *gin.Context) {
 // @Failure 500 {object} handlers.ErrorResponse
 // @Router /api/v1/blog/posts [get]
 func (h *Handler) listPosts(c *gin.Context) {
-	var posts []model.Post
 	page, pageSize := httpx.PageParams(c)
 	userID, err := parseOptionalUUID(c.Query("user_id"))
 	if err != nil {
@@ -141,13 +140,13 @@ func (h *Handler) listPosts(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	posts, err = hydrateCanonicalBlogPosts(h.service.db, canonicalRows)
+	contents, err := hydrateCanonicalBlogContents(h.service.db, canonicalRows)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
 
-	postDTOs, err := h.service.postDTOs(h.service.db, posts, currentViewerID(c))
+	postDTOs, err := h.service.blogContentDTOs(h.service.db, contents, currentViewerID(c))
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -158,8 +157,8 @@ func (h *Handler) listPosts(c *gin.Context) {
 		CommentsCount  int64     `gorm:"column:comments_count"`
 		BookmarksCount int64     `gorm:"column:bookmarks_count"`
 	}
-	postIDs := make([]uuid.UUID, 0, len(posts))
-	for _, post := range posts {
+	postIDs := make([]uuid.UUID, 0, len(contents))
+	for _, post := range contents {
 		postIDs = append(postIDs, post.ID)
 	}
 	countsByPostID := make(map[uuid.UUID]postEngagementCount, len(postIDs))
@@ -177,8 +176,8 @@ func (h *Handler) listPosts(c *gin.Context) {
 			countsByPostID[count.PostID] = count
 		}
 	}
-	items := make([]BlogContentListItemDTO, 0, len(posts))
-	for index, post := range posts {
+	items := make([]BlogContentListItemDTO, 0, len(contents))
+	for index, post := range contents {
 		count := countsByPostID[post.ID]
 		items = append(items, BlogContentListItemDTO{
 			BlogContentDTO: postDTOs[index], LikesCount: count.LikesCount,
@@ -249,8 +248,8 @@ func (h *Handler) getPost(c *gin.Context) {
 		return
 	}
 
-	var post model.Post
-	if post, err = loadCanonicalBlogPost(h.service.db, postID); err != nil {
+	contents, err := LoadCanonicalBlogContents(h.service.db, canonicalBlogPostsQuery(h.service.db).Where("posts.id = ?", postID))
+	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
 			return
@@ -258,6 +257,11 @@ func (h *Handler) getPost(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
+	if len(contents) == 0 {
+		httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
+		return
+	}
+	post := contents[0]
 
 	viewerID := currentViewerID(c)
 	if post.Status != "published" {
@@ -266,7 +270,7 @@ func (h *Handler) getPost(c *gin.Context) {
 			return
 		}
 	} else {
-		allowed, err := CanViewPublishedPost(h.service.db, viewerID, post)
+		allowed, err := CanViewPublishedBlogContent(h.service.db, viewerID, post)
 		if err != nil {
 			httpx.Error(c, err)
 			return
@@ -318,7 +322,7 @@ func (h *Handler) getPost(c *gin.Context) {
 		}
 	}
 
-	postDTO, err := h.service.postDTO(h.service.db, post, viewerID)
+	postDTO, err := h.service.blogContentDTOs(h.service.db, []BlogContent{post}, viewerID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -331,7 +335,7 @@ func (h *Handler) getPost(c *gin.Context) {
 		BookmarksCount        int64 `json:"bookmarks_count"`
 		ChannelFollowersCount int64 `json:"channel_followers_count"`
 	}{
-		BlogContentDTO:        postDTO,
+		BlogContentDTO:        postDTO[0],
 		Liked:                 liked,
 		LikesCount:            likesCount,
 		CommentsCount:         commentsCount,
@@ -348,7 +352,7 @@ func currentViewerID(c *gin.Context) *uuid.UUID {
 	return &user.ID
 }
 
-func CanViewPublishedPost(db *gorm.DB, viewerID *uuid.UUID, post model.Post) (bool, error) {
+func CanViewPublishedBlogContent(db *gorm.DB, viewerID *uuid.UUID, post BlogContent) (bool, error) {
 	switch post.Visibility {
 	case "", "public":
 		return true, nil
@@ -426,17 +430,22 @@ func (h *Handler) createPost(c *gin.Context) {
 		return
 	}
 
-	post, err := h.service.CreatePost(user, req)
+	created, err := h.service.CreateBlogContent(user, req)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	postDTO, err := h.service.postDTO(h.service.db, post, &user.ID)
+	content, err := loadCanonicalBlogContent(h.service.db, created.ID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusCreated, postDTO)
+	postDTOs, err := h.service.blogContentDTOs(h.service.db, []BlogContent{content}, &user.ID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, postDTOs[0])
 }
 
 // listPostVersions godoc
@@ -493,17 +502,22 @@ func (h *Handler) restorePostVersion(c *gin.Context) {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "version must be a positive integer"))
 		return
 	}
-	post, err := h.service.RestorePostVersion(user, postID, version)
+	restored, err := h.service.RestoreBlogContentVersion(user, postID, version)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	postDTO, err := h.service.postDTO(h.service.db, post, &user.ID)
+	content, err := loadCanonicalBlogContent(h.service.db, restored.ID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	httpx.OK(c, http.StatusOK, postDTO)
+	postDTOs, err := h.service.blogContentDTOs(h.service.db, []BlogContent{content}, &user.ID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, postDTOs[0])
 }
 
 func (h *Handler) updatePost(c *gin.Context) {
@@ -529,7 +543,7 @@ func (h *Handler) updatePost(c *gin.Context) {
 			return
 		}
 	}
-	post, err := loadCanonicalBlogPost(h.service.db, postID)
+	post, err := loadCanonicalBlogContent(h.service.db, postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
@@ -646,15 +660,18 @@ func (h *Handler) updatePost(c *gin.Context) {
 				}
 			}
 		}
-		updated, err := loadCanonicalBlogPost(tx, postID)
+		content, err := loadCanonicalBlogContent(tx, postID)
 		if err != nil {
 			return err
 		}
-		if _, err := h.service.syncPostReferences(tx, updated); err != nil {
+		if err := h.service.syncBlogContentMediaAssets(tx, content.ID, content.UserID, content.CoverURL, content.Content); err != nil {
 			return err
 		}
-		if updated.Status == "published" {
-			if err := saveBlogPostVersion(tx, updated, user.ID); err != nil {
+		if _, err := h.service.syncBlogContentReferences(tx, content); err != nil {
+			return err
+		}
+		if content.Status == "published" {
+			if err := saveBlogContentVersion(tx, content, user.ID); err != nil {
 				return err
 			}
 			if !wasPublished {
@@ -666,20 +683,20 @@ func (h *Handler) updatePost(c *gin.Context) {
 		httpx.Error(c, err)
 		return
 	}
-	post, err = loadCanonicalBlogPost(h.service.db, postID)
+	content, err := loadCanonicalBlogContent(h.service.db, postID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	postDTO, err := h.service.postDTO(h.service.db, post, &user.ID)
+	postDTOs, err := h.service.blogContentDTOs(h.service.db, []BlogContent{content}, &user.ID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-	if wasPublic || isPublicPostState(post.Status, post.Visibility) {
-		indexnow.NotifyPaths(seoPostPath(post.ID))
+	if wasPublic || isPublicPostState(content.Status, content.Visibility) {
+		indexnow.NotifyPaths(seoPostPath(content.ID))
 	}
-	httpx.OK(c, http.StatusOK, postDTO)
+	httpx.OK(c, http.StatusOK, postDTOs[0])
 }
 
 func (h *Handler) deletePost(c *gin.Context) {
@@ -688,14 +705,12 @@ func (h *Handler) deletePost(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-
 	postID, err := parsePostID(c.Param("id"))
 	if err != nil {
 		httpx.Error(c, err)
 		return
 	}
-
-	post, err := loadCanonicalBlogPost(h.service.db, postID)
+	post, err := loadCanonicalBlogContent(h.service.db, postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
@@ -710,6 +725,9 @@ func (h *Handler) deletePost(c *gin.Context) {
 	}
 	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
 		if err := h.service.references.RemoveSource(tx, "post", post.ID); err != nil {
+			return err
+		}
+		if err := tx.Where("content_id = ?", post.ID).Delete(&model.ContentMediaAsset{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("content_id = ?", post.ID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
@@ -732,6 +750,10 @@ func (h *Handler) deletePost(c *gin.Context) {
 func (h *Handler) publishPost(c *gin.Context) { h.updatePostStatus(c, "published") }
 
 func (h *Handler) unpublishPost(c *gin.Context) { h.updatePostStatus(c, "draft") }
+
+func (h *Handler) archivePost(c *gin.Context) { h.updatePostStatus(c, "archived") }
+
+func (h *Handler) unarchivePost(c *gin.Context) { h.updatePostStatus(c, "draft") }
 
 func (h *Handler) pinPost(c *gin.Context) { h.updatePostPin(c, true) }
 
@@ -809,7 +831,7 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 		httpx.Error(c, err)
 		return
 	}
-	post, err := loadCanonicalBlogPost(h.service.db, postID)
+	post, err := loadCanonicalBlogContent(h.service.db, postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))
@@ -828,8 +850,7 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 			return
 		}
 	}
-	wasPublished := post.Status == "published"
-	wasPublic := isPublicPostState(post.Status, post.Visibility)
+	wasPublished, wasPublic := post.Status == "published", isPublicPostState(post.Status, post.Visibility)
 	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
 		updates := map[string]any{"status": status, "scheduled_at": nil}
 		if status == "published" && post.PublishedAt == nil {
@@ -838,15 +859,15 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 		if err := tx.Model(&model.ContentEntry{}).Where("id = ?", postID).Updates(updates).Error; err != nil {
 			return err
 		}
-		updated, err := loadCanonicalBlogPost(tx, postID)
+		content, err := loadCanonicalBlogContent(tx, postID)
 		if err != nil {
 			return err
 		}
-		if _, err := h.service.syncPostReferences(tx, updated); err != nil {
+		if _, err := h.service.syncBlogContentReferences(tx, content); err != nil {
 			return err
 		}
 		if status == "published" && !wasPublished {
-			if err := saveBlogPostVersion(tx, updated, user.ID); err != nil {
+			if err := saveBlogContentVersion(tx, content, user.ID); err != nil {
 				return err
 			}
 			return lifecycle.NewService(tx).EnqueuePublication("blog", postID)
@@ -856,7 +877,7 @@ func (h *Handler) updatePostStatus(c *gin.Context, status string) {
 		httpx.Error(c, err)
 		return
 	}
-	post, err = loadCanonicalBlogPost(h.service.db, postID)
+	post, err = loadCanonicalBlogContent(h.service.db, postID)
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -878,7 +899,7 @@ func (h *Handler) updatePostPin(c *gin.Context, pinned bool) {
 		httpx.Error(c, err)
 		return
 	}
-	post, err := loadCanonicalBlogPost(h.service.db, postID)
+	post, err := loadCanonicalBlogContent(h.service.db, postID)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			httpx.Error(c, apperr.NotFound("blog.post_not_found", "Post not found"))

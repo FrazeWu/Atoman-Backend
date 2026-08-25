@@ -51,7 +51,7 @@ func newLifecycleFixture(t *testing.T) lifecycleFixture {
 		&model.User{}, &model.Channel{}, &model.Collection{}, &model.Post{}, &model.PodcastEpisode{}, &model.Video{}, &model.VideoCollection{},
 		&model.ContentEntry{}, &model.ContentBlogExtension{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{}, &model.ContentCollection{}, &model.ContentCollectionMembership{},
 		&model.ContentLifecycleEvent{}, &model.ContentProgress{}, &model.ContentNotificationPreference{},
-		&model.ContentPublicationEvent{}, &model.FeedSource{}, &model.Subscription{}, &model.Follow{}, &model.Notification{},
+		&model.ContentPublicationEvent{}, &model.BlogPublishSchedule{}, &model.FeedSource{}, &model.Subscription{}, &model.Follow{}, &model.Notification{},
 	)
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {
 		t.Fatal(err)
@@ -971,6 +971,70 @@ func TestDispatchPendingPublicationsRetriesRecoverableDispatchError(t *testing.T
 	}
 }
 
+func TestRetryBlogScheduleStopsAtTwentyFourHourDeadline(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	deadline := now.Add(24 * time.Hour)
+	schedule := model.BlogPublishSchedule{
+		ContentID: fixture.post.ID, AuthorID: fixture.owner.ID, PublishAt: now,
+		Timezone: "UTC", Status: "processing", LeaseToken: "lease", LeaseUntil: &deadline,
+		Attempts: 5, NextRunAt: now,
+	}
+	if err := fixture.db.Create(&schedule).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.retryBlogSchedule(schedule.ID, "lease", now.Add(14*time.Hour+30*time.Minute), errors.New("publish unavailable")); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.First(&schedule, "id = ?", schedule.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if schedule.Status != "pending" || !schedule.NextRunAt.Equal(deadline) {
+		t.Fatalf("expected final retry at deadline, got %#v", schedule)
+	}
+	schedule.Status = "processing"
+	schedule.LeaseToken = "deadline-lease"
+	schedule.LeaseUntil = &deadline
+	if err := fixture.db.Save(&schedule).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.service.retryBlogSchedule(schedule.ID, "deadline-lease", deadline, errors.New("publish unavailable")); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.First(&schedule, "id = ?", schedule.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if schedule.Status != "failed" {
+		t.Fatalf("expected failed schedule after deadline, got %#v", schedule)
+	}
+}
+
+func TestGetBlogScheduleEnforcesOwnershipAndSupportsAdmin(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	publishAt := time.Now().UTC().Add(time.Hour)
+	if _, err := fixture.service.ScheduleContent(fixture.owner, ScheduleInput{Module: "blog", ContentID: fixture.post.ID, PublishAt: publishAt, Timezone: "UTC"}); err != nil {
+		t.Fatal(err)
+	}
+	status, err := fixture.service.GetBlogSchedule(fixture.owner, fixture.post.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Status != "pending" || status.ContentID != fixture.post.ID || status.PublishAt.UTC().Unix() != publishAt.UTC().Unix() {
+		t.Fatalf("unexpected owner schedule status: %#v", status)
+	}
+	if _, err := fixture.service.GetBlogSchedule(fixture.viewer, fixture.post.ID); err == nil {
+		t.Fatal("expected non-owner schedule access to fail")
+	}
+	admin := fixture.viewer
+	admin.Role = authctx.RoleAdmin
+	if _, err := fixture.service.GetBlogSchedule(admin, fixture.post.ID); err != nil {
+		t.Fatalf("expected administrator schedule access: %v", err)
+	}
+	if _, err := fixture.service.GetBlogSchedule(fixture.owner, uuid.New()); err == nil {
+		t.Fatal("expected missing schedule content to fail")
+	}
+}
+
 func TestSchedulePublishesDueContentAndEnqueuesPublication(t *testing.T) {
 	fixture := newLifecycleFixture(t)
 	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", fixture.post.ID).Updates(map[string]any{"status": "draft", "published_at": nil}).Error; err != nil {
@@ -984,7 +1048,7 @@ func TestSchedulePublishesDueContentAndEnqueuesPublication(t *testing.T) {
 	if result.Status != "scheduled" || !result.PublishAt.Equal(due) {
 		t.Fatalf("unexpected schedule result: %#v", result)
 	}
-	if err := fixture.service.PublishDue(due.Add(-time.Second), 10); err != nil {
+	if err := fixture.service.PublishDueBlogSchedules(due.Add(-time.Second), 10); err != nil {
 		t.Fatal(err)
 	}
 	var before model.ContentEntry
@@ -994,7 +1058,7 @@ func TestSchedulePublishesDueContentAndEnqueuesPublication(t *testing.T) {
 	if before.Status != "scheduled" {
 		t.Fatalf("content published early: %#v", before)
 	}
-	if err := fixture.service.PublishDue(due.Add(time.Second), 10); err != nil {
+	if err := fixture.service.PublishDueBlogSchedules(due.Add(time.Second), 10); err != nil {
 		t.Fatal(err)
 	}
 	var after model.ContentEntry
@@ -1003,6 +1067,13 @@ func TestSchedulePublishesDueContentAndEnqueuesPublication(t *testing.T) {
 	}
 	if after.Status != "published" || after.PublishedAt == nil || after.ScheduledAt != nil {
 		t.Fatalf("content was not published: %#v", after)
+	}
+	var schedule model.BlogPublishSchedule
+	if err := fixture.db.Where("content_id = ?", fixture.post.ID).First(&schedule).Error; err != nil {
+		t.Fatal(err)
+	}
+	if schedule.Status != "published" || schedule.PublishedAt == nil {
+		t.Fatalf("schedule was not completed: %#v", schedule)
 	}
 	var publications int64
 	if err := fixture.db.Model(&model.ContentPublicationEvent{}).Where("content_type = ? AND content_id = ?", "blog", fixture.post.ID).Count(&publications).Error; err != nil {

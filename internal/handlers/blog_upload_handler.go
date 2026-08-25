@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/middleware"
+	"atoman/internal/model"
 	"atoman/internal/storage"
 )
 
@@ -52,6 +53,11 @@ func UploadBlogImage(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			return
 		}
 		userID := fmt.Sprintf("%v", userIDVal)
+		ownerID, err := uuid.Parse(userID)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
 
 		// Parse multipart image field
 		file, header, err := c.Request.FormFile("image")
@@ -102,7 +108,12 @@ func UploadBlogImage(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save image"})
 				return
 			}
-			c.JSON(http.StatusOK, gin.H{"url": "/uploads/blog/images/" + userID + "/" + filename})
+			imageURL := "/uploads/blog/images/" + userID + "/" + filename
+			if err := db.Create(&model.MediaAsset{UserID: &ownerID, Purpose: "blog.image", URL: imageURL, Key: s3Key, ContentType: contentType, Size: header.Size}).Error; err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to persist image metadata"})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"url": imageURL})
 			return
 		}
 
@@ -123,6 +134,11 @@ func UploadBlogImage(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 		}
 
 		imageURL := strings.TrimRight(os.Getenv("S3_URL_PREFIX"), "/") + "/" + s3Key
+		if err := db.Create(&model.MediaAsset{UserID: &ownerID, Purpose: "blog.image", URL: imageURL, Key: s3Key, ContentType: contentType, Size: header.Size}).Error; err != nil {
+			_, _ = s3Client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(s3Key)})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to persist image metadata"})
+			return
+		}
 		c.JSON(http.StatusOK, gin.H{"url": imageURL})
 	}
 }

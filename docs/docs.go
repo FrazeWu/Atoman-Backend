@@ -4222,6 +4222,133 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/blog/imports/markdown/{id}": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "查询 Markdown 导入预览",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.MarkdownImportDetails"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/imports/markdown/{id}/confirm": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "将已由当前作者创建的 canonical 草稿关联到导入任务。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "确认 Markdown 导入",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "确认内容",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.markdownImportConfirmInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.MarkdownImportDetails"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/blog/posts": {
             "get": {
                 "description": "返回已发布文章，可按用户、频道或合集筛选。",
@@ -4418,6 +4545,67 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/posts/{id}/export": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回当前文章版本及已验证站内资源的 ZIP 备份。仅作者或管理员可导出。",
+                "produces": [
+                    "application/zip"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "导出文章 Markdown 备份",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文章 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "file"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -7669,7 +7857,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "返回单个 feed item 详情。",
+                "description": "返回条目元数据和可阅读的 RSS、网页全文变体；default_variant 指定首次展示内容。",
                 "produces": [
                     "application/json"
                 ],
@@ -7690,7 +7878,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/feed.FeedItemResponse"
+                            "$ref": "#/definitions/feed.FeedItemDetailResponse"
                         }
                     },
                     "400": {
@@ -7724,7 +7912,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "提交当前订阅正文的缺失、排版、图片或噪声问题；同一用户的同类反馈幂等。",
+                "description": "提交当前显示的 RSS、全文或摘要的缺失、排版、图片或噪声问题；同一用户的同类反馈幂等。",
                 "consumes": [
                     "application/json"
                 ],
@@ -11506,6 +11694,70 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/lifecycle/{module}/{id}/schedule": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lifecycle"
+                ],
+                "summary": "查询定时发布状态",
+                "parameters": [
+                    {
+                        "enum": [
+                            "blog"
+                        ],
+                        "type": "string",
+                        "description": "内容模块",
+                        "name": "module",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "内容 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/lifecycle.BlogScheduleStatus"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/albums": {
             "get": {
                 "produces": [
@@ -11747,6 +11999,113 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/music/albums/{albumId}/rating": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "为可访问专辑设置 1 至 5 星评分；再次提交会更新原评分。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "评分专辑",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "专辑 ID",
+                        "name": "albumId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "评分",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.setAlbumRatingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.SongRatingSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "清除专辑评分",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "专辑 ID",
+                        "name": "albumId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.SongRatingSummary"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
                         }
@@ -14925,6 +15284,113 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/music/songs/{songId}/rating": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "为可访问歌曲设置 1 至 5 星评分；再次提交会更新原评分。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "评分歌曲",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 ID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "评分",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/music.setSongRatingRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.SongRatingSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "music"
+                ],
+                "summary": "清除歌曲评分",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "歌曲 ID",
+                        "name": "songId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/music.SongRatingSummary"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/state-requests": {
             "get": {
                 "security": [
@@ -16203,6 +16669,127 @@ const docTemplate = `{
                         "description": "Bad Request",
                         "schema": {
                             "$ref": "#/definitions/reference.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/reputation/blog/posts/{postID}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reputation"
+                ],
+                "summary": "获取博客质量影子快照",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "博客 UUID",
+                        "name": "postID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/reputation.BlogSnapshotDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/reputation/runs": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reputation"
+                ],
+                "summary": "执行声誉影子计算",
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/reputation/users/{userID}": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "reputation"
+                ],
+                "summary": "获取用户质量快照",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "用户 UUID",
+                        "name": "userID",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/reputation.UserSnapshotDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -22753,6 +23340,41 @@ const docTemplate = `{
                 }
             }
         },
+        "blog.MarkdownImportDetails": {
+            "type": "object",
+            "properties": {
+                "content": {
+                    "type": "string"
+                },
+                "content_id": {
+                    "type": "string"
+                },
+                "diagnostics": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.BlogMarkdownImportDiagnostic"
+                    }
+                },
+                "draft_id": {
+                    "type": "string"
+                },
+                "file_name": {
+                    "type": "string"
+                },
+                "import_id": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
         "blog.PostRatingSummary": {
             "type": "object",
             "properties": {
@@ -22878,6 +23500,17 @@ const docTemplate = `{
                 "bookmark_folder_id": {
                     "type": "string"
                 },
+                "content_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.markdownImportConfirmInput": {
+            "type": "object",
+            "required": [
+                "content_id"
+            ],
+            "properties": {
                 "content_id": {
                     "type": "string"
                 }
@@ -24252,6 +24885,14 @@ const docTemplate = `{
                         "image",
                         "noise"
                     ]
+                },
+                "variant": {
+                    "type": "string",
+                    "enum": [
+                        "rss",
+                        "full_text",
+                        "summary"
+                    ]
                 }
             }
         },
@@ -24313,57 +24954,62 @@ const docTemplate = `{
         "feed.FeedItemDetailResponse": {
             "type": "object",
             "properties": {
-                "author": {
-                    "type": "string"
-                },
-                "content_html": {
-                    "type": "string"
-                },
-                "content_source": {
-                    "type": "string"
-                },
-                "duration": {
-                    "type": "string"
-                },
-                "enclosure_type": {
-                    "type": "string"
-                },
-                "enclosure_url": {
-                    "type": "string"
-                },
-                "feed_item": {
+                "item": {
                     "$ref": "#/definitions/model.FeedItem"
                 },
-                "feed_source": {
-                    "$ref": "#/definitions/model.FeedSource"
+                "reader": {
+                    "$ref": "#/definitions/feed.FeedItemReaderResponse"
+                }
+            }
+        },
+        "feed.FeedItemReaderResponse": {
+            "type": "object",
+            "properties": {
+                "default_variant": {
+                    "$ref": "#/definitions/feed.FeedReaderVariant"
                 },
-                "id": {
-                    "type": "string"
+                "full_text": {
+                    "$ref": "#/definitions/feed.FeedReaderFullTextResponse"
                 },
-                "image_url": {
-                    "type": "string"
-                },
-                "link": {
-                    "type": "string"
-                },
-                "published_at": {
-                    "type": "string"
-                },
-                "summary": {
-                    "type": "string"
-                },
-                "title": {
+                "rss": {
+                    "$ref": "#/definitions/feed.FeedReaderContentResponse"
+                }
+            }
+        },
+        "feed.FeedReaderContentResponse": {
+            "type": "object",
+            "properties": {
+                "html": {
                     "type": "string"
                 }
             }
         },
-        "feed.FeedItemResponse": {
+        "feed.FeedReaderFullTextResponse": {
             "type": "object",
             "properties": {
-                "data": {
-                    "$ref": "#/definitions/feed.FeedItemDetailResponse"
+                "html": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "word_count": {
+                    "type": "integer"
                 }
             }
+        },
+        "feed.FeedReaderVariant": {
+            "type": "string",
+            "enum": [
+                "rss",
+                "full_text",
+                "summary"
+            ],
+            "x-enum-varnames": [
+                "FeedReaderVariantRSS",
+                "FeedReaderVariantFullText",
+                "FeedReaderVariantSummary"
+            ]
         },
         "feed.FeedSourceStat": {
             "type": "object",
@@ -27665,6 +28311,38 @@ const docTemplate = `{
                 }
             }
         },
+        "lifecycle.BlogScheduleStatus": {
+            "type": "object",
+            "properties": {
+                "attempts": {
+                    "type": "integer"
+                },
+                "cancelled_at": {
+                    "type": "string"
+                },
+                "content_id": {
+                    "type": "string"
+                },
+                "last_error": {
+                    "type": "string"
+                },
+                "next_run_at": {
+                    "type": "string"
+                },
+                "publish_at": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timezone": {
+                    "type": "string"
+                }
+            }
+        },
         "model.Album": {
             "type": "object",
             "properties": {
@@ -27728,6 +28406,12 @@ const docTemplate = `{
                 "play_count": {
                     "type": "integer"
                 },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
                 "redirect_to": {
                     "type": "string"
                 },
@@ -27769,6 +28453,9 @@ const docTemplate = `{
                 },
                 "user": {
                     "$ref": "#/definitions/model.User"
+                },
+                "viewer_rating": {
+                    "type": "integer"
                 },
                 "year": {
                     "type": "integer"
@@ -27940,6 +28627,35 @@ const docTemplate = `{
                 },
                 "is_main_name": {
                     "type": "boolean"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.BlogMarkdownImportDiagnostic": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "import_id": {
+                    "type": "string"
+                },
+                "level": {
+                    "type": "string"
+                },
+                "line": {
+                    "type": "integer"
+                },
+                "message": {
+                    "type": "string"
                 },
                 "updated_at": {
                     "type": "string"
@@ -28281,12 +28997,6 @@ const docTemplate = `{
                 "author": {
                     "type": "string"
                 },
-                "content_html": {
-                    "type": "string"
-                },
-                "content_source": {
-                    "type": "string"
-                },
                 "created_at": {
                     "type": "string"
                 },
@@ -28333,9 +29043,6 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "full_text_fetched_at": {
-                    "type": "string"
-                },
-                "full_text_html": {
                     "type": "string"
                 },
                 "full_text_status": {
@@ -29488,6 +30195,12 @@ const docTemplate = `{
                 "playback_sample_rate_hz": {
                     "type": "integer"
                 },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
                 "release_date": {
                     "type": "string"
                 },
@@ -29550,6 +30263,9 @@ const docTemplate = `{
                 },
                 "user": {
                     "$ref": "#/definitions/model.User"
+                },
+                "viewer_rating": {
+                    "type": "integer"
                 },
                 "waveform_peaks": {
                     "type": "array",
@@ -31891,6 +32607,20 @@ const docTemplate = `{
                 }
             }
         },
+        "music.SongRatingSummary": {
+            "type": "object",
+            "properties": {
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "viewer_rating": {
+                    "type": "integer"
+                }
+            }
+        },
         "music.Source": {
             "type": "object",
             "properties": {
@@ -32007,6 +32737,28 @@ const docTemplate = `{
                 },
                 "query": {
                     "type": "string"
+                }
+            }
+        },
+        "music.setAlbumRatingRequest": {
+            "type": "object",
+            "required": [
+                "score"
+            ],
+            "properties": {
+                "score": {
+                    "type": "integer"
+                }
+            }
+        },
+        "music.setSongRatingRequest": {
+            "type": "object",
+            "required": [
+                "score"
+            ],
+            "properties": {
+                "score": {
+                    "type": "integer"
                 }
             }
         },
@@ -32255,6 +33007,64 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "content": {
+                    "type": "string"
+                }
+            }
+        },
+        "reputation.BlogSnapshotDTO": {
+            "type": "object",
+            "properties": {
+                "calculated_at": {
+                    "type": "string"
+                },
+                "post_id": {
+                    "type": "string"
+                },
+                "quality_active": {
+                    "type": "boolean"
+                },
+                "quality_estimate": {
+                    "type": "number"
+                },
+                "raw_score": {
+                    "type": "number"
+                },
+                "run_id": {
+                    "type": "string"
+                },
+                "valid_rating_count": {
+                    "type": "integer"
+                },
+                "weight_sum": {
+                    "type": "number"
+                },
+                "weighted_score": {
+                    "type": "number"
+                }
+            }
+        },
+        "reputation.UserSnapshotDTO": {
+            "type": "object",
+            "properties": {
+                "calculated_at": {
+                    "type": "string"
+                },
+                "contribution_total": {
+                    "type": "integer"
+                },
+                "evaluation_weight": {
+                    "type": "number"
+                },
+                "quality": {
+                    "type": "number"
+                },
+                "quality_evidence_mass": {
+                    "type": "number"
+                },
+                "quality_state": {
+                    "type": "string"
+                },
+                "run_id": {
                     "type": "string"
                 }
             }

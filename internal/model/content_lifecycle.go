@@ -62,3 +62,23 @@ type ContentPublicationEvent struct {
 }
 
 func (ContentPublicationEvent) TableName() string { return "content_publication_events" }
+
+// BlogPublishSchedule tracks a scheduled Blog publication independently from the
+// content entry so workers can safely lease, retry, and audit delivery.
+type BlogPublishSchedule struct {
+	Base
+	ContentID   uuid.UUID  `json:"content_id" gorm:"type:uuid;not null;uniqueIndex:idx_blog_publish_schedule_content"`
+	AuthorID    uuid.UUID  `json:"author_id" gorm:"type:uuid;not null;index"`
+	PublishAt   time.Time  `json:"publish_at" gorm:"not null;index"`
+	Timezone    string     `json:"timezone" gorm:"type:varchar(64);not null;default:'UTC'"`
+	Status      string     `json:"status" gorm:"type:varchar(16);not null;default:'pending';index"`
+	LeaseToken  string     `json:"-" gorm:"type:varchar(64);not null;default:''"`
+	LeaseUntil  *time.Time `json:"-" gorm:"index"`
+	Attempts    int        `json:"attempts" gorm:"not null;default:0"`
+	NextRunAt   time.Time  `json:"next_run_at" gorm:"not null;index"`
+	LastError   string     `json:"last_error" gorm:"type:text"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
+	CancelledAt *time.Time `json:"cancelled_at,omitempty"`
+}
+
+func (BlogPublishSchedule) TableName() string { return "blog_publish_schedules" }
