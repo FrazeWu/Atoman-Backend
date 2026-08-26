@@ -330,7 +330,7 @@ func TestAlbumImportFileMultipartSupportsResumeAndCompletion(t *testing.T) {
 		t.Fatalf("unexpected presign result=%#v store=%#v", upload, store)
 	}
 
-	for _, part := range []CompleteAlbumImportMultipartPartInput{
+	for index, part := range []CompleteAlbumImportMultipartPartInput{
 		{ETag: "etag-2", Size: albumImportMultipartPartSize},
 		{ETag: "etag-1", Size: albumImportMultipartPartSize},
 		{ETag: "etag-2-new", Size: albumImportMultipartPartSize},
@@ -341,6 +341,17 @@ func TestAlbumImportFileMultipartSupportsResumeAndCompletion(t *testing.T) {
 		}
 		if _, err := svc.CompleteAlbumImportFilePart(user, session.ID, file.ID, partNumber, part); err != nil {
 			t.Fatalf("complete part %d: %v", partNumber, err)
+		}
+		var progressed model.AlbumImportSession
+		if err := db.First(&progressed, "id = ?", session.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		wantProgress := int64(albumImportMultipartPartSize)
+		if index > 0 {
+			wantProgress = 2 * int64(albumImportMultipartPartSize)
+		}
+		if progressed.ProgressCurrent != wantProgress || progressed.ProgressTotal != 32*1024*1024 {
+			t.Fatalf("unexpected upload progress after part %d: %#v", partNumber, progressed)
 		}
 	}
 
