@@ -24611,11 +24611,17 @@ const docTemplate = `{
                 "avatar_url": {
                     "type": "string"
                 },
+                "contribution_total": {
+                    "type": "integer"
+                },
                 "display_name": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
+                },
+                "quality": {
+                    "type": "number"
                 },
                 "username": {
                     "type": "string"
@@ -27787,6 +27793,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Writer and builder"
                 },
+                "contribution_total": {
+                    "type": "integer",
+                    "example": 100
+                },
                 "created_at": {
                     "type": "string",
                     "format": "date-time",
@@ -27803,6 +27813,10 @@ const docTemplate = `{
                 "location": {
                     "type": "string",
                     "example": "Seoul"
+                },
+                "quality": {
+                    "type": "number",
+                    "example": 20
                 },
                 "username": {
                     "type": "string",
@@ -28316,6 +28330,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Writer and builder"
                 },
+                "contribution_total": {
+                    "type": "integer",
+                    "example": 100
+                },
                 "created_at": {
                     "type": "string",
                     "format": "date-time",
@@ -28340,6 +28358,10 @@ const docTemplate = `{
                 "posts_count": {
                     "type": "integer",
                     "example": 5
+                },
+                "quality": {
+                    "type": "number",
+                    "example": 20
                 },
                 "role": {
                     "type": "string",
@@ -33210,7 +33232,6 @@ const docTemplate = `{
         "music.SavePlaybackProgressRequest": {
             "type": "object",
             "required": [
-                "position_seconds",
                 "song_id"
             ],
             "properties": {
@@ -33236,7 +33257,6 @@ const docTemplate = `{
             "required": [
                 "current_song_id",
                 "playback_mode",
-                "position_seconds",
                 "song_ids"
             ],
             "properties": {

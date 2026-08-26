@@ -295,8 +295,27 @@ func TestCommentDTOIncludesAuthorsAndPersistsReplyIdentity(t *testing.T) {
 	nested := ctx.create(t, 2, "nested author", &child.ID)
 	direct := ctx.create(t, 3, "direct author", &root.ID)
 
+	runAt := time.Now().UTC()
+	run := model.ReputationRun{
+		Status: model.ReputationRunPublished, QualityAlgorithmVersion: "test", ContributionRuleVersion: "test", WeightAlgorithmVersion: "test",
+		StartedAt: runAt, PublishedAt: &runAt,
+	}
+	require.NoError(t, ctx.db.Create(&run).Error)
+	require.NoError(t, ctx.db.Create(&model.UserReputationSnapshot{
+		RunID: run.ID, UserID: ctx.users[0].ID, ContributionTotal: 1280, QualityState: model.ReputationQualityEvidenceBased,
+		QualityEvidenceMass: 1, PortfolioQuality: 72.35, StabilityRate: 1, Quality: 72.35, EvaluationWeight: 0.7235,
+	}).Error)
+	require.NoError(t, ctx.db.Create(&model.UserReputationSnapshot{
+		RunID: run.ID, UserID: ctx.users[1].ID, ContributionTotal: 100, QualityState: model.ReputationQualityInitial,
+		QualityEvidenceMass: 0, PortfolioQuality: 20, StabilityRate: 0.8, Quality: 20, EvaluationWeight: 0.2,
+	}).Error)
+
 	listed, err := ctx.service.List(ctx.users[0], ctx.target, ListCommentsInput{Page: 1})
 	require.NoError(t, err)
+	require.Equal(t, 72.35, listed.Items[0].Author.Quality)
+	require.Equal(t, 1280, listed.Items[0].Author.ContributionTotal)
+	require.Equal(t, 20.0, listed.Items[0].Replies[0].Author.Quality)
+	require.Equal(t, 100, listed.Items[0].Replies[0].Author.ContributionTotal)
 	require.Equal(t, ctx.users[0].ID, listed.Items[0].Author.ID)
 	require.Nil(t, listed.Items[0].ReplyToAuthor)
 	require.Equal(t, ctx.users[1].ID, listed.Items[0].Replies[0].Author.ID)
@@ -853,7 +872,8 @@ func TestListUsesConstantQueryCount(t *testing.T) {
 	for _, root := range listed.Items {
 		require.Len(t, root.Replies, 3)
 	}
-	require.LessOrEqual(t, queries.Load(), int64(11))
+	// User reputation metrics are hydrated in one batch query alongside the existing comment relations.
+	require.LessOrEqual(t, queries.Load(), int64(13))
 }
 
 func TestCommentDTODoesNotExposeContentHash(t *testing.T) {

@@ -143,18 +143,20 @@ type UserRoleResponse struct {
 }
 
 type UserLookupData struct {
-	ID             uint   `json:"id" example:"1"`
-	UUID           string `json:"uuid" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
-	Username       string `json:"username" example:"fafa"`
-	DisplayName    string `json:"display_name" example:"Fafa"`
-	AvatarURL      string `json:"avatar_url" example:"https://cdn.example.com/avatar.png"`
-	Bio            string `json:"bio" example:"Writer and builder"`
-	Website        string `json:"website" example:"https://atoman.org"`
-	Role           string `json:"role" example:"user"`
-	CreatedAt      string `json:"created_at" format:"date-time" example:"2026-05-25T11:00:00Z"`
-	FollowersCount int64  `json:"followers_count" example:"12"`
-	FollowingCount int64  `json:"following_count" example:"7"`
-	PostsCount     int64  `json:"posts_count" example:"5"`
+	ID                uint    `json:"id" example:"1"`
+	UUID              string  `json:"uuid" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
+	Username          string  `json:"username" example:"fafa"`
+	DisplayName       string  `json:"display_name" example:"Fafa"`
+	AvatarURL         string  `json:"avatar_url" example:"https://cdn.example.com/avatar.png"`
+	Bio               string  `json:"bio" example:"Writer and builder"`
+	Website           string  `json:"website" example:"https://atoman.org"`
+	Role              string  `json:"role" example:"user"`
+	CreatedAt         string  `json:"created_at" format:"date-time" example:"2026-05-25T11:00:00Z"`
+	FollowersCount    int64   `json:"followers_count" example:"12"`
+	FollowingCount    int64   `json:"following_count" example:"7"`
+	PostsCount        int64   `json:"posts_count" example:"5"`
+	Quality           float64 `json:"quality" example:"20.0"`
+	ContributionTotal int     `json:"contribution_total" example:"100"`
 }
 
 type UserLookupResponse struct {
@@ -163,15 +165,17 @@ type UserLookupResponse struct {
 }
 
 type PublicProfileUser struct {
-	ID          uint   `json:"id" example:"1"`
-	UUID        string `json:"uuid" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
-	Username    string `json:"username" example:"fafa"`
-	DisplayName string `json:"display_name" example:"Fafa"`
-	AvatarURL   string `json:"avatar_url" example:"https://cdn.example.com/avatar.png"`
-	Bio         string `json:"bio" example:"Writer and builder"`
-	Website     string `json:"website" example:"https://atoman.org"`
-	Location    string `json:"location" example:"Seoul"`
-	CreatedAt   string `json:"created_at" format:"date-time" example:"2026-05-25T11:00:00Z"`
+	ID                uint    `json:"id" example:"1"`
+	UUID              string  `json:"uuid" format:"uuid" example:"018f6f6d-b0de-7b8f-bf91-43bc0b8f4c8a"`
+	Username          string  `json:"username" example:"fafa"`
+	DisplayName       string  `json:"display_name" example:"Fafa"`
+	AvatarURL         string  `json:"avatar_url" example:"https://cdn.example.com/avatar.png"`
+	Bio               string  `json:"bio" example:"Writer and builder"`
+	Website           string  `json:"website" example:"https://atoman.org"`
+	Location          string  `json:"location" example:"Seoul"`
+	CreatedAt         string  `json:"created_at" format:"date-time" example:"2026-05-25T11:00:00Z"`
+	Quality           float64 `json:"quality" example:"20.0"`
+	ContributionTotal int     `json:"contribution_total" example:"100"`
 }
 
 type UserProfileStats struct {

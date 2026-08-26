@@ -1,11 +1,13 @@
 package comment
 
 import (
+	"context"
 	"fmt"
 	"math"
 
 	"atoman/internal/model"
 	"atoman/internal/modules/reference"
+	"atoman/internal/modules/reputation"
 	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
@@ -343,12 +345,20 @@ func (s *Service) entryDTOs(db *gorm.DB, entries []model.CommentEntry, viewerIDs
 	if err := db.Unscoped().Select("uuid", "username", "display_name", "avatar_url").Where("uuid IN ?", userIDs).Order("uuid ASC").Find(&users).Error; err != nil {
 		return nil, err
 	}
+	userMetrics, err := reputation.NewService(db).LatestPublicUserMetrics(context.Background(), userIDs)
+	if err != nil {
+		return nil, err
+	}
 	userSummaries := make(map[uuid.UUID]UserSummaryDTO, len(userIDs))
 	for _, id := range userIDs {
 		userSummaries[id] = UserSummaryDTO{ID: id}
 	}
 	for _, user := range users {
-		userSummaries[user.UUID] = UserSummaryDTO{ID: user.UUID, Username: user.Username, DisplayName: user.DisplayName, AvatarURL: user.AvatarURL}
+		metrics := userMetrics[user.UUID]
+		userSummaries[user.UUID] = UserSummaryDTO{
+			ID: user.UUID, Username: user.Username, DisplayName: user.DisplayName, AvatarURL: user.AvatarURL,
+			Quality: metrics.Quality, ContributionTotal: metrics.ContributionTotal,
+		}
 	}
 	for _, entry := range entries {
 		dto := dtos[entry.ID]

@@ -451,6 +451,44 @@ func TestGetUserByUsernameUsesLinkedIdentityAvatarWhenUserAvatarIsEmpty(t *testi
 	}
 }
 
+func TestGetUserByUsernameIncludesPublicReputationMetrics(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.ReputationRun{}, &model.UserReputationSnapshot{})
+	user := model.User{Username: "reputation-user", Email: "reputation@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	runAt := time.Now().UTC()
+	run := model.ReputationRun{Status: model.ReputationRunPublished, QualityAlgorithmVersion: "test", ContributionRuleVersion: "test", WeightAlgorithmVersion: "test", StartedAt: runAt, PublishedAt: &runAt}
+	if err := db.Create(&run).Error; err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := db.Create(&model.UserReputationSnapshot{RunID: run.ID, UserID: user.UUID, Quality: 72.35, ContributionTotal: 1280, QualityState: model.ReputationQualityEvidenceBased, QualityEvidenceMass: 1, PortfolioQuality: 72.35, StabilityRate: 1, EvaluationWeight: 0.7235}).Error; err != nil {
+		t.Fatalf("create snapshot: %v", err)
+	}
+
+	r := gin.New()
+	r.GET("/users/by-username/:username", GetUserByUsername(db))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/users/by-username/reputation-user", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Quality           float64 `json:"quality"`
+			ContributionTotal int     `json:"contribution_total"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Data.Quality != 72.35 || response.Data.ContributionTotal != 1280 {
+		t.Fatalf("unexpected reputation metrics: %#v", response.Data)
+	}
+}
+
 func TestUpdateUserProfileOnlyChangesProvidedFields(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)

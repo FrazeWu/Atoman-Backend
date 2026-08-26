@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
@@ -36,6 +37,11 @@ type UserSnapshotDTO struct {
 	EvaluationWeight    float64   `json:"evaluation_weight"`
 	RunID               uuid.UUID `json:"run_id"`
 	CalculatedAt        time.Time `json:"calculated_at"`
+}
+
+type PublicUserMetrics struct {
+	Quality           float64
+	ContributionTotal int
 }
 
 type BlogSnapshotDTO struct {
@@ -118,6 +124,41 @@ func qualityByUser(db *gorm.DB, runID uuid.UUID) (map[uuid.UUID]float64, error) 
 		result[snapshot.UserID] = snapshot.Quality
 	}
 	return result, nil
+}
+
+func (s *Service) LatestPublicUserMetrics(ctx context.Context, userIDs []uuid.UUID) (map[uuid.UUID]PublicUserMetrics, error) {
+	metrics := make(map[uuid.UUID]PublicUserMetrics, len(userIDs))
+	for _, userID := range userIDs {
+		metrics[userID] = PublicUserMetrics{Quality: InitialQuality}
+	}
+	if len(userIDs) == 0 {
+		return metrics, nil
+	}
+
+	publishedRunID := s.db.Model(&model.ReputationRun{}).
+		Select("id").Where("status = ?", model.ReputationRunPublished).
+		Order("published_at DESC").Limit(1)
+	var snapshots []model.UserReputationSnapshot
+	if err := s.db.WithContext(ctx).
+		Where("run_id = (?) AND user_id IN ?", publishedRunID, userIDs).
+		Find(&snapshots).Error; err != nil {
+		if isMissingReputationTableError(err) {
+			return metrics, nil
+		}
+		return nil, err
+	}
+	for _, snapshot := range snapshots {
+		metrics[snapshot.UserID] = PublicUserMetrics{Quality: snapshot.Quality, ContributionTotal: snapshot.ContributionTotal}
+	}
+	return metrics, nil
+}
+
+func isMissingReputationTableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "no such table") || strings.Contains(message, "does not exist")
 }
 
 func (s *Service) LatestUserSnapshot(ctx context.Context, userID uuid.UUID) (UserSnapshotDTO, error) {

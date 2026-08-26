@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 
 	"atoman/internal/model"
+	"atoman/internal/modules/reputation"
 	"atoman/internal/service"
 )
 
@@ -126,6 +127,12 @@ func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		avatarURL := service.ResolveUserAvatarURL(db, user)
+		metrics, err := reputation.NewService(db).LatestPublicUserMetrics(c.Request.Context(), []uuid.UUID{user.UUID})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load user reputation"})
+			return
+		}
+		userMetrics := metrics[user.UUID]
 
 		var followersCount, followingCount, postsCount int64
 		db.Model(&model.Follow{}).Where("following_id = ?", user.UUID).Count(&followersCount)
@@ -134,18 +141,20 @@ func GetUserByUsername(db *gorm.DB) gin.HandlerFunc {
 
 		c.JSON(http.StatusOK, gin.H{
 			"data": gin.H{
-				"id":              user.ID,
-				"uuid":            user.UUID,
-				"username":        user.Username,
-				"display_name":    user.DisplayName,
-				"avatar_url":      avatarURL,
-				"bio":             user.Bio,
-				"website":         user.Website,
-				"role":            user.Role,
-				"created_at":      user.CreatedAt,
-				"followers_count": followersCount,
-				"following_count": followingCount,
-				"posts_count":     postsCount,
+				"id":                 user.ID,
+				"uuid":               user.UUID,
+				"username":           user.Username,
+				"display_name":       user.DisplayName,
+				"avatar_url":         avatarURL,
+				"bio":                user.Bio,
+				"website":            user.Website,
+				"role":               user.Role,
+				"created_at":         user.CreatedAt,
+				"followers_count":    followersCount,
+				"following_count":    followingCount,
+				"posts_count":        postsCount,
+				"quality":            userMetrics.Quality,
+				"contribution_total": userMetrics.ContributionTotal,
 			},
 			"message": "ok",
 		})
@@ -172,6 +181,12 @@ func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		avatarURL := service.ResolveUserAvatarURL(db, user)
+		metrics, err := reputation.NewService(db).LatestPublicUserMetrics(c.Request.Context(), []uuid.UUID{user.UUID})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load user reputation"})
+			return
+		}
+		userMetrics := metrics[user.UUID]
 
 		// Get counts
 		var followersCount int64
@@ -189,15 +204,17 @@ func GetUserProfile(db *gorm.DB) gin.HandlerFunc {
 		c.JSON(http.StatusOK, gin.H{
 			"data": gin.H{
 				"user": gin.H{
-					"id":           user.ID,
-					"uuid":         user.UUID,
-					"username":     user.Username,
-					"display_name": user.DisplayName,
-					"avatar_url":   avatarURL,
-					"bio":          user.Bio,
-					"website":      user.Website,
-					"location":     user.Location,
-					"created_at":   user.CreatedAt,
+					"id":                 user.ID,
+					"uuid":               user.UUID,
+					"username":           user.Username,
+					"display_name":       user.DisplayName,
+					"avatar_url":         avatarURL,
+					"bio":                user.Bio,
+					"website":            user.Website,
+					"location":           user.Location,
+					"created_at":         user.CreatedAt,
+					"quality":            userMetrics.Quality,
+					"contribution_total": userMetrics.ContributionTotal,
 				},
 				"stats": gin.H{
 					"followers_count": followersCount,
