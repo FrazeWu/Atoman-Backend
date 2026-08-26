@@ -680,7 +680,7 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 		ChannelID:  &channel.ID,
 		Title:      "推荐文章",
 		Content:    "这是一篇适合推荐的文章内容。",
-		Summary:    "推荐摘要",
+		Summary:    "",
 		Status:     "published",
 		Visibility: "public",
 		ViewCount:  86,
@@ -736,6 +736,9 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 	}
 	if first.TargetPath != "/post/"+first.ID {
 		t.Fatalf("expected canonical post target path, got %q", first.TargetPath)
+	}
+	if first.Summary != "这是一篇适合推荐的文章内容。" {
+		t.Fatalf("expected recommendation summary fallback, got %q", first.Summary)
 	}
 }
 

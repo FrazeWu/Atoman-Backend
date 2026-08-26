@@ -206,7 +206,7 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		items = append(items, RecommendationItemDTO{
 			ID:            post.ID.String(),
 			Title:         post.Title,
-			Summary:       post.Summary,
+			Summary:       seoPostDescription(post),
 			ContentType:   "blog",
 			ImageURL:      post.CoverURL,
 			TargetPath:    "/post/" + post.ID.String(),
