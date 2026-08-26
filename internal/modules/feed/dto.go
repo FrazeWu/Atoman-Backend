@@ -87,6 +87,7 @@ type RecommendationItemDTO struct {
 	SourceType           string                     `json:"source_type,omitempty"`
 	SourceCategory       string                     `json:"source_category,omitempty"`
 	SourcePath           string                     `json:"source_path,omitempty"`
+	RssURL               string                     `json:"rss_url,omitempty"`
 	RecentItems          []RecommendationPreviewDTO `json:"recent_items,omitempty"`
 }
 

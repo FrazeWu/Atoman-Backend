@@ -246,6 +246,8 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 				LanguageCode:    rowLanguageCode(row.LanguageCode, languageCode),
 				ImageURL:        row.CoverURL,
 				TargetPath:      targetPath,
+				SourceID:        row.ChannelID.String(),
+				SourceType:      "internal_channel",
 				ScoreLabel:      recommendationScoreLabel(mode, item.FinalScore),
 				LastPublishedAt: lastPublishedAt,
 			})
@@ -263,9 +265,12 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 			ContentType:     normalizeSourceCategory(source.Category),
 			LanguageCode:    rowLanguageCode(source.LanguageCode, languageCode),
 			TargetPath:      "/feed/sources?source_id=" + source.ID.String(),
+			SourceID:        source.ID.String(),
+			SourceType:      "external_rss",
 			ScoreLabel:      recommendationScoreLabel(mode, item.FinalScore),
 			BookmarkCount:   source.SubscriptionCount,
 			LastPublishedAt: source.LastPublishedAt,
+			RssURL:          source.RSSURL,
 		})
 	}
 
