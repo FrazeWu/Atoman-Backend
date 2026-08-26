@@ -7071,6 +7071,48 @@ definitions:
     - channel_id
     - name
     type: object
+  studio.CreateStudioGoalActionInput:
+    properties:
+      content_id:
+        type: string
+      content_module:
+        $ref: '#/definitions/studio.Module'
+      due_date:
+        type: string
+      title:
+        type: string
+    type: object
+  studio.CreateStudioGoalCycleInput:
+    properties:
+      channel_id:
+        type: string
+      end_date:
+        type: string
+      start_date:
+        type: string
+      timezone:
+        type: string
+    type: object
+  studio.CreateStudioGoalInput:
+    properties:
+      metric:
+        type: string
+      module:
+        $ref: '#/definitions/studio.Module'
+      name:
+        type: string
+      target_value:
+        type: integer
+    type: object
+  studio.CreateStudioGoalReviewInput:
+    properties:
+      learning:
+        type: string
+      next_action:
+        type: string
+      result:
+        type: string
+    type: object
   studio.DashboardResponse:
     properties:
       channel_subscriber_count:
@@ -7274,6 +7316,108 @@ definitions:
       visibility:
         type: string
     type: object
+  studio.StudioGoal:
+    properties:
+      actions:
+        items:
+          $ref: '#/definitions/studio.StudioGoalAction'
+        type: array
+      actual_value:
+        type: integer
+      baseline_value:
+        type: integer
+      current_value:
+        type: integer
+      cycle_id:
+        type: string
+      id:
+        type: string
+      metric:
+        type: string
+      module:
+        $ref: '#/definitions/studio.Module'
+      name:
+        type: string
+      progress:
+        type: integer
+      target_value:
+        type: integer
+    type: object
+  studio.StudioGoalAction:
+    properties:
+      content_id:
+        type: string
+      content_module:
+        $ref: '#/definitions/studio.Module'
+      due_date:
+        type: string
+      goal_id:
+        type: string
+      id:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+    type: object
+  studio.StudioGoalCycle:
+    properties:
+      channel_id:
+        type: string
+      end_date:
+        type: string
+      goals:
+        items:
+          $ref: '#/definitions/studio.StudioGoal'
+        type: array
+      id:
+        type: string
+      needs_review:
+        type: boolean
+      review:
+        $ref: '#/definitions/studio.StudioGoalReview'
+      start_date:
+        type: string
+      status:
+        type: string
+      timezone:
+        type: string
+    type: object
+  studio.StudioGoalMetricOption:
+    properties:
+      label:
+        type: string
+      metric:
+        type: string
+      module:
+        $ref: '#/definitions/studio.Module'
+    type: object
+  studio.StudioGoalReview:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      learning:
+        type: string
+      next_action:
+        type: string
+      result:
+        type: string
+    type: object
+  studio.StudioGoalsResponse:
+    properties:
+      current_cycle:
+        $ref: '#/definitions/studio.StudioGoalCycle'
+      cycles:
+        items:
+          $ref: '#/definitions/studio.StudioGoalCycle'
+        type: array
+      metrics:
+        items:
+          $ref: '#/definitions/studio.StudioGoalMetricOption'
+        type: array
+    type: object
   studio.StudioInteractionAuthor:
     properties:
       avatar_url:
@@ -7384,6 +7528,20 @@ definitions:
         type: boolean
       priority:
         type: string
+    type: object
+  studio.UpdateStudioGoalActionInput:
+    properties:
+      status:
+        type: string
+      title:
+        type: string
+    type: object
+  studio.UpdateStudioGoalInput:
+    properties:
+      name:
+        type: string
+      target_value:
+        type: integer
     type: object
   studio.collectionConflictResolution:
     properties:
@@ -19770,6 +19928,357 @@ paths:
       security:
       - BearerAuth: []
       summary: 获取创作中心总览
+      tags:
+      - studio
+  /api/v1/studio/goals:
+    get:
+      parameters:
+      - description: 频道 UUID
+        in: query
+        name: channel_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.StudioGoalsResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 获取频道经营目标
+      tags:
+      - studio
+  /api/v1/studio/goals/{id}:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 目标 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 经营目标
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.UpdateStudioGoalInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.StudioGoal'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新经营目标
+      tags:
+      - studio
+  /api/v1/studio/goals/{id}/actions:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 目标 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 目标行动
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.CreateStudioGoalActionInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/studio.StudioGoalAction'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建目标行动
+      tags:
+      - studio
+  /api/v1/studio/goals/actions/{id}:
+    delete:
+      parameters:
+      - description: 行动 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 删除目标行动
+      tags:
+      - studio
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: 行动 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 目标行动
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.UpdateStudioGoalActionInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/studio.StudioGoalAction'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 更新目标行动
+      tags:
+      - studio
+  /api/v1/studio/goals/cycles:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 经营目标周期
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.CreateStudioGoalCycleInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/studio.StudioGoalCycle'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建经营目标周期
+      tags:
+      - studio
+  /api/v1/studio/goals/cycles/{id}/goals:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 目标周期 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 经营目标
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.CreateStudioGoalInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/studio.StudioGoal'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 创建经营目标
+      tags:
+      - studio
+  /api/v1/studio/goals/cycles/{id}/review:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 目标周期 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 周期复盘
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/studio.CreateStudioGoalReviewInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/studio.StudioGoalCycle'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: 提交经营目标周期复盘
       tags:
       - studio
   /api/v1/studio/reply-templates:

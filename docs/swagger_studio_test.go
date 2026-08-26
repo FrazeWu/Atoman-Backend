@@ -40,6 +40,13 @@ func TestStudioSwaggerCoversUnifiedCreatorAPI(t *testing.T) {
 		"/api/v1/studio/{module}/interactions/{id}/state": {"put"},
 		"/api/v1/studio/reply-templates":                  {"get", "post"},
 		"/api/v1/studio/reply-templates/{id}":             {"delete"},
+		"/api/v1/studio/goals":                            {"get"},
+		"/api/v1/studio/goals/cycles":                     {"post"},
+		"/api/v1/studio/goals/cycles/{id}/goals":          {"post"},
+		"/api/v1/studio/goals/cycles/{id}/review":         {"post"},
+		"/api/v1/studio/goals/{id}":                       {"patch"},
+		"/api/v1/studio/goals/{id}/actions":               {"post"},
+		"/api/v1/studio/goals/actions/{id}":               {"patch", "delete"},
 		"/api/v1/studio/{module}/settings":                {"get", "patch"},
 	}
 	for path, methods := range expected {
@@ -62,6 +69,12 @@ func TestStudioSwaggerCoversUnifiedCreatorAPI(t *testing.T) {
 		"/api/v1/studio/{module}/interactions/{id}/state": {"put"},
 		"/api/v1/studio/reply-templates":                  {"post"},
 		"/api/v1/studio/reply-templates/{id}":             {"delete"},
+		"/api/v1/studio/goals/cycles":                     {"post"},
+		"/api/v1/studio/goals/cycles/{id}/goals":          {"post"},
+		"/api/v1/studio/goals/cycles/{id}/review":         {"post"},
+		"/api/v1/studio/goals/{id}":                       {"patch"},
+		"/api/v1/studio/goals/{id}/actions":               {"post"},
+		"/api/v1/studio/goals/actions/{id}":               {"patch", "delete"},
 	}
 	for path, methods := range writes {
 		for _, method := range methods {

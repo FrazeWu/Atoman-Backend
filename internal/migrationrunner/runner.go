@@ -251,7 +251,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.ExternalIdentity{}, &model.OAuthFlow{}, &model.Follow{}, &model.Channel{}, &model.Collection{},
 		&model.ContentEntry{}, &model.ContentPostExtension{}, &model.ContentBlogExtension{}, &model.ContentBlogVersion{}, &model.ContentBlogDraft{}, &model.BlogMarkdownImport{}, &model.BlogMarkdownImportDiagnostic{}, &model.ContentEpisodeExtension{}, &model.ContentVideoExtension{},
 		&model.ContentCollection{}, &model.ContentCollectionMembership{}, &model.LegacyCollectionMapping{},
-		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.StudioMetricEvent{}, &model.StudioInteractionState{}, &model.StudioReplyTemplate{}, &model.ContentLifecycleEvent{},
+		&model.UserStudioState{}, &model.StudioModuleSettings{}, &model.StudioMetricEvent{}, &model.StudioInteractionState{}, &model.StudioReplyTemplate{}, &model.StudioGoalCycle{}, &model.StudioGoal{}, &model.StudioGoalAction{}, &model.StudioGoalReview{}, &model.ContentLifecycleEvent{},
 		&model.ContentProgress{}, &model.ContentNotificationPreference{}, &model.ContentPublicationEvent{}, &model.BlogPublishSchedule{},
 		&model.Post{}, &model.BlogPostVersion{}, &model.PostCollection{}, &model.BlogDraft{}, &model.ShortNote{},
 		&model.ShortNoteMedia{}, &model.ShortNoteVote{}, &model.Like{}, &model.PostRating{},

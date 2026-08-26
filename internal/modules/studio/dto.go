@@ -301,3 +301,96 @@ type StudioReplyTemplate struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+type StudioGoalMetricOption struct {
+	Module Module `json:"module"`
+	Metric string `json:"metric"`
+	Label  string `json:"label"`
+}
+
+type StudioGoalAction struct {
+	ID            uuid.UUID  `json:"id"`
+	GoalID        uuid.UUID  `json:"goal_id"`
+	Title         string     `json:"title"`
+	Status        string     `json:"status"`
+	DueDate       *time.Time `json:"due_date,omitempty"`
+	ContentID     *uuid.UUID `json:"content_id,omitempty"`
+	ContentModule Module     `json:"content_module,omitempty"`
+}
+
+type StudioGoal struct {
+	ID            uuid.UUID          `json:"id"`
+	CycleID       uuid.UUID          `json:"cycle_id"`
+	Name          string             `json:"name"`
+	Module        Module             `json:"module"`
+	Metric        string             `json:"metric"`
+	BaselineValue int64              `json:"baseline_value"`
+	TargetValue   int64              `json:"target_value"`
+	CurrentValue  int64              `json:"current_value"`
+	ActualValue   *int64             `json:"actual_value,omitempty"`
+	Progress      int                `json:"progress"`
+	Actions       []StudioGoalAction `json:"actions"`
+}
+
+type StudioGoalReview struct {
+	ID         uuid.UUID `json:"id"`
+	Result     string    `json:"result"`
+	Learning   string    `json:"learning"`
+	NextAction string    `json:"next_action"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+type StudioGoalCycle struct {
+	ID          uuid.UUID         `json:"id"`
+	ChannelID   uuid.UUID         `json:"channel_id"`
+	StartDate   string            `json:"start_date"`
+	EndDate     string            `json:"end_date"`
+	Timezone    string            `json:"timezone"`
+	Status      string            `json:"status"`
+	NeedsReview bool              `json:"needs_review"`
+	Goals       []StudioGoal      `json:"goals"`
+	Review      *StudioGoalReview `json:"review,omitempty"`
+}
+
+type StudioGoalsResponse struct {
+	CurrentCycle *StudioGoalCycle         `json:"current_cycle,omitempty"`
+	Cycles       []StudioGoalCycle        `json:"cycles"`
+	Metrics      []StudioGoalMetricOption `json:"metrics"`
+}
+
+type CreateStudioGoalCycleInput struct {
+	ChannelID uuid.UUID `json:"channel_id"`
+	StartDate string    `json:"start_date"`
+	EndDate   string    `json:"end_date"`
+	Timezone  string    `json:"timezone"`
+}
+
+type CreateStudioGoalInput struct {
+	Name        string `json:"name"`
+	Module      Module `json:"module"`
+	Metric      string `json:"metric"`
+	TargetValue int64  `json:"target_value"`
+}
+
+type UpdateStudioGoalInput struct {
+	Name        *string `json:"name"`
+	TargetValue *int64  `json:"target_value"`
+}
+
+type CreateStudioGoalActionInput struct {
+	Title         string     `json:"title"`
+	DueDate       string     `json:"due_date"`
+	ContentID     *uuid.UUID `json:"content_id"`
+	ContentModule Module     `json:"content_module"`
+}
+
+type UpdateStudioGoalActionInput struct {
+	Title  *string `json:"title"`
+	Status *string `json:"status"`
+}
+
+type CreateStudioGoalReviewInput struct {
+	Result     string `json:"result"`
+	Learning   string `json:"learning"`
+	NextAction string `json:"next_action"`
+}
