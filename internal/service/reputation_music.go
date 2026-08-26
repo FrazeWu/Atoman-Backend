@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"atoman/internal/model"
-	"atoman/internal/platform/authctx"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -39,9 +38,8 @@ func RecordMusicRevisionContribution(tx *gorm.DB, revision *model.Revision) erro
 	if !isReputationMusicEntity(revision.ContentType) {
 		return nil
 	}
-	skipped, err := contributionActorExcluded(tx, revision.EditorID)
-	if err != nil || skipped {
-		return err
+	if isAutomatedMusicOperation(revision.EditSummary) {
+		return nil
 	}
 
 	score, metadata, err := scoreMusicRevision(tx, revision)
@@ -70,9 +68,8 @@ func RecordMusicLyricsContribution(tx *gorm.DB, version *model.MusicSongLyricVer
 		}
 		return nil
 	}
-	skipped, err := contributionActorExcluded(tx, version.CreatedBy)
-	if err != nil || skipped {
-		return err
+	if isAutomatedMusicOperation(version.EditSummary) {
+		return nil
 	}
 
 	target := normalizedContributionTarget(version.Target)
@@ -433,12 +430,30 @@ func hasAddedIDs(before, after map[string]struct{}) bool {
 
 func hasRemovedIDs(before, after map[string]struct{}) bool { return hasAddedIDs(after, before) }
 
-func contributionActorExcluded(tx *gorm.DB, userID uuid.UUID) (bool, error) {
-	var user model.User
-	if err := tx.Select("role").First(&user, "uuid = ?", userID).Error; err != nil {
-		return false, err
+func isAutomatedMusicOperation(summary string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(summary))
+	if normalized == "" {
+		return false
 	}
-	return authctx.RoleAtLeast(user.Role, authctx.RoleAdmin), nil
+	for _, marker := range []string{
+		"initial version (migrated from existing data)",
+		"初始版本",
+		"从旧歌词字段迁移",
+		"迁移为独立歌曲",
+		"自动匹配",
+		"自动识别",
+		"自动补全",
+		"批量修复",
+		"修复 lrc 歌词时间轴",
+		"通过专辑版本更新歌词",
+		"通过歌曲版本更新歌词",
+		"通过歌曲上传创建歌词",
+	} {
+		if strings.Contains(normalized, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func isReputationMusicEntity(contentType string) bool {
