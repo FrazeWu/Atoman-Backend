@@ -104,7 +104,7 @@ func TestSubscriptionGroupRejectsDuplicateUserName(t *testing.T) {
 	}
 }
 
-func TestCreateSubscriptionTreatsTrailingSlashExternalRSSAsSameSource(t *testing.T) {
+func TestCreateSubscriptionTreatsEquivalentExternalRSSURLsAsSameSource(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
 		&model.User{},
@@ -127,7 +127,7 @@ func TestCreateSubscriptionTreatsTrailingSlashExternalRSSAsSameSource(t *testing
 	}
 	secondReq := CreateSubscriptionRequest{
 		TargetType: "external_rss",
-		RSSURL:     "https://example.com/feed.xml/",
+		RSSURL:     "HTTP://WWW.example.com/feed.xml/",
 		Title:      "Example Feed",
 	}
 

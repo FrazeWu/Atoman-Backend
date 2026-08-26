@@ -11,6 +11,7 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
 	"atoman/internal/platform/authctx"
+	"atoman/internal/service"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -46,7 +47,7 @@ func (s *Service) CreateSubscription(user authctx.CurrentUser, req CreateSubscri
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return model.Subscription{}, apperr.BadRequest("validation.invalid_request", "rss_url must be an absolute http/https URL")
 	}
-	rssURL = normalizeExternalRSSURL(parsed)
+	rssURL = service.NormalizeFeedSourceURL(rssURL)
 
 	title := strings.TrimSpace(req.Title)
 
@@ -180,10 +181,11 @@ func findOrCreateExternalFeedSource(repo *Repo, rssURL string, title string) (mo
 	}
 
 	source = model.FeedSource{
-		SourceType: "external_rss",
-		RssURL:     rssURL,
-		Hash:       hash,
-		Title:      title,
+		SourceType:   "external_rss",
+		RssURL:       rssURL,
+		CanonicalURL: rssURL,
+		Hash:         hash,
+		Title:        title,
 	}
 	if err := repo.CreateFeedSource(&source); err != nil {
 		if existing, reloadErr := repo.FindFeedSourceByHash(hash); reloadErr == nil {
@@ -208,16 +210,12 @@ func buildFeedSourceHash(targetType string, targetID *uuid.UUID, rssURL string) 
 }
 
 func normalizeExternalRSSURL(parsed *url.URL) string {
-	normalized := *parsed
-	normalized.Path = strings.TrimRight(normalized.Path, "/")
-	return normalized.String()
+	if parsed == nil {
+		return ""
+	}
+	return service.NormalizeFeedSourceURL(parsed.String())
 }
 
 func normalizeExternalRSSURLString(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	parsed, err := url.ParseRequestURI(trimmed)
-	if err != nil {
-		return trimmed
-	}
-	return normalizeExternalRSSURL(parsed)
+	return service.NormalizeFeedSourceURL(raw)
 }

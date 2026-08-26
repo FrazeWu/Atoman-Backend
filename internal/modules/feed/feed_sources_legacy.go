@@ -19,9 +19,7 @@ var syncFeedSource = func(db *gorm.DB, source model.FeedSource) {
 }
 
 func normalizeCanonicalFeedURL(raw string) string {
-	trimmed := strings.TrimSpace(raw)
-	trimmed = strings.TrimRight(trimmed, "/")
-	return trimmed
+	return service.NormalizeFeedSourceURL(raw)
 }
 
 func buildFeedSourceHash(targetType string, targetID *uuid.UUID, rssURL string) string {
