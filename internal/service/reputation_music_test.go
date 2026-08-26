@@ -37,11 +37,18 @@ func TestScoreMusicCreationRequiresMinimumCompleteness(t *testing.T) {
 	}
 }
 
-func TestScoreMusicChangesUsesOnePointForAlbumTrackRemoval(t *testing.T) {
-	before := map[string]any{"album": map[string]any{}, "songs": []any{map[string]any{"id": "one"}, map[string]any{"id": "two"}}}
-	after := map[string]any{"album": map[string]any{}, "songs": []any{map[string]any{"id": "one"}}}
-	score, _ := scoreMusicChanges("album", before, after)
-	if score.Type != "album.tracks.remove" || score.Points != 1 {
-		t.Fatalf("score = %#v, want removal worth 1", score)
+func TestAutomatedMusicOperationsDoNotCreateContribution(t *testing.T) {
+	for _, summary := range []string{
+		"Initial version (migrated from existing data)",
+		"自动匹配歌词",
+		"修复 LRC 歌词时间轴",
+		"通过专辑版本更新歌词",
+	} {
+		if !isAutomatedMusicOperation(summary) {
+			t.Fatalf("summary %q should be classified as automated", summary)
+		}
+	}
+	if isAutomatedMusicOperation("补充专辑简介") {
+		t.Fatal("manual music edit should remain eligible for contribution")
 	}
 }

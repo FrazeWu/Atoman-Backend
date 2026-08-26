@@ -2,6 +2,7 @@ package migrationrunner
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -94,6 +95,7 @@ func Run(db *gorm.DB) error {
 		{"unified content migration", migrations.RunUnifiedContentMigration},
 		{"blog rating content migration", migrations.RunBlogRatingContentMigration},
 		{"blog bookmark content migration", migrations.RunBlogBookmarkContentMigration},
+		{"music contribution evidence backfill", runMusicContributionEvidenceBackfill},
 	}
 	for _, step := range postSchemaSteps {
 		if err := step.run(db); err != nil {
@@ -101,6 +103,64 @@ func Run(db *gorm.DB) error {
 		}
 	}
 	return nil
+}
+
+func runMusicContributionEvidenceBackfill(db *gorm.DB) error {
+	for _, table := range []any{&model.ReputationRun{}, &model.Revision{}, &model.MusicSongLyricVersion{}, &model.MusicContributionEvent{}, &model.MusicContributionEvidence{}} {
+		if !db.Migrator().HasTable(table) {
+			return nil
+		}
+	}
+
+	return db.Transaction(func(tx *gorm.DB) error {
+		var revisions []model.Revision
+		if err := tx.Where("status = ? AND content_type IN ?", "approved", []string{"artist", "album", "song"}).
+			Order("created_at ASC, id ASC").Find(&revisions).Error; err != nil {
+			return fmt.Errorf("find music revisions for contribution backfill: %w", err)
+		}
+		for i := range revisions {
+			var existing int64
+			if err := tx.Model(&model.MusicContributionEvent{}).
+				Where("source_kind = ? AND source_id = ?", "revision", revisions[i].ID).Count(&existing).Error; err != nil {
+				return err
+			}
+			if existing > 0 {
+				continue
+			}
+			if err := service.RecordMusicRevisionContribution(tx, &revisions[i]); err != nil {
+				return fmt.Errorf("backfill revision %s: %w", revisions[i].ID, err)
+			}
+		}
+
+		var versions []model.MusicSongLyricVersion
+		if err := tx.Order("created_at ASC, id ASC").Find(&versions).Error; err != nil {
+			return fmt.Errorf("find lyric versions for contribution backfill: %w", err)
+		}
+		for i := range versions {
+			var existing int64
+			if err := tx.Model(&model.MusicContributionEvent{}).
+				Where("source_kind = ? AND source_id = ?", "lyrics", versions[i].ID).Count(&existing).Error; err != nil {
+				return err
+			}
+			if existing > 0 {
+				continue
+			}
+
+			var previous model.MusicSongLyricVersion
+			err := tx.Where("song_id = ? AND version < ?", versions[i].SongID, versions[i].Version).
+				Order("version DESC").First(&previous).Error
+			wasNew := errors.Is(err, gorm.ErrRecordNotFound)
+			if err != nil && !wasNew {
+				return err
+			}
+			hadTranslation := !wasNew && strings.TrimSpace(previous.Translation) != ""
+			hadTiming := !wasNew && previous.Format == "lrc"
+			if err := service.RecordMusicLyricsContribution(tx, &versions[i], wasNew, hadTranslation, hadTiming); err != nil {
+				return fmt.Errorf("backfill lyric version %s: %w", versions[i].ID, err)
+			}
+		}
+		return nil
+	})
 }
 
 func runMusicFavoritePlaylistMigration(db *gorm.DB) error {

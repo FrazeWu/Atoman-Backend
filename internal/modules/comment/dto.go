@@ -65,10 +65,12 @@ type TimeAnchorDTO struct {
 }
 
 type UserSummaryDTO struct {
-	ID          uuid.UUID `json:"id"`
-	Username    string    `json:"username"`
-	DisplayName string    `json:"display_name"`
-	AvatarURL   string    `json:"avatar_url"`
+	ID                uuid.UUID `json:"id"`
+	Username          string    `json:"username"`
+	DisplayName       string    `json:"display_name"`
+	AvatarURL         string    `json:"avatar_url"`
+	Quality           float64   `json:"quality"`
+	ContributionTotal int       `json:"contribution_total"`
 }
 
 type CommentDTO struct {

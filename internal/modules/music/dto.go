@@ -148,7 +148,7 @@ type RecordMusicRecommendationEventsRequest struct {
 
 type SavePlaybackProgressRequest struct {
 	SongID          uuid.UUID `json:"song_id" binding:"required"`
-	PositionSeconds float64   `json:"position_seconds" binding:"required"`
+	PositionSeconds float64   `json:"position_seconds"`
 	DurationSeconds float64   `json:"duration_seconds"`
 	Completed       bool      `json:"completed"`
 	ReportedAt      time.Time `json:"reported_at"`
@@ -157,7 +157,7 @@ type SavePlaybackProgressRequest struct {
 type SavePlaybackSessionRequest struct {
 	SongIDs         []uuid.UUID `json:"song_ids" binding:"required"`
 	CurrentSongID   uuid.UUID   `json:"current_song_id" binding:"required"`
-	PositionSeconds float64     `json:"position_seconds" binding:"required"`
+	PositionSeconds float64     `json:"position_seconds"`
 	PlaybackMode    string      `json:"playback_mode" binding:"required"`
 	ReportedAt      time.Time   `json:"reported_at"`
 }

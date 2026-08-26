@@ -12,6 +12,7 @@ import (
 	"atoman/internal/platform/apperr"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm/clause"
 )
 
 func parseRecommendationMode(raw string) (recommendation.Mode, error) {
@@ -33,6 +34,8 @@ type blogRecommendationRow struct {
 	CommentsCount         int64
 	BookmarksCount        int64
 	ChannelFollowersCount int64
+	RatingScore           float64
+	RatingCount           int64
 }
 
 type blogEngagementSignals struct {
@@ -44,18 +47,21 @@ type blogEngagementSignals struct {
 }
 
 type blogRankedPost struct {
-	ID            string
-	ChannelID     string
-	Score         float64
-	PublishedAt   time.Time
-	Post          BlogContent
-	LikesCount    int64
-	CommentsCount int64
+	ID             string
+	ChannelID      string
+	Score          float64
+	PublishedAt    time.Time
+	Post           BlogContent
+	LikesCount     int64
+	CommentsCount  int64
+	BookmarksCount int64
+	RatingScore    float64
+	RatingCount    int64
 }
 
 const blogRecommendationCandidateLimit = 2000
 
-func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.UUID, page int, pageSize int) ([]RecommendationItemDTO, int64, error) {
+func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.UUID, page int, pageSize int, queryText string) ([]RecommendationItemDTO, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -92,7 +98,7 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		ChannelFollowersCount int64      `gorm:"column:channel_followers_count"`
 	}
 	var candidates []candidateRow
-	if err := canonicalBlogPostsQuery(s.db).Select(`posts.id, posts.created_at, posts.updated_at, posts.author_id, posts.channel_id,
+	query := canonicalBlogPostsQuery(s.db).Select(`posts.id, posts.created_at, posts.updated_at, posts.author_id, posts.channel_id,
 		posts.title, posts.summary, posts.cover_url, posts.status, posts.visibility, posts.published_at, posts.scheduled_at,
 		blog_extensions.content, blog_extensions.language_code, blog_extensions.pinned, blog_extensions.view_count,
 		blog_extensions.collection_conflict, memberships.collection_id, memberships.position AS collection_position,
@@ -100,8 +106,13 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		COALESCE((SELECT targets.comment_count FROM discussion_targets AS targets WHERE targets.kind = 'blog_post' AND targets.resource_id = posts.id AND targets.deleted_at IS NULL LIMIT 1), 0) AS comments_count,
 		(SELECT COUNT(*) FROM bookmarks WHERE bookmarks.content_id = posts.id AND bookmarks.deleted_at IS NULL) AS bookmarks_count,
 		(SELECT COUNT(*) FROM subscriptions JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id
-		 WHERE feed_sources.source_type = 'internal_channel' AND feed_sources.source_id = posts.channel_id
-		 AND subscriptions.deleted_at IS NULL AND feed_sources.deleted_at IS NULL) AS channel_followers_count`).
+			 WHERE feed_sources.source_type = 'internal_channel' AND feed_sources.source_id = posts.channel_id
+			 AND subscriptions.deleted_at IS NULL AND feed_sources.deleted_at IS NULL) AS channel_followers_count`)
+	if searchQuery := strings.TrimSpace(queryText); searchQuery != "" {
+		searchLike := "%" + searchQuery + "%"
+		query = query.Where("(LOWER(posts.title) LIKE LOWER(?) OR LOWER(posts.summary) LIKE LOWER(?) OR LOWER(blog_extensions.content) LIKE LOWER(?))", searchLike, searchLike, searchLike)
+	}
+	if err := query.
 		Where("posts.status = ? AND (posts.visibility = ? OR posts.visibility = ?)", "published", "", "public").
 		Order("COALESCE(posts.published_at, posts.created_at) DESC").
 		Limit(blogRecommendationCandidateLimit).
@@ -138,6 +149,17 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 			BlogContent: content, LikesCount: candidate.LikesCount, CommentsCount: candidate.CommentsCount,
 			BookmarksCount: candidate.BookmarksCount, ChannelFollowersCount: candidate.ChannelFollowersCount,
 		})
+	}
+
+	ratingsByPostID, err := s.recommendationRatings(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	for index := range rows {
+		if rating, ok := ratingsByPostID[rows[index].ID]; ok {
+			rows[index].RatingScore = rating.Score
+			rows[index].RatingCount = rating.Count
+		}
 	}
 
 	subscribedChannels := map[uuid.UUID]struct{}{}
@@ -190,6 +212,7 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 			ID: row.ID.String(), ChannelID: blogContentRecommendationSourceKey(row.BlogContent), Score: score,
 			PublishedAt: publishedAt, Post: row.BlogContent,
 			LikesCount: row.LikesCount, CommentsCount: row.CommentsCount,
+			BookmarksCount: row.BookmarksCount, RatingScore: row.RatingScore, RatingCount: row.RatingCount,
 		})
 	}
 	sort.SliceStable(ranked, func(i, j int) bool {
@@ -204,15 +227,12 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 	for _, rankedItem := range ranked {
 		post := rankedItem.Post
 		items = append(items, RecommendationItemDTO{
-			ID:            post.ID.String(),
-			Title:         post.Title,
-			Summary:       seoPostDescription(post),
-			ContentType:   "blog",
-			ImageURL:      post.CoverURL,
-			TargetPath:    "/post/" + post.ID.String(),
-			ScoreLabel:    blogRecommendationLabel(mode, rankedItem.Score),
-			LikesCount:    rankedItem.LikesCount,
-			CommentsCount: rankedItem.CommentsCount,
+			ID: post.ID.String(), Title: post.Title, Summary: seoPostDescription(post), ContentType: "blog",
+			ImageURL: post.CoverURL, TargetPath: "/posts/post/" + post.ID.String(),
+			ScoreLabel: blogRecommendationLabel(mode, rankedItem.Score), LikesCount: rankedItem.LikesCount,
+			CommentsCount: rankedItem.CommentsCount, CreatedAt: post.CreatedAt, PublishedAt: post.PublishedAt,
+			User: recommendationAuthor(post.User), Channel: recommendationChannel(post.Channel), ViewCount: post.ViewCount, BookmarksCount: rankedItem.BookmarksCount,
+			RatingScore: rankedItem.RatingScore, RatingCount: rankedItem.RatingCount,
 		})
 	}
 
@@ -226,6 +246,120 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		end = len(items)
 	}
 	return items[start:end], total, nil
+}
+
+func (s *Service) RelatedPosts(postID uuid.UUID, viewerID *uuid.UUID, limit int) ([]RecommendationItemDTO, error) {
+	if limit < 1 || limit > 12 {
+		limit = 6
+	}
+
+	anchorQuery := ApplyPublishedPostListVisibility(
+		canonicalBlogPostsQuery(s.db).Where("posts.id = ? AND posts.status = ?", postID, "published"), viewerID,
+	)
+	anchors, err := LoadCanonicalBlogContents(s.db, anchorQuery.Limit(1))
+	if err != nil {
+		return nil, err
+	}
+	if len(anchors) == 0 {
+		return nil, apperr.NotFound("blog.post_not_found", "Post not found")
+	}
+	anchor := anchors[0]
+
+	orderSQL := "CASE "
+	orderVars := make([]interface{}, 0, 2)
+	if anchor.ChannelID != nil && *anchor.ChannelID != uuid.Nil {
+		orderSQL += "WHEN posts.channel_id = ? THEN 0 "
+		orderVars = append(orderVars, *anchor.ChannelID)
+	}
+	if anchor.UserID != uuid.Nil {
+		orderSQL += "WHEN posts.author_id = ? THEN 1 "
+		orderVars = append(orderVars, anchor.UserID)
+	}
+	orderSQL += "ELSE 2 END, COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC"
+
+	query := ApplyPublishedPostListVisibility(
+		canonicalBlogPostsQuery(s.db).Where("posts.id <> ? AND posts.status = ?", postID, "published"), viewerID,
+	).Order(clause.OrderBy{Expression: clause.Expr{SQL: orderSQL, Vars: orderVars}}).Limit(limit)
+	var rows []canonicalBlogPostRow
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	contents, err := hydrateCanonicalBlogContents(s.db, rows)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]RecommendationItemDTO, 0, len(contents))
+	for _, content := range contents {
+		reason := "更多文章"
+		if anchor.ChannelID != nil && content.ChannelID != nil && *anchor.ChannelID == *content.ChannelID {
+			reason = "同频道"
+		} else if anchor.UserID != uuid.Nil && anchor.UserID == content.UserID {
+			reason = "同作者"
+		}
+		items = append(items, RecommendationItemDTO{
+			ID: content.ID.String(), Title: content.Title, Summary: content.Summary, ContentType: "blog",
+			ImageURL: content.CoverURL, TargetPath: "/posts/post/" + content.ID.String(), ScoreLabel: reason,
+			CreatedAt: content.CreatedAt, PublishedAt: content.PublishedAt,
+			User: recommendationAuthor(content.User), Channel: recommendationChannel(content.Channel),
+		})
+	}
+	return items, nil
+}
+
+func recommendationAuthor(user *model.User) *RecommendationAuthorDTO {
+	if user == nil {
+		return nil
+	}
+	return &RecommendationAuthorDTO{
+		UUID: user.UUID, Username: user.Username, DisplayName: user.DisplayName, AvatarURL: user.AvatarURL,
+	}
+}
+
+func recommendationChannel(channel *model.Channel) *RecommendationChannelDTO {
+	if channel == nil {
+		return nil
+	}
+	return &RecommendationChannelDTO{
+		ID: channel.ID, Name: channel.Name, Slug: channel.Slug,
+		Description: channel.Description, CoverURL: channel.CoverURL,
+	}
+}
+
+type recommendationRating struct {
+	Score float64
+	Count int64
+}
+
+func (s *Service) recommendationRatings(rows []blogRecommendationRow) (map[uuid.UUID]recommendationRating, error) {
+	result := make(map[uuid.UUID]recommendationRating)
+	if len(rows) == 0 || !s.db.Migrator().HasTable(&model.PostRating{}) {
+		return result, nil
+	}
+	ids := make([]uuid.UUID, 0, len(rows))
+	for _, row := range rows {
+		ids = append(ids, row.ID)
+	}
+	type aggregate struct {
+		ContentID uuid.UUID `gorm:"column:content_id"`
+		Score     float64   `gorm:"column:score"`
+		Count     int64     `gorm:"column:count"`
+	}
+	var aggregates []aggregate
+	if err := s.db.Model(&model.PostRating{}).
+		Select("content_id, AVG(score) AS score, COUNT(*) AS count").
+		Where("content_id IN ?", ids).
+		Group("content_id").
+		Scan(&aggregates).Error; err != nil {
+		return nil, err
+	}
+	for _, aggregate := range aggregates {
+		result[aggregate.ContentID] = recommendationRating{
+			Score: math.Round(aggregate.Score*10) / 10,
+			Count: aggregate.Count,
+		}
+	}
+	return result, nil
 }
 
 func uuidValue(value *uuid.UUID) uuid.UUID {

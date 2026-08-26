@@ -279,11 +279,41 @@ definitions:
       viewer_rating:
         type: integer
     type: object
+  blog.RecommendationAuthorDTO:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      username:
+        type: string
+      uuid:
+        type: string
+    type: object
+  blog.RecommendationChannelDTO:
+    properties:
+      cover_url:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      slug:
+        type: string
+    type: object
   blog.RecommendationItemDTO:
     properties:
+      bookmarks_count:
+        type: integer
+      channel:
+        $ref: '#/definitions/blog.RecommendationChannelDTO'
       comments_count:
         type: integer
       content_type:
+        type: string
+      created_at:
         type: string
       id:
         type: string
@@ -291,6 +321,12 @@ definitions:
         type: string
       likes_count:
         type: integer
+      published_at:
+        type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
       score_label:
         type: string
       summary:
@@ -299,6 +335,10 @@ definitions:
         type: string
       title:
         type: string
+      user:
+        $ref: '#/definitions/blog.RecommendationAuthorDTO'
+      view_count:
+        type: integer
     type: object
   blog.SEOPostDTO:
     properties:
@@ -660,10 +700,14 @@ definitions:
     properties:
       avatar_url:
         type: string
+      contribution_total:
+        type: integer
       display_name:
         type: string
       id:
         type: string
+      quality:
+        type: number
       username:
         type: string
     type: object
@@ -2781,6 +2825,9 @@ definitions:
       bio:
         example: Writer and builder
         type: string
+      contribution_total:
+        example: 100
+        type: integer
       created_at:
         example: "2026-05-25T11:00:00Z"
         format: date-time
@@ -2794,6 +2841,9 @@ definitions:
       location:
         example: Seoul
         type: string
+      quality:
+        example: 20
+        type: number
       username:
         example: fafa
         type: string
@@ -3142,6 +3192,9 @@ definitions:
       bio:
         example: Writer and builder
         type: string
+      contribution_total:
+        example: 100
+        type: integer
       created_at:
         example: "2026-05-25T11:00:00Z"
         format: date-time
@@ -3161,6 +3214,9 @@ definitions:
       posts_count:
         example: 5
         type: integer
+      quality:
+        example: 20
+        type: number
       role:
         example: user
         type: string
@@ -6402,7 +6458,6 @@ definitions:
       song_id:
         type: string
     required:
-    - position_seconds
     - song_id
     type: object
   music.SavePlaybackSessionRequest:
@@ -6422,7 +6477,6 @@ definitions:
     required:
     - current_song_id
     - playback_mode
-    - position_seconds
     - song_ids
     type: object
   music.SongRatingSummary:
@@ -10550,6 +10604,44 @@ paths:
       summary: 设置文章评分
       tags:
       - blog
+  /api/v1/blog/posts/{id}/related:
+    get:
+      description: 按当前文章的频道和作者优先返回可阅读的公开文章。
+      parameters:
+      - description: 文章 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - default: 6
+        description: 返回数量上限
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/blog.RecommendationItemDTO'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取文章相关推荐
+      tags:
+      - blog
   /api/v1/blog/posts/{id}/versions:
     get:
       parameters:
@@ -10635,6 +10727,10 @@ paths:
         - discover
         in: query
         name: mode
+        type: string
+      - description: 搜索标题、摘要或正文
+        in: query
+        name: q
         type: string
       - description: 页码
         in: query

@@ -4738,6 +4738,63 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/blog/posts/{id}/related": {
+            "get": {
+                "description": "按当前文章的频道和作者优先返回可阅读的公开文章。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "获取文章相关推荐",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文章 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "default": 6,
+                        "description": "返回数量上限",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/blog.RecommendationItemDTO"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/blog/posts/{id}/versions": {
             "get": {
                 "security": [
@@ -4839,6 +4896,12 @@ const docTemplate = `{
                         "type": "string",
                         "description": "推荐模式",
                         "name": "mode",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "搜索标题、摘要或正文",
+                        "name": "q",
                         "in": "query"
                     },
                     {
@@ -23958,13 +24021,59 @@ const docTemplate = `{
                 }
             }
         },
+        "blog.RecommendationAuthorDTO": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.RecommendationChannelDTO": {
+            "type": "object",
+            "properties": {
+                "cover_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                }
+            }
+        },
         "blog.RecommendationItemDTO": {
             "type": "object",
             "properties": {
+                "bookmarks_count": {
+                    "type": "integer"
+                },
+                "channel": {
+                    "$ref": "#/definitions/blog.RecommendationChannelDTO"
+                },
                 "comments_count": {
                     "type": "integer"
                 },
                 "content_type": {
+                    "type": "string"
+                },
+                "created_at": {
                     "type": "string"
                 },
                 "id": {
@@ -23975,6 +24084,15 @@ const docTemplate = `{
                 },
                 "likes_count": {
                     "type": "integer"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
                 },
                 "score_label": {
                     "type": "string"
@@ -23987,6 +24105,12 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/blog.RecommendationAuthorDTO"
+                },
+                "view_count": {
+                    "type": "integer"
                 }
             }
         },
@@ -24544,11 +24668,17 @@ const docTemplate = `{
                 "avatar_url": {
                     "type": "string"
                 },
+                "contribution_total": {
+                    "type": "integer"
+                },
                 "display_name": {
                     "type": "string"
                 },
                 "id": {
                     "type": "string"
+                },
+                "quality": {
+                    "type": "number"
                 },
                 "username": {
                     "type": "string"
@@ -27720,6 +27850,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Writer and builder"
                 },
+                "contribution_total": {
+                    "type": "integer",
+                    "example": 100
+                },
                 "created_at": {
                     "type": "string",
                     "format": "date-time",
@@ -27736,6 +27870,10 @@ const docTemplate = `{
                 "location": {
                     "type": "string",
                     "example": "Seoul"
+                },
+                "quality": {
+                    "type": "number",
+                    "example": 20
                 },
                 "username": {
                     "type": "string",
@@ -28249,6 +28387,10 @@ const docTemplate = `{
                     "type": "string",
                     "example": "Writer and builder"
                 },
+                "contribution_total": {
+                    "type": "integer",
+                    "example": 100
+                },
                 "created_at": {
                     "type": "string",
                     "format": "date-time",
@@ -28273,6 +28415,10 @@ const docTemplate = `{
                 "posts_count": {
                     "type": "integer",
                     "example": 5
+                },
+                "quality": {
+                    "type": "number",
+                    "example": 20
                 },
                 "role": {
                     "type": "string",
@@ -33143,7 +33289,6 @@ const docTemplate = `{
         "music.SavePlaybackProgressRequest": {
             "type": "object",
             "required": [
-                "position_seconds",
                 "song_id"
             ],
             "properties": {
@@ -33169,7 +33314,6 @@ const docTemplate = `{
             "required": [
                 "current_song_id",
                 "playback_mode",
-                "position_seconds",
                 "song_ids"
             ],
             "properties": {
