@@ -688,6 +688,13 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 	if err := db.Create(&post).Error; err != nil {
 		t.Fatalf("create post: %v", err)
 	}
+	otherPost := model.Post{
+		UserID: user.ID, ChannelID: &channel.ID, Title: "另一篇文章", Content: "普通内容",
+		Summary: "普通摘要", Status: "published", Visibility: "public",
+	}
+	if err := db.Create(&otherPost).Error; err != nil {
+		t.Fatalf("create other post: %v", err)
+	}
 	if err := db.Create(&model.Like{UserID: user.ID, TargetType: "post", TargetID: post.ID}).Error; err != nil {
 		t.Fatalf("create like: %v", err)
 	}
@@ -699,7 +706,7 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 
 	r := newBlogHTTPRouter(service, &user)
 	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/recommend/posts?mode=hot&page=1&page_size=20", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/blog/recommend/posts?mode=hot&q=推荐&page=1&page_size=20", nil)
 	r.ServeHTTP(w, req)
 
 	if w.Code == http.StatusNotFound {
@@ -711,30 +718,39 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 
 	var payload struct {
 		Data []struct {
-			ID            string `json:"id"`
-			Title         string `json:"title"`
-			Summary       string `json:"summary"`
-			ContentType   string `json:"content_type"`
-			TargetPath    string `json:"target_path"`
-			ScoreLabel    string `json:"score_label"`
-			LikesCount    int64  `json:"likes_count"`
-			CommentsCount int64  `json:"comments_count"`
+			ID            string                    `json:"id"`
+			Title         string                    `json:"title"`
+			Summary       string                    `json:"summary"`
+			ContentType   string                    `json:"content_type"`
+			TargetPath    string                    `json:"target_path"`
+			ScoreLabel    string                    `json:"score_label"`
+			LikesCount    int64                     `json:"likes_count"`
+			CommentsCount int64                     `json:"comments_count"`
+			ViewCount     int64                     `json:"view_count"`
+			User          *RecommendationAuthorDTO  `json:"user"`
+			Channel       *RecommendationChannelDTO `json:"channel"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if len(payload.Data) == 0 {
-		t.Fatalf("expected recommendation items, got %s", w.Body.String())
+	if len(payload.Data) != 1 {
+		t.Fatalf("expected q search to return one recommendation, got %d: %s", len(payload.Data), w.Body.String())
 	}
 	first := payload.Data[0]
 	if first.LikesCount != 1 || first.CommentsCount != 1 {
 		t.Fatalf("expected recommendation engagement 1/1, got %d/%d: %s", first.LikesCount, first.CommentsCount, w.Body.String())
 	}
+	if first.ViewCount != 86 || first.User == nil || first.Channel == nil {
+		t.Fatalf("expected card metadata, got view_count=%d user=%v channel=%v", first.ViewCount, first.User, first.Channel)
+	}
 	if first.ID == "" || first.Title == "" || first.TargetPath == "" || first.ScoreLabel == "" || first.ContentType != "blog" {
 		t.Fatalf("expected recommendation dto fields, got %#v", first)
 	}
-	if first.TargetPath != "/post/"+first.ID {
+	if strings.Contains(w.Body.String(), "alice@example.com") {
+		t.Fatalf("recommendation response must not expose author email: %s", w.Body.String())
+	}
+	if first.TargetPath != "/posts/post/"+first.ID {
 		t.Fatalf("expected canonical post target path, got %q", first.TargetPath)
 	}
 }

@@ -45,16 +45,39 @@ type CreatePostRequest struct {
 	Status       string    `json:"status"`
 }
 
+type RecommendationAuthorDTO struct {
+	UUID        uuid.UUID `json:"uuid"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"display_name"`
+	AvatarURL   string    `json:"avatar_url"`
+}
+
+type RecommendationChannelDTO struct {
+	ID          uuid.UUID `json:"id"`
+	Name        string    `json:"name"`
+	Slug        string    `json:"slug"`
+	Description string    `json:"description"`
+	CoverURL    string    `json:"cover_url"`
+}
+
 type RecommendationItemDTO struct {
-	ID            string `json:"id"`
-	Title         string `json:"title"`
-	Summary       string `json:"summary"`
-	ContentType   string `json:"content_type"`
-	ImageURL      string `json:"image_url"`
-	TargetPath    string `json:"target_path"`
-	ScoreLabel    string `json:"score_label"`
-	LikesCount    int64  `json:"likes_count"`
-	CommentsCount int64  `json:"comments_count"`
+	ID             string                    `json:"id"`
+	Title          string                    `json:"title"`
+	Summary        string                    `json:"summary"`
+	ContentType    string                    `json:"content_type"`
+	ImageURL       string                    `json:"image_url"`
+	TargetPath     string                    `json:"target_path"`
+	ScoreLabel     string                    `json:"score_label"`
+	LikesCount     int64                     `json:"likes_count"`
+	CommentsCount  int64                     `json:"comments_count"`
+	CreatedAt      time.Time                 `json:"created_at"`
+	PublishedAt    *time.Time                `json:"published_at,omitempty"`
+	User           *RecommendationAuthorDTO  `json:"user,omitempty"`
+	Channel        *RecommendationChannelDTO `json:"channel,omitempty"`
+	ViewCount      int64                     `json:"view_count"`
+	BookmarksCount int64                     `json:"bookmarks_count"`
+	RatingScore    float64                   `json:"rating_score"`
+	RatingCount    int64                     `json:"rating_count"`
 }
 
 type BlogContentListItemDTO struct {

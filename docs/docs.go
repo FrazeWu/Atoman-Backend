@@ -4842,6 +4842,12 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "type": "string",
+                        "description": "搜索标题、摘要或正文",
+                        "name": "q",
+                        "in": "query"
+                    },
+                    {
                         "type": "integer",
                         "description": "页码",
                         "name": "page",
@@ -23958,13 +23964,59 @@ const docTemplate = `{
                 }
             }
         },
+        "blog.RecommendationAuthorDTO": {
+            "type": "object",
+            "properties": {
+                "avatar_url": {
+                    "type": "string"
+                },
+                "display_name": {
+                    "type": "string"
+                },
+                "username": {
+                    "type": "string"
+                },
+                "uuid": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.RecommendationChannelDTO": {
+            "type": "object",
+            "properties": {
+                "cover_url": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "slug": {
+                    "type": "string"
+                }
+            }
+        },
         "blog.RecommendationItemDTO": {
             "type": "object",
             "properties": {
+                "bookmarks_count": {
+                    "type": "integer"
+                },
+                "channel": {
+                    "$ref": "#/definitions/blog.RecommendationChannelDTO"
+                },
                 "comments_count": {
                     "type": "integer"
                 },
                 "content_type": {
+                    "type": "string"
+                },
+                "created_at": {
                     "type": "string"
                 },
                 "id": {
@@ -23975,6 +24027,15 @@ const docTemplate = `{
                 },
                 "likes_count": {
                     "type": "integer"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
                 },
                 "score_label": {
                     "type": "string"
@@ -23987,6 +24048,12 @@ const docTemplate = `{
                 },
                 "title": {
                     "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/blog.RecommendationAuthorDTO"
+                },
+                "view_count": {
+                    "type": "integer"
                 }
             }
         },

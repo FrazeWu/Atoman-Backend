@@ -212,6 +212,7 @@ func ApplyPublishedPostListVisibility(query *gorm.DB, viewerID *uuid.UUID) *gorm
 // @Tags blog
 // @Produce json
 // @Param mode query string false "推荐模式" Enums(hot,featured,discover)
+// @Param q query string false "搜索标题、摘要或正文"
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
 // @Success 200 {array} RecommendationItemDTO
@@ -223,7 +224,7 @@ func (h *Handler) listRecommendedPosts(c *gin.Context) {
 		return
 	}
 	page, pageSize := httpx.PageParams(c)
-	items, total, err := h.service.RecommendPostsByMode(mode, currentViewerID(c), page, pageSize)
+	items, total, err := h.service.RecommendPostsByMode(mode, currentViewerID(c), page, pageSize, c.Query("q"))
 	if err != nil {
 		httpx.Error(c, err)
 		return

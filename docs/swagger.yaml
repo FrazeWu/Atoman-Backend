@@ -279,11 +279,41 @@ definitions:
       viewer_rating:
         type: integer
     type: object
+  blog.RecommendationAuthorDTO:
+    properties:
+      avatar_url:
+        type: string
+      display_name:
+        type: string
+      username:
+        type: string
+      uuid:
+        type: string
+    type: object
+  blog.RecommendationChannelDTO:
+    properties:
+      cover_url:
+        type: string
+      description:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      slug:
+        type: string
+    type: object
   blog.RecommendationItemDTO:
     properties:
+      bookmarks_count:
+        type: integer
+      channel:
+        $ref: '#/definitions/blog.RecommendationChannelDTO'
       comments_count:
         type: integer
       content_type:
+        type: string
+      created_at:
         type: string
       id:
         type: string
@@ -291,6 +321,12 @@ definitions:
         type: string
       likes_count:
         type: integer
+      published_at:
+        type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
       score_label:
         type: string
       summary:
@@ -299,6 +335,10 @@ definitions:
         type: string
       title:
         type: string
+      user:
+        $ref: '#/definitions/blog.RecommendationAuthorDTO'
+      view_count:
+        type: integer
     type: object
   blog.SEOPostDTO:
     properties:
@@ -10635,6 +10675,10 @@ paths:
         - discover
         in: query
         name: mode
+        type: string
+      - description: 搜索标题、摘要或正文
+        in: query
+        name: q
         type: string
       - description: 页码
         in: query
