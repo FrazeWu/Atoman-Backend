@@ -10604,6 +10604,44 @@ paths:
       summary: 设置文章评分
       tags:
       - blog
+  /api/v1/blog/posts/{id}/related:
+    get:
+      description: 按当前文章的频道和作者优先返回可阅读的公开文章。
+      parameters:
+      - description: 文章 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - default: 6
+        description: 返回数量上限
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/blog.RecommendationItemDTO'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取文章相关推荐
+      tags:
+      - blog
   /api/v1/blog/posts/{id}/versions:
     get:
       parameters:

@@ -118,6 +118,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.GET("/posts/:id/versions", h.listPostVersions)
 	group.GET("/posts/:id/export", canPublish, h.exportMarkdownPost)
 	group.POST("/posts/:id/versions/:version/restore", h.restorePostVersion)
+	group.GET("/posts/:id/related", h.listRelatedPosts)
 	group.GET("/posts/:id", h.getPost)
 	group.POST("/posts", canPublish, h.createPost)
 	group.PUT("/posts/:id", canPublish, h.updatePost)

@@ -755,6 +755,55 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 	}
 }
 
+func TestRelatedPostsPrioritizesChannelAndExcludesAnchor(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	otherChannel := model.Channel{UserID: &user.ID, Name: "Other", Slug: "other-" + uuid.NewString()[:8]}
+	if err := db.Create(&otherChannel).Error; err != nil {
+		t.Fatalf("create other channel: %v", err)
+	}
+	anchor := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "当前文章", Content: "正文", Status: "published", Visibility: "public"}
+	sameChannel := model.Post{UserID: user.ID, ChannelID: &channel.ID, Title: "同频道文章", Content: "正文", Status: "published", Visibility: "public"}
+	sameAuthor := model.Post{UserID: user.ID, ChannelID: &otherChannel.ID, Title: "同作者文章", Content: "正文", Status: "published", Visibility: "public"}
+	for _, post := range []*model.Post{&anchor, &sameChannel, &sameAuthor} {
+		if err := db.Create(post).Error; err != nil {
+			t.Fatalf("create post %q: %v", post.Title, err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	newBlogHTTPRouter(service, &user).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/blog/posts/"+anchor.ID.String()+"/related?limit=2", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected related posts 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			ID         string `json:"id"`
+			ScoreLabel string `json:"score_label"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode related posts: %v", err)
+	}
+	if len(payload.Data) != 2 {
+		t.Fatalf("expected two related posts, got %d: %s", len(payload.Data), w.Body.String())
+	}
+	if payload.Data[0].ID != sameChannel.ID.String() || payload.Data[0].ScoreLabel != "同频道" {
+		t.Fatalf("expected same-channel post first, got %#v", payload.Data)
+	}
+	if payload.Data[1].ID != sameAuthor.ID.String() || payload.Data[1].ScoreLabel != "同作者" {
+		t.Fatalf("expected same-author post second, got %#v", payload.Data)
+	}
+	for _, item := range payload.Data {
+		if item.ID == anchor.ID.String() {
+			t.Fatalf("related posts must exclude anchor: %s", w.Body.String())
+		}
+	}
+}
+
 func TestRegisterRoutesMountsBookmarkAndFolderMutationEndpoints(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
