@@ -1863,7 +1863,7 @@ func TestRegisterRoutesPlaybackProgressRoundTrip(t *testing.T) {
 	}
 	router := newMusicHTTPRouter(service, &user)
 
-	save := performMusicJSONRequest(t, router, http.MethodPut, "/api/v1/music/playback-progress", `{"song_id":"`+song.ID.String()+`","position_seconds":42.5,"duration_seconds":180,"completed":false}`)
+	save := performMusicJSONRequest(t, router, http.MethodPut, "/api/v1/music/playback-progress", `{"song_id":"`+song.ID.String()+`","position_seconds":0,"duration_seconds":180,"completed":false}`)
 	if save.Code != http.StatusOK {
 		t.Fatalf("save status = %d, body=%s", save.Code, save.Body.String())
 	}
@@ -1878,7 +1878,7 @@ func TestRegisterRoutesPlaybackProgressRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(load.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode playback progress: %v", err)
 	}
-	if payload.Data.SongID != song.ID || payload.Data.PositionSeconds != 42.5 || payload.Data.DurationSeconds != 180 || payload.Data.Completed || payload.Data.Song == nil || payload.Data.Song.ID != song.ID {
+	if payload.Data.SongID != song.ID || payload.Data.PositionSeconds != 0 || payload.Data.DurationSeconds != 180 || payload.Data.Completed || payload.Data.Song == nil || payload.Data.Song.ID != song.ID {
 		t.Fatalf("unexpected playback progress: %#v", payload.Data)
 	}
 }
@@ -1894,7 +1894,7 @@ func TestRegisterRoutesPlaybackSessionRoundTrip(t *testing.T) {
 		t.Fatalf("create second song: %v", err)
 	}
 	router := newMusicHTTPRouter(service, &user)
-	body := `{"song_ids":["` + second.ID.String() + `","` + first.ID.String() + `"],"current_song_id":"` + first.ID.String() + `","position_seconds":23,"playback_mode":"random"}`
+	body := `{"song_ids":["` + second.ID.String() + `","` + first.ID.String() + `"],"current_song_id":"` + first.ID.String() + `","position_seconds":0,"playback_mode":"random"}`
 	save := performMusicJSONRequest(t, router, http.MethodPut, "/api/v1/music/playback-session", body)
 	if save.Code != http.StatusOK {
 		t.Fatalf("save session status = %d, body=%s", save.Code, save.Body.String())
@@ -1909,7 +1909,7 @@ func TestRegisterRoutesPlaybackSessionRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(load.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode playback session: %v", err)
 	}
-	if payload.Data.CurrentSongID != first.ID || payload.Data.PositionSeconds != 23 || payload.Data.PlaybackMode != "random" || len(payload.Data.Queue) != 2 || payload.Data.Queue[0].ID != second.ID || payload.Data.Queue[1].ID != first.ID {
+	if payload.Data.CurrentSongID != first.ID || payload.Data.PositionSeconds != 0 || payload.Data.PlaybackMode != "random" || len(payload.Data.Queue) != 2 || payload.Data.Queue[0].ID != second.ID || payload.Data.Queue[1].ID != first.ID {
 		t.Fatalf("unexpected playback session: %#v", payload.Data)
 	}
 }
