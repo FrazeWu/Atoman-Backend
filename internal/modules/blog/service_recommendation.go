@@ -12,6 +12,7 @@ import (
 	"atoman/internal/platform/apperr"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm/clause"
 )
 
 func parseRecommendationMode(raw string) (recommendation.Mode, error) {
@@ -245,6 +246,65 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		end = len(items)
 	}
 	return items[start:end], total, nil
+}
+
+func (s *Service) RelatedPosts(postID uuid.UUID, viewerID *uuid.UUID, limit int) ([]RecommendationItemDTO, error) {
+	if limit < 1 || limit > 12 {
+		limit = 6
+	}
+
+	anchorQuery := ApplyPublishedPostListVisibility(
+		canonicalBlogPostsQuery(s.db).Where("posts.id = ? AND posts.status = ?", postID, "published"), viewerID,
+	)
+	anchors, err := LoadCanonicalBlogContents(s.db, anchorQuery.Limit(1))
+	if err != nil {
+		return nil, err
+	}
+	if len(anchors) == 0 {
+		return nil, apperr.NotFound("blog.post_not_found", "Post not found")
+	}
+	anchor := anchors[0]
+
+	orderSQL := "CASE "
+	orderVars := make([]interface{}, 0, 2)
+	if anchor.ChannelID != nil && *anchor.ChannelID != uuid.Nil {
+		orderSQL += "WHEN posts.channel_id = ? THEN 0 "
+		orderVars = append(orderVars, *anchor.ChannelID)
+	}
+	if anchor.UserID != uuid.Nil {
+		orderSQL += "WHEN posts.author_id = ? THEN 1 "
+		orderVars = append(orderVars, anchor.UserID)
+	}
+	orderSQL += "ELSE 2 END, COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC"
+
+	query := ApplyPublishedPostListVisibility(
+		canonicalBlogPostsQuery(s.db).Where("posts.id <> ? AND posts.status = ?", postID, "published"), viewerID,
+	).Order(clause.OrderBy{Expression: clause.Expr{SQL: orderSQL, Vars: orderVars}}).Limit(limit)
+	var rows []canonicalBlogPostRow
+	if err := query.Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	contents, err := hydrateCanonicalBlogContents(s.db, rows)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]RecommendationItemDTO, 0, len(contents))
+	for _, content := range contents {
+		reason := "更多文章"
+		if anchor.ChannelID != nil && content.ChannelID != nil && *anchor.ChannelID == *content.ChannelID {
+			reason = "同频道"
+		} else if anchor.UserID != uuid.Nil && anchor.UserID == content.UserID {
+			reason = "同作者"
+		}
+		items = append(items, RecommendationItemDTO{
+			ID: content.ID.String(), Title: content.Title, Summary: content.Summary, ContentType: "blog",
+			ImageURL: content.CoverURL, TargetPath: "/posts/post/" + content.ID.String(), ScoreLabel: reason,
+			CreatedAt: content.CreatedAt, PublishedAt: content.PublishedAt,
+			User: recommendationAuthor(content.User), Channel: recommendationChannel(content.Channel),
+		})
+	}
+	return items, nil
 }
 
 func recommendationAuthor(user *model.User) *RecommendationAuthorDTO {

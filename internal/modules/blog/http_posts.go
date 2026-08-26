@@ -232,6 +232,33 @@ func (h *Handler) listRecommendedPosts(c *gin.Context) {
 	httpx.List(c, items, page, pageSize, total)
 }
 
+// listRelatedPosts godoc
+// @Summary 获取文章相关推荐
+// @Description 按当前文章的频道和作者优先返回可阅读的公开文章。
+// @Tags blog
+// @Produce json
+// @Param id path string true "文章 UUID"
+// @Param limit query int false "返回数量上限" default(6)
+// @Success 200 {array} RecommendationItemDTO
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Failure 500 {object} handlers.ErrorResponse
+// @Router /api/v1/blog/posts/{id}/related [get]
+func (h *Handler) listRelatedPosts(c *gin.Context) {
+	postID, err := parsePostID(c.Param("id"))
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "6"))
+	items, err := h.service.RelatedPosts(postID, currentViewerID(c), limit)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, items)
+}
+
 // getPost godoc
 // @Summary 获取文章详情
 // @Description 返回指定文章；未发布文章（草稿或定时发布）仅作者本人可查看。
