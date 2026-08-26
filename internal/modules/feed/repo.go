@@ -1084,6 +1084,7 @@ func (r *Repo) countExploreFeedItemsSearch(search string) (int64, error) {
 			FROM feed_items
 			JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id
 			WHERE feed_sources.hidden = false
+			  AND feed_sources.deleted_at IS NULL
 			  AND feed_items.deleted_at IS NULL
 			  AND (LOWER(feed_items.title) LIKE ? ESCAPE '\' OR LOWER(feed_items.summary) LIKE ? ESCAPE '\')
 			UNION
@@ -1091,6 +1092,7 @@ func (r *Repo) countExploreFeedItemsSearch(search string) (int64, error) {
 			FROM feed_items
 			JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id
 			WHERE feed_sources.hidden = false
+			  AND feed_sources.deleted_at IS NULL
 			  AND feed_items.deleted_at IS NULL
 			  AND (LOWER(feed_sources.title) LIKE ? ESCAPE '\' OR LOWER(feed_sources.rss_url) LIKE ? ESCAPE '\')
 		) AS matched_feed_items`, pattern, pattern, pattern, pattern).Scan(&count).Error
@@ -1293,8 +1295,8 @@ func (r *Repo) CountExploreSources(category string, query string, language ...st
 	}
 	db := r.db.Table("feed_sources").
 		Select("feed_sources.id").
-		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
-		Where("feed_sources.source_type = ? AND feed_sources.hidden = ?", "external_rss", false)
+		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id AND feed_items.deleted_at IS NULL").
+		Where("feed_sources.source_type = ? AND feed_sources.hidden = ? AND feed_sources.deleted_at IS NULL", "external_rss", false)
 	if normalizedCategory := normalizeFeedSourceCategory(category); normalizedCategory != "" {
 		db = applyExploreSourceCategoryFilter(db, normalizedCategory)
 	}
