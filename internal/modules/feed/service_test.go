@@ -1856,6 +1856,46 @@ func TestListExploreSourcesExcludesHiddenSources(t *testing.T) {
 	}
 }
 
+func TestListExploreSourcesExcludesDeletedSources(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	deletedSource := model.FeedSource{
+		SourceType:   "external_rss",
+		RssURL:       "https://deleted-explore.example.com/feed.xml",
+		Hash:         "deleted-explore-source-hash",
+		Title:        "Deleted Explore Source",
+		HealthStatus: "healthy",
+	}
+	if err := db.Create(&deletedSource).Error; err != nil {
+		t.Fatalf("create deleted source: %v", err)
+	}
+	deletedItem := model.FeedItem{
+		FeedSourceID: deletedSource.ID,
+		GUID:         "deleted-explore-guid",
+		Title:        "Deleted Explore Item",
+		Link:         "https://deleted-explore.example.com/items/1",
+		PublishedAt:  time.Now().UTC(),
+		FetchedAt:    time.Now().UTC(),
+	}
+	if err := db.Create(&deletedItem).Error; err != nil {
+		t.Fatalf("create deleted item: %v", err)
+	}
+	if err := db.Delete(&deletedItem).Error; err != nil {
+		t.Fatalf("soft-delete item: %v", err)
+	}
+	if err := db.Delete(&deletedSource).Error; err != nil {
+		t.Fatalf("soft-delete source: %v", err)
+	}
+
+	rows, err := service.repo.ListExploreSources(20, 0, "", "deleted-explore")
+	if err != nil {
+		t.Fatalf("list explore sources: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("deleted source leaked into explore sources: %#v", rows)
+	}
+}
+
 func TestListExploreSourcesIncludesRecentItemPreviews(t *testing.T) {
 	service, db, _ := newFeedTestService(t)
 

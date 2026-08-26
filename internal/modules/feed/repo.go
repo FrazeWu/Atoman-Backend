@@ -1142,10 +1142,11 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 			COUNT(DISTINCT feed_items.id) AS recent_item_count,
 			MAX(feed_items.published_at) AS last_published_at
 		`).
-		Joins("LEFT JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id").
-		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id").
+		Joins("LEFT JOIN subscriptions ON subscriptions.feed_source_id = feed_sources.id AND subscriptions.deleted_at IS NULL").
+		Joins("LEFT JOIN feed_items ON feed_items.feed_source_id = feed_sources.id AND feed_items.deleted_at IS NULL").
 		Where("feed_sources.source_type = ?", "external_rss").
-		Where("feed_sources.hidden = ?", false)
+		Where("feed_sources.hidden = ?", false).
+		Where("feed_sources.deleted_at IS NULL")
 	if languageValue != "" {
 		db = db.Where("feed_sources.language_code = ?", languageValue)
 	}
