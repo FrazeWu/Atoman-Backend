@@ -133,6 +133,14 @@ func refreshAlbumImportUploadProgress(tx *gorm.DB, session *model.AlbumImportSes
 		total += file.Size
 		if file.UploadStatus == AlbumImportFileUploadStatusUploaded {
 			current += file.Size
+			continue
+		}
+		parts, err := albumImportFileCompletedParts(file)
+		if err != nil {
+			return err
+		}
+		for _, part := range parts {
+			current += part.Size
 		}
 	}
 	session.ProgressCurrent = current
