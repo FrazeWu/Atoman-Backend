@@ -66,6 +66,18 @@ func resolveSubscriptionInputForUser(db *gorm.DB, userID uuid.UUID, rawInput str
 	}
 
 	canonicalInput := normalizeCanonicalFeedURL(u.String())
+	if db != nil {
+		directTarget := autoSubscriptionTargetFromDirectFeedURL(canonicalInput, canonicalInput)
+		if _, found, err := findExistingAutoSubscriptionSource(db, directTarget); err != nil {
+			return newAutoSubscriptionResolveResponse("error"), http.StatusInternalServerError
+		} else if found {
+			response, err := classifyAutoSubscriptionTarget(db, userID, directTarget)
+			if err != nil {
+				return newAutoSubscriptionResolveResponse("error"), http.StatusInternalServerError
+			}
+			return response, http.StatusOK
+		}
+	}
 	if ok, err := probeAutoSubscriptionDirectFeedURL(u); err != nil {
 		return newAutoSubscriptionResolveResponse("error"), http.StatusInternalServerError
 	} else if ok {

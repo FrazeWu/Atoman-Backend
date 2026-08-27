@@ -27,7 +27,7 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func openFullTextWorkerTestDB(t *testing.T) (*gorm.DB, error) {
 	t.Helper()
 	db := testdb.Open(t)
-	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedFullTextHost{}, &model.FeedItem{}, &model.FeedSourceDiagnostic{}, &model.ReadingListItem{}, &model.FeedItemStar{})
+	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedFullTextHost{}, &model.FeedItem{}, &model.FeedSourceDiagnostic{}, &model.ReadingListItem{}, &model.FeedItemStar{}, &model.Subscription{})
 	if err := migrations.RunFeedItemUniqueIndex(db); err != nil {
 		return nil, err
 	}
@@ -682,7 +682,7 @@ func TestRunFullTextCycleRefreshesSourceFailureStateBetweenItems(t *testing.T) {
 	now := time.Now().UTC()
 	items := []model.FeedItem{
 		{FeedSourceID: source.ID, GUID: "refresh-1", Title: "First", Link: "https://example.com/first", FullTextStatus: FullTextStatusPending, PublishedAt: now, FetchedAt: now},
-		{FeedSourceID: source.ID, GUID: "refresh-2", Title: "Second", Link: "https://example.com/second", FullTextStatus: FullTextStatusPending, PublishedAt: now.Add(-time.Minute), FetchedAt: now},
+		{FeedSourceID: source.ID, GUID: "refresh-2", Title: "Second", Link: "https://other.example.com/second", FullTextStatus: FullTextStatusPending, PublishedAt: now.Add(-time.Minute), FetchedAt: now},
 	}
 	if err := db.Create(&items).Error; err != nil {
 		t.Fatal(err)

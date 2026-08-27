@@ -87,6 +87,9 @@ func (s *Service) CompleteAlbumImportFilePart(user authctx.CurrentUser, sessionI
 		if err := tx.Save(&file).Error; err != nil {
 			return err
 		}
+		if err := refreshAlbumImportUploadProgress(tx, &session); err != nil {
+			return err
+		}
 		out = file
 		return nil
 	})

@@ -101,6 +101,16 @@ func autoSubscriptionTargetForAdd(db *gorm.DB, userID uuid.UUID, input AutoSubsc
 	}
 
 	canonicalInput := normalizeCanonicalFeedURL(u.String())
+	if db != nil {
+		directTarget := autoSubscriptionTargetFromDirectFeedURL(canonicalInput, firstNonBlank(input.Title, canonicalInput))
+		if source, found, err := findExistingAutoSubscriptionSource(db, directTarget); err != nil {
+			return autoSubscriptionTarget{}, err
+		} else if found {
+			target := autoSubscriptionTargetFromSource(*sourceDTOFromModel(source), input.Title)
+			target.Category = defaultFeedSourceCategory(input.Category)
+			return target, nil
+		}
+	}
 	if ok, err := probeAutoSubscriptionDirectFeedURL(u); err != nil {
 		return autoSubscriptionTarget{}, err
 	} else if ok {

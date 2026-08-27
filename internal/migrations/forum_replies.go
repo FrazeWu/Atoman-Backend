@@ -1,13 +1,16 @@
 package migrations
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"math"
 	"sort"
+	"strings"
 	"time"
 
 	"atoman/internal/model"
-	commentmodule "atoman/internal/modules/comment"
 	"github.com/google/uuid"
+	"golang.org/x/text/unicode/norm"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -115,7 +118,7 @@ func MigrateLegacyForumReplies(db *gorm.DB) error {
 				ReplyToAuthorID: replyToAuthorID,
 				FloorNumber:     floorsByReply[reply.ID],
 				Content:         reply.Content,
-				ContentHash:     commentmodule.ContentHash(reply.Content, nil),
+				ContentHash:     legacyForumReplyContentHash(reply.Content),
 				Status:          "active",
 			}
 			if existing, ok := existingByID[entry.ID]; ok {
@@ -154,6 +157,20 @@ func MigrateLegacyForumReplies(db *gorm.DB) error {
 		}
 		return recountMigratedForumTargets(tx, targetByTopic, pinnedByTopic, entriesByTarget, commentLikes)
 	})
+}
+
+func legacyForumReplyContentHash(content string) string {
+	normalized := strings.ReplaceAll(content, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+	normalized = strings.TrimSpace(norm.NFC.String(normalized))
+	hash := sha256.Sum256([]byte(normalized))
+	return fmt.Sprintf("%x", hash[:])
+}
+
+func legacyForumReplyHotScore(rootLikes, childLikes, childCount int, age time.Duration) float64 {
+	numerator := float64(rootLikes*3 + childLikes + childCount*2)
+	hours := math.Max(0, age.Hours())
+	return numerator / math.Pow(hours+2, 1.2)
 }
 
 func loadLegacyForumTopics(tx *gorm.DB, ids []uuid.UUID) ([]legacyReplyMigrationTopic, error) {
@@ -553,7 +570,7 @@ func recountMigratedForumTargets(tx *gorm.DB, targets map[uuid.UUID]model.Discus
 			entries[i].LikeCount = likeCounts[entries[i].ID]
 			entries[i].ReplyCount = rootReplies[entries[i].ID]
 			if entries[i].RootID == nil {
-				entries[i].HotScore = commentmodule.HotScore(entries[i].LikeCount, rootChildLikes[entries[i].ID], entries[i].ReplyCount, now.Sub(entries[i].CreatedAt))
+				entries[i].HotScore = legacyForumReplyHotScore(entries[i].LikeCount, rootChildLikes[entries[i].ID], entries[i].ReplyCount, now.Sub(entries[i].CreatedAt))
 			}
 			commentUpdates = append(commentUpdates, entries[i])
 		}

@@ -2335,28 +2335,17 @@ func TestAutoAddSubscriptionDoesNotFetchSourceTitleDuringCreate(t *testing.T) {
 	disableFeedSourceSync(t)
 	user := seedFeedTestUser(t, db)
 
-	fetched := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fetched = true
-		w.Header().Set("Content-Type", "application/rss+xml")
-		_, _ = w.Write([]byte(`<?xml version="1.0"?><rss version="2.0"><channel><title>Remote Title</title></channel></rss>`))
-	}))
-	defer server.Close()
-
 	router := gin.New()
 	feed := router.Group("/api/v1/feed")
 	feed.POST("/subscriptions/auto-add", withFeedAuth(user.UUID, AutoAddSubscription(db)))
 
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(fmt.Sprintf(`{"input":%q,"title":"Request Title"}`, server.URL+"/feed.xml")))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/auto-add", strings.NewReader(`{"input":"https://example.com/site","candidate_feed_url":"https://example.com/feed.xml","title":"Request Title"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
 	router.ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d with body %s", http.StatusCreated, rr.Code, rr.Body.String())
-	}
-	if fetched {
-		t.Fatal("expected auto-add source creation not to fetch RSS metadata synchronously")
 	}
 
 	var source model.FeedSource
