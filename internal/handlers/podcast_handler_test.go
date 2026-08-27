@@ -1078,8 +1078,11 @@ func TestUpdatePodcastEpisodeReturnsInternalServerErrorWhenReloadFails(t *testin
 	episodeQueries := 0
 	callbackName := "podcast_episode_reload_error_" + strings.ReplaceAll(t.Name(), "/", "_")
 	if err := db.Callback().Row().Before("gorm:row").Register(callbackName, func(tx *gorm.DB) {
+		if !isCanonicalContentEntryRow(tx) {
+			return
+		}
 		episodeQueries++
-		if episodeQueries == 3 {
+		if episodeQueries == 2 {
 			tx.AddError(errors.New("injected episode reload error"))
 		}
 	}); err != nil {
@@ -1096,8 +1099,8 @@ func TestUpdatePodcastEpisodeReturnsInternalServerErrorWhenReloadFails(t *testin
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("expected 404 after canonical reload query failure, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 after canonical reload query failure, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var post model.Post

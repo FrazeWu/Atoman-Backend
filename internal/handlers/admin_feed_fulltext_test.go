@@ -584,6 +584,7 @@ func newAdminFeedFullTextTestDB(t *testing.T) *gorm.DB {
 		&model.AuthSession{},
 		&model.SiteSetting{},
 		&model.FeedSource{},
+		&model.FeedSourceDiagnostic{},
 		&model.FeedFullTextHost{},
 		&model.FeedItem{},
 		&model.Subscription{},

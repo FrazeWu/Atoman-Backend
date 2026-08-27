@@ -75,7 +75,7 @@ func TestRunContentReferencesMigrationBackfillsPublishedLongFormContentSilently(
 		Name: collection.Name, Description: collection.Description, IsDefault: collection.IsDefault,
 	}
 	require.NoError(t, db.Create(&canonicalCollection).Error)
-	published := model.Post{UserID: actor.UUID, Title: "Published", Content: "@migration-mentioned @channel:" + channel.ID.String(), Status: "published", Visibility: "public"}
+	published := model.Post{UserID: actor.UUID, ChannelID: &channel.ID, Title: "Published", Content: "@migration-mentioned @channel:" + channel.ID.String(), Status: "published", Visibility: "public"}
 	draft := model.Post{UserID: actor.UUID, Title: "Draft", Content: "@migration-mentioned", Status: "draft", Visibility: "public"}
 	require.NoError(t, db.Create(&published).Error)
 	require.NoError(t, db.Create(&draft).Error)

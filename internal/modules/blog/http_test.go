@@ -230,6 +230,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.ContentReference{},
 		&model.MediaAsset{},
 		&model.ContentMediaAsset{},
+		&model.DiscussionTarget{},
 		&model.Notification{},
 	)
 	if err := migrations.RunNotificationDMIndexes(db); err != nil {

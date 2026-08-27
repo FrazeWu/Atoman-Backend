@@ -274,9 +274,9 @@ func requireLegacyForumTables(t *testing.T, db interface {
 }) {
 	t.Helper()
 	for _, statement := range []string{
-		`CREATE TABLE forum_topics (id TEXT PRIMARY KEY, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME, user_id TEXT NOT NULL, solved_reply_id TEXT)`,
-		`CREATE TABLE forum_replies (id TEXT PRIMARY KEY, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME, topic_id TEXT NOT NULL, user_id TEXT NOT NULL, parent_reply_id TEXT, content TEXT NOT NULL, floor_number INTEGER, is_solved NUMERIC)`,
-		`CREATE TABLE forum_likes (id TEXT PRIMARY KEY, created_at DATETIME, updated_at DATETIME, deleted_at DATETIME, user_id TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL)`,
+		`CREATE TABLE forum_topics (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, user_id TEXT NOT NULL, solved_reply_id TEXT)`,
+		`CREATE TABLE forum_replies (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, topic_id TEXT NOT NULL, user_id TEXT NOT NULL, parent_reply_id TEXT, content TEXT NOT NULL, floor_number INTEGER, is_solved BOOLEAN)`,
+		`CREATE TABLE forum_likes (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, user_id TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL)`,
 	} {
 		if err := db.Exec(statement).Error; err != nil {
 			t.Fatalf("create legacy forum table: %v", err)
@@ -348,14 +348,12 @@ func TestBootstrapOwnerFromEnvCreatesOwnerWhenConfigured(t *testing.T) {
 	if state.ChannelID == nil || *state.ChannelID != channels[0].ID {
 		t.Fatalf("expected current channel %s, got %#v", channels[0].ID, state.ChannelID)
 	}
-	for _, contentType := range []string{"blog", "podcast", "video"} {
-		var count int64
-		if err := db.Model(&model.Collection{}).Where("channel_id = ? AND content_type = ? AND is_default = ?", channels[0].ID, contentType, true).Count(&count).Error; err != nil {
-			t.Fatalf("count %s default collection: %v", contentType, err)
-		}
-		if count != 1 {
-			t.Fatalf("expected one %s default collection, got %d", contentType, count)
-		}
+	var collections []model.ContentCollection
+	if err := db.Where("channel_id = ? AND is_default = ?", channels[0].ID, true).Find(&collections).Error; err != nil {
+		t.Fatalf("count default collection: %v", err)
+	}
+	if len(collections) != 1 {
+		t.Fatalf("expected one mixed-content default collection, got %d", len(collections))
 	}
 }
 
@@ -440,6 +438,7 @@ func ownerBootstrapModels() []interface{} {
 		&model.UserSettings{},
 		&model.Channel{},
 		&model.Collection{},
+		&model.ContentCollection{},
 		&model.UserStudioState{},
 		&model.StudioModuleSettings{},
 		&model.FeedSource{},

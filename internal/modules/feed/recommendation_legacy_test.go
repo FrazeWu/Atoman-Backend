@@ -71,6 +71,10 @@ func TestRecommendArticlesUsesCanonicalBlogExtensions(t *testing.T) {
 func TestRecommendArticlesRanksReadableFeedItemsAheadOfLowQualityCandidates(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
+		&model.User{},
+		&model.Channel{},
+		&model.ContentEntry{},
+		&model.ContentBlogExtension{},
 		&model.FeedSource{},
 		&model.FeedItem{},
 		&model.FeedItemRead{},

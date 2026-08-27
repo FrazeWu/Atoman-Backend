@@ -352,6 +352,12 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 		&model.User{},
 		&model.Channel{},
 		&model.Collection{},
+		&model.ContentCollection{},
+		&model.ContentEntry{},
+		&model.ContentBlogExtension{},
+		&model.ContentBlogDraft{},
+		&model.ContentMediaAsset{},
+		&model.ContentCollectionMembership{},
 		&model.Post{},
 		&model.BlogDraft{},
 		&model.AuditLog{},
@@ -368,7 +374,7 @@ func TestRegisterV1RoutesMountsBlogCreatePost(t *testing.T) {
 	if err := db.Create(&channel).Error; err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
-	collection := model.Collection{ChannelID: channel.ID, ContentType: "blog", Name: "默认专栏", IsDefault: true}
+	collection := model.ContentCollection{ChannelID: channel.ID, Name: "默认专栏", IsDefault: true}
 	if err := db.Create(&collection).Error; err != nil {
 		t.Fatalf("create default collection: %v", err)
 	}
