@@ -480,6 +480,25 @@ func TestUploadPodcastAudioRejectsSpoofedMP3Content(t *testing.T) {
 	}
 }
 
+func TestUploadPodcastAudioRejectsSpoofedM4AContent(t *testing.T) {
+	r, db, user := newPodcastUploadTestRouter(t, "/api/v1/podcast/upload-audio", UploadPodcastAudio(nil))
+
+	body, contentType := multipartPodcastUploadBody(t, "audio", "spoof.m4a", "audio/x-m4a", []byte("not really an m4a"))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/podcast/upload-audio", body)
+	req.Header.Set("Authorization", podcastAuthHeader(t, db, user))
+	req.Header.Set("Content-Type", contentType)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for spoofed m4a content, got %d: %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "音频文件内容与类型不匹配") {
+		t.Fatalf("expected content mismatch error, got: %s", w.Body.String())
+	}
+}
+
 func TestUploadPodcastAudioAllowsRealMP3Header(t *testing.T) {
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")

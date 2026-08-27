@@ -114,6 +114,29 @@ func TestStudioBlogContentsFilterAndRenderManyToManyCollection(t *testing.T) {
 	}
 }
 
+func TestStudioBlogContentsFilterBySecondaryCollectionMembership(t *testing.T) {
+	fixture := newStudioQueryFixture(t)
+	primary := fixture.collections[ModuleBlog]
+	secondary := model.Collection{ChannelID: fixture.channel.ID, ContentType: string(ModuleBlog), Name: "secondary filter collection"}
+	if err := fixture.db.Create(&secondary).Error; err != nil {
+		t.Fatal(err)
+	}
+	post := createStudioBlogPost(t, fixture, primary, "Secondary membership", "draft", "public", time.Now())
+	if err := fixture.db.Create(&model.ContentCollectionMembership{ContentID: post.ID, CollectionID: secondary.ID, Position: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items, total, err := fixture.service.ListContents(fixture.user, ModuleBlog, ContentQuery{
+		ChannelID: fixture.channel.ID, CollectionID: secondary.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != post.ID {
+		t.Fatalf("expected secondary membership to match filter, total=%d items=%#v", total, items)
+	}
+}
+
 func TestStudioVideoContentsUseScalarCollectionAndExposeLegacyConflict(t *testing.T) {
 	fixture := newStudioQueryFixture(t)
 	videoCollection := fixture.collections[ModuleVideo]

@@ -133,6 +133,31 @@ func TestTopicLikeCanBeAddedAgainAfterSoftDeleteToggle(t *testing.T) {
 	}
 }
 
+func TestTopicBookmarkCanBeAddedAgainAfterSoftDeleteToggle(t *testing.T) {
+	svc, db, author, liker, category := newForumEngagementTestService(t)
+	topic := model.ForumTopic{UserID: author.UUID, CategoryID: category.ID, Title: "bookmark-toggle", Content: "body"}
+	if err := db.Create(&topic).Error; err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+	actor := authctx.CurrentUser{ID: liker.UUID, Role: liker.Role}
+	for index, want := range []bool{true, false, true} {
+		state, err := svc.ToggleTopicBookmark(actor, topic.ID)
+		if err != nil || state.Bookmarked != want {
+			t.Fatalf("toggle %d: state=%#v err=%v", index, state, err)
+		}
+	}
+	var bookmarks []model.ForumBookmark
+	if err := db.Unscoped().Where("user_id = ? AND topic_id = ?", liker.UUID, topic.ID).Find(&bookmarks).Error; err != nil {
+		t.Fatalf("load bookmarks: %v", err)
+	}
+	if len(bookmarks) != 1 {
+		t.Fatalf("expected one bookmark row, got %d", len(bookmarks))
+	}
+	if bookmarks[0].DeletedAt.Valid {
+		t.Fatal("expected bookmark to be active after re-adding")
+	}
+}
+
 func TestNewTopicLikeTriggersAuthorTrustEvaluation(t *testing.T) {
 	svc, db, author, liker, category := newForumEngagementTestService(t)
 	var targetID uuid.UUID

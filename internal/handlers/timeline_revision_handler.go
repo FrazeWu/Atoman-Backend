@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 
+	"atoman/internal/platform/authctx"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -78,8 +79,7 @@ func GetTimelineEventHistory(db *gorm.DB) gin.HandlerFunc {
 // @Router /api/v1/timeline/events/{id}/revert/{revision_id} [post]
 func RevertTimelineEvent(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		role, _ := c.Get("role")
-		if role != "admin" {
+		if !authctx.RoleAtLeast(c.GetString("role"), authctx.RoleAdmin) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "Admin only"})
 			return
 		}

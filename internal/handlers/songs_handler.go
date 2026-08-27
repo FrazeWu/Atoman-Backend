@@ -278,7 +278,7 @@ func CreateSongHandler(db *gorm.DB, s3Client *s3.S3) gin.HandlerFunc {
 			if err != nil {
 				releaseDate = time.Now()
 			}
-		} else if os.Getenv("STORAGE_TYPE") == "local" {
+		} else {
 			releaseDate = time.Now()
 		}
 

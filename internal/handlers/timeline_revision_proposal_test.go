@@ -150,3 +150,29 @@ func TestRevertTimelineEventRestoresAcceptedCoordinatesAndTags(t *testing.T) {
 	require.Nil(t, reverted.Longitude)
 	require.Empty(t, reverted.Tags)
 }
+
+func TestRevertTimelineEventAllowsOwnerRole(t *testing.T) {
+	_, svc, db, user, event := timelineProposalHandlerContext(t)
+	proposal, err := svc.CreateEventProposal(user, event.ID, proposalservice.TimelineProposalInput{
+		Content: "owner revert", Evidence: "archive", Patch: map[string]any{"location": "Berlin"},
+	})
+	require.NoError(t, err)
+	accepted, err := svc.Decide(user, proposal.Comment.ID, "accept")
+	require.NoError(t, err)
+	require.NotNil(t, accepted.AppliedRevisionID)
+	require.NoError(t, db.Model(&model.TimelineEvent{}).Where("id = ?", event.ID).Update("location", "Paris").Error)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) { c.Set("role", authctx.RoleOwner); c.Next() })
+	router.POST("/events/:id/revert/:revision_id", RevertTimelineEvent(db))
+
+	request := httptest.NewRequest(http.MethodPost, "/events/"+event.ID.String()+"/revert/"+accepted.AppliedRevisionID.String(), nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	var reverted model.TimelineEvent
+	require.NoError(t, db.First(&reverted, "id = ?", event.ID).Error)
+	require.Equal(t, "Berlin", reverted.Location)
+}

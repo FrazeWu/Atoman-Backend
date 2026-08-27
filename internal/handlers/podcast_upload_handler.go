@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"atoman/internal/musicmedia"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -224,15 +225,12 @@ func podcastAudioContentAllowed(file interface {
 	Read([]byte) (int, error)
 	Seek(int64, int) (int64, error)
 }, declared string, ext string) bool {
-	sniffable := map[string]bool{
-		"audio/mpeg":     true,
-		"audio/mp3":      true,
-		"audio/wav":      true,
-		"audio/x-wav":    true,
-		"audio/vnd.wave": true,
-	}
-	if !sniffable[declared] && ext != ".mp3" && ext != ".wav" {
-		return true
+	normalized := strings.ToLower(strings.TrimSpace(declared))
+	switch normalized {
+	case "audio/mp3":
+		normalized = "audio/mpeg"
+	case "audio/m4a":
+		normalized = "audio/mp4"
 	}
 
 	var header [512]byte
@@ -244,13 +242,8 @@ func podcastAudioContentAllowed(file interface {
 		return false
 	}
 
-	detected := http.DetectContentType(header[:n])
-	switch ext {
-	case ".mp3":
-		return detected == "audio/mpeg"
-	case ".wav":
-		return detected == "audio/wave"
-	default:
-		return false
+	if musicmedia.AudioHeaderMatches(header[:n], normalized) {
+		return true
 	}
+	return ext == ".wav" && normalized == "audio/wav" && http.DetectContentType(header[:n]) == "audio/wave"
 }

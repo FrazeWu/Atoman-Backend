@@ -4,8 +4,8 @@ import "github.com/google/uuid"
 
 type UserBlock struct {
 	Base
-	BlockerID uuid.UUID `json:"blocker_id" gorm:"type:uuid;not null;index;uniqueIndex:uq_user_block_pair"`
-	BlockedID uuid.UUID `json:"blocked_id" gorm:"type:uuid;not null;index;uniqueIndex:uq_user_block_pair"`
+	BlockerID uuid.UUID `json:"blocker_id" gorm:"type:uuid;not null;index;uniqueIndex:uq_user_block_pair,where:deleted_at IS NULL"`
+	BlockedID uuid.UUID `json:"blocked_id" gorm:"type:uuid;not null;index;uniqueIndex:uq_user_block_pair,where:deleted_at IS NULL"`
 	Blocked   *User     `json:"blocked,omitempty" gorm:"foreignKey:BlockedID;references:UUID"`
 }
 

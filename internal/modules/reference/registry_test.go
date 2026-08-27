@@ -188,6 +188,36 @@ func TestRegistryHidesNonPublicPodcastReferencesFromGuests(t *testing.T) {
 	}
 }
 
+func TestRegistryHidesPrivateBlogChannelsFromGuests(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.Post{}, &model.PodcastEpisode{})
+
+	owner := model.User{Username: "blog-owner", Email: "blog-owner@example.com", Password: "hash", IsActive: true}
+	require.NoError(t, db.Create(&owner).Error)
+	channel := model.Channel{UserID: &owner.UUID, Name: "Private Blog Channel", Slug: "private-blog-channel"}
+	require.NoError(t, db.Create(&channel).Error)
+	privatePost := model.Post{
+		UserID: owner.UUID, ChannelID: &channel.ID, Title: "Private Blog Post", Content: "body",
+		Status: "published", Visibility: "private",
+	}
+	require.NoError(t, db.Create(&privatePost).Error)
+
+	registry := NewRegistry(db)
+	_, err := registry.Resolve(Viewer{}, "channel", channel.ID)
+	require.ErrorIs(t, err, ErrTargetUnavailable)
+	guestItems, err := registry.Search(Viewer{}, "channel", "Private Blog", 10)
+	require.NoError(t, err)
+	require.Empty(t, guestItems)
+
+	resolved, err := registry.Resolve(Viewer{UserID: owner.UUID}, "channel", channel.ID)
+	require.NoError(t, err)
+	require.Equal(t, channel.ID, resolved.ID)
+	ownerItems, err := registry.Search(Viewer{UserID: owner.UUID}, "channel", "Private Blog", 10)
+	require.NoError(t, err)
+	require.Len(t, ownerItems, 1)
+	require.Equal(t, channel.ID, ownerItems[0].ID)
+}
+
 func seedReferenceRegistry(t *testing.T) (*gorm.DB, map[string]uuid.UUID) {
 	t.Helper()
 	db := testdb.Open(t)

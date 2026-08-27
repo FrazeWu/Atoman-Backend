@@ -20,8 +20,13 @@ func NormalizeFeedSourceURL(raw string) string {
 
 	normalized := *parsed
 	normalized.Scheme = "https"
-	normalized.Host = strings.ToLower(normalized.Host)
-	normalized.Host = strings.TrimPrefix(normalized.Host, "www.")
+	host := strings.ToLower(normalized.Hostname())
+	host = strings.TrimPrefix(host, "www.")
+	port := normalized.Port()
+	if port != "" && port != "80" && port != "443" {
+		host += ":" + port
+	}
+	normalized.Host = host
 	normalized.Path = strings.TrimRight(normalized.Path, "/")
 	normalized.Fragment = ""
 	normalized.RawFragment = ""

@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
@@ -80,6 +81,62 @@ func TestLegacySongCreateAndUpdateKeepLyricsWikiInSync(t *testing.T) {
 	db.Model(&model.MusicSongLyricVersion{}).Where("song_id = ?", song.ID).Count(&versionCount)
 	if lyric.Content != "updated" || lyric.Version != 2 || versionCount != 2 || lyric.UpdatedBy != user.UUID {
 		t.Fatalf("unexpected synchronized lyric: %#v, versions=%d", lyric, versionCount)
+	}
+}
+
+func TestCreateSongDefaultsReleaseDateForS3Uploads(t *testing.T) {
+	t.Setenv("S3_BUCKET", "atoman-test")
+	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com/assets")
+	t.Setenv("STORAGE_TYPE", "s3")
+	gin.SetMode(gin.TestMode)
+
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{}, &model.Artist{}, &model.ArtistMember{}, &model.Album{}, &model.Song{},
+		&model.MusicSongLyric{}, &model.MusicSongLyricLine{}, &model.MusicSongLyricVersion{},
+		&model.MusicLyricAnnotation{}, &model.MusicLyricAnnotationVote{},
+		&model.Revision{},
+	)
+	user := createDeleteSongTestUser(t, db, "s3-editor", authctx.RoleUser)
+	var s3Path string
+	var s3ContentType string
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("user_id", user.UUID)
+		c.Set("role", user.Role)
+		c.Next()
+	})
+	r.POST("/api/v1/songs", CreateSongHandler(db, fakeS3ClientForUploadTest(t, &s3Path, &s3ContentType)))
+
+	body, contentType := multipartLegacyMusicAudioBody(t, map[string]string{
+		"title": "S3 Default Date Song", "artist": "Artist", "album": "S3 Default Date Album",
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/songs", body)
+	req.Header.Set("Content-Type", contentType)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create song: %d %s", w.Code, w.Body.String())
+	}
+
+	var song model.Song
+	if err := json.Unmarshal(w.Body.Bytes(), &song); err != nil {
+		t.Fatalf("decode created song: %v", err)
+	}
+	if song.ReleaseDate.IsZero() {
+		t.Fatalf("release date should default to current time")
+	}
+	currentYear := time.Now().Year()
+	if song.ReleaseDate.Year() != currentYear {
+		t.Fatalf("release date year = %d, want %d", song.ReleaseDate.Year(), currentYear)
+	}
+
+	var album model.Album
+	if err := db.First(&album, "id = ?", song.AlbumID).Error; err != nil {
+		t.Fatalf("load album: %v", err)
+	}
+	if album.Year != currentYear {
+		t.Fatalf("album year = %d, want %d", album.Year, currentYear)
 	}
 }
 

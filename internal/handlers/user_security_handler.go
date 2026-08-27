@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -13,6 +14,8 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/platform/audit"
 	"atoman/internal/platform/authsession"
+	"atoman/internal/platform/ratelimit"
+	"atoman/internal/platform/requestmeta"
 	"atoman/internal/service"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -39,6 +42,8 @@ type SendEmailChangeCodeInput struct {
 }
 
 func SendEmailChangeCode(db *gorm.DB) gin.HandlerFunc {
+	emailLimiter := ratelimit.New()
+	ipLimiter := ratelimit.New()
 	return func(c *gin.Context) {
 		var input SendEmailChangeCodeInput
 		if err := c.ShouldBindJSON(&input); err != nil {
@@ -46,6 +51,11 @@ func SendEmailChangeCode(db *gorm.DB) gin.HandlerFunc {
 			return
 		}
 		email := strings.ToLower(strings.TrimSpace(input.Email))
+		requestInfo := requestmeta.FromGin(c)
+		if !allowAuthRequest(c, ipLimiter, "email-change-send:ip:"+requestIPAddress(c, requestInfo), 10, time.Hour) ||
+			!allowAuthRequest(c, emailLimiter, "email-change-send:email:"+email, 3, 15*time.Minute) {
+			return
+		}
 		var count int64
 		if err := db.Unscoped().Model(&model.User{}).Where("LOWER(email) = ?", email).Count(&count).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "发送验证码失败"})

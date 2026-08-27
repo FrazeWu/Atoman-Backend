@@ -152,6 +152,25 @@ func TestAuthMiddlewareAcceptsAPIBearerForWriteRequestWithoutCSRF(t *testing.T) 
 	}
 }
 
+func TestAuthMiddlewareAcceptsCaseInsensitiveBearerScheme(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "bearer token-value")
+	c.Request = req
+
+	credential := credentialFromRequest(c)
+	if !credential.present {
+		t.Fatal("expected authorization header to be detected")
+	}
+	if credential.kind != authsession.KindAPI {
+		t.Fatalf("credential kind = %q, want %q", credential.kind, authsession.KindAPI)
+	}
+	if credential.token != "token-value" {
+		t.Fatalf("credential token = %q, want token-value", credential.token)
+	}
+}
+
 func TestAuthMiddlewareDoesNotFallBackToCookieWhenBearerIsInvalid(t *testing.T) {
 	db := newMiddlewareAuthTestDB(t)
 	user := seedMiddlewareAuthUser(t, db, model.User{Username: "alice", Email: "alice@example.com", Password: "hash", Role: "user", IsActive: true})

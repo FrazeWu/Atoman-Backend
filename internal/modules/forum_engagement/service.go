@@ -105,16 +105,21 @@ func (s *Service) ToggleTopicBookmark(user authctx.CurrentUser, topicID uuid.UUI
 	state := ToggleState{}
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		var bookmark model.ForumBookmark
-		result := tx.Where("user_id = ? AND topic_id = ?", user.ID, topicID).Limit(1).Find(&bookmark)
+		result := tx.Unscoped().Where("user_id = ? AND topic_id = ?", user.ID, topicID).Limit(1).Find(&bookmark)
 		if result.Error != nil {
 			return result.Error
 		}
-		if result.RowsAffected > 0 {
+		if result.RowsAffected > 0 && !bookmark.DeletedAt.Valid {
 			if err := tx.Unscoped().Delete(&bookmark).Error; err != nil {
 				return err
 			}
 			state.Bookmarked = false
 			return nil
+		}
+		if result.RowsAffected > 0 {
+			if err := tx.Unscoped().Delete(&bookmark).Error; err != nil {
+				return err
+			}
 		}
 
 		bookmark = model.ForumBookmark{UserID: user.ID, TopicID: topicID}

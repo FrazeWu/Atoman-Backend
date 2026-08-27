@@ -50,12 +50,12 @@ type requestCredential struct {
 func credentialFromRequest(c *gin.Context) requestCredential {
 	authorization := strings.TrimSpace(c.GetHeader("Authorization"))
 	if authorization != "" {
-		const prefix = "Bearer "
-		if !strings.HasPrefix(authorization, prefix) {
+		parts := strings.Fields(authorization)
+		if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") {
 			return requestCredential{kind: authsession.KindAPI, present: true}
 		}
 		return requestCredential{
-			token:   strings.TrimSpace(strings.TrimPrefix(authorization, prefix)),
+			token:   strings.TrimSpace(parts[1]),
 			kind:    authsession.KindAPI,
 			present: true,
 		}

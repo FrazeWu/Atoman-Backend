@@ -153,7 +153,7 @@ func (s *Service) listBlogContents(userID uuid.UUID, query ContentQuery) ([]Stud
 		db = db.Where("memberships.collection_id IS NULL")
 	}
 	if query.CollectionID != uuid.Nil {
-		db = db.Where("memberships.collection_id = ?", query.CollectionID)
+		db = db.Where("EXISTS (SELECT 1 FROM content_collection_memberships filter_memberships WHERE filter_memberships.content_id = posts.id AND filter_memberships.collection_id = ?)", query.CollectionID)
 	}
 	var total int64
 	if err := db.Session(&gorm.Session{}).Distinct("posts.id").Count(&total).Error; err != nil {

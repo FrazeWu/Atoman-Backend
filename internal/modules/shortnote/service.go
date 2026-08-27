@@ -100,6 +100,7 @@ func (s *Service) Update(user authctx.CurrentUser, id uuid.UUID, input noteInput
 		if err := tx.Model(&note).Update("content", content).Error; err != nil {
 			return err
 		}
+		note.Content = content
 		if err := tx.Where("short_note_id = ?", note.ID).Delete(&model.ShortNoteMedia{}).Error; err != nil {
 			return err
 		}

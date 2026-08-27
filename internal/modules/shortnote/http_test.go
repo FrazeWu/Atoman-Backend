@@ -15,6 +15,7 @@ import (
 	"atoman/internal/testdb"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -229,5 +230,44 @@ func TestShortNoteMentionsNotifiesTargetUser(t *testing.T) {
 	var count int64
 	if err := db.Model(&model.Notification{}).Where("recipient_id = ? AND type = ?", adminUser.UUID, "content_mention").Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("expected 1 mention notification for admin, got %d, err=%v", count, err)
+	}
+}
+
+func TestShortNoteUpdateRefreshesMentionsAndNotifiesNewTarget(t *testing.T) {
+	service, db, user := newShortNoteHTTPTestService(t)
+	adminUser := model.User{Username: "admin", Email: "admin-update@example.com", Password: "hash", Role: authctx.RoleAdmin, IsActive: true}
+	bobUser := model.User{Username: "bob", Email: "bob-update@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	for _, account := range []*model.User{&adminUser, &bobUser} {
+		if err := db.Create(account).Error; err != nil {
+			t.Fatalf("create mentioned user: %v", err)
+		}
+	}
+
+	r := newShortNoteHTTPRouter(service, &user)
+	create := shortNoteRequest(t, r, http.MethodPost, "/api/v1/short-notes", `{"content":"hello @admin"}`)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", create.Code, create.Body.String())
+	}
+	noteID := uuid.MustParse(responseID(t, create))
+
+	update := shortNoteRequest(t, r, http.MethodPut, "/api/v1/short-notes/"+noteID.String(), `{"content":"hello @bob"}`)
+	if update.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", update.Code, update.Body.String())
+	}
+
+	var refs []model.ContentReference
+	if err := db.Order("start_offset ASC").Find(&refs, "source_type = ? AND source_id = ?", "short_note", noteID).Error; err != nil {
+		t.Fatalf("load content references: %v", err)
+	}
+	if len(refs) != 1 || refs[0].TargetType != "user" || refs[0].TargetID != bobUser.UUID {
+		t.Fatalf("expected references to point to bob only, got %#v", refs)
+	}
+
+	var bobCount int64
+	if err := db.Model(&model.Notification{}).Where("recipient_id = ? AND type = ?", bobUser.UUID, "content_mention").Count(&bobCount).Error; err != nil {
+		t.Fatalf("count bob notifications: %v", err)
+	}
+	if bobCount != 1 {
+		t.Fatalf("expected 1 mention notification for bob after update, got %d", bobCount)
 	}
 }

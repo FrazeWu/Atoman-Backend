@@ -207,6 +207,49 @@ func TestRevokeSessionRejectsCurrentSession(t *testing.T) {
 	}
 }
 
+func TestSendEmailChangeCodeRateLimitsRepeatedRequests(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	t.Setenv("FRONTEND_URL", "https://www.atoman.org")
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.AuthSession{}, &model.EmailVerificationCode{})
+	user := model.User{Username: "email-change-user", Email: "current@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	current, err := authsession.New(db).Create(user.UUID, authsession.KindWeb)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	middleware.SetAuthDB(db)
+	t.Cleanup(func() { middleware.SetAuthDB(nil) })
+	r := gin.New()
+	r.POST("/users/me/email/send-code", middleware.AuthMiddleware(), SendEmailChangeCode(db))
+
+	for attempt := 1; attempt <= 4; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/users/me/email/send-code", bytes.NewBufferString(`{"email":"new@example.com"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Origin", "https://www.atoman.org")
+		req.Header.Set(middleware.CSRFHeaderName, current.CSRFToken)
+		req.AddCookie(&http.Cookie{Name: middleware.AuthSessionCookieName, Value: current.Token})
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if attempt <= 3 {
+			if w.Code != http.StatusNoContent {
+				t.Fatalf("attempt %d: expected 204, got %d: %s", attempt, w.Code, w.Body.String())
+			}
+			continue
+		}
+		if w.Code != http.StatusTooManyRequests {
+			t.Fatalf("attempt %d: expected 429, got %d: %s", attempt, w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), `"code":"auth.rate_limited"`) {
+			t.Fatalf("attempt %d: expected rate limited payload, got %s", attempt, w.Body.String())
+		}
+	}
+}
+
 func TestListSecurityActivitiesOnlyReturnsCurrentUsersAuthEvents(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := testdb.Open(t)

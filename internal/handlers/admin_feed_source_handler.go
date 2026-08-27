@@ -424,9 +424,10 @@ func UpdateAdminFeedSource(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		updates := map[string]any{
-			"rss_url": rssURL,
-			"hash":    feedmodule.BuildFeedSourceHash("external_rss", nil, rssURL),
-			"title":   strings.TrimSpace(input.Title),
+			"rss_url":       rssURL,
+			"canonical_url": service.NormalizeFeedSourceURL(rssURL),
+			"hash":          feedmodule.BuildFeedSourceHash("external_rss", nil, rssURL),
+			"title":         strings.TrimSpace(input.Title),
 		}
 		if strings.TrimSpace(input.Title) == "" {
 			delete(updates, "title")

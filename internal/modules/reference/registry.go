@@ -186,7 +186,7 @@ func (r *Registry) Resolve(viewer Viewer, targetType string, id uuid.UUID) (Targ
 		return target(targetType, row.ID, row.Title, "timeline", "/?event="+row.ID.String()), nil
 	case "channel":
 		var row model.Channel
-		if err := r.db.First(&row, "id = ?", id).Error; err != nil {
+		if err := visibleBlogChannels(r.db, r.db, viewer).First(&row, "channels.id = ?", id).Error; err != nil {
 			return Target{}, targetError(err)
 		}
 		return target(targetType, row.ID, row.Name, "blog", "/channel/"+row.Slug), nil
@@ -367,7 +367,7 @@ func (r *Registry) searchResourceTargets(viewer Viewer, targetType, search strin
 		query = visiblePublicOwned(r.db.Model(&model.TimelineEvent{}).Where("LOWER(timeline_events.title) LIKE ? ESCAPE '\\'", like), viewer).
 			Select("timeline_events.id, timeline_events.title AS label")
 	case "channel":
-		query = r.db.Model(&model.Channel{}).
+		query = visibleBlogChannels(r.db, r.db.Model(&model.Channel{}), viewer).
 			Where("LOWER(channels.name) LIKE ? ESCAPE '\\' OR LOWER(channels.slug) LIKE ? ESCAPE '\\'", like, like).
 			Select("channels.id, channels.name AS label, channels.slug")
 	case "collection":
@@ -584,7 +584,8 @@ func (r *Registry) searchResourceIDs(viewer Viewer, targetType, search string, l
 	case "event":
 		query = visiblePublicOwned(r.db.Model(&model.TimelineEvent{}).Where("LOWER(title) LIKE ? ESCAPE '\\'", like), viewer)
 	case "channel":
-		query = r.db.Model(&model.Channel{}).Where("LOWER(name) LIKE ? ESCAPE '\\' OR LOWER(slug) LIKE ? ESCAPE '\\'", like, like)
+		query = visibleBlogChannels(r.db, r.db.Model(&model.Channel{}), viewer).
+			Where("LOWER(channels.name) LIKE ? ESCAPE '\\' OR LOWER(channels.slug) LIKE ? ESCAPE '\\'", like, like)
 	case "collection":
 		if !contentmodule.CurrentMediaSchema(r.db).ContentCollectionTable {
 			query = r.db.Model(&model.Collection{}).Where("LOWER(collections.name) LIKE ? ESCAPE '\\'", like)
@@ -720,6 +721,51 @@ func visiblePodcastChannels(db *gorm.DB, query *gorm.DB, viewer Viewer) *gorm.DB
 		JOIN content_episode_extensions pe ON pe.content_id = p.id
 		`+legacyJoin+`
 		WHERE p.channel_id = channels.id AND p.deleted_at IS NULL AND p.status = 'published' AND `+visibility+`
+	)`, args...)
+}
+
+func visibleBlogChannels(db *gorm.DB, query *gorm.DB, viewer Viewer) *gorm.DB {
+	capabilities := contentmodule.CurrentMediaSchema(db)
+	if !capabilities.ContentEntryTable {
+		visibility := "p.visibility = ?"
+		args := []interface{}{"public"}
+		if viewer.UserID != uuid.Nil {
+			visibility = "(p.visibility = ? OR p.user_id = ?)"
+			args = append(args, viewer.UserID)
+		}
+		return query.Where(`EXISTS (
+			SELECT 1 FROM posts p
+			WHERE p.channel_id = channels.id
+				AND p.deleted_at IS NULL
+				AND p.status = 'published'
+				AND NOT EXISTS (
+					SELECT 1 FROM podcast_episodes pe
+					WHERE pe.post_id = p.id AND pe.deleted_at IS NULL
+				)
+				AND `+visibility+`
+		)`, args...)
+	}
+
+	visibility := "p.visibility = ?"
+	args := []interface{}{"public"}
+	authorColumn := "p.author_id"
+	legacyJoin := ""
+	if !capabilities.ContentEntryAuthor {
+		legacyJoin = "LEFT JOIN posts legacy_p ON legacy_p.id = p.id AND legacy_p.deleted_at IS NULL"
+		authorColumn = "legacy_p.user_id"
+	}
+	if viewer.UserID != uuid.Nil {
+		visibility = "(p.visibility = ? OR " + authorColumn + " = ?)"
+		args = append(args, viewer.UserID)
+	}
+	return query.Where(`EXISTS (
+		SELECT 1 FROM content_entries p
+		`+legacyJoin+`
+		WHERE p.channel_id = channels.id
+			AND p.deleted_at IS NULL
+			AND p.kind = 'blog'
+			AND p.status = 'published'
+			AND `+visibility+`
 	)`, args...)
 }
 

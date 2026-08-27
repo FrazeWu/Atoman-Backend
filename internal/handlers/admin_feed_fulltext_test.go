@@ -15,6 +15,7 @@ import (
 
 	"atoman/internal/middleware"
 	"atoman/internal/model"
+	feedmodule "atoman/internal/modules/feed"
 	"atoman/internal/platform/authctx"
 	"atoman/internal/service"
 	"atoman/internal/testdb"
@@ -144,6 +145,52 @@ func TestUpdateAdminFeedSource(t *testing.T) {
 	}
 	if updated.Title != "Updated Feed" {
 		t.Fatalf("expected title updated, got %s", updated.Title)
+	}
+}
+
+func TestUpdateAdminFeedSourceRefreshesCanonicalURL(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newAdminFeedFullTextTestDB(t)
+
+	source := model.FeedSource{
+		SourceType:      "external_rss",
+		Hash:            feedmodule.BuildFeedSourceHash("external_rss", nil, "https://example.com/original.xml"),
+		RssURL:          "https://example.com/original.xml",
+		CanonicalURL:    "https://example.com/original.xml",
+		Title:           "Original Feed",
+		FullTextEnabled: true,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+
+	r := gin.New()
+	r.PUT("/api/v1/admin/feed/fulltext/sources/:source_id", UpdateAdminFeedSource(db))
+
+	body := bytes.NewBufferString(`{"rss_url":"https://example.com/updated.xml","title":"Updated Feed"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/feed/fulltext/sources/"+source.ID.String(), body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+
+	recreated, err := feedmodule.FindOrCreateFeedSource(db, "external_rss", nil, "https://example.com/original.xml", "Original Feed", "")
+	if err != nil {
+		t.Fatalf("recreate source from old url: %v", err)
+	}
+	if recreated.ID == source.ID {
+		t.Fatalf("expected old rss url to create a new source after update, but reused source %s", source.ID)
+	}
+
+	var updated model.FeedSource
+	if err := db.First(&updated, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("reload source: %v", err)
+	}
+	if updated.CanonicalURL != "https://example.com/updated.xml" {
+		t.Fatalf("expected canonical_url updated, got %q", updated.CanonicalURL)
 	}
 }
 
