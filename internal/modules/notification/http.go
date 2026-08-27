@@ -28,6 +28,44 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/notifications/mutes", h.createMute)
 }
 
+func RegisterAdminRoutes(group *gin.RouterGroup, service *Service) {
+	h := &Handler{service: service}
+	group.POST("/admin/announcements", h.publishAnnouncement)
+}
+
+// publishAnnouncement godoc
+// @Summary 发布站点公告
+// @Description 仅管理员可发布，公告会作为系统通知投递给所有活跃用户。
+// @Tags notifications
+// @Accept json
+// @Produce json
+// @Param payload body PublishAnnouncementInput true "公告内容"
+// @Success 201 {object} PublishAnnouncementResponse
+// @Failure 400 {object} handlers.ErrorResponse
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/admin/announcements [post]
+func (h *Handler) publishAnnouncement(c *gin.Context) {
+	var input PublishAnnouncementInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "Announcement content is invalid"))
+		return
+	}
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	delivered, err := h.service.PublishAnnouncement(user, input)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusCreated, PublishAnnouncementResponse{Delivered: delivered})
+}
+
 // listPreferences godoc
 // @Summary 获取通知偏好
 // @Tags notifications

@@ -13,9 +13,14 @@ import (
 )
 
 type Service struct {
-	db   *gorm.DB
-	repo *Repo
+	db        *gorm.DB
+	repo      *Repo
+	publisher NotificationPublisher
 }
+
+type NotificationPublisher func(uuid.UUID, *model.Notification)
+
+const announcementNotificationType = "site_announcement"
 
 var notificationCategories = [...]string{"like", "interaction", "mention", "reply", "collaboration", "system"}
 
@@ -50,6 +55,64 @@ func categoryForType(notificationType string) string {
 }
 
 func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
+
+func (s *Service) SetNotificationPublisher(publisher NotificationPublisher) {
+	s.publisher = publisher
+}
+
+func (s *Service) PublishAnnouncement(user authctx.CurrentUser, input PublishAnnouncementInput) (int, error) {
+	if user.ID == uuid.Nil {
+		return 0, apperr.Unauthorized("Login required")
+	}
+	if !authctx.RoleAtLeast(user.Role, authctx.RoleAdmin) {
+		return 0, apperr.Forbidden("notification.announcement_forbidden", "Administrator access required")
+	}
+
+	input.Title = strings.TrimSpace(input.Title)
+	input.Body = strings.TrimSpace(input.Body)
+	input.Path = strings.TrimSpace(input.Path)
+	if input.Title == "" || len([]rune(input.Title)) > 120 || input.Body == "" || len([]rune(input.Body)) > 1000 || !validAnnouncementPath(input.Path) {
+		return 0, apperr.BadRequest("notification.invalid_announcement", "Announcement content is invalid")
+	}
+
+	sourceID := uuid.New()
+	actorID := user.ID
+	notifications := make([]model.Notification, 0)
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		var recipients []model.User
+		if err := tx.Select("uuid").Where("is_active = ?", true).Find(&recipients).Error; err != nil {
+			return err
+		}
+		notifications = make([]model.Notification, 0, len(recipients))
+		for _, recipient := range recipients {
+			notifications = append(notifications, model.Notification{
+				RecipientID: recipient.UUID,
+				ActorID:     &actorID,
+				Type:        announcementNotificationType,
+				SourceType:  announcementNotificationType,
+				SourceID:    sourceID,
+				Meta: model.NotificationMeta{
+					"title": input.Title,
+					"body":  input.Body,
+					"path":  input.Path,
+				},
+			})
+		}
+		if len(notifications) == 0 {
+			return nil
+		}
+		return tx.CreateInBatches(&notifications, 100).Error
+	}); err != nil {
+		return 0, err
+	}
+
+	if s.publisher != nil {
+		for i := range notifications {
+			s.publisher(notifications[i].RecipientID, &notifications[i])
+		}
+	}
+	return len(notifications), nil
+}
 
 func (s *Service) ListNotifications(user authctx.CurrentUser, query ListQuery) ([]NotificationDTO, int64, error) {
 	if user.ID == uuid.Nil {
@@ -171,6 +234,10 @@ func (s *Service) CreateMute(user authctx.CurrentUser, input CreateMuteInput) (m
 		return model.NotificationMute{}, err
 	}
 	return mute, nil
+}
+
+func validAnnouncementPath(path string) bool {
+	return path == "" || (strings.HasPrefix(path, "/") && !strings.HasPrefix(path, "//"))
 }
 
 func validNotificationCategory(category string) bool {

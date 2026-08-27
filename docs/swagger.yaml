@@ -6636,6 +6636,23 @@ definitions:
     - category
     - event_type
     type: object
+  notification.PublishAnnouncementInput:
+    properties:
+      body:
+        type: string
+      path:
+        type: string
+      title:
+        type: string
+    required:
+    - body
+    - title
+    type: object
+  notification.PublishAnnouncementResponse:
+    properties:
+      delivered:
+        type: integer
+    type: object
   notification.SavePreferencesInput:
     properties:
       items:
@@ -7629,6 +7646,43 @@ info:
   title: Atoman API
   version: "1.0"
 paths:
+  /api/v1/admin/announcements:
+    post:
+      consumes:
+      - application/json
+      description: 仅管理员可发布，公告会作为系统通知投递给所有活跃用户。
+      parameters:
+      - description: 公告内容
+        in: body
+        name: payload
+        required: true
+        schema:
+          $ref: '#/definitions/notification.PublishAnnouncementInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/notification.PublishAnnouncementResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 发布站点公告
+      tags:
+      - notifications
   /api/v1/admin/artists/{id}/merge:
     post:
       consumes:
