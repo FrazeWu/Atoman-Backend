@@ -31,6 +31,16 @@ type CreateMuteInput struct {
 	Reason     string    `json:"reason"`
 }
 
+type PublishAnnouncementInput struct {
+	Title string `json:"title" binding:"required"`
+	Body  string `json:"body" binding:"required"`
+	Path  string `json:"path"`
+}
+
+type PublishAnnouncementResponse struct {
+	Delivered int `json:"delivered"`
+}
+
 type NotificationDTO struct {
 	ID         string                 `json:"id"`
 	Type       string                 `json:"type"`

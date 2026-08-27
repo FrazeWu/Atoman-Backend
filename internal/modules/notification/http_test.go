@@ -308,3 +308,47 @@ func TestNotificationCategoryEndpointsFilterAndMarkCategory(t *testing.T) {
 		t.Fatalf("expected two known-category notifications to remain unread, got %d", unread)
 	}
 }
+
+func TestAdminAnnouncementEndpointPublishesSystemNotifications(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{})
+	admin := model.User{Username: "announcement-http-admin", Email: "announcement-http-admin@example.com", Password: "hash", Role: authctx.RoleAdmin, IsActive: true}
+	recipient := model.User{Username: "announcement-http-recipient", Email: "announcement-http-recipient@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	for _, user := range []*model.User{&admin, &recipient} {
+		if err := db.Create(user).Error; err != nil {
+			t.Fatalf("create announcement user: %v", err)
+		}
+	}
+
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		authctx.SetCurrentUser(c, authctx.CurrentUser{ID: admin.UUID, Username: admin.Username, Role: admin.Role})
+		c.Next()
+	})
+	RegisterAdminRoutes(r.Group("/api/v1"), NewService(db))
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/announcements", strings.NewReader(`{"title":"系统维护","body":"周日凌晨维护","path":"/status"}`))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected announcement 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Data PublishAnnouncementResponse `json:"data"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode announcement response: %v", err)
+	}
+	if response.Data.Delivered != 2 {
+		t.Fatalf("expected two recipients, got %#v", response.Data)
+	}
+	var count int64
+	if err := db.Model(&model.Notification{}).Where("type = ?", announcementNotificationType).Count(&count).Error; err != nil {
+		t.Fatalf("count announcement notifications: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("expected two persisted announcements, got %d", count)
+	}
+}
