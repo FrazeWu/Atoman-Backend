@@ -410,6 +410,641 @@ definitions:
     required:
     - score
     type: object
+  books.BookContinueReadingDTO:
+    properties:
+      asset_id:
+        type: string
+      author:
+        type: string
+      file_name:
+        type: string
+      format:
+        type: string
+      last_read_at:
+        type: string
+      processing_status:
+        type: string
+      reading_percent:
+        type: number
+      title:
+        type: string
+    type: object
+  books.BookEditDTO:
+    properties:
+      created_at:
+        type: string
+      decision_note:
+        type: string
+      downvote_count:
+        type: integer
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      id:
+        type: string
+      reason:
+        type: string
+      reviewed_at:
+        type: string
+      sources:
+        items:
+          $ref: '#/definitions/books.BookPublicSourceDTO'
+        type: array
+      status:
+        type: string
+      type:
+        type: string
+      upvote_count:
+        type: integer
+    type: object
+  books.BookEditListResult:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/books.BookEditDTO'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  books.BookEditSourceInput:
+    properties:
+      kind:
+        type: string
+      note:
+        type: string
+      title:
+        type: string
+      url:
+        type: string
+    type: object
+  books.BookEditVoteInput:
+    properties:
+      value:
+        type: integer
+    type: object
+  books.BookImportSessionDTO:
+    properties:
+      asset_id:
+        type: string
+      author:
+        type: string
+      completed_parts:
+        items:
+          $ref: '#/definitions/books.BookUploadPart'
+        type: array
+      content_type:
+        type: string
+      edition_id:
+        type: string
+      error_code:
+        type: string
+      error_message:
+        type: string
+      expires_at:
+        type: string
+      file_name:
+        type: string
+      format:
+        type: string
+      id:
+        type: string
+      part_size:
+        type: integer
+      processing_status:
+        type: string
+      size:
+        type: integer
+      status:
+        type: string
+      title:
+        type: string
+      work_id:
+        type: string
+    type: object
+  books.BookPostListResult:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/books.BookPublicPostDTO'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  books.BookPrivateAssetDTO:
+    properties:
+      author:
+        type: string
+      content_type:
+        type: string
+      error_message:
+        type: string
+      file_name:
+        type: string
+      format:
+        type: string
+      id:
+        type: string
+      import_id:
+        type: string
+      processing_status:
+        type: string
+      scan_status:
+        type: string
+      size:
+        type: integer
+      status:
+        type: string
+      title:
+        type: string
+    type: object
+  books.BookPublicEditionDTO:
+    properties:
+      binding:
+        type: string
+      cover_url:
+        type: string
+      id:
+        type: string
+      isbn10:
+        type: string
+      isbn13:
+        type: string
+      language:
+        type: string
+      page_count:
+        type: integer
+      published_date:
+        type: string
+      publisher:
+        type: string
+      title:
+        type: string
+      work_id:
+        type: string
+    type: object
+  books.BookPublicEditionDetailDTO:
+    properties:
+      edition:
+        $ref: '#/definitions/books.BookPublicEditionDTO'
+      sources:
+        items:
+          $ref: '#/definitions/books.BookPublicSourceDTO'
+        type: array
+      work:
+        $ref: '#/definitions/books.BookPublicWorkDTO'
+    type: object
+  books.BookPublicPersonDTO:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+      role:
+        type: string
+    type: object
+  books.BookPublicPostDTO:
+    properties:
+      id:
+        type: string
+      published_at:
+        type: string
+      summary:
+        type: string
+      title:
+        type: string
+    type: object
+  books.BookPublicSourceDTO:
+    properties:
+      kind:
+        type: string
+      note:
+        type: string
+      title:
+        type: string
+      url:
+        type: string
+    type: object
+  books.BookPublicWorkDTO:
+    properties:
+      authors:
+        items:
+          $ref: '#/definitions/books.BookPublicPersonDTO'
+        type: array
+      description:
+        type: string
+      editions:
+        items:
+          $ref: '#/definitions/books.BookPublicEditionDTO'
+        type: array
+      id:
+        type: string
+      language:
+        type: string
+      lifecycle_status:
+        type: string
+      original_title:
+        type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
+      redirected_from:
+        type: string
+      related_posts:
+        items:
+          $ref: '#/definitions/books.BookPublicPostDTO'
+        type: array
+      sources:
+        items:
+          $ref: '#/definitions/books.BookPublicSourceDTO'
+        type: array
+      subtitle:
+        type: string
+      title:
+        type: string
+    type: object
+  books.BookPublicationAppealDTO:
+    properties:
+      created_at:
+        type: string
+      decision_note:
+        type: string
+      id:
+        type: string
+      publication_request_id:
+        type: string
+      published_asset_id:
+        type: string
+      reason:
+        type: string
+      reviewed_at:
+        type: string
+      status:
+        type: string
+    type: object
+  books.BookPublicationAppealListResult:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/books.BookPublicationAppealDTO'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  books.BookPublicationReportDTO:
+    properties:
+      asset_id:
+        type: string
+      created_at:
+        type: string
+      decision_note:
+        type: string
+      id:
+        type: string
+      reason:
+        type: string
+      reviewed_at:
+        type: string
+      status:
+        type: string
+    type: object
+  books.BookPublicationReportListResult:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/books.BookPublicationReportDTO'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  books.BookPublicationRequestDTO:
+    properties:
+      asset_id:
+        type: string
+      created_at:
+        type: string
+      decision_note:
+        type: string
+      declaration:
+        type: string
+      edition_id:
+        type: string
+      evidence_uploaded:
+        type: boolean
+      id:
+        type: string
+      license_type:
+        type: string
+      published_asset_status:
+        type: string
+      reason:
+        type: string
+      reviewed_at:
+        type: string
+      rights_holder:
+        type: string
+      source_url:
+        type: string
+      status:
+        type: string
+      work_id:
+        type: string
+    type: object
+  books.BookPublicationRequestListResult:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/books.BookPublicationRequestDTO'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  books.BookPublicationRetentionHoldDTO:
+    properties:
+      held:
+        type: boolean
+      reason:
+        type: string
+      request_id:
+        type: string
+      set_at:
+        type: string
+    type: object
+  books.BookPublishedAssetDTO:
+    properties:
+      content_type:
+        type: string
+      created_at:
+        type: string
+      edition_id:
+        type: string
+      file_name:
+        type: string
+      format:
+        type: string
+      id:
+        type: string
+      size:
+        type: integer
+      status:
+        type: string
+      work_id:
+        type: string
+    type: object
+  books.BookRatingSummary:
+    properties:
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
+      viewer_rating:
+        type: integer
+    type: object
+  books.BookReadingStateDTO:
+    properties:
+      asset_id:
+        type: string
+      epub_cfi:
+        type: string
+      last_read_at:
+        type: string
+      pdf_page:
+        type: integer
+      preferences:
+        additionalProperties: {}
+        type: object
+      private_notes:
+        type: string
+      reading_percent:
+        type: number
+      txt_offset:
+        type: integer
+    type: object
+  books.BookReviewDTO:
+    properties:
+      author_id:
+        type: string
+      content:
+        type: string
+      created_at:
+        type: string
+      id:
+        type: string
+      spoiler:
+        type: boolean
+      updated_at:
+        type: string
+      work_id:
+        type: string
+    type: object
+  books.BookShelfItemDTO:
+    properties:
+      id:
+        type: string
+      note:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+      work:
+        $ref: '#/definitions/books.BookPublicWorkDTO'
+      work_id:
+        type: string
+    type: object
+  books.BookShelfListResult:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/books.BookShelfItemDTO'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  books.BookUploadPart:
+    properties:
+      etag:
+        type: string
+      part_number:
+        type: integer
+      size:
+        type: integer
+    type: object
+  books.BookUploadPartURL:
+    properties:
+      part_number:
+        type: integer
+      upload_url:
+        type: string
+    type: object
+  books.CreateBookImportInput:
+    properties:
+      author:
+        type: string
+      content_type:
+        type: string
+      file_name:
+        type: string
+      size:
+        type: integer
+      title:
+        type: string
+    type: object
+  books.LinkBookImportInput:
+    properties:
+      edition_id:
+        type: string
+      work_id:
+        type: string
+    type: object
+  books.PublishedBookAssetListResult:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/books.BookPublishedAssetDTO'
+        type: array
+      limit:
+        type: integer
+      offset:
+        type: integer
+      total:
+        type: integer
+    type: object
+  books.SaveBookReadingStateInput:
+    properties:
+      epub_cfi:
+        type: string
+      pdf_page:
+        type: integer
+      preferences:
+        additionalProperties: {}
+        type: object
+      private_notes:
+        type: string
+      reading_percent:
+        type: number
+      txt_offset:
+        type: integer
+    type: object
+  books.SaveBookReviewInput:
+    properties:
+      content:
+        type: string
+      spoiler:
+        type: boolean
+      visibility:
+        type: string
+    type: object
+  books.SaveBookShelfInput:
+    properties:
+      note:
+        type: string
+      status:
+        type: string
+    type: object
+  books.SubmitBookEditInput:
+    properties:
+      entity_id:
+        type: string
+      entity_type:
+        type: string
+      payload:
+        additionalProperties: {}
+        type: object
+      reason:
+        type: string
+      sources:
+        items:
+          $ref: '#/definitions/books.BookEditSourceInput'
+        type: array
+      type:
+        type: string
+    type: object
+  books.SubmitPublicationInput:
+    properties:
+      declaration:
+        type: string
+      edition_id:
+        type: string
+      license_type:
+        type: string
+      reason:
+        type: string
+      rights_holder:
+        type: string
+      source_url:
+        type: string
+      work_id:
+        type: string
+    type: object
+  books.bookPublicationReportInput:
+    properties:
+      reason:
+        type: string
+    type: object
+  books.bookRatingInput:
+    properties:
+      score:
+        type: integer
+    type: object
+  books.publicationRetentionHoldInput:
+    properties:
+      held:
+        type: boolean
+      reason:
+        type: string
+    type: object
+  books.reviewBookEditInput:
+    properties:
+      decision:
+        type: string
+      note:
+        type: string
+    type: object
+  books.reviewPublicationAppealInput:
+    properties:
+      decision:
+        type: string
+      note:
+        type: string
+    type: object
+  books.reviewPublicationInput:
+    properties:
+      decision:
+        type: string
+      note:
+        type: string
+    type: object
+  books.submitPublicationAppealInput:
+    properties:
+      reason:
+        type: string
+    type: object
   comment.ActionResponse:
     properties:
       data:
@@ -10917,6 +11552,1859 @@ paths:
       summary: 上传博客图片
       tags:
       - blog-upload
+  /api/v1/books/assets/{assetId}:
+    get:
+      description: 只返回当前用户拥有的私有资源元数据，不返回对象存储 key。
+      parameters:
+      - description: 私有资源 UUID
+        in: path
+        name: assetId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPrivateAssetDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取私有电子书资源状态
+      tags:
+      - books-reading
+  /api/v1/books/assets/{assetId}/content:
+    get:
+      description: 只有资源所有者可以读取已完成处理的私有原始文件；响应不缓存且不生成公共 URL。
+      parameters:
+      - description: 私有资源 UUID
+        in: path
+        name: assetId
+        required: true
+        type: string
+      produces:
+      - application/epub+zip
+      - application/pdf
+      - text/plain
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 读取私有电子书正文
+      tags:
+      - books-reading
+  /api/v1/books/assets/{assetId}/publication-requests:
+    post:
+      consumes:
+      - application/json
+      description: 提交权利声明后等待审核。审核通过会创建独立公共资源，原私有资源仍由原用户控制。
+      parameters:
+      - description: 私有资源 UUID
+        in: path
+        name: assetId
+        required: true
+        type: string
+      - description: 授权声明
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.SubmitPublicationInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/books.BookPublicationRequestDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 申请发布公共正文
+      tags:
+      - books-publication
+  /api/v1/books/assets/{assetId}/reading-state:
+    get:
+      parameters:
+      - description: 私有资源 UUID
+        in: path
+        name: assetId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookReadingStateDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取私有电子书阅读位置
+      tags:
+      - books-reading
+    put:
+      consumes:
+      - application/json
+      description: 阅读位置、笔记和偏好均只属于当前用户。
+      parameters:
+      - description: 私有资源 UUID
+        in: path
+        name: assetId
+        required: true
+        type: string
+      - description: 阅读状态
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.SaveBookReadingStateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookReadingStateDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 保存私有电子书阅读位置
+      tags:
+      - books-reading
+  /api/v1/books/catalog/assets/{assetId}:
+    get:
+      parameters:
+      - description: 公共资源 UUID
+        in: path
+        name: assetId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublishedAssetDTO'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取公共正文元数据
+      tags:
+      - books-reading
+  /api/v1/books/catalog/assets/{assetId}/content:
+    get:
+      parameters:
+      - description: 公共资源 UUID
+        in: path
+        name: assetId
+        required: true
+        type: string
+      produces:
+      - application/epub+zip
+      - application/pdf
+      - text/plain
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 读取公共正文
+      tags:
+      - books-reading
+  /api/v1/books/catalog/assets/{assetId}/reports:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 公共资源 UUID
+        in: path
+        name: assetId
+        required: true
+        type: string
+      - description: 举报理由
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.bookPublicationReportInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/books.BookPublicationReportDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 举报公共正文
+      tags:
+      - books-publication
+  /api/v1/books/catalog/editions/{editionId}:
+    get:
+      parameters:
+      - description: 公共版本 UUID
+        in: path
+        name: editionId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicEditionDetailDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取公共版本
+      tags:
+      - books-catalog
+  /api/v1/books/catalog/search:
+    get:
+      description: 只搜索已公开的作品元数据，不包含私有导入和正文。
+      parameters:
+      - description: 标题、作者或副标题
+        in: query
+        name: q
+        type: string
+      - description: 每页数量，最大 50
+        in: query
+        name: limit
+        type: integer
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      summary: 搜索公共书目
+      tags:
+      - books-catalog
+  /api/v1/books/catalog/works/{workId}:
+    get:
+      parameters:
+      - description: 公共作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicWorkDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 获取公共作品
+      tags:
+      - books-catalog
+  /api/v1/books/catalog/works/{workId}/assets:
+    get:
+      parameters:
+      - description: 作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.PublishedBookAssetListResult'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 列出公共正文资源
+      tags:
+      - books-reading
+  /api/v1/books/catalog/works/{workId}/posts:
+    get:
+      parameters:
+      - description: 作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPostListResult'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 列出作品相关文章
+      tags:
+      - books-catalog
+  /api/v1/books/catalog/works/{workId}/posts/{postId}:
+    delete:
+      parameters:
+      - description: 作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      - description: 文章 UUID
+        in: path
+        name: postId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 取消 Blog 文章关联
+      tags:
+      - books-contributions
+    put:
+      parameters:
+      - description: 作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      - description: 文章 UUID
+        in: path
+        name: postId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 关联自己的公开 Blog 文章
+      tags:
+      - books-contributions
+  /api/v1/books/catalog/works/{workId}/rating:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 公共作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      - description: 1 至 5 分
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.bookRatingInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookRatingSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 为公共作品评分
+      tags:
+      - books-engagement
+  /api/v1/books/catalog/works/{workId}/review:
+    delete:
+      parameters:
+      - description: 作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 删除自己的短书评
+      tags:
+      - books-engagement
+    get:
+      parameters:
+      - description: 作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookReviewDTO'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取我的短书评
+      tags:
+      - books-engagement
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 公共作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      - description: 短书评
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.SaveBookReviewInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookReviewDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 创建或更新公共作品短书评
+      tags:
+      - books-engagement
+  /api/v1/books/catalog/works/{workId}/reviews:
+    get:
+      parameters:
+      - description: 公共作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      - description: 每页数量，最大 50
+        in: query
+        name: limit
+        type: integer
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 列出公共作品短书评
+      tags:
+      - books-engagement
+  /api/v1/books/contributions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookEditListResult'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 列出我的书目申请
+      tags:
+      - books-contributions
+    post:
+      consumes:
+      - application/json
+      description: 提交作品、版本或人物资料修订。每次申请至少需要一条可核验来源。
+      parameters:
+      - description: 书目修订
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.SubmitBookEditInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/books.BookEditDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 提交书目修订
+      tags:
+      - books-contributions
+  /api/v1/books/contributions/{editId}/vote:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 申请 UUID
+        in: path
+        name: editId
+        required: true
+        type: string
+      - description: 支持或反对
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.BookEditVoteInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookEditDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 对书目申请投票
+      tags:
+      - books-contributions
+  /api/v1/books/contributions/{editId}/withdraw:
+    post:
+      parameters:
+      - description: 申请 UUID
+        in: path
+        name: editId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 撤回书目申请
+      tags:
+      - books-contributions
+  /api/v1/books/imports:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/books.BookImportSessionDTO'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 列出我的私有电子书导入
+      tags:
+      - books-imports
+    post:
+      consumes:
+      - application/json
+      description: 创建用户隔离的 EPUB 或 PDF 分片上传会话。正文不会进入公共书目。
+      parameters:
+      - description: 电子书文件信息
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.CreateBookImportInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/books.BookImportSessionDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 创建私有电子书导入
+      tags:
+      - books-imports
+  /api/v1/books/imports/{importId}:
+    delete:
+      description: 立即撤销读取状态，并删除或终止对应的私有对象存储上传。
+      parameters:
+      - description: 导入会话 UUID
+        in: path
+        name: importId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 删除私有电子书导入
+      tags:
+      - books-imports
+    get:
+      parameters:
+      - description: 导入会话 UUID
+        in: path
+        name: importId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookImportSessionDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取私有电子书导入状态
+      tags:
+      - books-imports
+  /api/v1/books/imports/{importId}/catalog-link:
+    put:
+      consumes:
+      - application/json
+      description: 只保存当前用户导入与已公开作品或版本的关联，不会改变私有正文的可见性。
+      parameters:
+      - description: 导入会话 UUID
+        in: path
+        name: importId
+        required: true
+        type: string
+      - description: 公共书目关联
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.LinkBookImportInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookImportSessionDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 关联私有导入与公共书目
+      tags:
+      - books-imports
+  /api/v1/books/imports/{importId}/complete:
+    post:
+      description: 完成对象存储分片合并并校验文件魔数。文件进入扫描状态后才会继续解析。
+      parameters:
+      - description: 导入会话 UUID
+        in: path
+        name: importId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookImportSessionDTO'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "422":
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 完成私有电子书上传
+      tags:
+      - books-imports
+  /api/v1/books/imports/{importId}/parts/{partNumber}:
+    post:
+      parameters:
+      - description: 导入会话 UUID
+        in: path
+        name: importId
+        required: true
+        type: string
+      - description: 分片序号
+        in: path
+        name: partNumber
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookUploadPartURL'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取私有电子书分片上传地址
+      tags:
+      - books-imports
+  /api/v1/books/imports/{importId}/parts/{partNumber}/complete:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 导入会话 UUID
+        in: path
+        name: importId
+        required: true
+        type: string
+      - description: 分片序号
+        in: path
+        name: partNumber
+        required: true
+        type: integer
+      - description: 分片 ETag 与大小
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.BookUploadPart'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookImportSessionDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 记录私有电子书分片上传结果
+      tags:
+      - books-imports
+  /api/v1/books/imports/{importId}/retry:
+    post:
+      description: 仅普通处理失败可以重试；病毒隔离资源必须删除后重新提交。
+      parameters:
+      - description: 导入会话 UUID
+        in: path
+        name: importId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookImportSessionDTO'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 重试失败的私有电子书处理
+      tags:
+      - books-imports
+  /api/v1/books/library:
+    get:
+      description: 书架记录和书架备注只对当前用户可见。
+      parameters:
+      - description: want_to_read、reading、read、on_hold 或 dropped
+        in: query
+        name: status
+        type: string
+      - description: 每页数量
+        in: query
+        name: limit
+        type: integer
+      - description: 偏移量
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookShelfListResult'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 列出我的书架
+      tags:
+      - books-library
+  /api/v1/books/library/continue:
+    get:
+      description: 只返回当前用户拥有且尚未读完的私有资源，不返回其他用户或公共资源信息。
+      parameters:
+      - description: 数量
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/books.BookContinueReadingDTO'
+            type: array
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 列出继续阅读项目
+      tags:
+      - books-library
+  /api/v1/books/library/works/{workId}:
+    delete:
+      parameters:
+      - description: 作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 移出书架
+      tags:
+      - books-library
+    put:
+      consumes:
+      - application/json
+      description: 仅已公开的作品可以加入当前用户的私有书架。
+      parameters:
+      - description: 作品 UUID
+        in: path
+        name: workId
+        required: true
+        type: string
+      - description: 书架状态
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.SaveBookShelfInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookShelfItemDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 保存书架状态
+      tags:
+      - books-library
+  /api/v1/books/publication-requests:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicationRequestListResult'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 列出我的公共正文申请
+      tags:
+      - books-publication
+  /api/v1/books/publication-requests/{requestId}/appeals:
+    get:
+      parameters:
+      - description: 公共正文申请 UUID
+        in: path
+        name: requestId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicationAppealListResult'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 列出我的公共正文申诉
+      tags:
+      - books-publication
+    post:
+      consumes:
+      - application/json
+      description: 只有原公共正文申请人可以提交申诉；每个被下架资源同时只能有一个待处理申诉。
+      parameters:
+      - description: 公共正文申请 UUID
+        in: path
+        name: requestId
+        required: true
+        type: string
+      - description: 申诉理由
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.submitPublicationAppealInput'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/books.BookPublicationAppealDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 申诉被下架的公共正文
+      tags:
+      - books-publication
+  /api/v1/books/publication-requests/{requestId}/evidence:
+    get:
+      description: 仅申请人和审核人员可读取私有授权证据。
+      parameters:
+      - description: 申请 UUID
+        in: path
+        name: requestId
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取公共正文授权证据
+      tags:
+      - books-review
+    post:
+      consumes:
+      - multipart/form-data
+      description: 证据文件仅保存到私有 R2 对象存储，不会出现在公共书目接口中。
+      parameters:
+      - description: 申请 UUID
+        in: path
+        name: requestId
+        required: true
+        type: string
+      - description: 授权证据文件
+        in: formData
+        name: evidence
+        required: true
+        type: file
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicationRequestDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 上传公共正文授权证据
+      tags:
+      - books-publication
+  /api/v1/books/review/contributions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookEditListResult'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 列出待审核书目申请
+      tags:
+      - books-review
+  /api/v1/books/review/contributions/{editId}/decision:
+    post:
+      consumes:
+      - application/json
+      description: 审核者不能批准或驳回自己提交的申请。
+      parameters:
+      - description: 申请 UUID
+        in: path
+        name: editId
+        required: true
+        type: string
+      - description: 审核决定
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.reviewBookEditInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookEditDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 审核书目申请
+      tags:
+      - books-review
+  /api/v1/books/review/publication-appeals:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicationAppealListResult'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 列出公共正文申诉审核队列
+      tags:
+      - books-review
+  /api/v1/books/review/publication-appeals/{appealId}/decision:
+    post:
+      consumes:
+      - application/json
+      description: 通过申诉会恢复对应公共正文；驳回申诉会保持下架状态。
+      parameters:
+      - description: 申诉 UUID
+        in: path
+        name: appealId
+        required: true
+        type: string
+      - description: 审核决定
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.reviewPublicationAppealInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicationAppealDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "409":
+          description: Conflict
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 审核公共正文申诉
+      tags:
+      - books-review
+  /api/v1/books/review/publication-reports:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicationReportListResult'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 列出公共正文举报
+      tags:
+      - books-review
+  /api/v1/books/review/publication-reports/{reportId}/decision:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 举报 UUID
+        in: path
+        name: reportId
+        required: true
+        type: string
+      - description: 举报处理决定
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.reviewPublicationInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicationReportDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 处理公共正文举报
+      tags:
+      - books-review
+  /api/v1/books/review/publication-requests:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicationRequestListResult'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 列出公共正文审核申请
+      tags:
+      - books-review
+  /api/v1/books/review/publication-requests/{requestId}/decision:
+    post:
+      consumes:
+      - application/json
+      description: 审核通过会复制到独立公共对象存储键，不会把私有对象直接改为公共对象。
+      parameters:
+      - description: 申请 UUID
+        in: path
+        name: requestId
+        required: true
+        type: string
+      - description: 审核决定
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.reviewPublicationInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicationRequestDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 审核公共正文申请
+      tags:
+      - books-review
+  /api/v1/books/review/publication-requests/{requestId}/evidence:
+    get:
+      description: 仅申请人和审核人员可读取私有授权证据。
+      parameters:
+      - description: 申请 UUID
+        in: path
+        name: requestId
+        required: true
+        type: string
+      produces:
+      - application/octet-stream
+      responses:
+        "200":
+          description: OK
+          schema:
+            type: file
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "503":
+          description: Service Unavailable
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取公共正文授权证据
+      tags:
+      - books-review
+  /api/v1/books/review/publication-requests/{requestId}/retention-hold:
+    post:
+      consumes:
+      - application/json
+      description: 法律保全期间不会删除授权证据或申诉材料；设置和解除操作都会写入不可删除的审核日志。
+      parameters:
+      - description: 公共正文申请 UUID
+        in: path
+        name: requestId
+        required: true
+        type: string
+      - description: 保全状态和理由
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.publicationRetentionHoldInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/books.BookPublicationRetentionHoldDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 设置或解除公共正文保全
+      tags:
+      - books-review
+  /api/v1/books/review/published-assets/{assetId}/status:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 公共资源 UUID
+        in: path
+        name: assetId
+        required: true
+        type: string
+      - description: 资源状态
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/books.reviewPublicationInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 下架或恢复公共正文
+      tags:
+      - books-review
   /api/v1/comments/{comment_id}:
     delete:
       parameters:

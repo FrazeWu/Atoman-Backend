@@ -38,6 +38,7 @@ func newTargetTestRegistry(t *testing.T) (*TargetRegistry, *gorm.DB) {
 		&model.Debate{},
 		&model.TimelineEvent{},
 		&model.TimelinePerson{},
+		&model.BookWork{},
 	)
 	callback := "test:comment-canonical-post-" + uuid.NewString()
 	require.NoError(t, db.Callback().Create().After("gorm:create").Register(callback, func(tx *gorm.DB) {
@@ -167,6 +168,7 @@ func TestTargetRegistryRegistersExactlySupportedKinds(t *testing.T) {
 		TargetKindDebate,
 		TargetKindTimelineEvent,
 		TargetKindTimelinePerson,
+		TargetKindBookWork,
 	}
 	require.Len(t, registry.resolvers, len(want))
 	for _, kind := range want {
@@ -358,6 +360,21 @@ func TestFeedArticleResolverNormalizesHostCredentialsAndPorts(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, expected, resolved.ResourceKey)
 	}
+}
+
+func TestBookWorkResolverAllowsOnlyPublicWorks(t *testing.T) {
+	registry, db := newTargetTestRegistry(t)
+	active := model.BookWork{Title: "public", LifecycleStatus: model.BookLifecycleStatusActive, EditStatus: model.BookEditStatusDevelopment}
+	draft := model.BookWork{Title: "draft", LifecycleStatus: model.BookLifecycleStatusDraft, EditStatus: model.BookEditStatusDevelopment}
+	require.NoError(t, db.Create(&active).Error)
+	require.NoError(t, db.Create(&draft).Error)
+
+	resolved, err := registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindBookWork, ResourceID: active.ID})
+	require.NoError(t, err)
+	require.True(t, resolved.Visible)
+	require.Equal(t, TargetKindBookWork, resolved.Kind)
+	_, err = registry.Resolve(Viewer{}, TargetRef{Kind: TargetKindBookWork, ResourceID: draft.ID})
+	require.ErrorIs(t, err, ErrTargetNotFound)
 }
 
 func TestContentResolversRespectPublicationVisibilityAndOwnership(t *testing.T) {
