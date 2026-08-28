@@ -221,6 +221,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.PostRating{},
 		&model.ReputationRun{},
 		&model.BlogQualitySnapshot{},
+		&model.BlogRecommendationFeedback{},
 		&model.Bookmark{},
 		&model.BookmarkFolder{},
 		&model.AuditLog{},

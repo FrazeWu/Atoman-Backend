@@ -174,6 +174,16 @@ type BlogDraft struct {
 
 func (BlogDraft) TableName() string { return "blog_drafts" }
 
+// BlogRecommendationFeedback records a reader's reversible recommendation preference.
+type BlogRecommendationFeedback struct {
+	Base
+	UserID    uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_blog_recommendation_feedback,priority:1,where:deleted_at IS NULL"`
+	ContentID uuid.UUID `json:"content_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_blog_recommendation_feedback,priority:2,where:deleted_at IS NULL"`
+	Action    string    `json:"action" gorm:"type:varchar(16);not null;uniqueIndex:idx_blog_recommendation_feedback,priority:3,where:deleted_at IS NULL"`
+}
+
+func (BlogRecommendationFeedback) TableName() string { return "blog_recommendation_feedback" }
+
 type PostCollection struct {
 	PostID       uuid.UUID `json:"post_id" gorm:"type:uuid;primaryKey"`
 	ContentID    uuid.UUID `json:"content_id" gorm:"-"`

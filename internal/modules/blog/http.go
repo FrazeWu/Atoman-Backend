@@ -1,6 +1,8 @@
 package blog
 
 import (
+	"time"
+
 	"atoman/internal/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -34,19 +36,25 @@ type bookmarkFolderInput struct {
 }
 
 type postInput struct {
-	Title         string  `json:"title" binding:"required"`
-	Content       string  `json:"content" binding:"required"`
-	Summary       string  `json:"summary"`
-	CoverURL      string  `json:"cover_url"`
-	Visibility    string  `json:"visibility"`
-	AllowComments *bool   `json:"allow_comments"`
-	Status        string  `json:"status"`
-	ChannelID     *string `json:"channel_id"`
-	CollectionID  *string `json:"collection_id"`
+	Title         string     `json:"title" binding:"required"`
+	Content       string     `json:"content" binding:"required"`
+	Summary       string     `json:"summary"`
+	CoverURL      string     `json:"cover_url"`
+	Visibility    string     `json:"visibility"`
+	AllowComments *bool      `json:"allow_comments"`
+	Status        string     `json:"status"`
+	ChannelID     *string    `json:"channel_id"`
+	CollectionID  *string    `json:"collection_id"`
+	BaseUpdatedAt *time.Time `json:"base_updated_at"`
 }
 
 type postRatingInput struct {
 	Score int `json:"score" binding:"required,min=1,max=10"`
+}
+
+type blogRecommendationFeedbackInput struct {
+	ContentID uuid.UUID `json:"content_id" binding:"required"`
+	Action    string    `json:"action" binding:"required"`
 }
 
 type reorderCollectionPostsInput struct {
@@ -113,7 +121,11 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/bookmark-folders", h.createBookmarkFolder)
 	group.DELETE("/bookmark-folders/:id", h.deleteBookmarkFolder)
 	group.GET("/posts", h.listPosts)
+	group.GET("/search", h.searchBlogPosts)
 	group.GET("/recommend/posts", h.listRecommendedPosts)
+	group.POST("/recommendation-feedback", h.createBlogRecommendationFeedback)
+	group.DELETE("/recommendation-feedback/:id", h.deleteBlogRecommendationFeedback)
+	group.GET("/digest", h.getBlogDigest)
 	group.GET("/posts/drafts", h.getDrafts)
 	group.GET("/posts/:id/versions", h.listPostVersions)
 	group.GET("/posts/:id/export", canPublish, h.exportMarkdownPost)
