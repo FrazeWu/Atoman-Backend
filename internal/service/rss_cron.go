@@ -384,8 +384,8 @@ func selectItemImageURL(itemImageURL string, mediaImageURL string, channelImageU
 	for _, candidate := range []string{
 		strings.TrimSpace(itemImageURL),
 		strings.TrimSpace(mediaImageURL),
-		strings.TrimSpace(channelImageURL),
 		extractFirstImageURLFromHTML(contentHTML),
+		strings.TrimSpace(channelImageURL),
 	} {
 		if candidate != "" {
 			return candidate

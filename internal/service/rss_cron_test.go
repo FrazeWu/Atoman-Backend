@@ -376,8 +376,8 @@ func TestNormalizeRSSItemUsesDCDateAndImageFallbackChain(t *testing.T) {
 		DCDate:      "2026-06-03T09:30:00Z",
 	}, "Feed Title", "https://cdn.example.com/channel-cover.jpg", fallback)
 
-	if withChannelFallback.ImageURL != "https://cdn.example.com/channel-cover.jpg" {
-		t.Fatalf("channel image fallback=%q", withChannelFallback.ImageURL)
+	if withChannelFallback.ImageURL != "https://cdn.example.com/content-image.jpg" {
+		t.Fatalf("content image fallback=%q", withChannelFallback.ImageURL)
 	}
 	expectedPublishedAt := time.Date(2026, 6, 3, 9, 30, 0, 0, time.UTC)
 	if !withChannelFallback.PublishedAt.Equal(expectedPublishedAt) {

@@ -100,10 +100,7 @@ func GetFeedItem(db *gorm.DB) gin.HandlerFunc {
 		}
 
 		c.JSON(http.StatusOK, gin.H{
-			"data": FeedItemDetailResponse{
-				Item:   &item,
-				Reader: newFeedItemReaderResponse(item),
-			},
+			"data": newFeedItemDetailResponse(item),
 		})
 	}
 }

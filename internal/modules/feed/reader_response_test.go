@@ -2,6 +2,7 @@ package feed
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -44,6 +45,43 @@ func TestNewFeedItemReaderResponseHidesStaleFullText(t *testing.T) {
 	}
 	if reader.FullText.HTML != "" || reader.FullText.Status != service.FullTextStatusRetry {
 		t.Fatalf("full_text=%+v", reader.FullText)
+	}
+}
+
+func TestFeedItemDetailResponseProxiesMediaAndPrefersContentImage(t *testing.T) {
+	t.Setenv("FEED_IMAGE_PROXY_PUBLIC_URL", "/api/v1/feed/media/image")
+	t.Setenv("FEED_IMAGE_PROXY_SECRET", "image-proxy-secret-for-tests-32bytes")
+
+	sourceCoverURL := "https://cdn.example.com/source-cover.jpg"
+	contentImageURL := "https://cdn.example.com/article-cover.jpg"
+	source := &model.FeedSource{CoverURL: sourceCoverURL}
+	item := model.FeedItem{
+		ImageURL:        sourceCoverURL,
+		FeedSource:      source,
+		Link:            "https://example.com/articles/1",
+		FeedContentHTML: `<p>正文</p><img src="https://cdn.example.com/article-cover.jpg">`,
+	}
+
+	response := newFeedItemDetailResponse(item)
+	if response.Item == nil {
+		t.Fatal("response item is nil")
+	}
+	itemImage, err := url.Parse(response.Item.ImageURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if itemImage.Query().Get("url") != contentImageURL || itemImage.Query().Get("sig") == "" {
+		t.Fatalf("item image=%q", response.Item.ImageURL)
+	}
+	sourceImage, err := url.Parse(response.Item.FeedSource.CoverURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sourceImage.Query().Get("url") != sourceCoverURL || sourceImage.Query().Get("sig") == "" {
+		t.Fatalf("source image=%q", response.Item.FeedSource.CoverURL)
+	}
+	if item.ImageURL != sourceCoverURL || item.FeedSource.CoverURL != sourceCoverURL {
+		t.Fatalf("input item mutated: %+v", item)
 	}
 }
 
