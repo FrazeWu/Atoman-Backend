@@ -9451,6 +9451,58 @@
                 }
             }
         },
+        "/api/v1/feed/subscriptions/{id}/diagnostics": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回当前用户订阅的外部 RSS 来源最近抓取失败与恢复记录。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取订阅源抓取诊断",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "订阅 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/model.FeedSourceDiagnostic"
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/feed/subscriptions/{id}/group": {
             "put": {
                 "security": [
@@ -29986,6 +30038,41 @@
                 },
                 "title": {
                     "description": "全局默认标题",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.FeedSourceDiagnostic": {
+            "type": "object",
+            "properties": {
+                "attempt_count": {
+                    "type": "integer"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "feed_item_id": {
+                    "type": "string"
+                },
+                "feed_source_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "recovered_at": {
                     "type": "string"
                 },
                 "updated_at": {

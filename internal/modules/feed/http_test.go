@@ -1963,3 +1963,85 @@ func TestSubscriptionReadHandlersRejectForeignSubscription(t *testing.T) {
 		t.Fatalf("expected foreign subscription to return 404, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+func TestListSubscriptionDiagnosticsReturnsOwnedRSSHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+	if err := db.AutoMigrate(&model.FeedSourceDiagnostic{}); err != nil {
+		t.Fatalf("migrate source diagnostics: %v", err)
+	}
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+	var subscription model.Subscription
+	if err := db.Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+
+	recoveredAt := time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)
+	if err := db.Create(&[]model.FeedSourceDiagnostic{
+		{
+			FeedSourceID: source.ID,
+			Kind:         "rss_fetch_recovered",
+			ErrorCode:    "request_failed",
+			Message:      "RSS fetch recovered",
+			AttemptCount: 3,
+			RecoveredAt:  &recoveredAt,
+			Base:         model.Base{CreatedAt: recoveredAt},
+		},
+		{
+			FeedSourceID: source.ID,
+			Kind:         "rss_fetch_failure",
+			ErrorCode:    "http_429",
+			Message:      "feed returned HTTP 429",
+			AttemptCount: 4,
+			Base:         model.Base{CreatedAt: recoveredAt.Add(time.Minute)},
+		},
+		{
+			FeedSourceID: source.ID,
+			Kind:         "reused",
+			Message:      "full text reused",
+			Base:         model.Base{CreatedAt: recoveredAt.Add(2 * time.Minute)},
+		},
+	}).Error; err != nil {
+		t.Fatalf("create diagnostics: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	request := func(currentUser authctx.CurrentUser) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/api/v1/feed/subscriptions/%s/diagnostics", subscription.ID), nil)
+		req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, currentUser))
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		return rr
+	}
+
+	rr := request(user)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list diagnostics status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var payload struct {
+		Data []struct {
+			Kind         string     `json:"kind"`
+			ErrorCode    string     `json:"error_code"`
+			AttemptCount int        `json:"attempt_count"`
+			RecoveredAt  *time.Time `json:"recovered_at"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode diagnostics response: %v", err)
+	}
+	if len(payload.Data) != 2 || payload.Data[0].Kind != "rss_fetch_failure" || payload.Data[0].ErrorCode != "http_429" || payload.Data[0].AttemptCount != 4 || payload.Data[1].Kind != "rss_fetch_recovered" || payload.Data[1].RecoveredAt == nil {
+		t.Fatalf("unexpected diagnostics response: %#v", payload.Data)
+	}
+
+	other := model.User{Username: "diagnostics-other", Email: "diagnostics-other@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	if rr := request(authctx.CurrentUser{ID: other.UUID, Username: other.Username, Role: authctx.RoleUser}); rr.Code != http.StatusNotFound {
+		t.Fatalf("expected foreign diagnostics request to return 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
