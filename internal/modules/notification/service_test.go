@@ -45,6 +45,9 @@ func TestServicePublishAnnouncementDeliversToActiveUsersAndPublishesAfterCommit(
 			t.Fatalf("create announcement user: %v", err)
 		}
 	}
+	if err := db.Model(&inactive).Update("is_active", false).Error; err != nil {
+		t.Fatalf("deactivate announcement user: %v", err)
+	}
 
 	service := NewService(db)
 	pushed := make([]model.Notification, 0)

@@ -40,6 +40,7 @@ func NewTargetRegistry(db *gorm.DB) *TargetRegistry {
 		TargetKindDebate:         targetResolverFunc(resolvers.resolveDebate),
 		TargetKindTimelineEvent:  targetResolverFunc(resolvers.resolveTimelineEvent),
 		TargetKindTimelinePerson: targetResolverFunc(resolvers.resolveTimelinePerson),
+		TargetKindBookWork:       targetResolverFunc(resolvers.resolveBookWork),
 	}}
 }
 
@@ -169,6 +170,14 @@ func (r *databaseTargetResolvers) resolveDebate(_ Viewer, resourceID uuid.UUID) 
 		return ResolvedTarget{}, targetLookupError(TargetKindDebate, resourceID, err)
 	}
 	return ownedTarget(TargetKindDebate, debate.ID, debate.UserID, true, 0, markLabelPinned), nil
+}
+
+func (r *databaseTargetResolvers) resolveBookWork(_ Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {
+	var work model.BookWork
+	if err := r.db.Where("id = ? AND lifecycle_status = ? AND edit_status <> ?", resourceID, model.BookLifecycleStatusActive, model.BookEditStatusClosed).First(&work).Error; err != nil {
+		return ResolvedTarget{}, targetLookupError(TargetKindBookWork, resourceID, err)
+	}
+	return communityTarget(TargetKindBookWork, work.ID, true), nil
 }
 
 func (r *databaseTargetResolvers) resolveTimelineEvent(_ Viewer, resourceID uuid.UUID) (ResolvedTarget, error) {

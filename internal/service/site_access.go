@@ -122,6 +122,7 @@ func DefaultSiteAccessMatrix() SiteAccessMatrix {
 			"media":    defaultAccessModule(),
 			"music":    defaultAccessModule("music.submit", "music.review"),
 			"blog":     defaultAccessModule("post.create", "channel.manage"),
+			"books":    defaultAccessModule("books.submit", "books.review", "books.publish_asset"),
 			"forum":    defaultAccessModule("topic.create", "category.request"),
 			"debate":   defaultAccessModule("debate.create", "debate.edit"),
 			"timeline": defaultAccessModule("timeline.edit"),

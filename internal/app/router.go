@@ -10,6 +10,7 @@ import (
 	"atoman/internal/handlers"
 	"atoman/internal/middleware"
 	"atoman/internal/modules/blog"
+	"atoman/internal/modules/books"
 	"atoman/internal/modules/comment"
 	"atoman/internal/modules/debate"
 	"atoman/internal/modules/debate_voting"
@@ -54,6 +55,7 @@ func RegisterV1Routes(
 	reference.RegisterRoutes(group, refService)
 	blogService := blog.NewService(db).WithExportAssetReader(blog.NewS3ExportAssetReader(s3Client))
 	blog.RegisterRoutes(group.Group("/blog"), blogService)
+	books.RegisterRoutes(group.Group("/books"), books.NewService(db).WithS3(s3Client))
 	shortnote.RegisterRoutes(group.Group("/short-notes"), shortnote.NewService(db, refService))
 	feed.RegisterRoutes(group.Group("/feed"), feed.NewService(db))
 	feed.RegisterPublicRSSRoutes(group.Group("/rss"), db)

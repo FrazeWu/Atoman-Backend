@@ -23,6 +23,7 @@ const (
 	TargetKindDebate         = "debate"
 	TargetKindTimelineEvent  = "timeline_event"
 	TargetKindTimelinePerson = "timeline_person"
+	TargetKindBookWork       = "book_work"
 )
 
 var (

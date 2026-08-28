@@ -31,6 +31,7 @@ import (
 	"atoman/internal/migrationrunner"
 	"atoman/internal/migrations"
 	"atoman/internal/model"
+	"atoman/internal/modules/books"
 	"atoman/internal/modules/lifecycle"
 	"atoman/internal/modules/reputation"
 	"atoman/internal/platform/apperr"
@@ -452,6 +453,7 @@ func main() {
 	indexNowWorkerDone := indexnow.StartWorker(ctx)
 	lifecycleWorkerDone := lifecycle.StartWorker(ctx, db)
 	reputationWorkerDone := reputation.StartWorker(ctx, db)
+	bookProcessingWorkerDone := books.StartProcessingWorker(ctx, db, s3Client)
 
 	log.Println("Initializing Casbin Enforcer...")
 	if err := middleware.InitCasbin(db); err != nil {
@@ -494,7 +496,7 @@ func main() {
 	if err := serveUntilShutdown(ctx, server, shutdownTimeout); err != nil {
 		fatalLogger.Fatal("Failed to start server: ", err)
 	}
-	if err := waitForWorkers(shutdownTimeout, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone, reputationWorkerDone, indexNowWorkerDone); err != nil {
+	if err := waitForWorkers(shutdownTimeout, rssCronDone, fullTextWorkerDone, lifecycleWorkerDone, reputationWorkerDone, indexNowWorkerDone, bookProcessingWorkerDone); err != nil {
 		log.Printf("WARN: timed out waiting for background workers to stop: %v", err)
 	}
 	log.Println("Server stopped")

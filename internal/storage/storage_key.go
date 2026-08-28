@@ -35,6 +35,18 @@ func BuildMusicUploadKey(kind, userID, filename string, createdAt time.Time) str
 	return "music/" + strings.Trim(kind, "/") + "/uploads/users/" + strings.Trim(userID, "/") + "/" + buildYearMonth(createdAt) + "/" + cleanFilename(filename)
 }
 
+func BuildBookPrivateObjectKey(userID, importID, format string) string {
+	return "books/private/users/" + strings.Trim(userID, "/") + "/imports/" + strings.Trim(importID, "/") + "/source" + normalizeExtension(format)
+}
+
+func BuildBookPublishedObjectKey(assetID, format string) string {
+	return "books/public/assets/" + strings.Trim(assetID, "/") + "/source" + normalizeExtension(format)
+}
+
+func BuildBookPublicationEvidenceObjectKey(requestID, evidenceID, extension string) string {
+	return "books/private/publication-evidence/requests/" + strings.Trim(requestID, "/") + "/" + strings.Trim(evidenceID, "/") + normalizeExtension(extension)
+}
+
 func BuildMusicAlbumCoverKey(albumID, ext string) string {
 	return "music/albums/" + strings.Trim(albumID, "/") + "/cover" + normalizeExtension(ext)
 }
