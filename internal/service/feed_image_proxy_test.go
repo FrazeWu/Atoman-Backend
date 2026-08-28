@@ -58,6 +58,36 @@ func TestFeedImageProxySignsAndFetchesOnlyValidImages(t *testing.T) {
 	}
 }
 
+func TestFeedImageProxyAllowsLargeArticleImages(t *testing.T) {
+	t.Setenv("FEED_IMAGE_PROXY_PUBLIC_URL", "/api/v1/feed/media/image")
+	t.Setenv("FEED_IMAGE_PROXY_SECRET", "image-proxy-secret-for-tests-32bytes")
+	remoteURL := "https://cdn.example.com/large-article.jpg"
+
+	originalResolver := resolveFullTextHostname
+	resolveFullTextHostname = func(host string) ([]net.IP, error) {
+		return []net.IP{net.ParseIP("93.184.216.34")}, nil
+	}
+	t.Cleanup(func() { resolveFullTextHostname = originalResolver })
+
+	originalClient := feedImageProxyHTTPClient
+	feedImageProxyHTTPClient = &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"image/jpeg"}},
+			Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", 12*1024*1024))),
+		}, nil
+	})}
+	t.Cleanup(func() { feedImageProxyHTTPClient = originalClient })
+
+	body, contentType, err := FetchFeedImageProxy(remoteURL, signFeedImageProxyURL(remoteURL, "image-proxy-secret-for-tests-32bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) != 12*1024*1024 || contentType != "image/jpeg" {
+		t.Fatalf("body_size=%d content_type=%q", len(body), contentType)
+	}
+}
+
 func TestMaybeProxyFeedImageURLIsIdempotent(t *testing.T) {
 	t.Setenv("FEED_IMAGE_PROXY_PUBLIC_URL", "https://api.example.com/api/v1/feed/media/image")
 	t.Setenv("FEED_IMAGE_PROXY_SECRET", "image-proxy-secret-for-tests-32bytes")

@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	feedImageProxyMaxResponseBytes = 8 * 1024 * 1024
+	feedImageProxyMaxResponseBytes = 16 * 1024 * 1024
 	feedImageProxyMinimumSecret    = 32
 )
 

@@ -36,6 +36,37 @@ type FeedItemDetailResponse struct {
 	Reader FeedItemReaderResponse `json:"reader"`
 }
 
+func newFeedItemDetailResponse(item model.FeedItem) FeedItemDetailResponse {
+	responseItem := item
+	responseItem.ImageURL = service.MaybeProxyFeedImageURL(preferredFeedItemImageURL(item))
+	if item.FeedSource != nil {
+		source := *item.FeedSource
+		source.CoverURL = service.MaybeProxyFeedImageURL(source.CoverURL)
+		responseItem.FeedSource = &source
+	}
+	return FeedItemDetailResponse{
+		Item:   &responseItem,
+		Reader: newFeedItemReaderResponse(item),
+	}
+}
+
+func preferredFeedItemImageURL(item model.FeedItem) string {
+	storedURL := strings.TrimSpace(item.ImageURL)
+	sourceCoverURL := ""
+	if item.FeedSource != nil {
+		sourceCoverURL = strings.TrimSpace(item.FeedSource.CoverURL)
+	}
+	if storedURL != "" && storedURL != sourceCoverURL {
+		return storedURL
+	}
+
+	metadata, err := service.ExtractFeedImageMetadata(item.Link, strings.NewReader(item.FeedContentHTML))
+	if err == nil && strings.TrimSpace(metadata.ImageURL) != "" {
+		return strings.TrimSpace(metadata.ImageURL)
+	}
+	return storedURL
+}
+
 func newFeedItemReaderResponse(item model.FeedItem) FeedItemReaderResponse {
 	rssHTML := strings.TrimSpace(item.FeedContentHTML)
 	fullTextHTML := ""
