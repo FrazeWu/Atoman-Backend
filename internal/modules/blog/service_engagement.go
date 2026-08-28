@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"strings"
+	"time"
 
 	"atoman/internal/model"
 	"atoman/internal/platform/apperr"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (s *Service) CountPostLikes(postID uuid.UUID) (int64, error) {
@@ -26,6 +28,19 @@ type PostRatingSummary struct {
 	ViewerRating *int    `json:"viewer_rating,omitempty"`
 }
 
+func postRatingUpsertConflict(score int) clause.OnConflict {
+	return clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "content_id"}},
+		TargetWhere: clause.Where{Exprs: []clause.Expression{
+			clause.Expr{SQL: "deleted_at IS NULL"},
+		}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"score":      score,
+			"updated_at": time.Now(),
+		}),
+	}
+}
+
 func (s *Service) SetPostRating(user authctx.CurrentUser, postID uuid.UUID, score int) (PostRatingSummary, error) {
 	if user.ID == uuid.Nil {
 		return PostRatingSummary{}, apperr.Unauthorized("Login required")
@@ -37,20 +52,9 @@ func (s *Service) SetPostRating(user authctx.CurrentUser, postID uuid.UUID, scor
 		return PostRatingSummary{}, err
 	}
 
-	var rating model.PostRating
-	err := s.db.Where("user_id = ? AND content_id = ?", user.ID, postID).First(&rating).Error
-	switch {
-	case errors.Is(err, gorm.ErrRecordNotFound):
-		rating = model.PostRating{UserID: user.ID, ContentID: postID, Score: score}
-		if err := s.db.Create(&rating).Error; err != nil {
-			return PostRatingSummary{}, err
-		}
-	case err != nil:
+	rating := model.PostRating{UserID: user.ID, ContentID: postID, Score: score}
+	if err := s.db.Clauses(postRatingUpsertConflict(score)).Create(&rating).Error; err != nil {
 		return PostRatingSummary{}, err
-	default:
-		if err := s.db.Model(&rating).Update("score", score).Error; err != nil {
-			return PostRatingSummary{}, err
-		}
 	}
 	return s.PostRatingSummary(postID, &user.ID)
 }

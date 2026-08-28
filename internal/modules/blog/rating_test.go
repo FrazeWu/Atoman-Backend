@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,6 +104,53 @@ func TestPostRatingRejectsScoresOutsideOneToTen(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("expected no invalid ratings, got %d", count)
+	}
+}
+
+func TestPostRatingConcurrentInitialSubmissionsKeepOneRating(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	post := model.Post{
+		UserID:     user.ID,
+		ChannelID:  &channel.ID,
+		Title:      "Concurrent rating post",
+		Content:    "Content",
+		Status:     "published",
+		Visibility: "public",
+	}
+	if err := db.Create(&post).Error; err != nil {
+		t.Fatalf("create post: %v", err)
+	}
+	canonicalizeBlogTestPost(t, db, post)
+
+	const workers = 20
+	errs := make(chan error, workers)
+	var group sync.WaitGroup
+	for score := 1; score <= workers; score++ {
+		group.Add(1)
+		go func(score int) {
+			defer group.Done()
+			_, err := service.SetPostRating(user, post.ID, (score-1)%10+1)
+			errs <- err
+		}(score)
+	}
+	group.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent post rating: %v", err)
+		}
+	}
+
+	var count int64
+	if err := db.Model(&model.PostRating{}).Where("user_id = ? AND content_id = ?", user.ID, post.ID).Count(&count).Error; err != nil {
+		t.Fatalf("count post ratings: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("post rating count = %d, want 1", count)
 	}
 }
 
