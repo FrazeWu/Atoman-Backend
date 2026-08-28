@@ -9185,14 +9185,14 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "批量检测当前用户所有订阅的健康状态。",
+                "description": "使用受限并发的 RSS 同步管线检查当前用户的全部外部订阅源，并更新统一抓取状态。",
                 "produces": [
                     "application/json"
                 ],
                 "tags": [
                     "feed"
                 ],
-                "summary": "检查全部订阅健康状态",
+                "summary": "检查全部外部订阅健康状态",
                 "responses": {
                     "200": {
                         "description": "OK",
@@ -9525,7 +9525,7 @@ const docTemplate = `{
                         "CookieAuth": []
                     }
                 ],
-                "description": "检测订阅源可访问性并更新健康状态。",
+                "description": "使用受保护的 RSS 同步管线立即检查订阅源，并更新统一抓取状态。",
                 "produces": [
                     "application/json"
                 ],

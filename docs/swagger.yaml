@@ -13449,7 +13449,7 @@ paths:
       - feed
   /api/v1/feed/subscriptions/{id}/health:
     post:
-      description: 检测订阅源可访问性并更新健康状态。
+      description: 使用受保护的 RSS 同步管线立即检查订阅源，并更新统一抓取状态。
       parameters:
       - description: 订阅 UUID
         in: path
@@ -13725,7 +13725,7 @@ paths:
       - feed
   /api/v1/feed/subscriptions/health/check-all:
     post:
-      description: 批量检测当前用户所有订阅的健康状态。
+      description: 使用受限并发的 RSS 同步管线检查当前用户的全部外部订阅源，并更新统一抓取状态。
       produces:
       - application/json
       responses:
@@ -13740,7 +13740,7 @@ paths:
       security:
       - BearerAuth: []
       - CookieAuth: []
-      summary: 检查全部订阅健康状态
+      summary: 检查全部外部订阅健康状态
       tags:
       - feed
   /api/v1/feed/subscriptions/resolve:

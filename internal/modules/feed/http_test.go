@@ -150,6 +150,88 @@ func TestSyncSubscriptionHandlerReturnsStructuredFeedFailure(t *testing.T) {
 	}
 }
 
+func TestHealthCheckHandlerUsesSubscriptionSyncPipeline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+	if err := db.Model(&source).Update("rss_url", "http://127.0.0.1:1/feed.xml").Error; err != nil {
+		t.Fatalf("set test source URL: %v", err)
+	}
+	var subscription model.Subscription
+	if err := db.Where("user_id = ? AND feed_source_id = ?", user.ID, source.ID).First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+
+	called := 0
+	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+		called++
+		return feedservice.RSSSyncResult{FeedSourceID: got.ID, FetchedItems: 2, NewItems: 1, SyncedAt: time.Now().UTC()}, nil
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/v1/feed/subscriptions/%s/health", subscription.ID), nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("health check status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if called != 1 {
+		t.Fatalf("health check must use the subscription sync pipeline, called=%d", called)
+	}
+	var payload FeedHealthCheckResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if payload.SubscriptionID != subscription.ID.String() || payload.HealthStatus != "healthy" || payload.ErrorMessage != "" || payload.LastChecked == "" {
+		t.Fatalf("unexpected health response: %#v", payload)
+	}
+}
+
+func TestCheckAllSubscriptionsHealthUsesBoundedSyncPipeline(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+	if err := db.Model(&source).Update("rss_url", "http://127.0.0.1:1/feed.xml").Error; err != nil {
+		t.Fatalf("set test source URL: %v", err)
+	}
+
+	called := 0
+	service.syncSource = func(_ *gorm.DB, got model.FeedSource) (feedservice.RSSSyncResult, error) {
+		called++
+		return feedservice.RSSSyncResult{FeedSourceID: got.ID, FetchedItems: 3, NewItems: 2, SyncedAt: time.Now().UTC()}, nil
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/feed/subscriptions/health/check-all", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("health check all status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	if called != 1 {
+		t.Fatalf("bulk health check must use the bounded sync pipeline, called=%d", called)
+	}
+	var payload FeedHealthCheckListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode health list response: %v", err)
+	}
+	if payload.CheckedCount != 1 || len(payload.Results) != 1 || payload.Results[0].HealthStatus != "healthy" || payload.Results[0].LastChecked == "" {
+		t.Fatalf("unexpected health list response: %#v", payload)
+	}
+}
+
 func TestSyncAllSubscriptionsHandlerReturnsSummary(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
