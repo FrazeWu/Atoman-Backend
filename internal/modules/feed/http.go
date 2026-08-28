@@ -70,6 +70,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 		protected.POST("/subscriptions/:id/mark-unread", h.markSubscriptionUnread)
 		protected.POST("/subscriptions/sync-all", h.syncAllSubscriptions)
 		protected.POST("/subscriptions/:id/sync", h.syncSubscription)
+		protected.GET("/subscriptions/:id/diagnostics", h.listSubscriptionDiagnostics)
 		protected.GET("/stats", GetFeedStats(service.db))
 		protected.GET("/groups", GetSubscriptionGroups(service.db))
 		protected.PUT("/groups/order", ReorderSubscriptionGroups(service.db))

@@ -4232,6 +4232,29 @@ definitions:
       updated_at:
         type: string
     type: object
+  model.FeedSourceDiagnostic:
+    properties:
+      attempt_count:
+        type: integer
+      created_at:
+        type: string
+      error_code:
+        type: string
+      feed_item_id:
+        type: string
+      feed_source_id:
+        type: string
+      id:
+        type: string
+      kind:
+        type: string
+      message:
+        type: string
+      recovered_at:
+        type: string
+      updated_at:
+        type: string
+    type: object
   model.ForumCategory:
     properties:
       color:
@@ -13407,6 +13430,38 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 更新订阅
+      tags:
+      - feed
+  /api/v1/feed/subscriptions/{id}/diagnostics:
+    get:
+      description: 返回当前用户订阅的外部 RSS 来源最近抓取失败与恢复记录。
+      parameters:
+      - description: 订阅 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/model.FeedSourceDiagnostic'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取订阅源抓取诊断
       tags:
       - feed
   /api/v1/feed/subscriptions/{id}/group:

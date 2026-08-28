@@ -1189,7 +1189,11 @@ func markRSSFetchSuccess(db *gorm.DB, group rssSourceGroup, result RSSFetchResul
 		"fetch_lease_token":          "",
 		"fetch_lease_until":          nil,
 	}
-	return rssLeaseQuery(db, group).Updates(updates).Error
+	if err := rssLeaseQuery(db, group).Updates(updates).Error; err != nil {
+		return err
+	}
+	recordRSSFetchRecoveryOperations(db, group, now)
+	return nil
 }
 
 func markRSSFetchFailure(db *gorm.DB, group rssSourceGroup, err error, result RSSFetchResult, now time.Time) error {
@@ -1226,7 +1230,11 @@ func markRSSFetchFailure(db *gorm.DB, group rssSourceGroup, err error, result RS
 		"fetch_lease_token":          "",
 		"fetch_lease_until":          nil,
 	}
-	return rssLeaseQuery(db, group).Updates(updates).Error
+	if err := rssLeaseQuery(db, group).Updates(updates).Error; err != nil {
+		return err
+	}
+	recordRSSFetchFailureOperations(db, group, code, message, attempt)
+	return nil
 }
 
 func feedFetchRetryDelay(code string, attempt int) time.Duration {
