@@ -157,6 +157,7 @@ func TestRunUnifiedContentMigrationBackfillsMixedContentAndCollections(t *testin
 	require.Len(t, postExtensions, 1)
 	require.Len(t, episodeExtensions, 1)
 	require.Len(t, videoExtensions, 1)
+	require.Equal(t, video.VideoURL, videoExtensions[0].VideoURL)
 
 	var blogVersions []model.ContentBlogVersion
 	require.NoError(t, db.Find(&blogVersions).Error)
@@ -170,4 +171,11 @@ func TestRunUnifiedContentMigrationBackfillsMixedContentAndCollections(t *testin
 	require.NotNil(t, blogDrafts[0].ContentID)
 	require.Equal(t, blogEntries[0].ID, *blogDrafts[0].ContentID)
 	require.Equal(t, defaults[0].ID, *blogDrafts[0].CollectionID)
+
+	require.NoError(t, db.Model(&model.ContentVideoExtension{}).
+		Where("video_id = ?", video.ID).
+		Update("video_url", "").Error)
+	require.NoError(t, RunUnifiedContentMigrationIfReady(db))
+	require.NoError(t, db.Where("video_id = ?", video.ID).First(&videoExtensions[0]).Error)
+	require.Equal(t, video.VideoURL, videoExtensions[0].VideoURL)
 }
