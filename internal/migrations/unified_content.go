@@ -42,7 +42,27 @@ func RunUnifiedContentMigrationIfReady(db *gorm.DB) error {
 			return RunUnifiedContentMigration(db)
 		}
 	}
+	if err := repairMissingContentVideoSources(db); err != nil {
+		return fmt.Errorf("repair missing content video sources: %w", err)
+	}
 	return nil
+}
+
+func repairMissingContentVideoSources(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.Video{}) || !db.Migrator().HasTable(&model.ContentVideoExtension{}) {
+		return nil
+	}
+	return db.Model(&model.ContentVideoExtension{}).
+		Where("TRIM(COALESCE(video_url, '')) = ''").
+		Where(`EXISTS (
+			SELECT 1 FROM videos
+			WHERE videos.id = content_video_extensions.video_id
+			AND TRIM(COALESCE(videos.video_url, '')) <> ''
+		)`).
+		Update("video_url", gorm.Expr(`(
+			SELECT videos.video_url FROM videos
+			WHERE videos.id = content_video_extensions.video_id
+		)`)).Error
 }
 
 func RunUnifiedContentMigration(db *gorm.DB) error {
@@ -683,6 +703,7 @@ func syncContentVideoExtension(tx *gorm.DB, contentID uuid.UUID, video model.Vid
 		"created_at":          extension.CreatedAt,
 		"updated_at":          extension.UpdatedAt,
 		"storage_type":        extension.StorageType,
+		"video_url":           extension.VideoURL,
 		"thumbnail_url":       extension.ThumbnailURL,
 		"duration_sec":        extension.DurationSec,
 		"processing_status":   extension.ProcessingStatus,
