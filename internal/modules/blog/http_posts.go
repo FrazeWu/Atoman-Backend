@@ -671,8 +671,16 @@ func (h *Handler) updatePost(c *gin.Context) {
 	}
 
 	if err := h.service.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.ContentEntry{}).Where("id = ?", postID).Updates(entryUpdates).Error; err != nil {
-			return err
+		entryQuery := tx.Model(&model.ContentEntry{}).Where("id = ?", postID)
+		if req.BaseUpdatedAt != nil {
+			entryQuery = entryQuery.Where("updated_at = ?", req.BaseUpdatedAt.UTC())
+		}
+		updateResult := entryQuery.Updates(entryUpdates)
+		if updateResult.Error != nil {
+			return updateResult.Error
+		}
+		if req.BaseUpdatedAt != nil && updateResult.RowsAffected == 0 {
+			return apperr.Conflict("blog.post_conflict", "This article was updated in another session. Refresh before saving again")
 		}
 		if err := tx.Model(&model.ContentBlogExtension{}).Where("content_id = ?", postID).Updates(extensionUpdates).Error; err != nil {
 			return err
