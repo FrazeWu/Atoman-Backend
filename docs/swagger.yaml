@@ -2427,6 +2427,8 @@ definitions:
         $ref: '#/definitions/model.PodcastEpisode'
       post:
         $ref: '#/definitions/feed.TimelinePostDTO'
+      priority_reason:
+        type: string
       published_at:
         type: string
       type:
@@ -5744,6 +5746,8 @@ definitions:
         type: string
       position:
         type: integer
+      priority:
+        type: string
       resumed_after:
         type: string
       subscription:

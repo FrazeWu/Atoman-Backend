@@ -165,7 +165,7 @@ func (h *Handler) syncAllSubscriptions(c *gin.Context) {
 
 // getSubscribedFeed godoc
 // @Summary 获取订阅时间线
-// @Description 聚合文章与外部 RSS 条目，支持分页和筛选。
+// @Description 聚合文章与外部 RSS 条目，支持分页和筛选；`sort=priority` 返回至多 20 条未读优先内容。
 // @Tags feed
 // @Produce json
 // @Param page query int false "页码"
@@ -175,6 +175,7 @@ func (h *Handler) syncAllSubscriptions(c *gin.Context) {
 // @Param group_id query string false "分组 UUID"
 // @Param is_read query string false "是否已读" Enums(true,false)
 // @Param hide_duplicates query bool false "隐藏重复项"
+// @Param sort query string false "排序模式" Enums(recent,priority)
 // @Success 200 {object} TimelineListResponseDTO
 // @Failure 500 {object} ErrorResponse
 // @Security BearerAuth

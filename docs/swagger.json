@@ -30540,6 +30540,9 @@
                 "post": {
                     "$ref": "#/definitions/feed.TimelinePostDTO"
                 },
+                "priority_reason": {
+                    "type": "string"
+                },
                 "published_at": {
                     "type": "string"
                 },
@@ -35473,6 +35476,9 @@
                 },
                 "position": {
                     "type": "integer"
+                },
+                "priority": {
+                    "type": "string"
                 },
                 "resumed_after": {
                     "type": "string"

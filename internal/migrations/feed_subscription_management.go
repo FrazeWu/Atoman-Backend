@@ -15,6 +15,14 @@ func RunFeedSubscriptionManagementMigration(db *gorm.DB) error {
 		return nil
 	}
 	return db.Transaction(func(tx *gorm.DB) error {
+		if tx.Migrator().HasColumn(&model.Subscription{}, "priority") {
+			if err := tx.Model(&model.Subscription{}).
+				Where("COALESCE(priority, '') NOT IN ?", []string{"high", "normal", "low"}).
+				Update("priority", "normal").Error; err != nil {
+				return fmt.Errorf("backfill subscription priority: %w", err)
+			}
+		}
+
 		var groups []model.SubscriptionGroup
 		if err := tx.Order("user_id ASC, position ASC, created_at ASC").Find(&groups).Error; err != nil {
 			return fmt.Errorf("load subscription groups: %w", err)

@@ -30543,6 +30543,9 @@ const docTemplate = `{
                 "post": {
                     "$ref": "#/definitions/feed.TimelinePostDTO"
                 },
+                "priority_reason": {
+                    "type": "string"
+                },
                 "published_at": {
                     "type": "string"
                 },
@@ -35476,6 +35479,9 @@ const docTemplate = `{
                 },
                 "position": {
                     "type": "integer"
+                },
+                "priority": {
+                    "type": "string"
                 },
                 "resumed_after": {
                     "type": "string"
