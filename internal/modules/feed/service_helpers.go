@@ -140,6 +140,175 @@ func sortTimeline(items []TimelineItemDTO) {
 	})
 }
 
+const priorityInboxLimit = 20
+
+func isPriorityInboxSort(raw string) bool {
+	return strings.EqualFold(strings.TrimSpace(raw), "priority")
+}
+
+type subscriptionPriorityIndex struct {
+	feedSources map[uuid.UUID]string
+	users       map[uuid.UUID]string
+	channels    map[uuid.UUID]string
+	collections map[uuid.UUID]string
+}
+
+func applySubscriptionPriority(items []TimelineItemDTO, priorities subscriptionPriorityIndex) {
+	for index := range items {
+		priority := priorities.priorityForItem(items[index])
+		items[index].priorityRank = subscriptionPriorityRank(priority)
+		items[index].PriorityReason = "subscription_priority_" + priority
+	}
+}
+
+func newSubscriptionPriorityIndex(subscriptions []model.Subscription) subscriptionPriorityIndex {
+	priorities := subscriptionPriorityIndex{
+		feedSources: make(map[uuid.UUID]string, len(subscriptions)),
+		users:       make(map[uuid.UUID]string),
+		channels:    make(map[uuid.UUID]string),
+		collections: make(map[uuid.UUID]string),
+	}
+	for _, subscription := range subscriptions {
+		priority, ok := normalizeSubscriptionPriority(subscription.Priority)
+		if !ok {
+			priority = subscriptionPriorityNormal
+		}
+		source := subscription.FeedSource
+		if source == nil {
+			priorities.assign(priorities.feedSources, subscription.FeedSourceID, priority)
+			continue
+		}
+		switch source.SourceType {
+		case "internal_user":
+			if source.SourceID != nil {
+				priorities.assign(priorities.users, *source.SourceID, priority)
+			}
+		case "internal_channel":
+			if source.SourceID != nil {
+				priorities.assign(priorities.channels, *source.SourceID, priority)
+			}
+		case "internal_collection":
+			if source.SourceID != nil {
+				priorities.assign(priorities.collections, *source.SourceID, priority)
+			}
+		default:
+			priorities.assign(priorities.feedSources, subscription.FeedSourceID, priority)
+		}
+	}
+	return priorities
+}
+
+func (priorities subscriptionPriorityIndex) assign(target map[uuid.UUID]string, id uuid.UUID, priority string) {
+	if id == uuid.Nil {
+		return
+	}
+	target[id] = higherSubscriptionPriority(target[id], priority)
+}
+
+func (priorities subscriptionPriorityIndex) priorityForItem(item TimelineItemDTO) string {
+	if item.FeedItem != nil {
+		return highestConfiguredPriority(priorities.feedSources[item.FeedItem.FeedSourceID])
+	}
+	if item.Post != nil {
+		return priorities.priorityForPost(&item.Post.Post)
+	}
+	if item.PodcastEpisode != nil {
+		if item.PodcastEpisode.Post != nil {
+			return priorities.priorityForPost(item.PodcastEpisode.Post)
+		}
+		return highestConfiguredPriority(priorities.channels[item.PodcastEpisode.ChannelID])
+	}
+	if item.Video != nil {
+		candidates := []string{priorities.users[item.Video.UserID]}
+		if item.Video.ChannelID != nil {
+			candidates = append(candidates, priorities.channels[*item.Video.ChannelID])
+		}
+		if item.Video.CollectionID != nil {
+			candidates = append(candidates, priorities.collections[*item.Video.CollectionID])
+		}
+		return highestConfiguredPriority(candidates...)
+	}
+	return subscriptionPriorityNormal
+}
+
+func (priorities subscriptionPriorityIndex) priorityForPost(post *model.Post) string {
+	candidates := []string{priorities.users[post.UserID]}
+	if post.ChannelID != nil {
+		candidates = append(candidates, priorities.channels[*post.ChannelID])
+	}
+	if post.CollectionID != nil {
+		candidates = append(candidates, priorities.collections[*post.CollectionID])
+	}
+	return highestConfiguredPriority(candidates...)
+}
+
+func highestConfiguredPriority(candidates ...string) string {
+	priority := ""
+	for _, candidate := range candidates {
+		normalized, ok := normalizeSubscriptionPriority(candidate)
+		if !ok {
+			continue
+		}
+		if priority == "" || subscriptionPriorityRank(normalized) > subscriptionPriorityRank(priority) {
+			priority = normalized
+		}
+	}
+	if priority == "" {
+		return subscriptionPriorityNormal
+	}
+	return priority
+}
+
+func higherSubscriptionPriority(current string, candidate string) string {
+	normalizedCurrent, currentOK := normalizeSubscriptionPriority(current)
+	normalizedCandidate, candidateOK := normalizeSubscriptionPriority(candidate)
+	if !currentOK {
+		if candidateOK {
+			return normalizedCandidate
+		}
+		return subscriptionPriorityNormal
+	}
+	if !candidateOK {
+		return normalizedCurrent
+	}
+	if subscriptionPriorityRank(normalizedCandidate) > subscriptionPriorityRank(normalizedCurrent) {
+		return normalizedCandidate
+	}
+	return normalizedCurrent
+}
+
+func subscriptionPriorityRank(priority string) int {
+	switch priority {
+	case subscriptionPriorityHigh:
+		return 3
+	case subscriptionPriorityNormal:
+		return 2
+	case subscriptionPriorityLow:
+		return 1
+	default:
+		return 2
+	}
+}
+
+func priorityInbox(items []TimelineItemDTO) ([]TimelineItemDTO, int64) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].priorityRank != items[j].priorityRank {
+			return items[i].priorityRank > items[j].priorityRank
+		}
+		if !items[i].PublishedAt.Equal(items[j].PublishedAt) {
+			return items[i].PublishedAt.After(items[j].PublishedAt)
+		}
+		if items[i].Type != items[j].Type {
+			return timelineTypeRank(items[i].Type) < timelineTypeRank(items[j].Type)
+		}
+		return timelineItemID(items[i]) > timelineItemID(items[j])
+	})
+	if len(items) > priorityInboxLimit {
+		items = items[:priorityInboxLimit]
+	}
+	return items, int64(len(items))
+}
+
 func timelineTypeRank(itemType string) int {
 	switch itemType {
 	case "post":

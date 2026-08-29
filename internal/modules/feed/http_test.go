@@ -64,6 +64,42 @@ func TestGetExploreFeedHandlerAllowsAnonymousPublicRead(t *testing.T) {
 	}
 }
 
+func TestSubscribedFeedHandlerPriorityInboxExposesReason(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, user := newFeedTestService(t)
+	var subscription model.Subscription
+	if err := db.Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+		Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", user.ID, "external_rss").
+		First(&subscription).Error; err != nil {
+		t.Fatalf("find external subscription: %v", err)
+	}
+	if err := db.Model(&subscription).Update("priority", "high").Error; err != nil {
+		t.Fatalf("set subscription priority: %v", err)
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/timeline?source_type=external_rss&sort=priority&page=2&limit=100", nil)
+	req.Header.Set("Authorization", "Bearer "+signedFeedHTTPTokenForTest(t, db, user))
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("priority inbox status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	var response struct {
+		Data []struct {
+			PriorityReason string `json:"priority_reason"`
+			IsRead         bool   `json:"is_read"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode priority inbox: %v", err)
+	}
+	if len(response.Data) != 1 || response.Data[0].PriorityReason != "subscription_priority_high" || response.Data[0].IsRead {
+		t.Fatalf("unexpected priority inbox response: %#v", response.Data)
+	}
+}
+
 func TestSyncSubscriptionHandlerReturnsStructuredResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)

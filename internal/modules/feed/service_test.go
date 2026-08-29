@@ -636,6 +636,108 @@ func TestHasExternalFeedUpdatesScopesToCurrentUsersSubscriptions(t *testing.T) {
 	}
 }
 
+func TestGetSubscribedFeedPriorityInboxRanksUnreadSubscriptionsAndCapsResults(t *testing.T) {
+	service, db, user := newFeedTestService(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	var lowSubscription model.Subscription
+	if err := db.Joins("JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id").
+		Where("subscriptions.user_id = ? AND feed_sources.source_type = ?", user.ID, "external_rss").
+		First(&lowSubscription).Error; err != nil {
+		t.Fatalf("find low subscription: %v", err)
+	}
+	if err := db.Model(&lowSubscription).Update("priority", "low").Error; err != nil {
+		t.Fatalf("set low priority: %v", err)
+	}
+
+	createSourceItem := func(priority, suffix string, publishedAt time.Time) model.FeedItem {
+		source := model.FeedSource{
+			SourceType: "external_rss",
+			RssURL:     "https://priority.example.com/" + suffix + ".xml",
+			Hash:       "priority-source-" + suffix,
+			Title:      suffix,
+		}
+		if err := db.Create(&source).Error; err != nil {
+			t.Fatalf("create %s source: %v", suffix, err)
+		}
+		if err := db.Create(&model.Subscription{UserID: user.ID, FeedSourceID: source.ID, Title: suffix, Priority: priority}).Error; err != nil {
+			t.Fatalf("create %s subscription: %v", suffix, err)
+		}
+		item := model.FeedItem{
+			FeedSourceID: source.ID,
+			GUID:         "priority-" + suffix,
+			Title:        suffix,
+			Link:         "https://priority.example.com/items/" + suffix,
+			PublishedAt:  publishedAt,
+			FetchedAt:    publishedAt,
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create %s item: %v", suffix, err)
+		}
+		return item
+	}
+
+	highUnread := createSourceItem("high", "high-unread", now.Add(-4*time.Hour))
+	highRead := createSourceItem("high", "high-read", now)
+	if err := db.Create(&model.FeedItemRead{UserID: user.ID, FeedItemID: highRead.ID, ReadAt: now}).Error; err != nil {
+		t.Fatalf("mark high item read: %v", err)
+	}
+	normal := createSourceItem("normal", "normal", now.Add(-3*time.Hour))
+
+	lowItems := make([]model.FeedItem, 0, 21)
+	for i := 0; i < 21; i++ {
+		lowItems = append(lowItems, model.FeedItem{
+			FeedSourceID: lowSubscription.FeedSourceID,
+			GUID:         fmt.Sprintf("priority-low-%d", i),
+			Title:        "Low priority item",
+			Link:         fmt.Sprintf("https://example.com/priority-low-%d", i),
+			PublishedAt:  now.Add(-time.Duration(i+1) * time.Minute),
+			FetchedAt:    now,
+		})
+	}
+	if err := db.Create(&lowItems).Error; err != nil {
+		t.Fatalf("create low priority items: %v", err)
+	}
+
+	priorityItems, priorityTotal, err := service.GetSubscribedFeed(user, FeedQuery{
+		SourceType: "external_rss",
+		Sort:       "priority",
+		Page:       2,
+		PageSize:   100,
+	})
+	if err != nil {
+		t.Fatalf("get priority inbox: %v", err)
+	}
+	if priorityTotal != 20 || len(priorityItems) != 20 {
+		t.Fatalf("expected capped priority inbox, got total=%d items=%d", priorityTotal, len(priorityItems))
+	}
+	if priorityItems[0].FeedItem == nil || priorityItems[0].FeedItem.ID != highUnread.ID {
+		t.Fatalf("expected high-priority unread item first, got %#v", priorityItems[0])
+	}
+	if priorityItems[0].PriorityReason != "subscription_priority_high" {
+		t.Fatalf("expected high priority reason, got %q", priorityItems[0].PriorityReason)
+	}
+	if priorityItems[1].FeedItem == nil || priorityItems[1].FeedItem.ID != normal.ID {
+		t.Fatalf("expected normal-priority item second, got %#v", priorityItems[1])
+	}
+	for _, item := range priorityItems {
+		if item.IsRead || (item.FeedItem != nil && item.FeedItem.ID == highRead.ID) {
+			t.Fatalf("priority inbox must exclude read content, got %#v", item)
+		}
+	}
+
+	chronologicalItems, _, err := service.GetSubscribedFeed(user, FeedQuery{SourceType: "external_rss", Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatalf("get chronological timeline: %v", err)
+	}
+	if chronologicalItems[0].FeedItem == nil || chronologicalItems[0].FeedItem.ID != highRead.ID {
+		t.Fatalf("expected chronological timeline to remain newest first, got %#v", chronologicalItems[0])
+	}
+	if chronologicalItems[0].PriorityReason != "" {
+		t.Fatalf("chronological timeline must not expose a priority reason, got %q", chronologicalItems[0].PriorityReason)
+	}
+}
+
 func TestGetSubscribedFeedExcludesPausedSubscriptions(t *testing.T) {
 	service, db, user := newFeedTestService(t)
 	var subscription model.Subscription
