@@ -7,17 +7,22 @@ import (
 	"atoman/internal/testdb"
 )
 
-func TestBlogSearchIndexStatementsCoverSubstringSearchColumns(t *testing.T) {
+func TestBlogSearchIndexStatementsCoverCanonicalSubstringSearchColumns(t *testing.T) {
 	joined := strings.Join(blogSearchIndexStatements(), "\n")
 	for _, expected := range []string{
 		"CREATE EXTENSION IF NOT EXISTS pg_trgm",
-		"LOWER(title) gin_trgm_ops",
-		"LOWER(summary) gin_trgm_ops",
-		"LOWER(content) gin_trgm_ops",
-		"WHERE deleted_at IS NULL",
+		"idx_content_entries_blog_title_trgm",
+		"idx_content_entries_blog_summary_trgm",
+		"idx_content_blog_extensions_content_trgm",
+		"idx_content_blog_extensions_search_vector",
+		"idx_content_entries_blog_search_vector",
+		"idx_content_entries_blog_public_channel_published",
+		"ON content_entries USING GIN (LOWER(title) gin_trgm_ops)",
+		"ON content_blog_extensions USING GIN (LOWER(content) gin_trgm_ops)",
+		"kind = 'blog' AND status = 'published'",
 	} {
 		if !strings.Contains(joined, expected) {
-			t.Fatalf("expected blog search indexes to contain %q", expected)
+			t.Fatalf("expected canonical blog search indexes to contain %q", expected)
 		}
 	}
 }

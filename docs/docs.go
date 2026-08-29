@@ -4282,6 +4282,42 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/blog/digest": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "获取订阅博客摘要",
+                "parameters": [
+                    {
+                        "enum": [
+                            "day",
+                            "week"
+                        ],
+                        "type": "string",
+                        "description": "摘要周期",
+                        "name": "period",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/blog.BlogDigestDTO"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/blog/imports/markdown/{id}": {
             "get": {
                 "security": [
@@ -4984,6 +5020,136 @@ const docTemplate = `{
                             "type": "array",
                             "items": {
                                 "$ref": "#/definitions/blog.RecommendationItemDTO"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/recommendation-feedback": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "隐藏一篇博客推荐",
+                "parameters": [
+                    {
+                        "description": "推荐反馈",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/blog.blogRecommendationFeedbackInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/recommendation-feedback/{id}": {
+            "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "恢复被隐藏的博客推荐",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "文章 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    }
+                }
+            }
+        },
+        "/api/v1/blog/search": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "blog"
+                ],
+                "summary": "搜索公开博客文章",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "关键词",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "频道 UUID",
+                        "name": "channel_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "合集 UUID",
+                        "name": "collection_id",
+                        "in": "query"
+                    },
+                    {
+                        "enum": [
+                            "relevance",
+                            "recent"
+                        ],
+                        "type": "string",
+                        "description": "排序",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "page_size",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/blog.BlogSearchResultDTO"
                             }
                         }
                     }
@@ -26887,6 +27053,96 @@ const docTemplate = `{
                 }
             }
         },
+        "blog.BlogDigestDTO": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/blog.BlogDigestItemDTO"
+                    }
+                },
+                "period": {
+                    "type": "string"
+                },
+                "period_end": {
+                    "type": "string"
+                },
+                "period_start": {
+                    "type": "string"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "blog.BlogDigestItemDTO": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "$ref": "#/definitions/blog.RecommendationChannelDTO"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "target_path": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "blog.BlogSearchResultDTO": {
+            "type": "object",
+            "properties": {
+                "channel": {
+                    "$ref": "#/definitions/blog.RecommendationChannelDTO"
+                },
+                "collection_id": {
+                    "type": "string"
+                },
+                "cover_url": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "match_field": {
+                    "type": "string"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "snippet": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "target_path": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "user": {
+                    "$ref": "#/definitions/blog.RecommendationAuthorDTO"
+                }
+            }
+        },
         "blog.BookmarkBlogContentDTO": {
             "type": "object",
             "properties": {
@@ -27253,6 +27509,21 @@ const docTemplate = `{
                     "items": {
                         "$ref": "#/definitions/blog.SEOSitemapItemDTO"
                     }
+                }
+            }
+        },
+        "blog.blogRecommendationFeedbackInput": {
+            "type": "object",
+            "required": [
+                "action",
+                "content_id"
+            ],
+            "properties": {
+                "action": {
+                    "type": "string"
+                },
+                "content_id": {
+                    "type": "string"
                 }
             }
         },

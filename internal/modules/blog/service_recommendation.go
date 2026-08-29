@@ -72,6 +72,15 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		pageSize = 100
 	}
 
+	var hiddenContentIDs []uuid.UUID
+	if viewerID != nil && s.db.Migrator().HasTable(&model.BlogRecommendationFeedback{}) {
+		if err := s.db.Model(&model.BlogRecommendationFeedback{}).
+			Where("user_id = ? AND action = ?", *viewerID, "hide").
+			Pluck("content_id", &hiddenContentIDs).Error; err != nil {
+			return nil, 0, err
+		}
+	}
+
 	type candidateRow struct {
 		ID                    uuid.UUID  `gorm:"column:id"`
 		CreatedAt             time.Time  `gorm:"column:created_at"`
@@ -108,6 +117,9 @@ func (s *Service) RecommendPostsByMode(mode recommendation.Mode, viewerID *uuid.
 		(SELECT COUNT(*) FROM subscriptions JOIN feed_sources ON feed_sources.id = subscriptions.feed_source_id
 			 WHERE feed_sources.source_type = 'internal_channel' AND feed_sources.source_id = posts.channel_id
 			 AND subscriptions.deleted_at IS NULL AND feed_sources.deleted_at IS NULL) AS channel_followers_count`)
+	if len(hiddenContentIDs) > 0 {
+		query = query.Where("posts.id NOT IN ?", hiddenContentIDs)
+	}
 	if searchQuery := strings.TrimSpace(queryText); searchQuery != "" {
 		searchLike := "%" + searchQuery + "%"
 		query = query.Where("(LOWER(posts.title) LIKE LOWER(?) OR LOWER(posts.summary) LIKE LOWER(?) OR LOWER(blog_extensions.content) LIKE LOWER(?))", searchLike, searchLike, searchLike)
