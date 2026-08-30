@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -124,6 +125,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 
 	ranked := recommendation.RankCandidates(mode, candidates, 0)
 	items := make([]RecommendationItemDTO, 0, len(ranked))
+	seenFeedItemContentKeys := make(map[string]struct{}, len(feedItems))
 	for _, item := range ranked {
 		post, ok := postByID[item.EntityID]
 		if ok {
@@ -142,6 +144,11 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 		if !ok {
 			continue
 		}
+		contentKey := recommendationFeedItemContentKey(feedItem)
+		if _, duplicate := seenFeedItemContentKeys[contentKey]; duplicate {
+			continue
+		}
+		seenFeedItemContentKeys[contentKey] = struct{}{}
 		items = append(items, RecommendationItemDTO{
 			ID:           feedItem.ID.String(),
 			Title:        feedItem.Title,
@@ -775,6 +782,26 @@ func (s *Service) findInternalChannelFeedSourceID(channelID uuid.UUID) (uuid.UUI
 		}
 	}
 	return source.ID, nil
+}
+
+func recommendationFeedItemContentKey(item RecommendationArticleFeedItemRow) string {
+	rawLink := strings.TrimSpace(item.Link)
+	if rawLink == "" {
+		return "feed-item:" + item.ID.String()
+	}
+
+	parsed, err := url.Parse(rawLink)
+	scheme := strings.ToLower(parsed.Scheme)
+	if err != nil || (scheme != "http" && scheme != "https") || parsed.Host == "" {
+		return "link:" + rawLink
+	}
+	parsed.Scheme = scheme
+	parsed.Host = strings.ToLower(parsed.Host)
+	parsed.Fragment = ""
+	if query, err := url.ParseQuery(parsed.RawQuery); err == nil {
+		parsed.RawQuery = query.Encode()
+	}
+	return "link:" + parsed.String()
 }
 
 func filterRecommendationItems(items []RecommendationItemDTO, category string, theme string) []RecommendationItemDTO {
