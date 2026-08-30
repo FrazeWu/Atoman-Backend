@@ -692,6 +692,7 @@ type RecommendationArticlePostRow struct {
 type RecommendationArticleFeedItemRow struct {
 	ID                 uuid.UUID
 	FeedSourceID       uuid.UUID
+	Link               string
 	Title              string
 	Summary            string
 	SummaryLength      int
@@ -784,6 +785,7 @@ func (r *Repo) ListRecommendationArticleFeedItems(includeText bool, category str
 	columns := []string{
 		"feed_items.id",
 		"feed_items.feed_source_id",
+		"feed_items.link",
 		"'' AS title",
 		"'' AS summary",
 		"LENGTH(COALESCE(feed_items.summary, '')) AS summary_length",

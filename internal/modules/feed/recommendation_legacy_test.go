@@ -122,6 +122,70 @@ func TestRecommendArticlesRanksReadableFeedItemsAheadOfLowQualityCandidates(t *t
 	}
 }
 
+func TestRecommendArticlesDeduplicatesFeedItemsByCanonicalLink(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.User{},
+		&model.Channel{},
+		&model.ContentEntry{},
+		&model.ContentBlogExtension{},
+		&model.FeedSource{},
+		&model.FeedItem{},
+		&model.FeedItemRead{},
+		&model.FeedItemStar{},
+	)
+
+	now := time.Now().UTC()
+	preferredSource := model.FeedSource{SourceType: "external_rss", Hash: "preferred-source-" + uuid.NewString(), Title: "Primary feed", Category: "blog"}
+	duplicateSource := model.FeedSource{SourceType: "external_rss", Hash: "duplicate-source-" + uuid.NewString(), Title: "Mirror feed", Category: "blog"}
+	if err := db.Create(&preferredSource).Error; err != nil {
+		t.Fatalf("create preferred source: %v", err)
+	}
+	if err := db.Create(&duplicateSource).Error; err != nil {
+		t.Fatalf("create duplicate source: %v", err)
+	}
+
+	preferredItem := model.FeedItem{
+		FeedSourceID:       preferredSource.ID,
+		GUID:               "primary-guid",
+		Title:              "Shared article",
+		Summary:            strings.Repeat("A substantial article summary. ", 20),
+		Link:               "https://Example.COM/articles/shared?b=2&a=1#comments",
+		ReaderQualityScore: 95,
+		FullTextWordCount:  1200,
+		PublishedAt:        now,
+		FetchedAt:          now,
+	}
+	duplicateItem := model.FeedItem{
+		FeedSourceID:       duplicateSource.ID,
+		GUID:               "mirror-guid",
+		Title:              "Shared article",
+		Summary:            strings.Repeat("A substantial article summary. ", 20),
+		Link:               "https://example.com/articles/shared?a=1&b=2",
+		ReaderQualityScore: 80,
+		FullTextWordCount:  1000,
+		PublishedAt:        now.Add(-time.Minute),
+		FetchedAt:          now,
+	}
+	if err := db.Create(&preferredItem).Error; err != nil {
+		t.Fatalf("create preferred item: %v", err)
+	}
+	if err := db.Create(&duplicateItem).Error; err != nil {
+		t.Fatalf("create duplicate item: %v", err)
+	}
+
+	items, total, err := NewService(db).RecommendArticlesByMode(recommendation.ModeHot, "blog", "", "", "", 1, 20)
+	if err != nil {
+		t.Fatalf("recommend articles: %v", err)
+	}
+	if total != 1 || len(items) != 1 {
+		t.Fatalf("expected one recommendation after cross-source deduplication, got total=%d items=%+v", total, items)
+	}
+	if items[0].ID != preferredItem.ID.String() {
+		t.Fatalf("expected the highest-ranked duplicate to be retained, got %+v", items[0])
+	}
+}
+
 func TestRecommendArticlesReturnsEmptyWithoutCanonicalBlogExtensions(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db,
