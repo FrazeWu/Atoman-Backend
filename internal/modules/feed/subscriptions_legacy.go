@@ -15,6 +15,21 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	subscriptionPriorityHigh   = "high"
+	subscriptionPriorityNormal = "normal"
+	subscriptionPriorityLow    = "low"
+)
+
+func normalizeSubscriptionPriority(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case subscriptionPriorityHigh, subscriptionPriorityNormal, subscriptionPriorityLow:
+		return strings.ToLower(strings.TrimSpace(raw)), true
+	default:
+		return "", false
+	}
+}
+
 // CreateSubscription godoc
 // @Summary 创建订阅
 // @Description 创建站内或外部 RSS 订阅。
@@ -204,6 +219,7 @@ func UpdateSubscription(db *gorm.DB) gin.HandlerFunc {
 			Title              *string    `json:"title"`
 			GroupID            *uuid.UUID `json:"group_id"`
 			IsMuted            *bool      `json:"is_muted"`
+			Priority           *string    `json:"priority"`
 			AutoMarkRead       *bool      `json:"auto_mark_read"`
 			AutoAddReadingList *bool      `json:"auto_add_reading_list"`
 		}
@@ -232,6 +248,14 @@ func UpdateSubscription(db *gorm.DB) gin.HandlerFunc {
 		}
 		if input.IsMuted != nil {
 			updates["is_muted"] = *input.IsMuted
+		}
+		if input.Priority != nil {
+			priority, ok := normalizeSubscriptionPriority(*input.Priority)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "priority must be high, normal, or low"})
+				return
+			}
+			updates["priority"] = priority
 		}
 		if input.AutoMarkRead != nil {
 			updates["auto_mark_read"] = *input.AutoMarkRead

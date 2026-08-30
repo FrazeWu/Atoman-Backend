@@ -1598,6 +1598,95 @@ func TestUpdateSubscriptionPersistsAutomationFlags(t *testing.T) {
 	}
 }
 
+func TestUpdateSubscriptionPersistsAndValidatesPriority(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+	source, err := findOrCreateFeedSource(db, "external_rss", nil, "https://priority.example.com/feed.xml", "Priority Feed", "")
+	if err != nil {
+		t.Fatalf("create feed source: %v", err)
+	}
+	subscription := model.Subscription{UserID: user.UUID, FeedSourceID: source.ID, Title: "Priority Feed"}
+	if err := db.Create(&subscription).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.PUT("/subscriptions/:id", withFeedAuth(user.UUID, UpdateSubscription(db)))
+	update := func(body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/feed/subscriptions/"+subscription.ID.String(), strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		router.ServeHTTP(rr, req)
+		return rr
+	}
+
+	valid := update(`{"priority":"high"}`)
+	if valid.Code != http.StatusOK {
+		t.Fatalf("expected priority update status %d, got %d with body %s", http.StatusOK, valid.Code, valid.Body.String())
+	}
+	var validResponse struct {
+		Data struct {
+			Priority string `json:"priority"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(valid.Body.Bytes(), &validResponse); err != nil {
+		t.Fatalf("decode priority response: %v", err)
+	}
+	if validResponse.Data.Priority != "high" {
+		t.Fatalf("expected high priority response, got %q", validResponse.Data.Priority)
+	}
+
+	invalid := update(`{"priority":"urgent"}`)
+	if invalid.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid priority status %d, got %d with body %s", http.StatusBadRequest, invalid.Code, invalid.Body.String())
+	}
+	var stored struct {
+		Priority string
+	}
+	if err := db.Model(&model.Subscription{}).Select("priority").First(&stored, "id = ?", subscription.ID).Error; err != nil {
+		t.Fatalf("reload subscription priority: %v", err)
+	}
+	if stored.Priority != "high" {
+		t.Fatalf("expected invalid priority update to preserve high, got %q", stored.Priority)
+	}
+}
+
+func TestGetSubscriptionsDefaultsPriorityToNormal(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newFeedHandlerTestDB(t)
+	user := seedFeedTestUser(t, db)
+	source, err := findOrCreateFeedSource(db, "external_rss", nil, "https://default-priority.example.com/feed.xml", "Default Priority Feed", "")
+	if err != nil {
+		t.Fatalf("create feed source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{UserID: user.UUID, FeedSourceID: source.ID, Title: "Default Priority Feed"}).Error; err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+
+	router := gin.New()
+	feed := router.Group("/api/v1/feed")
+	feed.GET("/subscriptions", withFeedAuth(user.UUID, GetSubscriptions(db)))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/subscriptions", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected subscriptions status %d, got %d with body %s", http.StatusOK, rr.Code, rr.Body.String())
+	}
+	var response struct {
+		Data []struct {
+			Priority string `json:"priority"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode subscriptions response: %v", err)
+	}
+	if len(response.Data) != 1 || response.Data[0].Priority != "normal" {
+		t.Fatalf("expected normal default priority, got %#v", response.Data)
+	}
+}
+
 func TestSubscriptionRulesCreateListAndApplyToMatchingSubscriptions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newFeedHandlerTestDB(t)

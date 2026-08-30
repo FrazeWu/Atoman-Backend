@@ -326,6 +326,7 @@ type Subscription struct {
 	ErrorMessage        string             `json:"error_message" gorm:"type:text"`
 	LastChecked         *time.Time         `json:"last_checked"`
 	IsMuted             bool               `json:"is_muted" gorm:"not null;default:false"`
+	Priority            string             `json:"priority" gorm:"type:varchar(16);not null;default:'normal';index"`
 	AutoMarkRead        bool               `json:"auto_mark_read" gorm:"not null;default:false"`
 	AutoAddReadingList  bool               `json:"auto_add_reading_list" gorm:"not null;default:false"`
 	IsPaused            bool               `json:"is_paused" gorm:"not null;default:false;index"`

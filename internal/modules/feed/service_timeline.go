@@ -58,6 +58,11 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 		return s.GetPublicFeed(query)
 	}
 	query.viewerID = user.ID
+	priorityInboxMode := isPriorityInboxSort(query.Sort)
+	if priorityInboxMode {
+		unreadOnly := false
+		query.IsRead = &unreadOnly
+	}
 
 	subscriptions, err := s.repo.ListSubscriptionsWithSources(user.ID, query)
 	if err != nil {
@@ -74,6 +79,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 		return []TimelineItemDTO{}, 0, nil
 	}
 
+	sourcePriorities := newSubscriptionPriorityIndex(subscriptions)
 	userIDs := append([]uuid.UUID(nil), followedUserIDs...)
 	channelIDs := make([]uuid.UUID, 0)
 	collectionIDs := make([]uuid.UUID, 0)
@@ -117,7 +123,7 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 		return s.getSubscribedBlogFeed(user.ID, userIDs, channelIDs, collectionIDs, query)
 	}
 	query.sourceVisibleAfter = feedSourceVisibleAfter
-	if len(userIDs) == 0 && len(channelIDs) == 0 && len(collectionIDs) == 0 && !query.HideDuplicates && strings.TrimSpace(query.Search) == "" {
+	if len(userIDs) == 0 && len(channelIDs) == 0 && len(collectionIDs) == 0 && !query.HideDuplicates && strings.TrimSpace(query.Search) == "" && !priorityInboxMode {
 		return s.getSubscribedExternalFeed(user.ID, feedSourceIDs, query, feedSourceVisibleAfter)
 	}
 
@@ -215,6 +221,11 @@ func (s *Service) GetSubscribedFeed(user authctx.CurrentUser, query FeedQuery) (
 	}
 
 	items = filterTimeline(items, query)
+	if priorityInboxMode {
+		applySubscriptionPriority(items, sourcePriorities)
+		priorityItems, total := priorityInbox(items)
+		return priorityItems, total, nil
+	}
 	sortTimeline(items)
 	paged, total := paginateTimeline(items, normalizedPage(query.Page), normalizedPageSize(query.PageSize))
 	return paged, total, nil

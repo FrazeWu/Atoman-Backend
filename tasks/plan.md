@@ -44,3 +44,48 @@ Build order: source-diagnostics -> recovery-notifications -> operations-ui.
 - The third consecutive failed fetch creates no more than one active system notification per subscribed user and source.
 - Only the subscription owner can read the recent RSS diagnostics.
 - The manage sheet summarizes healthy, retrying, blocked, and failed sources; it can display recent diagnostics and retains the existing retry action.
+
+## Plan: Subscription Priority Inbox
+
+## Overview
+
+Add a user-owned subscription priority and an opt-in Today inbox. The feature extends the existing subscription update and timeline contracts; it does not alter the chronological feed or use recommendation infrastructure.
+
+## Task List
+
+### Task 1: Persist and validate priority
+
+- [x] Add the `high | normal | low` priority field with a `normal` default, a compatible migration, and owner-scoped update validation.
+- [x] Verify defaulting, valid updates, and rejected values in feed HTTP tests.
+
+### Task 2: Serve deterministic Today ranking
+
+- [x] Extend timeline query and response DTOs with priority mode and per-item reason.
+- [x] Rank unread subscribed items by priority, publication time, and stable identity; enforce the 20-item Today cap.
+- [x] Verify priority ordering, cap, reasons, and unchanged chronological behavior.
+
+### Task 3: Expose subscription priority management
+
+- [x] Add priority to shared frontend subscription types and the management sheet's update payload and control.
+- [x] Verify the selected value is rendered and emitted for an owned source.
+
+### Task 4: Add the Today inbox mode
+
+- [x] Add a compact mode selector to the timeline toolbar and carry priority mode through the controller query.
+- [x] Render Today reason labels without changing default timeline interactions.
+- [x] Verify query construction, mode switching, and reason rendering.
+
+## Checkpoint
+
+- [x] Backend focused tests and `go build ./...` pass.
+- [x] Swagger is regenerated for API changes.
+- [x] Frontend focused tests, type check, and build pass.
+- [x] LSP diagnostics and `git diff --check` are clean.
+
+## Risks and Mitigations
+
+| Risk | Mitigation |
+| --- | --- |
+| Priority sorting changes the default reader flow | Activate only through explicit `sort=priority`; retain chronological mode as the default. |
+| A source maps to multiple content kinds | Assign the maximum matching subscription priority and use stable tie-breaking. |
+| Large unread backlogs make Today unbounded | Force unread-only semantics and cap Today at 20 server-side. |

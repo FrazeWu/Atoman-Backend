@@ -26,3 +26,28 @@
 
 - [x] Focused tests, backend build, Swagger generation, frontend type check and build pass.
 - [x] Diff and diagnostics are clean; no user-owned untracked file is staged.
+
+## Subscription Priority Inbox Tasks
+
+## Task 1: Persist and validate priority
+
+- [x] Add a defaulted subscription priority and reject unknown values.
+- [x] Verify default, valid update, and invalid update behavior in backend tests.
+
+## Task 2: Serve the Today inbox
+
+- [x] Rank unread subscribed items deterministically and return an explainable reason.
+- [x] Enforce the Today cap while keeping chronological requests unchanged.
+- [x] Verify response ordering, cap, reasons, and compatibility.
+
+## Task 3: Manage and consume priority
+
+- [x] Add source-priority selection to subscription management.
+- [x] Add a chronology/Today mode selector and render ranking reasons.
+- [x] Verify component events, controller query parameters, and the visible feed state.
+
+## Checkpoint: Completion
+
+- [x] Focused backend and frontend tests pass.
+- [x] Backend build, Swagger generation, frontend type check, and frontend build pass.
+- [x] Diff and diagnostics are clean; no user-owned untracked file is staged.

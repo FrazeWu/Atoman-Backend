@@ -34,6 +34,8 @@ type TimelineItemDTO struct {
 	FeedItem       *model.FeedItem       `json:"feed_item,omitempty"`
 	PublishedAt    time.Time             `json:"published_at"`
 	IsRead         bool                  `json:"is_read"`
+	PriorityReason string                `json:"priority_reason,omitempty"`
+	priorityRank   int
 }
 
 type TimelinePostDTO struct {
