@@ -45,6 +45,8 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	protected := group.Group("")
 	protected.Use(middleware.AuthMiddleware())
 	{
+		protected.GET("/subscription-hub/tree", h.getSubscriptionHubTree)
+		protected.GET("/subscription-hub/updates", h.getSubscriptionHubUpdates)
 		protected.POST("/timeline/mark-read", h.markRead)
 		protected.POST("/timeline/mark-unread", h.markUnread)
 		protected.POST("/timeline/mark-all-read", h.markAllRead)
