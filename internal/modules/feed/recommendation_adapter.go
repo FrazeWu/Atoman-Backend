@@ -36,8 +36,10 @@ func parseRecommendationMode(raw string) (recommendation.Mode, error) {
 		return recommendation.ModeFeatured, nil
 	case recommendation.ModeDiscover:
 		return recommendation.ModeDiscover, nil
+	case recommendation.ModeLatest:
+		return recommendation.ModeLatest, nil
 	default:
-		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover")
+		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover, latest")
 	}
 }
 
@@ -83,6 +85,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 		return nil, 0, err
 	}
 
+	qualityFirst := mode == recommendation.ModeFeatured || mode == recommendation.ModeDiscover
 	candidates := make([]recommendation.Candidate, 0, len(posts)+len(feedItems))
 	postByID := make(map[string]RecommendationArticlePostRow, len(posts))
 	feedItemByID := make(map[string]RecommendationArticleFeedItemRow, len(feedItems))
@@ -93,7 +96,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 			EntityID:        post.ID.String(),
 			SourceKey:       recommendationSourceKeyForPost(post),
 			QualityScore:    normalizeArticleQuality(post),
-			QualityFirst:    true,
+			QualityFirst:    qualityFirst,
 			TrendScore:      normalizePostRecency(post.PublishedAt, 7*24*time.Hour),
 			FreshnessScore:  normalizePostRecency(post.PublishedAt, 14*24*time.Hour),
 			AuthorityScore:  normalizeArticleAuthority(post),
@@ -111,7 +114,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 			EntityID:        feedItem.ID.String(),
 			SourceKey:       recommendationSourceKeyForFeedItem(feedItem),
 			QualityScore:    normalizeFeedItemQuality(feedItem),
-			QualityFirst:    true,
+			QualityFirst:    qualityFirst,
 			TrendScore:      normalizeFeedItemTrend(feedItem),
 			FreshnessScore:  normalizePostRecency(feedItem.PublishedAt, 14*24*time.Hour),
 			AuthorityScore:  normalizeFeedItemAuthority(feedItem),
@@ -809,6 +812,7 @@ func recommendationScoreLabel(mode recommendation.Mode, score float64) string {
 		recommendation.ModeHot:      "热度",
 		recommendation.ModeFeatured: "精选",
 		recommendation.ModeDiscover: "探索",
+		recommendation.ModeLatest:   "最新",
 	}[mode]
 	if prefix == "" {
 		prefix = "推荐"
