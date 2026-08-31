@@ -979,6 +979,43 @@ func (r *Repo) ListRecentPublishedPostsByChannelID(channelID uuid.UUID, limit in
 	return blogmodule.LoadCanonicalBlogPosts(r.db, query)
 }
 
+func (r *Repo) ListRecentPublishedPostTitlesByChannelIDs(channelIDs []uuid.UUID, limit int) (map[uuid.UUID][]string, error) {
+	titlesByChannelID := make(map[uuid.UUID][]string, len(channelIDs))
+	if len(channelIDs) == 0 || limit <= 0 {
+		return titlesByChannelID, nil
+	}
+
+	type recentPostTitleRow struct {
+		ChannelID uuid.UUID `gorm:"column:channel_id"`
+		Title     string    `gorm:"column:title"`
+	}
+	rows := make([]recentPostTitleRow, 0, len(channelIDs)*limit)
+	rankedPosts := r.db.Table("content_entries AS posts").
+		Select(`
+			posts.channel_id,
+			posts.title,
+			ROW_NUMBER() OVER (
+				PARTITION BY posts.channel_id
+				ORDER BY posts.created_at DESC, posts.id DESC
+			) AS row_number
+		`).
+		Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
+		Where("posts.channel_id IN ?", channelIDs).
+		Where("posts.deleted_at IS NULL AND posts.kind = ? AND posts.status = ?", "blog", "published").
+		Where("COALESCE(posts.visibility, '') IN ?", []string{"", "public"})
+	if err := r.db.Table("(?) AS ranked_posts", rankedPosts).
+		Select("channel_id, title").
+		Where("row_number <= ?", limit).
+		Order("channel_id, row_number").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		titlesByChannelID[row.ChannelID] = append(titlesByChannelID[row.ChannelID], row.Title)
+	}
+	return titlesByChannelID, nil
+}
+
 func recommendationChannelLatestPublishedExpr(dialect string) string {
 	switch dialect {
 	case "postgres":
