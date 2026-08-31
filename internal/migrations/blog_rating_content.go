@@ -42,6 +42,10 @@ WHERE content_id IS NULL`).Error; err != nil {
 			return fmt.Errorf("post rating content migration: %d active ratings have no canonical blog content entry", missing)
 		}
 
+		if err := tx.Exec("ALTER TABLE post_ratings ALTER COLUMN post_id DROP NOT NULL").Error; err != nil {
+			return fmt.Errorf("allow legacy post_ratings.post_id to be null: %w", err)
+		}
+
 		if err := tx.Exec("DROP INDEX IF EXISTS idx_post_ratings_user_post").Error; err != nil {
 			return fmt.Errorf("drop legacy post rating index: %w", err)
 		}

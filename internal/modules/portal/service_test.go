@@ -1,6 +1,7 @@
 package portal
 
 import (
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -47,6 +48,69 @@ func TestHotContentCachesRepeatedRequests(t *testing.T) {
 	}
 	if queries.Load() != firstQueryCount {
 		t.Fatalf("expected cached response without new queries, got %d additional queries", queries.Load()-firstQueryCount)
+	}
+}
+
+func TestHotContentRotatesSpotlightBatches(t *testing.T) {
+	items := make([]HotItem, 0, 8)
+	for index := 0; index < 8; index++ {
+		items = append(items, HotItem{ID: fmt.Sprintf("spotlight-%d", index)})
+	}
+	service := &Service{hotCache: map[int]hotCacheEntry{
+		8: {
+			items:     items,
+			expiresAt: time.Now().Add(time.Minute),
+		},
+	}}
+
+	first, err := service.HotContent(8)
+	if err != nil {
+		t.Fatalf("load first spotlight batch: %v", err)
+	}
+	next, err := service.HotContentAtOffset(8, 4)
+	if err != nil {
+		t.Fatalf("load next spotlight batch: %v", err)
+	}
+
+	if len(first.Featured) != 4 || len(next.Featured) != 4 {
+		t.Fatalf("expected complete spotlight batches, got first=%d next=%d", len(first.Featured), len(next.Featured))
+	}
+	if next.FeaturedTotal != 8 {
+		t.Fatalf("expected 8 spotlight candidates, got %d", next.FeaturedTotal)
+	}
+
+	firstIDs := make(map[string]struct{}, len(first.Featured))
+	for _, item := range first.Featured {
+		firstIDs[item.ID] = struct{}{}
+	}
+	for _, item := range next.Featured {
+		if _, found := firstIDs[item.ID]; found {
+			t.Fatalf("next spotlight batch repeated %q", item.ID)
+		}
+	}
+}
+
+func TestArrangeSpotlightItemsInterleavesModulesBeforeRepeating(t *testing.T) {
+	items := []HotItem{
+		{ID: "feed-1", Module: "feed", Score: 1000},
+		{ID: "feed-2", Module: "feed", Score: 900},
+		{ID: "blog-1", Module: "blog", Score: 1},
+		{ID: "video-1", Module: "video", Score: 1},
+		{ID: "music-1", Module: "music", Score: 1},
+	}
+
+	arranged := arrangeSpotlightItems(items)
+	wantModules := []string{"blog", "feed", "video", "music"}
+	if len(arranged) != len(items) {
+		t.Fatalf("expected %d spotlight items, got %d", len(items), len(arranged))
+	}
+	for index, module := range wantModules {
+		if arranged[index].Module != module {
+			t.Fatalf("expected module %q at position %d, got %q", module, index, arranged[index].Module)
+		}
+	}
+	if arranged[4].ID != "feed-2" {
+		t.Fatalf("expected the second feed item after the first module round, got %q", arranged[4].ID)
 	}
 }
 

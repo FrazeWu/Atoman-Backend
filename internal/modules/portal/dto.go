@@ -22,6 +22,7 @@ type HotSection struct {
 }
 
 type HotResponse struct {
-	Featured []HotItem    `json:"featured"`
-	Sections []HotSection `json:"sections"`
+	Featured      []HotItem    `json:"featured"`
+	FeaturedTotal int          `json:"featured_total"`
+	Sections      []HotSection `json:"sections"`
 }
