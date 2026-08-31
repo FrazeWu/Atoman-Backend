@@ -22,24 +22,58 @@ type Service struct {
 	hotCache map[int]hotCacheEntry
 }
 
-const hotCacheTTL = time.Minute
+const (
+	hotCacheTTL       = time.Minute
+	spotlightPageSize = 4
+)
+
+var spotlightModuleOrder = []string{
+	"blog", "feed", "video", "podcast", "music", "forum", "debate", "timeline",
+}
 
 type hotCacheEntry struct {
-	response  HotResponse
+	items     []HotItem
+	sections  []HotSection
 	expiresAt time.Time
 }
 
 func (s *Service) HotContent(limit int) (HotResponse, error) {
+	return s.HotContentAtOffset(limit, 0)
+}
+
+func (s *Service) HotContentAtOffset(limit int, spotlightOffset int) (HotResponse, error) {
 	if limit < 1 {
 		limit = 6
+	}
+	if spotlightOffset < 0 {
+		spotlightOffset = 0
 	}
 
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
-	if cached, ok := s.hotCache[limit]; ok && time.Now().Before(cached.expiresAt) {
-		return cached.response, nil
+
+	cached, ok := s.hotCache[limit]
+	if !ok || !time.Now().Before(cached.expiresAt) {
+		sections, items, err := s.loadHotContent(limit)
+		if err != nil {
+			return HotResponse{}, err
+		}
+		cached = hotCacheEntry{
+			items:     items,
+			sections:  sections,
+			expiresAt: time.Now().Add(hotCacheTTL),
+		}
+		s.hotCache[limit] = cached
 	}
 
+	return HotResponse{
+		Featured:      spotlightBatch(cached.items, spotlightOffset),
+		FeaturedTotal: len(cached.items),
+		Sections:      cached.sections,
+	}, nil
+}
+
+func (s *Service) loadHotContent(limit int) ([]HotSection, []HotItem, error) {
 	sections := make([]HotSection, 0, 8)
 	all := make([]HotItem, 0, limit*4)
 
@@ -75,7 +109,7 @@ func (s *Service) HotContent(limit int) (HotResponse, error) {
 			if isMissingTableError(err) {
 				continue
 			}
-			return HotResponse{}, err
+			return nil, nil, err
 		}
 		if len(items) == 0 {
 			continue
@@ -89,13 +123,58 @@ func (s *Service) HotContent(limit int) (HotResponse, error) {
 	}
 
 	sortHotItems(all)
-	if len(all) > 4 {
-		all = all[:4]
+	return sections, arrangeSpotlightItems(all), nil
+}
+
+func arrangeSpotlightItems(items []HotItem) []HotItem {
+	byModule := make(map[string][]HotItem)
+	moduleOrder := make([]string, 0, len(spotlightModuleOrder))
+	seenModules := make(map[string]struct{})
+
+	for _, item := range items {
+		byModule[item.Module] = append(byModule[item.Module], item)
+	}
+	for _, module := range spotlightModuleOrder {
+		if len(byModule[module]) == 0 {
+			continue
+		}
+		moduleOrder = append(moduleOrder, module)
+		seenModules[module] = struct{}{}
+	}
+	for _, item := range items {
+		if _, seen := seenModules[item.Module]; seen {
+			continue
+		}
+		moduleOrder = append(moduleOrder, item.Module)
+		seenModules[item.Module] = struct{}{}
 	}
 
-	response := HotResponse{Featured: all, Sections: sections}
-	s.hotCache[limit] = hotCacheEntry{response: response, expiresAt: time.Now().Add(hotCacheTTL)}
-	return response, nil
+	arranged := make([]HotItem, 0, len(items))
+	for index := 0; len(arranged) < len(items); index++ {
+		for _, module := range moduleOrder {
+			candidates := byModule[module]
+			if index >= len(candidates) {
+				continue
+			}
+			arranged = append(arranged, candidates[index])
+		}
+	}
+	return arranged
+}
+
+func spotlightBatch(items []HotItem, offset int) []HotItem {
+	if len(items) == 0 {
+		return []HotItem{}
+	}
+	if offset < 0 || offset >= len(items) {
+		offset = 0
+	}
+
+	end := offset + spotlightPageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return append([]HotItem(nil), items[offset:end]...)
 }
 
 type blogHotRow struct {
