@@ -1888,6 +1888,76 @@ func TestFeedRecommendationChannelsIncludesExternalSources(t *testing.T) {
 	}
 }
 
+func TestFeedRecommendationChannelsDeduplicatesMirroredInternalAndRSSSources(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service, db, _ := newFeedTestService(t)
+
+	var channel model.Channel
+	if err := db.Where("slug = ?", "alice-channel").First(&channel).Error; err != nil {
+		t.Fatalf("find internal channel: %v", err)
+	}
+
+	mirror := model.FeedSource{
+		SourceType: "external_rss",
+		RssURL:     "https://mirror.example.com/alice.xml",
+		Hash:       "alice-channel-rss-mirror",
+		Title:      channel.Name,
+		Category:   "blog",
+	}
+	if err := db.Create(&mirror).Error; err != nil {
+		t.Fatalf("create mirrored RSS source: %v", err)
+	}
+	publishedAt := time.Now().UTC()
+	for index, title := range []string{"Post item", "Channel post", "Collection post"} {
+		item := model.FeedItem{
+			FeedSourceID: mirror.ID,
+			GUID:         fmt.Sprintf("alice-channel-mirror-%d", index),
+			Title:        title,
+			Link:         fmt.Sprintf("https://mirror.example.com/posts/%d", index),
+			PublishedAt:  publishedAt.Add(-time.Duration(index) * time.Hour),
+			FetchedAt:    publishedAt,
+		}
+		if err := db.Create(&item).Error; err != nil {
+			t.Fatalf("create mirrored RSS item: %v", err)
+		}
+	}
+
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/feed"), service)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/feed/recommend/channels?mode=featured", nil)
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected channel recommendations to return 200, got %d with body %s", rr.Code, rr.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"data"`
+		Meta struct {
+			Total int64 `json:"total"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	matching := 0
+	for _, item := range payload.Data {
+		if item.Title == channel.Name {
+			matching++
+		}
+	}
+	if matching != 1 {
+		t.Fatalf("expected one recommendation for mirrored source %q, got %d in %+v", channel.Name, matching, payload.Data)
+	}
+	if payload.Meta.Total != int64(len(payload.Data)) {
+		t.Fatalf("expected deduplicated total %d, got %d", len(payload.Data), payload.Meta.Total)
+	}
+}
+
 func TestMarkUnreadHandlerDeletesReadRecord(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service, db, user := newFeedTestService(t)
