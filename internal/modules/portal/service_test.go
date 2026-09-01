@@ -114,6 +114,34 @@ func TestArrangeSpotlightItemsInterleavesModulesBeforeRepeating(t *testing.T) {
 	}
 }
 
+func TestHotMusicItemsPreserveAlbumMetadata(t *testing.T) {
+	artistID := uuid.Must(uuid.NewV7())
+	albumID := uuid.Must(uuid.NewV7())
+	albums := []model.Album{{
+		Base:        model.Base{ID: albumID},
+		Title:       "后端专辑",
+		HotScore:    99,
+		PlayCount:   321,
+		ReleaseYear: 2024,
+		Artists:     []model.Artist{{Base: model.Base{ID: artistID}, Name: "真实艺人"}},
+	}}
+
+	items := hotMusicItems(albums, map[uuid.UUID]int64{albumID: 12})
+	if len(items) != 1 {
+		t.Fatalf("expected one music item, got %#v", items)
+	}
+	item := items[0]
+	if item.PlayCount != 321 || item.BookmarkCount != 12 {
+		t.Fatalf("expected stored music statistics, got %#v", item)
+	}
+	if len(item.Artists) != 1 || item.Artists[0].ID != artistID.String() || item.Artists[0].Name != "真实艺人" {
+		t.Fatalf("expected linked music artist, got %#v", item.Artists)
+	}
+	if item.PublishedAt == nil || item.PublishedAt.Year() != 2024 {
+		t.Fatalf("expected release year to determine portal date, got %#v", item.PublishedAt)
+	}
+}
+
 func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 	db := testdb.Open(t)
 	migratePortalHotContentTables(t, db)
@@ -121,11 +149,13 @@ func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 
 	userID := uuid.Must(uuid.NewV7())
 	if err := db.Create(&model.User{
-		UUID:     userID,
-		Username: "reader",
-		Email:    "reader@example.com",
-		Password: "pw",
-		IsActive: true,
+		UUID:        userID,
+		Username:    "reader",
+		Email:       "reader@example.com",
+		Password:    "pw",
+		DisplayName: "Portal reader",
+		AvatarURL:   "/avatars/portal-reader.png",
+		IsActive:    true,
 	}).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -193,6 +223,9 @@ func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 	}
 	if response.Featured[0].ImageURL != "/covers/lively.jpg" {
 		t.Fatalf("unexpected image URL: %q", response.Featured[0].ImageURL)
+	}
+	if response.Featured[0].AuthorName != "Portal reader" || response.Featured[0].AuthorUsername != "reader" || response.Featured[0].AuthorAvatarURL != "/avatars/portal-reader.png" {
+		t.Fatalf("expected blog author profile, got %#v", response.Featured[0])
 	}
 }
 
@@ -281,7 +314,7 @@ func TestHotContentExcludesItemsFromUnavailableFeedSources(t *testing.T) {
 	db := testdb.Open(t)
 	testdb.Migrate(t, db, &model.FeedSource{}, &model.FeedItem{})
 
-	visibleSource := model.FeedSource{Title: "Visible feed", Hash: "portal-visible-feed"}
+	visibleSource := model.FeedSource{Title: "Visible feed", CoverURL: "/feeds/visible.png", Hash: "portal-visible-feed"}
 	hiddenSource := model.FeedSource{Title: "Hidden feed", Hash: "portal-hidden-feed", Hidden: true}
 	deletedSource := model.FeedSource{Title: "Deleted feed", Hash: "portal-deleted-feed"}
 	for _, source := range []*model.FeedSource{&visibleSource, &hiddenSource, &deletedSource} {
@@ -317,6 +350,9 @@ func TestHotContentExcludesItemsFromUnavailableFeedSources(t *testing.T) {
 	if len(feedItems) != 1 || feedItems[0].ID != items[0].ID.String() {
 		t.Fatalf("expected only visible feed item, got %#v", feedItems)
 	}
+	if feedItems[0].SourceName != "Visible feed" || feedItems[0].SourceImageURL != "/feeds/visible.png" {
+		t.Fatalf("expected feed source identity, got %#v", feedItems[0])
+	}
 }
 
 func TestHotContentExcludesNonPublicMusicAlbums(t *testing.T) {
@@ -345,6 +381,47 @@ func TestHotContentExcludesNonPublicMusicAlbums(t *testing.T) {
 	}
 	if len(musicItems) != 1 || musicItems[0].ID != albums[0].ID.String() {
 		t.Fatalf("expected only public album, got %#v", musicItems)
+	}
+}
+
+func TestHotContentPreservesMusicAlbumMetadata(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Artist{}, &model.Album{}, &model.AlbumArtist{}, &model.AlbumBookmark{})
+
+	user := model.User{Username: "music-reader", Email: "music-reader@example.test", Password: "pw", IsActive: true}
+	artist := model.Artist{Name: "真实艺人"}
+	album := model.Album{Title: "后端专辑", Status: "open", HotScore: 99, PlayCount: 321, ReleaseYear: 2024}
+	for _, record := range []any{&user, &artist, &album} {
+		if err := db.Create(record).Error; err != nil {
+			t.Fatalf("create music fixture: %v", err)
+		}
+	}
+	if err := db.Create(&model.AlbumArtist{AlbumID: album.ID, ArtistID: artist.ID}).Error; err != nil {
+		t.Fatalf("link album artist: %v", err)
+	}
+	if err := db.Create(&model.AlbumBookmark{UserID: user.UUID, AlbumID: album.ID}).Error; err != nil {
+		t.Fatalf("create album bookmark: %v", err)
+	}
+
+	response, err := NewService(db).HotContent(4)
+	if err != nil {
+		t.Fatalf("HotContent returned error: %v", err)
+	}
+	var musicItem *HotItem
+	for _, section := range response.Sections {
+		if section.Module == "music" && len(section.Items) > 0 {
+			musicItem = &section.Items[0]
+			break
+		}
+	}
+	if musicItem == nil {
+		t.Fatal("expected music item")
+	}
+	if musicItem.PlayCount != 321 || musicItem.BookmarkCount != 1 {
+		t.Fatalf("expected stored music statistics, got %#v", musicItem)
+	}
+	if len(musicItem.Artists) != 1 || musicItem.Artists[0].ID != artist.ID.String() || musicItem.Artists[0].Name != "真实艺人" {
+		t.Fatalf("expected linked music artist, got %#v", musicItem.Artists)
 	}
 }
 

@@ -331,7 +331,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.UserBookImport{}, &model.UserBookAsset{}, &model.UserBookReadingState{}, &model.UserBookShelf{},
 		&model.BookPublicationRequest{}, &model.BookRightsDeclaration{}, &model.PublishedBookAsset{}, &model.BookRating{}, &model.BookReview{}, &model.BookPostLink{},
 		&model.FeedSource{}, &model.OnboardingFeedRecommendation{}, &model.Subscription{},
-		&model.FeedSubscriptionRule{}, &model.FeedPreference{}, &model.SubscriptionGroup{}, &model.FeedItem{},
+		&model.FeedSubscriptionRule{}, &model.FeedPreference{}, &model.SubscriptionGroup{}, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{}, &model.FeedItem{},
 		&model.FeedSourceDiagnostic{}, &model.FeedContentFeedback{},
 		&model.FeedItemRead{}, &model.FeedStarGroup{}, &model.FeedItemStar{}, &model.ReadingListItem{},
 		&model.SourceReadEvent{}, &model.Notification{}, &model.NotificationPreference{}, &model.NotificationMute{}, &model.Revision{}, &model.EditConflict{},

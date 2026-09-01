@@ -12052,6 +12052,137 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/feed/subscription-hub/tree": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回按播客、视频、博客和 RSS 分离的分组与订阅叶子。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取订阅中心树",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.SubscriptionHubTree"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/feed/subscription-hub/updates": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "description": "返回选中类型和分组的最新更新；可进一步按订阅叶子收窄。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "feed"
+                ],
+                "summary": "获取订阅中心更新流",
+                "parameters": [
+                    {
+                        "enum": [
+                            "podcast",
+                            "video",
+                            "blog",
+                            "rss"
+                        ],
+                        "type": "string",
+                        "description": "订阅类型",
+                        "name": "type",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "分组 UUID",
+                        "name": "group_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "订阅叶子 UUID",
+                        "name": "membership_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页码",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每页数量",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/feed.TimelineListResponseDTO"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/feed.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/feed/subscriptions": {
             "get": {
                 "security": [
@@ -19892,6 +20023,51 @@ const docTemplate = `{
                         "description": "Service Unavailable",
                         "schema": {
                             "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/portal/hot": {
+            "get": {
+                "description": "返回全站高质量内容候选池中的当前四项；featured_total 表示候选总数，spotlight_offset 按候选位置切换下一批。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "portal"
+                ],
+                "summary": "获取门户焦点精选",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 6,
+                        "description": "每个模块的候选数量",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "default": 0,
+                        "description": "焦点精选候选偏移量",
+                        "name": "spotlight_offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/portal.HotResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
                         }
                     }
                 }
@@ -30372,6 +30548,63 @@ const docTemplate = `{
                 }
             }
         },
+        "feed.SubscriptionHubGroupNode": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "memberships": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/model.SubscriptionHubMembership"
+                    }
+                },
+                "name": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "subscription_type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "feed.SubscriptionHubTree": {
+            "type": "object",
+            "properties": {
+                "types": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/feed.SubscriptionHubTypeNode"
+                    }
+                }
+            }
+        },
+        "feed.SubscriptionHubTypeNode": {
+            "type": "object",
+            "properties": {
+                "groups": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/feed.SubscriptionHubGroupNode"
+                    }
+                },
+                "subscription_type": {
+                    "type": "string"
+                }
+            }
+        },
         "feed.SubscriptionInput": {
             "type": "object",
             "required": [
@@ -35529,6 +35762,70 @@ const docTemplate = `{
                 }
             }
         },
+        "model.SubscriptionHubGroup": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "subscription_type": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "model.SubscriptionHubMembership": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "feed_source": {
+                    "$ref": "#/definitions/model.FeedSource"
+                },
+                "feed_source_id": {
+                    "type": "string"
+                },
+                "group": {
+                    "$ref": "#/definitions/model.SubscriptionHubGroup"
+                },
+                "group_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "position": {
+                    "type": "integer"
+                },
+                "subscription_type": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "user_id": {
+                    "type": "string"
+                }
+            }
+        },
         "model.TimelineEvent": {
             "type": "object",
             "properties": {
@@ -38007,6 +38304,116 @@ const docTemplate = `{
             "properties": {
                 "data": {
                     "$ref": "#/definitions/notification.UnreadCountsDTO"
+                }
+            }
+        },
+        "portal.HotArtist": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                }
+            }
+        },
+        "portal.HotItem": {
+            "type": "object",
+            "properties": {
+                "artists": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/portal.HotArtist"
+                    }
+                },
+                "author_avatar_url": {
+                    "type": "string"
+                },
+                "author_name": {
+                    "type": "string"
+                },
+                "author_username": {
+                    "type": "string"
+                },
+                "bookmark_count": {
+                    "type": "integer"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "image_url": {
+                    "type": "string"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "module": {
+                    "type": "string"
+                },
+                "play_count": {
+                    "type": "integer"
+                },
+                "published_at": {
+                    "type": "string"
+                },
+                "score": {
+                    "type": "number"
+                },
+                "score_label": {
+                    "type": "string"
+                },
+                "source_image_url": {
+                    "type": "string"
+                },
+                "source_name": {
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "target_path": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "portal.HotResponse": {
+            "type": "object",
+            "properties": {
+                "featured": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/portal.HotItem"
+                    }
+                },
+                "featured_total": {
+                    "type": "integer"
+                },
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/portal.HotSection"
+                    }
+                }
+            }
+        },
+        "portal.HotSection": {
+            "type": "object",
+            "properties": {
+                "items": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/portal.HotItem"
+                    }
+                },
+                "module": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
                 }
             }
         },

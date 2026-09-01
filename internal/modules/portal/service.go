@@ -178,14 +178,17 @@ func spotlightBatch(items []HotItem, offset int) []HotItem {
 }
 
 type blogHotRow struct {
-	ID            uuid.UUID `gorm:"column:id"`
-	Title         string
-	Summary       string
-	Content       string `gorm:"column:content"`
-	CoverURL      string `gorm:"column:cover_url"`
-	UpdatedAt     time.Time
-	LikesCount    int64
-	CommentsCount int64
+	ID              uuid.UUID `gorm:"column:id"`
+	Title           string
+	Summary         string
+	Content         string `gorm:"column:content"`
+	CoverURL        string `gorm:"column:cover_url"`
+	AuthorName      string `gorm:"column:author_name"`
+	AuthorUsername  string `gorm:"column:author_username"`
+	AuthorAvatarURL string `gorm:"column:author_avatar_url"`
+	UpdatedAt       time.Time
+	LikesCount      int64
+	CommentsCount   int64
 }
 
 func (s *Service) hotBlogPosts(limit int) ([]HotItem, error) {
@@ -193,12 +196,16 @@ func (s *Service) hotBlogPosts(limit int) ([]HotItem, error) {
 	err := blogmodule.CanonicalBlogPostsQuery(s.db).
 		Select(`posts.id, posts.title, posts.summary, posts.cover_url, posts.updated_at,
 			blog_extensions.content,
+			COALESCE(NULLIF(authors.display_name, ''), authors.username, '') AS author_name,
+			COALESCE(authors.username, '') AS author_username,
+			COALESCE(authors.avatar_url, '') AS author_avatar_url,
 			COUNT(DISTINCT likes.id) AS likes_count,
 			COALESCE(MAX(discussion_targets.comment_count), 0) AS comments_count`).
+		Joins(`LEFT JOIN "Users" AS authors ON authors.uuid = posts.author_id AND authors.deleted_at IS NULL`).
 		Joins("LEFT JOIN likes ON likes.target_id = posts.id AND likes.target_type = ? AND likes.deleted_at IS NULL", "post").
 		Joins("LEFT JOIN discussion_targets ON discussion_targets.resource_id = posts.id AND discussion_targets.kind = ? AND discussion_targets.deleted_at IS NULL", "blog_post").
 		Where("posts.status = ? AND COALESCE(posts.visibility, '') IN ?", "published", []string{"", "public"}).
-		Group("posts.id, blog_extensions.content").
+		Group("posts.id, blog_extensions.content, authors.display_name, authors.username, authors.avatar_url").
 		Order("(COUNT(DISTINCT likes.id) * 3 + COALESCE(MAX(discussion_targets.comment_count), 0) * 2) DESC").
 		Order("posts.updated_at DESC").
 		Limit(limit).
@@ -213,6 +220,7 @@ func (s *Service) hotBlogPosts(limit int) ([]HotItem, error) {
 		items = append(items, HotItem{
 			ID: row.ID.String(), Module: "blog", Kind: "post", Title: row.Title,
 			Summary: excerpt(row.Summary, row.Content), ImageURL: row.CoverURL,
+			AuthorName: row.AuthorName, AuthorUsername: row.AuthorUsername, AuthorAvatarURL: row.AuthorAvatarURL,
 			TargetPath: "/posts/post/" + row.ID.String(), Score: score,
 			ScoreLabel: countLabel(row.LikesCount, "赞", row.CommentsCount, "评论"), PublishedAt: timePtr(row.UpdatedAt),
 		})
@@ -260,6 +268,33 @@ func (s *Service) hotMusicAlbums(limit int) ([]HotItem, error) {
 		return nil, err
 	}
 
+	bookmarkCounts := make(map[uuid.UUID]int64)
+	if len(albums) > 0 {
+		albumIDs := make([]uuid.UUID, 0, len(albums))
+		for _, album := range albums {
+			albumIDs = append(albumIDs, album.ID)
+		}
+		var bookmarkRows []struct {
+			AlbumID uuid.UUID `gorm:"column:album_id"`
+			Count   int64     `gorm:"column:count"`
+		}
+		err = s.db.Model(&model.AlbumBookmark{}).
+			Select("album_id, COUNT(*) AS count").
+			Where("album_id IN ?", albumIDs).
+			Group("album_id").
+			Scan(&bookmarkRows).Error
+		if err != nil && !isMissingTableError(err) {
+			return nil, err
+		}
+		for _, row := range bookmarkRows {
+			bookmarkCounts[row.AlbumID] = row.Count
+		}
+	}
+
+	return hotMusicItems(albums, bookmarkCounts), nil
+}
+
+func hotMusicItems(albums []model.Album, bookmarkCounts map[uuid.UUID]int64) []HotItem {
 	items := make([]HotItem, 0, len(albums))
 	for _, album := range albums {
 		var publishedAt *time.Time
@@ -278,19 +313,22 @@ func (s *Service) hotMusicAlbums(limit int) ([]HotItem, error) {
 		}
 
 		items = append(items, HotItem{
-			ID:          album.ID.String(),
-			Module:      "music",
-			Kind:        "album",
-			Title:       album.Title,
-			Summary:     artistNames(album.Artists),
-			ImageURL:    album.CoverURL,
-			TargetPath:  "/music/album/" + album.ID.String(),
-			Score:       album.HotScore,
-			ScoreLabel:  fmt.Sprintf("热度 %.0f", album.HotScore),
-			PublishedAt: publishedAt,
+			ID:            album.ID.String(),
+			Module:        "music",
+			Kind:          "album",
+			Title:         album.Title,
+			Summary:       artistNames(album.Artists),
+			ImageURL:      album.CoverURL,
+			Artists:       hotArtists(album.Artists),
+			PlayCount:     album.PlayCount,
+			BookmarkCount: bookmarkCounts[album.ID],
+			TargetPath:    "/music/album/" + album.ID.String(),
+			Score:         album.HotScore,
+			ScoreLabel:    fmt.Sprintf("热度 %.0f", album.HotScore),
+			PublishedAt:   publishedAt,
 		})
 	}
-	return items, nil
+	return items
 }
 
 func (s *Service) hotForumTopics(limit int) ([]HotItem, error) {
@@ -397,7 +435,8 @@ func (s *Service) hotPodcastEpisodes(limit int) ([]HotItem, error) {
 
 func (s *Service) hotFeedItems(limit int) ([]HotItem, error) {
 	var items []model.FeedItem
-	err := s.db.Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id AND feed_sources.deleted_at IS NULL AND feed_sources.hidden = ?", false).
+	err := s.db.Preload("FeedSource").
+		Joins("JOIN feed_sources ON feed_sources.id = feed_items.feed_source_id AND feed_sources.deleted_at IS NULL AND feed_sources.hidden = ?", false).
 		Order("feed_items.published_at DESC").
 		Limit(limit).
 		Find(&items).Error
@@ -407,17 +446,25 @@ func (s *Service) hotFeedItems(limit int) ([]HotItem, error) {
 
 	result := make([]HotItem, 0, len(items))
 	for _, item := range items {
+		sourceName := ""
+		sourceImageURL := ""
+		if item.FeedSource != nil {
+			sourceName = item.FeedSource.Title
+			sourceImageURL = item.FeedSource.CoverURL
+		}
 		result = append(result, HotItem{
-			ID:          item.ID.String(),
-			Module:      "feed",
-			Kind:        "feed_item",
-			Title:       item.Title,
-			Summary:     excerpt(item.Summary, ""),
-			ImageURL:    item.ImageURL,
-			TargetPath:  "/feed/item/" + item.ID.String(),
-			Score:       recencyScore(item.PublishedAt),
-			ScoreLabel:  "近期热门",
-			PublishedAt: timePtr(item.PublishedAt),
+			ID:             item.ID.String(),
+			Module:         "feed",
+			Kind:           "feed_item",
+			Title:          item.Title,
+			Summary:        excerpt(item.Summary, ""),
+			ImageURL:       item.ImageURL,
+			SourceName:     sourceName,
+			SourceImageURL: sourceImageURL,
+			TargetPath:     "/feed/item/" + item.ID.String(),
+			Score:          recencyScore(item.PublishedAt),
+			ScoreLabel:     "近期热门",
+			PublishedAt:    timePtr(item.PublishedAt),
 		})
 	}
 	return result, nil
@@ -502,6 +549,14 @@ func countLabel(first int64, firstName string, second int64, secondName string) 
 		return "近期热门"
 	}
 	return strings.Join(parts, " / ")
+}
+
+func hotArtists(artists []model.Artist) []HotArtist {
+	items := make([]HotArtist, 0, len(artists))
+	for _, artist := range artists {
+		items = append(items, HotArtist{ID: artist.ID.String(), Name: artist.Name})
+	}
+	return items
 }
 
 func artistNames(artists []model.Artist) string {
