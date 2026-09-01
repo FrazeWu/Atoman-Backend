@@ -7410,6 +7410,78 @@ definitions:
       data:
         $ref: '#/definitions/notification.UnreadCountsDTO'
     type: object
+  portal.HotArtist:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
+  portal.HotItem:
+    properties:
+      artists:
+        items:
+          $ref: '#/definitions/portal.HotArtist'
+        type: array
+      author_avatar_url:
+        type: string
+      author_name:
+        type: string
+      author_username:
+        type: string
+      bookmark_count:
+        type: integer
+      id:
+        type: string
+      image_url:
+        type: string
+      kind:
+        type: string
+      module:
+        type: string
+      play_count:
+        type: integer
+      published_at:
+        type: string
+      score:
+        type: number
+      score_label:
+        type: string
+      source_image_url:
+        type: string
+      source_name:
+        type: string
+      summary:
+        type: string
+      target_path:
+        type: string
+      title:
+        type: string
+    type: object
+  portal.HotResponse:
+    properties:
+      featured:
+        items:
+          $ref: '#/definitions/portal.HotItem'
+        type: array
+      featured_total:
+        type: integer
+      sections:
+        items:
+          $ref: '#/definitions/portal.HotSection'
+        type: array
+    type: object
+  portal.HotSection:
+    properties:
+      items:
+        items:
+          $ref: '#/definitions/portal.HotItem'
+        type: array
+      module:
+        type: string
+      title:
+        type: string
+    type: object
   reference.ErrorBody:
     properties:
       code:
@@ -20877,6 +20949,36 @@ paths:
       summary: 上传播客封面
       tags:
       - podcast
+  /api/v1/portal/hot:
+    get:
+      description: 返回全站高质量内容候选池中的当前四项；featured_total 表示候选总数，spotlight_offset 按候选位置切换下一批。
+      parameters:
+      - default: 6
+        description: 每个模块的候选数量
+        in: query
+        name: limit
+        type: integer
+      - default: 0
+        description: 焦点精选候选偏移量
+        in: query
+        name: spotlight_offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/portal.HotResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: 获取门户焦点精选
+      tags:
+      - portal
   /api/v1/references/resolve:
     post:
       consumes:
