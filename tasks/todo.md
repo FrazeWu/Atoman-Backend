@@ -51,3 +51,25 @@
 - [x] Focused backend and frontend tests pass.
 - [x] Backend build, Swagger generation, frontend type check, and frontend build pass.
 - [x] Diff and diagnostics are clean; no user-owned untracked file is staged.
+
+## Source Favicon Fallback Tasks
+
+## Task 1: Derive a safe favicon candidate
+
+- [x] Derive an HTTP(S) favicon URL from the RSS source origin without persisting it.
+- [x] Verify empty, malformed, and unsupported URLs return no candidate.
+
+## Task 2: Add source-card fallback order
+
+- [x] Render explicit cover, then favicon, then title initial in source identity cards.
+- [x] Verify the candidate sequence and source-change reset behavior.
+
+## Task 3: Add source-detail fallback order
+
+- [x] Render the same candidate sequence in the source article sheet.
+- [x] Verify cover and favicon failures each reach the correct fallback.
+
+## Checkpoint: Completion
+
+- [x] Focused source-avatar tests, type check, build, and diff check pass.
+- [x] No source record is mutated and no third-party favicon service is introduced.

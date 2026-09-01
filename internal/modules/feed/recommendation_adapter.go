@@ -274,6 +274,7 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 			Description:     recommendationSourceDescription(source),
 			ContentType:     normalizeSourceCategory(source.Category),
 			LanguageCode:    rowLanguageCode(source.LanguageCode, languageCode),
+			ImageURL:        source.CoverURL,
 			TargetPath:      "/feed/sources?source_id=" + source.ID.String(),
 			SourceID:        source.ID.String(),
 			SourceType:      "external_rss",

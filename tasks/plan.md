@@ -89,3 +89,45 @@ Add a user-owned subscription priority and an opt-in Today inbox. The feature ex
 | Priority sorting changes the default reader flow | Activate only through explicit `sort=priority`; retain chronological mode as the default. |
 | A source maps to multiple content kinds | Assign the maximum matching subscription priority and use stable tie-breaking. |
 | Large unread backlogs make Today unbounded | Force unread-only semantics and cap Today at 20 server-side. |
+
+## Plan: Source Favicon Fallback
+
+## Overview
+
+Render a source favicon only after an explicit feed cover is absent or fails. The favicon URL derives from the existing RSS URL origin, because the current external-source dataset has no persisted `site_url` values.
+
+## Architecture Decisions
+
+- Candidate order is feed cover, derived HTTP(S) `<origin>/favicon.ico`, then title initial.
+- Favicon URLs are derived in the existing frontend source-presentation utility. No network request, source mutation, third-party favicon provider, or database backfill is introduced.
+- A failed image advances one candidate at a time, so a broken cover does not suppress an available favicon.
+
+## Task List
+
+### Task 1: Derive a safe favicon candidate
+
+- [x] Add a URL helper that accepts only valid HTTP(S) source URLs and returns their origin favicon path.
+- [x] Verify invalid, non-HTTP(S), and empty values produce no candidate.
+
+### Task 2: Apply candidate fallback to source cards
+
+- [x] Update the source identity card to try cover, favicon, then initial.
+- [x] Verify an image error advances to the next candidate and resets when the source changes.
+
+### Task 3: Apply candidate fallback to source detail
+
+- [x] Update the source articles sheet to use the same candidate order.
+- [x] Verify both failed-image transitions and the existing title-initial state.
+
+## Checkpoint: Completion
+
+- [x] Focused source-avatar tests, type check, and production build pass.
+- [x] `git diff --check` is clean and no fallback URL is persisted.
+
+## Risks and Mitigations
+
+| Risk | Mitigation |
+| --- | --- |
+| An RSS host differs from the publisher host | Preserve the explicit cover first; a failed or generic favicon still falls back to the initial. |
+| A favicon is unavailable or blocked | Advance to the existing title-initial fallback through the image error handler. |
+| HTTP favicon is blocked on an HTTPS page | Preserve the source URL scheme and fall back safely when the browser rejects it. |
