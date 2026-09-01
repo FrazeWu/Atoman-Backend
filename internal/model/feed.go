@@ -481,3 +481,29 @@ type SubscriptionGroup struct {
 }
 
 func (SubscriptionGroup) TableName() string { return "subscription_groups" }
+
+// SubscriptionHubGroup is a type-scoped branch in the unified subscription tree.
+type SubscriptionHubGroup struct {
+	Base
+	UserID           uuid.UUID `json:"user_id" gorm:"type:uuid;not null;uniqueIndex:idx_subscription_hub_groups_user_type_name,priority:1,where:deleted_at IS NULL"`
+	SubscriptionType string    `json:"subscription_type" gorm:"type:varchar(16);not null;uniqueIndex:idx_subscription_hub_groups_user_type_name,priority:2,where:deleted_at IS NULL;index"`
+	Name             string    `json:"name" gorm:"not null;uniqueIndex:idx_subscription_hub_groups_user_type_name,priority:3,where:deleted_at IS NULL"`
+	Position         int       `json:"position" gorm:"not null;default:0;index"`
+}
+
+func (SubscriptionHubGroup) TableName() string { return "subscription_hub_groups" }
+
+// SubscriptionHubMembership associates one source with exactly one type-scoped group.
+type SubscriptionHubMembership struct {
+	Base
+	UserID           uuid.UUID             `json:"user_id" gorm:"type:uuid;not null;uniqueIndex:idx_subscription_hub_memberships_user_type_source,priority:1,where:deleted_at IS NULL"`
+	SubscriptionType string                `json:"subscription_type" gorm:"type:varchar(16);not null;uniqueIndex:idx_subscription_hub_memberships_user_type_source,priority:2,where:deleted_at IS NULL;index"`
+	GroupID          uuid.UUID             `json:"group_id" gorm:"type:uuid;not null;index"`
+	Group            *SubscriptionHubGroup `json:"group,omitempty" gorm:"foreignKey:GroupID"`
+	FeedSourceID     uuid.UUID             `json:"feed_source_id" gorm:"type:uuid;not null;uniqueIndex:idx_subscription_hub_memberships_user_type_source,priority:3,where:deleted_at IS NULL;index"`
+	FeedSource       *FeedSource           `json:"feed_source,omitempty" gorm:"foreignKey:FeedSourceID"`
+	Title            string                `json:"title"`
+	Position         int                   `json:"position" gorm:"not null;default:0;index"`
+}
+
+func (SubscriptionHubMembership) TableName() string { return "subscription_hub_memberships" }

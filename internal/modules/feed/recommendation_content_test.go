@@ -3,6 +3,13 @@ package feed
 import (
 	"strings"
 	"testing"
+	"time"
+
+	"atoman/internal/model"
+	"atoman/internal/modules/recommendation"
+	"atoman/internal/testdb"
+
+	"github.com/google/uuid"
 )
 
 func TestNormalizeArticleQualityPrefersStructuredContent(t *testing.T) {
@@ -37,5 +44,80 @@ func TestArticleContentQualityPenalizesLinkHeavyContent(t *testing.T) {
 	_, linkHeavyScore := articleContentQualitySignals(linkHeavyContent, int64(len(linkHeavyContent)))
 	if structuredScore <= linkHeavyScore {
 		t.Fatalf("structured content must score above a link list: structured=%.3f links=%.3f", structuredScore, linkHeavyScore)
+	}
+}
+
+func TestRecommendArticlesSeparatesHotFromFeaturedRanking(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.FeedSource{},
+		&model.FeedItem{},
+		&model.FeedItemRead{},
+		&model.FeedItemStar{},
+	)
+
+	now := time.Now().UTC()
+	featuredSource := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "featured-source-" + uuid.NewString(),
+		Title:      "Featured source",
+		Category:   "blog",
+	}
+	hotSource := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "hot-source-" + uuid.NewString(),
+		Title:      "Hot source",
+		Category:   "blog",
+	}
+	if err := db.Create(&featuredSource).Error; err != nil {
+		t.Fatalf("create featured source: %v", err)
+	}
+	if err := db.Create(&hotSource).Error; err != nil {
+		t.Fatalf("create hot source: %v", err)
+	}
+
+	featuredItem := model.FeedItem{
+		FeedSourceID:       featuredSource.ID,
+		GUID:               "featured-item",
+		Title:              "深度专题",
+		Summary:            strings.Repeat("完整的专题内容。", 30),
+		Link:               "https://example.com/featured",
+		ReaderQualityScore: 100,
+		FullTextWordCount:  1200,
+		PublishedAt:        now.Add(-6 * 24 * time.Hour),
+		FetchedAt:          now,
+	}
+	hotItem := model.FeedItem{
+		FeedSourceID:       hotSource.ID,
+		GUID:               "hot-item",
+		Title:              "刚刚发布的更新",
+		Summary:            strings.Repeat("及时的更新内容。", 30),
+		Link:               "https://example.com/hot",
+		ReaderQualityScore: 70,
+		FullTextWordCount:  800,
+		PublishedAt:        now.Add(-time.Hour),
+		FetchedAt:          now,
+	}
+	if err := db.Create(&featuredItem).Error; err != nil {
+		t.Fatalf("create featured feed item: %v", err)
+	}
+	if err := db.Create(&hotItem).Error; err != nil {
+		t.Fatalf("create hot feed item: %v", err)
+	}
+
+	hotItems, _, err := NewService(db).RecommendArticlesByMode(recommendation.ModeHot, "blog", "", "", "", 1, 20)
+	if err != nil {
+		t.Fatalf("recommend hot articles: %v", err)
+	}
+	if len(hotItems) < 2 || hotItems[0].ID != hotItem.ID.String() {
+		t.Fatalf("expected newest trending article first for hot mode, got %+v", hotItems)
+	}
+
+	featuredItems, _, err := NewService(db).RecommendArticlesByMode(recommendation.ModeFeatured, "blog", "", "", "", 1, 20)
+	if err != nil {
+		t.Fatalf("recommend featured articles: %v", err)
+	}
+	if len(featuredItems) < 2 || featuredItems[0].ID != featuredItem.ID.String() {
+		t.Fatalf("expected higher-quality article first for featured mode, got %+v", featuredItems)
 	}
 }

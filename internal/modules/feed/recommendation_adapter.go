@@ -36,8 +36,10 @@ func parseRecommendationMode(raw string) (recommendation.Mode, error) {
 		return recommendation.ModeFeatured, nil
 	case recommendation.ModeDiscover:
 		return recommendation.ModeDiscover, nil
+	case recommendation.ModeLatest:
+		return recommendation.ModeLatest, nil
 	default:
-		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover")
+		return "", apperr.BadRequest("validation.invalid_request", "mode must be one of hot, featured, discover, latest")
 	}
 }
 
@@ -83,6 +85,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 		return nil, 0, err
 	}
 
+	qualityFirst := mode == recommendation.ModeFeatured || mode == recommendation.ModeDiscover
 	candidates := make([]recommendation.Candidate, 0, len(posts)+len(feedItems))
 	postByID := make(map[string]RecommendationArticlePostRow, len(posts))
 	feedItemByID := make(map[string]RecommendationArticleFeedItemRow, len(feedItems))
@@ -93,7 +96,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 			EntityID:        post.ID.String(),
 			SourceKey:       recommendationSourceKeyForPost(post),
 			QualityScore:    normalizeArticleQuality(post),
-			QualityFirst:    true,
+			QualityFirst:    qualityFirst,
 			TrendScore:      normalizePostRecency(post.PublishedAt, 7*24*time.Hour),
 			FreshnessScore:  normalizePostRecency(post.PublishedAt, 14*24*time.Hour),
 			AuthorityScore:  normalizeArticleAuthority(post),
@@ -111,7 +114,7 @@ func (s *Service) RecommendArticles(mode recommendation.Mode, category string, t
 			EntityID:        feedItem.ID.String(),
 			SourceKey:       recommendationSourceKeyForFeedItem(feedItem),
 			QualityScore:    normalizeFeedItemQuality(feedItem),
-			QualityFirst:    true,
+			QualityFirst:    qualityFirst,
 			TrendScore:      normalizeFeedItemTrend(feedItem),
 			FreshnessScore:  normalizePostRecency(feedItem.PublishedAt, 14*24*time.Hour),
 			AuthorityScore:  normalizeFeedItemAuthority(feedItem),
@@ -282,6 +285,17 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 	}
 
 	items = filterRecommendationItems(items, category, theme)
+	channelIDs := make([]uuid.UUID, 0, len(items))
+	for _, item := range items {
+		if row, ok := rowByID[item.ID]; ok {
+			channelIDs = append(channelIDs, row.ChannelID)
+		}
+	}
+	recentTitlesByChannelID, err := s.repo.ListRecentPublishedPostTitlesByChannelIDs(channelIDs, 3)
+	if err != nil {
+		return nil, 0, err
+	}
+	items = deduplicateRecommendationChannels(items, rowByID, sourceByID, recentTitlesByChannelID)
 	items, total, err := paginateRecommendationItems(items, page, pageSize)
 	if err != nil {
 		return nil, 0, err
@@ -290,6 +304,94 @@ func (s *Service) RecommendChannels(mode recommendation.Mode, category string, t
 		return nil, 0, err
 	}
 	return items, total, nil
+}
+
+func deduplicateRecommendationChannels(items []RecommendationItemDTO, rowByID map[string]RecommendationChannelRow, sourceByID map[string]ExploreSourceRow, recentTitlesByChannelID map[uuid.UUID][]string) []RecommendationItemDTO {
+	deduplicated := make([]RecommendationItemDTO, 0, len(items))
+	candidateIndexesByIdentity := make(map[string][]int, len(items))
+	for _, item := range items {
+		identity := recommendationChannelIdentity(item)
+		if identity == "" {
+			deduplicated = append(deduplicated, item)
+			continue
+		}
+
+		isDuplicate := false
+		for _, index := range candidateIndexesByIdentity[identity] {
+			if recommendationChannelsShareRecentTitles(deduplicated[index], item, rowByID, sourceByID, recentTitlesByChannelID) {
+				isDuplicate = true
+				break
+			}
+		}
+		if isDuplicate {
+			continue
+		}
+
+		candidateIndexesByIdentity[identity] = append(candidateIndexesByIdentity[identity], len(deduplicated))
+		deduplicated = append(deduplicated, item)
+	}
+	return deduplicated
+}
+
+func recommendationChannelIdentity(item RecommendationItemDTO) string {
+	title := normalizeRecommendationChannelText(item.Title)
+	if title == "" {
+		return ""
+	}
+	return normalizeSourceCategory(item.ContentType) + "\x1f" + title
+}
+
+func recommendationChannelsShareRecentTitles(first RecommendationItemDTO, second RecommendationItemDTO, rowByID map[string]RecommendationChannelRow, sourceByID map[string]ExploreSourceRow, recentTitlesByChannelID map[uuid.UUID][]string) bool {
+	firstTitles := recommendationChannelRecentTitles(first, rowByID, sourceByID, recentTitlesByChannelID)
+	secondTitles := recommendationChannelRecentTitles(second, rowByID, sourceByID, recentTitlesByChannelID)
+	if len(firstTitles) < 2 || len(secondTitles) < 2 {
+		return false
+	}
+
+	firstTitleSet := make(map[string]struct{}, len(firstTitles))
+	for _, title := range firstTitles {
+		if normalized := normalizeRecommendationChannelText(title); normalized != "" {
+			firstTitleSet[normalized] = struct{}{}
+		}
+	}
+	matchingTitles := 0
+	seen := make(map[string]struct{}, len(secondTitles))
+	for _, title := range secondTitles {
+		normalized := normalizeRecommendationChannelText(title)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		if _, exists := firstTitleSet[normalized]; exists {
+			matchingTitles++
+			if matchingTitles >= 2 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func recommendationChannelRecentTitles(item RecommendationItemDTO, rowByID map[string]RecommendationChannelRow, sourceByID map[string]ExploreSourceRow, recentTitlesByChannelID map[uuid.UUID][]string) []string {
+	if row, ok := rowByID[item.ID]; ok {
+		return recentTitlesByChannelID[row.ChannelID]
+	}
+	source, ok := sourceByID[item.ID]
+	if !ok {
+		return nil
+	}
+	titles := make([]string, 0, len(source.RecentItems))
+	for _, recentItem := range source.RecentItems {
+		titles = append(titles, recentItem.Title)
+	}
+	return titles
+}
+
+func normalizeRecommendationChannelText(value string) string {
+	return strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(value)), " "))
 }
 
 func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) error {
@@ -710,6 +812,7 @@ func recommendationScoreLabel(mode recommendation.Mode, score float64) string {
 		recommendation.ModeHot:      "热度",
 		recommendation.ModeFeatured: "精选",
 		recommendation.ModeDiscover: "探索",
+		recommendation.ModeLatest:   "最新",
 	}[mode]
 	if prefix == "" {
 		prefix = "推荐"

@@ -223,7 +223,11 @@ func (s *Service) CreateBookmark(user authctx.CurrentUser, postID uuid.UUID, fol
 		return model.Bookmark{}, apperr.Unauthorized("Login required")
 	}
 	if folderID == nil || *folderID == uuid.Nil {
-		return model.Bookmark{}, apperr.BadRequest("validation.invalid_request", "bookmark_folder_id is required")
+		fallback := model.BookmarkFolder{UserID: user.ID, Name: "默认收藏夹"}
+		if err := s.db.Where("user_id = ? AND name = ?", user.ID, fallback.Name).FirstOrCreate(&fallback).Error; err != nil {
+			return model.Bookmark{}, err
+		}
+		folderID = &fallback.ID
 	}
 	post, err := loadCanonicalBlogContent(s.db, postID)
 	if err != nil {
