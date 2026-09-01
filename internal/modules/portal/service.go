@@ -178,17 +178,22 @@ func spotlightBatch(items []HotItem, offset int) []HotItem {
 }
 
 type blogHotRow struct {
-	ID              uuid.UUID `gorm:"column:id"`
-	Title           string
-	Summary         string
-	Content         string `gorm:"column:content"`
-	CoverURL        string `gorm:"column:cover_url"`
-	AuthorName      string `gorm:"column:author_name"`
-	AuthorUsername  string `gorm:"column:author_username"`
-	AuthorAvatarURL string `gorm:"column:author_avatar_url"`
-	UpdatedAt       time.Time
-	LikesCount      int64
-	CommentsCount   int64
+	ID                      uuid.UUID `gorm:"column:id"`
+	Title                   string
+	Summary                 string
+	Content                 string `gorm:"column:content"`
+	CoverURL                string `gorm:"column:cover_url"`
+	AuthorDisplayName       string `gorm:"column:author_display_name"`
+	AuthorUsername          string `gorm:"column:author_username"`
+	AuthorAvatarURL         string `gorm:"column:author_avatar_url"`
+	ChannelOwnerDisplayName string `gorm:"column:channel_owner_display_name"`
+	ChannelOwnerUsername    string `gorm:"column:channel_owner_username"`
+	ChannelOwnerAvatarURL   string `gorm:"column:channel_owner_avatar_url"`
+	ChannelName             string `gorm:"column:channel_name"`
+	ChannelCoverURL         string `gorm:"column:channel_cover_url"`
+	UpdatedAt               time.Time
+	LikesCount              int64
+	CommentsCount           int64
 }
 
 func (s *Service) hotBlogPosts(limit int) ([]HotItem, error) {
@@ -196,16 +201,26 @@ func (s *Service) hotBlogPosts(limit int) ([]HotItem, error) {
 	err := blogmodule.CanonicalBlogPostsQuery(s.db).
 		Select(`posts.id, posts.title, posts.summary, posts.cover_url, posts.updated_at,
 			blog_extensions.content,
-			COALESCE(NULLIF(authors.display_name, ''), authors.username, '') AS author_name,
+			COALESCE(authors.display_name, '') AS author_display_name,
 			COALESCE(authors.username, '') AS author_username,
 			COALESCE(authors.avatar_url, '') AS author_avatar_url,
+			COALESCE(channel_owners.display_name, '') AS channel_owner_display_name,
+			COALESCE(channel_owners.username, '') AS channel_owner_username,
+			COALESCE(channel_owners.avatar_url, '') AS channel_owner_avatar_url,
+			COALESCE(channels.name, '') AS channel_name,
+			COALESCE(channels.cover_url, '') AS channel_cover_url,
 			COUNT(DISTINCT likes.id) AS likes_count,
 			COALESCE(MAX(discussion_targets.comment_count), 0) AS comments_count`).
 		Joins(`LEFT JOIN "Users" AS authors ON authors.uuid = posts.author_id AND authors.deleted_at IS NULL`).
+		Joins("LEFT JOIN channels ON channels.id = posts.channel_id AND channels.deleted_at IS NULL").
+		Joins(`LEFT JOIN "Users" AS channel_owners ON channel_owners.uuid = channels.user_id AND channel_owners.deleted_at IS NULL`).
 		Joins("LEFT JOIN likes ON likes.target_id = posts.id AND likes.target_type = ? AND likes.deleted_at IS NULL", "post").
 		Joins("LEFT JOIN discussion_targets ON discussion_targets.resource_id = posts.id AND discussion_targets.kind = ? AND discussion_targets.deleted_at IS NULL", "blog_post").
 		Where("posts.status = ? AND COALESCE(posts.visibility, '') IN ?", "published", []string{"", "public"}).
-		Group("posts.id, blog_extensions.content, authors.display_name, authors.username, authors.avatar_url").
+		Group(`posts.id, blog_extensions.content,
+			authors.display_name, authors.username, authors.avatar_url,
+			channel_owners.display_name, channel_owners.username, channel_owners.avatar_url,
+			channels.name, channels.cover_url`).
 		Order("(COUNT(DISTINCT likes.id) * 3 + COALESCE(MAX(discussion_targets.comment_count), 0) * 2) DESC").
 		Order("posts.updated_at DESC").
 		Limit(limit).
@@ -216,11 +231,13 @@ func (s *Service) hotBlogPosts(limit int) ([]HotItem, error) {
 
 	items := make([]HotItem, 0, len(rows))
 	for _, row := range rows {
+		authorName, authorUsername, authorAvatarURL := blogAuthorProfile(row)
 		score := float64(row.LikesCount*3 + row.CommentsCount*2)
 		items = append(items, HotItem{
 			ID: row.ID.String(), Module: "blog", Kind: "post", Title: row.Title,
 			Summary: excerpt(row.Summary, row.Content), ImageURL: row.CoverURL,
-			AuthorName: row.AuthorName, AuthorUsername: row.AuthorUsername, AuthorAvatarURL: row.AuthorAvatarURL,
+			AuthorName: authorName, AuthorUsername: authorUsername, AuthorAvatarURL: authorAvatarURL,
+			SourceName: row.ChannelName, SourceImageURL: row.ChannelCoverURL,
 			TargetPath: "/posts/post/" + row.ID.String(), Score: score,
 			ScoreLabel: countLabel(row.LikesCount, "赞", row.CommentsCount, "评论"), PublishedAt: timePtr(row.UpdatedAt),
 		})
@@ -446,12 +463,7 @@ func (s *Service) hotFeedItems(limit int) ([]HotItem, error) {
 
 	result := make([]HotItem, 0, len(items))
 	for _, item := range items {
-		sourceName := ""
-		sourceImageURL := ""
-		if item.FeedSource != nil {
-			sourceName = item.FeedSource.Title
-			sourceImageURL = item.FeedSource.CoverURL
-		}
+		sourceName, sourceImageURL := feedSourceIdentity(item)
 		result = append(result, HotItem{
 			ID:             item.ID.String(),
 			Module:         "feed",
@@ -468,6 +480,31 @@ func (s *Service) hotFeedItems(limit int) ([]HotItem, error) {
 		})
 	}
 	return result, nil
+}
+
+func blogAuthorProfile(row blogHotRow) (name string, username string, avatarURL string) {
+	return firstNonEmpty(
+			row.AuthorDisplayName,
+			row.AuthorUsername,
+			row.ChannelOwnerDisplayName,
+			row.ChannelOwnerUsername,
+			row.ChannelName,
+			"作者",
+		), firstNonEmpty(row.AuthorUsername, row.ChannelOwnerUsername), firstNonEmpty(
+			row.AuthorAvatarURL,
+			row.ChannelOwnerAvatarURL,
+			row.ChannelCoverURL,
+		)
+}
+
+func feedSourceIdentity(item model.FeedItem) (name string, imageURL string) {
+	sourceName := ""
+	sourceImageURL := ""
+	if item.FeedSource != nil {
+		sourceName = item.FeedSource.Title
+		sourceImageURL = item.FeedSource.CoverURL
+	}
+	return firstNonEmpty(sourceName, item.Author, "订阅源"), firstNonEmpty(sourceImageURL, item.ImageURL)
 }
 
 func (s *Service) hotTimelineEvents(limit int) ([]HotItem, error) {
