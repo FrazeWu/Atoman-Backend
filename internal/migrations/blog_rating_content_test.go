@@ -52,3 +52,13 @@ func TestRunBlogRatingContentMigrationFailsWithoutCanonicalBlogEntry(t *testing.
 
 	require.Error(t, RunBlogRatingContentMigration(db))
 }
+
+func TestRunBlogRatingContentMigrationSkipsMissingLegacyPostID(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db, &model.User{}, &model.Channel{}, &model.ContentEntry{}, &model.PostRating{})
+	require.False(t, db.Migrator().HasColumn("post_ratings", "post_id"))
+
+	require.NoError(t, RunBlogRatingContentMigration(db))
+	require.NoError(t, RunBlogRatingContentMigration(db))
+	assertIndexExists(t, db, "post_ratings", "idx_post_ratings_user_content")
+}
