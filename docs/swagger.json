@@ -26835,6 +26835,104 @@
                 }
             }
         },
+        "/api/v1/videos/{id}/rating": {
+            "put": {
+                "description": "为可观看视频提交或更新 0.5 至 5 星评分，分值使用 1 至 10 的半星单位。",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "设置视频评分",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "视频 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "视频评分",
+                        "name": "input",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handlers.videoRatingInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.videoRatingSummary"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "description": "清除当前用户对可观看视频的评分。",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "videos"
+                ],
+                "summary": "清除视频评分",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "视频 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.videoRatingSummary"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/videos/{id}/recommended": {
             "get": {
                 "description": "基于同频道和同标签返回推荐视频。",
@@ -33555,6 +33653,33 @@
                 }
             }
         },
+        "handlers.videoRatingInput": {
+            "type": "object",
+            "required": [
+                "score"
+            ],
+            "properties": {
+                "score": {
+                    "type": "integer",
+                    "maximum": 10,
+                    "minimum": 1
+                }
+            }
+        },
+        "handlers.videoRatingSummary": {
+            "type": "object",
+            "properties": {
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
+                "viewer_rating": {
+                    "type": "integer"
+                }
+            }
+        },
         "handlers.videoSubscriptionListResponse": {
             "type": "object",
             "properties": {
@@ -36106,6 +36231,12 @@
                 "published_at": {
                     "type": "string"
                 },
+                "rating_count": {
+                    "type": "integer"
+                },
+                "rating_score": {
+                    "type": "number"
+                },
                 "scheduled_at": {
                     "type": "string"
                 },
@@ -36143,6 +36274,9 @@
                     "type": "string"
                 },
                 "view_count": {
+                    "type": "integer"
+                },
+                "viewer_rating": {
                     "type": "integer"
                 },
                 "visibility": {
