@@ -2314,6 +2314,43 @@ definitions:
         example: ok
         type: string
     type: object
+  feed.SubscriptionHubGroupNode:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      memberships:
+        items:
+          $ref: '#/definitions/model.SubscriptionHubMembership'
+        type: array
+      name:
+        type: string
+      position:
+        type: integer
+      subscription_type:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
+  feed.SubscriptionHubTree:
+    properties:
+      types:
+        items:
+          $ref: '#/definitions/feed.SubscriptionHubTypeNode'
+        type: array
+    type: object
+  feed.SubscriptionHubTypeNode:
+    properties:
+      groups:
+        items:
+          $ref: '#/definitions/feed.SubscriptionHubGroupNode'
+        type: array
+      subscription_type:
+        type: string
+    type: object
   feed.SubscriptionInput:
     properties:
       rss_url:
@@ -5773,6 +5810,48 @@ definitions:
         type: string
       position:
         type: integer
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
+  model.SubscriptionHubGroup:
+    properties:
+      created_at:
+        type: string
+      id:
+        type: string
+      name:
+        type: string
+      position:
+        type: integer
+      subscription_type:
+        type: string
+      updated_at:
+        type: string
+      user_id:
+        type: string
+    type: object
+  model.SubscriptionHubMembership:
+    properties:
+      created_at:
+        type: string
+      feed_source:
+        $ref: '#/definitions/model.FeedSource'
+      feed_source_id:
+        type: string
+      group:
+        $ref: '#/definitions/model.SubscriptionHubGroup'
+      group_id:
+        type: string
+      id:
+        type: string
+      position:
+        type: integer
+      subscription_type:
+        type: string
+      title:
+        type: string
       updated_at:
         type: string
       user_id:
@@ -16041,6 +16120,89 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 查询合集订阅状态
+      tags:
+      - feed
+  /api/v1/feed/subscription-hub/tree:
+    get:
+      description: 返回按播客、视频、博客和 RSS 分离的分组与订阅叶子。
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.SubscriptionHubTree'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取订阅中心树
+      tags:
+      - feed
+  /api/v1/feed/subscription-hub/updates:
+    get:
+      description: 返回选中类型和分组的最新更新；可进一步按订阅叶子收窄。
+      parameters:
+      - description: 订阅类型
+        enum:
+        - podcast
+        - video
+        - blog
+        - rss
+        in: query
+        name: type
+        required: true
+        type: string
+      - description: 分组 UUID
+        in: query
+        name: group_id
+        type: string
+      - description: 订阅叶子 UUID
+        in: query
+        name: membership_id
+        type: string
+      - description: 页码
+        in: query
+        name: page
+        type: integer
+      - description: 每页数量
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.TimelineListResponseDTO'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 获取订阅中心更新流
       tags:
       - feed
   /api/v1/feed/subscriptions:
