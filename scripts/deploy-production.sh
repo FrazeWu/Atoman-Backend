@@ -76,6 +76,10 @@ require_file() {
   [[ -f "$1" ]] || die "missing file: $1"
 }
 
+run_compose() {
+  docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"
+}
+
 check_go_version() {
   local version major minor
   version="$(go env GOVERSION)"
@@ -105,7 +109,7 @@ check_prerequisites() {
   require_file "$NGINX_REAL_IP_SOURCE"
   require_file "$NGINX_SITE_SOURCE"
 
-  for required_env in DATABASE_TYPE DATABASE_URL AUTH_CODE_SECRET BASE_URL S3_BUCKET; do
+  for required_env in DATABASE_TYPE DATABASE_URL AUTH_CODE_SECRET BASE_URL S3_BUCKET POSTGRES_PASSWORD; do
     grep -q "^${required_env}=" "$ENV_FILE" || die "$ENV_FILE is missing $required_env"
   done
 
@@ -132,7 +136,7 @@ sync_source() {
 
 wait_for_postgres() {
   local container_id state
-  container_id="$(docker compose -f "$COMPOSE_FILE" ps -q postgres)"
+  container_id="$(run_compose ps -q postgres)"
   [[ -n "$container_id" ]] || die "PostgreSQL container was not created"
 
   for _ in {1..30}; do
@@ -148,7 +152,7 @@ wait_for_postgres() {
 
 start_postgres() {
   log "Starting local PostgreSQL"
-  docker compose -f "$COMPOSE_FILE" up -d postgres db-init
+  run_compose up -d postgres db-init
   wait_for_postgres
 }
 
@@ -363,6 +367,9 @@ check_runtime() {
   else
     die "Docker is not active"
   fi
+
+  log "Validating Compose configuration"
+  run_compose config --quiet
 
   if [[ -f "$SERVICE_FILE" ]]; then
     if systemctl is-active --quiet "$SERVICE_NAME"; then
