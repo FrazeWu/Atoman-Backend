@@ -2,7 +2,6 @@ package migrationrunner
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -148,12 +147,12 @@ func runMusicContributionEvidenceBackfill(db *gorm.DB) error {
 			}
 
 			var previous model.MusicSongLyricVersion
-			err := tx.Where("song_id = ? AND version < ?", versions[i].SongID, versions[i].Version).
-				Order("version DESC").First(&previous).Error
-			wasNew := errors.Is(err, gorm.ErrRecordNotFound)
-			if err != nil && !wasNew {
-				return err
+			previousResult := tx.Where("song_id = ? AND version < ?", versions[i].SongID, versions[i].Version).
+				Order("version DESC").Limit(1).Find(&previous)
+			if previousResult.Error != nil {
+				return previousResult.Error
 			}
+			wasNew := previousResult.RowsAffected == 0
 			hadTranslation := !wasNew && strings.TrimSpace(previous.Translation) != ""
 			hadTiming := !wasNew && previous.Format == "lrc"
 			if err := service.RecordMusicLyricsContribution(tx, &versions[i], wasNew, hadTranslation, hadTiming); err != nil {

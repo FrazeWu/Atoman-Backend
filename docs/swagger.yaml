@@ -4348,6 +4348,24 @@ definitions:
       url:
         type: string
     type: object
+  handlers.videoRatingInput:
+    properties:
+      score:
+        maximum: 10
+        minimum: 1
+        type: integer
+    required:
+    - score
+    type: object
+  handlers.videoRatingSummary:
+    properties:
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
+      viewer_rating:
+        type: integer
+    type: object
   handlers.videoSubscriptionListResponse:
     properties:
       data:
@@ -6046,6 +6064,10 @@ definitions:
         type: string
       published_at:
         type: string
+      rating_count:
+        type: integer
+      rating_score:
+        type: number
       scheduled_at:
         type: string
       status:
@@ -6073,6 +6095,8 @@ definitions:
         description: S3 key or external URL
         type: string
       view_count:
+        type: integer
+      viewer_rating:
         type: integer
       visibility:
         description: 'Visibility: public | followers | private'
@@ -25000,6 +25024,71 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 更新视频
+      tags:
+      - videos
+  /api/v1/videos/{id}/rating:
+    delete:
+      description: 清除当前用户对可观看视频的评分。
+      parameters:
+      - description: 视频 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.videoRatingSummary'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 清除视频评分
+      tags:
+      - videos
+    put:
+      consumes:
+      - application/json
+      description: 为可观看视频提交或更新 0.5 至 5 星评分，分值使用 1 至 10 的半星单位。
+      parameters:
+      - description: 视频 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 视频评分
+        in: body
+        name: input
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.videoRatingInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.videoRatingSummary'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      summary: 设置视频评分
       tags:
       - videos
   /api/v1/videos/{id}/recommended:
