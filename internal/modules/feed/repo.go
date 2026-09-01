@@ -33,6 +33,7 @@ type ExploreSourceRow struct {
 	ID                uuid.UUID                 `json:"id"`
 	Title             string                    `json:"title"`
 	RSSURL            string                    `json:"rss_url"`
+	CoverURL          string                    `json:"cover_url"`
 	Category          string                    `json:"category"`
 	LanguageCode      string                    `json:"language_code,omitempty"`
 	SubscriptionCount int64                     `json:"subscription_count"`
@@ -1155,6 +1156,7 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 		ID                uuid.UUID
 		Title             string
 		RSSURL            string
+		CoverURL          string
 		Category          string
 		LanguageCode      string
 		SubscriptionCount int64
@@ -1177,6 +1179,7 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 			feed_sources.id,
 			feed_sources.title,
 			feed_sources.rss_url,
+			feed_sources.cover_url,
 			feed_sources.category,
 			feed_sources.language_code,
 			COUNT(DISTINCT subscriptions.id) AS subscription_count,
@@ -1220,6 +1223,7 @@ func (r *Repo) ListExploreSources(limit int, offset int, category string, query 
 			ID:                raw.ID,
 			Title:             raw.Title,
 			RSSURL:            raw.RSSURL,
+			CoverURL:          raw.CoverURL,
 			Category:          raw.Category,
 			LanguageCode:      raw.LanguageCode,
 			SubscriptionCount: raw.SubscriptionCount,

@@ -2049,6 +2049,33 @@ func TestListExploreSourcesIncludesRecentItemPreviews(t *testing.T) {
 	}
 }
 
+func TestListExploreSourcesReturnsSourceCoverURL(t *testing.T) {
+	service, db, _ := newFeedTestService(t)
+
+	var source model.FeedSource
+	if err := db.Where("source_type = ?", "external_rss").First(&source).Error; err != nil {
+		t.Fatalf("find external source: %v", err)
+	}
+	const coverURL = "https://cdn.example.com/source-cover.png"
+	if err := db.Model(&source).Update("cover_url", coverURL).Error; err != nil {
+		t.Fatalf("set source cover: %v", err)
+	}
+
+	rows, err := service.repo.ListExploreSources(20, 0, "")
+	if err != nil {
+		t.Fatalf("list explore sources: %v", err)
+	}
+	for _, row := range rows {
+		if row.ID == source.ID {
+			if row.CoverURL != coverURL {
+				t.Fatalf("source cover_url = %q, want %q", row.CoverURL, coverURL)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected source %s in explore rows", source.ID)
+}
+
 func TestListExploreSourcesFiltersByCategory(t *testing.T) {
 	service, db, _ := newFeedTestService(t)
 
