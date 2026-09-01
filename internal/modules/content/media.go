@@ -344,9 +344,11 @@ func hydrateVideos(db *gorm.DB, rows []videoRow) ([]model.Video, error) {
 	contentIDs := make([]uuid.UUID, 0, len(rows))
 	videoIDs := make([]uuid.UUID, 0, len(rows))
 	channelIDs := make([]uuid.UUID, 0, len(rows))
+	authorIDs := make([]uuid.UUID, 0, len(rows))
 	for _, row := range rows {
 		contentIDs = append(contentIDs, row.ContentID)
 		videoIDs = append(videoIDs, row.VideoID)
+		authorIDs = append(authorIDs, row.AuthorID)
 		if row.ChannelID != nil {
 			channelIDs = append(channelIDs, *row.ChannelID)
 		}
@@ -356,6 +358,10 @@ func hydrateVideos(db *gorm.DB, rows []videoRow) ([]model.Video, error) {
 		return nil, err
 	}
 	channels, err := loadChannels(db, channelIDs)
+	if err != nil {
+		return nil, err
+	}
+	users, err := loadMediaUsers(db, authorIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +381,7 @@ func hydrateVideos(db *gorm.DB, rows []videoRow) ([]model.Video, error) {
 		}
 		video := model.Video{
 			Base:      model.Base{ID: row.VideoID, CreatedAt: videoCreatedAt, UpdatedAt: videoUpdatedAt},
-			ChannelID: row.ChannelID, Channel: channelForID(channels, row.ChannelID), UserID: row.AuthorID,
+			ChannelID: row.ChannelID, Channel: channelForID(channels, row.ChannelID), UserID: row.AuthorID, User: users[row.AuthorID],
 			Title: row.Title, Description: row.Summary, StorageType: row.StorageType, VideoURL: row.VideoURL,
 			ThumbnailURL: row.ThumbnailURL, DurationSec: row.DurationSec, ProcessingStatus: row.ProcessingStatus,
 			ProcessingError: row.ProcessingError, PreviewThumbnails: row.PreviewThumbnails,
@@ -414,6 +420,22 @@ func channelForID(channels map[uuid.UUID]*model.Channel, id *uuid.UUID) *model.C
 		return nil
 	}
 	return channels[*id]
+}
+
+func loadMediaUsers(db *gorm.DB, ids []uuid.UUID) (map[uuid.UUID]*model.User, error) {
+	unique := uniqueIDs(ids)
+	result := make(map[uuid.UUID]*model.User, len(unique))
+	if len(unique) == 0 {
+		return result, nil
+	}
+	var users []model.User
+	if err := db.Where("uuid IN ?", unique).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	for index := range users {
+		result[users[index].UUID] = &users[index]
+	}
+	return result, nil
 }
 
 func loadVideoTags(db *gorm.DB, videoIDs []uuid.UUID) (map[uuid.UUID][]model.VideoTag, error) {

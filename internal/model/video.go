@@ -29,15 +29,18 @@ type Video struct {
 	ProcessingError   string          `json:"processing_error" gorm:"type:text"`
 	PreviewThumbnails json.RawMessage `json:"preview_thumbnails" gorm:"type:jsonb" swaggertype:"array,object"`
 	// Visibility: public | followers | private
-	Visibility  string       `json:"visibility" gorm:"not null;default:'public'"`
-	Status      string       `json:"status" gorm:"not null;default:'draft'"` // draft | scheduled | published
-	ScheduledAt *time.Time   `json:"scheduled_at,omitempty" gorm:"index"`
-	PublishedAt *time.Time   `json:"published_at,omitempty" gorm:"index"`
-	ViewCount   int          `json:"view_count" gorm:"default:0"`
-	LikeCount   int          `json:"like_count" gorm:"-"`
-	Liked       bool         `json:"liked" gorm:"-"`
-	Tags        []VideoTag   `json:"tags,omitempty" gorm:"many2many:video_tag_relations;joinForeignKey:VideoID;joinReferences:TagID"`
-	Collections []Collection `json:"collections,omitempty" gorm:"many2many:video_collections;"`
+	Visibility   string       `json:"visibility" gorm:"not null;default:'public'"`
+	Status       string       `json:"status" gorm:"not null;default:'draft'"` // draft | scheduled | published
+	ScheduledAt  *time.Time   `json:"scheduled_at,omitempty" gorm:"index"`
+	PublishedAt  *time.Time   `json:"published_at,omitempty" gorm:"index"`
+	ViewCount    int          `json:"view_count" gorm:"default:0"`
+	LikeCount    int          `json:"like_count" gorm:"-"`
+	Liked        bool         `json:"liked" gorm:"-"`
+	RatingScore  float64      `json:"rating_score" gorm:"-"`
+	RatingCount  int64        `json:"rating_count" gorm:"-"`
+	ViewerRating *int         `json:"viewer_rating,omitempty" gorm:"-"`
+	Tags         []VideoTag   `json:"tags,omitempty" gorm:"many2many:video_tag_relations;joinForeignKey:VideoID;joinReferences:TagID"`
+	Collections  []Collection `json:"collections,omitempty" gorm:"many2many:video_collections;"`
 }
 
 func (Video) TableName() string { return "videos" }

@@ -53,6 +53,24 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 	return db
 }
 
+func TestGetVideoIncludesAuthorAccount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	owner := seedVideoUser(t, db)
+	video := seedVideoWithState(t, db, owner.UUID, "published", "public")
+
+	router := gin.New()
+	router.GET("/api/v1/videos/:id", GetVideo(db))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/videos/"+video.ID.String(), nil))
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+
+	var detail model.Video
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &detail))
+	require.NotNil(t, detail.User)
+	require.Equal(t, owner.Username, detail.User.Username)
+}
+
 func TestSetupVideoRoutesDoesNotMountLegacyRSS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newVideoTestDB(t)
