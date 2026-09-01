@@ -142,6 +142,30 @@ func TestHotMusicItemsPreserveAlbumMetadata(t *testing.T) {
 	}
 }
 
+func TestBlogAuthorProfileFallsBackToChannelIdentity(t *testing.T) {
+	name, username, avatarURL := blogAuthorProfile(blogHotRow{
+		ChannelOwnerDisplayName: "频道作者",
+		ChannelOwnerUsername:    "channel-owner",
+		ChannelCoverURL:         "/channels/owner.png",
+	})
+
+	if name != "频道作者" || username != "channel-owner" || avatarURL != "/channels/owner.png" {
+		t.Fatalf("expected channel identity fallback, got name=%q username=%q avatar=%q", name, username, avatarURL)
+	}
+}
+
+func TestFeedSourceIdentityFallsBackToArticleIdentity(t *testing.T) {
+	name, imageURL := feedSourceIdentity(model.FeedItem{
+		Author:     "订阅作者",
+		ImageURL:   "/articles/feed.png",
+		FeedSource: &model.FeedSource{},
+	})
+
+	if name != "订阅作者" || imageURL != "/articles/feed.png" {
+		t.Fatalf("expected article identity fallback, got name=%q image=%q", name, imageURL)
+	}
+}
+
 func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 	db := testdb.Open(t)
 	migratePortalHotContentTables(t, db)
@@ -187,7 +211,7 @@ func TestHotContentOrdersFeaturedBlogPostsByEngagement(t *testing.T) {
 		t.Fatalf("create lively post: %v", err)
 	}
 	for _, post := range []model.Post{quiet, lively} {
-		entry := model.ContentEntry{Base: post.Base, AuthorID: &userID, ChannelID: channel.ID, Kind: "blog", Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL, Status: post.Status, Visibility: post.Visibility}
+		entry := model.ContentEntry{Base: post.Base, ChannelID: channel.ID, Kind: "blog", Title: post.Title, Summary: post.Summary, CoverURL: post.CoverURL, Status: post.Status, Visibility: post.Visibility}
 		if err := db.Create(&entry).Error; err != nil {
 			t.Fatalf("create canonical portal entry: %v", err)
 		}
