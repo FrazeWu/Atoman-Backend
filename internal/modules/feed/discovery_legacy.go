@@ -18,6 +18,11 @@ import (
 
 const feedDiscoveryMaxHTMLBytes = 2 * 1024 * 1024
 
+type feedDiscoveryDocument struct {
+	Body        string
+	ContentType string
+}
+
 var resolveFeedDiscoveryHostname = net.LookupIP
 
 var feedDiscoveryHTTPClient = &http.Client{
@@ -87,36 +92,43 @@ func DiscoverFeedCandidates() gin.HandlerFunc {
 }
 
 func fetchFeedDiscoveryHTML(targetURL string) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	document, err := fetchFeedDiscoveryDocument(targetURL, "text/html,application/xhtml+xml")
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Accept", "text/html,application/xhtml+xml")
+	if document.ContentType != "" && !strings.Contains(document.ContentType, "text/html") && !strings.Contains(document.ContentType, "application/xhtml+xml") {
+		return "", fmt.Errorf("unsupported content type %q", document.ContentType)
+	}
+	return document.Body, nil
+}
+
+func fetchFeedDiscoveryDocument(targetURL string, accept string) (feedDiscoveryDocument, error) {
+	req, err := http.NewRequest(http.MethodGet, targetURL, nil)
+	if err != nil {
+		return feedDiscoveryDocument{}, err
+	}
+	req.Header.Set("Accept", accept)
 	req.Header.Set("User-Agent", "AtomanFeedDiscoveryBot/1.0")
 
 	resp, err := feedDiscoveryHTTPClient.Do(req)
 	if err != nil {
-		return "", err
+		return feedDiscoveryDocument{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return "", fmt.Errorf("unexpected status %d", resp.StatusCode)
+		return feedDiscoveryDocument{}, fmt.Errorf("unexpected status %d", resp.StatusCode)
 	}
 	contentType := strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type")))
-	if contentType != "" && !strings.Contains(contentType, "text/html") && !strings.Contains(contentType, "application/xhtml+xml") {
-		return "", fmt.Errorf("unsupported content type %q", contentType)
-	}
-
 	limited := io.LimitReader(resp.Body, feedDiscoveryMaxHTMLBytes+1)
 	data, err := io.ReadAll(limited)
 	if err != nil {
-		return "", err
+		return feedDiscoveryDocument{}, err
 	}
 	if len(data) > feedDiscoveryMaxHTMLBytes {
-		return "", errors.New("feed discovery html response too large")
+		return feedDiscoveryDocument{}, errors.New("feed discovery html response too large")
 	}
-	return string(data), nil
+	return feedDiscoveryDocument{Body: string(data), ContentType: contentType}, nil
 }
 
 func validateFeedDiscoveryFetchURL(u *url.URL) error {

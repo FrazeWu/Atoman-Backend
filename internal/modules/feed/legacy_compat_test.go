@@ -2227,10 +2227,12 @@ func TestResolveSubscriptionInputReturnsMultipleCandidatesForWebsite(t *testing.
 	gin.SetMode(gin.TestMode)
 	db := newFeedHandlerTestDB(t)
 	user := seedFeedTestUser(t, db)
+	requestCount := 0
 
 	originalClient := feedDiscoveryHTTPClient
 	feedDiscoveryHTTPClient = &http.Client{
 		Transport: feedDiscoveryRoundTripFunc(func(req *http.Request) (*http.Response, error) {
+			requestCount++
 			html := `<html><head>
 <link rel="alternate" type="application/rss+xml" title="Main Feed" href="/feed.xml">
 <link rel="alternate" type="application/atom+xml" title="Updates" href="/updates.atom">
@@ -2277,6 +2279,9 @@ func TestResolveSubscriptionInputReturnsMultipleCandidatesForWebsite(t *testing.
 	}
 	if len(payload.Candidates) != 2 {
 		t.Fatalf("expected 2 candidates, got %d", len(payload.Candidates))
+	}
+	if requestCount != 1 {
+		t.Fatalf("expected website discovery to make one request, got %d", requestCount)
 	}
 	if payload.Candidates[0].Status != "new_source" {
 		t.Fatalf("expected first candidate status new_source, got %q", payload.Candidates[0].Status)

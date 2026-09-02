@@ -78,9 +78,11 @@ func resolveSubscriptionInputForUser(db *gorm.DB, userID uuid.UUID, rawInput str
 			return response, http.StatusOK
 		}
 	}
-	if ok, err := probeAutoSubscriptionDirectFeedURL(u); err != nil {
-		return newAutoSubscriptionResolveResponse("error"), http.StatusInternalServerError
-	} else if ok {
+	document, err := fetchAutoSubscriptionDocument(u.String())
+	if err != nil {
+		return newAutoSubscriptionResolveResponse("not_found"), http.StatusOK
+	}
+	if document.IsFeed {
 		target := autoSubscriptionTargetFromDirectFeedURL(canonicalInput, canonicalInput)
 		response, err := classifyAutoSubscriptionTarget(db, userID, target)
 		if err != nil {
@@ -89,7 +91,7 @@ func resolveSubscriptionInputForUser(db *gorm.DB, userID uuid.UUID, rawInput str
 		return response, http.StatusOK
 	}
 
-	response, statusCode, err := resolveDiscoveredSubscriptionInput(db, userID, u)
+	response, statusCode, err := resolveDiscoveredSubscriptionHTML(db, userID, u, document.Body)
 	if err != nil {
 		return newAutoSubscriptionResolveResponse("error"), statusCode
 	}
@@ -344,6 +346,22 @@ func looksLikeAutoSubscriptionFeedDocument(body string) bool {
 		strings.HasPrefix(lower, "<rdf:rdf")
 }
 
+type autoSubscriptionDocument struct {
+	Body   string
+	IsFeed bool
+}
+
+func fetchAutoSubscriptionDocument(targetURL string) (autoSubscriptionDocument, error) {
+	document, err := fetchFeedDiscoveryDocument(targetURL, "application/rss+xml,application/atom+xml,application/xml,text/xml;q=0.9,text/html,application/xhtml+xml;q=0.8,*/*;q=0.1")
+	if err != nil {
+		return autoSubscriptionDocument{}, err
+	}
+	return autoSubscriptionDocument{
+		Body:   document.Body,
+		IsFeed: isAutoSubscriptionFeedContentType(document.ContentType) || looksLikeAutoSubscriptionFeedDocument(document.Body),
+	}, nil
+}
+
 func resolveDiscoveredSubscriptionInput(db *gorm.DB, userID uuid.UUID, u *url.URL) (AutoSubscriptionResolveResponse, int, error) {
 	if err := validateFeedDiscoveryFetchURL(u); err != nil {
 		return newAutoSubscriptionResolveResponse("invalid"), http.StatusOK, nil
@@ -355,6 +373,11 @@ func resolveDiscoveredSubscriptionInput(db *gorm.DB, userID uuid.UUID, u *url.UR
 		return newAutoSubscriptionResolveResponse("not_found"), http.StatusOK, nil
 	}
 
+	return resolveDiscoveredSubscriptionHTML(db, userID, u, html)
+}
+
+func resolveDiscoveredSubscriptionHTML(db *gorm.DB, userID uuid.UUID, u *url.URL, html string) (AutoSubscriptionResolveResponse, int, error) {
+	rawURL := u.String()
 	discovered := service.ExtractFeedCandidatesFromHTML(rawURL, html)
 	if len(discovered) == 0 {
 		return newAutoSubscriptionResolveResponse("not_found"), http.StatusOK, nil
