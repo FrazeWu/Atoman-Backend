@@ -122,7 +122,7 @@ func DefaultSiteAccessMatrix() SiteAccessMatrix {
 			"media":    defaultAccessModule(),
 			"music":    defaultAccessModule("music.submit", "music.review"),
 			"blog":     defaultAccessModule("post.create", "channel.manage"),
-			"books":    defaultAccessModule("books.submit", "books.review", "books.publish_asset"),
+			"books":    disabledAccessModule("books.submit", "books.review", "books.publish_asset"),
 			"forum":    defaultAccessModule("topic.create", "category.request"),
 			"debate":   defaultAccessModule("debate.create", "debate.edit"),
 			"timeline": defaultAccessModule("timeline.edit"),
@@ -157,13 +157,20 @@ func defaultAccessModule(features ...string) SiteAccessModule {
 	return SiteAccessModule{Enabled: &enabled, Features: featureMap}
 }
 
+func disabledAccessModule(features ...string) SiteAccessModule {
+	module := defaultAccessModule(features...)
+	disabled := false
+	module.Enabled = &disabled
+	return module
+}
+
 func (s *SiteAccessService) Load() (SiteAccessMatrix, error) {
 	matrix := DefaultSiteAccessMatrix()
 
 	var setting model.SiteSetting
 	if err := s.db.First(&setting, "key = ?", SiteAccessSettingKey).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return matrix, nil
+			return forceBooksDisabled(matrix), nil
 		}
 		return matrix, err
 	}
@@ -176,7 +183,7 @@ func (s *SiteAccessService) Load() (SiteAccessMatrix, error) {
 		}
 		loaded.Revision = setting.Revision
 		loaded.UpdatedAt = &setting.UpdatedAt
-		return loaded, nil
+		return forceBooksDisabled(loaded), nil
 	}
 
 	var legacy legacySiteAccessMatrix
@@ -186,7 +193,18 @@ func (s *SiteAccessService) Load() (SiteAccessMatrix, error) {
 	loaded := mergeStoredLegacySiteAccess(matrix, legacy)
 	loaded.Revision = setting.Revision
 	loaded.UpdatedAt = &setting.UpdatedAt
-	return loaded, nil
+	return forceBooksDisabled(loaded), nil
+}
+
+func forceBooksDisabled(matrix SiteAccessMatrix) SiteAccessMatrix {
+	books, ok := matrix.Modules["books"]
+	if !ok {
+		return matrix
+	}
+	disabled := false
+	books.Enabled = &disabled
+	matrix.Modules["books"] = books
+	return matrix
 }
 
 func (s *SiteAccessService) Save(matrix SiteAccessMatrix) error {
@@ -208,6 +226,7 @@ func (s *SiteAccessService) SaveInput(input SiteAccessMatrixInput) error {
 	if err != nil {
 		return err
 	}
+	merged = forceBooksDisabled(merged)
 	if err := validateSiteAccess(merged); err != nil {
 		return err
 	}
@@ -269,6 +288,7 @@ func (s *SiteAccessService) SaveLegacyPayload(value []byte) error {
 	if err != nil {
 		return err
 	}
+	matrix = forceBooksDisabled(matrix)
 	if err := validateSiteAccess(matrix); err != nil {
 		return err
 	}
