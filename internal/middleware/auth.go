@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -117,11 +118,15 @@ func IsTrustedWebOrigin(rawOrigin string) bool {
 	if rawOrigin == "https://www.atoman.org" || rawOrigin == "https://atoman.org" {
 		return true
 	}
-	if os.Getenv("ENV") == "production" {
-		return false
-	}
 	parsed, err := url.Parse(rawOrigin)
 	if err != nil {
+		return false
+	}
+	if parsed.Scheme == "http" && (parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1") {
+		port, err := strconv.Atoi(parsed.Port())
+		return err == nil && ((port >= 5173 && port <= 5180) || port == 52310)
+	}
+	if os.Getenv("ENV") == "production" {
 		return false
 	}
 	return parsed.Scheme == "http" && (parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1")
