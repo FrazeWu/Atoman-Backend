@@ -119,6 +119,33 @@ func TestTrustedOriginMiddlewareRejectsUntrustedProductionOrigin(t *testing.T) {
 	}
 }
 
+func TestIsTrustedWebOriginAcceptsConfiguredLocalDevelopmentPortsInProduction(t *testing.T) {
+	t.Setenv("ENV", "production")
+	t.Setenv("FRONTEND_URL", "https://www.atoman.org")
+
+	for _, origin := range []string{
+		"http://localhost:5173",
+		"http://localhost:5180",
+		"http://127.0.0.1:5175",
+		"http://localhost:52310",
+		"http://127.0.0.1:52310",
+	} {
+		if !IsTrustedWebOrigin(origin) {
+			t.Fatalf("expected local development origin %q to be trusted", origin)
+		}
+	}
+
+	for _, origin := range []string{
+		"http://localhost:5172",
+		"http://localhost:5181",
+		"http://example.com:5175",
+	} {
+		if IsTrustedWebOrigin(origin) {
+			t.Fatalf("expected origin %q to be rejected", origin)
+		}
+	}
+}
+
 func TestStableAuthMiddlewareUsesStructuredErrorEnvelope(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	SetAuthDB(newMiddlewareAuthTestDB(t))
