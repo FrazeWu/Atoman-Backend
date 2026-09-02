@@ -8,8 +8,8 @@ func TestDefaultSiteAccessIncludesBooksCapabilities(t *testing.T) {
 	if !ok {
 		t.Fatal("books module is missing from default site access")
 	}
-	if books.Enabled == nil || !*books.Enabled {
-		t.Fatal("books module should be enabled by default")
+	if books.Enabled == nil || *books.Enabled {
+		t.Fatal("books module should be disabled until launch")
 	}
 	for _, feature := range []string{"books.submit", "books.review", "books.publish_asset"} {
 		if !books.Features[feature] {

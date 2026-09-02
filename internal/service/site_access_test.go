@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -15,6 +16,47 @@ func TestSaveInputAcceptsMediaModule(t *testing.T) {
 
 	if err := validateSiteAccessInput(input); err != nil {
 		t.Fatalf("validate site access input with media: %v", err)
+	}
+}
+
+func TestDefaultSiteAccessDisablesBooksUntilLaunch(t *testing.T) {
+	books := DefaultSiteAccessMatrix().Modules["books"]
+	if books.Enabled == nil || *books.Enabled {
+		t.Fatal("books should be disabled by default")
+	}
+}
+
+func TestSaveLegacyPayloadKeepsBooksDisabled(t *testing.T) {
+	db := testdb.Open(t)
+	if err := db.AutoMigrate(&model.SiteSetting{}); err != nil {
+		t.Fatalf("migrate site settings: %v", err)
+	}
+
+	enabled := true
+	payload, err := json.Marshal(legacySiteAccessMatrix{
+		Modules: map[string]legacySiteAccessModule{
+			"books": {Enabled: &enabled},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy payload: %v", err)
+	}
+
+	svc := NewSiteAccessService(db)
+	if err := svc.SaveLegacyPayload(payload); err != nil {
+		t.Fatalf("save legacy payload: %v", err)
+	}
+
+	var setting model.SiteSetting
+	if err := db.First(&setting, "key = ?", SiteAccessSettingKey).Error; err != nil {
+		t.Fatalf("load stored site access: %v", err)
+	}
+	var stored SiteAccessMatrix
+	if err := json.Unmarshal([]byte(setting.Value), &stored); err != nil {
+		t.Fatalf("decode stored site access: %v", err)
+	}
+	if stored.Modules["books"].Enabled == nil || *stored.Modules["books"].Enabled {
+		t.Fatal("books should remain disabled after legacy save")
 	}
 }
 
