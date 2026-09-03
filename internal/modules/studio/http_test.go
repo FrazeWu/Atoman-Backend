@@ -67,6 +67,7 @@ func newStudioHTTPFixture(t *testing.T) studioHTTPFixture {
 		&model.ContentCollection{},
 		&model.ContentCollectionMembership{},
 		&model.ContentEpisodeExtension{},
+		&model.BlogPublishSchedule{},
 	)
 	registerStudioCanonicalTestSeeds(t, db)
 	middleware.SetAuthDB(db)
