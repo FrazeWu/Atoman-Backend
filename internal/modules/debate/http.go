@@ -68,7 +68,7 @@ func (h *Handler) create(c *gin.Context) {
 		return
 	}
 	var req CreateDebateRequest
-	if !bindJSON(c, &req) {
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	created, err := h.service.CreateDebate(user, req)
@@ -87,7 +87,7 @@ func (h *Handler) create(c *gin.Context) {
 // @Success 200 {object} handlers.DebateResponse
 // @Router /api/v1/debate/topics/{id} [get]
 func (h *Handler) get(c *gin.Context) {
-	id, ok := parseID(c, "id")
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
@@ -114,12 +114,12 @@ func (h *Handler) save(c *gin.Context) {
 	if !ok {
 		return
 	}
-	id, ok := parseID(c, "id")
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
 	var req SaveWikiRequest
-	if !bindJSON(c, &req) {
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	item, err := h.service.SaveWiki(user, id, req)
@@ -143,7 +143,7 @@ func (h *Handler) archive(c *gin.Context) {
 	if !ok {
 		return
 	}
-	id, ok := parseID(c, "id")
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
@@ -163,7 +163,7 @@ func (h *Handler) archive(c *gin.Context) {
 // @Success 200 {object} handlers.DebateRevisionListResponse
 // @Router /api/v1/debate/topics/{id}/revisions [get]
 func (h *Handler) listRevisions(c *gin.Context) {
-	id, ok := parseID(c, "id")
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
@@ -244,7 +244,7 @@ func (h *Handler) revertRevision(c *gin.Context) {
 		return
 	}
 	var req RevertRevisionRequest
-	if !bindJSON(c, &req) {
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	item, err := h.service.RevertRevision(user, id, revisionID, req)
@@ -276,7 +276,7 @@ func (h *Handler) reconfirm(c *gin.Context) {
 		return
 	}
 	var req ReconfirmReferenceRequest
-	if !bindJSON(c, &req) {
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	item, err := h.service.ReconfirmReference(user, id, relationID, req)
@@ -302,12 +302,12 @@ func (h *Handler) putProtection(c *gin.Context) {
 	if !ok {
 		return
 	}
-	id, ok := parseID(c, "id")
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
 	var req ProtectionRequest
-	if !bindJSON(c, &req) {
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	if err := h.service.SetProtection(user, id, req); err != nil {
@@ -330,7 +330,7 @@ func (h *Handler) deleteProtection(c *gin.Context) {
 	if !ok {
 		return
 	}
-	id, ok := parseID(c, "id")
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
@@ -351,7 +351,7 @@ func (h *Handler) deleteProtection(c *gin.Context) {
 // @Success 200 {object} handlers.DebateGraphResponse
 // @Router /api/v1/debates/{id}/relations [get]
 func (h *Handler) graph(c *gin.Context) {
-	id, ok := parseID(c, "id")
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
@@ -380,28 +380,11 @@ func requireCurrentUser(c *gin.Context) (authctx.CurrentUser, bool) {
 	return user, ok
 }
 
-func parseID(c *gin.Context, name string) (uuid.UUID, bool) {
-	id, err := uuid.Parse(c.Param(name))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", name+" must be a valid uuid"))
-		return uuid.Nil, false
-	}
-	return id, true
-}
-
 func parseTwoIDs(c *gin.Context, first, second string) (uuid.UUID, uuid.UUID, bool) {
-	firstID, ok := parseID(c, first)
+	firstID, ok := httpx.UUIDParam(c, first)
 	if !ok {
 		return uuid.Nil, uuid.Nil, false
 	}
-	secondID, ok := parseID(c, second)
+	secondID, ok := httpx.UUIDParam(c, second)
 	return firstID, secondID, ok
-}
-
-func bindJSON(c *gin.Context, target any) bool {
-	if err := c.ShouldBindJSON(target); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return false
-	}
-	return true
 }

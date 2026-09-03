@@ -14,7 +14,7 @@ func (h *Handler) createUnifiedCollection(c *gin.Context) {
 		return
 	}
 	var input CreateCollectionInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	collection, err := h.service.CreateUnifiedCollection(user, input)
@@ -31,7 +31,7 @@ func (h *Handler) updateUnifiedCollection(c *gin.Context) {
 		return
 	}
 	var input UpdateCollectionInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	collection, err := h.service.UpdateUnifiedCollection(user, id, input)
@@ -72,7 +72,7 @@ func (h *Handler) reorderUnifiedCollectionContents(c *gin.Context) {
 		return
 	}
 	var input reorderCollectionContentsInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	if err := h.service.ReorderUnifiedCollectionContents(user, id, input.ContentIDs); err != nil {

@@ -131,7 +131,7 @@ func (h *Handler) createReplyTemplate(c *gin.Context) {
 		return
 	}
 	var input StudioReplyTemplateInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	template, err := h.service.CreateReplyTemplate(user, input)
@@ -196,7 +196,7 @@ func (h *Handler) updateInteractionState(c *gin.Context) {
 		return
 	}
 	var input UpdateInteractionStateInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	respond(c, http.StatusOK, gin.H{"updated": true}, h.service.UpdateInteractionState(user, module, channelID, commentID, input))
@@ -227,7 +227,7 @@ func (h *Handler) setInteractionsHandled(c *gin.Context) {
 		return
 	}
 	var input BatchInteractionStateInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	respond(c, http.StatusOK, gin.H{"updated": true}, h.service.SetInteractionsHandled(user, module, channelID, input.CommentIDs, input.Handled))

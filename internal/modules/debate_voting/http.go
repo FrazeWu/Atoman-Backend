@@ -8,7 +8,6 @@ import (
 	"atoman/internal/platform/httpx"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 type voteRequest struct {
@@ -33,7 +32,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 // @Success 200 {object} handlers.DebateVoteResponse
 // @Router /api/v1/debate/topics/{id}/votes [get]
 func (h *Handler) getVotes(c *gin.Context) {
-	id, ok := parseDebateID(c)
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
@@ -61,7 +60,7 @@ func (h *Handler) setVote(c *gin.Context) {
 	if !ok {
 		return
 	}
-	id, ok := parseDebateID(c)
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
@@ -91,7 +90,7 @@ func (h *Handler) deleteVote(c *gin.Context) {
 	if !ok {
 		return
 	}
-	id, ok := parseDebateID(c)
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
@@ -111,7 +110,7 @@ func (h *Handler) deleteVote(c *gin.Context) {
 // @Success 200 {object} handlers.DebateConclusionListResponse
 // @Router /api/v1/debate/topics/{id}/conclusions [get]
 func (h *Handler) listConclusions(c *gin.Context) {
-	id, ok := parseDebateID(c)
+	id, ok := httpx.UUIDParam(c, "id")
 	if !ok {
 		return
 	}
@@ -129,13 +128,4 @@ func requireUser(c *gin.Context) (authctx.CurrentUser, bool) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 	}
 	return user, ok
-}
-
-func parseDebateID(c *gin.Context) (uuid.UUID, bool) {
-	id, err := uuid.Parse(c.Param("id"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "id must be a valid uuid"))
-		return uuid.Nil, false
-	}
-	return id, true
 }

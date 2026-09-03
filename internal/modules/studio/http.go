@@ -99,7 +99,7 @@ func (h *Handler) resolveCollectionConflicts(c *gin.Context) {
 		return
 	}
 	var input resolveCollectionConflictsInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	respond(c, http.StatusOK, gin.H{"resolved": true}, h.service.ResolveCollectionConflicts(user, module, input.Items))
@@ -131,7 +131,7 @@ func (h *Handler) resolveCollectionConflict(c *gin.Context) {
 		return
 	}
 	var input resolveCollectionConflictInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	if input.CollectionID == uuid.Nil {
@@ -166,7 +166,7 @@ func (h *Handler) reorderCollectionContents(c *gin.Context) {
 		return
 	}
 	var input reorderCollectionContentsInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	respond(c, http.StatusOK, gin.H{"reordered": true}, h.service.ReorderCollectionContents(user, module, collectionID, input.ContentIDs))
@@ -325,7 +325,7 @@ func (h *Handler) patchSettings(c *gin.Context) {
 		return
 	}
 	var input SettingsInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	settings, err := h.service.SaveSettings(user, module, input)
@@ -466,7 +466,7 @@ func (h *Handler) patchState(c *gin.Context) {
 		return
 	}
 	var input PutStateInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	state, err := h.service.SetState(user, input.ChannelID)
@@ -508,7 +508,7 @@ func (h *Handler) createChannel(c *gin.Context) {
 		return
 	}
 	var input CreateChannelInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	channel, err := h.service.CreateChannel(user, input)
@@ -538,7 +538,7 @@ func (h *Handler) updateChannel(c *gin.Context) {
 		return
 	}
 	var input UpdateChannelInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	channel, err := h.service.UpdateChannel(user, id, input)
@@ -654,7 +654,7 @@ func (h *Handler) createCollection(c *gin.Context) {
 		return
 	}
 	var input CreateCollectionInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	collection, err := h.service.CreateCollection(user, module, input)
@@ -685,7 +685,7 @@ func (h *Handler) updateCollection(c *gin.Context) {
 		return
 	}
 	var input UpdateCollectionInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	collection, err := h.service.UpdateCollection(user, module, id, input)
@@ -775,14 +775,6 @@ func optionalBoolQuery(c *gin.Context, name string) (bool, bool) {
 		return false, false
 	}
 	return value, true
-}
-
-func bindJSON(c *gin.Context, target any) bool {
-	if err := c.ShouldBindJSON(target); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return false
-	}
-	return true
 }
 
 func respond(c *gin.Context, status int, data any, err error) {
