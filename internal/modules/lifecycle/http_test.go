@@ -66,7 +66,7 @@ func TestLifecycleHTTPSchedulesOwnedContent(t *testing.T) {
 func TestLifecycleHTTPRetriesFailedBlogSchedule(t *testing.T) {
 	fixture := newLifecycleFixture(t)
 	now := time.Now().UTC()
-	if err := fixture.db.Model(&fixture.post).Updates(map[string]any{"status": "draft", "published_at": nil}).Error; err != nil {
+	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", fixture.post.ID).Updates(map[string]any{"status": "scheduled", "published_at": nil, "scheduled_at": now.Add(-time.Hour)}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.db.Create(&model.BlogPublishSchedule{
