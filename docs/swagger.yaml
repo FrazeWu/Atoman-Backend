@@ -16158,6 +16158,44 @@ paths:
       summary: 查询合集订阅状态
       tags:
       - feed
+  /api/v1/feed/subscription-hub/sources/{feed_source_id}:
+    delete:
+      description: 删除当前用户对指定来源的订阅及对应的播客、视频收藏关系。
+      parameters:
+      - description: 订阅来源 UUID
+        in: path
+        name: feed_source_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/feed.MessageResponse'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/feed.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 取消统一订阅来源
+      tags:
+      - feed
   /api/v1/feed/subscription-hub/tree:
     get:
       description: 返回按播客、视频、博客和 RSS 分离的分组与订阅叶子。

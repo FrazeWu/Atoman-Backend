@@ -38,6 +38,38 @@ func (h *Handler) getSubscriptionHubTree(c *gin.Context) {
 	httpx.OK(c, http.StatusOK, tree)
 }
 
+// deleteSubscriptionHubSource godoc
+// @Summary 取消统一订阅来源
+// @Description 删除当前用户对指定来源的订阅及对应的播客、视频收藏关系。
+// @Tags feed
+// @Produce json
+// @Param feed_source_id path string true "订阅来源 UUID"
+// @Success 200 {object} MessageResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 401 {object} ErrorResponse
+// @Failure 404 {object} ErrorResponse
+// @Failure 500 {object} ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/feed/subscription-hub/sources/{feed_source_id} [delete]
+func (h *Handler) deleteSubscriptionHubSource(c *gin.Context) {
+	user, ok := authctx.Current(c)
+	if !ok {
+		httpx.Error(c, apperr.Unauthorized("Login required"))
+		return
+	}
+	feedSourceID, err := uuid.Parse(strings.TrimSpace(c.Param("feed_source_id")))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "feed_source_id must be a valid uuid"))
+		return
+	}
+	if err := h.service.DeleteSubscriptionHubSource(user.ID, feedSourceID); err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, gin.H{"message": "Subscription removed"})
+}
+
 // getSubscriptionHubUpdates godoc
 // @Summary 获取订阅中心更新流
 // @Description 返回选中类型和分组的最新更新；可进一步按订阅叶子收窄。

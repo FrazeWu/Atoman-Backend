@@ -47,6 +47,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	{
 		protected.GET("/subscription-hub/tree", h.getSubscriptionHubTree)
 		protected.GET("/subscription-hub/updates", h.getSubscriptionHubUpdates)
+		protected.DELETE("/subscription-hub/sources/:feed_source_id", h.deleteSubscriptionHubSource)
 		protected.POST("/timeline/mark-read", h.markRead)
 		protected.POST("/timeline/mark-unread", h.markUnread)
 		protected.POST("/timeline/mark-all-read", h.markAllRead)
