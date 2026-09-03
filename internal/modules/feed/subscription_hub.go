@@ -116,8 +116,10 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 	type legacyContextCandidate struct {
 		subscriptionType string
 		groupName        string
+		groupPosition    int
 		feedSource       *model.FeedSource
 		title            string
+		position         int
 	}
 
 	return s.db.Transaction(func(tx *gorm.DB) error {
@@ -131,21 +133,25 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 				continue
 			}
 			groupName := defaultSubscriptionGroupName
+			groupPosition := 0
 			if subscription.SubscriptionGroup != nil && strings.TrimSpace(subscription.SubscriptionGroup.Name) != "" {
 				groupName = subscription.SubscriptionGroup.Name
+				groupPosition = subscription.SubscriptionGroup.Position
 			}
 			for _, subscriptionType := range subscriptionHubTypesForLegacySource(subscription.FeedSource) {
 				candidates = append(candidates, legacyContextCandidate{
 					subscriptionType: subscriptionType,
 					groupName:        groupName,
+					groupPosition:    groupPosition,
 					feedSource:       subscription.FeedSource,
 					title:            firstNonBlank(subscription.Title, subscription.FeedSource.Title),
+					position:         subscription.Position,
 				})
 			}
 		}
 
 		var channelBookmarks []model.ChannelBookmark
-		if err := tx.Where("user_id = ? AND kind IN ?", userID, []string{"podcast_show", "video_channel"}).Find(&channelBookmarks).Error; err != nil {
+		if err := tx.Where("user_id = ? AND kind IN ?", userID, []string{"podcast_show", "video_channel"}).Order("created_at ASC").Find(&channelBookmarks).Error; err != nil {
 			return err
 		}
 		if len(channelBookmarks) > 0 {
@@ -205,7 +211,7 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 					}
 				}
 			}
-			for _, bookmark := range channelBookmarks {
+			for position, bookmark := range channelBookmarks {
 				source, exists := sourcesByChannelID[bookmark.ChannelID]
 				if !exists {
 					continue
@@ -219,17 +225,25 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 					groupName:        defaultSubscriptionGroupName,
 					feedSource:       &source,
 					title:            source.Title,
+					position:         position,
 				})
 			}
 		}
 
 		desiredGroups := make([]groupKey, 0)
 		desiredGroupSet := make(map[groupKey]struct{})
+		desiredGroupPositions := make(map[groupKey]int)
+		desiredMemberships := make(map[membershipKey]legacyContextCandidate)
 		for _, candidate := range candidates {
 			key := groupKey{subscriptionType: candidate.subscriptionType, name: candidate.groupName}
 			if _, exists := desiredGroupSet[key]; !exists {
 				desiredGroupSet[key] = struct{}{}
 				desiredGroups = append(desiredGroups, key)
+				desiredGroupPositions[key] = candidate.groupPosition
+			}
+			membershipKey := membershipKey{subscriptionType: candidate.subscriptionType, feedSourceID: candidate.feedSource.ID}
+			if _, exists := desiredMemberships[membershipKey]; !exists {
+				desiredMemberships[membershipKey] = candidate
 			}
 		}
 
@@ -238,11 +252,13 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 			return err
 		}
 		groupsByKey := make(map[groupKey]model.SubscriptionHubGroup, len(groups))
-		nextPositions := make(map[string]int)
 		for _, group := range groups {
-			groupsByKey[groupKey{subscriptionType: group.SubscriptionType, name: group.Name}] = group
-			if group.Position >= nextPositions[group.SubscriptionType] {
-				nextPositions[group.SubscriptionType] = group.Position + 1
+			key := groupKey{subscriptionType: group.SubscriptionType, name: group.Name}
+			groupsByKey[key] = group
+			if position, desired := desiredGroupPositions[key]; desired && group.Position != position {
+				if err := tx.Model(&model.SubscriptionHubGroup{}).Where("id = ?", group.ID).Update("position", position).Error; err != nil {
+					return err
+				}
 			}
 		}
 		groupsToCreate := make([]model.SubscriptionHubGroup, 0)
@@ -254,9 +270,8 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 				UserID:           userID,
 				SubscriptionType: key.subscriptionType,
 				Name:             key.name,
-				Position:         nextPositions[key.subscriptionType],
+				Position:         desiredGroupPositions[key],
 			})
-			nextPositions[key.subscriptionType]++
 		}
 		if len(groupsToCreate) > 0 {
 			if err := tx.Clauses(clause.OnConflict{
@@ -279,21 +294,44 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 		if err := tx.Where("user_id = ?", userID).Find(&existingMemberships).Error; err != nil {
 			return err
 		}
-		existingByKey := make(map[membershipKey]struct{}, len(existingMemberships))
-		nextMembershipPositions := make(map[uuid.UUID]int)
+		existingByKey := make(map[membershipKey]model.SubscriptionHubMembership, len(existingMemberships))
+		staleMembershipIDs := make([]uuid.UUID, 0)
 		for _, membership := range existingMemberships {
-			existingByKey[membershipKey{subscriptionType: membership.SubscriptionType, feedSourceID: membership.FeedSourceID}] = struct{}{}
-			if membership.Position >= nextMembershipPositions[membership.GroupID] {
-				nextMembershipPositions[membership.GroupID] = membership.Position + 1
+			key := membershipKey{subscriptionType: membership.SubscriptionType, feedSourceID: membership.FeedSourceID}
+			existingByKey[key] = membership
+			candidate, desired := desiredMemberships[key]
+			if !desired {
+				staleMembershipIDs = append(staleMembershipIDs, membership.ID)
+				continue
+			}
+			group := groupsByKey[groupKey{subscriptionType: candidate.subscriptionType, name: candidate.groupName}]
+			updates := map[string]any{}
+			if membership.GroupID != group.ID {
+				updates["group_id"] = group.ID
+			}
+			if membership.Title != candidate.title {
+				updates["title"] = candidate.title
+			}
+			if membership.Position != candidate.position {
+				updates["position"] = candidate.position
+			}
+			if len(updates) > 0 {
+				if err := tx.Model(&model.SubscriptionHubMembership{}).Where("id = ?", membership.ID).Updates(updates).Error; err != nil {
+					return err
+				}
+			}
+		}
+		if len(staleMembershipIDs) > 0 {
+			if err := tx.Where("id IN ?", staleMembershipIDs).Delete(&model.SubscriptionHubMembership{}).Error; err != nil {
+				return err
 			}
 		}
 		membershipsToCreate := make([]model.SubscriptionHubMembership, 0)
-		for _, candidate := range candidates {
+		for key, candidate := range desiredMemberships {
 			if candidate.feedSource == nil {
 				continue
 			}
-			memberKey := membershipKey{subscriptionType: candidate.subscriptionType, feedSourceID: candidate.feedSource.ID}
-			if _, exists := existingByKey[memberKey]; exists {
+			if _, exists := existingByKey[key]; exists {
 				continue
 			}
 			group, exists := groupsByKey[groupKey{subscriptionType: candidate.subscriptionType, name: candidate.groupName}]
@@ -306,10 +344,8 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 				GroupID:          group.ID,
 				FeedSourceID:     candidate.feedSource.ID,
 				Title:            candidate.title,
-				Position:         nextMembershipPositions[group.ID],
+				Position:         candidate.position,
 			})
-			nextMembershipPositions[group.ID]++
-			existingByKey[memberKey] = struct{}{}
 		}
 		if len(membershipsToCreate) > 0 {
 			if err := tx.Clauses(clause.OnConflict{
@@ -317,6 +353,19 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 				TargetWhere: clause.Where{Exprs: []clause.Expression{clause.Eq{Column: clause.Column{Name: "deleted_at"}, Value: nil}}},
 				DoNothing:   true,
 			}).Create(&membershipsToCreate).Error; err != nil {
+				return err
+			}
+		}
+
+		staleGroupIDs := make([]uuid.UUID, 0)
+		for _, group := range groups {
+			key := groupKey{subscriptionType: group.SubscriptionType, name: group.Name}
+			if _, desired := desiredGroupSet[key]; !desired {
+				staleGroupIDs = append(staleGroupIDs, group.ID)
+			}
+		}
+		if len(staleGroupIDs) > 0 {
+			if err := tx.Where("id IN ?", staleGroupIDs).Delete(&model.SubscriptionHubGroup{}).Error; err != nil {
 				return err
 			}
 		}
@@ -367,6 +416,9 @@ func (s *Service) GetSubscriptionHubTree(userID uuid.UUID) (SubscriptionHubTree,
 		Find(&memberships).Error; err != nil {
 		return SubscriptionHubTree{}, err
 	}
+	if err := s.hydrateSubscriptionHubSourceImages(memberships); err != nil {
+		return SubscriptionHubTree{}, err
+	}
 	for _, membership := range memberships {
 		location, ok := groupsByID[membership.GroupID]
 		if !ok {
@@ -380,6 +432,99 @@ func (s *Service) GetSubscriptionHubTree(userID uuid.UUID) (SubscriptionHubTree,
 	}
 
 	return tree, nil
+}
+
+func (s *Service) hydrateSubscriptionHubSourceImages(memberships []model.SubscriptionHubMembership) error {
+	userIDs := make([]uuid.UUID, 0)
+	channelIDs := make([]uuid.UUID, 0)
+	collectionIDs := make([]uuid.UUID, 0)
+	for _, membership := range memberships {
+		if membership.FeedSource == nil || membership.FeedSource.SourceID == nil {
+			continue
+		}
+		switch membership.FeedSource.SourceType {
+		case "internal_user":
+			userIDs = append(userIDs, *membership.FeedSource.SourceID)
+		case "internal_channel":
+			channelIDs = append(channelIDs, *membership.FeedSource.SourceID)
+		case "internal_collection":
+			collectionIDs = append(collectionIDs, *membership.FeedSource.SourceID)
+		}
+	}
+
+	images := make(map[uuid.UUID]string)
+	if userIDs = dedupeUUIDs(userIDs); len(userIDs) > 0 {
+		var users []model.User
+		if err := s.db.Where("uuid IN ?", userIDs).Find(&users).Error; err != nil {
+			return err
+		}
+		for _, user := range users {
+			images[user.UUID] = strings.TrimSpace(user.AvatarURL)
+		}
+	}
+	if channelIDs = dedupeUUIDs(channelIDs); len(channelIDs) > 0 {
+		var channels []model.Channel
+		if err := s.db.Preload("User").Where("id IN ?", channelIDs).Find(&channels).Error; err != nil {
+			return err
+		}
+		for _, channel := range channels {
+			image := strings.TrimSpace(channel.CoverURL)
+			if image == "" && channel.User != nil {
+				image = strings.TrimSpace(channel.User.AvatarURL)
+			}
+			images[channel.ID] = image
+		}
+	}
+	if collectionIDs = dedupeUUIDs(collectionIDs); len(collectionIDs) > 0 {
+		var collections []model.ContentCollection
+		if err := s.db.Where("id IN ?", collectionIDs).Find(&collections).Error; err != nil {
+			return err
+		}
+		for _, collection := range collections {
+			images[collection.ID] = strings.TrimSpace(collection.CoverURL)
+		}
+		var legacyCollections []model.Collection
+		if err := s.db.Where("id IN ?", collectionIDs).Find(&legacyCollections).Error; err != nil {
+			return err
+		}
+		for _, collection := range legacyCollections {
+			if images[collection.ID] == "" {
+				images[collection.ID] = strings.TrimSpace(collection.CoverURL)
+			}
+		}
+	}
+
+	for index := range memberships {
+		source := memberships[index].FeedSource
+		if source == nil || source.SourceID == nil {
+			continue
+		}
+		if image := images[*source.SourceID]; image != "" {
+			source.CoverURL = image
+		}
+	}
+	return nil
+}
+
+func (s *Service) DeleteSubscriptionHubSource(userID, feedSourceID uuid.UUID) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		var source model.FeedSource
+		if err := tx.First(&source, "id = ?", feedSourceID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("subscription_hub.source_not_found", "Subscription source not found")
+			}
+			return err
+		}
+		if err := tx.Where("user_id = ? AND feed_source_id = ?", userID, feedSourceID).Delete(&model.Subscription{}).Error; err != nil {
+			return err
+		}
+		if source.SourceType == "internal_channel" && source.SourceID != nil {
+			if err := tx.Where("user_id = ? AND channel_id = ? AND kind IN ?", userID, *source.SourceID, []string{"podcast_show", "video_channel"}).Delete(&model.ChannelBookmark{}).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Where("user_id = ? AND feed_source_id = ?", userID, feedSourceID).Delete(&model.SubscriptionHubMembership{}).Error
+	})
 }
 
 func (s *Service) GetSubscriptionHubUpdates(user authctx.CurrentUser, query SubscriptionHubUpdatesQuery) ([]TimelineItemDTO, int64, error) {
