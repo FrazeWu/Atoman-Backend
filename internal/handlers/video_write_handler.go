@@ -112,6 +112,46 @@ func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// DuplicateVideo creates an editable draft that reuses the owner's existing media.
+func DuplicateVideo(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("userID").(uuid.UUID)
+		videoID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		original, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", videoID))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		if original.UserID != userID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		tags := make([]string, 0, len(original.Tags))
+		for _, tag := range original.Tags {
+			tags = append(tags, tag.Name)
+		}
+		copy, statusCode, err := createVideoRecord(db, userID, videoCreateParams{
+			ChannelID: original.ChannelID, Title: fmt.Sprintf("%s (副本)", original.Title), Description: original.Description,
+			StorageType: original.StorageType, VideoURL: original.VideoURL, ThumbnailURL: original.ThumbnailURL,
+			SubtitleURL: original.SubtitleURL, Chapters: original.Chapters, DurationSec: original.DurationSec,
+			Visibility: original.Visibility, Status: "draft", Tags: tags, CollectionID: original.CollectionID,
+		})
+		if err != nil {
+			if apperr.FromError(err) != nil {
+				httpx.Error(c, err)
+				return
+			}
+			c.JSON(statusCode, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, copy)
+	}
+}
+
 func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (model.Video, int, error) {
 	storageType := input.StorageType
 	if storageType == "" {

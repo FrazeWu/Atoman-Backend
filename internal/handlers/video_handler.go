@@ -14,6 +14,7 @@ func SetupVideoRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 		v.GET("", middleware.OptionalAuthMiddleware(), GetVideos(db))
 		v.GET("/recommend/items", GetRecommendedVideoItems(db))
 		v.POST("/:id/reprocess", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), ReprocessVideo(db))
+		v.POST("/:id/duplicate", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), DuplicateVideo(db))
 		v.PUT("/:id/rating", middleware.AuthMiddleware(), SetVideoRating(db))
 		v.DELETE("/:id/rating", middleware.AuthMiddleware(), DeleteVideoRating(db))
 		v.GET("/bookmarks", middleware.AuthMiddleware(), GetVideoBookmarks(db))
