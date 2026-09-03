@@ -880,7 +880,8 @@ func videoImportPublicURL(key string) string {
 }
 
 func isLocalVideoStorage() bool {
-	return strings.EqualFold(strings.TrimSpace(os.Getenv("STORAGE_TYPE")), "local")
+	// 视频导入只允许使用 R2 的 S3 兼容 multipart API，不能回退到应用文件系统。
+	return false
 }
 
 func localVideoImportPartsDir(userID, importID uuid.UUID) string {
