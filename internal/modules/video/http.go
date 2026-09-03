@@ -12,7 +12,9 @@ import (
 func RegisterRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	v := router.Group("/api/v1/videos")
 	v.GET("", middleware.OptionalAuthMiddleware(), handlers.GetVideos(db))
-	v.GET("/recommend/items", handlers.GetRecommendedVideoItems(db))
+	v.GET("/recommend/items", middleware.OptionalAuthMiddleware(), handlers.GetRecommendedVideoItems(db))
+	v.POST("/recommendation-feedback", middleware.AuthMiddleware(), handlers.CreateVideoRecommendationFeedback(db))
+	v.DELETE("/recommendation-feedback/:scope/:id", middleware.AuthMiddleware(), handlers.DeleteVideoRecommendationFeedback(db))
 	v.GET("/subscriptions", middleware.AuthMiddleware(), handlers.GetSubscribedVideos(db))
 	v.GET("/collection-bookmarks", middleware.AuthMiddleware(), handlers.GetVideoCollectionBookmarks(db))
 	v.GET("/bookmarks", middleware.AuthMiddleware(), handlers.GetVideoBookmarks(db))
