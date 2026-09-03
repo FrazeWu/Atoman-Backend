@@ -72,6 +72,24 @@ func TestCreateDebateCreatesCurrentVersionOneInOneTransaction(t *testing.T) {
 	require.Equal(t, ctx.owner.ID, revision.EditorID)
 }
 
+func TestListDebatesUsesIDAsStableTieBreakerForCreatedAt(t *testing.T) {
+	ctx := newDebateTestContext(t)
+	createdAt := time.Date(2026, time.January, 1, 12, 0, 0, 0, time.UTC)
+	lowerID := uuid.MustParse("00000000-0000-0000-0000-000000000001")
+	higherID := uuid.MustParse("00000000-0000-0000-0000-000000000002")
+	debates := []model.Debate{
+		{Base: model.Base{ID: lowerID, CreatedAt: createdAt, UpdatedAt: createdAt}, UserID: ctx.owner.ID, Title: "Lower", Status: model.DebateStatusActive},
+		{Base: model.Base{ID: higherID, CreatedAt: createdAt, UpdatedAt: createdAt}, UserID: ctx.owner.ID, Title: "Higher", Status: model.DebateStatusActive},
+	}
+	require.NoError(t, ctx.db.Create(&debates).Error)
+
+	items, total, err := ctx.service.ListDebates(ListDebatesQuery{Page: 1, PageSize: 1})
+	require.NoError(t, err)
+	require.Equal(t, int64(2), total)
+	require.Len(t, items, 1)
+	require.Equal(t, higherID, items[0].ID)
+}
+
 func TestSaveWikiStoresConcludedDebateReferenceInUnifiedReferences(t *testing.T) {
 	ctx := newDebateTestContext(t)
 	source := createDebateForTest(t, ctx, "Source", "body")
