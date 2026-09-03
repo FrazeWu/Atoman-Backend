@@ -53,6 +53,8 @@ type videoRow struct {
 	StorageType        string     `gorm:"column:storage_type"`
 	VideoURL           string     `gorm:"column:video_url"`
 	ThumbnailURL       string     `gorm:"column:thumbnail_url"`
+	SubtitleURL        string     `gorm:"column:subtitle_url"`
+	Chapters           []byte     `gorm:"column:chapters"`
 	DurationSec        int        `gorm:"column:duration_sec"`
 	ProcessingStatus   string     `gorm:"column:processing_status"`
 	ProcessingError    string     `gorm:"column:processing_error"`
@@ -122,7 +124,7 @@ func VideoQuery(db *gorm.DB) *gorm.DB {
 		return db.Table("(SELECT videos.*, videos.user_id AS author_id FROM videos) AS posts").
 			Joins(`JOIN (
 				SELECT id, id AS video_id, created_at, updated_at, storage_type, video_url,
-					thumbnail_url, duration_sec, processing_status, processing_error,
+					thumbnail_url, subtitle_url, chapters, duration_sec, processing_status, processing_error,
 					preview_thumbnails, view_count
 				FROM videos
 			) AS videos ON videos.id = posts.id`).
@@ -131,7 +133,7 @@ func VideoQuery(db *gorm.DB) *gorm.DB {
 				videos.created_at AS video_created_at, videos.updated_at AS video_updated_at,
 				posts.title, posts.description AS summary, posts.status, posts.visibility,
 				posts.published_at, posts.scheduled_at, videos.storage_type, videos.video_url,
-				videos.thumbnail_url, videos.duration_sec, videos.processing_status,
+				videos.thumbnail_url, videos.subtitle_url, videos.chapters, videos.duration_sec, videos.processing_status,
 				videos.processing_error, videos.preview_thumbnails, videos.view_count,
 				0 AS collection_conflict`).
 			Where("posts.deleted_at IS NULL")
@@ -150,7 +152,7 @@ func VideoQuery(db *gorm.DB) *gorm.DB {
 			videos.created_at AS video_created_at, videos.updated_at AS video_updated_at,
 			posts.title, posts.summary, posts.status, posts.visibility,
 			posts.published_at, posts.scheduled_at, videos.storage_type, videos.video_url,
-			videos.thumbnail_url, videos.duration_sec, videos.processing_status,
+			videos.thumbnail_url, videos.subtitle_url, videos.chapters, videos.duration_sec, videos.processing_status,
 			videos.processing_error, videos.preview_thumbnails, videos.view_count,
 			videos.collection_conflict`).
 		Where("posts.kind = ? AND posts.deleted_at IS NULL", "video")
@@ -383,7 +385,7 @@ func hydrateVideos(db *gorm.DB, rows []videoRow) ([]model.Video, error) {
 			Base:      model.Base{ID: row.VideoID, CreatedAt: videoCreatedAt, UpdatedAt: videoUpdatedAt},
 			ChannelID: row.ChannelID, Channel: channelForID(channels, row.ChannelID), UserID: row.AuthorID, User: users[row.AuthorID],
 			Title: row.Title, Description: row.Summary, StorageType: row.StorageType, VideoURL: row.VideoURL,
-			ThumbnailURL: row.ThumbnailURL, DurationSec: row.DurationSec, ProcessingStatus: row.ProcessingStatus,
+			ThumbnailURL: row.ThumbnailURL, SubtitleURL: row.SubtitleURL, Chapters: row.Chapters, DurationSec: row.DurationSec, ProcessingStatus: row.ProcessingStatus,
 			ProcessingError: row.ProcessingError, PreviewThumbnails: row.PreviewThumbnails,
 			Visibility: row.Visibility, Status: row.Status, ScheduledAt: timePtr(row.ScheduledAt),
 			PublishedAt: timePtr(row.PublishedAt), ViewCount: row.ViewCount,
