@@ -64,6 +64,9 @@ func resolveSubscriptionInputForUser(db *gorm.DB, userID uuid.UUID, rawInput str
 		}
 		return response, http.StatusOK
 	}
+	if err := validateFeedDiscoveryFetchURL(u); err != nil {
+		return newAutoSubscriptionResolveResponse("invalid"), http.StatusOK
+	}
 
 	canonicalInput := normalizeCanonicalFeedURL(u.String())
 	if db != nil {

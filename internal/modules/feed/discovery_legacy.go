@@ -26,7 +26,7 @@ type feedDiscoveryDocument struct {
 var resolveFeedDiscoveryHostname = net.LookupIP
 
 var feedDiscoveryHTTPClient = &http.Client{
-	Timeout: 8 * time.Second,
+	Timeout: 4 * time.Second,
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
 			return errors.New("too many redirects")
@@ -57,12 +57,12 @@ func DiscoverFeedCandidates() gin.HandlerFunc {
 			return
 		}
 
-		isDirectFeed, err := probeAutoSubscriptionDirectFeedURL(u)
+		document, err := fetchAutoSubscriptionDocument(rawURL)
 		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to verify feed URL"})
+			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch website for feed discovery"})
 			return
 		}
-		if isDirectFeed {
+		if document.IsFeed {
 			c.JSON(http.StatusOK, gin.H{"candidates": []service.FeedDiscoveryCandidate{
 				{
 					Title:     rawURL,
@@ -77,13 +77,7 @@ func DiscoverFeedCandidates() gin.HandlerFunc {
 			return
 		}
 
-		html, err := fetchFeedDiscoveryHTML(rawURL)
-		if err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": "failed to fetch website for feed discovery"})
-			return
-		}
-
-		candidates := service.ExtractFeedCandidatesFromHTML(rawURL, html)
+		candidates := service.ExtractFeedCandidatesFromHTML(rawURL, document.Body)
 		if candidates == nil {
 			candidates = []service.FeedDiscoveryCandidate{}
 		}
