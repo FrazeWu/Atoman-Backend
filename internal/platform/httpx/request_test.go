@@ -66,3 +66,18 @@ func TestUUIDParam(t *testing.T) {
 		t.Fatalf("invalid UUID response = %s", got)
 	}
 }
+
+func TestParseUUID(t *testing.T) {
+	want := uuid.New()
+	got, err := ParseUUID(want.String(), "user_id")
+	if err != nil {
+		t.Fatalf("parse valid UUID: %v", err)
+	}
+	if got != want {
+		t.Fatalf("parsed UUID = %s, want %s", got, want)
+	}
+
+	if _, err := ParseUUID("invalid", "user_id"); err == nil {
+		t.Fatal("invalid UUID error = nil, want validation error")
+	}
+}
