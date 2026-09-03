@@ -682,14 +682,14 @@ func CancelVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "已创建的视频不能取消"})
 			return
 		}
-		if isLocalVideoStorage() {
-			cleanupLocalVideoImport(session)
-		} else if client != nil && session.UploadCompletedAt == nil {
-			_, _ = client.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
-				Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey), UploadId: aws.String(session.UploadID),
-			})
-		} else if client != nil && (session.ContentID != nil || session.TargetVideoID != nil) {
-			_, _ = client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey)})
+		if client != nil {
+			if session.UploadCompletedAt == nil {
+				_, _ = client.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
+					Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey), UploadId: aws.String(session.UploadID),
+				})
+			} else {
+				_, _ = client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey)})
+			}
 		}
 		if err := db.Model(&session).Updates(map[string]any{"status": videoImportCanceled, "error_message": ""}).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
