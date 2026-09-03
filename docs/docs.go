@@ -30876,6 +30876,9 @@ const docTemplate = `{
                         "$ref": "#/definitions/feed.SubscriptionHubGroupNode"
                     }
                 },
+                "has_content": {
+                    "type": "boolean"
+                },
                 "subscription_type": {
                     "type": "string"
                 }
