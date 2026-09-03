@@ -393,14 +393,15 @@ func (importer *AppleCatalogImporter) findOrCreateAppleArtist(tx *gorm.DB, store
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return artist, err
 	} else {
-		err = tx.Where("LOWER(name) = LOWER(?)", candidate.Name).First(&artist).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		query := tx.Where("LOWER(name) = LOWER(?)", candidate.Name).Limit(1).Find(&artist)
+		if query.Error != nil {
+			return artist, query.Error
+		}
+		if query.RowsAffected == 0 {
 			artist = model.Artist{Name: candidate.Name, ArtistForm: "person", EntryStatus: "open", LifecycleStatus: model.MusicLifecycleActive, EditStatus: model.MusicEditDevelopment, CreatedBy: &importer.ownerID, SourcesJSON: appleSourceJSON("", candidate.URL)}
 			if err := tx.Create(&artist).Error; err != nil {
 				return artist, err
 			}
-		} else if err != nil {
-			return artist, err
 		} else if err := addAppleSource(tx, &artist, candidate.URL); err != nil {
 			return artist, err
 		}
@@ -420,8 +421,11 @@ func (importer *AppleCatalogImporter) findOrCreateAppleAlbum(tx *gorm.DB, storef
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return album, err
 	} else {
-		err = tx.Table(`"Albums"`).Joins("JOIN album_artists ON album_artists.album_id = \"Albums\".id").Where("album_artists.artist_id = ? AND LOWER(\"Albums\".title) = LOWER(?)", artist.ID, item.CollectionName).First(&album).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		query := tx.Table(`"Albums"`).Joins("JOIN album_artists ON album_artists.album_id = \"Albums\".id").Where("album_artists.artist_id = ? AND LOWER(\"Albums\".title) = LOWER(?)", artist.ID, item.CollectionName).Limit(1).Find(&album)
+		if query.Error != nil {
+			return album, query.Error
+		}
+		if query.RowsAffected == 0 {
 			releaseDate := parseAppleDate(item.ReleaseDate)
 			releaseYear := 0
 			if !releaseDate.IsZero() {
@@ -434,8 +438,6 @@ func (importer *AppleCatalogImporter) findOrCreateAppleAlbum(tx *gorm.DB, storef
 			if err := tx.Create(&model.AlbumArtist{AlbumID: album.ID, ArtistID: artist.ID, Role: "primary", Position: 1}).Error; err != nil {
 				return album, err
 			}
-		} else if err != nil {
-			return album, err
 		} else if err := addAppleSource(tx, &album, appleCollectionURL(item.CollectionViewURL)); err != nil {
 			return album, err
 		}
@@ -454,8 +456,11 @@ func (importer *AppleCatalogImporter) findOrCreateAppleSong(tx *gorm.DB, storefr
 	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	} else {
-		err = tx.Where("album_id = ? AND disc_number = ? AND track_number = ? AND LOWER(title) = LOWER(?)", album.ID, item.DiscNumber, item.TrackNumber, item.TrackName).First(&song).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		query := tx.Where("album_id = ? AND disc_number = ? AND track_number = ? AND LOWER(title) = LOWER(?)", album.ID, item.DiscNumber, item.TrackNumber, item.TrackName).Limit(1).Find(&song)
+		if query.Error != nil {
+			return query.Error
+		}
+		if query.RowsAffected == 0 {
 			releaseDate := parseAppleDate(item.ReleaseDate)
 			song = model.Song{Title: item.TrackName, ReleaseDate: releaseDate, ReleaseDatePrecision: appleDatePrecision(releaseDate), TrackNumber: item.TrackNumber, DiscNumber: max(item.DiscNumber, 1), AudioURL: "", AudioSource: "", SourcesJSON: appleSourceJSON("", item.TrackViewURL), Status: "open", LifecycleStatus: model.MusicLifecycleActive, EditStatus: model.MusicEditDevelopment, AlbumID: &album.ID, UploadedBy: &importer.ownerID, DurationSec: item.TrackTimeMillis / 1000}
 			if err := tx.Create(&song).Error; err != nil {
@@ -464,8 +469,6 @@ func (importer *AppleCatalogImporter) findOrCreateAppleSong(tx *gorm.DB, storefr
 			if err := tx.Create(&model.SongArtist{SongID: song.ID, ArtistID: artist.ID, Role: "primary", Position: 1}).Error; err != nil {
 				return err
 			}
-		} else if err != nil {
-			return err
 		} else if err := addAppleSource(tx, &song, item.TrackViewURL); err != nil {
 			return err
 		}
@@ -475,8 +478,14 @@ func (importer *AppleCatalogImporter) findOrCreateAppleSong(tx *gorm.DB, storefr
 
 func findMusicCatalogLink(tx *gorm.DB, entityType, externalID string) (model.MusicCatalogLink, error) {
 	var link model.MusicCatalogLink
-	err := tx.Where("provider = ? AND entity_type = ? AND external_id = ?", appleCatalogProvider, entityType, externalID).First(&link).Error
-	return link, err
+	query := tx.Where("provider = ? AND entity_type = ? AND external_id = ?", appleCatalogProvider, entityType, externalID).Limit(1).Find(&link)
+	if query.Error != nil {
+		return link, query.Error
+	}
+	if query.RowsAffected == 0 {
+		return link, gorm.ErrRecordNotFound
+	}
+	return link, nil
 }
 
 func upsertMusicCatalogLink(tx *gorm.DB, entityType, externalID string, entityID uuid.UUID, storefront, sourceURL string, chartRank int, metadata any) error {

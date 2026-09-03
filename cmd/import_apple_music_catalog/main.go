@@ -35,17 +35,28 @@ func main() {
 	}
 	var db *gorm.DB
 	var ownerID uuid.UUID
+	var err error
 	if *apply {
-		parsedOwnerID, err := uuid.Parse(strings.TrimSpace(*userID))
-		if err != nil {
-			log.Fatal("-user-id must be a valid UUID when -apply is set")
-		}
 		db, err = app.OpenDB(config.DBConfig{Type: strings.TrimSpace(os.Getenv("DATABASE_TYPE")), URL: strings.TrimSpace(os.Getenv("DATABASE_URL"))})
 		if err != nil {
 			log.Fatalf("open database: %v", err)
 		}
 		var owner model.User
-		if err := db.First(&owner, "uuid = ?", parsedOwnerID).Error; err != nil {
+		ownerQuery := db
+		if value := strings.TrimSpace(*userID); value != "" {
+			parsedOwnerID, err := uuid.Parse(value)
+			if err != nil {
+				log.Fatal("-user-id must be a valid UUID")
+			}
+			ownerQuery = ownerQuery.Where("uuid = ?", parsedOwnerID)
+		} else {
+			ownerUsername := strings.TrimSpace(os.Getenv("OWNER_USERNAME"))
+			if ownerUsername == "" {
+				log.Fatal("-user-id or OWNER_USERNAME is required when -apply is set")
+			}
+			ownerQuery = ownerQuery.Where("username = ?", ownerUsername)
+		}
+		if err := ownerQuery.First(&owner).Error; err != nil {
 			log.Fatalf("load catalog owner: %v", err)
 		}
 		ownerID = owner.UUID
