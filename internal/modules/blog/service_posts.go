@@ -360,6 +360,9 @@ func (s *Service) CreateBlogContent(user authctx.CurrentUser, req CreatePostRequ
 		if err := tx.Create(&blogExtension).Error; err != nil {
 			return err
 		}
+		if err := syncBlogTags(tx, entry.ID, req.Tags); err != nil {
+			return err
+		}
 		if err := s.syncBlogContentMediaAssets(tx, entry.ID, user.ID, entry.CoverURL, blogExtension.Content); err != nil {
 			return err
 		}

@@ -24,8 +24,18 @@ func GetVideoBookmarks(db *gorm.DB) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID := c.MustGet("userID").(uuid.UUID)
 		sort := strings.TrimSpace(c.DefaultQuery("sort", "latest"))
+		state := strings.TrimSpace(c.DefaultQuery("state", "active"))
 		var bookmarks []model.VideoBookmark
-		query := db.Where("video_bookmarks.user_id = ?", userID)
+		query := db.Model(&model.VideoBookmark{}).Select("video_bookmarks.*").Where("video_bookmarks.user_id = ?", userID)
+		switch state {
+		case "completed":
+			query = query.Joins("JOIN content_progress ON content_progress.user_id = video_bookmarks.user_id AND content_progress.content_type = ? AND content_progress.content_id = video_bookmarks.video_id AND content_progress.completed = ?", "video", true)
+		case "all":
+			// Keep all records for future management surfaces.
+		default:
+			query = query.Joins("LEFT JOIN content_progress ON content_progress.user_id = video_bookmarks.user_id AND content_progress.content_type = ? AND content_progress.content_id = video_bookmarks.video_id", "video").
+				Where("COALESCE(content_progress.completed, ?) = ?", false, false)
+		}
 		if sort == "popular" {
 			query = query.
 				Joins("JOIN content_video_extensions AS videos ON videos.video_id = video_bookmarks.video_id").

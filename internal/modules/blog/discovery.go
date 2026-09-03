@@ -23,6 +23,7 @@ const (
 
 type BlogSearchQuery struct {
 	Text         string
+	Tag          string
 	AuthorID     *uuid.UUID
 	ChannelID    *uuid.UUID
 	CollectionID *uuid.UUID
@@ -88,7 +89,8 @@ func normalizeBlogDigestPeriod(raw string) (string, time.Duration, error) {
 
 func (s *Service) SearchPublishedBlogContents(input BlogSearchQuery) ([]BlogSearchResultDTO, int64, error) {
 	text := strings.TrimSpace(input.Text)
-	if text == "" {
+	tag := strings.ToLower(strings.Join(strings.Fields(strings.TrimSpace(input.Tag)), " "))
+	if text == "" && tag == "" {
 		return []BlogSearchResultDTO{}, 0, nil
 	}
 	page, pageSize := normalizeBlogSearchPage(input.Page, input.PageSize)
@@ -108,7 +110,13 @@ func (s *Service) SearchPublishedBlogContents(input BlogSearchQuery) ([]BlogSear
 		if input.CollectionID != nil {
 			query = query.Where("memberships.collection_id = ?", *input.CollectionID)
 		}
-		return applyBlogSearchFilter(query, text)
+		if tag != "" {
+			query = query.Where("EXISTS (SELECT 1 FROM content_blog_tags WHERE content_blog_tags.content_id = posts.id AND content_blog_tags.name = ?)", tag)
+		}
+		if text != "" {
+			query = applyBlogSearchFilter(query, text)
+		}
+		return query
 	}
 
 	var total int64
@@ -131,6 +139,9 @@ func (s *Service) SearchPublishedBlogContents(input BlogSearchQuery) ([]BlogSear
 	items := make([]BlogSearchResultDTO, 0, len(contents))
 	for _, content := range contents {
 		snippet, matchField := blogSearchSnippet(content, text)
+		if text == "" {
+			snippet, matchField = content.Summary, "tag"
+		}
 		items = append(items, BlogSearchResultDTO{
 			ID: content.ID, Title: content.Title, Summary: content.Summary, Snippet: snippet, MatchField: matchField,
 			CoverURL: content.CoverURL, PublishedAt: content.PublishedAt, CreatedAt: content.CreatedAt,

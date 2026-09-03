@@ -53,15 +53,17 @@ var (
 )
 
 type VideoImportPayload struct {
-	ChannelID     *uuid.UUID  `json:"channel_id"`
-	Title         string      `json:"title"`
-	Description   string      `json:"description"`
-	ThumbnailURL  string      `json:"thumbnail_url"`
-	DurationSec   int         `json:"duration_sec"`
-	Visibility    string      `json:"visibility"`
-	Tags          []string    `json:"tags"`
-	CollectionID  *uuid.UUID  `json:"collection_id"`
-	CollectionIDs []uuid.UUID `json:"collection_ids"`
+	ChannelID     *uuid.UUID      `json:"channel_id"`
+	Title         string          `json:"title"`
+	Description   string          `json:"description"`
+	ThumbnailURL  string          `json:"thumbnail_url"`
+	SubtitleURL   string          `json:"subtitle_url"`
+	Chapters      json.RawMessage `json:"chapters"`
+	DurationSec   int             `json:"duration_sec"`
+	Visibility    string          `json:"visibility"`
+	Tags          []string        `json:"tags"`
+	CollectionID  *uuid.UUID      `json:"collection_id"`
+	CollectionIDs []uuid.UUID     `json:"collection_ids"`
 }
 
 type CreateVideoImportInput struct {
@@ -750,7 +752,7 @@ func finalizeVideoImport(db *gorm.DB, id, userID uuid.UUID) error {
 		}
 		video, _, err := createVideoRecord(tx, userID, videoCreateParams{
 			ChannelID: payload.ChannelID, Title: payload.Title, Description: payload.Description,
-			StorageType: "local", VideoURL: videoImportPublicURL(session.ObjectKey), ThumbnailURL: payload.ThumbnailURL,
+			StorageType: "local", VideoURL: videoImportPublicURL(session.ObjectKey), ThumbnailURL: payload.ThumbnailURL, SubtitleURL: payload.SubtitleURL, Chapters: payload.Chapters,
 			DurationSec: payload.DurationSec,
 			Visibility:  payload.Visibility, Status: status, Tags: payload.Tags,
 			CollectionID: payload.CollectionID, CollectionIDs: payload.CollectionIDs,

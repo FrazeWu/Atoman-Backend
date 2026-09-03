@@ -210,6 +210,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.ContentEntry{},
 		&model.ContentPostExtension{},
 		&model.ContentBlogExtension{},
+		&model.ContentBlogTag{},
 		&model.ContentBlogVersion{},
 		&model.ContentBlogDraft{},
 		&model.BlogMarkdownImport{},
@@ -565,12 +566,28 @@ func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 	}
 
 	r := newBlogHTTPRouter(service, &user)
-	missingFolderW := httptest.NewRecorder()
-	missingFolderReq := httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"content_id":"`+post.ID.String()+`"}`))
-	missingFolderReq.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(missingFolderW, missingFolderReq)
-	if missingFolderW.Code != http.StatusBadRequest {
-		t.Fatalf("expected bookmark folder to be required, got %d: %s", missingFolderW.Code, missingFolderW.Body.String())
+	defaultFolderW := httptest.NewRecorder()
+	defaultFolderReq := httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"content_id":"`+post.ID.String()+`"}`))
+	defaultFolderReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(defaultFolderW, defaultFolderReq)
+	if defaultFolderW.Code != http.StatusCreated {
+		t.Fatalf("expected default bookmark folder fallback, got %d: %s", defaultFolderW.Code, defaultFolderW.Body.String())
+	}
+	var defaultBookmark struct {
+		Data BlogBookmarkDTO `json:"data"`
+	}
+	if err := json.Unmarshal(defaultFolderW.Body.Bytes(), &defaultBookmark); err != nil {
+		t.Fatalf("decode default bookmark response: %v", err)
+	}
+	if defaultBookmark.Data.BookmarkFolderID == nil {
+		t.Fatal("expected fallback bookmark folder in response")
+	}
+	var folder model.BookmarkFolder
+	if err := db.First(&folder, "id = ? AND user_id = ?", *defaultBookmark.Data.BookmarkFolderID, user.ID).Error; err != nil {
+		t.Fatalf("load fallback bookmark folder: %v", err)
+	}
+	if folder.Name != "默认收藏夹" {
+		t.Fatalf("fallback bookmark folder name = %q, want %q", folder.Name, "默认收藏夹")
 	}
 
 	w := httptest.NewRecorder()
@@ -578,15 +595,6 @@ func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
 		t.Fatalf("expected likes count route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	folder := model.BookmarkFolder{UserID: user.ID, Name: "Favorites"}
-	if err := db.Create(&folder).Error; err != nil {
-		t.Fatalf("create bookmark folder: %v", err)
-	}
-	bookmark := model.Bookmark{UserID: user.ID, ContentID: post.ID, BookmarkFolderID: &folder.ID}
-	if err := db.Create(&bookmark).Error; err != nil {
-		t.Fatalf("create bookmark: %v", err)
 	}
 
 	for _, path := range []string{
@@ -757,6 +765,30 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 	}
 	if first.Summary != "这是一篇适合推荐的文章内容。" {
 		t.Fatalf("expected recommendation summary fallback, got %q", first.Summary)
+	}
+}
+
+func TestBlogPostsPersistNormalizedTagsAndFilterByTag(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	router := newBlogHTTPRouter(service, &user)
+	body := `{"title":"Tagged post","content":"Body","channel_id":"` + channel.ID.String() + `","status":"published","visibility":"public","tags":[" Design ","design","Vue"]}`
+	created := httptest.NewRecorder()
+	router.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts", bytes.NewBufferString(body)))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("expected tagged post to be created, got %d: %s", created.Code, created.Body.String())
+	}
+	if !bytes.Contains(created.Body.Bytes(), []byte(`"tags":["design","vue"]`)) {
+		t.Fatalf("expected normalized tags in create response, got %s", created.Body.String())
+	}
+
+	filtered := httptest.NewRecorder()
+	router.ServeHTTP(filtered, httptest.NewRequest(http.MethodGet, "/api/v1/blog/search?tag=design", nil))
+	if filtered.Code != http.StatusOK || !bytes.Contains(filtered.Body.Bytes(), []byte("Tagged post")) {
+		t.Fatalf("expected tag filter to return tagged post, got %d: %s", filtered.Code, filtered.Body.String())
 	}
 }
 
