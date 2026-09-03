@@ -34,6 +34,7 @@ type SubscriptionHubTree struct {
 
 type SubscriptionHubTypeNode struct {
 	SubscriptionType string                     `json:"subscription_type"`
+	HasContent       bool                       `json:"has_content"`
 	Groups           []SubscriptionHubGroupNode `json:"groups"`
 }
 
@@ -429,6 +430,22 @@ func (s *Service) GetSubscriptionHubTree(userID uuid.UUID) (SubscriptionHubTree,
 			continue
 		}
 		group.Memberships = append(group.Memberships, membership)
+	}
+
+	for typeIndex := range tree.Types {
+		membershipsForType := make([]model.SubscriptionHubMembership, 0)
+		for groupIndex := range tree.Types[typeIndex].Groups {
+			membershipsForType = append(membershipsForType, tree.Types[typeIndex].Groups[groupIndex].Memberships...)
+		}
+		_, total, err := s.getSubscriptionHubTimeline(userID, membershipsForType, FeedQuery{
+			Page:        1,
+			PageSize:    1,
+			ContentType: subscriptionHubContentType(tree.Types[typeIndex].SubscriptionType),
+		})
+		if err != nil {
+			return SubscriptionHubTree{}, err
+		}
+		tree.Types[typeIndex].HasContent = total > 0
 	}
 
 	return tree, nil

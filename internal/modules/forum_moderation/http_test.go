@@ -62,6 +62,33 @@ func seedForumModerationHTTPUsers(t *testing.T) (*Service, authctx.CurrentUser, 
 	return service, admin, authctx.CurrentUser{ID: user.UUID, Username: user.Username, Role: user.Role}, category, moderator
 }
 
+func TestModerationRoutesPreserveInvalidRequestEnvelope(t *testing.T) {
+	service, admin, normalUser, _, _ := seedForumModerationHTTPUsers(t)
+	router := newForumModerationHTTPRouter(service, &admin)
+
+	invalidID := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/forum/moderation/users/invalid/actions", bytes.NewBufferString(`{"action":"silence"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(invalidID, request)
+	if invalidID.Code != http.StatusBadRequest {
+		t.Fatalf("invalid user ID status = %d, want 400", invalidID.Code)
+	}
+	if got := invalidID.Body.String(); got != `{"error":{"code":"validation.invalid_request","details":{},"message":"userID must be a valid uuid"}}` {
+		t.Fatalf("invalid user ID response = %s", got)
+	}
+
+	invalidJSON := httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/forum/moderation/users/"+normalUser.ID.String()+"/actions", bytes.NewBufferString(`{"action":`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(invalidJSON, request)
+	if invalidJSON.Code != http.StatusBadRequest {
+		t.Fatalf("invalid JSON status = %d, want 400", invalidJSON.Code)
+	}
+	if got := invalidJSON.Body.String(); got != `{"error":{"code":"validation.invalid_request","details":{},"message":"request body must be valid JSON"}}` {
+		t.Fatalf("invalid JSON response = %s", got)
+	}
+}
+
 func TestModeratorAssignmentRoutesRejectNonAdminUser(t *testing.T) {
 	service, _, normalUser, _, _ := seedForumModerationHTTPUsers(t)
 	router := newForumModerationHTTPRouter(service, &normalUser)

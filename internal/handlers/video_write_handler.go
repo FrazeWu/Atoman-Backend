@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -22,19 +23,21 @@ import (
 )
 
 type videoCreateParams struct {
-	ChannelID              *uuid.UUID  `json:"channel_id"`
-	Title                  string      `json:"title" binding:"required"`
-	Description            string      `json:"description"`
-	StorageType            string      `json:"storage_type"`
-	VideoURL               string      `json:"video_url" binding:"required"`
-	ThumbnailURL           string      `json:"thumbnail_url"`
-	DurationSec            int         `json:"duration_sec"`
-	Visibility             string      `json:"visibility"`
-	Status                 string      `json:"status"`
-	Tags                   []string    `json:"tags"`
-	CollectionID           *uuid.UUID  `json:"collection_id"`
-	CollectionIDs          []uuid.UUID `json:"collection_ids"`
-	AllowPendingProcessing bool        `json:"-"`
+	ChannelID              *uuid.UUID      `json:"channel_id"`
+	Title                  string          `json:"title" binding:"required"`
+	Description            string          `json:"description"`
+	StorageType            string          `json:"storage_type"`
+	VideoURL               string          `json:"video_url" binding:"required"`
+	ThumbnailURL           string          `json:"thumbnail_url"`
+	SubtitleURL            string          `json:"subtitle_url"`
+	Chapters               json.RawMessage `json:"chapters"`
+	DurationSec            int             `json:"duration_sec"`
+	Visibility             string          `json:"visibility"`
+	Status                 string          `json:"status"`
+	Tags                   []string        `json:"tags"`
+	CollectionID           *uuid.UUID      `json:"collection_id"`
+	CollectionIDs          []uuid.UUID     `json:"collection_ids"`
+	AllowPendingProcessing bool            `json:"-"`
 }
 
 // ReprocessVideo godoc
@@ -109,6 +112,46 @@ func CreateVideo(db *gorm.DB) gin.HandlerFunc {
 	}
 }
 
+// DuplicateVideo creates an editable draft that reuses the owner's existing media.
+func DuplicateVideo(db *gorm.DB) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID := c.MustGet("userID").(uuid.UUID)
+		videoID, err := uuid.Parse(c.Param("id"))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		original, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", videoID))
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "video not found"})
+			return
+		}
+		if original.UserID != userID {
+			c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		tags := make([]string, 0, len(original.Tags))
+		for _, tag := range original.Tags {
+			tags = append(tags, tag.Name)
+		}
+		copy, statusCode, err := createVideoRecord(db, userID, videoCreateParams{
+			ChannelID: original.ChannelID, Title: fmt.Sprintf("%s (副本)", original.Title), Description: original.Description,
+			StorageType: original.StorageType, VideoURL: original.VideoURL, ThumbnailURL: original.ThumbnailURL,
+			SubtitleURL: original.SubtitleURL, Chapters: original.Chapters, DurationSec: original.DurationSec,
+			Visibility: original.Visibility, Status: "draft", Tags: tags, CollectionID: original.CollectionID,
+		})
+		if err != nil {
+			if apperr.FromError(err) != nil {
+				httpx.Error(c, err)
+				return
+			}
+			c.JSON(statusCode, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusCreated, copy)
+	}
+}
+
 func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (model.Video, int, error) {
 	storageType := input.StorageType
 	if storageType == "" {
@@ -153,7 +196,7 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 	video := model.Video{
 		Base: model.Base{ID: videoID}, UserID: userID, ChannelID: &channelID, CollectionID: collectionID,
 		Title: strings.TrimSpace(input.Title), Description: input.Description, StorageType: storageType,
-		VideoURL: input.VideoURL, ThumbnailURL: input.ThumbnailURL, DurationSec: input.DurationSec,
+		VideoURL: input.VideoURL, ThumbnailURL: input.ThumbnailURL, SubtitleURL: input.SubtitleURL, Chapters: input.Chapters, DurationSec: input.DurationSec,
 		Visibility: visibility, Status: status,
 	}
 	statusCode := http.StatusInternalServerError
@@ -168,7 +211,7 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 		}
 		extension := model.ContentVideoExtension{
 			ContentID: contentID, VideoID: video.ID, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt, StorageType: video.StorageType,
-			VideoURL: video.VideoURL, ThumbnailURL: video.ThumbnailURL, DurationSec: video.DurationSec,
+			VideoURL: video.VideoURL, ThumbnailURL: video.ThumbnailURL, SubtitleURL: video.SubtitleURL, Chapters: video.Chapters, DurationSec: video.DurationSec,
 			ProcessingStatus: "none",
 		}
 		if err := tx.Create(&extension).Error; err != nil {
@@ -259,6 +302,8 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 			Title         *string           `json:"title"`
 			Description   *string           `json:"description"`
 			ThumbnailURL  *string           `json:"thumbnail_url"`
+			SubtitleURL   *string           `json:"subtitle_url"`
+			Chapters      json.RawMessage   `json:"chapters"`
 			Visibility    *string           `json:"visibility"`
 			Status        *string           `json:"status"`
 			Tags          []string          `json:"tags"`
@@ -352,6 +397,12 @@ func UpdateVideo(db *gorm.DB) gin.HandlerFunc {
 		extensionUpdates := map[string]any{}
 		if input.ThumbnailURL != nil {
 			extensionUpdates["thumbnail_url"] = *input.ThumbnailURL
+		}
+		if input.SubtitleURL != nil {
+			extensionUpdates["subtitle_url"] = *input.SubtitleURL
+		}
+		if input.Chapters != nil {
+			extensionUpdates["chapters"] = input.Chapters
 		}
 		if shouldResolveCollection {
 			extensionUpdates["collection_conflict"] = false

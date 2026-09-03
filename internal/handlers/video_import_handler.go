@@ -2,11 +2,9 @@ package handlers
 
 import (
 	"bytes"
-	"crypto/md5"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -53,15 +51,17 @@ var (
 )
 
 type VideoImportPayload struct {
-	ChannelID     *uuid.UUID  `json:"channel_id"`
-	Title         string      `json:"title"`
-	Description   string      `json:"description"`
-	ThumbnailURL  string      `json:"thumbnail_url"`
-	DurationSec   int         `json:"duration_sec"`
-	Visibility    string      `json:"visibility"`
-	Tags          []string    `json:"tags"`
-	CollectionID  *uuid.UUID  `json:"collection_id"`
-	CollectionIDs []uuid.UUID `json:"collection_ids"`
+	ChannelID     *uuid.UUID      `json:"channel_id"`
+	Title         string          `json:"title"`
+	Description   string          `json:"description"`
+	ThumbnailURL  string          `json:"thumbnail_url"`
+	SubtitleURL   string          `json:"subtitle_url"`
+	Chapters      json.RawMessage `json:"chapters"`
+	DurationSec   int             `json:"duration_sec"`
+	Visibility    string          `json:"visibility"`
+	Tags          []string        `json:"tags"`
+	CollectionID  *uuid.UUID      `json:"collection_id"`
+	CollectionIDs []uuid.UUID     `json:"collection_ids"`
 }
 
 type CreateVideoImportInput struct {
@@ -122,7 +122,6 @@ func RegisterVideoImportRoutes(group *gin.RouterGroup, db *gorm.DB, s3Client *s3
 	imports.PUT("/:id", UpdateVideoImport(db))
 	imports.POST("/:id/submit", SubmitVideoImport(db))
 	imports.POST("/:id/parts/:partNumber", CreateVideoImportPartUpload(db, s3Client))
-	imports.PUT("/:id/parts/:partNumber/upload", UploadVideoImportPart(db))
 	imports.POST("/:id/parts/:partNumber/complete", CompleteVideoImportPart(db))
 	imports.POST("/:id/complete", CompleteVideoImport(db, s3Client))
 	imports.POST("/:id/retry", RetryVideoImport(db))
@@ -148,8 +147,7 @@ func registerVideoImportRoutes(group *gin.RouterGroup, db *gorm.DB, s3Client *s3
 // @Router /api/v1/videos/imports [post]
 func CreateVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		localStorage := isLocalVideoStorage()
-		if !localStorage && (client == nil || strings.TrimSpace(os.Getenv("S3_BUCKET")) == "") {
+		if client == nil || strings.TrimSpace(os.Getenv("S3_BUCKET")) == "" {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "存储服务不可用"})
 			return
 		}
@@ -177,23 +175,15 @@ func CreateVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 				return
 			}
 		}
-		uploadID := ""
-		if localStorage {
-			if err := os.MkdirAll(localVideoImportPartsDir(userID, id), 0o755); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "无法开始上传"})
-				return
-			}
-		} else {
-			created, err := client.CreateMultipartUpload(&s3.CreateMultipartUploadInput{
-				Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(objectKey),
-				ContentType: aws.String(input.ContentType),
-			})
-			if err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "无法开始上传"})
-				return
-			}
-			uploadID = aws.StringValue(created.UploadId)
+		created, err := client.CreateMultipartUpload(&s3.CreateMultipartUploadInput{
+			Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(objectKey),
+			ContentType: aws.String(input.ContentType),
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "无法开始上传"})
+			return
 		}
+		uploadID := aws.StringValue(created.UploadId)
 		session := model.VideoImportSession{
 			UserID: userID, ChannelID: input.ChannelID, Status: videoImportUploading,
 			FileName: filepath.Base(input.FileName), FileSize: input.FileSize, ContentType: input.ContentType,
@@ -202,13 +192,9 @@ func CreateVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 		}
 		session.ID = id
 		if err := db.Create(&session).Error; err != nil {
-			if localStorage {
-				_ = os.RemoveAll(localVideoImportPartsDir(userID, id))
-			} else {
-				_, _ = client.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
-					Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(objectKey), UploadId: aws.String(uploadID),
-				})
-			}
+			_, _ = client.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
+				Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(objectKey), UploadId: aws.String(uploadID),
+			})
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
@@ -368,8 +354,7 @@ func SubmitVideoImport(db *gorm.DB) gin.HandlerFunc {
 // @Router /api/v1/videos/imports/{id}/parts/{partNumber} [post]
 func CreateVideoImportPartUpload(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		localStorage := isLocalVideoStorage()
-		if !localStorage && client == nil {
+		if client == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "存储服务不可用"})
 			return
 		}
@@ -384,13 +369,6 @@ func CreateVideoImportPartUpload(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "分片序号无效"})
 			return
 		}
-		if localStorage {
-			c.JSON(http.StatusOK, VideoImportPartUploadDTO{
-				PartNumber: partNumber,
-				UploadURL:  fmt.Sprintf("%s/upload", c.Request.URL.Path),
-			})
-			return
-		}
 		req, _ := client.UploadPartRequest(&s3.UploadPartInput{
 			Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey),
 			UploadId: aws.String(session.UploadID), PartNumber: aws.Int64(int64(partNumber)),
@@ -401,62 +379,6 @@ func CreateVideoImportPartUpload(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 			return
 		}
 		c.JSON(http.StatusOK, VideoImportPartUploadDTO{PartNumber: partNumber, UploadURL: url})
-	}
-}
-
-// UploadVideoImportPart godoc
-// @Summary 上传本地视频分片
-// @Tags video-imports
-// @Accept octet-stream
-// @Produce json
-// @Param id path string true "导入任务 UUID"
-// @Param partNumber path int true "分片序号"
-// @Success 200 {object} map[string]any
-// @Security BearerAuth
-// @Security CookieAuth
-// @Router /api/v1/videos/imports/{id}/parts/{partNumber}/upload [put]
-func UploadVideoImportPart(db *gorm.DB) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		if !isLocalVideoStorage() {
-			c.JSON(http.StatusNotFound, gin.H{"error": "本地分片上传未启用"})
-			return
-		}
-		session, err := loadVideoImport(db, c)
-		if err != nil {
-			videoImportHTTPError(c, err)
-			return
-		}
-		partNumber, err := strconv.Atoi(c.Param("partNumber"))
-		maxParts := int((session.FileSize + session.PartSize - 1) / session.PartSize)
-		if err != nil || partNumber < 1 || partNumber > maxParts || session.UploadCompletedAt != nil || session.Status == videoImportCanceled {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "分片序号无效"})
-			return
-		}
-		expectedSize := session.PartSize
-		if partNumber == maxParts {
-			expectedSize = session.FileSize - int64(partNumber-1)*session.PartSize
-		}
-		partPath := localVideoImportPartPath(session, partNumber)
-		if err := os.MkdirAll(filepath.Dir(partPath), 0o755); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "无法保存视频分片"})
-			return
-		}
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, expectedSize+1)
-		file, err := os.Create(partPath)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "无法保存视频分片"})
-			return
-		}
-		hasher := md5.New()
-		written, copyErr := io.Copy(io.MultiWriter(file, hasher), c.Request.Body)
-		closeErr := file.Close()
-		if copyErr != nil || closeErr != nil || written != expectedSize {
-			_ = os.Remove(partPath)
-			c.JSON(http.StatusBadRequest, gin.H{"error": "视频分片大小无效"})
-			return
-		}
-		c.Header("ETag", fmt.Sprintf("\"%x\"", hasher.Sum(nil)))
-		c.JSON(http.StatusOK, gin.H{"part_number": partNumber, "size": written})
 	}
 }
 
@@ -554,8 +476,7 @@ func CompleteVideoImportPart(db *gorm.DB) gin.HandlerFunc {
 // @Router /api/v1/videos/imports/{id}/complete [post]
 func CompleteVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		localStorage := isLocalVideoStorage()
-		if !localStorage && client == nil {
+		if client == nil {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "存储服务不可用"})
 			return
 		}
@@ -572,42 +493,27 @@ func CompleteVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 				return
 			}
 			_ = db.Model(&session).Update("status", videoImportCompleting).Error
-			if localStorage {
-				if err := completeLocalVideoImport(session, parts); err != nil {
-					cleanupLocalVideoImport(session)
+			completed := make([]*s3.CompletedPart, 0, len(parts))
+			for _, part := range parts {
+				completed = append(completed, &s3.CompletedPart{ETag: aws.String(part.ETag), PartNumber: aws.Int64(int64(part.PartNumber))})
+			}
+			_, completeErr := client.CompleteMultipartUpload(&s3.CompleteMultipartUploadInput{
+				Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey), UploadId: aws.String(session.UploadID),
+				MultipartUpload: &s3.CompletedMultipartUpload{Parts: completed},
+			})
+			if completeErr != nil {
+				head, headErr := client.HeadObject(&s3.HeadObjectInput{Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey)})
+				if headErr != nil || aws.Int64Value(head.ContentLength) != session.FileSize {
 					_ = db.Model(&session).Updates(map[string]any{"status": videoImportFailed, "error_message": "完成文件上传失败"}).Error
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "完成文件上传失败"})
 					return
 				}
-				if err := validateLocalVideoImport(session); err != nil {
-					cleanupLocalVideoImport(session)
-					_ = db.Model(&session).Updates(map[string]any{"status": videoImportFailed, "error_message": "视频文件内容无效"}).Error
-					c.JSON(http.StatusBadRequest, gin.H{"error": "视频文件内容无效"})
-					return
-				}
-			} else {
-				completed := make([]*s3.CompletedPart, 0, len(parts))
-				for _, part := range parts {
-					completed = append(completed, &s3.CompletedPart{ETag: aws.String(part.ETag), PartNumber: aws.Int64(int64(part.PartNumber))})
-				}
-				_, completeErr := client.CompleteMultipartUpload(&s3.CompleteMultipartUploadInput{
-					Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey), UploadId: aws.String(session.UploadID),
-					MultipartUpload: &s3.CompletedMultipartUpload{Parts: completed},
-				})
-				if completeErr != nil {
-					head, headErr := client.HeadObject(&s3.HeadObjectInput{Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey)})
-					if headErr != nil || aws.Int64Value(head.ContentLength) != session.FileSize {
-						_ = db.Model(&session).Updates(map[string]any{"status": videoImportFailed, "error_message": "完成文件上传失败"}).Error
-						c.JSON(http.StatusInternalServerError, gin.H{"error": "完成文件上传失败"})
-						return
-					}
-				}
-				if err := validateStoredVideoImport(client, session); err != nil {
-					_, _ = client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey)})
-					_ = db.Model(&session).Updates(map[string]any{"status": videoImportFailed, "error_message": "视频文件内容无效"}).Error
-					c.JSON(http.StatusBadRequest, gin.H{"error": "视频文件内容无效"})
-					return
-				}
+			}
+			if err := validateStoredVideoImport(client, session); err != nil {
+				_, _ = client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey)})
+				_ = db.Model(&session).Updates(map[string]any{"status": videoImportFailed, "error_message": "视频文件内容无效"}).Error
+				c.JSON(http.StatusBadRequest, gin.H{"error": "视频文件内容无效"})
+				return
 			}
 			now := time.Now().UTC()
 			status := videoImportAwaiting
@@ -680,14 +586,14 @@ func CancelVideoImport(db *gorm.DB, client *s3.S3) gin.HandlerFunc {
 			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "已创建的视频不能取消"})
 			return
 		}
-		if isLocalVideoStorage() {
-			cleanupLocalVideoImport(session)
-		} else if client != nil && session.UploadCompletedAt == nil {
-			_, _ = client.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
-				Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey), UploadId: aws.String(session.UploadID),
-			})
-		} else if client != nil && (session.ContentID != nil || session.TargetVideoID != nil) {
-			_, _ = client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey)})
+		if client != nil {
+			if session.UploadCompletedAt == nil {
+				_, _ = client.AbortMultipartUpload(&s3.AbortMultipartUploadInput{
+					Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey), UploadId: aws.String(session.UploadID),
+				})
+			} else {
+				_, _ = client.DeleteObject(&s3.DeleteObjectInput{Bucket: aws.String(os.Getenv("S3_BUCKET")), Key: aws.String(session.ObjectKey)})
+			}
 		}
 		if err := db.Model(&session).Updates(map[string]any{"status": videoImportCanceled, "error_message": ""}).Error; err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -750,7 +656,7 @@ func finalizeVideoImport(db *gorm.DB, id, userID uuid.UUID) error {
 		}
 		video, _, err := createVideoRecord(tx, userID, videoCreateParams{
 			ChannelID: payload.ChannelID, Title: payload.Title, Description: payload.Description,
-			StorageType: "local", VideoURL: videoImportPublicURL(session.ObjectKey), ThumbnailURL: payload.ThumbnailURL,
+			StorageType: "local", VideoURL: videoImportPublicURL(session.ObjectKey), ThumbnailURL: payload.ThumbnailURL, SubtitleURL: payload.SubtitleURL, Chapters: payload.Chapters,
 			DurationSec: payload.DurationSec,
 			Visibility:  payload.Visibility, Status: status, Tags: payload.Tags,
 			CollectionID: payload.CollectionID, CollectionIDs: payload.CollectionIDs,
@@ -873,82 +779,7 @@ func videoImportExtension(fileName, contentType string) (string, bool) {
 }
 
 func videoImportPublicURL(key string) string {
-	if isLocalVideoStorage() {
-		return "/uploads/" + strings.TrimLeft(key, "/")
-	}
 	return strings.TrimRight(os.Getenv("S3_URL_PREFIX"), "/") + "/" + strings.TrimLeft(key, "/")
-}
-
-func isLocalVideoStorage() bool {
-	// 视频导入只允许使用 R2 的 S3 兼容 multipart API，不能回退到应用文件系统。
-	return false
-}
-
-func localVideoImportPartsDir(userID, importID uuid.UUID) string {
-	return filepath.Join("uploads", "video", "imports", userID.String(), importID.String(), "parts")
-}
-
-func localVideoImportPartPath(session model.VideoImportSession, partNumber int) string {
-	return filepath.Join(localVideoImportPartsDir(session.UserID, session.ID), fmt.Sprintf("part-%06d", partNumber))
-}
-
-func localVideoImportFilePath(session model.VideoImportSession) string {
-	return filepath.FromSlash(filepath.Join("uploads", session.ObjectKey))
-}
-
-func completeLocalVideoImport(session model.VideoImportSession, parts []videoImportPart) error {
-	finalPath := localVideoImportFilePath(session)
-	if err := os.MkdirAll(filepath.Dir(finalPath), 0o755); err != nil {
-		return err
-	}
-	output, err := os.Create(finalPath)
-	if err != nil {
-		return err
-	}
-	for _, part := range parts {
-		input, openErr := os.Open(localVideoImportPartPath(session, part.PartNumber))
-		if openErr != nil {
-			_ = output.Close()
-			return openErr
-		}
-		written, copyErr := io.Copy(output, input)
-		closeErr := input.Close()
-		if copyErr != nil || closeErr != nil || written != part.Size {
-			_ = output.Close()
-			return fmt.Errorf("invalid local video import part %d", part.PartNumber)
-		}
-	}
-	if err := output.Close(); err != nil {
-		return err
-	}
-	return os.RemoveAll(localVideoImportPartsDir(session.UserID, session.ID))
-}
-
-func validateLocalVideoImport(session model.VideoImportSession) error {
-	file, err := os.Open(localVideoImportFilePath(session))
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	buffer := make([]byte, 32)
-	n, err := file.Read(buffer)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
-	}
-	buffer = buffer[:n]
-	ext := strings.ToLower(filepath.Ext(session.FileName))
-	switch ext {
-	case ".mp4", ".mov":
-		return assertVideoSignature(len(buffer) >= 8 && bytes.Equal(buffer[4:8], []byte("ftyp")))
-	case ".webm":
-		return assertVideoSignature(len(buffer) >= 4 && bytes.Equal(buffer[:4], []byte{0x1a, 0x45, 0xdf, 0xa3}))
-	default:
-		return errors.New("unsupported video format")
-	}
-}
-
-func cleanupLocalVideoImport(session model.VideoImportSession) {
-	_ = os.RemoveAll(filepath.Dir(localVideoImportFilePath(session)))
 }
 
 func validateStoredVideoImport(client *s3.S3, session model.VideoImportSession) error {

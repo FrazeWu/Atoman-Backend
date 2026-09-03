@@ -30,7 +30,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 
 func (h *Handler) recordEvent(c *gin.Context) {
 	var input EventInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	user, _ := authctx.Current(c)
@@ -43,7 +43,7 @@ func (h *Handler) recordEvent(c *gin.Context) {
 
 func (h *Handler) saveProgress(c *gin.Context) {
 	var input ProgressInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	user, _ := authctx.Current(c)
@@ -92,7 +92,7 @@ func (h *Handler) listNotificationPreferences(c *gin.Context) {
 
 func (h *Handler) saveNotificationPreference(c *gin.Context) {
 	var input NotificationPreferenceInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	user, _ := authctx.Current(c)
@@ -141,7 +141,7 @@ func (h *Handler) scheduleContent(c *gin.Context) {
 		return
 	}
 	var input ScheduleInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	input.Module = c.Param("module")
@@ -197,14 +197,6 @@ func (h *Handler) retrySchedule(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, status)
-}
-
-func bindJSON(c *gin.Context, target any) bool {
-	if err := c.ShouldBindJSON(target); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
-		return false
-	}
-	return true
 }
 
 func pathUUID(c *gin.Context, name string) (uuid.UUID, bool) {

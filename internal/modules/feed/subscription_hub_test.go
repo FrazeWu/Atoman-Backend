@@ -162,6 +162,26 @@ func TestSubscriptionHubKeepsChannelContextsSeparatedByType(t *testing.T) {
 	if videoGroup == nil || len(videoGroup.Memberships) != 1 || videoGroup.Memberships[0].FeedSourceID != podcastGroup.Memberships[0].FeedSourceID {
 		t.Fatalf("video branch must contain an independent channel membership: %#v", videoGroup)
 	}
+	for _, test := range []struct {
+		subscriptionType string
+		hasContent       bool
+	}{
+		{subscriptionType: SubscriptionHubTypePodcast, hasContent: true},
+		{subscriptionType: SubscriptionHubTypeVideo, hasContent: true},
+		{subscriptionType: SubscriptionHubTypeBlog, hasContent: false},
+		{subscriptionType: SubscriptionHubTypeRSS, hasContent: false},
+	} {
+		var node *SubscriptionHubTypeNode
+		for index := range tree.Types {
+			if tree.Types[index].SubscriptionType == test.subscriptionType {
+				node = &tree.Types[index]
+				break
+			}
+		}
+		if node == nil || node.HasContent != test.hasContent {
+			t.Fatalf("unexpected content availability for %s: %#v", test.subscriptionType, node)
+		}
+	}
 
 	podcastItems, _, err := service.GetSubscriptionHubUpdates(viewer, SubscriptionHubUpdatesQuery{
 		SubscriptionType: SubscriptionHubTypePodcast,
@@ -187,6 +207,47 @@ func TestSubscriptionHubKeepsChannelContextsSeparatedByType(t *testing.T) {
 	}
 	if len(videoItems) != 1 || videoItems[0].Video == nil || videoItems[0].Video.ID != video.ID || videoItems[0].PodcastEpisode != nil {
 		t.Fatalf("video branch leaked a different content type: %#v", videoItems)
+	}
+}
+
+func TestSubscriptionHubMarksSubscribedTypeWithoutContentEmpty(t *testing.T) {
+	service, db, viewer, _, channel := newUnifiedSubscriptionFixture(t)
+	testdb.Migrate(t, db, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
+
+	source := model.FeedSource{
+		SourceType: "internal_channel",
+		SourceID:   &channel.ID,
+		Hash:       "subscription-hub-empty-channel",
+		Title:      channel.Name,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create empty channel source: %v", err)
+	}
+	group := model.SubscriptionHubGroup{
+		UserID:           viewer.ID,
+		SubscriptionType: SubscriptionHubTypeVideo,
+		Name:             "Empty video group",
+	}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatalf("create empty video group: %v", err)
+	}
+	if err := db.Create(&model.SubscriptionHubMembership{
+		UserID:           viewer.ID,
+		SubscriptionType: SubscriptionHubTypeVideo,
+		GroupID:          group.ID,
+		FeedSourceID:     source.ID,
+		Title:            source.Title,
+	}).Error; err != nil {
+		t.Fatalf("create empty video membership: %v", err)
+	}
+
+	tree, err := service.GetSubscriptionHubTree(viewer.ID)
+	if err != nil {
+		t.Fatalf("get subscription hub tree: %v", err)
+	}
+	videoNode := tree.Types[1]
+	if videoNode.SubscriptionType != SubscriptionHubTypeVideo || videoNode.HasContent {
+		t.Fatalf("video type with no updates must be marked empty: %#v", videoNode)
 	}
 }
 

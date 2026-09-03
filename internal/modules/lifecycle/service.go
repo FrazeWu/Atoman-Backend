@@ -490,7 +490,7 @@ func (s *Service) RetryBlogSchedule(user authctx.CurrentUser, contentID uuid.UUI
 		if result.RowsAffected != 1 {
 			return apperr.Conflict("lifecycle.schedule_not_failed", "Schedule is not failed")
 		}
-		contentUpdate := tx.Model(&model.ContentEntry{}).Where("id = ? AND author_id = ? AND status = ?", contentID, user.ID, "draft").Updates(map[string]any{"status": "scheduled", "scheduled_at": now})
+		contentUpdate := tx.Model(&model.ContentEntry{}).Where("id = ? AND author_id = ? AND status IN ?", contentID, user.ID, []string{"draft", "scheduled"}).Updates(map[string]any{"status": "scheduled", "scheduled_at": now})
 		if contentUpdate.Error != nil {
 			return contentUpdate.Error
 		}
@@ -643,7 +643,7 @@ func (s *Service) PublishDue(now time.Time, limit int) error {
 		if err := s.validatePublishable("video", video.ID, true); err != nil {
 			continue
 		}
-		if video.StorageType == "local" && video.ProcessingStatus != "ready" {
+		if video.StorageType == "local" && strings.HasPrefix(video.VideoURL, "/uploads/") && video.ProcessingStatus != "ready" {
 			continue
 		}
 		contentID, err := contentmodule.VideoContentID(s.db, video.ID)

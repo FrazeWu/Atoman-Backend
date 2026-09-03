@@ -43,6 +43,7 @@ type CreatePostRequest struct {
 	CollectionID uuid.UUID `json:"collection_id"`
 	Visibility   string    `json:"visibility"`
 	Status       string    `json:"status"`
+	Tags         []string  `json:"tags"`
 }
 
 type RecommendationAuthorDTO struct {
@@ -137,6 +138,7 @@ type BlogContentDTO struct {
 	WeightedRatingScore  *float64                      `json:"weighted_rating_score,omitempty"`
 	WeightedRatingCount  int                           `json:"weighted_rating_count"`
 	WeightedRatingActive bool                          `json:"weighted_rating_active"`
+	Tags                 []string                      `json:"tags"`
 	References           []reference.ResolvedReference `json:"references"`
 }
 
@@ -149,7 +151,7 @@ func newBlogContentDTOFromCanonical(content BlogContent) BlogContentDTO {
 	for _, item := range content.Collections {
 		collections = append(collections, BlogCollectionDTO{ID: item.ID, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt, ChannelID: item.ChannelID, Channel: item.Channel, CreatedBy: item.CreatedBy, Name: item.Name, Description: item.Description, CoverURL: item.CoverURL, IsDefault: item.IsDefault})
 	}
-	return BlogContentDTO{ID: content.ID, CreatedAt: content.CreatedAt, UpdatedAt: content.UpdatedAt, UserID: content.UserID, User: content.User, ChannelID: content.ChannelID, Channel: content.Channel, CollectionID: content.CollectionID, Collection: collection, Collections: collections, CollectionPosition: content.CollectionPosition, CollectionConflict: content.CollectionConflict, Title: content.Title, Content: content.Content, Summary: content.Summary, LanguageCode: content.LanguageCode, CoverURL: content.CoverURL, Status: content.Status, Visibility: content.Visibility, Pinned: content.Pinned, ScheduledAt: content.ScheduledAt, PublishedAt: content.PublishedAt, ViewCount: content.ViewCount, BookmarksCount: content.BookmarksCount, RatingScore: content.RatingScore, RatingCount: content.RatingCount, ViewerRating: content.ViewerRating, WeightedRatingScore: content.WeightedRatingScore, WeightedRatingCount: content.WeightedRatingCount, WeightedRatingActive: content.WeightedRatingActive, References: []reference.ResolvedReference{}}
+	return BlogContentDTO{ID: content.ID, CreatedAt: content.CreatedAt, UpdatedAt: content.UpdatedAt, UserID: content.UserID, User: content.User, ChannelID: content.ChannelID, Channel: content.Channel, CollectionID: content.CollectionID, Collection: collection, Collections: collections, CollectionPosition: content.CollectionPosition, CollectionConflict: content.CollectionConflict, Title: content.Title, Content: content.Content, Summary: content.Summary, LanguageCode: content.LanguageCode, CoverURL: content.CoverURL, Status: content.Status, Visibility: content.Visibility, Pinned: content.Pinned, ScheduledAt: content.ScheduledAt, PublishedAt: content.PublishedAt, ViewCount: content.ViewCount, BookmarksCount: content.BookmarksCount, RatingScore: content.RatingScore, RatingCount: content.RatingCount, ViewerRating: content.ViewerRating, WeightedRatingScore: content.WeightedRatingScore, WeightedRatingCount: content.WeightedRatingCount, WeightedRatingActive: content.WeightedRatingActive, Tags: content.Tags, References: []reference.ResolvedReference{}}
 }
 
 type BlogContentVersionDTO struct {

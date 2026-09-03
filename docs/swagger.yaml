@@ -2348,6 +2348,8 @@ definitions:
         items:
           $ref: '#/definitions/feed.SubscriptionHubGroupNode'
         type: array
+      has_content:
+        type: boolean
       subscription_type:
         type: string
     type: object

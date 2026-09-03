@@ -140,12 +140,12 @@ func (h *Handler) handleAdminTrust(c *gin.Context, evaluate bool) {
 		httpx.Error(c, apperr.Forbidden("auth.forbidden", "Admin access required"))
 		return
 	}
-	userID, err := uuid.Parse(c.Param("userID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "userID must be a valid uuid"))
+	userID, ok := httpx.UUIDParam(c, "userID")
+	if !ok {
 		return
 	}
 	var trust model.ForumUserTrust
+	var err error
 	if evaluate {
 		trust, err = h.service.trust.Evaluate(userID)
 	} else {
@@ -168,9 +168,8 @@ func (h *Handler) listCategories(c *gin.Context) {
 }
 
 func (h *Handler) getCategory(c *gin.Context) {
-	categoryID, err := uuid.Parse(c.Param("categoryID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "categoryID must be a valid uuid"))
+	categoryID, ok := httpx.UUIDParam(c, "categoryID")
+	if !ok {
 		return
 	}
 	category, err := h.service.GetCategory(currentForumUser(c), categoryID)
@@ -190,9 +189,9 @@ func (h *Handler) listTopics(c *gin.Context) {
 		PageSize: pageSize(c),
 	}
 	if raw := c.Query("category_id"); raw != "" {
-		id, err := uuid.Parse(raw)
+		id, err := httpx.ParseUUID(raw, "category_id")
 		if err != nil {
-			httpx.Error(c, apperr.BadRequest("validation.invalid_request", "category_id must be a valid uuid"))
+			httpx.Error(c, err)
 			return
 		}
 		query.CategoryID = id
@@ -241,9 +240,8 @@ func (h *Handler) searchTopics(c *gin.Context) {
 }
 
 func (h *Handler) getTopic(c *gin.Context) {
-	topicID, err := uuid.Parse(c.Param("topicID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "topicID must be a valid uuid"))
+	topicID, ok := httpx.UUIDParam(c, "topicID")
+	if !ok {
 		return
 	}
 	topic, err := h.service.GetTopic(currentForumUser(c), topicID)
@@ -266,8 +264,7 @@ func (h *Handler) createTopic(c *gin.Context) {
 		return
 	}
 	var req CreateTopicRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	topic, err := h.service.CreateTopic(user, req)
@@ -290,8 +287,7 @@ func (h *Handler) createCategoryRequest(c *gin.Context) {
 		return
 	}
 	var req CreateCategoryRequestRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	request, err := h.service.CreateCategoryRequest(user, req)
@@ -308,14 +304,12 @@ func (h *Handler) updateTopic(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	topicID, err := uuid.Parse(c.Param("topicID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "topicID must be a valid uuid"))
+	topicID, ok := httpx.UUIDParam(c, "topicID")
+	if !ok {
 		return
 	}
 	var req UpdateTopicRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	topic, err := h.service.UpdateTopic(user, topicID, req)
@@ -337,9 +331,8 @@ func (h *Handler) deleteTopic(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	topicID, err := uuid.Parse(c.Param("topicID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "topicID must be a valid uuid"))
+	topicID, ok := httpx.UUIDParam(c, "topicID")
+	if !ok {
 		return
 	}
 	if err := h.service.DeleteTopic(user, topicID); err != nil {
@@ -486,8 +479,7 @@ func (h *Handler) saveDraft(c *gin.Context) {
 		return
 	}
 	var req SaveDraftRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	if err := h.service.SaveDraft(user, req); err != nil {
@@ -503,9 +495,8 @@ func (h *Handler) deleteDraft(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	draftID, err := uuid.Parse(c.Param("draftID"))
-	if err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "draftID must be a valid uuid"))
+	draftID, ok := httpx.UUIDParam(c, "draftID")
+	if !ok {
 		return
 	}
 	if err := h.service.DeleteDraft(user, draftID); err != nil {

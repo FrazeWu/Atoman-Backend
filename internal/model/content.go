@@ -46,6 +46,14 @@ type ContentBlogExtension struct {
 
 func (ContentBlogExtension) TableName() string { return "content_blog_extensions" }
 
+// ContentBlogTag stores one normalized topic label for a blog content entry.
+type ContentBlogTag struct {
+	ContentID uuid.UUID `json:"content_id" gorm:"type:uuid;primaryKey"`
+	Name      string    `json:"name" gorm:"type:varchar(48);primaryKey;index"`
+}
+
+func (ContentBlogTag) TableName() string { return "content_blog_tags" }
+
 type ContentBlogVersion struct {
 	Base
 	ContentID    uuid.UUID  `json:"content_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_content_blog_version,priority:1"`
@@ -132,6 +140,8 @@ type ContentVideoExtension struct {
 	StorageType        string          `json:"storage_type" gorm:"default:'external'"`
 	VideoURL           string          `json:"video_url" gorm:"type:text"`
 	ThumbnailURL       string          `json:"thumbnail_url" gorm:"type:text"`
+	SubtitleURL        string          `json:"subtitle_url" gorm:"type:text"`
+	Chapters           json.RawMessage `json:"chapters" gorm:"type:jsonb"`
 	DurationSec        int             `json:"duration_sec" gorm:"not null;default:0"`
 	ProcessingStatus   string          `json:"processing_status" gorm:"not null;default:'none'"`
 	ProcessingError    string          `json:"processing_error" gorm:"type:text"`

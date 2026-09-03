@@ -29,7 +29,6 @@ import (
 	"atoman/internal/config"
 	"atoman/internal/middleware"
 	"atoman/internal/migrationrunner"
-	"atoman/internal/migrations"
 	"atoman/internal/model"
 	"atoman/internal/modules/books"
 	"atoman/internal/modules/lifecycle"
@@ -55,68 +54,6 @@ import (
 // @in cookie
 // @name atoman_session
 // @description 使用登录后写入的 atoman_session HttpOnly Cookie；写请求还需 X-CSRF-Token
-
-func runUnifiedCommentStartupMigrations(db *gorm.DB, models ...any) error {
-	if err := migrations.RunAuthPasswordResetMigration(db); err != nil {
-		return fmt.Errorf("migrate password reset auth schema: %w", err)
-	}
-	if err := migrations.RunAuthSecurityMigration(db); err != nil {
-		return fmt.Errorf("migrate auth security schema: %w", err)
-	}
-	if err := migrations.RunAuthOAuthMigration(db); err != nil {
-		return fmt.Errorf("migrate oauth auth schema: %w", err)
-	}
-	if err := migrations.RunDebateWikiMigration(db); err != nil {
-		return fmt.Errorf("migrate debate wiki schema: %w", err)
-	}
-	models = append(models,
-		&model.ForumGroup{},
-		&model.ForumGroupMember{},
-		&model.ForumCategoryPermission{},
-		&model.ForumUserModerationAction{},
-		&model.ForumUserTrust{},
-		&model.DiscussionTarget{},
-		&model.CommentEntry{},
-		&model.CommentMention{},
-		&model.CommentAttachment{},
-		&model.CommentLike{},
-		&model.CommentReport{},
-		&model.CommentTimeAnchor{},
-		&model.CommentPublishRecord{},
-		&model.TimelineRevisionProposal{},
-		&model.DebateConclusionEvent{},
-		&model.DebateRevisionReference{},
-		&model.DebateVote{},
-		&model.DebateRelation{},
-	)
-	if err := db.AutoMigrate(models...); err != nil {
-		return fmt.Errorf("auto migrate startup models: %w", err)
-	}
-	if err := migrations.RunUnifiedCommentIndexes(db); err != nil {
-		return fmt.Errorf("create unified comment indexes: %w", err)
-	}
-	if err := migrations.MigrateLegacyForumReplies(db); err != nil {
-		return fmt.Errorf("migrate legacy forum replies: %w", err)
-	}
-	if err := migrations.RunMusicLyricsMigration(db); err != nil {
-		return fmt.Errorf("migrate music lyrics: %w", err)
-	}
-	return nil
-}
-
-func runMusicBookmarkStartupMigration(db *gorm.DB) error {
-	return migrations.RunMusicBookmarksPlaylistsMigration(db)
-}
-
-func runStartupDMV2Migration(db *gorm.DB) error {
-	if err := migrations.RunNotificationDMIndexes(db); err != nil {
-		return fmt.Errorf("notification/dm index migration: %w", err)
-	}
-	if err := migrations.RunDMV2Migration(db); err != nil {
-		return fmt.Errorf("dm v2 migration: %w", err)
-	}
-	return nil
-}
 
 func ensureSoftDeleteColumns(db *gorm.DB) {
 	softDeleteModels := []interface{}{

@@ -51,7 +51,7 @@ func (h *Handler) createGoalCycle(c *gin.Context) {
 		return
 	}
 	var input CreateStudioGoalCycleInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	response, err := h.service.CreateGoalCycle(user, input)
@@ -83,7 +83,7 @@ func (h *Handler) createGoal(c *gin.Context) {
 		return
 	}
 	var input CreateStudioGoalInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	response, err := h.service.CreateGoal(user, cycleID, input)
@@ -115,7 +115,7 @@ func (h *Handler) updateGoal(c *gin.Context) {
 		return
 	}
 	var input UpdateStudioGoalInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	response, err := h.service.UpdateGoal(user, goalID, input)
@@ -147,7 +147,7 @@ func (h *Handler) createGoalAction(c *gin.Context) {
 		return
 	}
 	var input CreateStudioGoalActionInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	response, err := h.service.CreateGoalAction(user, goalID, input)
@@ -179,7 +179,7 @@ func (h *Handler) updateGoalAction(c *gin.Context) {
 		return
 	}
 	var input UpdateStudioGoalActionInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	response, err := h.service.UpdateGoalAction(user, actionID, input)
@@ -240,7 +240,7 @@ func (h *Handler) reviewGoalCycle(c *gin.Context) {
 		return
 	}
 	var input CreateStudioGoalReviewInput
-	if !bindJSON(c, &input) {
+	if !httpx.BindRequiredJSON(c, &input) {
 		return
 	}
 	response, err := h.service.ReviewGoalCycle(user, cycleID, input)

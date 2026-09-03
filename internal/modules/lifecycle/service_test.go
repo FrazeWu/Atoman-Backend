@@ -294,6 +294,57 @@ func TestDispatchPublicationNotifiesVideoCollectionSubscribers(t *testing.T) {
 	}
 }
 
+func TestPublishDuePublishesR2VideoBeforePreviewProcessingCompletes(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	collection := model.Collection{ChannelID: fixture.channel.ID, ContentType: "video", Name: "Scheduled videos"}
+	if err := fixture.db.Create(&collection).Error; err != nil {
+		t.Fatal(err)
+	}
+	canonicalCollection := model.ContentCollection{Base: collection.Base, ChannelID: collection.ChannelID, Name: collection.Name}
+	if err := fixture.db.Create(&canonicalCollection).Error; err != nil {
+		t.Fatal(err)
+	}
+	publishAt := time.Now().UTC().Add(-time.Minute)
+	video := model.Video{
+		UserID: fixture.owner.ID, ChannelID: &fixture.channel.ID, CollectionID: &collection.ID,
+		Title: "Scheduled R2 video", StorageType: "local", VideoURL: "https://cdn.example.com/video/imports/source.mp4",
+		ProcessingStatus: "pending", Status: "scheduled", Visibility: "public", ScheduledAt: &publishAt,
+	}
+	if err := fixture.db.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+	entry := model.ContentEntry{
+		Base: video.Base, AuthorID: &fixture.owner.ID, ChannelID: fixture.channel.ID,
+		Kind: "video", Title: video.Title, Status: "scheduled", Visibility: "public", ScheduledAt: &publishAt,
+	}
+	if err := fixture.db.Create(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.ContentVideoExtension{
+		ContentID: entry.ID, VideoID: video.ID, CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt,
+		StorageType: video.StorageType, VideoURL: video.VideoURL, ProcessingStatus: video.ProcessingStatus,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.ContentCollectionMembership{ContentID: entry.ID, CollectionID: canonicalCollection.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.service.PublishDue(time.Now().UTC(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.First(&entry, "id = ?", entry.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if entry.Status != "published" {
+		t.Fatalf("expected scheduled R2 video to publish, got %q", entry.Status)
+	}
+	var event model.ContentPublicationEvent
+	if err := fixture.db.Where("content_type = ? AND content_id = ?", "video", video.ID).First(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDispatchPendingPublicationsConcurrentlyClaimsEventBeforeNotifying(t *testing.T) {
 	fixture := newLifecycleFixture(t)
 	source := model.FeedSource{SourceType: "internal_channel", SourceID: &fixture.channel.ID, Hash: uuid.NewString(), Title: fixture.channel.Name}
@@ -1051,7 +1102,39 @@ func TestRetryFailedBlogScheduleRequeuesContent(t *testing.T) {
 	}
 }
 
-func TestRetryFailedBlogScheduleRejectsContentThatIsNoLongerDraft(t *testing.T) {
+func TestRetryFailedBlogScheduleRequeuesAlreadyScheduledContent(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", fixture.post.ID).Updates(map[string]any{"status": "scheduled", "published_at": nil, "scheduled_at": now.Add(-time.Hour)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	schedule := model.BlogPublishSchedule{
+		ContentID: fixture.post.ID, AuthorID: fixture.owner.ID, PublishAt: now.Add(-time.Hour),
+		Timezone: "UTC", Status: "failed", Attempts: 3, NextRunAt: now.Add(-time.Hour), LastError: "publish unavailable",
+	}
+	if err := fixture.db.Create(&schedule).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := fixture.service.RetryBlogSchedule(fixture.owner, fixture.post.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.First(&schedule, "id = ?", schedule.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if schedule.Status != "pending" || schedule.Attempts != 0 || schedule.LastError != "" || schedule.NextRunAt.Before(now) {
+		t.Fatalf("failed schedule was not requeued: %#v", schedule)
+	}
+	var entry model.ContentEntry
+	if err := fixture.db.First(&entry, "id = ?", fixture.post.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if entry.Status != "scheduled" || entry.ScheduledAt == nil || entry.ScheduledAt.Before(now) {
+		t.Fatalf("retried content was not scheduled: %#v", entry)
+	}
+}
+
+func TestRetryFailedBlogScheduleRejectsPublishedContent(t *testing.T) {
 	fixture := newLifecycleFixture(t)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	schedule := model.BlogPublishSchedule{
@@ -1063,7 +1146,7 @@ func TestRetryFailedBlogScheduleRejectsContentThatIsNoLongerDraft(t *testing.T) 
 	}
 
 	if _, err := fixture.service.RetryBlogSchedule(fixture.owner, fixture.post.ID); err == nil {
-		t.Fatal("expected retry to reject content that is no longer a draft")
+		t.Fatal("expected retry to reject published content")
 	}
 	if err := fixture.db.First(&schedule, "id = ?", schedule.ID).Error; err != nil {
 		t.Fatal(err)

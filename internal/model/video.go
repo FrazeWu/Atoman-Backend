@@ -24,6 +24,8 @@ type Video struct {
 	StorageType       string          `json:"storage_type" gorm:"not null;default:'external'"` // local | external
 	VideoURL          string          `json:"video_url" gorm:"type:text;not null"`             // S3 key or external URL
 	ThumbnailURL      string          `json:"thumbnail_url" gorm:"type:text"`
+	SubtitleURL       string          `json:"subtitle_url" gorm:"type:text"`
+	Chapters          json.RawMessage `json:"chapters" gorm:"type:jsonb"`
 	DurationSec       int             `json:"duration_sec" gorm:"default:0"`
 	ProcessingStatus  string          `json:"processing_status" gorm:"not null;default:'none'"`
 	ProcessingError   string          `json:"processing_error" gorm:"type:text"`
@@ -93,3 +95,13 @@ type VideoBookmark struct {
 }
 
 func (VideoBookmark) TableName() string { return "video_bookmarks" }
+
+// VideoRecommendationFeedback records a reversible preference for a video recommendation scope.
+type VideoRecommendationFeedback struct {
+	Base
+	UserID   uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_video_recommendation_feedback,priority:1,where:deleted_at IS NULL"`
+	Scope    string    `json:"scope" gorm:"type:varchar(16);not null;uniqueIndex:idx_video_recommendation_feedback,priority:2,where:deleted_at IS NULL"`
+	TargetID uuid.UUID `json:"target_id" gorm:"type:uuid;not null;uniqueIndex:idx_video_recommendation_feedback,priority:3,where:deleted_at IS NULL"`
+}
+
+func (VideoRecommendationFeedback) TableName() string { return "video_recommendation_feedback" }

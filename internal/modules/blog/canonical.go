@@ -225,6 +225,9 @@ func hydrateCanonicalBlogContents(db *gorm.DB, rows []canonicalBlogPostRow) ([]B
 		}
 		contents = append(contents, content)
 	}
+	if err := hydrateBlogTags(db, contents); err != nil {
+		return nil, err
+	}
 	return contents, nil
 }
 
