@@ -25,6 +25,7 @@ func RegisterRoutes(router *gin.Engine, db *gorm.DB, s3Client *s3.S3) {
 	v.DELETE("/channel-bookmarks/:id", middleware.AuthMiddleware(), handlers.DeleteChannelBookmark(db))
 	v.POST("/upload-video", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), handlers.UploadVideoFile(s3Client))
 	v.POST("/upload-cover", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), handlers.UploadVideoCover(s3Client))
+	v.POST("/upload-subtitle", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), handlers.UploadVideoSubtitle(s3Client))
 	v.POST("/:id/reprocess", middleware.AuthMiddleware(), middleware.RequireSiteFeature(db, "video", "video.publish"), handlers.ReprocessVideo(db))
 	v.GET("/:id", middleware.OptionalAuthMiddleware(), handlers.GetVideo(db))
 	v.GET("/:id/recommended", handlers.GetRecommendedVideos(db))

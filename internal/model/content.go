@@ -132,6 +132,8 @@ type ContentVideoExtension struct {
 	StorageType        string          `json:"storage_type" gorm:"default:'external'"`
 	VideoURL           string          `json:"video_url" gorm:"type:text"`
 	ThumbnailURL       string          `json:"thumbnail_url" gorm:"type:text"`
+	SubtitleURL        string          `json:"subtitle_url" gorm:"type:text"`
+	Chapters           json.RawMessage `json:"chapters" gorm:"type:jsonb"`
 	DurationSec        int             `json:"duration_sec" gorm:"not null;default:0"`
 	ProcessingStatus   string          `json:"processing_status" gorm:"not null;default:'none'"`
 	ProcessingError    string          `json:"processing_error" gorm:"type:text"`

@@ -160,4 +160,30 @@ func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 	}
 }
 
+// UploadVideoSubtitle stores a verified WebVTT subtitle file in R2.
+func UploadVideoSubtitle(s3Client *s3.S3) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		file, header, err := c.Request.FormFile("subtitle")
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "字幕文件必填（字段名：subtitle）"})
+			return
+		}
+		defer file.Close()
+		if header.Size > 5*1024*1024 || !strings.HasSuffix(strings.ToLower(header.Filename), ".vtt") {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "仅支持不超过 5 MB 的 VTT 字幕"})
+			return
+		}
+		if !requireS3(c, s3Client) {
+			return
+		}
+		userID := fmt.Sprintf("%v", c.MustGet("userID"))
+		key := "video/subtitles/" + userID + "/" + uuid.New().String() + ".vtt"
+		if err := storage.PutPublicObject(s3Client, os.Getenv("S3_BUCKET"), key, "text/vtt", file); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "上传字幕失败"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"url": strings.TrimRight(os.Getenv("S3_URL_PREFIX"), "/") + "/" + key})
+	}
+}
+
 // GetVideos returns published videos. Supports ?channel_id=&tag=&sort=latest|popular&page=1&limit=40
