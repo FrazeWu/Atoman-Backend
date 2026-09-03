@@ -72,6 +72,37 @@ func TestGetVideoIncludesAuthorAccount(t *testing.T) {
 	require.Equal(t, owner.Username, detail.User.Username)
 }
 
+func TestDuplicateVideoCreatesIndependentDraft(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	owner := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, owner.UUID, "Draft copy channel")
+	original, _, err := createVideoRecord(db, owner.UUID, videoCreateParams{
+		ChannelID: &channel.ID, Title: "Original video", Description: "Original description",
+		StorageType: "local", VideoURL: "https://cdn.example.com/original.mp4", ThumbnailURL: "https://cdn.example.com/cover.jpg",
+		SubtitleURL: "https://cdn.example.com/subtitles.vtt", Chapters: json.RawMessage(`[{"title":"Intro","start_sec":0}]`),
+		DurationSec: 120, Visibility: "public", Status: "draft", Tags: []string{"tutorial"},
+	})
+	require.NoError(t, err)
+
+	r := gin.New()
+	r.POST("/api/v1/videos/:id/duplicate", withVideoAuth(owner.UUID, DuplicateVideo(db)))
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/videos/"+original.ID.String()+"/duplicate", nil))
+	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+
+	var copied model.Video
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &copied))
+	require.NotEqual(t, original.ID, copied.ID)
+	require.Equal(t, "Original video (副本)", copied.Title)
+	require.Equal(t, "draft", copied.Status)
+	require.Equal(t, original.VideoURL, copied.VideoURL)
+	require.Equal(t, original.SubtitleURL, copied.SubtitleURL)
+	require.JSONEq(t, string(original.Chapters), string(copied.Chapters))
+	require.Len(t, copied.Tags, 1)
+	require.Equal(t, "tutorial", copied.Tags[0].Name)
+}
+
 func TestSetupVideoRoutesDoesNotMountLegacyRSS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	db := newVideoTestDB(t)
