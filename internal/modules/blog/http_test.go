@@ -565,12 +565,28 @@ func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 	}
 
 	r := newBlogHTTPRouter(service, &user)
-	missingFolderW := httptest.NewRecorder()
-	missingFolderReq := httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"content_id":"`+post.ID.String()+`"}`))
-	missingFolderReq.Header.Set("Content-Type", "application/json")
-	r.ServeHTTP(missingFolderW, missingFolderReq)
-	if missingFolderW.Code != http.StatusBadRequest {
-		t.Fatalf("expected bookmark folder to be required, got %d: %s", missingFolderW.Code, missingFolderW.Body.String())
+	defaultFolderW := httptest.NewRecorder()
+	defaultFolderReq := httptest.NewRequest(http.MethodPost, "/api/v1/blog/bookmarks", bytes.NewBufferString(`{"content_id":"`+post.ID.String()+`"}`))
+	defaultFolderReq.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(defaultFolderW, defaultFolderReq)
+	if defaultFolderW.Code != http.StatusCreated {
+		t.Fatalf("expected default bookmark folder fallback, got %d: %s", defaultFolderW.Code, defaultFolderW.Body.String())
+	}
+	var defaultBookmark struct {
+		Data BlogBookmarkDTO `json:"data"`
+	}
+	if err := json.Unmarshal(defaultFolderW.Body.Bytes(), &defaultBookmark); err != nil {
+		t.Fatalf("decode default bookmark response: %v", err)
+	}
+	if defaultBookmark.Data.BookmarkFolderID == nil {
+		t.Fatal("expected fallback bookmark folder in response")
+	}
+	var folder model.BookmarkFolder
+	if err := db.First(&folder, "id = ? AND user_id = ?", *defaultBookmark.Data.BookmarkFolderID, user.ID).Error; err != nil {
+		t.Fatalf("load fallback bookmark folder: %v", err)
+	}
+	if folder.Name != "默认收藏夹" {
+		t.Fatalf("fallback bookmark folder name = %q, want %q", folder.Name, "默认收藏夹")
 	}
 
 	w := httptest.NewRecorder()
@@ -578,15 +594,6 @@ func TestRegisterRoutesMountsBookmarkAndLikeReadEndpoints(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code == http.StatusNotFound {
 		t.Fatalf("expected likes count route to be mounted, got 404: %s", w.Body.String())
-	}
-
-	folder := model.BookmarkFolder{UserID: user.ID, Name: "Favorites"}
-	if err := db.Create(&folder).Error; err != nil {
-		t.Fatalf("create bookmark folder: %v", err)
-	}
-	bookmark := model.Bookmark{UserID: user.ID, ContentID: post.ID, BookmarkFolderID: &folder.ID}
-	if err := db.Create(&bookmark).Error; err != nil {
-		t.Fatalf("create bookmark: %v", err)
 	}
 
 	for _, path := range []string{
