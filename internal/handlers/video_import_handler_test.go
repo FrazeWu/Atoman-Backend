@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
@@ -21,7 +22,7 @@ import (
 	contentmodule "atoman/internal/modules/content"
 )
 
-func fakeVideoImportS3(t *testing.T) *s3.S3 {
+func fakeVideoImportS3(t *testing.T, onDelete ...func(*http.Request)) *s3.S3 {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
@@ -35,6 +36,9 @@ func fakeVideoImportS3(t *testing.T) *s3.S3 {
 			w.WriteHeader(http.StatusPartialContent)
 			_, _ = w.Write([]byte{0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'})
 		case r.Method == http.MethodDelete:
+			if len(onDelete) > 0 {
+				onDelete[0](r)
+			}
 			w.WriteHeader(http.StatusNoContent)
 		default:
 			t.Fatalf("unexpected S3 request: %s %s", r.Method, r.URL.String())
@@ -169,4 +173,28 @@ func TestVideoImportIsScopedToOwner(t *testing.T) {
 
 	response := performVideoImportRequest(t, videoImportTestRouter(db, nil, other.UUID), http.MethodGet, "/api/v1/videos/imports/"+session.ID.String(), nil)
 	require.Equal(t, http.StatusNotFound, response.Code)
+}
+
+func TestCancelUploadedVideoImportDeletesR2Object(t *testing.T) {
+	t.Setenv("S3_BUCKET", "atoman-test")
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	owner := seedVideoUser(t, db)
+	now := time.Now().UTC()
+	item := model.VideoImportSession{
+		UserID: owner.UUID, Status: videoImportAwaiting, FileName: "clip.mp4", FileSize: 5,
+		ContentType: "video/mp4", ObjectKey: "video/imports/uploaded/source.mp4", UploadID: "upload-1",
+		PartSize: videoImportPartSize, CompletedPartsJSON: `[{"part_number":1,"etag":"etag-1","size":5}]`, PayloadJSON: "{}",
+		UploadCompletedAt: &now,
+	}
+	require.NoError(t, db.Create(&item).Error)
+
+	deleted := make([]string, 0, 1)
+	router := videoImportTestRouter(db, fakeVideoImportS3(t, func(request *http.Request) {
+		deleted = append(deleted, request.URL.Path)
+	}), owner.UUID)
+	response := performVideoImportRequest(t, router, http.MethodDelete, "/api/v1/videos/imports/"+item.ID.String(), nil)
+
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	require.Equal(t, []string{"/atoman-test/video/imports/uploaded/source.mp4"}, deleted)
 }
