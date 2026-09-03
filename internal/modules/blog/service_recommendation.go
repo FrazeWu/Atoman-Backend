@@ -279,15 +279,19 @@ func (s *Service) RelatedPosts(postID uuid.UUID, viewerID *uuid.UUID, limit int)
 
 	orderSQL := "CASE "
 	orderVars := make([]interface{}, 0, 2)
+	if len(anchor.Tags) > 0 {
+		orderSQL += "WHEN EXISTS (SELECT 1 FROM content_blog_tags related_tags WHERE related_tags.content_id = posts.id AND related_tags.name IN ?) THEN 0 "
+		orderVars = append(orderVars, anchor.Tags)
+	}
 	if anchor.ChannelID != nil && *anchor.ChannelID != uuid.Nil {
-		orderSQL += "WHEN posts.channel_id = ? THEN 0 "
+		orderSQL += "WHEN posts.channel_id = ? THEN 1 "
 		orderVars = append(orderVars, *anchor.ChannelID)
 	}
 	if anchor.UserID != uuid.Nil {
-		orderSQL += "WHEN posts.author_id = ? THEN 1 "
+		orderSQL += "WHEN posts.author_id = ? THEN 2 "
 		orderVars = append(orderVars, anchor.UserID)
 	}
-	orderSQL += "ELSE 2 END, COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC"
+	orderSQL += "ELSE 3 END, COALESCE(posts.published_at, posts.created_at) DESC, posts.id DESC"
 
 	query := ApplyPublishedPostListVisibility(
 		canonicalBlogPostsQuery(s.db).Where("posts.id <> ? AND posts.status = ?", postID, "published"), viewerID,
@@ -304,7 +308,9 @@ func (s *Service) RelatedPosts(postID uuid.UUID, viewerID *uuid.UUID, limit int)
 	items := make([]RecommendationItemDTO, 0, len(contents))
 	for _, content := range contents {
 		reason := "更多文章"
-		if anchor.ChannelID != nil && content.ChannelID != nil && *anchor.ChannelID == *content.ChannelID {
+		if sharesBlogTag(anchor.Tags, content.Tags) {
+			reason = "同主题"
+		} else if anchor.ChannelID != nil && content.ChannelID != nil && *anchor.ChannelID == *content.ChannelID {
 			reason = "同频道"
 		} else if anchor.UserID != uuid.Nil && anchor.UserID == content.UserID {
 			reason = "同作者"
@@ -317,6 +323,19 @@ func (s *Service) RelatedPosts(postID uuid.UUID, viewerID *uuid.UUID, limit int)
 		})
 	}
 	return items, nil
+}
+
+func sharesBlogTag(left, right []string) bool {
+	seen := make(map[string]struct{}, len(left))
+	for _, tag := range left {
+		seen[tag] = struct{}{}
+	}
+	for _, tag := range right {
+		if _, ok := seen[tag]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func recommendationAuthor(user *model.User) *RecommendationAuthorDTO {

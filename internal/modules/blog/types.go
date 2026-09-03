@@ -55,4 +55,5 @@ type BlogContent struct {
 	WeightedRatingScore  *float64
 	WeightedRatingCount  int
 	WeightedRatingActive bool
+	Tags                 []string
 }
