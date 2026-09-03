@@ -643,7 +643,7 @@ func (s *Service) PublishDue(now time.Time, limit int) error {
 		if err := s.validatePublishable("video", video.ID, true); err != nil {
 			continue
 		}
-		if video.StorageType == "local" && video.ProcessingStatus != "ready" {
+		if video.StorageType == "local" && strings.HasPrefix(video.VideoURL, "/uploads/") && video.ProcessingStatus != "ready" {
 			continue
 		}
 		contentID, err := contentmodule.VideoContentID(s.db, video.ID)

@@ -294,6 +294,57 @@ func TestDispatchPublicationNotifiesVideoCollectionSubscribers(t *testing.T) {
 	}
 }
 
+func TestPublishDuePublishesR2VideoBeforePreviewProcessingCompletes(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	collection := model.Collection{ChannelID: fixture.channel.ID, ContentType: "video", Name: "Scheduled videos"}
+	if err := fixture.db.Create(&collection).Error; err != nil {
+		t.Fatal(err)
+	}
+	canonicalCollection := model.ContentCollection{Base: collection.Base, ChannelID: collection.ChannelID, Name: collection.Name}
+	if err := fixture.db.Create(&canonicalCollection).Error; err != nil {
+		t.Fatal(err)
+	}
+	publishAt := time.Now().UTC().Add(-time.Minute)
+	video := model.Video{
+		UserID: fixture.owner.ID, ChannelID: &fixture.channel.ID, CollectionID: &collection.ID,
+		Title: "Scheduled R2 video", StorageType: "local", VideoURL: "https://cdn.example.com/video/imports/source.mp4",
+		ProcessingStatus: "pending", Status: "scheduled", Visibility: "public", ScheduledAt: &publishAt,
+	}
+	if err := fixture.db.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+	entry := model.ContentEntry{
+		Base: video.Base, AuthorID: &fixture.owner.ID, ChannelID: fixture.channel.ID,
+		Kind: "video", Title: video.Title, Status: "scheduled", Visibility: "public", ScheduledAt: &publishAt,
+	}
+	if err := fixture.db.Create(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.ContentVideoExtension{
+		ContentID: entry.ID, VideoID: video.ID, CreatedAt: video.CreatedAt, UpdatedAt: video.UpdatedAt,
+		StorageType: video.StorageType, VideoURL: video.VideoURL, ProcessingStatus: video.ProcessingStatus,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.ContentCollectionMembership{ContentID: entry.ID, CollectionID: canonicalCollection.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := fixture.service.PublishDue(time.Now().UTC(), 10); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.First(&entry, "id = ?", entry.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if entry.Status != "published" {
+		t.Fatalf("expected scheduled R2 video to publish, got %q", entry.Status)
+	}
+	var event model.ContentPublicationEvent
+	if err := fixture.db.Where("content_type = ? AND content_id = ?", "video", video.ID).First(&event).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDispatchPendingPublicationsConcurrentlyClaimsEventBeforeNotifying(t *testing.T) {
 	fixture := newLifecycleFixture(t)
 	source := model.FeedSource{SourceType: "internal_channel", SourceID: &fixture.channel.ID, Hash: uuid.NewString(), Title: fixture.channel.Name}
