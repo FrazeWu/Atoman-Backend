@@ -2,6 +2,8 @@ package storage
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -9,6 +11,19 @@ import (
 	"atoman/internal/model"
 	"atoman/internal/testdb"
 )
+
+type wrappedEOFReader struct {
+	returned bool
+}
+
+func (r *wrappedEOFReader) Read(p []byte) (int, error) {
+	if !r.returned {
+		r.returned = true
+		copy(p, "audio")
+		return len("audio"), nil
+	}
+	return 0, fmt.Errorf("read complete: %w", io.EOF)
+}
 
 func TestDeleteSongAndS3ObjectsNilClientWithS3URLs(t *testing.T) {
 	t.Setenv("S3_URL_PREFIX", "https://storage.example.com/music")
@@ -117,5 +132,47 @@ func TestSaveFileLocallyRejectsFilenameWithPathSeparator(t *testing.T) {
 
 	if _, err := os.Stat(filepath.Join(tmpDir, "uploads", "music", "artist", "evil.mp3")); !os.IsNotExist(err) {
 		t.Fatalf("expected traversal target not to exist, stat err=%v", err)
+	}
+}
+
+func TestSaveFileLocallyAcceptsWrappedEOF(t *testing.T) {
+	tmpDir := t.TempDir()
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working dir: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(originalDir); err != nil {
+			t.Fatalf("restore working dir: %v", err)
+		}
+	})
+
+	path, _, err := SaveFileLocally(&wrappedEOFReader{}, "track.mp3", "Artist", "Album")
+	if err != nil {
+		t.Fatalf("SaveFileLocally() error = %v, want nil", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved file: %v", err)
+	}
+	if string(data) != "audio" {
+		t.Fatalf("saved content = %q, want %q", data, "audio")
+	}
+}
+
+func TestSaveFileToPathAcceptsWrappedEOF(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "track.mp3")
+	if err := SaveFileToPath(&wrappedEOFReader{}, path); err != nil {
+		t.Fatalf("SaveFileToPath() error = %v, want nil", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved file: %v", err)
+	}
+	if string(data) != "audio" {
+		t.Fatalf("saved content = %q, want %q", data, "audio")
 	}
 }

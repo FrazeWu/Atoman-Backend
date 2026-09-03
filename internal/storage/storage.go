@@ -1,7 +1,9 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -250,7 +252,7 @@ func SaveFileLocally(file interface{}, filename, artist, album string) (string, 
 			}
 		}
 		if err != nil {
-			if err.Error() == "EOF" {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return "", "", err
@@ -358,7 +360,7 @@ func SaveFileToPath(reader interface{ Read([]byte) (int, error) }, destPath stri
 			}
 		}
 		if readErr != nil {
-			if readErr.Error() == "EOF" {
+			if errors.Is(readErr, io.EOF) {
 				break
 			}
 			return readErr
