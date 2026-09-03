@@ -829,8 +829,21 @@ func (s *Service) FinalizeSubmittedAlbumImport(id uuid.UUID) error {
 	if err := json.Unmarshal(raw, &input); err != nil {
 		return err
 	}
-	_, err = s.CommitAlbumImportSession(authctx.CurrentUser{ID: *session.UserID, Role: authctx.RoleUser}, id, input)
-	return err
+	committed, err := s.CommitAlbumImportSession(authctx.CurrentUser{ID: *session.UserID, Role: authctx.RoleUser}, id, input)
+	if err != nil {
+		return err
+	}
+	return s.syncExternalImportTarget(committed)
+}
+
+func (s *Service) syncExternalImportTarget(session model.AlbumImportSession) error {
+	if !s.db.Migrator().HasTable(&model.MusicExternalImport{}) {
+		return nil
+	}
+	updates := map[string]any{"album_id": session.TargetAlbumID, "song_id": session.TargetSongID}
+	return s.db.Model(&model.MusicExternalImport{}).
+		Where("import_session_id = ?", session.ID).
+		Updates(updates).Error
 }
 
 func (s *Service) promoteAlbumImportAsset(rawURL, destinationKey string, importID uuid.UUID) (string, string, string, error) {

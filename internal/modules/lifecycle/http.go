@@ -24,6 +24,7 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.PUT("/notification-preferences", h.saveNotificationPreference)
 	group.GET("/:module/:id/schedule", h.getSchedule)
 	group.POST("/:module/:id/schedule", h.scheduleContent)
+	group.POST("/:module/:id/schedule/retry", h.retrySchedule)
 	group.DELETE("/:module/:id/schedule", h.cancelSchedule)
 }
 
@@ -165,6 +166,37 @@ func (h *Handler) cancelSchedule(c *gin.Context) {
 		return
 	}
 	httpx.OK(c, http.StatusOK, gin.H{"cancelled": true})
+}
+
+// retrySchedule godoc
+// @Summary 重试失败的定时发布
+// @Tags lifecycle
+// @Produce json
+// @Param module path string true "内容模块" Enums(blog)
+// @Param id path string true "内容 UUID"
+// @Success 200 {object} BlogScheduleStatus
+// @Failure 401 {object} handlers.ErrorResponse
+// @Failure 403 {object} handlers.ErrorResponse
+// @Failure 404 {object} handlers.ErrorResponse
+// @Security BearerAuth
+// @Security CookieAuth
+// @Router /api/v1/lifecycle/{module}/{id}/schedule/retry [post]
+func (h *Handler) retrySchedule(c *gin.Context) {
+	contentID, ok := pathUUID(c, "id")
+	if !ok {
+		return
+	}
+	if c.Param("module") != "blog" {
+		httpx.Error(c, apperr.BadRequest("lifecycle.invalid_module", "schedule retry is available for blog content"))
+		return
+	}
+	user, _ := authctx.Current(c)
+	status, err := h.service.RetryBlogSchedule(user, contentID)
+	if err != nil {
+		httpx.Error(c, err)
+		return
+	}
+	httpx.OK(c, http.StatusOK, status)
 }
 
 func bindJSON(c *gin.Context, target any) bool {

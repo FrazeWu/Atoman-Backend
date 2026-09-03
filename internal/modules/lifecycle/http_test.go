@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"atoman/internal/model"
 	"atoman/internal/platform/authctx"
 
 	"github.com/gin-gonic/gin"
@@ -59,5 +60,25 @@ func TestLifecycleHTTPSchedulesOwnedContent(t *testing.T) {
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/content/blog/"+fixture.post.ID.String()+"/schedule", bytes.NewBufferString(body)))
 	if w.Code != http.StatusOK {
 		t.Fatalf("schedule: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestLifecycleHTTPRetriesFailedBlogSchedule(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	now := time.Now().UTC()
+	if err := fixture.db.Model(&fixture.post).Updates(map[string]any{"status": "draft", "published_at": nil}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.Create(&model.BlogPublishSchedule{
+		ContentID: fixture.post.ID, AuthorID: fixture.owner.ID, PublishAt: now.Add(-time.Hour), Timezone: "UTC",
+		Status: "failed", NextRunAt: now.Add(-time.Hour), LastError: "publish unavailable",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	r := lifecycleRouter(fixture.service, fixture.owner)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/content/blog/"+fixture.post.ID.String()+"/schedule/retry", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("retry schedule: %d %s", w.Code, w.Body.String())
 	}
 }

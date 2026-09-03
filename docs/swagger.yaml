@@ -8278,6 +8278,14 @@ definitions:
         type: string
       published_at:
         type: string
+      schedule_attempts:
+        type: integer
+      schedule_last_error:
+        type: string
+      schedule_status:
+        type: string
+      schedule_timezone:
+        type: string
       scheduled_at:
         type: string
       status:
@@ -18151,6 +18159,46 @@ paths:
       - BearerAuth: []
       - CookieAuth: []
       summary: 查询定时发布状态
+      tags:
+      - lifecycle
+  /api/v1/lifecycle/{module}/{id}/schedule/retry:
+    post:
+      parameters:
+      - description: 内容模块
+        enum:
+        - blog
+        in: path
+        name: module
+        required: true
+        type: string
+      - description: 内容 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/lifecycle.BlogScheduleStatus'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "403":
+          description: Forbidden
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/handlers.ErrorResponse'
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 重试失败的定时发布
       tags:
       - lifecycle
   /api/v1/music/albums:

@@ -54,6 +54,6 @@ func (r *Repo) ListDebates(query ListDebatesQuery) ([]model.Debate, int64, error
 		pageSize = 100
 	}
 	var debates []model.Debate
-	err := db.Preload("User").Order("created_at DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&debates).Error
+	err := db.Preload("User").Order("created_at DESC").Order("id DESC").Offset((page - 1) * pageSize).Limit(pageSize).Find(&debates).Error
 	return debates, total, err
 }
