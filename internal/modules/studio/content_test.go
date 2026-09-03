@@ -65,6 +65,12 @@ func TestStudioContentsExposeScheduledPublicationTime(t *testing.T) {
 	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", post.ID).Update("scheduled_at", scheduledAt).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := fixture.db.Create(&model.BlogPublishSchedule{
+		ContentID: post.ID, AuthorID: fixture.user.ID, PublishAt: scheduledAt, Timezone: "Asia/Shanghai",
+		Status: "pending", Attempts: 2, NextRunAt: scheduledAt,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
 
 	items, total, err := fixture.service.ListContents(fixture.user, ModuleBlog, ContentQuery{
 		ChannelID: fixture.channel.ID, Status: "scheduled", Page: 1, PageSize: 20,
@@ -74,6 +80,9 @@ func TestStudioContentsExposeScheduledPublicationTime(t *testing.T) {
 	}
 	if total != 1 || len(items) != 1 || items[0].ScheduledAt == nil || !items[0].ScheduledAt.Equal(scheduledAt) {
 		t.Fatalf("expected scheduled content and time, total=%d items=%#v", total, items)
+	}
+	if items[0].ScheduleStatus != "pending" || items[0].ScheduleTimezone != "Asia/Shanghai" || items[0].ScheduleAttempts != 2 {
+		t.Fatalf("expected schedule details, got %#v", items[0])
 	}
 }
 

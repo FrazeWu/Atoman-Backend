@@ -114,6 +114,10 @@ type canonicalStudioBlogRow struct {
 	CollectionConflict bool       `gorm:"column:collection_conflict"`
 	CollectionID       *uuid.UUID `gorm:"column:collection_id"`
 	CollectionPosition int        `gorm:"column:collection_position"`
+	ScheduleStatus     string     `gorm:"column:schedule_status"`
+	ScheduleTimezone   string     `gorm:"column:schedule_timezone"`
+	ScheduleAttempts   int        `gorm:"column:schedule_attempts"`
+	ScheduleLastError  string     `gorm:"column:schedule_last_error"`
 }
 
 func (s *Service) listBlogContents(userID uuid.UUID, query ContentQuery) ([]StudioContentItem, int64, error) {
@@ -122,8 +126,11 @@ func (s *Service) listBlogContents(userID uuid.UUID, query ContentQuery) ([]Stud
 			posts.title, posts.summary, posts.cover_url, posts.status, posts.visibility,
 			posts.published_at, posts.scheduled_at, blog_extensions.content,
 			blog_extensions.pinned, blog_extensions.view_count, blog_extensions.collection_conflict,
-			memberships.collection_id, memberships.position AS collection_position`).
+			memberships.collection_id, memberships.position AS collection_position,
+			COALESCE(schedules.status, '') AS schedule_status, COALESCE(schedules.timezone, '') AS schedule_timezone,
+			COALESCE(schedules.attempts, 0) AS schedule_attempts, COALESCE(schedules.last_error, '') AS schedule_last_error`).
 		Joins("JOIN content_blog_extensions AS blog_extensions ON blog_extensions.content_id = posts.id").
+		Joins("LEFT JOIN blog_publish_schedules AS schedules ON schedules.content_id = posts.id").
 		Joins(`LEFT JOIN LATERAL (
 			SELECT collection_id, position
 			FROM content_collection_memberships
@@ -207,7 +214,12 @@ func (s *Service) listBlogContents(userID uuid.UUID, query ContentQuery) ([]Stud
 		if post.Collection != nil {
 			collections = append(collections, *post.Collection)
 		}
-		items = append(items, studioPostItem(ModuleBlog, post.ID, post, collections))
+		item := studioPostItem(ModuleBlog, post.ID, post, collections)
+		item.ScheduleStatus = row.ScheduleStatus
+		item.ScheduleTimezone = row.ScheduleTimezone
+		item.ScheduleAttempts = row.ScheduleAttempts
+		item.ScheduleLastError = row.ScheduleLastError
+		items = append(items, item)
 	}
 	if err := s.enrichContentMetrics(ModuleBlog, items); err != nil {
 		return nil, 0, err

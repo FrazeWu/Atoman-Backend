@@ -453,6 +453,58 @@ func (s *Service) CancelSchedule(user authctx.CurrentUser, module string, conten
 	}
 }
 
+func (s *Service) RetryBlogSchedule(user authctx.CurrentUser, contentID uuid.UUID) (BlogScheduleStatus, error) {
+	if user.ID == uuid.Nil {
+		return BlogScheduleStatus{}, apperr.Unauthorized("Login required")
+	}
+	content, err := s.resolveContent("blog", contentID)
+	if err != nil {
+		return BlogScheduleStatus{}, err
+	}
+	if content.OwnerID != user.ID {
+		return BlogScheduleStatus{}, apperr.Forbidden("lifecycle.content_forbidden", "You do not have permission to retry this schedule")
+	}
+	if err := s.validatePublishable("blog", contentID, true); err != nil {
+		return BlogScheduleStatus{}, err
+	}
+
+	now := time.Now().UTC()
+	var schedule model.BlogPublishSchedule
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("content_id = ? AND author_id = ?", contentID, user.ID).First(&schedule).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return apperr.NotFound("lifecycle.schedule_not_found", "Schedule not found")
+			}
+			return err
+		}
+		if schedule.Status != "failed" {
+			return apperr.Conflict("lifecycle.schedule_not_failed", "Schedule is not failed")
+		}
+		result := tx.Model(&model.BlogPublishSchedule{}).Where("id = ? AND status = ?", schedule.ID, "failed").Updates(map[string]any{
+			"status": "pending", "publish_at": now, "next_run_at": now, "attempts": 0, "last_error": "",
+			"lease_token": "", "lease_until": nil, "published_at": nil, "cancelled_at": nil,
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return apperr.Conflict("lifecycle.schedule_not_failed", "Schedule is not failed")
+		}
+		contentUpdate := tx.Model(&model.ContentEntry{}).Where("id = ? AND author_id = ? AND status = ?", contentID, user.ID, "draft").Updates(map[string]any{"status": "scheduled", "scheduled_at": now})
+		if contentUpdate.Error != nil {
+			return contentUpdate.Error
+		}
+		if contentUpdate.RowsAffected != 1 {
+			return apperr.Conflict("lifecycle.content_not_draft", "Content is no longer a draft")
+		}
+		return tx.First(&schedule, "id = ?", schedule.ID).Error
+	})
+	if err != nil {
+		return BlogScheduleStatus{}, err
+	}
+	return BlogScheduleStatus{ContentID: schedule.ContentID, Status: schedule.Status, PublishAt: schedule.PublishAt, Timezone: schedule.Timezone, Attempts: schedule.Attempts, NextRunAt: schedule.NextRunAt, LastError: schedule.LastError, PublishedAt: schedule.PublishedAt, CancelledAt: schedule.CancelledAt}, nil
+}
+
 func (s *Service) PublishDueBlogSchedules(now time.Time, limit int) error {
 	if limit < 1 || limit > 100 {
 		limit = 20
@@ -527,7 +579,13 @@ func (s *Service) retryBlogSchedule(id uuid.UUID, token string, now time.Time, c
 	} else if nextRunAt.After(deadline) {
 		nextRunAt = deadline
 	}
-	return s.db.Model(&model.BlogPublishSchedule{}).Where("id = ? AND status = ? AND lease_token = ?", id, "processing", token).Updates(map[string]any{"status": status, "attempts": attempts, "next_run_at": nextRunAt, "last_error": cause.Error(), "lease_token": "", "lease_until": nil}).Error
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.BlogPublishSchedule{}).Where("id = ? AND status = ? AND lease_token = ?", id, "processing", token).Updates(map[string]any{"status": status, "attempts": attempts, "next_run_at": nextRunAt, "last_error": cause.Error(), "lease_token": "", "lease_until": nil})
+		if result.Error != nil || result.RowsAffected != 1 || status != "failed" {
+			return result.Error
+		}
+		return tx.Model(&model.ContentEntry{}).Where("id = ? AND status = ?", schedule.ContentID, "scheduled").Updates(map[string]any{"status": "draft", "scheduled_at": nil}).Error
+	})
 }
 
 func blogScheduleRetryDelay(attempt int) time.Duration {

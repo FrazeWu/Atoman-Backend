@@ -105,6 +105,10 @@ type StudioContentItem struct {
 	ProcessingStatus   string                    `json:"processing_status,omitempty"`
 	PublishedAt        *time.Time                `json:"published_at,omitempty"`
 	ScheduledAt        *time.Time                `json:"scheduled_at,omitempty"`
+	ScheduleStatus     string                    `json:"schedule_status,omitempty"`
+	ScheduleTimezone   string                    `json:"schedule_timezone,omitempty"`
+	ScheduleAttempts   int                       `json:"schedule_attempts,omitempty"`
+	ScheduleLastError  string                    `json:"schedule_last_error,omitempty"`
 	CreatedAt          time.Time                 `json:"created_at"`
 	UpdatedAt          time.Time                 `json:"updated_at"`
 }
