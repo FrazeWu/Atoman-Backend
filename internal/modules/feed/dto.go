@@ -87,6 +87,7 @@ type RecommendationItemDTO struct {
 	LastPublishedAt      *time.Time                 `json:"last_published_at,omitempty"`
 	SourceID             string                     `json:"source_id,omitempty"`
 	SourceTitle          string                     `json:"source_title,omitempty"`
+	SourceImageURL       string                     `json:"source_image_url,omitempty"`
 	SourceType           string                     `json:"source_type,omitempty"`
 	SourceCategory       string                     `json:"source_category,omitempty"`
 	Platform             string                     `json:"platform,omitempty"`

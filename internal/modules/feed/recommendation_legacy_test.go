@@ -293,3 +293,54 @@ func TestRecommendChannelsReturnsEmptyWithoutCanonicalBlogExtensions(t *testing.
 		t.Fatalf("expected canonical-only recent posts query to exclude legacy post, got %+v", recentPosts)
 	}
 }
+
+func TestRecommendArticlesReturnsSourceIdentityForExternalFeedItems(t *testing.T) {
+	db := testdb.Open(t)
+	testdb.Migrate(t, db,
+		&model.FeedSource{},
+		&model.FeedItem{},
+		&model.FeedItemRead{},
+		&model.FeedItemStar{},
+	)
+
+	now := time.Now().UTC()
+	source := model.FeedSource{
+		SourceType: "external_rss",
+		Hash:       "source-identity-" + uuid.NewString(),
+		Title:      "Source identity feed",
+		RssURL:     "https://source-identity.example.com/feed.xml",
+		CoverURL:   "https://source-identity.example.com/source-cover.png",
+		Category:   "blog",
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	item := model.FeedItem{
+		FeedSourceID:       source.ID,
+		GUID:               "source-identity-item",
+		Title:              "Article image must not become source avatar",
+		Summary:            strings.Repeat("A substantial article summary. ", 20),
+		ImageURL:           "https://source-identity.example.com/article-image.png",
+		ReaderQualityScore: 95,
+		FullTextWordCount:  1200,
+		PublishedAt:        now,
+		FetchedAt:          now,
+	}
+	if err := db.Create(&item).Error; err != nil {
+		t.Fatalf("create item: %v", err)
+	}
+
+	items, _, err := NewService(db).RecommendArticlesByMode(recommendation.ModeHot, "blog", "", "", "", 1, 20)
+	if err != nil {
+		t.Fatalf("recommend articles: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected one recommendation, got %+v", items)
+	}
+	if items[0].SourceImageURL != source.CoverURL {
+		t.Fatalf("source_image_url = %q, want %q", items[0].SourceImageURL, source.CoverURL)
+	}
+	if items[0].RssURL != source.RssURL {
+		t.Fatalf("rss_url = %q, want %q", items[0].RssURL, source.RssURL)
+	}
+}

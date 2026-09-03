@@ -552,6 +552,7 @@ func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) e
 			if post.Channel != nil {
 				items[i].SourceID = post.Channel.ID.String()
 				items[i].SourceTitle = post.Channel.Name
+				items[i].SourceImageURL = post.Channel.CoverURL
 				items[i].SourceType = "internal_channel"
 				items[i].SourceCategory = "blog"
 				if strings.TrimSpace(post.Channel.Slug) != "" {
@@ -569,9 +570,11 @@ func (s *Service) hydrateRecommendationArticles(items []RecommendationItemDTO) e
 			if feedItem.FeedSource != nil {
 				items[i].SourceID = feedItem.FeedSource.ID.String()
 				items[i].SourceTitle = feedItem.FeedSource.Title
+				items[i].SourceImageURL = feedItem.FeedSource.CoverURL
 				items[i].SourceType = feedItem.FeedSource.SourceType
 				items[i].SourceCategory = normalizeSourceCategory(feedItem.FeedSource.Category)
 				items[i].SourcePath = "/feed/sources?source_id=" + feedItem.FeedSource.ID.String()
+				items[i].RssURL = feedItem.FeedSource.RssURL
 			}
 		}
 	}
