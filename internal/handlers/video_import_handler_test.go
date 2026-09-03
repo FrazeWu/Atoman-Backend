@@ -158,6 +158,16 @@ func TestVideoImportRejectsLocalStorageFallback(t *testing.T) {
 	require.Equal(t, http.StatusServiceUnavailable, created.Code, created.Body.String())
 }
 
+func TestVideoImportRoutesDoNotExposeLocalPartUpload(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterVideoImportRoutes(router.Group("/api/v1/videos"), nil, nil)
+
+	for _, route := range router.Routes() {
+		require.NotEqual(t, "PUT /api/v1/videos/imports/:id/parts/:partNumber/upload", route.Method+" "+route.Path)
+	}
+}
+
 func TestVideoImportIsScopedToOwner(t *testing.T) {
 	t.Setenv("S3_BUCKET", "atoman-test")
 	gin.SetMode(gin.TestMode)
