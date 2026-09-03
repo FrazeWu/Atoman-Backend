@@ -34,6 +34,7 @@ func newVideoTestDB(t *testing.T) *gorm.DB {
 		&model.ContentEntry{},
 		&model.ContentVideoExtension{},
 		&model.ContentPublicationEvent{},
+		&model.ContentProgress{},
 		&model.ContentCollection{},
 		&model.ContentCollectionMembership{},
 		&model.VideoBookmark{},
@@ -561,6 +562,37 @@ func TestVideoBookmarksSupportPopularSort(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 	require.Len(t, resp.Data, 2)
 	require.Equal(t, hotVideo.ID.String(), resp.Data[0].VideoID)
+}
+
+func TestVideoBookmarksFilterCompletedItems(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	user := seedVideoUser(t, db)
+	unfinished := seedVideo(t, db, user.UUID)
+	finished := seedVideo(t, db, user.UUID)
+	require.NoError(t, db.Create(&model.VideoBookmark{UserID: user.UUID, VideoID: unfinished.ID}).Error)
+	require.NoError(t, db.Create(&model.VideoBookmark{UserID: user.UUID, VideoID: finished.ID}).Error)
+	require.NoError(t, db.Create(&model.ContentProgress{
+		UserID: user.UUID, ContentType: "video", ContentID: finished.ID, Completed: true, Progress: 1,
+	}).Error)
+
+	r := gin.New()
+	r.GET("/api/v1/videos/bookmarks", withVideoAuth(user.UUID, GetVideoBookmarks(db)))
+
+	for _, test := range []struct {
+		state string
+		want  string
+		skip  string
+	}{
+		{state: "active", want: unfinished.ID.String(), skip: finished.ID.String()},
+		{state: "completed", want: finished.ID.String(), skip: unfinished.ID.String()},
+	} {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/videos/bookmarks?state="+test.state, nil))
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		require.Contains(t, w.Body.String(), test.want)
+		require.NotContains(t, w.Body.String(), test.skip)
+	}
 }
 
 func TestCreateChannelBookmarkIsIdempotentWithRepeatedRequests(t *testing.T) {
