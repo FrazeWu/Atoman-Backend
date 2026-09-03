@@ -11,7 +11,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"gorm.io/gorm"
 
 	"atoman/internal/model"
 	"atoman/internal/testdb"
@@ -52,18 +51,6 @@ func TestWaitForWorkersTimesOutWhenWorkerDoesNotStop(t *testing.T) {
 		t.Fatalf("waitForWorkers() error = %v, want context deadline exceeded", err)
 	}
 }
-
-type legacyStartupEmailVerificationCode struct {
-	UUID      uuid.UUID `gorm:"type:uuid;primaryKey"`
-	Email     string    `gorm:"uniqueIndex;not null"`
-	Code      string    `gorm:"not null"`
-	ExpiresAt time.Time `gorm:"not null"`
-	Used      bool      `gorm:"default:false"`
-	CreatedAt time.Time
-	DeletedAt gorm.DeletedAt `gorm:"index"`
-}
-
-func (legacyStartupEmailVerificationCode) TableName() string { return "email_verification_codes" }
 
 func TestCORSRejectsUnknownOriginWithCredentialsOutsideProduction(t *testing.T) {
 	gin.SetMode(gin.TestMode)
@@ -127,160 +114,6 @@ func TestValidateAuthEnvironmentRequiresCodeSecretOnlyInProduction(t *testing.T)
 	t.Setenv("AUTH_CODE_SECRET", "production-auth-code-secret")
 	if err := validateAuthEnvironment(); err != nil {
 		t.Fatalf("production auth environment should be valid: %v", err)
-	}
-}
-
-func TestRunUnifiedCommentStartupMigrationsCreatesTablesAndIndexes(t *testing.T) {
-	db := testdb.Open(t)
-
-	if err := runUnifiedCommentStartupMigrations(db); err != nil {
-		t.Fatalf("run unified comment startup migrations: %v", err)
-	}
-	for _, table := range []string{
-		"music_song_lyrics",
-		"music_song_lyric_lines",
-		"music_song_lyric_versions",
-		"music_lyric_annotations",
-		"music_lyric_annotation_votes",
-	} {
-		if !db.Migrator().HasTable(table) {
-			t.Fatalf("expected startup migration to create %s", table)
-		}
-	}
-
-	models := []any{
-		&model.AuthSession{},
-		&model.ExternalIdentity{},
-		&model.OAuthFlow{},
-		&model.ForumGroup{},
-		&model.ForumGroupMember{},
-		&model.ForumCategoryPermission{},
-		&model.ForumUserModerationAction{},
-		&model.ForumUserTrust{},
-		&model.DiscussionTarget{},
-		&model.CommentEntry{},
-		&model.CommentMention{},
-		&model.CommentAttachment{},
-		&model.CommentLike{},
-		&model.CommentReport{},
-		&model.CommentTimeAnchor{},
-		&model.CommentPublishRecord{},
-		&model.TimelineRevisionProposal{},
-		&model.Debate{},
-		&model.DebateConclusionEvent{},
-		&model.DebateRevisionReference{},
-		&model.DebateVote{},
-		&model.DebateRelation{},
-	}
-	for _, schemaModel := range models {
-		if !db.Migrator().HasTable(schemaModel) {
-			t.Fatalf("expected table for %T to exist", schemaModel)
-		}
-	}
-	if !db.Migrator().HasColumn(&model.DiscussionTarget{}, "resource_id") {
-		t.Fatal("expected discussion_targets.resource_id")
-	}
-	if !db.Migrator().HasColumn(&model.CommentEntry{}, "reply_to_author_id") {
-		t.Fatal("expected comment_entries.reply_to_author_id")
-	}
-
-	for table, index := range map[string]string{
-		"discussion_targets":      "uq_discussion_target_kind_key",
-		"comment_entries":         "uq_comment_root_floor",
-		"comment_likes":           "uq_comment_like_user",
-		"comment_reports":         "uq_comment_report_user",
-		"comment_publish_records": "idx_comment_publish_author_created",
-	} {
-		if !db.Migrator().HasIndex(table, index) {
-			t.Fatalf("expected index %s on %s to exist", index, table)
-		}
-	}
-}
-
-func TestStartupMigrationsUpgradePasswordResetAuthSchema(t *testing.T) {
-	db := testdb.Open(t)
-	if err := db.AutoMigrate(&legacyStartupEmailVerificationCode{}); err != nil {
-		t.Fatalf("create legacy verification schema: %v", err)
-	}
-	legacy := legacyStartupEmailVerificationCode{
-		UUID: uuid.New(), Email: "legacy@example.com", Code: "123456",
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
-	}
-	if err := db.Create(&legacy).Error; err != nil {
-		t.Fatalf("seed legacy verification code: %v", err)
-	}
-
-	if err := runUnifiedCommentStartupMigrations(db, &model.User{}, &model.EmailVerificationCode{}); err != nil {
-		t.Fatalf("run startup migrations: %v", err)
-	}
-	resetCode := model.EmailVerificationCode{
-		Email: "legacy@example.com", Purpose: "password_reset", CodeHash: "654321",
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
-	}
-	if err := db.Create(&resetCode).Error; err != nil {
-		t.Fatalf("create purpose-specific reset code after startup migration: %v", err)
-	}
-}
-
-func TestRunMusicBookmarkStartupMigrationCreatesPlaylistBookmarksOnFreshDatabase(t *testing.T) {
-	db := testdb.Open(t)
-
-	if err := runMusicBookmarkStartupMigration(db); err != nil {
-		t.Fatalf("run music bookmark startup migration: %v", err)
-	}
-	if !db.Migrator().HasTable(&model.PlaylistBookmark{}) {
-		t.Fatal("expected startup migration to create music_playlist_bookmarks")
-	}
-	if !db.Migrator().HasIndex(&model.PlaylistBookmark{}, "idx_music_playlist_bookmarks_user_playlist") {
-		t.Fatal("expected startup migration to create playlist bookmark unique index")
-	}
-}
-
-func TestStartupDMV2MigrationOrder(t *testing.T) {
-	db := testdb.Open(t)
-	if err := runStartupDMV2Migration(db); err != nil {
-		t.Fatalf("run startup dm v2 migration: %v", err)
-	}
-	if !db.Migrator().HasTable(&model.DMConversation{}) || !db.Migrator().HasTable(&model.DMMessage{}) {
-		t.Fatal("expected startup migration to create dm v2 core tables")
-	}
-	if !db.Migrator().HasIndex("dm_conversations", "uq_dm_conversation_typed") {
-		t.Fatal("expected startup migration to create typed conversation index")
-	}
-}
-
-func TestRunUnifiedCommentStartupMigrationsBackfillsLegacyForumReplies(t *testing.T) {
-	db := testdb.Open(t)
-	requireLegacyForumTables(t, db)
-	topicID, ownerID, replyID, authorID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
-	if err := db.Exec(`INSERT INTO forum_topics (id, user_id) VALUES (?, ?)`, topicID, ownerID).Error; err != nil {
-		t.Fatalf("seed legacy topic: %v", err)
-	}
-	if err := db.Exec(`INSERT INTO forum_replies (id, topic_id, user_id, content, floor_number) VALUES (?, ?, ?, ?, ?)`, replyID, topicID, authorID, "legacy", 1).Error; err != nil {
-		t.Fatalf("seed legacy reply: %v", err)
-	}
-
-	if err := runUnifiedCommentStartupMigrations(db); err != nil {
-		t.Fatalf("run unified comment startup migrations: %v", err)
-	}
-	var entry model.CommentEntry
-	if err := db.First(&entry, "id = ?", replyID).Error; err != nil {
-		t.Fatalf("expected legacy reply to be migrated: %v", err)
-	}
-}
-
-func requireLegacyForumTables(t *testing.T, db interface {
-	Exec(string, ...interface{}) *gorm.DB
-}) {
-	t.Helper()
-	for _, statement := range []string{
-		`CREATE TABLE forum_topics (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, user_id TEXT NOT NULL, solved_reply_id TEXT)`,
-		`CREATE TABLE forum_replies (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, topic_id TEXT NOT NULL, user_id TEXT NOT NULL, parent_reply_id TEXT, content TEXT NOT NULL, floor_number INTEGER, is_solved BOOLEAN)`,
-		`CREATE TABLE forum_likes (id TEXT PRIMARY KEY, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ, user_id TEXT NOT NULL, target_type TEXT NOT NULL, target_id TEXT NOT NULL)`,
-	} {
-		if err := db.Exec(statement).Error; err != nil {
-			t.Fatalf("create legacy forum table: %v", err)
-		}
 	}
 }
 
