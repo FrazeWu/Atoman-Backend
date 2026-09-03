@@ -26278,6 +26278,53 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/videos/imports/{id}/parts/{partNumber}/upload": {
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/octet-stream"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "video-imports"
+                ],
+                "summary": "上传本地视频分片",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "导入任务 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "分片序号",
+                        "name": "partNumber",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/videos/imports/{id}/record": {
             "delete": {
                 "security": [

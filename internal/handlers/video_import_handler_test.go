@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -74,6 +75,16 @@ func performVideoImportRequest(t *testing.T, router http.Handler, method, path s
 	return response
 }
 
+func performVideoImportPartUpload(t *testing.T, router http.Handler, path string, body []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPut, path, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "video/mp4")
+	req.Header.Set("Content-Length", fmt.Sprintf("%d", len(body)))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	return response
+}
+
 func TestVideoImportCompletesUploadAndPublishesOnce(t *testing.T) {
 	t.Setenv("S3_BUCKET", "atoman-test")
 	t.Setenv("S3_URL_PREFIX", "https://cdn.example.com")
@@ -126,6 +137,54 @@ func TestVideoImportCompletesUploadAndPublishesOnce(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&model.ContentVideoExtension{}).Where("video_id = ?", *task.TargetVideoID).Count(&count).Error)
 	require.EqualValues(t, 1, count)
+}
+
+func TestVideoImportSupportsLocalMultipartUpload(t *testing.T) {
+	t.Setenv("STORAGE_TYPE", "local")
+	t.Setenv("S3_BUCKET", "")
+	t.Setenv("S3_URL_PREFIX", "")
+	gin.SetMode(gin.TestMode)
+	db := newVideoTestDB(t)
+	owner := seedVideoUser(t, db)
+	channel := seedVideoChannel(t, db, owner.UUID, "Local Import Channel")
+	router := videoImportTestRouter(db, nil, owner.UUID)
+
+	file := []byte{0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm'}
+	created := performVideoImportRequest(t, router, http.MethodPost, "/api/v1/videos/imports", CreateVideoImportInput{
+		ChannelID: &channel.ID, FileName: "clip.mp4", FileSize: int64(len(file)), ContentType: "video/mp4",
+	})
+	require.Equal(t, http.StatusCreated, created.Code, created.Body.String())
+	var task VideoImportDTO
+	require.NoError(t, json.Unmarshal(created.Body.Bytes(), &task))
+	var importSession model.VideoImportSession
+	require.NoError(t, db.First(&importSession, "id = ?", task.ID).Error)
+	t.Cleanup(func() { cleanupLocalVideoImport(importSession) })
+
+	partUpload := performVideoImportPartUpload(t, router, "/api/v1/videos/imports/"+task.ID.String()+"/parts/1/upload", file)
+	require.Equal(t, http.StatusOK, partUpload.Code, partUpload.Body.String())
+	require.NotEmpty(t, partUpload.Header().Get("ETag"))
+
+	part := performVideoImportRequest(t, router, http.MethodPost, "/api/v1/videos/imports/"+task.ID.String()+"/parts/1/complete", CompleteVideoImportPartInput{
+		ETag: partUpload.Header().Get("ETag"), Size: int64(len(file)),
+	})
+	require.Equal(t, http.StatusOK, part.Code, part.Body.String())
+
+	submitted := performVideoImportRequest(t, router, http.MethodPost, "/api/v1/videos/imports/"+task.ID.String()+"/submit", SubmitVideoImportInput{
+		Payload:     VideoImportPayload{ChannelID: &channel.ID, Title: "Local imported video", Visibility: "public"},
+		PublishMode: "published",
+	})
+	require.Equal(t, http.StatusOK, submitted.Code, submitted.Body.String())
+
+	completed := performVideoImportRequest(t, router, http.MethodPost, "/api/v1/videos/imports/"+task.ID.String()+"/complete", nil)
+	require.Equal(t, http.StatusOK, completed.Code, completed.Body.String())
+	require.NoError(t, json.Unmarshal(completed.Body.Bytes(), &task))
+	require.Equal(t, videoImportPublished, task.Status)
+	require.NotNil(t, task.TargetVideoID)
+
+	video, err := contentmodule.LoadVideo(db, contentmodule.VideoQuery(db).Where("videos.video_id = ?", *task.TargetVideoID))
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(video.VideoURL, "/uploads/video/imports/"), video.VideoURL)
+	require.Equal(t, "published", video.Status)
 }
 
 func TestVideoImportIsScopedToOwner(t *testing.T) {

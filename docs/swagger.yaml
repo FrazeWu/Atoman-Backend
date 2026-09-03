@@ -25367,6 +25367,35 @@ paths:
       summary: 确认视频分片上传完成
       tags:
       - video-imports
+  /api/v1/videos/imports/{id}/parts/{partNumber}/upload:
+    put:
+      consumes:
+      - application/octet-stream
+      parameters:
+      - description: 导入任务 UUID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: 分片序号
+        in: path
+        name: partNumber
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      - CookieAuth: []
+      summary: 上传本地视频分片
+      tags:
+      - video-imports
   /api/v1/videos/imports/{id}/record:
     delete:
       parameters:

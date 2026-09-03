@@ -22,18 +22,19 @@ import (
 )
 
 type videoCreateParams struct {
-	ChannelID     *uuid.UUID  `json:"channel_id"`
-	Title         string      `json:"title" binding:"required"`
-	Description   string      `json:"description"`
-	StorageType   string      `json:"storage_type"`
-	VideoURL      string      `json:"video_url" binding:"required"`
-	ThumbnailURL  string      `json:"thumbnail_url"`
-	DurationSec   int         `json:"duration_sec"`
-	Visibility    string      `json:"visibility"`
-	Status        string      `json:"status"`
-	Tags          []string    `json:"tags"`
-	CollectionID  *uuid.UUID  `json:"collection_id"`
-	CollectionIDs []uuid.UUID `json:"collection_ids"`
+	ChannelID              *uuid.UUID  `json:"channel_id"`
+	Title                  string      `json:"title" binding:"required"`
+	Description            string      `json:"description"`
+	StorageType            string      `json:"storage_type"`
+	VideoURL               string      `json:"video_url" binding:"required"`
+	ThumbnailURL           string      `json:"thumbnail_url"`
+	DurationSec            int         `json:"duration_sec"`
+	Visibility             string      `json:"visibility"`
+	Status                 string      `json:"status"`
+	Tags                   []string    `json:"tags"`
+	CollectionID           *uuid.UUID  `json:"collection_id"`
+	CollectionIDs          []uuid.UUID `json:"collection_ids"`
+	AllowPendingProcessing bool        `json:"-"`
 }
 
 // ReprocessVideo godoc
@@ -189,8 +190,14 @@ func createVideoRecord(db *gorm.DB, userID uuid.UUID, input videoCreateParams) (
 		}
 		if status == "published" {
 			lifecycleService := lifecycle.NewService(tx)
-			if err := lifecycleService.ValidatePublishable("video", video.ID); err != nil {
-				return err
+			var validationErr error
+			if input.AllowPendingProcessing {
+				validationErr = lifecycleService.ValidatePublishableWithoutProcessing("video", video.ID)
+			} else {
+				validationErr = lifecycleService.ValidatePublishable("video", video.ID)
+			}
+			if validationErr != nil {
+				return validationErr
 			}
 			return lifecycleService.EnqueuePublication("video", video.ID)
 		}

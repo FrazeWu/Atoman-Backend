@@ -607,7 +607,7 @@ func (s *Service) PublishDue(now time.Time, limit int) error {
 	return nil
 }
 
-func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool) error {
+func (s *Service) validatePublishable(module string, contentID uuid.UUID, requireProcessing bool) error {
 	switch module {
 	case "blog":
 		var entry model.ContentEntry
@@ -641,7 +641,7 @@ func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool
 		if strings.TrimSpace(video.Title) == "" || strings.TrimSpace(video.VideoURL) == "" || video.CollectionID == nil || video.CollectionConflict {
 			return apperr.BadRequest("lifecycle.publish_check_failed", "Video title, source, and collection are required")
 		}
-		if video.StorageType == "local" && strings.HasPrefix(video.VideoURL, "/uploads/") && video.ProcessingStatus != "ready" {
+		if requireProcessing && video.StorageType == "local" && strings.HasPrefix(video.VideoURL, "/uploads/") && video.ProcessingStatus != "ready" {
 			return apperr.Conflict("lifecycle.content_processing", "Video processing must finish before publishing")
 		}
 	default:
@@ -652,6 +652,10 @@ func (s *Service) validatePublishable(module string, contentID uuid.UUID, _ bool
 
 func (s *Service) ValidatePublishable(module string, contentID uuid.UUID) error {
 	return s.validatePublishable(normalizeModule(module), contentID, true)
+}
+
+func (s *Service) ValidatePublishableWithoutProcessing(module string, contentID uuid.UUID) error {
+	return s.validatePublishable(normalizeModule(module), contentID, false)
 }
 
 func postHasResolvedCollection(post model.Post) bool {
