@@ -29,7 +29,6 @@ var (
 var allowedPostStatuses = map[string]struct{}{
 	"draft":     {},
 	"published": {},
-	"archived":  {},
 }
 
 var allowedPostVisibilities = map[string]struct{}{

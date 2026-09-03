@@ -93,6 +93,7 @@ func Run(db *gorm.DB) error {
 		{"user default resources migration", backfillUserDefaultResources},
 		{"resource management migration", migrations.RunResourceManagementMigration},
 		{"unified content migration", migrations.RunUnifiedContentMigration},
+		{"blog archive removal migration", migrations.RunBlogArchiveRemovalMigration},
 		{"blog rating content migration", migrations.RunBlogRatingContentMigration},
 		{"blog bookmark content migration", migrations.RunBlogBookmarkContentMigration},
 		{"music contribution evidence backfill", runMusicContributionEvidenceBackfill},

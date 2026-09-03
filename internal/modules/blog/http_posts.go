@@ -795,10 +795,6 @@ func (h *Handler) publishPost(c *gin.Context) { h.updatePostStatus(c, "published
 
 func (h *Handler) unpublishPost(c *gin.Context) { h.updatePostStatus(c, "draft") }
 
-func (h *Handler) archivePost(c *gin.Context) { h.updatePostStatus(c, "archived") }
-
-func (h *Handler) unarchivePost(c *gin.Context) { h.updatePostStatus(c, "draft") }
-
 func (h *Handler) pinPost(c *gin.Context) { h.updatePostPin(c, true) }
 
 func (h *Handler) unpinPost(c *gin.Context) { h.updatePostPin(c, false) }

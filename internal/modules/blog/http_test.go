@@ -2563,31 +2563,16 @@ func TestRegisterRoutesUnpublishPostUpdatesStatus(t *testing.T) {
 	}
 }
 
-func TestRegisterRoutesArchiveAndUnarchivePost(t *testing.T) {
-	service, db, user := newBlogHTTPTestService(t)
-	channel, _ := createOwnedChannelAndCollection(t, service, user, "Alice")
-	post := createPostRecord(t, db, user.ID, &channel.ID, "Archive me", "published")
+func TestRegisterRoutesDoNotMountArchiveEndpoints(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
 	r := newBlogHTTPRouter(service, &user)
 
-	for _, action := range []struct {
-		path   string
-		status string
-	}{
-		{path: "archive", status: "archived"},
-		{path: "unarchive", status: "draft"},
-	} {
+	for _, path := range []string{"archive", "unarchive"} {
 		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/"+post.ID.String()+"/"+action.path, nil)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts/00000000-0000-0000-0000-000000000001/"+path, nil)
 		r.ServeHTTP(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("%s status = %d: %s", action.path, w.Code, w.Body.String())
-		}
-		content, err := loadCanonicalBlogContent(db, post.ID)
-		if err != nil {
-			t.Fatalf("reload canonical content after %s: %v", action.path, err)
-		}
-		if content.Status != action.status {
-			t.Fatalf("status after %s = %q, want %q", action.path, content.Status, action.status)
+		if w.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404", path, w.Code)
 		}
 	}
 }

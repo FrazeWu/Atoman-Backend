@@ -137,8 +137,6 @@ func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.DELETE("/posts/:id", canPublish, h.deletePost)
 	group.POST("/posts/:id/publish", canPublish, h.publishPost)
 	group.POST("/posts/:id/unpublish", canPublish, h.unpublishPost)
-	group.POST("/posts/:id/archive", canPublish, h.archivePost)
-	group.POST("/posts/:id/unarchive", canPublish, h.unarchivePost)
 	group.POST("/posts/:id/pin", h.pinPost)
 	group.POST("/posts/:id/unpin", h.unpinPost)
 	group.PUT("/collections/:id/posts/order", h.reorderCollectionPosts)
