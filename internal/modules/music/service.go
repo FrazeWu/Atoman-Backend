@@ -1,33 +1,42 @@
 package music
 
 import (
+	"net/http"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go/service/s3"
 	"gorm.io/gorm"
 )
 
 type Service struct {
-	db                   *gorm.DB
-	repo                 *Repo
-	s3                   *s3.S3
-	albumImportMultipart albumImportMultipartStore
-	assetUploadMultipart albumImportMultipartStore
-	albumLinkSuggestions AlbumLinkSuggestionProvider
-	lyricsSaveMu         sync.Mutex
-	lyricsVoteMu         sync.Mutex
+	db                     *gorm.DB
+	repo                   *Repo
+	s3                     *s3.S3
+	albumImportMultipart   albumImportMultipartStore
+	assetUploadMultipart   albumImportMultipartStore
+	albumLinkSuggestions   AlbumLinkSuggestionProvider
+	applePreviewHTTPClient *http.Client
+	applePreviewBaseURL    string
+	lyricsSaveMu           sync.Mutex
+	lyricsVoteMu           sync.Mutex
 }
 
-func NewService(db *gorm.DB) *Service { return &Service{db: db, repo: NewRepo(db)} }
+func NewService(db *gorm.DB) *Service {
+	return &Service{
+		db:                     db,
+		repo:                   NewRepo(db),
+		applePreviewHTTPClient: &http.Client{Timeout: 8 * time.Second},
+		applePreviewBaseURL:    "https://itunes.apple.com/lookup",
+	}
+}
 
 func NewServiceWithS3(db *gorm.DB, s3Client *s3.S3) *Service {
-	return &Service{
-		db:                   db,
-		repo:                 NewRepo(db),
-		s3:                   s3Client,
-		albumImportMultipart: newS3AlbumImportMultipartStore(s3Client),
-		assetUploadMultipart: newS3PublicMusicMultipartStore(s3Client),
-	}
+	service := NewService(db)
+	service.s3 = s3Client
+	service.albumImportMultipart = newS3AlbumImportMultipartStore(s3Client)
+	service.assetUploadMultipart = newS3PublicMusicMultipartStore(s3Client)
+	return service
 }
 
 // WithAlbumLinkSuggestionProvider enables MusicBrainz-backed album suggestions.
