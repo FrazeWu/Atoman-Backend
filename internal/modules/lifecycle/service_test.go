@@ -1051,7 +1051,39 @@ func TestRetryFailedBlogScheduleRequeuesContent(t *testing.T) {
 	}
 }
 
-func TestRetryFailedBlogScheduleRejectsContentThatIsNoLongerDraft(t *testing.T) {
+func TestRetryFailedBlogScheduleRequeuesAlreadyScheduledContent(t *testing.T) {
+	fixture := newLifecycleFixture(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	if err := fixture.db.Model(&model.ContentEntry{}).Where("id = ?", fixture.post.ID).Updates(map[string]any{"status": "scheduled", "published_at": nil, "scheduled_at": now.Add(-time.Hour)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	schedule := model.BlogPublishSchedule{
+		ContentID: fixture.post.ID, AuthorID: fixture.owner.ID, PublishAt: now.Add(-time.Hour),
+		Timezone: "UTC", Status: "failed", Attempts: 3, NextRunAt: now.Add(-time.Hour), LastError: "publish unavailable",
+	}
+	if err := fixture.db.Create(&schedule).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := fixture.service.RetryBlogSchedule(fixture.owner, fixture.post.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.db.First(&schedule, "id = ?", schedule.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if schedule.Status != "pending" || schedule.Attempts != 0 || schedule.LastError != "" || schedule.NextRunAt.Before(now) {
+		t.Fatalf("failed schedule was not requeued: %#v", schedule)
+	}
+	var entry model.ContentEntry
+	if err := fixture.db.First(&entry, "id = ?", fixture.post.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if entry.Status != "scheduled" || entry.ScheduledAt == nil || entry.ScheduledAt.Before(now) {
+		t.Fatalf("retried content was not scheduled: %#v", entry)
+	}
+}
+
+func TestRetryFailedBlogScheduleRejectsPublishedContent(t *testing.T) {
 	fixture := newLifecycleFixture(t)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	schedule := model.BlogPublishSchedule{
@@ -1063,7 +1095,7 @@ func TestRetryFailedBlogScheduleRejectsContentThatIsNoLongerDraft(t *testing.T) 
 	}
 
 	if _, err := fixture.service.RetryBlogSchedule(fixture.owner, fixture.post.ID); err == nil {
-		t.Fatal("expected retry to reject content that is no longer a draft")
+		t.Fatal("expected retry to reject published content")
 	}
 	if err := fixture.db.First(&schedule, "id = ?", schedule.ID).Error; err != nil {
 		t.Fatal(err)
