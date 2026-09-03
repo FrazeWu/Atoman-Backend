@@ -435,12 +435,13 @@ func (importer *AppleCatalogImporter) findOrCreateAppleAlbum(tx *gorm.DB, storef
 			if err := tx.Create(&album).Error; err != nil {
 				return album, err
 			}
-			if err := tx.Create(&model.AlbumArtist{AlbumID: album.ID, ArtistID: artist.ID, Role: "primary", Position: 1}).Error; err != nil {
-				return album, err
-			}
 		} else if err := addAppleSource(tx, &album, appleCollectionURL(item.CollectionViewURL)); err != nil {
 			return album, err
 		}
+	}
+	credit := model.AlbumArtist{AlbumID: album.ID, ArtistID: artist.ID, Role: "primary", Position: 1}
+	if err := tx.Where("album_id = ? AND artist_id = ? AND role = ? AND custom_role = ?", album.ID, artist.ID, credit.Role, "").FirstOrCreate(&credit).Error; err != nil {
+		return album, err
 	}
 	return album, upsertMusicCatalogLink(tx, "album", externalID, album.ID, storefront, appleCollectionURL(item.CollectionViewURL), chartRank, item)
 }
@@ -466,12 +467,13 @@ func (importer *AppleCatalogImporter) findOrCreateAppleSong(tx *gorm.DB, storefr
 			if err := tx.Create(&song).Error; err != nil {
 				return err
 			}
-			if err := tx.Create(&model.SongArtist{SongID: song.ID, ArtistID: artist.ID, Role: "primary", Position: 1}).Error; err != nil {
-				return err
-			}
 		} else if err := addAppleSource(tx, &song, item.TrackViewURL); err != nil {
 			return err
 		}
+	}
+	credit := model.SongArtist{SongID: song.ID, ArtistID: artist.ID, Role: "primary", Position: 1}
+	if err := tx.Where("song_id = ? AND artist_id = ? AND role = ? AND custom_role = ?", song.ID, artist.ID, credit.Role, "").FirstOrCreate(&credit).Error; err != nil {
+		return err
 	}
 	return upsertMusicCatalogLink(tx, "song", externalID, song.ID, storefront, item.TrackViewURL, chartRank, item)
 }
