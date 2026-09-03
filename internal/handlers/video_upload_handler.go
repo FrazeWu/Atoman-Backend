@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -32,11 +31,11 @@ type multipartFile interface {
 	io.Seeker
 }
 
-// UploadVideoFile accepts a multipart video file and stores it locally or in S3.
+// UploadVideoFile accepts a multipart video file and stores it in object storage.
 // Field name: "video". Returns { "url": "..." }.
 // UploadVideoFile godoc
 // @Summary 上传视频文件
-// @Description 上传视频源文件，支持本地或 S3 存储。
+// @Description 上传视频源文件到 R2 兼容对象存储。
 // @Tags videos
 // @Accept mpfd
 // @Produce json
@@ -85,21 +84,6 @@ func UploadVideoFile(s3Client *s3.S3) gin.HandlerFunc {
 
 		filename := uuid.New().String() + ext
 		s3Key := "video/files/" + userID + "/" + filename
-
-		if os.Getenv("STORAGE_TYPE") == "local" {
-			localDir := filepath.Join("uploads", "video", "files", userID)
-			if err := os.MkdirAll(localDir, 0o755); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建目录失败"})
-				return
-			}
-			destPath := filepath.Join(localDir, filename)
-			if err := storage.SaveFileToPath(file, destPath); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "保存视频失败"})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"url": "/uploads/video/files/" + userID + "/" + filename})
-			return
-		}
 
 		if !requireS3(c, s3Client) {
 			return
@@ -163,21 +147,6 @@ func UploadVideoCover(s3Client *s3.S3) gin.HandlerFunc {
 		ext := contentTypeToExt(ct)
 		filename := uuid.New().String() + ext
 		s3Key := "video/covers/" + userID + "/" + filename
-
-		if os.Getenv("STORAGE_TYPE") == "local" {
-			localDir := filepath.Join("uploads", "video", "covers", userID)
-			if err := os.MkdirAll(localDir, 0o755); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "创建目录失败"})
-				return
-			}
-			destPath := filepath.Join(localDir, filename)
-			if err := storage.SaveFileToPath(file, destPath); err != nil {
-				c.JSON(http.StatusInternalServerError, gin.H{"error": "保存封面失败"})
-				return
-			}
-			c.JSON(http.StatusOK, gin.H{"url": "/uploads/video/covers/" + userID + "/" + filename})
-			return
-		}
 
 		if !requireS3(c, s3Client) {
 			return
