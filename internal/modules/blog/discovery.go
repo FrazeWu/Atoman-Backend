@@ -23,6 +23,7 @@ const (
 
 type BlogSearchQuery struct {
 	Text         string
+	AuthorID     *uuid.UUID
 	ChannelID    *uuid.UUID
 	CollectionID *uuid.UUID
 	Sort         string
@@ -98,6 +99,9 @@ func (s *Service) SearchPublishedBlogContents(input BlogSearchQuery) ([]BlogSear
 	newQuery := func() *gorm.DB {
 		query := canonicalBlogPostsQuery(s.db).
 			Where("posts.status = ? AND (posts.visibility = ? OR posts.visibility = ?)", "published", "", "public")
+		if input.AuthorID != nil {
+			query = query.Where("posts.author_id = ?", *input.AuthorID)
+		}
 		if input.ChannelID != nil {
 			query = query.Where("posts.channel_id = ?", *input.ChannelID)
 		}

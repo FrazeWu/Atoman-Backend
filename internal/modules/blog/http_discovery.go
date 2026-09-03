@@ -19,6 +19,7 @@ import (
 // @Tags blog
 // @Produce json
 // @Param q query string true "关键词"
+// @Param author_id query string false "作者 UUID"
 // @Param channel_id query string false "频道 UUID"
 // @Param collection_id query string false "合集 UUID"
 // @Param sort query string false "排序" Enums(relevance,recent)
@@ -27,6 +28,11 @@ import (
 // @Success 200 {array} BlogSearchResultDTO
 // @Router /api/v1/blog/search [get]
 func (h *Handler) searchBlogPosts(c *gin.Context) {
+	authorID, err := parseOptionalUUID(c.Query("author_id"))
+	if err != nil {
+		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "author_id must be a valid UUID"))
+		return
+	}
 	channelID, err := parseOptionalUUID(c.Query("channel_id"))
 	if err != nil {
 		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "channel_id must be a valid UUID"))
@@ -39,7 +45,7 @@ func (h *Handler) searchBlogPosts(c *gin.Context) {
 	}
 	page, pageSize := httpx.PageParams(c)
 	items, total, err := h.service.SearchPublishedBlogContents(BlogSearchQuery{
-		Text: c.Query("q"), ChannelID: channelID, CollectionID: collectionID,
+		Text: c.Query("q"), AuthorID: authorID, ChannelID: channelID, CollectionID: collectionID,
 		Sort: c.DefaultQuery("sort", blogSearchSortRelevance), Page: page, PageSize: pageSize,
 	})
 	if err != nil {

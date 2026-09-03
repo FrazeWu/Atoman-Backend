@@ -5110,6 +5110,12 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
+                        "description": "作者 UUID",
+                        "name": "author_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
                         "description": "频道 UUID",
                         "name": "channel_id",
                         "in": "query"

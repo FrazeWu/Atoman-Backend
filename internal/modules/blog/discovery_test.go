@@ -75,6 +75,40 @@ func TestBlogSearchRanksTitleMatchesAndReturnsSnippet(t *testing.T) {
 	}
 }
 
+func TestBlogSearchFiltersByAuthor(t *testing.T) {
+	service, db, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+	other := model.User{Username: "search-other", Email: "search-other@example.com", Password: "hash", Role: "user", IsActive: true}
+	if err := db.Create(&other).Error; err != nil {
+		t.Fatalf("create other user: %v", err)
+	}
+	otherChannel, err := service.CreateDefaultChannelForUser(other.UUID, "Other")
+	if err != nil {
+		t.Fatalf("create other channel: %v", err)
+	}
+	createPublicSearchPost(t, db, user.ID, channel.ID, "Author guide", "", "Alice article")
+	otherPost := createPublicSearchPost(t, db, other.UUID, otherChannel.ID, "Author guide", "", "Other article")
+	router := newBlogHTTPRouter(service, &user)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/blog/search?q=guide&author_id="+other.UUID.String(), nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected filtered search 200, got %d: %s", response.Code, response.Body.String())
+	}
+	if !bytes.Contains(response.Body.Bytes(), []byte(otherPost.ID.String())) || bytes.Contains(response.Body.Bytes(), []byte("Alice article")) {
+		t.Fatalf("author filter returned the wrong articles: %s", response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/blog/search?q=guide&author_id=invalid", nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected invalid author_id 400, got %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestBlogRecommendationFeedbackHidesAndRestoresArticle(t *testing.T) {
 	service, db, user := newBlogHTTPTestService(t)
 	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")

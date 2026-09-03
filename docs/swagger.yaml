@@ -11778,6 +11778,10 @@ paths:
         name: q
         required: true
         type: string
+      - description: 作者 UUID
+        in: query
+        name: author_id
+        type: string
       - description: 频道 UUID
         in: query
         name: channel_id
