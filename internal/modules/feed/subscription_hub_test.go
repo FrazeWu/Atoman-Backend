@@ -96,3 +96,39 @@ func TestSubscriptionHubKeepsChannelContextsSeparatedByType(t *testing.T) {
 		t.Fatalf("video branch leaked a different content type: %#v", videoItems)
 	}
 }
+
+func TestSubscriptionHubImportsSelfSubscriptionIntoAllContentTypes(t *testing.T) {
+	service, db, viewer, _, _ := newUnifiedSubscriptionFixture(t)
+	testdb.Migrate(t, db, &model.SubscriptionHubGroup{}, &model.SubscriptionHubMembership{})
+
+	source := model.FeedSource{
+		SourceType: "internal_user",
+		SourceID:   &viewer.ID,
+		Hash:       "subscription-hub-self-user",
+		Title:      viewer.Username,
+	}
+	if err := db.Create(&source).Error; err != nil {
+		t.Fatalf("create self source: %v", err)
+	}
+	if err := db.Create(&model.Subscription{
+		UserID:       viewer.ID,
+		FeedSourceID: source.ID,
+		Title:        source.Title,
+	}).Error; err != nil {
+		t.Fatalf("create self subscription: %v", err)
+	}
+
+	tree, err := service.GetSubscriptionHubTree(viewer.ID)
+	if err != nil {
+		t.Fatalf("get subscription hub tree: %v", err)
+	}
+	for _, subscriptionType := range []string{SubscriptionHubTypeBlog, SubscriptionHubTypePodcast, SubscriptionHubTypeVideo} {
+		group := firstSubscriptionHubGroup(tree, subscriptionType)
+		if group == nil || len(group.Memberships) != 1 || group.Memberships[0].FeedSourceID != source.ID {
+			t.Fatalf("self subscription should be available in %s: %#v", subscriptionType, group)
+		}
+	}
+	if group := firstSubscriptionHubGroup(tree, SubscriptionHubTypeRSS); group != nil {
+		t.Fatalf("self subscription must not be imported as RSS: %#v", group)
+	}
+}

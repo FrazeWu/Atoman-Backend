@@ -91,11 +91,17 @@ func subscriptionHubSourceMatchesType(subscriptionType string, source *model.Fee
 	return source.SourceType == "internal_user" || source.SourceType == "internal_channel" || source.SourceType == "internal_collection"
 }
 
-func subscriptionHubTypeForLegacySource(source *model.FeedSource) string {
+func subscriptionHubTypesForLegacySource(source *model.FeedSource) []string {
 	if source != nil && source.SourceType == "external_rss" {
-		return SubscriptionHubTypeRSS
+		return []string{SubscriptionHubTypeRSS}
 	}
-	return SubscriptionHubTypeBlog
+	if source != nil {
+		switch source.SourceType {
+		case "internal_user", "internal_channel", "internal_collection":
+			return []string{SubscriptionHubTypePodcast, SubscriptionHubTypeVideo, SubscriptionHubTypeBlog}
+		}
+	}
+	return []string{SubscriptionHubTypeBlog}
 }
 
 func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
@@ -128,12 +134,14 @@ func (s *Service) ensureLegacySubscriptionHubContexts(userID uuid.UUID) error {
 			if subscription.SubscriptionGroup != nil && strings.TrimSpace(subscription.SubscriptionGroup.Name) != "" {
 				groupName = subscription.SubscriptionGroup.Name
 			}
-			candidates = append(candidates, legacyContextCandidate{
-				subscriptionType: subscriptionHubTypeForLegacySource(subscription.FeedSource),
-				groupName:        groupName,
-				feedSource:       subscription.FeedSource,
-				title:            firstNonBlank(subscription.Title, subscription.FeedSource.Title),
-			})
+			for _, subscriptionType := range subscriptionHubTypesForLegacySource(subscription.FeedSource) {
+				candidates = append(candidates, legacyContextCandidate{
+					subscriptionType: subscriptionType,
+					groupName:        groupName,
+					feedSource:       subscription.FeedSource,
+					title:            firstNonBlank(subscription.Title, subscription.FeedSource.Title),
+				})
+			}
 		}
 
 		var channelBookmarks []model.ChannelBookmark
