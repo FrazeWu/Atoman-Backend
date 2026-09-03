@@ -35,10 +35,18 @@ func GetRecommendedVideoItems(db *gorm.DB) gin.HandlerFunc {
 			httpx.Error(c, err)
 			return
 		}
+		feedback := videoRecommendationFeedbackFor(db, currentBlogViewerID(c))
 
 		candidates := make([]recommendation.Candidate, 0, len(videos))
 		videoByID := make(map[string]model.Video, len(videos))
 		for _, video := range videos {
+			if feedback.excludes(video) {
+				continue
+			}
+			authority := normalizeVideoRecommendationAuthority(video)
+			if video.ChannelID != nil && feedback.reducedChannels[*video.ChannelID] {
+				authority *= 0.2
+			}
 			candidates = append(candidates, recommendation.Candidate{
 				Module:          "video",
 				EntityType:      recommendation.EntityVideo,
@@ -47,7 +55,7 @@ func GetRecommendedVideoItems(db *gorm.DB) gin.HandlerFunc {
 				QualityScore:    normalizeVideoRecommendationQuality(video),
 				TrendScore:      normalizeVideoRecommendationTrend(video),
 				FreshnessScore:  normalizeVideoRecommendationFreshness(video.CreatedAt, 14*24*time.Hour),
-				AuthorityScore:  normalizeVideoRecommendationAuthority(video),
+				AuthorityScore:  authority,
 				ExposureScore:   0,
 				EditorialScore:  0,
 				PublishedAtUnix: video.CreatedAt.Unix(),

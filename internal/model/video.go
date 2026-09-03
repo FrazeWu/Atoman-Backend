@@ -95,3 +95,13 @@ type VideoBookmark struct {
 }
 
 func (VideoBookmark) TableName() string { return "video_bookmarks" }
+
+// VideoRecommendationFeedback records a reversible preference for a video recommendation scope.
+type VideoRecommendationFeedback struct {
+	Base
+	UserID   uuid.UUID `json:"user_id" gorm:"type:uuid;not null;index;uniqueIndex:idx_video_recommendation_feedback,priority:1,where:deleted_at IS NULL"`
+	Scope    string    `json:"scope" gorm:"type:varchar(16);not null;uniqueIndex:idx_video_recommendation_feedback,priority:2,where:deleted_at IS NULL"`
+	TargetID uuid.UUID `json:"target_id" gorm:"type:uuid;not null;uniqueIndex:idx_video_recommendation_feedback,priority:3,where:deleted_at IS NULL"`
+}
+
+func (VideoRecommendationFeedback) TableName() string { return "video_recommendation_feedback" }

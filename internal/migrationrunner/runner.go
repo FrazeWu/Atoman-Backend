@@ -339,7 +339,7 @@ func MigrateSchema(db *gorm.DB) error {
 		&model.ForumBookmark{}, &model.ForumFollow{}, &model.ForumReport{}, &model.ForumUserModerationAction{},
 		&model.ForumUserTrust{}, &model.CategoryRequest{}, &model.ForumModeratorAssignment{},
 		&model.ForumGroup{}, &model.ForumGroupMember{}, &model.ForumCategoryPermission{},
-		&model.Video{}, &model.VideoBookmark{}, &model.VideoProcessingJob{}, &model.VideoImportSession{}, &model.VideoTag{},
+		&model.Video{}, &model.VideoBookmark{}, &model.VideoRecommendationFeedback{}, &model.VideoProcessingJob{}, &model.VideoImportSession{}, &model.VideoTag{},
 		&model.VideoCollection{}, &model.VideoTagRelation{}, &model.PodcastEpisode{}, &model.PodcastEpisodeBookmark{},
 		&model.Debate{}, &model.DebateConclusionEvent{}, &model.DebateRevisionReference{},
 		&model.DebateRelation{}, &model.DebateVote{}, &model.DiscussionTarget{}, &model.CommentEntry{},
