@@ -119,6 +119,30 @@ func decodeForumData[T any](t *testing.T, response *httptest.ResponseRecorder) (
 	return data, envelope
 }
 
+func TestForumRoutesPreserveInvalidRequestEnvelope(t *testing.T) {
+	router, _, _, _ := newForumHTTPTestRouter(t)
+
+	invalidID := httptest.NewRecorder()
+	router.ServeHTTP(invalidID, httptest.NewRequest(http.MethodGet, "/api/v1/forum/topics/invalid", nil))
+	if invalidID.Code != http.StatusBadRequest {
+		t.Fatalf("invalid topic ID status = %d, want 400", invalidID.Code)
+	}
+	if got := invalidID.Body.String(); got != `{"error":{"code":"validation.invalid_request","details":{},"message":"topicID must be a valid uuid"}}` {
+		t.Fatalf("invalid topic ID response = %s", got)
+	}
+
+	invalidJSON := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/forum/topics", bytes.NewBufferString(`{"title":`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(invalidJSON, req)
+	if invalidJSON.Code != http.StatusBadRequest {
+		t.Fatalf("invalid JSON status = %d, want 400", invalidJSON.Code)
+	}
+	if got := invalidJSON.Body.String(); got != `{"error":{"code":"validation.invalid_request","details":{},"message":"request body must be valid JSON"}}` {
+		t.Fatalf("invalid JSON response = %s", got)
+	}
+}
+
 func TestCreateAndUpdateTopicPersistNormalizedTags(t *testing.T) {
 	router, _, _, category := newForumHTTPTestRouter(t)
 	response := performForumRequest(t, router, http.MethodPost, "/api/v1/forum/topics", map[string]any{

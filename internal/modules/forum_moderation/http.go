@@ -103,7 +103,7 @@ func (h *Handler) listUserActions(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	userID, err := parseUUIDParam(c.Query("user_id"), "user_id")
+	userID, err := httpx.ParseUUID(c.Query("user_id"), "user_id")
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -141,14 +141,12 @@ func (h *Handler) applyUserAction(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	userID, err := parseUUIDParam(c.Param("userID"), "userID")
-	if err != nil {
-		httpx.Error(c, err)
+	userID, ok := httpx.UUIDParam(c, "userID")
+	if !ok {
 		return
 	}
 	var req UserActionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	action, err := h.service.ApplyUserAction(user, userID, req)
@@ -237,11 +235,10 @@ func (h *Handler) createReport(c *gin.Context) {
 		Reason     string `json:"reason"`
 		Note       string `json:"note"`
 	}
-	if err := c.ShouldBindJSON(&raw); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+	if !httpx.BindRequiredJSON(c, &raw) {
 		return
 	}
-	targetID, err := parseUUIDParam(raw.TargetID, "target_id")
+	targetID, err := httpx.ParseUUID(raw.TargetID, "target_id")
 	if err != nil {
 		httpx.Error(c, err)
 		return
@@ -279,8 +276,7 @@ func (h *Handler) reviewCategoryRequestLegacy(c *gin.Context) {
 		ReviewNote string `json:"review_note"`
 		Color      string `json:"color"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	switch req.Action {
@@ -317,9 +313,8 @@ func (h *Handler) resolveReport(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	reportID, err := parseUUIDParam(c.Param("reportID"), "reportID")
-	if err != nil {
-		httpx.Error(c, err)
+	reportID, ok := httpx.UUIDParam(c, "reportID")
+	if !ok {
 		return
 	}
 	var req ResolveReportRequest
@@ -341,9 +336,8 @@ func (h *Handler) approveCategoryRequest(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	requestID, err := parseUUIDParam(c.Param("requestID"), "requestID")
-	if err != nil {
-		httpx.Error(c, err)
+	requestID, ok := httpx.UUIDParam(c, "requestID")
+	if !ok {
 		return
 	}
 	var req ReviewCategoryRequestInput
@@ -365,9 +359,8 @@ func (h *Handler) rejectCategoryRequest(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	requestID, err := parseUUIDParam(c.Param("requestID"), "requestID")
-	if err != nil {
-		httpx.Error(c, err)
+	requestID, ok := httpx.UUIDParam(c, "requestID")
+	if !ok {
 		return
 	}
 	var req ReviewCategoryRequestInput
@@ -431,8 +424,7 @@ func (h *Handler) createModeratorAssignment(c *gin.Context) {
 		return
 	}
 	var req ModeratorAssignmentInput
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	assignment, err := h.service.CreateModeratorAssignment(user, req)
@@ -466,14 +458,12 @@ func (h *Handler) updateModeratorAssignment(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	assignmentID, err := parseUUIDParam(c.Param("assignmentID"), "assignmentID")
-	if err != nil {
-		httpx.Error(c, err)
+	assignmentID, ok := httpx.UUIDParam(c, "assignmentID")
+	if !ok {
 		return
 	}
 	var req ModeratorAssignmentInput
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpx.Error(c, apperr.BadRequest("validation.invalid_request", "request body must be valid JSON"))
+	if !httpx.BindRequiredJSON(c, &req) {
 		return
 	}
 	assignment, err := h.service.UpdateModeratorAssignment(user, assignmentID, req)
@@ -504,9 +494,8 @@ func (h *Handler) deleteModeratorAssignment(c *gin.Context) {
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	assignmentID, err := parseUUIDParam(c.Param("assignmentID"), "assignmentID")
-	if err != nil {
-		httpx.Error(c, err)
+	assignmentID, ok := httpx.UUIDParam(c, "assignmentID")
+	if !ok {
 		return
 	}
 	if err := h.service.DeleteModeratorAssignment(user, assignmentID); err != nil {
@@ -522,9 +511,8 @@ func (h *Handler) handleTopicAction(c *gin.Context, fn func(authctx.CurrentUser,
 		httpx.Error(c, apperr.Unauthorized("Login required"))
 		return
 	}
-	topicID, err := parseUUIDParam(c.Param("topicID"), "topicID")
-	if err != nil {
-		httpx.Error(c, err)
+	topicID, ok := httpx.UUIDParam(c, "topicID")
+	if !ok {
 		return
 	}
 	result, err := fn(user, topicID)
@@ -533,12 +521,4 @@ func (h *Handler) handleTopicAction(c *gin.Context, fn func(authctx.CurrentUser,
 		return
 	}
 	httpx.OK(c, http.StatusOK, result)
-}
-
-func parseUUIDParam(raw string, name string) (uuid.UUID, error) {
-	id, err := uuid.Parse(raw)
-	if err != nil {
-		return uuid.Nil, apperr.BadRequest("validation.invalid_request", name+" must be a valid uuid")
-	}
-	return id, nil
 }
