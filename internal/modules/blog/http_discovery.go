@@ -22,6 +22,7 @@ import (
 // @Param author_id query string false "作者 UUID"
 // @Param channel_id query string false "频道 UUID"
 // @Param collection_id query string false "合集 UUID"
+// @Param tag query string false "标签"
 // @Param sort query string false "排序" Enums(relevance,recent)
 // @Param page query int false "页码"
 // @Param page_size query int false "每页数量"
@@ -45,7 +46,7 @@ func (h *Handler) searchBlogPosts(c *gin.Context) {
 	}
 	page, pageSize := httpx.PageParams(c)
 	items, total, err := h.service.SearchPublishedBlogContents(BlogSearchQuery{
-		Text: c.Query("q"), AuthorID: authorID, ChannelID: channelID, CollectionID: collectionID,
+		Text: c.Query("q"), Tag: c.Query("tag"), AuthorID: authorID, ChannelID: channelID, CollectionID: collectionID,
 		Sort: c.DefaultQuery("sort", blogSearchSortRelevance), Page: page, PageSize: pageSize,
 	})
 	if err != nil {

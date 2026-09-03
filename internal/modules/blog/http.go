@@ -46,6 +46,7 @@ type postInput struct {
 	ChannelID     *string    `json:"channel_id"`
 	CollectionID  *string    `json:"collection_id"`
 	BaseUpdatedAt *time.Time `json:"base_updated_at"`
+	Tags          *[]string  `json:"tags"`
 }
 
 type postRatingInput struct {

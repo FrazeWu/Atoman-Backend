@@ -210,6 +210,7 @@ func newBlogHTTPTestService(t *testing.T) (*Service, *gorm.DB, authctx.CurrentUs
 		&model.ContentEntry{},
 		&model.ContentPostExtension{},
 		&model.ContentBlogExtension{},
+		&model.ContentBlogTag{},
 		&model.ContentBlogVersion{},
 		&model.ContentBlogDraft{},
 		&model.BlogMarkdownImport{},
@@ -764,6 +765,30 @@ func TestRegisterRoutesMountsBlogRecommendationPostsEndpoint(t *testing.T) {
 	}
 	if first.Summary != "这是一篇适合推荐的文章内容。" {
 		t.Fatalf("expected recommendation summary fallback, got %q", first.Summary)
+	}
+}
+
+func TestBlogPostsPersistNormalizedTagsAndFilterByTag(t *testing.T) {
+	service, _, user := newBlogHTTPTestService(t)
+	channel, err := service.CreateDefaultChannelForUser(user.ID, "Alice")
+	if err != nil {
+		t.Fatalf("create default channel: %v", err)
+	}
+	router := newBlogHTTPRouter(service, &user)
+	body := `{"title":"Tagged post","content":"Body","channel_id":"` + channel.ID.String() + `","status":"published","visibility":"public","tags":[" Design ","design","Vue"]}`
+	created := httptest.NewRecorder()
+	router.ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/api/v1/blog/posts", bytes.NewBufferString(body)))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("expected tagged post to be created, got %d: %s", created.Code, created.Body.String())
+	}
+	if !bytes.Contains(created.Body.Bytes(), []byte(`"tags":["design","vue"]`)) {
+		t.Fatalf("expected normalized tags in create response, got %s", created.Body.String())
+	}
+
+	filtered := httptest.NewRecorder()
+	router.ServeHTTP(filtered, httptest.NewRequest(http.MethodGet, "/api/v1/blog/search?tag=design", nil))
+	if filtered.Code != http.StatusOK || !bytes.Contains(filtered.Body.Bytes(), []byte("Tagged post")) {
+		t.Fatalf("expected tag filter to return tagged post, got %d: %s", filtered.Code, filtered.Body.String())
 	}
 }
 

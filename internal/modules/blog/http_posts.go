@@ -685,6 +685,11 @@ func (h *Handler) updatePost(c *gin.Context) {
 		if err := tx.Model(&model.ContentBlogExtension{}).Where("content_id = ?", postID).Updates(extensionUpdates).Error; err != nil {
 			return err
 		}
+		if req.Tags != nil {
+			if err := syncBlogTags(tx, postID, *req.Tags); err != nil {
+				return err
+			}
+		}
 		if shouldResolveCollection {
 			if err := tx.Where("content_id = ?", postID).Delete(&model.ContentCollectionMembership{}).Error; err != nil {
 				return err
