@@ -15207,6 +15207,70 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/v1/lifecycle/{module}/{id}/schedule/retry": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "CookieAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "lifecycle"
+                ],
+                "summary": "重试失败的定时发布",
+                "parameters": [
+                    {
+                        "enum": [
+                            "blog"
+                        ],
+                        "type": "string",
+                        "description": "内容模块",
+                        "name": "module",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "内容 UUID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/lifecycle.BlogScheduleStatus"
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "403": {
+                        "description": "Forbidden",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/handlers.ErrorResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/api/v1/music/albums": {
             "get": {
                 "produces": [
@@ -39660,6 +39724,18 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "published_at": {
+                    "type": "string"
+                },
+                "schedule_attempts": {
+                    "type": "integer"
+                },
+                "schedule_last_error": {
+                    "type": "string"
+                },
+                "schedule_status": {
+                    "type": "string"
+                },
+                "schedule_timezone": {
                     "type": "string"
                 },
                 "scheduled_at": {

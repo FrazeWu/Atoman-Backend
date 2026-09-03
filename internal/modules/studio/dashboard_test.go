@@ -61,6 +61,7 @@ func newStudioQueryFixture(t *testing.T) studioQueryFixture {
 		&model.ContentCollectionMembership{},
 		&model.ContentEpisodeExtension{},
 		&model.ContentVideoExtension{},
+		&model.BlogPublishSchedule{},
 	)
 	registerStudioCanonicalTestSeeds(t, db)
 	owner := model.User{Username: "studio-query-owner", Email: "studio-query-owner@example.com", Password: "hash", Role: authctx.RoleUser, IsActive: true}
